@@ -28,6 +28,7 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 export async function buildApp(opts: { config: Config; db: DB; logger?: boolean; rateLimitMax?: number }): Promise<FastifyInstance> {
   const { config, db } = opts;
   const app = Fastify({
+    trustProxy: config.trustProxy,
     logger:
       opts.logger === false
         ? false
@@ -41,7 +42,6 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
       return typeof h === 'string' && /^[\w-]{8,64}$/.test(h) ? h : randomUUID();
     },
     bodyLimit: 256 * 1024,
-    trustProxy: config.isProd,
   });
 
   app.decorate('db', db);

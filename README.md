@@ -35,6 +35,20 @@ Os níveis por módulo (Sem acesso · Próprio · Equipe · Total) são editados
 
 Atalhos: `/` busca global · `N` nova oportunidade (fora de campos de texto).
 
+## Publicar na Vercel
+
+O repositório já vem pronto (`vercel.json` + função `api/server.mjs`): o site e a API sobem juntos no mesmo endereço.
+
+1. Crie um banco Postgres (ex.: Supabase → Connect → **Session pooler**) e copie a URL de conexão.
+2. Na Vercel: **Add New → Project → Import** `phsmartdev/isp-sprint`. Framework: *Other*. Não mude Build/Output (vêm do `vercel.json`).
+3. Em **Environment Variables** cadastre:
+   - `DATABASE_URL` — a URL do Postgres (com a senha).
+   - `COOKIE_SECRET` — 64 caracteres aleatórios.
+   - `SEED_DEMO` = `true` — só se quiser a empresa fictícia Yepnet de demonstração (criada uma vez, em banco vazio).
+4. **Deploy.** O build aplica as migrations no banco e, com `SEED_DEMO=true`, cria os dados de demonstração.
+
+Domínios próprios: acrescente-os em `WEB_ORIGIN` (separados por vírgula). As URLs `*.vercel.app` do projeto já são aceitas automaticamente.
+
 ## Testes
 
 ```bash

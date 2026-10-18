@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/server.ts', 'src/db/migrate.ts', 'src/db/seed.ts'],
+  entry: ['src/server.ts', 'src/vercel.ts', 'src/vercel-setup.ts', 'src/db/migrate.ts', 'src/db/seed.ts'],
   format: ['esm'],
   platform: 'node',
   target: 'node22',
