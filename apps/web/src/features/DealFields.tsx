@@ -262,7 +262,7 @@ export function ViabilityPanel({ v, loading, title = 'Viabilidade da venda', com
       <button className="link mt-3 text-sm" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? 'Ocultar detalhes' : 'Ver detalhes do cálculo'}</button>
       {open && (
         <div className="mt-2 space-y-3 text-sm">
-          <Lines title="Custos de entrada (uma vez)" lines={v.oneTimeCosts} extra={[{ label: 'Comissão', cents: v.commission.cents }, { label: 'Taxa de ativação (abate)', cents: -v.revenue.activationFeeCents }]} total={{ label: 'CAC', cents: v.cacCents }} />
+          <Lines title="Custos de entrada (uma vez)" lines={v.oneTimeCosts} extra={[...(v.commission.lines?.length ? v.commission.lines.map((l) => ({ ...l, label: `Comissão · ${l.label}` })) : [{ label: 'Comissão', cents: v.commission.cents }]), { label: 'Taxa de ativação (abate)', cents: -v.revenue.activationFeeCents }]} total={{ label: 'CAC', cents: v.cacCents }} />
           <Lines title="Por mês" lines={[{ label: 'Mensalidade', cents: v.revenue.monthlyCents }, ...v.monthlyDeductions.map((l) => ({ ...l, cents: -l.cents }))]} total={{ label: 'Margem mensal', cents: v.marginMonthlyCents }} />
         </div>
       )}

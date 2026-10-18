@@ -39,6 +39,25 @@ export type ViabilityParams = {
   maxPaybackMonths: number | null;
 };
 
+/** Produto que compõe o plano: valor unitário e comissão por venda ativa e receptiva. */
+export type ProductCommission = { kind: 'percent' | 'fixo'; value: number };
+export type PlanProduct = { name: string; qty: number; unitPriceCents: number; commissionAtiva: ProductCommission | null; commissionReceptiva: ProductCommission | null };
+export const productsTotal = (items: PlanProduct[]) => items.reduce((a, i) => a + i.unitPriceCents * i.qty, 0);
+
+/** Comissão pelos produtos do plano; null quando nenhum produto define comissão para o tipo de venda. */
+export function productsCommission(items: PlanProduct[] | null | undefined, saleType: SaleType | null) {
+  if (!items?.length || !saleType) return null;
+  const lines: Line[] = [];
+  for (const i of items) {
+    const c = saleType === 'ativa' ? i.commissionAtiva : i.commissionReceptiva;
+    if (!c) continue;
+    const cents = c.kind === 'percent' ? pct(i.unitPriceCents * i.qty, c.value) : c.value * i.qty;
+    lines.push({ label: i.name, cents, detail: c.kind === 'percent' ? `${fmtBp(c.value)} de ${i.qty} × ${(i.unitPriceCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : `${i.qty} × ${(c.value / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` });
+  }
+  if (!lines.length) return null;
+  return { cents: lines.reduce((a, l) => a + l.cents, 0), lines };
+}
+
 export type ViabilityInput = {
   priceCents: number | null;
   mbps: number | null;
@@ -49,6 +68,8 @@ export type ViabilityInput = {
   equipment: KitItem[] | null;
   /** Caminho escolhido à mão; null usa a regra. */
   routeId: string | null;
+  /** Produtos do plano; com comissão definida, substituem as regras gerais de comissão. */
+  products?: PlanProduct[] | null;
 };
 
 export type Line = { label: string; cents: number; detail?: string };
@@ -59,7 +80,7 @@ export type ViabilityResult = {
   revenue: { monthlyCents: number; activationFeeCents: number };
   monthlyDeductions: Line[];
   oneTimeCosts: Line[];
-  commission: { cents: number; rule: string | null; detail: string | null };
+  commission: { cents: number; rule: string | null; detail: string | null; lines?: Line[] };
   marginMonthlyCents: number;
   cacCents: number;
   paybackMonths: number | null;
@@ -140,9 +161,10 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
   }
   oneTimeCosts.push(...equipmentLines);
 
-  const cRule = pickCommission(p.commissionRules, input.saleType, input.priceCents);
-  const comm = commissionFor(cRule, price);
-  if (input.saleType && input.priceCents !== null && !cRule) alerts.push('Nenhuma regra de comissão cobre este tipo de venda e valor.');
+  const byProducts = productsCommission(input.products, input.saleType);
+  const cRule = byProducts ? null : pickCommission(p.commissionRules, input.saleType, input.priceCents);
+  const comm = byProducts ? { cents: byProducts.cents, detail: `${byProducts.lines.length} produto(s) do plano` } : commissionFor(cRule, price);
+  if (input.saleType && input.priceCents !== null && !cRule && !byProducts) alerts.push('Nenhuma regra de comissão cobre este tipo de venda e valor.');
 
   const marginMonthlyCents = price - monthlyDeductions.reduce((a, l) => a + l.cents, 0);
   const activation = input.activationFeeCents ?? 0;
@@ -164,7 +186,7 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
     revenue: { monthlyCents: price, activationFeeCents: activation },
     monthlyDeductions,
     oneTimeCosts,
-    commission: { cents: comm.cents, rule: cRule?.name ?? null, detail: comm.detail },
+    commission: { cents: comm.cents, rule: byProducts ? 'Produtos do plano' : cRule?.name ?? null, detail: comm.detail, ...(byProducts ? { lines: byProducts.lines } : {}) },
     marginMonthlyCents,
     cacCents,
     paybackMonths,

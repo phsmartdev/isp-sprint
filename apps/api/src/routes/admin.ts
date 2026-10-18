@@ -111,6 +111,11 @@ function describeAudit(action: string, metadata: Record<string, unknown> | null)
   return { label, details };
 }
 
+/** Plano com produtos: a mensalidade é a soma (quantidade × valor unitário) dos produtos. */
+function withProductPrice<T extends { priceCents?: number; products?: { qty: number; unitPriceCents: number }[] }>(b: T): T {
+  return b.products?.length ? { ...b, priceCents: b.products.reduce((a, i) => a + i.qty * i.unitPriceCents, 0) } : b;
+}
+
 export const adminRoutes = [
   // ------------------------------------------------------------------ visão geral
   defineRoute({
@@ -363,7 +368,7 @@ export const adminRoutes = [
     ...ADMIN,
     body: PlanUpsert,
     handler: async ({ app, auth, body, req, reply }) => {
-      const [p] = await app.db.insert(s.plans).values({ tenantId: auth.tenantId, ...body }).returning();
+      const [p] = await app.db.insert(s.plans).values({ tenantId: auth.tenantId, ...withProductPrice(body) }).returning();
       await audit(app.db, req, { action: 'plan.create', entityType: 'plan', entityId: p!.id, metadata: { name: p!.name, priceCents: p!.priceCents } });
       reply.code(201);
       return p;
@@ -378,7 +383,7 @@ export const adminRoutes = [
     params: IdParams,
     body: PlanUpsert.partial(),
     handler: async ({ app, auth, params, body, req }) => {
-      const [p] = await app.db.update(s.plans).set({ ...body, updatedAt: new Date() }).where(and(eq(s.plans.id, params.id), eq(s.plans.tenantId, auth.tenantId))).returning();
+      const [p] = await app.db.update(s.plans).set({ ...withProductPrice(body), updatedAt: new Date() }).where(and(eq(s.plans.id, params.id), eq(s.plans.tenantId, auth.tenantId))).returning();
       if (!p) throw notFound('Plano não encontrado.');
       await audit(app.db, req, { action: 'plan.update', entityType: 'plan', entityId: p.id, metadata: { name: p.name, priceCents: p.priceCents } });
       return p;

@@ -64,9 +64,11 @@ export async function viabilityFor(db: DbOrTx, tenantId: string, o: OppViability
   const params = cache?.params ?? (await loadViabilityParams(db, tenantId));
   const base = cache?.base ?? (await historicalBase(db, tenantId, params));
   let mbps: number | null = null;
+  let products: ViabilityInput['products'] = null;
   if (o.planId) {
-    const [pl] = await db.select({ mbps: s.plans.speedMbps }).from(s.plans).where(eq(s.plans.id, o.planId)).limit(1);
+    const [pl] = await db.select({ mbps: s.plans.speedMbps, products: s.plans.products }).from(s.plans).where(and(eq(s.plans.id, o.planId), eq(s.plans.tenantId, tenantId))).limit(1);
     mbps = pl?.mbps ?? null;
+    products = pl?.products?.length ? pl.products : null;
   }
   const input: ViabilityInput = {
     priceCents: o.valueCents,
@@ -76,6 +78,7 @@ export async function viabilityFor(db: DbOrTx, tenantId: string, o: OppViability
     saleType: (o.saleType as SaleType | null) ?? null,
     equipment: o.equipment,
     routeId: o.routeId,
+    products,
   };
   return { input, result: computeViability(input, params, base) };
 }

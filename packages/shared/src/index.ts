@@ -254,12 +254,24 @@ export const UserUpdate = z.object({
   goalProposals: z.number().int().min(0).max(100_000).optional(),
   goalLeads: z.number().int().min(0).max(100_000).optional(),
 });
+const ProductCommission = z.object({ kind: z.enum(['percent', 'fixo']), value: z.number().int().min(0).max(10_000_000) }).nullable().default(null);
+export const PlanProductItem = z.object({
+  name: z.string().trim().min(2).max(120),
+  qty: z.number().int().min(1).max(100).default(1),
+  unitPriceCents: z.number().int().min(0).max(100_000_00),
+  commissionAtiva: ProductCommission,
+  commissionReceptiva: ProductCommission,
+});
 export const PlanUpsert = z.object({
   name: trimmed(80).min(2),
   line: optText(80),
   segment: z.enum(SEGMENTS),
+  /** Com produtos, o servidor usa a soma dos produtos como mensalidade. */
   priceCents: z.number().int().min(0).max(100_000_00),
   speedMbps: z.number().int().min(1).max(100_000).optional().nullable(),
+  /** Nome do serviço como sai na fatura do cliente. */
+  invoiceServiceName: optText(120),
+  products: z.array(PlanProductItem).max(30).default([]),
   active: z.boolean().default(true),
 });
 export const SourceUpsert = z.object({ name: trimmed(60).min(2), active: z.boolean().default(true) });

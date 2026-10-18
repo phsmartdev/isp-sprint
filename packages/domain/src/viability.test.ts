@@ -81,4 +81,18 @@ describe('viabilidade', () => {
     expect(lifetime(params.ltv, { customers: 10, avgLifetimeMonths: 30, avgMarginCents: 7000 })).toMatchObject({ months: 24, source: 'parametro' });
     expect(lifetime({ lifetimeMonths: null, monthlyChurnBp: 250, minSample: 30 }, null)).toMatchObject({ months: 40, source: 'parametro' });
   });
+
+  it('comissão pelos produtos do plano substitui a regra, por tipo de venda', () => {
+    const products = [
+      { name: 'Internet 300 Mega', qty: 1, unitPriceCents: 7990, commissionAtiva: { kind: 'percent' as const, value: 5000 }, commissionReceptiva: { kind: 'fixo' as const, value: 1000 } },
+      { name: 'Ponto Wi-Fi extra', qty: 2, unitPriceCents: 1000, commissionAtiva: { kind: 'fixo' as const, value: 500 }, commissionReceptiva: null },
+    ];
+    const ativa = computeViability({ priceCents: 9990, mbps: 300, cableMeters: 80, activationFeeCents: 0, saleType: 'ativa', equipment: null, routeId: null, products }, params);
+    expect(ativa.commission.cents).toBe(3995 + 1000);
+    expect(ativa.commission.rule).toBe('Produtos do plano');
+    const rec = computeViability({ priceCents: 9990, mbps: 300, cableMeters: 80, activationFeeCents: 0, saleType: 'receptiva', equipment: null, routeId: null, products }, params);
+    expect(rec.commission.cents).toBe(1000);
+    const none = computeViability({ priceCents: 9990, mbps: 300, cableMeters: 80, activationFeeCents: 0, saleType: 'receptiva', equipment: null, routeId: null, products: [{ ...products[1]!, commissionReceptiva: null }] }, params);
+    expect(none.commission.rule).not.toBe('Produtos do plano');
+  });
 });

@@ -92,7 +92,12 @@ describe('telas de configuração (gerência)', () => {
   });
 
   it('plano com velocidade e canal de entrada', async () => {
-    ok(await carlos.post('/admin/plans', { name: 'Plano E2E', line: null, segment: 'residencial', priceCents: 9990, speedMbps: 300, active: true }), 201);
+    const pl = await carlos.post('/admin/plans', { name: 'Plano E2E', line: null, segment: 'residencial', priceCents: 1, speedMbps: 300, invoiceServiceName: 'SCM - Internet 300M', products: [{ name: 'Internet 300M', qty: 1, unitPriceCents: 7990, commissionAtiva: { kind: 'percent', value: 5000 }, commissionReceptiva: { kind: 'fixo', value: 1000 } }, { name: 'Ponto extra', qty: 2, unitPriceCents: 1000, commissionAtiva: null, commissionReceptiva: null }], active: true });
+    ok(pl, 201);
+    expect(pl.json().priceCents).toBe(9990);
+    const sim = (await carlos.post('/viability/simulate', { planId: pl.json().id, saleType: 'receptiva', cableMeters: 50 })).json();
+    expect(sim.commission.cents).toBe(1000);
+    expect(sim.commission.rule).toBe('Produtos do plano');
     ok(await carlos.post('/admin/sources', { name: 'Instagram E2E' }), 201);
   });
 });

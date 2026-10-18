@@ -359,66 +359,7 @@ export function AdminUsers() {
 }
 
 // =================================================================== planos
-type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; active: boolean; sourceSystem: string };
-
-export function AdminPlans() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const q = useQuery({ queryKey: ['admin', 'plans'], queryFn: () => api<{ items: Plan[] }>('/admin/plans') });
-  const [editing, setEditing] = useState<Plan | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
-  const [form, setForm] = useState({ name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', active: true });
-  const open = (p: Plan | 'new') => { setEditing(p); setForm(p === 'new' ? { name: '', line: '', segment: 'residencial', price: '', speed: '', active: true } : { name: p.name, line: p.line ?? '', segment: p.segment, price: (p.priceCents / 100).toFixed(2).replace('.', ','), speed: p.speedMbps ? String(p.speedMbps) : '', active: p.active }); };
-  const m = useMutation({
-    mutationFn: () => {
-      const priceCents = toCents(form.price);
-      if (priceCents === null) throw new Error('Informe o preço no formato 99,90.');
-      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, active: form.active };
-      return editing === 'new' ? api('/admin/plans', { method: 'POST', body }) : api(`/admin/plans/${(editing as Plan).id}`, { method: 'PATCH', body });
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); toast({ tone: 'success', message: 'Plano salvo' }); },
-    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
-  });
-  return (
-    <section className="card overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
-        <div><h2 className="text-lg font-bold text-ink">Planos e produtos</h2><p className="text-sm text-muted">O preço daqui é o valor usado nas oportunidades. Catálogo manual até a integração com o IXC.</p></div>
-        <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => open('new')}>Cadastrar plano</Button>
-      </div>
-      {q.isLoading ? <LoadingRows /> : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Plano', 'Linha', 'Segmento', 'Velocidade', 'Preço mensal', 'Situação', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
-            <tbody>
-              {q.data?.items.map((p) => (
-                <tr key={p.id} className="border-t border-line">
-                  <td className="px-5 py-3 font-semibold text-ink">{p.name}</td>
-                  <td className="px-5 py-3 text-text">{p.line ?? '—'}</td>
-                  <td className="px-5 py-3 text-text">{SEGMENT_LABELS[p.segment]}</td>
-                  <td className="num px-5 py-3 text-text">{p.speedMbps ? `${p.speedMbps} Mbps` : <span className="text-warning">Informe</span>}</td>
-                  <td className="num px-5 py-3 text-ink">{fmtBRL(p.priceCents)}</td>
-                  <td className="px-5 py-3"><Chip tone={p.active ? 'green' : 'neutral'}>{p.active ? 'Ativo' : 'Inativo'}</Chip></td>
-                  <td className="px-5 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => open(p)}>Editar</Button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Cadastrar plano' : 'Editar plano'} size="sm" footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar</Button></>}>
-        <div className="space-y-3">
-          <FormField label="Nome" htmlFor="pl-name" required><Input id="pl-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: 500 Mega" data-autofocus /></FormField>
-          <FormField label="Linha" htmlFor="pl-line"><Input id="pl-line" value={form.line} onChange={(e) => setForm({ ...form, line: e.target.value })} placeholder="Ex.: Yep Família" /></FormField>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Segmento" htmlFor="pl-seg"><Select id="pl-seg" value={form.segment} onChange={(e) => setForm({ ...form, segment: e.target.value as Segment })}>{SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABELS[s]}</option>)}</Select></FormField>
-            <FormField label="Preço mensal (R$)" htmlFor="pl-price" required><Input id="pl-price" inputMode="decimal" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99,90" /></FormField>
-          </div>
-          <FormField label="Velocidade (Mbps)" htmlFor="pl-speed" hint="Usada nas regras de viabilidade para escolher o caminho de entrega"><Input id="pl-speed" type="number" min={1} value={form.speed} onChange={(e) => setForm({ ...form, speed: e.target.value })} placeholder="500" /></FormField>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />Ativo (aparece para novas oportunidades)</label>
-        </div>
-      </Modal>
-    </section>
-  );
-}
+export { AdminPlans } from './Plans';
 
 // =================================================================== origens
 export function AdminSources() {

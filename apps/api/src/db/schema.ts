@@ -124,6 +124,10 @@ export const plans = pgTable(
     priceCents: integer('price_cents').notNull(),
     /** Banda do plano (Mbps), usada nas regras de caminho de entrega. */
     speedMbps: integer('speed_mbps'),
+    /** Nome do serviço como sai na fatura. */
+    invoiceServiceName: text('invoice_service_name'),
+    /** Produtos que compõem o plano: nome, quantidade, valor unitário e comissão por tipo de venda. */
+    products: jsonb('products').$type<{ name: string; qty: number; unitPriceCents: number; commissionAtiva: { kind: 'percent' | 'fixo'; value: number } | null; commissionReceptiva: { kind: 'percent' | 'fixo'; value: number } | null }[]>().notNull().default([]),
     active: boolean('active').notNull().default(true),
     sourceSystem: text('source_system').notNull().default('catalogo_manual'),
     createdAt: createdAt(),
