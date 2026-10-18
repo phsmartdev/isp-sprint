@@ -5,11 +5,28 @@
   "buildCommand": "pnpm --filter @isp/api build && pnpm --filter @isp/api vercel:setup && pnpm --filter @isp/web build",
   "outputDirectory": "dist",
   "functions": {
-    "api/server.mjs": { "maxDuration": 30 }
+    "api/server.mjs": {
+      "maxDuration": 30
+    }
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/server" },
-    { "source": "/health/:path*", "destination": "/api/server" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "/api/server"
+    },
+    {
+      "source": "/health/:path*",
+      "destination": "/api/server"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/cron/alerts",
+      "schedule": "0 10 * * *"
+    }
   ]
 }
