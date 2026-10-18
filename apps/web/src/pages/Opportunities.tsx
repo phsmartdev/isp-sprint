@@ -4,20 +4,19 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core';
 import { BarChart3, CheckCircle2, ClipboardList, Clock3, Columns3, List, MoreVertical, Plus, Search, Send, SlidersHorizontal, UserRound } from 'lucide-react';
-import { OPPORTUNITY_STAGES, STAGE_LABELS, type OpportunityStage } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtRelativeShort } from '../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../lib/hooks';
-import type { Kpi, Opportunity, Paged, PipelineStage } from '../lib/types';
+import type { Kpi, LookupStage, Opportunity, Paged, PipelineStage } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
 import { PageHeader } from '../components/layout/PageHeader';
 import { ConfiarFacil } from '../components/brand';
-import { CLOSING_TAG, SourceChip, STAGE_STYLE, StageChip, productLabel } from '../components/badges';
+import { CLOSING_TAG, SourceChip, StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { TransitionDialog, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
 
-function CardMenu({ opp, onMove }: { opp: Opportunity; onMove: (to: OpportunityStage) => void }) {
+function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: string) => void; stages: LookupStage[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -33,11 +32,11 @@ function CardMenu({ opp, onMove }: { opp: Opportunity; onMove: (to: OpportunityS
       {open && (
         <ul role="menu" className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-line bg-surface py-1 text-sm shadow-overlay">
           <li className="px-3 py-1 text-xs text-muted">Mover para</li>
-          {OPPORTUNITY_STAGES.filter((s) => s !== opp.stage).map((s) => (
-            <li key={s}>
-              <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-2" onClick={() => { setOpen(false); onMove(s); }}>
-                <span className={clsx('h-2.5 w-2.5 rounded-full', STAGE_STYLE[s].badge)} aria-hidden />
-                {STAGE_LABELS[s]}
+          {stages.filter((s) => s.key !== opp.stage).map((s, i) => (
+            <li key={s.key}>
+              <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-2" onClick={() => { setOpen(false); onMove(s.key); }}>
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: stageColor(s.key, s.color, i) }} aria-hidden />
+                {s.name}
               </button>
             </li>
           ))}
@@ -47,7 +46,7 @@ function CardMenu({ opp, onMove }: { opp: Opportunity; onMove: (to: OpportunityS
   );
 }
 
-function Card({ opp, onMove, canMove }: { opp: Opportunity; onMove: (o: Opportunity, to: OpportunityStage) => void; canMove: boolean }) {
+function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[] }) {
   const nav = useNavigate();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
@@ -75,7 +74,7 @@ function Card({ opp, onMove, canMove }: { opp: Opportunity; onMove: (o: Opportun
           <p className="num mt-1 text-sm font-bold text-ink">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : <span className="font-medium text-muted">Sem plano</span>}</p>
         </div>
         <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={24} />
-        {canMove && <CardMenu opp={opp} onMove={(to) => onMove(opp, to)} />}
+        {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
       </div>
       <div className="mt-3 flex items-center justify-between gap-2">
         {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : <SourceChip name={opp.sourceName} />}
@@ -85,18 +84,18 @@ function Card({ opp, onMove, canMove }: { opp: Opportunity; onMove: (o: Opportun
   );
 }
 
-function Column({ stage, children, onAdd }: { stage: PipelineStage; children: React.ReactNode; onAdd: () => void }) {
+function Column({ stage, children, onAdd, index }: { stage: PipelineStage; children: React.ReactNode; onAdd: () => void; index: number }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.key });
-  const st = STAGE_STYLE[stage.key];
+  const c = stageColor(stage.key, stage.color, index);
   return (
-    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} className={clsx('flex min-w-[214px] flex-1 basis-0 flex-col rounded-lg p-2.5', st.col, isOver && 'ring-2 ring-primary')}>
+    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} style={{ background: `${c}14` }} className={clsx('flex min-w-[214px] flex-1 basis-0 flex-col rounded-lg p-2.5', isOver && 'ring-2 ring-primary')}>
       <header className="mb-3 px-1">
         <div className="flex items-center justify-between">
           <h2 id={`col-${stage.key}`} className="flex items-center gap-2 text-lg font-bold text-ink">
             {stage.name}
-            <span className={clsx('num inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold text-white', st.badge)}>{stage.count}</span>
+            <span className="num inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold text-white" style={{ background: c }}>{stage.count}</span>
           </h2>
-          <button onClick={onAdd} className={clsx('rounded-sm p-1 hover:bg-white/60', st.text)} aria-label={`Nova oportunidade (${stage.name})`}><Plus className="h-5 w-5" /></button>
+          <button onClick={onAdd} className="rounded-sm p-1 hover:bg-white/60" style={{ color: inkOf(c) }} aria-label={`Nova oportunidade (${stage.name})`}><Plus className="h-5 w-5" /></button>
         </div>
         <p className="num mt-1 text-md text-muted">{fmtBRL(stage.valueCents)}</p>
       </header>
@@ -109,34 +108,42 @@ export function OpportunitiesPage() {
   const { can } = useAuth();
   const lookups = useLookups();
   const nav = useNavigate();
-  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', view: 'kanban', status: 'abertas', page: '1', size: '10' });
+  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', pipelineId: '', view: 'kanban', status: 'abertas', page: '1', size: '10' });
+  const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed);
   const [search, setSearch] = useState(f.q);
   const dq = useDebounced(search);
   useEffect(() => { if (dq !== f.q) setF({ q: dq }); }, [dq]); // eslint-disable-line react-hooks/exhaustive-deps
   const kanban = f.view === 'kanban';
-  const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId };
+  const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId, pipelineId: f.pipelineId };
   const summary = useQuery({ queryKey: ['opportunities', 'summary'], queryFn: () => api<{ kpis: Kpi[] }>('/opportunities/summary') });
-  const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
+  const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
+  const currentPipelineId = f.pipelineId || pipe.data?.pipeline.id || journeys.find((p) => p.isDefault)?.id || '';
+  const stageList = (pipelineId: string) => lookups.data?.pipelines.find((p) => p.id === pipelineId)?.stages ?? [];
   const list = useQuery({ queryKey: ['opportunities', 'list', f], enabled: !kanban, placeholderData: keepPreviousData, queryFn: () => api<Paged<Opportunity>>(`/opportunities${qs({ ...filters, status: f.status, page: f.page, pageSize: f.size })}`) });
   const transition = useTransitionMutation();
-  const [pending, setPending] = useState<(TransitionRequest & { opp: Opportunity }) | null>(null);
+  const [pending, setPending] = useState<TransitionRequest | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
   const stages = pipe.data?.stages ?? [];
 
-  const requestMove = (opp: Opportunity, to: OpportunityStage) => {
+  const requestMove = (opp: Opportunity, to: string) => {
     if (opp.stage === to) return;
-    if (needsDialog(opp.stage, to)) setPending({ opp, from: opp.stage, to, title: opp.contactName });
+    const list = stageList(opp.pipelineId);
+    const target = list.find((x) => x.key === to);
+    if (!target) return;
+    const req: TransitionRequest = { opp, from: opp.stage, to, fromName: list.find((x) => x.key === opp.stage)?.name ?? opp.stage, toName: target.name, toKind: target.kind, requirements: target.requirements ?? {}, title: opp.contactName };
+    if (needsDialog(req)) setPending(req);
     else transition.mutate({ opp, payload: { toStage: to } });
   };
   const onDragEnd = (e: DragEndEvent) => {
     const opp = e.active.data.current?.opp as Opportunity | undefined;
-    const to = e.over?.id as OpportunityStage | undefined;
+    const to = e.over?.id as string | undefined;
     if (opp && to) requestMove(opp, to);
   };
+  const nameOf = (k: string) => stages.find((x) => x.key === k)?.name ?? k;
   const announcements: Announcements = {
     onDragStart: ({ active }) => `Pegou ${(active.data.current?.opp as Opportunity).contactName}.`,
-    onDragOver: ({ over }) => (over ? `Sobre a coluna ${STAGE_LABELS[over.id as OpportunityStage]}.` : 'Fora das colunas.'),
-    onDragEnd: ({ over }) => (over ? `Solto em ${STAGE_LABELS[over.id as OpportunityStage]}.` : 'Movimento cancelado.'),
+    onDragOver: ({ over }) => (over ? `Sobre a coluna ${nameOf(String(over.id))}.` : 'Fora das colunas.'),
+    onDragEnd: ({ over }) => (over ? `Solto em ${nameOf(String(over.id))}.` : 'Movimento cancelado.'),
     onDragCancel: () => 'Movimento cancelado.',
   };
   const kpiLook = [
@@ -154,7 +161,7 @@ export function OpportunitiesPage() {
         title="Oportunidades"
         subtitle="Visualize e gerencie seu funil de vendas de forma simples."
         mascot={{ slot: 'mascote_oportunidades', lines: ['Arraste as oportunidades', 'pelo funil e acompanhe', 'o progresso das suas vendas.'], highlight: <ConfiarFacil /> }}
-        actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/opportunities/new')}>Nova oportunidade</Button>}
+        actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav(`/opportunities/new${qs({ pipelineId: f.pipelineId })}`)}>Nova oportunidade</Button>}
       />
 
       <section aria-label="Indicadores" className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
@@ -162,6 +169,21 @@ export function OpportunitiesPage() {
         {!summary.data && Array.from({ length: 5 }).map((_, i) => <div key={i} className="card h-[92px] animate-pulse" />)}
       </section>
 
+      {journeys.length > 1 && (
+        <nav aria-label="Jornadas" className="scroll-thin mb-4 flex gap-2 overflow-x-auto">
+          {journeys.map((p) => (
+            <button
+              key={p.id}
+              aria-pressed={currentPipelineId === p.id}
+              onClick={() => setF({ pipelineId: p.id })}
+              className={clsx('whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold', currentPipelineId === p.id ? 'border-primary bg-primary text-white' : 'border-line bg-surface text-ink hover:border-line-strong')}
+            >
+              {p.name}
+            </button>
+          ))}
+          <button aria-pressed={!kanban && !f.pipelineId} onClick={() => setF({ pipelineId: '', view: 'lista' })} className={clsx('whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold', !kanban && !f.pipelineId ? 'border-primary bg-primary text-white' : 'border-line bg-surface text-ink hover:border-line-strong')}>Todas (lista)</button>
+        </nav>
+      )}
       <div className="mb-4 flex flex-wrap items-center gap-3" role="search">
         <div className="flex rounded-md border border-line bg-surface p-1" role="group" aria-label="Visualização">
           <button aria-pressed={kanban} onClick={() => setF({ view: 'kanban' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><Columns3 className="h-5 w-5" />Kanban</button>
@@ -201,10 +223,10 @@ export function OpportunitiesPage() {
         pipe.isLoading ? <div className="card"><LoadingRows /></div> : pipe.isError ? <ErrorState error={pipe.error} onRetry={() => pipe.refetch()} /> : (
           <DndContext sensors={sensors} onDragEnd={onDragEnd} accessibility={{ announcements, screenReaderInstructions: { draggable: 'Pressione espaço para pegar o cartão, use as setas para escolher a coluna e espaço para soltar. Esc cancela. Também é possível usar o menu do cartão.' } }}>
             <div className="scroll-thin -mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
-              {stages.map((s) => (
-                <Column key={s.key} stage={s} onAdd={() => nav('/opportunities/new')}>
+              {stages.map((s, i) => (
+                <Column key={s.key} stage={s} index={i} onAdd={() => nav(`/opportunities/new${qs({ pipelineId: currentPipelineId })}`)}>
                   <ul className="flex min-h-[120px] flex-col gap-3">
-                    {s.cards.map((c) => <Card key={c.id} opp={c} onMove={requestMove} canMove={can('oportunidades')} />)}
+                    {s.cards.map((c) => <Card key={c.id} opp={c} onMove={requestMove} canMove={can('oportunidades')} stages={stageList(c.pipelineId)} />)}
                     {s.cards.length === 0 && <li className="rounded-md border border-dashed border-line-strong/60 px-3 py-6 text-center text-sm text-muted">Nenhuma oportunidade</li>}
                   </ul>
                 </Column>
@@ -220,7 +242,7 @@ export function OpportunitiesPage() {
             <table className="w-full min-w-[960px] text-left">
               <caption className="sr-only">Lista de oportunidades</caption>
               <thead className="bg-surface-2 text-sm text-muted">
-                <tr>{['Cliente', 'Plano', 'Valor', 'Etapa', 'Origem', 'Responsável', 'Próxima ação'].map((h) => <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>)}</tr>
+                <tr>{['Cliente', 'Plano', 'Valor', 'Jornada · etapa', 'Origem', 'Responsável', 'Próxima ação'].map((h) => <th key={h} scope="col" className="px-4 py-3 font-medium">{h}</th>)}</tr>
               </thead>
               <tbody>
                 {list.data.items.map((o) => (
@@ -228,7 +250,7 @@ export function OpportunitiesPage() {
                     <td className="px-4 py-3"><span className="flex items-center gap-3"><Avatar name={o.contactName} size={38} tone={0} /><span><span className="block font-semibold text-ink">{o.contactName}</span><span className="block text-xs text-muted">OP-{o.code} · {productLabel(o.contactSegment)}</span></span></span></td>
                     <td className="px-4 py-3 text-sm"><span className="block font-semibold text-ink">{o.planName ?? '—'}</span><span className="block text-xs text-muted">{o.planLine ?? ''}</span></td>
                     <td className="num px-4 py-3 text-sm font-semibold text-ink">{o.valueCents !== null ? fmtBRL(o.valueCents) : '—'}</td>
-                    <td className="px-4 py-3"><StageChip stage={o.stage} /></td>
+                    <td className="px-4 py-3"><span className="block text-xs text-muted">{o.pipelineName}</span><StageChip stage={o.stage} name={o.stageName} color={stageList(o.pipelineId).find((x) => x.key === o.stage)?.color} /></td>
                     <td className="px-4 py-3"><SourceChip name={o.sourceName} /></td>
                     <td className="px-4 py-3"><span className="flex items-center gap-2 whitespace-nowrap text-sm"><Avatar name={o.ownerName} userId={o.ownerId} hasPhoto={o.ownerHasAvatar} size={28} />{o.ownerName}</span></td>
                     <td className={clsx('px-4 py-3 text-sm', o.overdue ? 'font-semibold text-danger' : 'text-text')}>{o.nextActionAt ? fmtRelativeShort(o.nextActionAt) : '—'}</td>

@@ -1,8 +1,8 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { OPEN_STAGES } from '@isp/domain';
+import { resolvePipeline } from '../services/instructions';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
-import { ownerScope, visibleUserIds } from '../services/scope';
+import { level, ownerScope, visibleUserIds } from '../services/scope';
 import { opportunityDto, opportunityQuery } from '../services/opportunities';
 import { opportunityKpis } from './opportunities';
 import { pctDelta, ratio } from '../services/metrics';
@@ -26,6 +26,7 @@ export const homeRoutes = [
       const localDay = sql`(${s.activities.dueAt} at time zone ${tz})::date`;
       const today = sql`(now() at time zone ${tz})::date`;
 
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const [oppK, actK, month, goals, agenda, pipeline, recent] = await Promise.all([
         opportunityKpis(app.db, auth, 'inicio'),
         app.db
@@ -56,7 +57,7 @@ export const homeRoutes = [
         app.db
           .select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
           .from(s.opportunities)
-          .where(and(oppScope, inArray(s.opportunities.stage, OPEN_STAGES as string[])))
+          .where(and(oppScope, eq(s.opportunities.pipelineId, pipe.id), sql`${s.opportunities.stage} not in ('ganha','perdida')`))
           .groupBy(s.opportunities.stage),
         opportunityQuery(app.db).where(oppScope).orderBy(desc(s.opportunities.updatedAt)).limit(5),
       ]);
@@ -83,9 +84,10 @@ export const homeRoutes = [
           { key: 'leads', label: 'Novos leads', value: m.leads, target: g.leads, progress: ratio(m.leads, g.leads) },
         ],
         agenda: agenda.map((x) => ({ ...x, overdue: !x.completedAt && !!x.dueAt && x.dueAt < new Date() })),
-        pipeline: (OPEN_STAGES as string[]).map((st) => {
-          const row = pipeline.find((p) => p.stage === st);
-          return { stage: st, count: row?.n ?? 0, valueCents: Number(row?.value ?? 0) };
+        pipelineName: pipe.name,
+        pipeline: pipe.stages.filter((st) => st.kind === 'open').map((st) => {
+          const row = pipeline.find((p) => p.stage === st.key);
+          return { stage: st.key, name: st.name, color: st.color, count: row?.n ?? 0, valueCents: Number(row?.value ?? 0) };
         }),
         recent: recent.map((o) => opportunityDto(o)),
         today: new Date().toISOString(),

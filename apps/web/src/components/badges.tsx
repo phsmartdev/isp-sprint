@@ -14,7 +14,25 @@ export const STAGE_STYLE: Record<OpportunityStage, { col: string; badge: string;
   ganha: { col: 'bg-[#E7F7EC]', badge: 'bg-[#16A34A]', text: 'text-[#16A34A]', bar: '#22C55E', tone: 'green' },
   perdida: { col: 'bg-[#FEE4E2]', badge: 'bg-[#DC2626]', text: 'text-[#DC2626]', bar: '#EF4444', tone: 'red' },
 };
-export const StageChip = ({ stage }: { stage: OpportunityStage }) => <Chip tone={STAGE_STYLE[stage].tone}>{STAGE_LABELS[stage]}</Chip>;
+const FALLBACK = ['#3B82F6', '#F59E0B', '#8B5CF6', '#60A5FA', '#22C55E', '#14B8A6', '#EC4899', '#F97316'];
+/** Cor da etapa: a cadastrada na jornada; senão a do design; senão uma da paleta pela posição. */
+export function stageColor(key: string, color?: string | null, index = 0) {
+  return color ?? (STAGE_STYLE as Record<string, { bar: string }>)[key]?.bar ?? FALLBACK[index % FALLBACK.length]!;
+}
+/** Escurece a cor para texto legível sobre fundo claro. */
+export function inkOf(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c: number) => Math.round(c * 0.62);
+  return `rgb(${f((n >> 16) & 255)}, ${f((n >> 8) & 255)}, ${f(n & 255)})`;
+}
+export const StageChip = ({ stage, name, color }: { stage: string; name?: string | null; color?: string | null }) => {
+  const c = stageColor(stage, color);
+  return (
+    <span className="inline-flex items-center whitespace-nowrap rounded-sm px-2 py-0.5 text-xs font-semibold" style={{ background: `${c}22`, color: inkOf(c) }}>
+      {name ?? (STAGE_LABELS as Record<string, string>)[stage] ?? stage}
+    </span>
+  );
+};
 
 /** Selos de origem com as cores do design (Site azul, Indicação roxo, WhatsApp verde…). */
 const SOURCE_TONE: Record<string, Tone> = { Site: 'sky', Indicação: 'purple', WhatsApp: 'green', Campanha: 'purple', Instagram: 'sky', Evento: 'neutral', Tráfego: 'sky' };

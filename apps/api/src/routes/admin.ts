@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  BRAND_SLOTS, ImageUpload, PasswordChange, PlanUpsert, SecurityUpdate, SourceUpsert, StageRename, UserCreate, UserUpdate,
+  BRAND_SLOTS, ImageUpload, PasswordChange, PlanUpsert, SecurityUpdate, SourceUpsert, UserCreate, UserUpdate,
 } from '@isp/shared';
 import { DEFAULT_ACCESS, MODULES, PROFILE_KEYS, allowedLevels, type AccessLevel, type Module, type ProfileKey } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -11,6 +11,8 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
+import { notifyUserAccess } from '../services/alerts';
+import { smtpConfig } from '../services/email';
 import { decodeImage } from '../services/images';
 import { hashPassword, verifyPassword } from '../auth/password';
 
@@ -58,6 +60,14 @@ const AUDIT_LABELS: Record<string, string> = {
   'auth.login_failed': 'Tentativa de login falhou',
   'auth.login_blocked': 'Login bloqueado',
   'user.create': 'Cadastrou novo usuário',
+  'instruction.upload': 'Enviou modelo de instrução',
+  'instruction.activate': 'Ativou modelo de instrução',
+  'instruction.export': 'Exportou modelo de instrução',
+  'smtp.update': 'Alterou o SMTP',
+  'notifications.update': 'Alterou notificações',
+  'attachment.upload': 'Anexou arquivo em oportunidade',
+  'attachment.delete': 'Removeu anexo de oportunidade',
+  'email.send': 'Enviou e-mail ao cliente',
   'user.update': 'Atualizou usuário',
   'user.password_reset': 'Gerou nova senha temporária',
   'security.update': 'Alterou nível de acesso',
@@ -92,6 +102,10 @@ function describeAudit(action: string, metadata: Record<string, unknown> | null)
     : action.startsWith('plan.') ? `${m.name ?? ''}${m.priceCents !== undefined ? ` - R$ ${(Number(m.priceCents) / 100).toFixed(2).replace('.', ',')}` : ''}`
     : action.startsWith('branding.') ? `Espaço: ${m.slot}`
     : action === 'user.create' || action === 'user.update' ? `${m.name ?? ''}${m.profile ? ` - Perfil: ${m.profile}` : ''}`
+    : action.startsWith('instruction.') ? `Versão ${m.version ?? ''}${m.changes !== undefined ? ` · ${m.changes} mudança(s)` : ''}`
+    : action.startsWith('attachment.') ? String(m.filename ?? '')
+    : action === 'smtp.update' ? `${m.host}:${m.port}${m.passwordChanged ? ' · senha alterada' : ''}`
+    : action === 'email.send' ? (m.kind === 'proposta' ? 'Proposta' : 'Follow-up')
     : action === 'export.csv' ? `${m.kind} · ${m.from} a ${m.to} (${m.rows} linhas)`
     : '';
   return { label, details };
@@ -122,7 +136,7 @@ export const adminRoutes = [
       ]);
       const sources = await app.db.select({ n: sql<number>`count(*)::int` }).from(s.leadSources).where(and(eq(s.leadSources.tenantId, t), eq(s.leadSources.active, true)));
       return {
-        counts: { users: u!.n, plans: p!.n, stages: st!.n, sources: sources[0]!.n, integrations: 0 },
+        counts: { users: u!.n, plans: p!.n, stages: st!.n, sources: sources[0]!.n, integrations: (await smtpConfig(app.db, t)) ? 1 : 0, pipelines: (await app.db.select({ n: sql<number>`count(*)::int` }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, t), eq(s.pipelines.active, true))))[0]!.n },
         system: {
           version: 'v1.2.0-fase1',
           online: true,
@@ -190,7 +204,8 @@ export const adminRoutes = [
         return u!;
       });
       reply.code(201);
-      return { id: result.id, temporaryPassword: temp };
+      const emailSent = await notifyUserAccess(app.db, app.config, auth, 'convite_usuario', { name: result.name, email: result.email }, temp);
+      return { id: result.id, temporaryPassword: temp, emailSent };
     },
   }),
 
@@ -241,7 +256,8 @@ export const adminRoutes = [
       await app.db.update(s.users).set({ passwordHash: await hashPassword(temp), failedLogins: 0, lockedUntil: null }).where(eq(s.users.id, u.id));
       await app.db.update(s.sessions).set({ revokedAt: new Date() }).where(eq(s.sessions.userId, u.id));
       await audit(app.db, req, { action: 'user.password_reset', entityType: 'user', entityId: u.id });
-      return { temporaryPassword: temp };
+      const emailSent = await notifyUserAccess(app.db, app.config, auth, 'nova_senha', { name: u.name, email: u.email }, temp);
+      return { temporaryPassword: temp, emailSent };
     },
   }),
 
@@ -405,31 +421,6 @@ export const adminRoutes = [
       return x;
     },
   }),
-  defineRoute({
-    method: 'GET',
-    url: '/admin/stages',
-    summary: 'Etapas de venda',
-    tag: 'Administração',
-    ...ADMIN,
-    handler: async ({ app, auth }) => ({ items: await app.db.select().from(s.pipelineStages).where(and(eq(s.pipelineStages.tenantId, auth.tenantId), eq(s.pipelineStages.active, true))).orderBy(asc(s.pipelineStages.position)) }),
-  }),
-  defineRoute({
-    method: 'PATCH',
-    url: '/admin/stages/:id',
-    summary: 'Renomeia etapa (as regras da etapa não mudam)',
-    tag: 'Administração',
-    ...ADMIN,
-    params: IdParams,
-    body: StageRename,
-    handler: async ({ app, auth, params, body, req }) => {
-      const [cur] = await app.db.select().from(s.pipelineStages).where(and(eq(s.pipelineStages.id, params.id), eq(s.pipelineStages.tenantId, auth.tenantId))).limit(1);
-      if (!cur) throw notFound('Etapa não encontrada.');
-      const [x] = await app.db.update(s.pipelineStages).set({ name: body.name }).where(eq(s.pipelineStages.id, cur.id)).returning();
-      await audit(app.db, req, { action: 'stage.rename', entityType: 'stage', entityId: cur.key, metadata: { from: cur.name, to: body.name } });
-      return x;
-    },
-  }),
-
   // ------------------------------------------------------------------ logs
   defineRoute({
     method: 'GET',

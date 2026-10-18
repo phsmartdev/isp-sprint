@@ -29,6 +29,20 @@
       "when": 1792277885601,
       "tag": "0003_drop_role_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792344232886,
+      "tag": "0004_journeys_instructions_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792349760189,
+      "tag": "0005_viability_regions_automations",
+      "breakpoints": true
     }
   ]
 }

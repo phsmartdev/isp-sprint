@@ -1,13 +1,14 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PeriodQuery } from '@isp/shared';
-import { CONTRACT_LABELS, OPEN_STAGES, csvSafe, STAGE_LABELS, type ContractRequestStatus, SEGMENT_PRODUCT_LABELS, type OpportunityStage, type Segment } from '@isp/domain';
+import { PeriodQuery, ReportQuery } from '@isp/shared';
+import { CONTRACT_LABELS, csvSafe, STAGE_LABELS, type ContractRequestStatus, SEGMENT_PRODUCT_LABELS, type OpportunityStage, type Segment } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import type { AuthContext } from '../http/context';
-import type { DB } from '../db/client';
+import type { DB, DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { ownerScope, visibleUserIds, level } from '../services/scope';
 import { opportunityQuery } from '../services/opportunities';
+import { resolvePipeline } from '../services/instructions';
 import { pctDelta } from '../services/metrics';
 import { monthsEnding, periodBounds } from '../services/period';
 import { audit } from '../services/audit';
@@ -85,19 +86,55 @@ export async function monthlySeries(db: DB, auth: AuthContext, m: Mod, to: strin
 const ExportQuery = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  kind: z.enum(['vendas', 'leads', 'oportunidades']).default('vendas'),
+  kind: z.enum(['vendas', 'leads', 'oportunidades', 'comissoes']).default('vendas'),
 });
 
+async function commissionRows(db: DbOrTx, auth: AuthContext, p: ReturnType<typeof periodBounds>) {
+  const rows = await opportunityQuery(db)
+    .where(and(oppScopeFor(auth, 'relatorios'), eq(s.opportunities.stage, 'ganha'), p.inCur(s.opportunities.wonAt)))
+    .orderBy(desc(s.opportunities.wonAt));
+  return rows.map((o) => ({ ...o, rule: ((o.viability as { commission?: { rule?: string } } | null)?.commission?.rule) ?? null }));
+}
+
 export const reportRoutes = [
+  defineRoute({
+    method: 'GET',
+    url: '/reports/commissions',
+    summary: 'Comissões das vendas fechadas no período (vendedor vê só as suas; supervisão a equipe; gerência todas)',
+    tag: 'Relatórios',
+    module: 'relatorios',
+    query: PeriodQuery,
+    handler: async ({ app, auth, query }) => {
+      const p = periodBounds(auth, query.from, query.to);
+      const rows = await commissionRows(app.db, auth, p);
+      const bySeller = new Map<string, { userId: string; name: string; sales: number; revenueCents: number; commissionCents: number; cacCents: number }>();
+      for (const r of rows) {
+        const cur = bySeller.get(r.ownerId) ?? { userId: r.ownerId, name: r.ownerName, sales: 0, revenueCents: 0, commissionCents: 0, cacCents: 0 };
+        cur.sales++;
+        cur.revenueCents += r.valueCents ?? 0;
+        cur.commissionCents += r.commissionCents ?? 0;
+        cur.cacCents += r.cacCents ?? 0;
+        bySeller.set(r.ownerId, cur);
+      }
+      const total = rows.reduce((a, r) => ({ sales: a.sales + 1, commissionCents: a.commissionCents + (r.commissionCents ?? 0), revenueCents: a.revenueCents + (r.valueCents ?? 0), cacCents: a.cacCents + (r.cacCents ?? 0) }), { sales: 0, commissionCents: 0, revenueCents: 0, cacCents: 0 });
+      return {
+        scope: level(auth, 'relatorios'),
+        total: { ...total, avgCacCents: total.sales ? Math.round(total.cacCents / total.sales) : null },
+        sellers: [...bySeller.values()].sort((a, b) => b.commissionCents - a.commissionCents),
+        items: rows.map((r) => ({ id: r.id, code: r.code, contactName: r.contactName, planName: r.planName, valueCents: r.valueCents, saleType: r.saleType, commissionCents: r.commissionCents, rule: r.rule, cacCents: r.cacCents, marginCents: r.marginCents, paybackMonths: r.paybackMonths, ownerId: r.ownerId, ownerName: r.ownerName, wonAt: r.wonAt })),
+      };
+    },
+  }),
   defineRoute({
     method: 'GET',
     url: '/reports/overview',
     summary: 'Relatórios — visão geral do período (vendas, leads, funil, planos, equipe)',
     tag: 'Relatórios',
     module: 'relatorios',
-    query: PeriodQuery,
+    query: ReportQuery,
     handler: async ({ app, auth, query }) => {
       const p = periodBounds(auth, query.from, query.to);
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const [t, evolution, origins, plans, statusRows, latest] = await Promise.all([
         salesTotals(app.db, auth, 'relatorios', p),
         monthlySeries(app.db, auth, 'relatorios', query.to, 5),
@@ -106,7 +143,7 @@ export const reportRoutes = [
         app.db
           .select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int` })
           .from(s.opportunities)
-          .where(and(oppScopeFor(auth, 'relatorios'), p.inCur(s.opportunities.createdAt)))
+          .where(and(oppScopeFor(auth, 'relatorios'), eq(s.opportunities.pipelineId, pipe.id), p.inCur(s.opportunities.createdAt)))
           .groupBy(s.opportunities.stage),
         opportunityQuery(app.db)
           .where(and(oppScopeFor(auth, 'relatorios'), eq(s.opportunities.stage, 'ganha'), p.inCur(s.opportunities.wonAt)))
@@ -125,8 +162,8 @@ export const reportRoutes = [
         })
         .from(s.users)
         .where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), users === 'all' ? undefined : inArray(s.users.id, users.length ? users : [auth.userId])));
-      const statusOrder: OpportunityStage[] = [...(OPEN_STAGES as OpportunityStage[]), 'perdida'];
-      const statusTotal = statusOrder.reduce((a, st) => a + (statusRows.find((r) => r.stage === st)?.n ?? 0), 0);
+      const statusStages = pipe.stages.filter((st) => st.kind !== 'won');
+      const statusTotal = statusStages.reduce((a, st) => a + (statusRows.find((r) => r.stage === st.key)?.n ?? 0), 0);
       return {
         period: p.label,
         kpis: [
@@ -137,7 +174,7 @@ export const reportRoutes = [
         ],
         evolution,
         origins,
-        status: { total: statusTotal, items: statusOrder.map((st) => { const n = statusRows.find((r) => r.stage === st)?.n ?? 0; return { stage: st, label: STAGE_LABELS[st], n, share: statusTotal ? n / statusTotal : null }; }) },
+        status: { pipeline: { id: pipe.id, name: pipe.name }, total: statusTotal, items: statusStages.map((st) => { const n = statusRows.find((r) => r.stage === st.key)?.n ?? 0; return { stage: st.key, label: st.name, color: st.color, n, share: statusTotal ? n / statusTotal : null }; }) },
         plans,
         team: {
           ranking: level(auth, 'relatorios') !== 'proprio',
@@ -169,12 +206,17 @@ export const reportRoutes = [
           .where(and(leadScopeFor(auth, 'relatorios'), p.inCur(s.leads.createdAt)));
         header = ['Nome', 'Status', 'Origem', 'Cidade', 'Responsável', 'Criado em'];
         lines = rows.map((r) => [r.name, r.status, r.source, r.city, r.owner, r.createdAt.toISOString()]);
+      } else if (query.kind === 'comissoes') {
+        const rows = await commissionRows(app.db, auth, p);
+        header = ['Código', 'Cliente', 'Plano', 'Mensalidade (R$)', 'Tipo de venda', 'Comissão (R$)', 'Regra', 'CAC (R$)', 'Margem mensal (R$)', 'Payback (meses)', 'Vendedor', 'Venda fechada em'];
+        const r2 = (c: number | null) => (c === null ? '' : (c / 100).toFixed(2).replace('.', ','));
+        lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, r2(o.valueCents), o.saleType ?? '', r2(o.commissionCents), o.rule ?? '', r2(o.cacCents), r2(o.marginCents), o.paybackMonths ?? '', o.ownerName, o.wonAt?.toISOString() ?? '']);
       } else {
         const rows = await opportunityQuery(app.db).where(
           and(oppScopeFor(auth, 'relatorios'), query.kind === 'vendas' ? and(eq(s.opportunities.stage, 'ganha'), p.inCur(s.opportunities.wonAt)) : p.inCur(s.opportunities.createdAt)),
         );
         header = ['Código', 'Cliente', 'Plano', 'Valor mensal (R$)', 'Etapa', 'Responsável', 'Criada em', 'Venda fechada em', 'Contrato'];
-        lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, o.valueCents === null ? '' : (o.valueCents / 100).toFixed(2).replace('.', ','), STAGE_LABELS[o.stage as OpportunityStage], o.ownerName, o.createdAt.toISOString(), o.wonAt?.toISOString() ?? '', CONTRACT_LABELS[o.contractRequestStatus as ContractRequestStatus] ?? o.contractRequestStatus]);
+        lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, o.valueCents === null ? '' : (o.valueCents / 100).toFixed(2).replace('.', ','), o.stageName ?? STAGE_LABELS[o.stage as OpportunityStage] ?? o.stage, o.ownerName, o.createdAt.toISOString(), o.wonAt?.toISOString() ?? '', CONTRACT_LABELS[o.contractRequestStatus as ContractRequestStatus] ?? o.contractRequestStatus]);
       }
       await audit(app.db, req, { action: 'export.csv', entityType: 'report', metadata: { kind: query.kind, from: query.from, to: query.to, rows: lines.length } });
       const meta = [`# ISP Sprint — exportação de ${query.kind}`, `# Período: ${query.from} a ${query.to} (${auth.timezone})`, `# Gerado em: ${new Date().toISOString()} por ${auth.name}`];

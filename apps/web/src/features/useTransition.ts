@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { STAGE_LABELS } from '@isp/domain';
 import { api, ApiError } from '../lib/api';
 import type { Opportunity, PipelineStage } from '../lib/types';
 import { useToast } from '../components/ui/overlay';
@@ -37,7 +36,7 @@ export function useTransitionMutation() {
     },
     onSuccess: (o) => {
       qc.setQueryData(['opportunity', o.id], o);
-      toast({ tone: 'success', message: `Movida para ${STAGE_LABELS[o.stage]}` });
+      toast({ tone: 'success', message: `Movida para ${o.stageName ?? o.stage}` });
     },
     onSettled: (_d, _e, v) => {
       for (const k of ['pipeline', 'opportunities', 'home', 'reports', 'intelligence']) qc.invalidateQueries({ queryKey: [k] });

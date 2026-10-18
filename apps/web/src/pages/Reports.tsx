@@ -3,24 +3,25 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowDown, ArrowRight, ArrowUp, BarChart3, Clock3, Download, Filter, Handshake, MoreVertical } from 'lucide-react';
-import { STAGE_LABELS, type OpportunityStage, type ActivityType } from '@isp/domain';
+import { type ActivityType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
-import { defaultPeriod, useUrlState } from '../lib/hooks';
+import { defaultPeriod, useLookups, useUrlState } from '../lib/hooks';
 import type { Kpi } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
-import { Avatar, Button, Chip, EmptyState, ErrorState, KpiCard, LoadingRows, Tabs } from '../components/ui/primitives';
+import { Avatar, Button, Chip, EmptyState, ErrorState, KpiCard, LoadingRows, Select, Tabs } from '../components/ui/primitives';
 import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
 import { ConfiarFacil } from '../components/brand';
 import { BarRows, CHART, ComboChart, Donut, FunnelShape, Legend } from '../components/charts/charts';
-import { STAGE_STYLE } from '../components/badges';
+import { stageColor } from '../components/badges';
+import { CommissionsReport } from '../features/CommissionsReport';
 
 type Overview = {
   kpis: Kpi[];
   evolution: { month: string; sales: number; revenueCents: number; leads: number }[];
   origins: { total: number; items: { source: string; n: number; share: number | null }[] };
-  status: { total: number; items: { stage: OpportunityStage; label: string; n: number; share: number | null }[] };
+  status: { pipeline: { id: string; name: string }; total: number; items: { stage: string; label: string; color: string | null; n: number; share: number | null }[] };
   plans: { total: number; items: { plan: string; n: number; share: number | null }[] };
   team: { ranking: boolean; items: { userId: string; name: string; hasAvatar: boolean; won: number; wonPrev: number; delta: number | null }[] };
   latest: { id: string; contactName: string; segmentLabel: string; planName: string | null; valueCents: number | null; ownerName: string; ownerId: string; ownerHasAvatar: boolean; wonAt: string; contractRequestStatus: string }[];
@@ -42,14 +43,15 @@ export function ReportsPage() {
   const nav = useNavigate();
   const { can } = useAuth();
   const p0 = defaultPeriod();
-  const [f, setF] = useUrlState({ from: p0.from, to: p0.to, tab: 'geral' });
-  const q = useQuery({ queryKey: ['reports', f.from, f.to], queryFn: () => api<Overview>(`/reports/overview${qs({ from: f.from, to: f.to })}`) });
+  const [f, setF] = useUrlState({ from: p0.from, to: p0.to, tab: 'geral', pipelineId: '' });
+  const lookups = useLookups();
+  const q = useQuery({ queryKey: ['reports', f.from, f.to, f.pipelineId], enabled: f.tab !== 'comissoes', queryFn: () => api<Overview>(`/reports/overview${qs({ from: f.from, to: f.to, pipelineId: f.pipelineId })}`) });
   const customers = useQuery({ queryKey: ['customers', 'summary'], enabled: f.tab === 'clientes' && can('clientes'), queryFn: () => api<{ kpis: Kpi[] }>('/customers/summary') });
   const days = Math.min(31, Math.round((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86_400_000) + 1);
   const acts = useQuery({ queryKey: ['activities', 'report', f.from, days], enabled: f.tab === 'atividades', queryFn: () => api<{ typeCounts: Record<ActivityType, number>; total: number }>(`/activities${qs({ scope: can('atividades', 'equipe') ? 'equipe' : 'minhas', status: 'concluidas', from: f.from, days, pageSize: 1 })}`) });
   const [teamMetric] = useState('vendas');
   const d = q.data;
-  const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: f.tab === 'leads' ? 'leads' : f.tab === 'oportunidades' ? 'oportunidades' : 'vendas' })}`;
+  const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: f.tab === 'leads' ? 'leads' : f.tab === 'oportunidades' ? 'oportunidades' : f.tab === 'comissoes' ? 'comissoes' : 'vendas' })}`;
   const show = (s: string) => f.tab === 'geral' || f.tab === s;
 
   return (
@@ -71,11 +73,12 @@ export function ReportsPage() {
         className="mb-5"
         value={f.tab}
         onChange={(t) => setF({ tab: t }, { resetPage: false })}
-        tabs={[{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }]}
+        tabs={[{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }]}
       />
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
 
-      {f.tab !== 'clientes' && f.tab !== 'atividades' && (
+      {f.tab === 'comissoes' && <CommissionsReport from={f.from} to={f.to} />}
+      {f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && (
         <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {d ? d.kpis.map((k, i) => <KpiCard key={k.key} k={k} icon={KPI_LOOK[i]!.icon} tone={KPI_LOOK[i]!.tone} />) : Array.from({ length: 4 }).map((_, i) => <div key={i} className="card h-[92px] animate-pulse" />)}
         </section>
@@ -95,7 +98,7 @@ export function ReportsPage() {
         </section>
       )}
 
-      {d && f.tab !== 'clientes' && f.tab !== 'atividades' && (
+      {d && f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           {show('vendas') && (
             <section className="card p-5 xl:col-span-7" aria-labelledby="h-evo">
@@ -122,14 +125,21 @@ export function ReportsPage() {
           )}
           {show('oportunidades') && (
             <section className="card p-5 xl:col-span-4" aria-labelledby="h-status">
-              <h2 id="h-status" className="mb-3 text-lg font-bold text-ink">Status das oportunidades</h2>
-              <p className="-mt-2 mb-2 text-xs text-muted">Oportunidades criadas no período, pela etapa atual</p>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 id="h-status" className="text-lg font-bold text-ink">Status das oportunidades</h2>
+                {(lookups.data?.pipelines.filter((x) => x.allowed).length ?? 0) > 1 && (
+                  <Select aria-label="Jornada" className="h-9 w-auto text-sm" value={f.pipelineId || d.status.pipeline.id} onChange={(e) => setF({ pipelineId: e.target.value }, { resetPage: false })}>
+                    {lookups.data?.pipelines.filter((x) => x.allowed).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </Select>
+                )}
+              </div>
+              <p className="-mt-2 mb-2 text-xs text-muted">Criadas no período, pela etapa atual · {d.status.pipeline.name}</p>
               <div className="flex items-center gap-4">
-                <FunnelShape colors={d.status.items.map((s) => STAGE_STYLE[s.stage].bar)} />
+                <FunnelShape colors={d.status.items.map((s, i) => stageColor(s.stage, s.color, i))} />
                 <ul className="flex-1 space-y-2.5">
                   {d.status.items.map((s) => (
                     <li key={s.stage} className="grid grid-cols-[1fr_auto_44px] items-center gap-3 text-sm">
-                      <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 rounded-full" style={{ background: STAGE_STYLE[s.stage].bar }} />{s.stage === 'perdida' ? 'Perdido' : STAGE_LABELS[s.stage]}</span>
+                      <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 shrink-0 rounded-full" style={{ background: stageColor(s.stage, s.color, d.status.items.indexOf(s)) }} />{s.label}</span>
                       <span className="num font-bold text-ink">{s.n}</span>
                       <span className="num text-right text-muted">{s.share === null ? 'N/D' : `${Math.round(s.share * 100)}%`}</span>
                     </li>

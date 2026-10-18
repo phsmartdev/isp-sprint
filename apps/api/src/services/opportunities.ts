@@ -1,16 +1,18 @@
 import type { FastifyRequest } from 'fastify';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { OpportunityReason } from '@isp/domain';
-import type { ContactCreate } from '@isp/shared';
+import type { ContactCreate, OpportunityDetails } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { AuthContext } from '../http/context';
 import { notFound, unprocessable } from '../http/errors';
-import { assertAssignableUser, assertTenantRefs, ownerScope } from './scope';
+import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './scope';
 import { audit } from './audit';
+import { resolvePipeline } from './instructions';
+import { storeViability } from './viability';
 
-export type CreateOpportunityInput = {
+export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   contactId?: string | null;
   newContact?: ContactCreate | null;
   leadId?: string | null;
@@ -18,6 +20,7 @@ export type CreateOpportunityInput = {
   sourceId?: string | null;
   campaignId?: string | null;
   planId?: string | null;
+  pipelineId?: string | null;
   channel: string | null;
   reasons: OpportunityReason[];
   title: string | null;
@@ -44,6 +47,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
 
   let contactId = input.contactId ?? null;
   let contactName: string;
+  let segment: string | null = input.newContact?.segment ?? null;
   if (!contactId) {
     if (!input.newContact) throw notFound('Contato não encontrado.');
     const [c] = await tx
@@ -65,13 +69,16 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   } else {
     // contato existente precisa estar visível na carteira do usuário (Clientes)
     const [c] = await tx
-      .select({ name: s.contacts.name })
+      .select({ name: s.contacts.name, segment: s.contacts.segment })
       .from(s.contacts)
       .where(and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
       .limit(1);
     if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Contato fora da sua carteira' }]);
     contactName = c.name;
+    segment = c.segment;
   }
+  const pipeline = await resolvePipeline(tx, auth.tenantId, { pipelineId: input.pipelineId, segment, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
+  const firstStage = pipeline.stages.find((st) => st.kind === 'open')!;
 
   if (input.leadId) {
     const [l] = await tx.select({ id: s.leads.id }).from(s.leads).where(and(eq(s.leads.id, input.leadId), eq(s.leads.tenantId, auth.tenantId))).limit(1);
@@ -90,6 +97,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       leadId: input.leadId ?? null,
       ownerId,
       teamId: team?.teamId ?? null,
+      pipelineId: pipeline.id,
+      stage: firstStage.key,
       title: input.title ?? (plan ? `${plan.name} — ${contactName}` : `${contactName} — nova oportunidade`),
       reasons: input.reasons,
       channel: input.channel,
@@ -99,6 +108,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       valueCents: plan?.priceCents ?? null,
       sprintStartedAt: now,
       createdBy: auth.userId,
+      ...(await detailsPatch(tx, auth, input, pipeline.id)),
     })
     .returning({ id: s.opportunities.id, code: s.opportunities.code });
   await tx.insert(s.opportunityEvents).values({
@@ -106,12 +116,15 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     opportunityId: opp!.id,
     type: 'created',
     actorId: auth.userId,
-    toValue: 'novo_lead',
+    toValue: firstStage.key,
     rowVersion: 1,
-    payload: { reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
+    payload: { pipeline: pipeline.key, reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
   });
   await audit(tx, req, { action: 'opportunity.create', entityType: 'opportunity', entityId: opp!.id });
-  return opp!;
+  await storeViability(tx, auth.tenantId, opp!.id);
+  const missing = pipeline.fields.filter((f) => f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
+  if (missing.length) throw unprocessable(`Preencha: ${missing.map((f) => f.label).join(', ')}.`, missing.map((f) => ({ path: `custom.${f.key}`, message: 'Obrigatório' })));
+  return { ...opp!, pipelineId: pipeline.id, stage: firstStage.key };
 }
 
 const owner = alias(s.users, 'opp_owner');
@@ -121,6 +134,33 @@ export const opportunitySelect = {
   code: s.opportunities.code,
   title: s.opportunities.title,
   stage: s.opportunities.stage,
+  pipelineId: s.opportunities.pipelineId,
+  pipelineName: s.pipelines.name,
+  installCep: s.opportunities.installCep,
+  installStreet: s.opportunities.installStreet,
+  installNumber: s.opportunities.installNumber,
+  installDistrict: s.opportunities.installDistrict,
+  installCity: s.opportunities.installCity,
+  condominiumId: s.opportunities.condominiumId,
+  condominiumName: sql<string | null>`(select c.name from condominiums c where c.id = "opportunities"."condominium_id")`,
+  regionName: sql<string | null>`(select r.name from condominiums c join regions r on r.id = c.region_id where c.id = "opportunities"."condominium_id")`,
+  installBlock: s.opportunities.installBlock,
+  installUnit: s.opportunities.installUnit,
+  saleType: s.opportunities.saleType,
+  cableMeters: s.opportunities.cableMeters,
+  activationFeeCents: s.opportunities.activationFeeCents,
+  equipment: s.opportunities.equipment,
+  routeId: s.opportunities.routeId,
+  viability: s.opportunities.viability,
+  commissionCents: s.opportunities.commissionCents,
+  cacCents: s.opportunities.cacCents,
+  marginCents: s.opportunities.marginCents,
+  paybackMonths: s.opportunities.paybackMonths,
+  custom: s.opportunities.custom,
+  duplicatedFromId: s.opportunities.duplicatedFromId,
+  stageName: s.pipelineStages.name,
+  attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,
+  proposalCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null and oa.kind = 'proposta')`,
   proposalStatus: s.opportunities.proposalStatus,
   contractRequestStatus: s.opportunities.contractRequestStatus,
   coverageStatus: s.opportunities.coverageStatus,
@@ -167,14 +207,24 @@ export function opportunityQuery(db: DbOrTx) {
     .from(s.opportunities)
     .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
     .innerJoin(owner, eq(owner.id, s.opportunities.ownerId))
+    .innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId))
+    .leftJoin(s.pipelineStages, and(eq(s.pipelineStages.pipelineId, s.opportunities.pipelineId), eq(s.pipelineStages.key, s.opportunities.stage)))
     .leftJoin(s.customers, eq(s.customers.id, s.opportunities.customerId))
     .leftJoin(s.plans, eq(s.plans.id, s.opportunities.planId))
     .leftJoin(s.leadSources, eq(s.leadSources.id, s.opportunities.sourceId))
     .leftJoin(s.campaigns, eq(s.campaigns.id, s.opportunities.campaignId));
 }
 
+/** Nível do módulo + jornadas restritas: quem não é membro só vê as próprias oportunidades nelas. */
 export function oppVisibility(auth: AuthContext) {
-  return ownerScope(auth, 'oportunidades', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
+  const base = ownerScope(auth, 'oportunidades', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
+  if (level(auth, 'oportunidades') === 'total') return base;
+  return and(
+    base,
+    sql`(${s.opportunities.ownerId} = ${auth.userId}
+      or not exists (select 1 from pipeline_members pm where pm.pipeline_id = ${s.opportunities.pipelineId})
+      or exists (select 1 from pipeline_members pm where pm.pipeline_id = ${s.opportunities.pipelineId} and pm.user_id = ${auth.userId}))`,
+  )!;
 }
 
 export async function loadOpportunity(db: DbOrTx, auth: AuthContext, id: string) {
@@ -197,3 +247,49 @@ export function opportunityDto(r: OpportunityRow, now = new Date()) {
 }
 
 export const bumpVersion = () => sql`${s.opportunities.rowVersion} + 1`;
+
+/** Valida referências da empresa e os campos personalizados da jornada; devolve o patch para o banco. */
+export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<OpportunityDetails>, pipelineId: string, currentCustom?: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  const copy = ['installCep', 'installStreet', 'installNumber', 'installDistrict', 'installCity', 'installBlock', 'installUnit', 'saleType', 'cableMeters', 'activationFeeCents', 'equipment'] as const;
+  for (const k of copy) if (d[k] !== undefined) out[k] = d[k];
+  if (d.installCep) out.installCep = d.installCep.replace(/^(\d{5})-?(\d{3})$/, '$1-$2');
+  if (d.condominiumId !== undefined) {
+    if (d.condominiumId) {
+      const [c] = await tx.select({ id: s.condominiums.id }).from(s.condominiums).where(and(eq(s.condominiums.id, d.condominiumId), eq(s.condominiums.tenantId, auth.tenantId))).limit(1);
+      if (!c) throw unprocessable('Condomínio inválido.', [{ path: 'condominiumId', message: 'Condomínio não encontrado' }]);
+    }
+    out.condominiumId = d.condominiumId;
+  }
+  if (d.routeId !== undefined) {
+    if (d.routeId) {
+      const [r] = await tx.select({ id: s.deliveryRoutes.id }).from(s.deliveryRoutes).where(and(eq(s.deliveryRoutes.id, d.routeId), eq(s.deliveryRoutes.tenantId, auth.tenantId))).limit(1);
+      if (!r) throw unprocessable('Caminho de entrega inválido.', [{ path: 'routeId', message: 'Caminho não encontrado' }]);
+    }
+    out.routeId = d.routeId;
+  }
+  if (d.equipment) {
+    const ids = [...new Set(d.equipment.map((e) => e.equipmentId))];
+    if (ids.length) {
+      const found = await tx.select({ id: s.equipmentItems.id }).from(s.equipmentItems).where(and(eq(s.equipmentItems.tenantId, auth.tenantId), inArray(s.equipmentItems.id, ids)));
+      if (found.length !== ids.length) throw unprocessable('Equipamento inválido.', [{ path: 'equipment', message: 'Equipamento não encontrado no cadastro' }]);
+    }
+  }
+  if (d.custom !== undefined) {
+    const fields = await tx.select().from(s.pipelineFields).where(and(eq(s.pipelineFields.pipelineId, pipelineId), eq(s.pipelineFields.active, true)));
+    const merged: Record<string, unknown> = { ...(currentCustom ?? {}) };
+    for (const [k, v] of Object.entries(d.custom)) {
+      const f = fields.find((x) => x.key === k);
+      if (!f) throw unprocessable('Campo personalizado desconhecido.', [{ path: `custom.${k}`, message: 'Campo não existe nesta jornada' }]);
+      if (v === null || v === '') { delete merged[k]; continue; }
+      const bad = (m: string) => unprocessable(`${f.label}: ${m}`, [{ path: `custom.${k}`, message: m }]);
+      if ((f.type === 'numero' || f.type === 'moeda') && typeof v !== 'number') throw bad('informe um número');
+      if (f.type === 'sim_nao' && typeof v !== 'boolean') throw bad('informe sim ou não');
+      if (f.type === 'data' && (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v))) throw bad('informe uma data');
+      if (f.type === 'lista' && !f.options.includes(String(v))) throw bad('escolha uma das opções');
+      merged[k] = v;
+    }
+    out.custom = merged;
+  }
+  return out;
+}

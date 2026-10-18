@@ -22,6 +22,9 @@ function vercelDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 
 export type Config = {
   trustProxy: boolean;
+  /** Endereço público do sistema, usado nos links dos e-mails. */
+  publicUrl: string;
+  cronSecret: string | null;
   databaseUrl: string;
   port: number;
   webOrigins: string[];
@@ -39,6 +42,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (isProd && !e.COOKIE_SECRET) throw new Error('COOKIE_SECRET (>= 32 caracteres) é obrigatório em produção');
   if (isProd && !e.COOKIE_SECURE) throw new Error('COOKIE_SECURE=true é obrigatório em produção (HTTPS)');
   return {
+    publicUrl: env.PUBLIC_URL ?? (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : e.WEB_ORIGIN.split(',')[0]!.trim()),
+    cronSecret: env.CRON_SECRET ?? null,
     trustProxy: !!env.VERCEL || isProd || env.TRUST_PROXY === 'true',
     cookieSecret: e.COOKIE_SECRET ?? 'dev-only-cookie-secret-change-me-0123456789',
     databaseUrl: e.DATABASE_URL,

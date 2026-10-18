@@ -6,12 +6,35 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, STAGE_LABELS, TERMINAL_STAGES, type ProfileKey } from '@isp/domain';
+import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, type ProfileKey } from '@isp/domain';
+import { createHash } from 'node:crypto';
+import { getActiveInstruction } from '../services/instructions';
+import { storeViability } from '../services/viability';
 import { createDb, type DB } from './client';
 import * as s from './schema';
 import { hashPassword } from '../auth/password';
 
 export const SEED_PASSWORD = 'Sprint@2026';
+
+/** PDF mínimo válido com texto fictício (só para demonstração). */
+function fakeProposalPdf(client: string, plan: string, cents: number) {
+  const ascii = (t: string) => t.normalize('NFD').replace(/[^\x20-\x7E]/g, '').replace(/[()\\]/g, '');
+  const lines = ['PROPOSTA COMERCIAL - DADOS FICTICIOS', `Cliente: ${ascii(client)}`, `Plano: ${ascii(plan)}`, `Valor mensal: R$ ${(cents / 100).toFixed(2).replace('.', ',')}`];
+  const stream = `BT /F1 14 Tf 60 760 Td ${lines.map((l, i) => `${i ? '0 -24 Td ' : ''}(${l}) Tj`).join(' ')} ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
 
 function rng(seed = 42) {
   let a = seed;
@@ -102,19 +125,63 @@ export async function seedTenant(
   const planRows = await db
     .insert(s.plans)
     .values([
-      { tenantId: tenant.id, name: '350 Mega', line: 'Yep Mais', segment: 'residencial', priceCents: 9990 },
-      { tenantId: tenant.id, name: '450 Mega', line: 'Yep Mais', segment: 'residencial', priceCents: 11990 },
-      { tenantId: tenant.id, name: '500 Mega', line: 'Yep Família', segment: 'residencial', priceCents: 13990 },
-      { tenantId: tenant.id, name: '800 Mega', line: 'Yep Ultra', segment: 'residencial', priceCents: 16990 },
-      { tenantId: tenant.id, name: 'Link Dedicado', line: 'Empresas', segment: 'empresarial', priceCents: 24990 },
-      { tenantId: tenant.id, name: 'Solução Educ+', line: 'Institucional', segment: 'institucional', priceCents: 49990 },
+      { tenantId: tenant.id, name: '350 Mega', speedMbps: 350, line: 'Yep Mais', segment: 'residencial', priceCents: 9990 },
+      { tenantId: tenant.id, name: '450 Mega', speedMbps: 450, line: 'Yep Mais', segment: 'residencial', priceCents: 11990 },
+      { tenantId: tenant.id, name: '500 Mega', speedMbps: 500, line: 'Yep Família', segment: 'residencial', priceCents: 13990 },
+      { tenantId: tenant.id, name: '800 Mega', speedMbps: 800, line: 'Yep Ultra', segment: 'residencial', priceCents: 16990 },
+      { tenantId: tenant.id, name: 'Link Dedicado', speedMbps: 1000, line: 'Empresas', segment: 'empresarial', priceCents: 24990 },
+      { tenantId: tenant.id, name: 'Solução Educ+', speedMbps: 600, line: 'Institucional', segment: 'institucional', priceCents: 49990 },
     ])
     .returning();
   const planWeights: [typeof planRows[number], number][] = [[planRows[0]!, 17], [planRows[1]!, 8], [planRows[2]!, 25], [planRows[3]!, 42], [planRows[4]!, 12], [planRows[5]!, 4]];
 
-  await db.insert(s.pipelineStages).values(
-    OPPORTUNITY_STAGES.map((key, i) => ({ tenantId: tenant.id, key, name: STAGE_LABELS[key], position: i, isTerminal: TERMINAL_STAGES.includes(key) })),
-  );
+  // jornadas vêm do modelo de instrução inicial (Residencial e Empresarial)
+  await getActiveInstruction(db, tenant.id);
+  const pipes = await db.select().from(s.pipelines).where(eq(s.pipelines.tenantId, tenant.id));
+  const pipeRes = pipes.find((p) => p.key === 'residencial')!;
+
+  // ---------- viabilidade (parâmetros fictícios de demonstração; a gerência ajusta em Configurações)
+  await db.insert(s.viabilityDeductions).values([
+    { tenantId: tenant.id, category: 'tributo', name: 'Simples Nacional', kind: 'percent', percentBp: 600 },
+    { tenantId: tenant.id, category: 'tributo', name: 'FUST/FUNTTEL', kind: 'percent', percentBp: 150 },
+    { tenantId: tenant.id, category: 'parceiro', name: 'Trânsito IP (fornecedor de link)', kind: 'percent', percentBp: 800 },
+    { tenantId: tenant.id, category: 'parceiro', name: 'Suporte N1 terceirizado', kind: 'fixed', amountCents: 300 },
+  ]);
+  const eqs = await db.insert(s.equipmentItems).values([
+    { tenantId: tenant.id, name: 'ONU GPON', costCents: 12000 },
+    { tenantId: tenant.id, name: 'Roteador Wi-Fi 6', costCents: 18000 },
+    { tenantId: tenant.id, name: 'Kit drop (conectores e fixação)', costCents: 1500 },
+  ]).returning();
+  const [onu, rot, kitDrop] = eqs as [typeof eqs[number], typeof eqs[number], typeof eqs[number]];
+  const routesRows = await db.insert(s.deliveryRoutes).values([
+    { tenantId: tenant.id, name: 'FTTH condomínio (rede própria)', description: 'Prédio já cabeado; lançamento curto até a unidade.', cablePerMeterCents: 120, installCostCents: 6000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 1 }] },
+    { tenantId: tenant.id, name: 'FTTH externo (lançamento longo)', description: 'Lançamento a partir da caixa na rua.', cablePerMeterCents: 180, installCostCents: 15000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 2 }] },
+    { tenantId: tenant.id, name: 'Link dedicado via parceiro', description: 'Alta banda: entrega pelo parceiro de transporte.', cablePerMeterCents: 250, installCostCents: 40000, monthlyCostCents: 6000, requiresApproval: true, kit: [{ equipmentId: rot.id, qty: 1 }] },
+  ]).returning();
+  const [rCondo, rExt, rDed] = routesRows as [typeof routesRows[number], typeof routesRows[number], typeof routesRows[number]];
+  await db.insert(s.routeRules).values([
+    { tenantId: tenant.id, name: 'Banda de 1 Giga ou mais', position: 0, minMbps: 1000, routeId: rDed.id },
+    { tenantId: tenant.id, name: 'Até 150 m de cabo', position: 1, maxMeters: 150, routeId: rCondo.id },
+    { tenantId: tenant.id, name: 'Acima de 150 m de cabo', position: 2, minMeters: 151, routeId: rExt.id },
+  ]);
+  await db.insert(s.commissionRules).values([
+    { tenantId: tenant.id, name: 'Venda ativa', position: 0, saleType: 'ativa', kind: 'percent', percentBp: 8000 },
+    { tenantId: tenant.id, name: 'Receptiva até R$ 120', position: 1, saleType: 'receptiva', maxPriceCents: 12000, kind: 'fixo', amountCents: 4000 },
+    { tenantId: tenant.id, name: 'Receptiva acima de R$ 120', position: 2, saleType: 'receptiva', minPriceCents: 12001, kind: 'mensalidades', multiplierX100: 50 },
+  ]);
+  await db.insert(s.viabilitySettings).values({ tenantId: tenant.id, defaultRouteId: rCondo.id, ltvLifetimeMonths: 36, ltvMinSample: 30, maxPaybackMonths: 12, defaultActivationFeeCents: 5000 });
+
+  // ---------- regiões e condomínios (nomes fictícios)
+  const regionRows = await db.insert(s.regions).values(['Zona Sul', 'Zona Norte', 'Centro', 'Grande Aracaju'].map((name) => ({ tenantId: tenant.id, name }))).returning();
+  const CONDOS: [string, number, string[], boolean][] = [
+    ['Cond. Jardins do Mar (fictício)', 0, ['A', 'B', 'C'], true], ['Cond. Vila Atlântica (fictício)', 0, ['1', '2'], true], ['Res. Porto Sereno (fictício)', 0, ['Única'], false],
+    ['Cond. Parque das Árvores (fictício)', 1, ['A', 'B'], true], ['Res. Sol Nascente (fictício)', 1, ['1', '2', '3', '4'], true],
+    ['Ed. Centro Empresarial (fictício)', 2, ['Torre 1'], true], ['Cond. Praça Velha (fictício)', 2, ['A'], false],
+    ['Cond. Recanto Verde (fictício)', 3, ['A', 'B', 'C', 'D'], true], ['Res. Lagoa Azul (fictício)', 3, ['1', '2'], false],
+  ];
+  const condoRows = await db.insert(s.condominiums).values(CONDOS.map(([name, ri, blocks, net], i) => ({ tenantId: tenant.id, regionId: regionRows[ri]!.id, name, blocks, hasNetwork: net, cep: `49${String(i).padStart(3, '0')}-000`, street: 'Avenida Fictícia', number: String(100 + i * 10), city: 'Aracaju', units: 48 + i * 12 }))).returning();
+  const pipeEmp = pipes.find((p) => p.key === 'empresarial')!;
+  const EMP_STAGE: Record<string, string> = { qualificacao: 'diagnostico', cobertura: 'visita_tecnica', fechamento: 'negociacao' };
 
   const makeContact = async (ownerId: string | null, segment?: 'residencial' | 'empresarial' | 'governamental' | 'institucional') => {
     const seg = segment ?? (r() < 0.78 ? 'residencial' : 'empresarial');
@@ -171,7 +238,9 @@ export async function seedTenant(
     const ownerId = weighted(sellerWeights);
     const plan = weighted(planWeights);
     const c = await makeContact(ownerId, plan.segment === 'institucional' ? 'institucional' : plan.segment === 'empresarial' ? (r() > 0.7 ? 'governamental' : 'empresarial') : 'residencial');
-    const stage = weighted(stageW);
+    const baseStage = weighted(stageW);
+    const business = c.segment !== 'residencial';
+    const stage = business ? (EMP_STAGE[baseStage] ?? baseStage) : baseStage;
     const terminal = stage === 'ganha' || stage === 'perdida';
     const created = terminal ? at(-recentDay() - 3, 9 + Math.floor(r() * 8), Math.floor(r() * 60)) : at(-Math.floor(Math.pow(r(), 1.3) * 50), 8 + Math.floor(r() * 9), Math.floor(r() * 60));
     const changed = new Date(Math.min(now - 3_600_000, created.getTime() + (1 + r() * 12) * DAY));
@@ -181,17 +250,22 @@ export async function seedTenant(
         tenantId: tenant.id,
         contactId: c.id,
         ownerId,
-        title: `${plan.name} — ${c.segment === 'residencial' ? 'Internet residencial' : 'Internet empresarial'}`,
+        title: `${plan.name} — ${c.segment === 'residencial' ? 'Internet residencial' : 'Internet corporativa'}`,
+        pipelineId: business ? pipeEmp.id : pipeRes.id,
         stage,
+        saleType: r() < 0.45 ? 'ativa' : 'receptiva',
+        cableMeters: business ? 120 + Math.floor(r() * 380) : 20 + Math.floor(r() * 150),
+        activationFeeCents: business ? 15000 : r() < 0.3 ? 0 : 5000,
+        ...(business || r() > 0.88 ? { installStreet: 'Rua Fictícia', installNumber: String(10 + i), installCity: c.city } : (() => { const cd = pick(condoRows); return { condominiumId: cd.id, installBlock: pick(cd.blocks), installUnit: String(100 + Math.floor(r() * 20) * 10 + Math.floor(r() * 4)), installCep: cd.cep, installStreet: cd.street, installNumber: cd.number, installCity: cd.city }; })()),
         planId: plan.id,
         reasons: [pick(['oferta', 'comparacao', 'nova_instalacao', 'satisfeito_aberto', 'problema'] as const)],
         channel: pick(CHANNELS),
         sourceId: sourceByName[weighted(SOURCES)],
         valueCents: plan.priceCents,
-        coverageStatus: ['proposta', 'fechamento', 'ganha'].includes(stage) ? 'elegivel' : stage === 'cobertura' ? 'pendente' : 'nao_consultada',
-        proposalStatus: stage === 'ganha' ? 'aceita' : ['proposta', 'fechamento'].includes(stage) ? 'enviada' : 'nao_criada',
+        coverageStatus: ['proposta', 'fechamento', 'ganha'].includes(baseStage) ? 'elegivel' : baseStage === 'cobertura' ? 'pendente' : 'nao_consultada',
+        proposalStatus: baseStage === 'ganha' ? 'aceita' : ['proposta', 'fechamento'].includes(baseStage) ? 'enviada' : 'nao_criada',
         // nenhuma venda da seed tem contrato confirmado: isso exige confirmação externa (IXC)
-        contractRequestStatus: stage === 'ganha' || stage === 'fechamento' ? 'pendente' : 'nao_solicitada',
+        contractRequestStatus: baseStage === 'ganha' || baseStage === 'fechamento' ? 'pendente' : 'nao_solicitada',
         nextAction: terminal ? null : pick(['Retornar com comparação', 'Verificar cobertura no endereço', 'Enviar condições da oferta', 'Confirmar decisão com cliente', 'Agendar instalação']),
         nextActionAt: terminal ? null : at(Math.floor(r() * 4) - 1, 9 + Math.floor(r() * 8), [0, 15, 30, 45][Math.floor(r() * 4)]!),
         lossReason: stage === 'perdida' ? pick(['preco', 'sem_cobertura', 'satisfeito_atual', 'sem_resposta']) : null,
@@ -205,6 +279,11 @@ export async function seedTenant(
       })
       .returning();
     opps.push({ id: o!.id, ownerId, contactId: c.id, stage, segment: c.segment });
+    await storeViability(db, tenant.id, o!.id);
+    if (['fechamento', 'ganha'].includes(baseStage)) {
+      const pdf = fakeProposalPdf(c.name, plan.name, plan.priceCents);
+      await db.insert(s.opportunityAttachments).values({ tenantId: tenant.id, opportunityId: o!.id, kind: 'proposta', filename: `Proposta ${plan.name} - ${c.name}.pdf`, mime: 'application/pdf', sizeBytes: pdf.length, sha256: createHash('sha256').update(pdf).digest('hex'), data: pdf, uploadedBy: ownerId, createdAt: changed });
+    }
     // boa parte das oportunidades nasceu de um lead convertido (alimenta o funil por coorte da Inteligência)
     if (r() < 0.55) {
       const leadCreated = new Date(created.getTime() - (2 + r() * 48) * 3_600_000);
@@ -233,6 +312,7 @@ export async function seedTenant(
     const anniversary = new Date(start);
     while (anniversary.getTime() < now) anniversary.setFullYear(anniversary.getFullYear() + 1);
     const ext = `FIC-${opts.seed}${String(10000 + i)}`;
+    const life = weighted(lifeW);
     const ingested = i % 9 === 0 ? at(-3, 6) : at(0, 2);
     const [cust] = await db
       .insert(s.customers)
@@ -240,10 +320,11 @@ export async function seedTenant(
         tenantId: tenant.id,
         contactId: c.id,
         displayName: c.name,
-        lifecycle: weighted(lifeW),
+        lifecycle: life,
         planId: plan.id,
         contractStart: iso(start),
         nextDueOn: iso(anniversary),
+        contractEnd: life === 'cancelado' ? iso(new Date(start.getTime() + r() * (now - start.getTime()))) : null,
         sourceSystem: 'seed_ficticio',
         externalId: ext,
         sourceUpdatedAt: ingested,

@@ -15,7 +15,12 @@ import { ActivitiesPage } from './pages/Activities';
 import { ReportsPage } from './pages/Reports';
 import { IntelligencePage } from './pages/Intelligence';
 import { CampaignsPage } from './pages/Campaigns';
-import { AdminLayout, AdminOverview, AdminUsers, AdminPlans, AdminStages, AdminSources, AdminIntegrations, AdminNotifications, AdminSecurity, AdminBranding, AdminLogs } from './pages/admin/Admin';
+import { AdminLayout, AdminOverview, AdminUsers, AdminPlans, AdminSources, AdminIntegrations, AdminSecurity, AdminBranding, AdminLogs } from './pages/admin/Admin';
+import { AdminJourneys } from './pages/admin/Journeys';
+import { AdminArea } from './pages/admin/Area';
+import { AdminViability } from './pages/admin/Viability';
+import { AdminInstructions } from './pages/admin/Instructions';
+import { AdminEmail } from './pages/admin/Email';
 import { ProfilePage } from './pages/admin/Profile';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -55,10 +60,15 @@ export function App() {
           <Route index element={<AdminOverview />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="plans" element={<AdminPlans />} />
-          <Route path="stages" element={<AdminStages />} />
+          <Route path="journeys" element={<AdminJourneys />} />
+          <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
+          <Route path="area" element={<AdminArea />} />
+          <Route path="viability" element={<AdminViability />} />
+          <Route path="instructions" element={<AdminInstructions />} />
+          <Route path="email" element={<AdminEmail />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />
-          <Route path="notifications" element={<AdminNotifications />} />
+          <Route path="notifications" element={<Navigate to="/settings/email" replace />} />
           <Route path="security" element={<AdminSecurity />} />
           <Route path="branding" element={<AdminBranding />} />
           <Route path="logs" element={<AdminLogs />} />
