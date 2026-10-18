@@ -23,11 +23,14 @@ import { BrandImage, ConfiarFacil, useBrand } from '../../components/brand';
 const TABS = [
   { to: '/settings', label: 'Visão geral', end: true },
   { to: '/settings/users', label: 'Usuários' },
+  { to: '/settings/journeys', label: 'Jornadas e automações' },
+  { to: '/settings/area', label: 'Área de atendimento' },
+  { to: '/settings/viability', label: 'Viabilidade' },
   { to: '/settings/plans', label: 'Planos e produtos' },
-  { to: '/settings/stages', label: 'Etapas de vendas' },
-  { to: '/settings/sources', label: 'Origem de leads' },
+  { to: '/settings/sources', label: 'Canais de entrada' },
+  { to: '/settings/instructions', label: 'Modelo de instrução' },
+  { to: '/settings/email', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },
-  { to: '/settings/notifications', label: 'Notificações' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },
   { to: '/settings/logs', label: 'Logs' },
@@ -98,7 +101,7 @@ export function AdminOverview() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {stat('/settings/users', <Users className="h-7 w-7" />, 'bg-primary-soft text-primary', d.counts.users, 'Usuários ativos')}
           {stat('/settings/plans', <Box className="h-7 w-7" />, 'bg-success-soft text-success', d.counts.plans, 'Planos cadastrados')}
-          {stat('/settings/stages', <Filter className="h-7 w-7" />, 'bg-purple-soft text-purple', d.counts.stages, 'Etapas de vendas')}
+          {stat('/settings/journeys', <Filter className="h-7 w-7" />, 'bg-purple-soft text-purple', d.counts.stages, 'Etapas nas jornadas')}
           {stat('/settings/integrations', <Workflow className="h-7 w-7" />, 'bg-success-soft text-success', d.counts.integrations, 'Integrações ativas')}
         </div>
         <section className="card p-5">
@@ -107,10 +110,13 @@ export function AdminOverview() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <Tile to="/settings/users" icon={<Users className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Usuários e permissões" desc="Cadastre usuários, defina perfis e controle os acessos." foot={`${d.counts.users} usuários cadastrados`} />
             <Tile to="/settings/plans" icon={<Box className="h-7 w-7" />} tone="bg-success-soft text-success" title="Planos e produtos" desc="Gerencie os planos de internet, produtos e serviços." foot={`${d.counts.plans} planos cadastrados`} />
-            <Tile to="/settings/stages" icon={<Filter className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Etapas de vendas" desc="Configure o funil de vendas e os status das oportunidades." foot={`${d.counts.stages} etapas configuradas`} />
-            <Tile to="/settings/sources" icon={<Target className="h-7 w-7" />} tone="bg-warning-soft text-[#EA580C]" title="Origem de leads" desc="Cadastre e categorize as origens de leads (site, WhatsApp, campanhas etc)." foot={`${d.counts.sources} origens configuradas`} />
+            <Tile to="/settings/journeys" icon={<Filter className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Jornadas e automações" desc="Crie funis, defina quem trabalha em cada um, campos do cadastro e automações." foot={`${d.counts.stages} etapas configuradas`} />
+            <Tile to="/settings/viability" icon={<Target className="h-7 w-7" />} tone="bg-success-soft text-success" title="Viabilidade" desc="Tributos, parceiros, equipamentos, caminhos de entrega, comissão e LTV." foot="CAC, margem e payback" />
+            <Tile to="/settings/area" icon={<Box className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Área de atendimento" desc="Regiões e condomínios, com blocos e endereço." foot="Região → condomínio" />
+            <Tile to="/settings/instructions" icon={<FileText className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="Modelo de instrução" desc="Exporte e adapte o playbook: roteiro, insights, jornadas e e-mails." foot="Versões com prévia" />
+            <Tile to="/settings/sources" icon={<Target className="h-7 w-7" />} tone="bg-warning-soft text-[#EA580C]" title="Canais de entrada" desc="WhatsApp, Instagram, telefone, site: por onde o cliente chega." foot={`${d.counts.sources} canais configurados`} />
             <Tile to="/settings/integrations" icon={<Link2 className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Integrações" desc="Conecte com IXC, WhatsApp, e-mail e sistemas externos." foot={`${d.counts.integrations} integrações ativas`} />
-            <Tile to="/settings/notifications" icon={<Bell className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="Notificações" desc="Configure alertas por e-mail, WhatsApp e sistema." foot="Alertas personalizados" />
+            <Tile to="/settings/email" icon={<Bell className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="E-mail e alertas" desc="Servidor SMTP, alertas automáticos e registro de envios." foot="Propostas, follow-ups e avisos" />
             <Tile to="/settings/security" icon={<Shield className="h-7 w-7" />} tone="bg-danger-soft text-danger" title="Segurança" desc="Defina níveis de acesso por módulo e perfil, e acompanhe a auditoria." foot="Matriz de acesso por módulo" />
             <Tile to="/settings/branding" icon={<Palette className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Personalização" desc="Envie logo, mascotes, banner e imagens da identidade visual." foot="Identidade Yepnet" />
             <Tile to="/settings/logs" icon={<FileText className="h-7 w-7" />} tone="bg-surface-2 text-ink" title="Logs do sistema" desc="Acompanhe todas as ações realizadas na plataforma." foot="Registro de atividades" />
@@ -160,7 +166,8 @@ export function AdminOverview() {
             {[
               ['/settings/users?novo=1', <UserPlus key="i" className="h-4 w-4 text-primary" />, 'Adicionar novo usuário'],
               ['/settings/plans?novo=1', <Box key="i" className="h-4 w-4 text-success" />, 'Cadastrar plano'],
-              ['/settings/stages', <Filter key="i" className="h-4 w-4 text-purple" />, 'Configurar etapa de venda'],
+              ['/settings/journeys', <Filter key="i" className="h-4 w-4 text-purple" />, 'Configurar jornadas'],
+              ['/settings/email', <Bell key="i" className="h-4 w-4 text-[#E5A100]" />, 'Configurar e-mail (SMTP)'],
               ['/settings/integrations', <MessageSquare key="i" className="h-4 w-4 text-success" />, 'Integrar WhatsApp'],
               ['/settings/branding', <Palette key="i" className="h-4 w-4 text-purple" />, 'Personalizar imagens'],
             ].map(([to, icon, label]) => (
@@ -352,20 +359,20 @@ export function AdminUsers() {
 }
 
 // =================================================================== planos
-type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; active: boolean; sourceSystem: string };
+type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; active: boolean; sourceSystem: string };
 
 export function AdminPlans() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['admin', 'plans'], queryFn: () => api<{ items: Plan[] }>('/admin/plans') });
   const [editing, setEditing] = useState<Plan | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
-  const [form, setForm] = useState({ name: '', line: '', segment: 'residencial' as Segment, price: '', active: true });
-  const open = (p: Plan | 'new') => { setEditing(p); setForm(p === 'new' ? { name: '', line: '', segment: 'residencial', price: '', active: true } : { name: p.name, line: p.line ?? '', segment: p.segment, price: (p.priceCents / 100).toFixed(2).replace('.', ','), active: p.active }); };
+  const [form, setForm] = useState({ name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', active: true });
+  const open = (p: Plan | 'new') => { setEditing(p); setForm(p === 'new' ? { name: '', line: '', segment: 'residencial', price: '', speed: '', active: true } : { name: p.name, line: p.line ?? '', segment: p.segment, price: (p.priceCents / 100).toFixed(2).replace('.', ','), speed: p.speedMbps ? String(p.speedMbps) : '', active: p.active }); };
   const m = useMutation({
     mutationFn: () => {
       const priceCents = toCents(form.price);
       if (priceCents === null) throw new Error('Informe o preço no formato 99,90.');
-      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, active: form.active };
+      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, active: form.active };
       return editing === 'new' ? api('/admin/plans', { method: 'POST', body }) : api(`/admin/plans/${(editing as Plan).id}`, { method: 'PATCH', body });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); toast({ tone: 'success', message: 'Plano salvo' }); },
@@ -380,13 +387,14 @@ export function AdminPlans() {
       {q.isLoading ? <LoadingRows /> : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Plano', 'Linha', 'Segmento', 'Preço mensal', 'Situação', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
+            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Plano', 'Linha', 'Segmento', 'Velocidade', 'Preço mensal', 'Situação', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {q.data?.items.map((p) => (
                 <tr key={p.id} className="border-t border-line">
                   <td className="px-5 py-3 font-semibold text-ink">{p.name}</td>
                   <td className="px-5 py-3 text-text">{p.line ?? '—'}</td>
                   <td className="px-5 py-3 text-text">{SEGMENT_LABELS[p.segment]}</td>
+                  <td className="num px-5 py-3 text-text">{p.speedMbps ? `${p.speedMbps} Mbps` : <span className="text-warning">Informe</span>}</td>
                   <td className="num px-5 py-3 text-ink">{fmtBRL(p.priceCents)}</td>
                   <td className="px-5 py-3"><Chip tone={p.active ? 'green' : 'neutral'}>{p.active ? 'Ativo' : 'Inativo'}</Chip></td>
                   <td className="px-5 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => open(p)}>Editar</Button></td>
@@ -404,40 +412,10 @@ export function AdminPlans() {
             <FormField label="Segmento" htmlFor="pl-seg"><Select id="pl-seg" value={form.segment} onChange={(e) => setForm({ ...form, segment: e.target.value as Segment })}>{SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABELS[s]}</option>)}</Select></FormField>
             <FormField label="Preço mensal (R$)" htmlFor="pl-price" required><Input id="pl-price" inputMode="decimal" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99,90" /></FormField>
           </div>
+          <FormField label="Velocidade (Mbps)" htmlFor="pl-speed" hint="Usada nas regras de viabilidade para escolher o caminho de entrega"><Input id="pl-speed" type="number" min={1} value={form.speed} onChange={(e) => setForm({ ...form, speed: e.target.value })} placeholder="500" /></FormField>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />Ativo (aparece para novas oportunidades)</label>
         </div>
       </Modal>
-    </section>
-  );
-}
-
-// =================================================================== etapas
-export function AdminStages() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const q = useQuery({ queryKey: ['admin', 'stages'], queryFn: () => api<{ items: { id: string; key: string; name: string; position: number; isTerminal: boolean }[] }>('/admin/stages') });
-  const [names, setNames] = useState<Record<string, string>>({});
-  const m = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => api(`/admin/stages/${id}`, { method: 'PATCH', body: { name } }),
-    onSuccess: () => { qc.invalidateQueries(); toast({ tone: 'success', message: 'Etapa renomeada' }); },
-    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
-  });
-  return (
-    <section className="card p-5">
-      <h2 className="text-lg font-bold text-ink">Etapas de vendas</h2>
-      <p className="mb-4 text-sm text-muted">Você pode renomear as etapas. A ordem e as regras (venda fechada pede confirmação, perda pede motivo, reabrir exige nível Equipe) são do sistema.</p>
-      {q.isLoading ? <LoadingRows /> : (
-        <ol className="space-y-2">
-          {q.data?.items.map((s, i) => (
-            <li key={s.id} className="flex flex-wrap items-center gap-3 rounded-md border border-line px-4 py-3">
-              <span className="num flex h-7 w-7 items-center justify-center rounded-full bg-primary-soft text-sm font-bold text-primary">{i + 1}</span>
-              <Input aria-label={`Nome da etapa ${i + 1}`} className="max-w-xs" value={names[s.id] ?? s.name} onChange={(e) => setNames({ ...names, [s.id]: e.target.value })} />
-              {s.isTerminal && <Chip tone="neutral">Encerra a oportunidade</Chip>}
-              {(names[s.id] ?? s.name) !== s.name && <Button size="sm" variant="primary" loading={m.isPending} onClick={() => m.mutate({ id: s.id, name: names[s.id]! })}>Salvar</Button>}
-            </li>
-          ))}
-        </ol>
-      )}
     </section>
   );
 }
@@ -450,7 +428,7 @@ export function AdminSources() {
   const [name, setName] = useState('');
   const create = useMutation({
     mutationFn: () => api('/admin/sources', { method: 'POST', body: { name } }),
-    onSuccess: () => { setName(''); qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: 'Origem cadastrada' }); },
+    onSuccess: () => { setName(''); qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: 'Canal cadastrado' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const toggle = useMutation({
@@ -459,10 +437,10 @@ export function AdminSources() {
   });
   return (
     <section className="card p-5">
-      <h2 className="text-lg font-bold text-ink">Origem de leads</h2>
-      <p className="mb-4 text-sm text-muted">Origens desativadas somem dos formulários, mas os registros antigos continuam com a origem original.</p>
+      <h2 className="text-lg font-bold text-ink">Canais de entrada</h2>
+      <p className="mb-4 text-sm text-muted">Por onde o cliente chega (WhatsApp, Instagram, telefone…). Canais desativados somem dos formulários, mas os registros antigos continuam com a origem original.</p>
       <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim().length >= 2) create.mutate(); }}>
-        <Input aria-label="Nova origem" className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Panfleto" />
+        <Input aria-label="Novo canal" className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Instagram" />
         <Button type="submit" variant="primary" icon={<Plus className="h-4 w-4" />} loading={create.isPending}>Cadastrar</Button>
       </form>
       {q.isLoading ? <LoadingRows /> : (
@@ -482,35 +460,27 @@ export function AdminSources() {
 // =================================================================== integrações e notificações
 export function AdminIntegrations() {
   const q = useQuery({ queryKey: ['admin', 'overview'], queryFn: () => api<Overview>('/admin/overview') });
+  const smtp = useQuery({ queryKey: ['admin', 'smtp'], queryFn: () => api<{ configured: boolean; enabled?: boolean; lastTestOk?: boolean | null }>('/admin/smtp') });
+  const smtpStatus = !smtp.data?.configured ? 'Não configurado' : !smtp.data.enabled ? 'Desligado' : smtp.data.lastTestOk === false ? 'Último teste falhou' : 'Configurado';
   const items = [
     { name: 'IXC Provedor', desc: 'Clientes, contratos, planos, cobertura e faturas.', status: `Simulado (${q.data?.system.ixcMode ?? 'mock'}) — leitura real na Fase 4`, icon: <Database className="h-6 w-6" /> },
     { name: 'WhatsApp Business', desc: 'Envio de propostas e lembretes pelo WhatsApp.', status: 'Não conectado', icon: <MessageSquare className="h-6 w-6" /> },
-    { name: 'E-mail (SMTP)', desc: 'Alertas e envio de propostas por e-mail.', status: 'Não conectado', icon: <FileText className="h-6 w-6" /> },
+    { name: 'E-mail (SMTP)', desc: 'Alertas e envio de propostas por e-mail.', status: smtpStatus, icon: <FileText className="h-6 w-6" />, to: '/settings/email' },
   ];
   return (
     <section className="card p-5">
       <h2 className="text-lg font-bold text-ink">Integrações</h2>
-      <p className="mb-4 text-sm text-muted">Nenhuma integração externa está ativa. Credenciais ficam só no servidor e nunca aparecem aqui.</p>
+      <p className="mb-4 text-sm text-muted">Credenciais ficam só no servidor e nunca aparecem aqui.</p>
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-3">
         {items.map((i) => (
           <li key={i.name} className="rounded-md border border-line p-4">
             <span className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-primary-soft text-primary">{i.icon}</span>
             <p className="font-bold text-ink">{i.name}</p>
             <p className="text-sm text-muted">{i.desc}</p>
-            <p className="mt-3"><Chip tone="neutral">{i.status}</Chip></p>
+            <p className="mt-3 flex items-center gap-2"><Chip tone="neutral">{i.status}</Chip>{'to' in i && i.to && <Link className="link text-sm" to={i.to}>Configurar</Link>}</p>
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-export function AdminNotifications() {
-  return (
-    <section className="card p-5">
-      <h2 className="text-lg font-bold text-ink">Notificações</h2>
-      <p className="mb-4 text-sm text-muted">Hoje o sino do topo mostra atividades de hoje e vencidas de cada pessoa.</p>
-      <Notice>Alertas por e-mail e WhatsApp dependem das integrações e ainda não estão disponíveis.</Notice>
     </section>
   );
 }

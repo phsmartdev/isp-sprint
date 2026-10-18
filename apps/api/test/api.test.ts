@@ -282,8 +282,11 @@ describe('oportunidade: criação, plano, edição concorrente e etapas', () => 
     expect(stale.json().currentRowVersion).toBe(2);
   });
 
-  it('venda fechada exige confirmação e NÃO confirma contrato', async () => {
-    const o = (await newOpp(lucas)).json();
+  it('venda fechada exige plano e confirmação, e NÃO confirma contrato', async () => {
+    const bare = (await newOpp(lucas)).json();
+    expect((await lucas.post(`/opportunities/${bare.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: 1 })).statusCode).toBe(422);
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = (await newOpp(lucas, { planId: plan.id })).json();
     expect((await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', rowVersion: 1 })).statusCode).toBe(422);
     const won = await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: 1 });
     expect(won.statusCode).toBe(200);
@@ -292,7 +295,8 @@ describe('oportunidade: criação, plano, edição concorrente e etapas', () => 
   });
 
   it('perdida exige motivo; reabrir só com nível Equipe e justificativa', async () => {
-    const o = (await newOpp(lucas)).json();
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = (await newOpp(lucas, { planId: plan.id })).json();
     expect((await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'perdida', confirm: true, rowVersion: 1 })).statusCode).toBe(422);
     const lost = await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'perdida', confirm: true, lossReason: 'preco', rowVersion: 1 });
     expect(lost.json().lossReason).toBe('preco');
