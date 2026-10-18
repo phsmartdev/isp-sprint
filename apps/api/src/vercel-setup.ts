@@ -14,6 +14,11 @@ async function main() {
     console.warn('[setup] DATABASE_URL não definido: build segue sem preparar o banco. Configure a variável e faça novo deploy.');
     return;
   }
+  // Deploys de prévia (branches) usam o mesmo banco da produção: não migram, para não quebrar a versão publicada.
+  if (process.env.VERCEL_ENV && process.env.VERCEL_ENV !== 'production' && process.env.MIGRATE_ON_PREVIEW !== 'true') {
+    console.log(`[setup] deploy de ${process.env.VERCEL_ENV}: migrations não aplicadas (só em produção).`);
+    return;
+  }
   console.log('[setup] aplicando migrations…');
   await runMigrations(url);
   console.log('[setup] migrations aplicadas.');
