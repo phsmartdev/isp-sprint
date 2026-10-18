@@ -23,6 +23,7 @@ import { adminRoutes } from './routes/admin';
 import { metaRoutes } from './routes/meta';
 import { sprintRoutes } from './routes/sprint';
 import { settingsRoutes } from './routes/settings';
+import { businessRoutes } from './routes/business';
 
 export const API_PREFIX = '/api/v1';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -96,6 +97,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...metaRoutes,
     ...sprintRoutes,
     ...settingsRoutes,
+    ...businessRoutes,
     ...homeRoutes,
     ...leadRoutes,
     ...opportunityRoutes,

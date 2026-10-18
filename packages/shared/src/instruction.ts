@@ -69,6 +69,58 @@ export const StageSchema = z.object({
   dicas: z.array(text(300)).max(10).default([]),
 });
 
+// ------------------------------------------------------------------ campos personalizados e automações
+export const FIELD_TYPES = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'] as const;
+export const FIELD_TYPE_LABELS: Record<(typeof FIELD_TYPES)[number], string> = { texto: 'Texto', texto_longo: 'Texto longo', numero: 'Número', moeda: 'Valor (R$)', data: 'Data', lista: 'Lista de opções', sim_nao: 'Sim/Não' };
+export const FieldSchema = z.object({
+  chave: slug,
+  rotulo: text(60),
+  tipo: z.enum(FIELD_TYPES).default('texto'),
+  opcoes: z.array(text(60)).max(30).default([]),
+  obrigatorio: z.boolean().default(false),
+});
+export type CustomField = z.infer<typeof FieldSchema>;
+
+export const TRIGGER_TYPES = ['criada', 'entrou_na_etapa', 'ganha', 'perdida', 'parada'] as const;
+export const TRIGGER_LABELS: Record<(typeof TRIGGER_TYPES)[number], string> = {
+  criada: 'Oportunidade criada',
+  entrou_na_etapa: 'Entrou na etapa',
+  ganha: 'Venda fechada',
+  perdida: 'Marcada como perdida',
+  parada: 'Parada na etapa por X dias',
+};
+export const AutomationTriggerSchema = z.object({
+  tipo: z.enum(TRIGGER_TYPES),
+  etapa: slug.optional().nullable(),
+  dias: z.number().int().min(1).max(365).optional().nullable(),
+});
+/** Responsável: 'dono' (o da oportunidade) ou o id/e-mail de um usuário. */
+const person = z.string().trim().min(3).max(200);
+export const ACTION_TYPES = ['criar_tarefa', 'enviar_email', 'mover_etapa', 'duplicar', 'atribuir'] as const;
+export const ACTION_LABELS: Record<(typeof ACTION_TYPES)[number], string> = {
+  criar_tarefa: 'Criar tarefa',
+  enviar_email: 'Enviar e-mail',
+  mover_etapa: 'Mover para etapa',
+  duplicar: 'Duplicar em outro funil (com histórico)',
+  atribuir: 'Trocar responsável',
+};
+export const AutomationActionSchema = z.discriminatedUnion('tipo', [
+  z.object({ tipo: z.literal('criar_tarefa'), titulo: text(200), tipoAtividade: z.enum(['tarefa', 'ligacao', 'reuniao', 'email', 'whatsapp', 'visita']).default('tarefa'), prazoDias: z.number().int().min(0).max(365).default(1), responsavel: person.default('dono') }),
+  z.object({ tipo: z.literal('enviar_email'), para: z.enum(['cliente', 'responsavel', 'gerencia']), assunto: text(200), corpo: text(5000) }),
+  z.object({ tipo: z.literal('mover_etapa'), etapa: slug }),
+  z.object({ tipo: z.literal('duplicar'), jornada: slug, etapa: slug.optional().nullable(), responsavel: person.default('mesmo') }),
+  z.object({ tipo: z.literal('atribuir'), responsavel: person }),
+]);
+export const AutomationSchema = z.object({
+  nome: text(80),
+  ativo: z.boolean().default(true),
+  gatilho: AutomationTriggerSchema,
+  acoes: z.array(AutomationActionSchema).min(1).max(10),
+});
+export type Automation = z.infer<typeof AutomationSchema>;
+export type AutomationAction = z.infer<typeof AutomationActionSchema>;
+export const AUTOMATION_EMAIL_VARIABLES = ['cliente.nome', 'cliente.telefone', 'responsavel.nome', 'oportunidade.titulo', 'etapa.nome', 'jornada.nome', 'plano.nome', 'plano.valor', 'link', 'empresa.nome'];
+
 export const JourneySchema = z.object({
   chave: slug,
   nome: text(60),
@@ -77,6 +129,10 @@ export const JourneySchema = z.object({
   /** Segmentos que usam esta jornada automaticamente ao criar uma oportunidade. */
   segmentos: z.array(z.enum(SEGMENTS)).default([]),
   etapas: z.array(StageSchema).min(3).max(15),
+  /** E-mails de quem trabalha nesta jornada. Vazio = todos. A gerência vê todas. */
+  membros: z.array(z.string().trim().toLowerCase().email()).max(200).default([]),
+  campos: z.array(FieldSchema).max(40).default([]),
+  automacoes: z.array(AutomationSchema).max(50).default([]),
 });
 
 export const ObjectionSchema = z.object({
@@ -139,6 +195,11 @@ export function checkInstruction(i: Instruction): InstructionIssue[] {
         if (q.tipo === 'opcoes' && (!q.opcoes || q.opcoes.length < 2)) issues.push({ path: `${base}.etapas[${ei}].perguntas[${qi}]`, message: 'Pergunta do tipo opcoes precisa de ao menos 2 opções' });
       });
     });
+    for (const k of dup(j.campos, (c) => c.chave)) issues.push({ path: base, message: `Campo repetido: ${k}` });
+    j.campos.forEach((c, ci) => { if (c.tipo === 'lista' && c.opcoes.length < 2) issues.push({ path: `${base}.campos[${ci}]`, message: 'Campo do tipo lista precisa de ao menos 2 opções' }); });
+    j.automacoes.forEach((a, ai) => {
+      for (const m of checkAutomation(a, j, i.jornadas)) issues.push({ path: `${base}.automacoes[${ai}] (${a.nome})`, message: m });
+    });
     if (j.etapas.filter((e) => e.tipo === 'aberta').length < 1) issues.push({ path: base, message: 'A jornada precisa de ao menos uma etapa aberta' });
     if (j.etapas[0]?.tipo !== 'aberta') issues.push({ path: base, message: 'A primeira etapa precisa ser aberta' });
   });
@@ -153,6 +214,28 @@ export function checkInstruction(i: Instruction): InstructionIssue[] {
     for (const v of used) if (!EMAIL_VARIABLES[k].includes(v)) issues.push({ path: `emails.modelos.${k}`, message: `Variável desconhecida {{${v}}}. Disponíveis: ${EMAIL_VARIABLES[k].join(', ')}` });
   }
   return issues;
+}
+
+/** Coerência de uma automação com a jornada dela e as demais. */
+export function checkAutomation(a: Automation, j: { chave: string; etapas: { chave: string; tipo: string }[] }, all: { chave: string; etapas: { chave: string; tipo: string }[] }[]) {
+  const out: string[] = [];
+  const stage = (jj: typeof j, k?: string | null) => !!k && jj.etapas.some((e) => e.chave === k);
+  if ((a.gatilho.tipo === 'entrou_na_etapa') && !stage(j, a.gatilho.etapa)) out.push('Gatilho "entrou na etapa" precisa de uma etapa desta jornada');
+  if (a.gatilho.tipo === 'parada' && (!a.gatilho.dias || (a.gatilho.etapa && !stage(j, a.gatilho.etapa)))) out.push('Gatilho "parada" precisa de dias (e, se informar etapa, uma etapa desta jornada)');
+  for (const ac of a.acoes) {
+    if (ac.tipo === 'mover_etapa' && !stage(j, ac.etapa)) out.push(`Etapa inexistente para mover: ${ac.etapa}`);
+    if (ac.tipo === 'duplicar') {
+      const target = all.find((x) => x.chave === ac.jornada);
+      if (!target) out.push(`Jornada de destino inexistente: ${ac.jornada}`);
+      else if (ac.etapa && !target.etapas.some((e) => e.chave === ac.etapa && e.tipo === 'aberta')) out.push(`Etapa de destino precisa ser aberta na jornada ${ac.jornada}`);
+    }
+    if (ac.tipo === 'enviar_email') {
+      const used = [...`${ac.assunto} ${ac.corpo}`.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((m) => m[1]!);
+      for (const v of used) if (!AUTOMATION_EMAIL_VARIABLES.includes(v)) out.push(`Variável desconhecida {{${v}}}`);
+    }
+  }
+  if (a.gatilho.tipo === 'perdida' && a.acoes.some((x) => x.tipo === 'mover_etapa')) out.push('Oportunidade perdida não pode ser movida na mesma jornada; use "duplicar"');
+  return out;
 }
 
 /** Lê e valida um JSON enviado. Erros com caminho legível. */
@@ -172,6 +255,8 @@ export const INSTRUCTION_README = [
   'exige: o que a oportunidade precisa ter para ENTRAR na etapa (proposta anexada, plano escolhido, próxima ação, perguntas obrigatórias respondidas).',
   'perguntas: roteiro mostrado no Sprint daquela etapa. tipo texto, sim_nao ou opcoes (com "opcoes").',
   'objecoes: respostas sugeridas; "jornadas" vazio vale para todas.',
+  'membros: e-mails de quem trabalha na jornada (vazio = todos). campos: campos personalizados do cadastro (texto, texto_longo, numero, moeda, data, lista, sim_nao).',
+  'automacoes: gatilho (criada, entrou_na_etapa, ganha, perdida, parada) e ações (criar_tarefa, enviar_email, mover_etapa, duplicar, atribuir). Em responsavel use "dono", "mesmo" ou o e-mail do usuário.',
   'insights: amostraMinima é o mínimo de registros para gerar uma frase; cada regra pode ser desligada.',
   'emails.modelos: use {{variavel}}; o sistema recusa variáveis que não existem para aquele modelo.',
 ];
@@ -196,6 +281,16 @@ export function defaultInstruction(): Instruction {
         descricao: 'Venda de internet para casa, decisão em uma conversa.',
         padrao: true,
         segmentos: ['residencial'],
+        membros: [],
+        campos: [
+          { chave: 'melhor_horario', rotulo: 'Melhor horário para contato', tipo: 'lista', opcoes: ['Manhã', 'Tarde', 'Noite'], obrigatorio: false },
+          { chave: 'provedor_atual', rotulo: 'Provedor atual', tipo: 'texto', opcoes: [], obrigatorio: false },
+        ],
+        automacoes: [
+          { nome: 'Perdida vai para Recuperação', ativo: true, gatilho: { tipo: 'perdida' }, acoes: [{ tipo: 'duplicar', jornada: 'recuperacao', etapa: null, responsavel: 'mesmo' }] },
+          { nome: 'Venda fechada: agendar instalação', ativo: true, gatilho: { tipo: 'ganha' }, acoes: [{ tipo: 'criar_tarefa', titulo: 'Agendar instalação com o cliente', tipoAtividade: 'ligacao', prazoDias: 1, responsavel: 'dono' }] },
+          { nome: 'Fechamento: conferir documentos', ativo: true, gatilho: { tipo: 'entrou_na_etapa', etapa: 'fechamento' }, acoes: [{ tipo: 'criar_tarefa', titulo: 'Conferir documentos para o contrato', tipoAtividade: 'tarefa', prazoDias: 0, responsavel: 'dono' }] },
+        ],
         etapas: [
           { chave: 'novo_lead', nome: 'Novo lead', tipo: 'aberta', cor: '#3B82F6', exige: none, perguntas: [
             { id: 'motivo', texto: 'O que fez você procurar a gente hoje?', tipo: 'texto', obrigatoria: true, ajuda: 'Curiosidade e comparação também contam. Não presuma problema.' },
@@ -218,10 +313,18 @@ export function defaultInstruction(): Instruction {
       },
       {
         chave: 'empresarial',
-        nome: 'Empresarial',
+        nome: 'Corporativo',
         descricao: 'Venda consultiva para empresas, governo e instituições, com visita técnica.',
         padrao: false,
         segmentos: ['empresarial', 'governamental', 'institucional'],
+        membros: [],
+        campos: [
+          { chave: 'cnpj', rotulo: 'CNPJ', tipo: 'texto', opcoes: [], obrigatorio: false },
+          { chave: 'colaboradores', rotulo: 'Nº de colaboradores', tipo: 'numero', opcoes: [], obrigatorio: false },
+        ],
+        automacoes: [
+          { nome: 'Parada há 5 dias: retomar', ativo: true, gatilho: { tipo: 'parada', dias: 5 }, acoes: [{ tipo: 'criar_tarefa', titulo: 'Retomar contato — oportunidade parada', tipoAtividade: 'ligacao', prazoDias: 0, responsavel: 'dono' }] },
+        ],
         etapas: [
           { chave: 'novo_lead', nome: 'Novo lead', tipo: 'aberta', cor: '#3B82F6', exige: none, perguntas: [
             { id: 'empresa_porte', texto: 'Quantos colaboradores usam a internet?', tipo: 'texto', obrigatoria: true },
@@ -235,6 +338,24 @@ export function defaultInstruction(): Instruction {
           ], dicas: [] },
           { chave: 'proposta', nome: 'Proposta', tipo: 'aberta', cor: '#60A5FA', exige: { ...none, plano: true }, perguntas: [], dicas: [] },
           { chave: 'negociacao', nome: 'Negociação', tipo: 'aberta', cor: '#4ADE80', exige: { ...none, proposta: true, plano: true, proximaAcao: true }, perguntas: [], dicas: ['Negocie prazo e escopo antes de preço.'] },
+          ...fim,
+        ],
+      },
+      {
+        chave: 'recuperacao',
+        nome: 'Recuperação',
+        descricao: 'Oportunidades perdidas que voltam para uma nova abordagem.',
+        padrao: false,
+        segmentos: [],
+        membros: [],
+        campos: [],
+        automacoes: [],
+        etapas: [
+          { chave: 'novo_contato', nome: 'Novo contato', tipo: 'aberta', cor: '#3B82F6', exige: none, perguntas: [
+            { id: 'motivo_perda_confirmado', texto: 'O motivo da perda ainda vale?', tipo: 'sim_nao', obrigatoria: false },
+          ], dicas: ['Retome pelo motivo registrado na perda.'] },
+          { chave: 'reapresentacao', nome: 'Reapresentação', tipo: 'aberta', cor: '#F59E0B', exige: none, perguntas: [], dicas: [] },
+          { chave: 'proposta', nome: 'Proposta', tipo: 'aberta', cor: '#60A5FA', exige: { ...none, plano: true }, perguntas: [], dicas: [] },
           ...fim,
         ],
       },

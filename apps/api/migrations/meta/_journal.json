@@ -36,6 +36,13 @@
       "when": 1792344232886,
       "tag": "0004_journeys_instructions_email",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792349760189,
+      "tag": "0005_viability_regions_automations",
+      "breakpoints": true
     }
   ]
 }

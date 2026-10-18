@@ -4,13 +4,15 @@ import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, Opportu
 import { pipelinesOf, resolvePipeline, getActiveInstruction } from '../services/instructions';
 import { checkStageRequirements } from '../services/requirements';
 import { notifyDealWon } from '../services/alerts';
+import { runAutomations } from '../services/automations';
 import { TERMINAL_STAGES, atLeast, validateTransition, type OpportunityStage } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { bumpVersion, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
+import { storeViability } from '../services/viability';
+import { bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
 import { pctDelta } from '../services/metrics';
@@ -127,7 +129,7 @@ export const opportunityRoutes = [
     module: 'oportunidades',
     query: FilterQuery,
     handler: async ({ app, auth, query }) => {
-      const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId });
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const where = filters(auth, { ...query, pipelineId: pipe.id });
       where.push(OPEN);
       const rows = await opportunityQuery(app.db).where(and(...where)).orderBy(desc(s.opportunities.updatedAt)).limit(1000);
@@ -162,6 +164,7 @@ export const opportunityRoutes = [
         }
         return created;
       });
+      await runAutomations(app.db, app.config, auth.tenantId, auth.userId, opp.id, { type: 'criada' });
       reply.code(201);
       return opportunityDto(await loadOpportunity(app.db, auth, opp.id));
     },
@@ -195,7 +198,7 @@ export const opportunityRoutes = [
         let pipelineChange: { pipelineId: string; stage: string } | undefined;
         if (body.pipelineId && body.pipelineId !== cur.pipelineId) {
           if (TERMINAL_STAGES.includes(cur.stage as OpportunityStage)) throw unprocessable('Oportunidade encerrada não muda de jornada.');
-          const np = await resolvePipeline(tx, auth.tenantId, { pipelineId: body.pipelineId });
+          const np = await resolvePipeline(tx, auth.tenantId, { pipelineId: body.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
           const same = np.stages.find((st) => st.key === cur.stage && st.kind === 'open');
           pipelineChange = { pipelineId: np.id, stage: (same ?? np.stages.find((st) => st.kind === 'open')!).key };
         }
@@ -213,12 +216,13 @@ export const opportunityRoutes = [
           notes: body.notes,
           pipelineId: pipelineChange?.pipelineId,
           stage: pipelineChange?.stage,
+          ...(await detailsPatch(tx, auth, body, pipelineChange?.pipelineId ?? cur.pipelineId, cur.custom ?? {})),
         };
         const changed: Record<string, { from: unknown; to: unknown }> = {};
         for (const [k, v] of Object.entries(patch)) {
           if (v === undefined) continue;
           const before = (cur as Record<string, unknown>)[k];
-          const norm = (x: unknown) => (x instanceof Date ? x.toISOString() : Array.isArray(x) ? x.join(',') : x ?? null);
+          const norm = (x: unknown) => (x instanceof Date ? x.toISOString() : Array.isArray(x) || (x && typeof x === 'object') ? JSON.stringify(x) : x ?? null);
           if (norm(before) !== norm(v)) changed[k] = { from: k === 'notes' ? undefined : norm(before), to: k === 'notes' ? undefined : norm(v) };
         }
         const updated = await tx
@@ -227,6 +231,7 @@ export const opportunityRoutes = [
           .where(and(eq(s.opportunities.id, params.id), eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.rowVersion, body.rowVersion)))
           .returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(cur.rowVersion);
+        if (Object.keys(changed).some((k) => ['planId', 'cableMeters', 'activationFeeCents', 'saleType', 'equipment', 'routeId'].includes(k))) await storeViability(tx, auth.tenantId, params.id);
         if (changed.ownerId) await tx.update(s.contacts).set({ ownerId: body.ownerId! }).where(and(eq(s.contacts.id, cur.contactId), eq(s.contacts.tenantId, auth.tenantId)));
         if (Object.keys(changed).length) {
           await tx.insert(s.opportunityEvents).values({
@@ -300,6 +305,8 @@ export const opportunityRoutes = [
           await audit(tx, req, { action: reopening ? 'opportunity.reopen' : `opportunity.${body.toStage}`, entityType: 'opportunity', entityId: params.id, metadata: { from, to: body.toStage } });
         }
       });
+      if (body.toStage === 'ganha') await storeViability(app.db, auth.tenantId, params.id);
+      await runAutomations(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage === 'ganha' ? { type: 'ganha' } : body.toStage === 'perdida' ? { type: 'perdida' } : { type: 'entrou_na_etapa', stage: body.toStage });
       const dto = opportunityDto(await loadOpportunity(app.db, auth, params.id));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
       return dto;

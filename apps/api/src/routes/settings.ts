@@ -9,6 +9,7 @@ import * as s from '../db/schema';
 import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipelinesOf } from '../services/instructions';
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
 import { sendActivityDigests } from '../services/alerts';
+import { runIdleAutomations } from '../services/automations';
 import { audit } from '../services/audit';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
@@ -269,7 +270,9 @@ export const settingsRoutes = [
       const given = Buffer.from(String(req.headers.authorization ?? ''));
       const expected = Buffer.from(`Bearer ${secret}`);
       if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw unauthorized();
-      return sendActivityDigests(app.db, app.config);
+      const digests = await sendActivityDigests(app.db, app.config);
+      const idle = await runIdleAutomations(app.db, app.config);
+      return { ...digests, ...idle };
     },
   }),
 ];

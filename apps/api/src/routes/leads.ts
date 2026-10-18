@@ -11,6 +11,7 @@ import type { DbOrTx } from '../db/client';
 import { assertAssignableUser, assertTenantRefs, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
 import { notifyLeadAssigned } from '../services/alerts';
+import { runAutomations } from '../services/automations';
 import { createOpportunity } from '../services/opportunities';
 import { pctDelta } from '../services/metrics';
 
@@ -319,6 +320,7 @@ export const leadRoutes = [
         return { opportunityId: opp.id, created: true };
       });
       reply.code(result.created ? 201 : 200);
+      if (result.created) await runAutomations(app.db, app.config, auth.tenantId, auth.userId, result.opportunityId, { type: 'criada' });
       return result;
     },
   }),

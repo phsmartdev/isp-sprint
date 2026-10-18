@@ -84,8 +84,8 @@ export const ACTIVITY_TAG_LABELS: Record<ActivityType, string> = {
 
 export const SEGMENTS = ['residencial', 'empresarial', 'governamental', 'institucional'] as const;
 export type Segment = (typeof SEGMENTS)[number];
-export const SEGMENT_LABELS: Record<Segment, string> = { residencial: 'Residencial', empresarial: 'Empresarial', governamental: 'Governamental', institucional: 'Institucional' };
-export const SEGMENT_PRODUCT_LABELS: Record<Segment, string> = { residencial: 'Internet residencial', empresarial: 'Internet empresarial', governamental: 'Governamental', institucional: 'Institucional' };
+export const SEGMENT_LABELS: Record<Segment, string> = { residencial: 'Residencial', empresarial: 'Corporativo', governamental: 'Governamental', institucional: 'Institucional' };
+export const SEGMENT_PRODUCT_LABELS: Record<Segment, string> = { residencial: 'Internet residencial', empresarial: 'Internet corporativa', governamental: 'Governamental', institucional: 'Institucional' };
 export const ACTIVITY_PRIORITIES = ['baixa', 'media', 'alta'] as const;
 export type ActivityPriority = (typeof ACTIVITY_PRIORITIES)[number];
 export const PRIORITY_LABELS: Record<ActivityPriority, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta' };

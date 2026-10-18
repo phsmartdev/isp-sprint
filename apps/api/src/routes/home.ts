@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { resolvePipeline } from '../services/instructions';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
-import { ownerScope, visibleUserIds } from '../services/scope';
+import { level, ownerScope, visibleUserIds } from '../services/scope';
 import { opportunityDto, opportunityQuery } from '../services/opportunities';
 import { opportunityKpis } from './opportunities';
 import { pctDelta, ratio } from '../services/metrics';
@@ -26,7 +26,7 @@ export const homeRoutes = [
       const localDay = sql`(${s.activities.dueAt} at time zone ${tz})::date`;
       const today = sql`(now() at time zone ${tz})::date`;
 
-      const pipe = await resolvePipeline(app.db, auth.tenantId, {});
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const [oppK, actK, month, goals, agenda, pipeline, recent] = await Promise.all([
         opportunityKpis(app.db, auth, 'inicio'),
         app.db

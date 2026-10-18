@@ -103,6 +103,25 @@ export const OpportunityListQuery = PageQuery.extend({
 });
 export type OpportunityListQuery = z.infer<typeof OpportunityListQuery>;
 
+/** Endereço de instalação, viabilidade e campos personalizados (criação e edição). */
+export const OpportunityDetails = z.object({
+  installCep: z.string().trim().regex(/^\d{5}-?\d{3}$/, 'CEP no formato 00000-000').optional().nullable().or(z.literal('').transform(() => null)),
+  installStreet: optText(200),
+  installNumber: optText(20),
+  installDistrict: optText(100),
+  installCity: optText(100),
+  condominiumId: uuid.optional().nullable(),
+  installBlock: optText(40),
+  installUnit: optText(40),
+  saleType: z.enum(['ativa', 'receptiva']).optional().nullable(),
+  cableMeters: z.number().int().min(0).max(100_000).optional().nullable(),
+  activationFeeCents: cents.optional().nullable(),
+  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
+  routeId: uuid.optional().nullable(),
+  custom: z.record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])).optional(),
+});
+export type OpportunityDetails = z.infer<typeof OpportunityDetails>;
+
 export const OpportunityCreate = z
   .object({
     contactId: uuid.optional().nullable(),
@@ -118,6 +137,7 @@ export const OpportunityCreate = z
     /** Jornada. Em branco: a do segmento do cliente ou a padrão. */
     pipelineId: uuid.optional().nullable(),
   })
+  .merge(OpportunityDetails)
   .refine((v) => !!v.contactId !== !!v.newContact, {
     message: 'Selecione um contato existente ou informe um novo contato (apenas um).',
     path: ['contactId'],
@@ -139,7 +159,7 @@ export const OpportunityUpdate = z.object({
   nextActionAt: isoDate.optional().nullable(),
   notes: optText(4000),
   rowVersion,
-});
+}).merge(OpportunityDetails);
 export type OpportunityUpdate = z.infer<typeof OpportunityUpdate>;
 
 export const OpportunityTransition = z.object({
@@ -239,6 +259,7 @@ export const PlanUpsert = z.object({
   line: optText(80),
   segment: z.enum(SEGMENTS),
   priceCents: z.number().int().min(0).max(100_000_00),
+  speedMbps: z.number().int().min(1).max(100_000).optional().nullable(),
   active: z.boolean().default(true),
 });
 export const SourceUpsert = z.object({ name: trimmed(60).min(2), active: z.boolean().default(true) });
@@ -315,3 +336,95 @@ export const NotificationUpdate = z.object({
   userAccess: z.boolean(),
 });
 export const InstructionUpload = z.object({ content: z.unknown(), notes: z.string().trim().max(300).optional().nullable() });
+
+// ------------------------------------------------------------------ viabilidade, área e jornadas pelo painel
+export const ViabilitySimulate = z.object({
+  planId: uuid.optional().nullable(),
+  cableMeters: z.number().int().min(0).max(100_000).optional().nullable(),
+  activationFeeCents: cents.optional().nullable(),
+  saleType: z.enum(['ativa', 'receptiva']).optional().nullable(),
+  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
+  routeId: uuid.optional().nullable(),
+});
+const optInt = z.number().int().min(0).max(10_000_000).optional().nullable();
+export const DeductionItem = z.object({
+  id: uuid.optional(),
+  name: z.string().trim().min(2).max(80),
+  kind: z.enum(['percent', 'fixed']),
+  percentBp: z.number().int().min(0).max(10_000).default(0),
+  amountCents: cents.default(0),
+  routeIds: z.array(uuid).max(50).default([]),
+  notes: optText(300),
+  active: z.boolean().default(true),
+});
+export const EquipmentItem = z.object({ id: uuid.optional(), name: z.string().trim().min(2).max(80), costCents: cents, active: z.boolean().default(true) });
+export const RouteItem = z.object({
+  id: uuid.optional(),
+  name: z.string().trim().min(2).max(80),
+  description: optText(300),
+  cablePerMeterCents: cents.default(0),
+  installCostCents: cents.default(0),
+  monthlyCostCents: cents.default(0),
+  requiresApproval: z.boolean().default(false),
+  kit: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(1).max(50) })).max(30).default([]),
+  active: z.boolean().default(true),
+});
+export const RouteRuleItem = z.object({
+  id: uuid.optional(),
+  name: z.string().trim().min(2).max(80),
+  minMeters: optInt, maxMeters: optInt, minMbps: optInt, maxMbps: optInt,
+  routeId: uuid,
+  active: z.boolean().default(true),
+});
+export const CommissionRuleItem = z.object({
+  id: uuid.optional(),
+  name: z.string().trim().min(2).max(80),
+  saleType: z.enum(['ativa', 'receptiva', 'qualquer']),
+  minPriceCents: cents.optional().nullable(),
+  maxPriceCents: cents.optional().nullable(),
+  kind: z.enum(['percent', 'mensalidades', 'fixo']),
+  percentBp: z.number().int().min(0).max(100_000).default(0),
+  multiplierX100: z.number().int().min(0).max(10_000).default(0),
+  amountCents: cents.default(0),
+  active: z.boolean().default(true),
+});
+export const ViabilitySettingsUpdate = z.object({
+  defaultRouteId: uuid.optional().nullable(),
+  ltvLifetimeMonths: z.number().int().min(1).max(600).optional().nullable(),
+  monthlyChurnBp: z.number().int().min(1).max(10_000).optional().nullable(),
+  ltvMinSample: z.number().int().min(1).max(100_000).default(30),
+  maxPaybackMonths: z.number().int().min(1).max(240).optional().nullable(),
+  defaultActivationFeeCents: cents.optional().nullable(),
+});
+export const listOf = <T extends z.ZodTypeAny>(item: T) => z.object({ items: z.array(item).max(200) });
+
+export const RegionUpsert = z.object({ name: z.string().trim().min(2).max(80), active: z.boolean().default(true) });
+export const CondominiumUpsert = z.object({
+  regionId: uuid,
+  name: z.string().trim().min(2).max(120),
+  cep: z.string().trim().regex(/^\d{5}-?\d{3}$/, 'CEP no formato 00000-000').optional().nullable().or(z.literal('').transform(() => null)),
+  street: optText(200), number: optText(20), district: optText(100), city: optText(100),
+  blocks: z.array(z.string().trim().min(1).max(40)).max(200).default([]),
+  units: z.number().int().min(0).max(100_000).optional().nullable(),
+  hasNetwork: z.boolean().default(false),
+  notes: optText(500),
+  active: z.boolean().default(true),
+});
+
+export const PipelineUpsert = z.object({
+  name: z.string().trim().min(2).max(60),
+  description: optText(300),
+  segments: z.array(z.enum(SEGMENTS)).default([]),
+  isDefault: z.boolean().default(false),
+  memberIds: z.array(uuid).max(200).default([]),
+  /** Ao criar: copia as etapas desta jornada; senão usa um funil básico. */
+  copyFromId: uuid.optional().nullable(),
+});
+export const StageItem = z.object({
+  key: z.string().trim().regex(/^[a-z][a-z0-9_]{1,39}$/).optional(),
+  name: z.string().trim().min(2).max(40),
+  kind: z.enum(['open', 'won', 'lost']),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().nullable(),
+  requirements: z.object({ proposta: z.boolean().default(false), plano: z.boolean().default(false), proximaAcao: z.boolean().default(false), respostasObrigatorias: z.boolean().default(false) }).default({}),
+});
+export const StagesPut = z.object({ stages: z.array(StageItem).min(3).max(15) });

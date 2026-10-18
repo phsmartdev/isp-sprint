@@ -122,6 +122,8 @@ export const plans = pgTable(
     line: text('line'),
     segment: text('segment').notNull().default('residencial'),
     priceCents: integer('price_cents').notNull(),
+    /** Banda do plano (Mbps), usada nas regras de caminho de entrega. */
+    speedMbps: integer('speed_mbps'),
     active: boolean('active').notNull().default(true),
     sourceSystem: text('source_system').notNull().default('catalogo_manual'),
     createdAt: createdAt(),
@@ -252,6 +254,8 @@ export const customers = pgTable(
     planId: uuid('plan_id').references(() => plans.id),
     contractStart: date('contract_start', { mode: 'string' }),
     nextDueOn: date('next_due_on', { mode: 'string' }),
+    /** Fim do contrato (cancelamento). Usado na vida média do LTV histórico. */
+    contractEnd: date('contract_end', { mode: 'string' }),
     sourceSystem: text('source_system').notNull().default('crm'),
     externalId: text('external_id'),
     sourceUpdatedAt: ts('source_updated_at'),
@@ -393,6 +397,29 @@ export const opportunities = pgTable(
     teamId: uuid('team_id').references(() => teams.id),
     title: text('title').notNull(),
     pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    /** Endereço de instalação (90% em condomínio). */
+    installCep: text('install_cep'),
+    installStreet: text('install_street'),
+    installNumber: text('install_number'),
+    installDistrict: text('install_district'),
+    installCity: text('install_city'),
+    condominiumId: uuid('condominium_id').references(() => condominiums.id),
+    installBlock: text('install_block'),
+    installUnit: text('install_unit'),
+    /** Viabilidade: venda ativa/receptiva, metragem, ativação, equipamentos e caminho. */
+    saleType: text('sale_type'),
+    cableMeters: integer('cable_meters'),
+    activationFeeCents: bigint('activation_fee_cents', { mode: 'number' }),
+    equipment: jsonb('equipment').$type<{ equipmentId: string; qty: number }[] | null>(),
+    routeId: uuid('route_id').references(() => deliveryRoutes.id),
+    viability: jsonb('viability').$type<Record<string, unknown> | null>(),
+    commissionCents: bigint('commission_cents', { mode: 'number' }),
+    cacCents: bigint('cac_cents', { mode: 'number' }),
+    marginCents: bigint('margin_cents', { mode: 'number' }),
+    paybackMonths: text('payback_months'),
+    /** Campos personalizados da jornada: { chave: valor }. */
+    custom: jsonb('custom').$type<Record<string, unknown>>().notNull().default({}),
+    duplicatedFromId: uuid('duplicated_from_id'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
@@ -636,3 +663,201 @@ export const emailMessages = pgTable(
     statusCk: check('email_messages_status_ck', inList('status', ['enviado', 'falhou', 'ignorado'])),
   }),
 );
+
+// --------------------------------------------------------------- jornadas pelo painel
+
+export const pipelineMembers = pgTable(
+  'pipeline_members',
+  {
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.pipelineId, t.userId] }) }),
+);
+
+export const pipelineFields = pgTable(
+  'pipeline_fields',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    key: text('key').notNull(),
+    label: text('label').notNull(),
+    type: text('type').notNull().default('texto'),
+    options: text('options').array().notNull().default(sql`'{}'::text[]`),
+    required: boolean('required').notNull().default(false),
+    position: integer('position').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+  },
+  (t) => ({
+    uq: uniqueIndex('pipeline_fields_uq').on(t.pipelineId, t.key),
+    typeCk: check('pipeline_fields_type_ck', inList('type', ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'])),
+  }),
+);
+
+export const pipelineAutomations = pgTable(
+  'pipeline_automations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    name: text('name').notNull(),
+    active: boolean('active').notNull().default(true),
+    trigger: jsonb('trigger').$type<Record<string, unknown>>().notNull(),
+    actions: jsonb('actions').$type<Record<string, unknown>[]>().notNull(),
+    position: integer('position').notNull().default(0),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ pipeIdx: index('pipeline_automations_pipe_idx').on(t.pipelineId) }),
+);
+
+export const automationRuns = pgTable(
+  'automation_runs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    automationId: uuid('automation_id').notNull().references(() => pipelineAutomations.id),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    status: text('status').notNull(),
+    detail: jsonb('detail').$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    oppIdx: index('automation_runs_opp_idx').on(t.opportunityId, t.automationId),
+    statusCk: check('automation_runs_status_ck', inList('status', ['ok', 'erro', 'ignorado'])),
+  }),
+);
+
+// --------------------------------------------------------------- área de atendimento
+
+export const regions = pgTable(
+  'regions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('regions_uq').on(t.tenantId, sql`lower(${t.name})`) }),
+);
+
+export const condominiums = pgTable(
+  'condominiums',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    regionId: uuid('region_id').notNull().references(() => regions.id),
+    name: text('name').notNull(),
+    cep: text('cep'),
+    street: text('street'),
+    number: text('number'),
+    district: text('district'),
+    city: text('city'),
+    blocks: text('blocks').array().notNull().default(sql`'{}'::text[]`),
+    units: integer('units'),
+    hasNetwork: boolean('has_network').notNull().default(false),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => ({ regionIdx: index('condominiums_region_idx').on(t.tenantId, t.regionId) }),
+);
+
+// --------------------------------------------------------------- viabilidade
+
+/** Tributos (kind=tributo) e parceiros/fornecedores (kind=parceiro): % da mensalidade ou valor fixo mensal. */
+export const viabilityDeductions = pgTable(
+  'viability_deductions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    category: text('category').notNull(),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    percentBp: integer('percent_bp').notNull().default(0),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull().default(0),
+    routeIds: uuid('route_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    catCk: check('viability_deductions_cat_ck', inList('category', ['tributo', 'parceiro'])),
+    kindCk: check('viability_deductions_kind_ck', inList('kind', ['percent', 'fixed'])),
+  }),
+);
+
+export const equipmentItems = pgTable('equipment_items', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  costCents: bigint('cost_cents', { mode: 'number' }).notNull(),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+});
+
+/** Caminho de entrega: custo do cabo por metro, instalação, custo mensal e kit de equipamentos. */
+export const deliveryRoutes = pgTable('delivery_routes', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  cablePerMeterCents: bigint('cable_per_meter_cents', { mode: 'number' }).notNull().default(0),
+  installCostCents: bigint('install_cost_cents', { mode: 'number' }).notNull().default(0),
+  monthlyCostCents: bigint('monthly_cost_cents', { mode: 'number' }).notNull().default(0),
+  requiresApproval: boolean('requires_approval').notNull().default(false),
+  kit: jsonb('kit').$type<{ equipmentId: string; qty: number }[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+});
+
+/** Regra de distância e banda: a primeira que casar (pela posição) escolhe o caminho. */
+export const routeRules = pgTable('route_rules', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  position: integer('position').notNull().default(0),
+  minMeters: integer('min_meters'),
+  maxMeters: integer('max_meters'),
+  minMbps: integer('min_mbps'),
+  maxMbps: integer('max_mbps'),
+  routeId: uuid('route_id').notNull().references(() => deliveryRoutes.id),
+  active: boolean('active').notNull().default(true),
+});
+
+export const commissionRules = pgTable(
+  'commission_rules',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    saleType: text('sale_type').notNull().default('qualquer'),
+    minPriceCents: bigint('min_price_cents', { mode: 'number' }),
+    maxPriceCents: bigint('max_price_cents', { mode: 'number' }),
+    kind: text('kind').notNull(),
+    percentBp: integer('percent_bp').notNull().default(0),
+    multiplierX100: integer('multiplier_x100').notNull().default(0),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull().default(0),
+    active: boolean('active').notNull().default(true),
+  },
+  (t) => ({
+    saleCk: check('commission_rules_sale_ck', inList('sale_type', ['ativa', 'receptiva', 'qualquer'])),
+    kindCk: check('commission_rules_kind_ck', inList('kind', ['percent', 'mensalidades', 'fixo'])),
+  }),
+);
+
+export const viabilitySettings = pgTable('viability_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  defaultRouteId: uuid('default_route_id').references(() => deliveryRoutes.id),
+  ltvLifetimeMonths: integer('ltv_lifetime_months'),
+  monthlyChurnBp: integer('monthly_churn_bp'),
+  ltvMinSample: integer('ltv_min_sample').notNull().default(30),
+  maxPaybackMonths: integer('max_payback_months'),
+  defaultActivationFeeCents: bigint('default_activation_fee_cents', { mode: 'number' }),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});

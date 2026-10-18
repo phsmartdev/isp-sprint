@@ -1,7 +1,8 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
-import { getActiveInstruction, pipelinesOf } from '../services/instructions';
+import { getActiveInstruction, pipelineAllowed, pipelinesOf } from '../services/instructions';
+import { level } from '../services/scope';
 
 export const metaRoutes = [
   defineRoute({
@@ -24,13 +25,16 @@ export const metaRoutes = [
         pipelinesOf(app.db, t),
         app.db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(eq(s.teams.tenantId, t)).orderBy(asc(s.teams.name)),
         app.db
-          .select({ id: s.plans.id, name: s.plans.name, line: s.plans.line, segment: s.plans.segment, priceCents: s.plans.priceCents })
+          .select({ id: s.plans.id, name: s.plans.name, line: s.plans.line, segment: s.plans.segment, priceCents: s.plans.priceCents, speedMbps: s.plans.speedMbps })
           .from(s.plans)
           .where(and(eq(s.plans.tenantId, t), eq(s.plans.active, true)))
           .orderBy(asc(s.plans.priceCents)),
       ]);
+      const total = level(auth, 'oportunidades') === 'total';
       const pipelines = pipes.map((p) => ({
         id: p.id, key: p.key, name: p.name, description: p.description, segments: p.segments, isDefault: p.isDefault,
+        allowed: pipelineAllowed(p, auth.userId, total),
+        fields: p.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required })),
         stages: p.stages.map((st) => ({ id: st.id, key: st.key, name: st.name, position: st.position, kind: st.kind, isTerminal: st.isTerminal, color: st.color, requirements: st.requirements })),
       }));
       const def = pipelines.find((p) => p.isDefault) ?? pipelines[0];
