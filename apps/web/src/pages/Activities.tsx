@@ -91,7 +91,7 @@ export function ActivitiesPage() {
   const dayLabel = new Date(`${day}T12:00:00`).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
 
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<CalendarCheck className="h-9 w-9" strokeWidth={2.2} />}
         title="Atividades"

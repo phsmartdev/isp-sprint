@@ -7,7 +7,7 @@ export function CampaignsPage() {
   const lookups = useLookups();
   const items = lookups.data?.campaigns ?? [];
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader icon={<Megaphone className="h-9 w-9" strokeWidth={2.2} />} title="Campanhas" subtitle="Campanhas usadas como origem de leads e oportunidades." />
       <section className="card p-5">
         {items.length === 0 ? (

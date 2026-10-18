@@ -70,7 +70,7 @@ export function HomePage() {
   const first = me?.user.name.split(' ')[0] ?? '';
 
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight text-ink">Olá, {first}!</h1>
@@ -98,7 +98,7 @@ export function HomePage() {
         )}
       </section>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_430px]">
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(400px,1fr)]">
         {/* Banner */}
         <section className="relative min-h-[300px] overflow-hidden rounded-[18px] bg-gradient-to-br from-[#0F4FD8] via-[#0B3AA6] to-[#0A1F66] text-white xl:col-span-2" aria-label="Destaque">
           <BrandImage slot="banner_inicio" className="absolute inset-y-0 right-0 h-full w-[62%] object-cover object-left" />

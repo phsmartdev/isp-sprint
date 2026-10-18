@@ -45,7 +45,7 @@ export function IntelligencePage() {
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<Lightbulb className="h-9 w-9" strokeWidth={2.2} />}
         title="Inteligência"

@@ -61,7 +61,7 @@ export function CustomerDetailPage() {
   const fict = c.sourceSystem === 'seed_ficticio';
 
   return (
-    <div className="mx-auto max-w-[1200px]">
+    <div className="w-full">
       <Breadcrumb items={[{ label: 'Clientes', to: '/customers' }, { label: c.name }]} />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">

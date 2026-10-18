@@ -211,7 +211,7 @@ export function LeadsPage() {
   const allSelected = items.length > 0 && items.every((l) => selected.has(l.id));
 
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<UsersRound className="h-9 w-9" strokeWidth={2.2} />}
         title="Leads"

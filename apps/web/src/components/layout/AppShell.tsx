@@ -209,7 +209,7 @@ export function AppShell() {
             <UserMenu />
           </div>
         </header>
-        <main id="conteudo" className="flex-1 px-4 py-6 sm:px-6">
+        <main id="conteudo" className="min-w-0 flex-1 px-4 py-6 sm:px-6 2xl:px-8">
           <Outlet />
         </main>
       </div>

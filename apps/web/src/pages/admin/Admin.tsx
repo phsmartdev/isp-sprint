@@ -35,7 +35,7 @@ const TABS = [
 
 export function AdminLayout() {
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<Settings className="h-9 w-9" strokeWidth={2.2} />}
         title="Administração"

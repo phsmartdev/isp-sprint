@@ -53,7 +53,7 @@ export function ReportsPage() {
   const show = (s: string) => f.tab === 'geral' || f.tab === s;
 
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<BarChart3 className="h-9 w-9" strokeWidth={2.4} />}
         title="Relatórios"

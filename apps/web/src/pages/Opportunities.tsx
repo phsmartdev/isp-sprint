@@ -148,7 +148,7 @@ export function OpportunitiesPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-[1400px]">
+    <div className="w-full">
       <PageHeader
         icon={<ClipboardList className="h-9 w-9" strokeWidth={2.2} />}
         title="Oportunidades"

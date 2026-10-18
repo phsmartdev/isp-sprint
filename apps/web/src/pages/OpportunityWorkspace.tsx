@@ -536,7 +536,7 @@ export function OpportunityWorkspacePage() {
   );
 
   return (
-    <div className="mx-auto max-w-[1500px]">
+    <div className="w-full">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <Breadcrumb items={[{ label: 'Oportunidades', to: '/opportunities' }, { label: `OP-${opp.code}` }]} />

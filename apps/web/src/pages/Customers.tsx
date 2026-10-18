@@ -79,7 +79,7 @@ export function CustomersPage() {
     { icon: <FileText className="h-7 w-7" />, tone: 'purple' as const },
   ];
   return (
-    <div className="mx-auto max-w-[1320px]">
+    <div className="w-full">
       <PageHeader
         icon={<Users className="h-9 w-9" strokeWidth={2.2} />}
         title="Clientes"
