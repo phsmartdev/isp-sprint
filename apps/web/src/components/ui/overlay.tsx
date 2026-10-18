@@ -9,6 +9,10 @@ const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:n
 /** Foco preso no diálogo, Esc fecha, foco volta ao gatilho ao fechar. */
 function useDialogFocus(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDivElement>(null);
+  // onClose costuma ser uma função nova a cada render (a cada tecla digitada). Guardado em ref,
+  // o efeito só roda ao abrir/fechar: não rouba o foco do campo nem "reabre" o diálogo.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -18,7 +22,7 @@ function useDialogFocus(open: boolean, onClose: () => void) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
       }
       if (e.key === 'Tab' && el) {
         const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)];
@@ -36,7 +40,7 @@ function useDialogFocus(open: boolean, onClose: () => void) {
       document.body.style.overflow = overflow;
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   return ref;
 }
 

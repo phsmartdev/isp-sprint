@@ -257,3 +257,19 @@ test('gerência abre jornadas, viabilidade, área, modelo de instrução e e-mai
   await v.goto('/settings/viability');
   await expect(v.getByText('Sem acesso a este módulo')).toBeVisible();
 });
+
+test('digitar em campo de janela não troca de campo nem fecha a janela', async ({ page }) => {
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/plans');
+  await page.getByRole('button', { name: 'Cadastrar plano' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Linha').click();
+  await page.keyboard.type('Yep Mais Família', { delay: 30 });
+  await expect(dialog.getByLabel('Linha')).toHaveValue('Yep Mais Família');
+  await expect(dialog.getByLabel('Linha')).toBeFocused();
+  await dialog.getByRole('button', { name: 'Adicionar produto' }).click();
+  await dialog.getByLabel('Valor unitário do produto 1').fill('');
+  await dialog.getByLabel('Valor unitário do produto 1').pressSequentially('79,90', { delay: 30 });
+  await expect(dialog.getByLabel('Valor unitário do produto 1')).toBeFocused();
+  await expect(dialog).toBeVisible();
+});
