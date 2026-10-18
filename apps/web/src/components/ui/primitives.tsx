@@ -207,12 +207,14 @@ export function EmptyState({ title, description, action, icon }: { title: string
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const msg = error instanceof Error ? error.message : 'Não foi possível carregar.';
   const rid = (error as { problem?: { requestId?: string } })?.problem?.requestId;
+  const diag = (error as { problem?: { diagnostic?: string } })?.problem?.diagnostic;
   return (
     <div role="alert" className="m-4 flex items-start gap-3 rounded-md border border-danger/30 bg-danger-soft p-4 text-danger">
       <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
       <div className="flex-1">
         <p className="font-semibold">{msg}</p>
         {rid && <p className="mt-1 text-xs opacity-80">Código da requisição: {rid}</p>}
+        {diag && <p className="mt-1 break-all font-mono text-xs opacity-80">Detalhe técnico: {diag}</p>}
       </div>
       {onRetry && <Button size="sm" onClick={onRetry}>Tentar novamente</Button>}
     </div>

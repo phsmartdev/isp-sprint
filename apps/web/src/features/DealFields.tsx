@@ -130,6 +130,47 @@ export const viabilityPayload = (v: ViabilityValue) => ({
   activationFeeCents: v.activationFee.trim() === '' ? null : toCents(v.activationFee),
 });
 
+// ------------------------------------------------------------------ caminho e equipamentos (troca manual)
+export type KitValue = { equipmentId: string; qty: number }[] | null;
+
+/** Caminho e equipamentos escolhidos à mão. Vazio = segue a regra de metragem/banda e o kit do caminho. */
+export function EquipmentOverride({ routeId, equipment, suggested, onChange, disabled, idPrefix = 'eq' }: {
+  routeId: string; equipment: KitValue; suggested?: { routeName: string | null }; onChange: (v: { routeId?: string; equipment?: KitValue }) => void; disabled?: boolean; idPrefix?: string;
+}) {
+  const meta = useViabilityMeta();
+  const manualKit = equipment !== null;
+  const qty = (id: string) => equipment?.find((e) => e.equipmentId === id)?.qty ?? 0;
+  if (!meta.data?.configured) return null;
+  return (
+    <details className="rounded-md border border-line px-3 py-2" open={!!routeId || manualKit}>
+      <summary className="cursor-pointer text-sm font-semibold text-ink">Caminho e equipamentos {routeId || manualKit ? '(ajustado à mão)' : '(automático)'}</summary>
+      <div className="mt-3 space-y-3">
+        <FormField label="Caminho de entrega" htmlFor={`${idPrefix}-route`} hint={routeId ? 'Escolhido à mão' : `Pela regra${suggested?.routeName ? `: ${suggested.routeName}` : ''}`}>
+          <Select id={`${idPrefix}-route`} value={routeId} disabled={disabled} onChange={(e) => onChange({ routeId: e.target.value })}>
+            <option value="">Automático (regra de metragem e banda)</option>
+            {meta.data.routes.map((r) => <option key={r.id} value={r.id}>{r.name}{r.requiresApproval ? ' (exige aprovação)' : ''}</option>)}
+          </Select>
+        </FormField>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={manualKit} disabled={disabled} onChange={(e) => onChange({ equipment: e.target.checked ? [] : null })} />
+          Escolher os equipamentos (em vez do kit do caminho)
+        </label>
+        {manualKit && (
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {meta.data.equipments.map((eq) => (
+              <li key={eq.id} className="flex items-center gap-2 text-sm">
+                <Input aria-label={`Quantidade de ${eq.name}`} type="number" min={0} max={50} className="h-8 w-16" disabled={disabled} value={qty(eq.id)}
+                  onChange={(e) => { const q = Math.max(0, Math.min(50, Number(e.target.value || 0))); onChange({ equipment: [...(equipment ?? []).filter((x) => x.equipmentId !== eq.id), ...(q ? [{ equipmentId: eq.id, qty: q }] : [])] }); }} />
+                <span className="text-ink">{eq.name}</span><span className="num text-muted">{fmtBRL(eq.costCents)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // ------------------------------------------------------------------ campos personalizados
 export type CustomValues = Record<string, string | number | boolean | null>;
 

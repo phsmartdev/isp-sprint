@@ -47,5 +47,8 @@ export function errorHandler(err: FastifyError | Error, req: FastifyRequest, rep
   if (pgCode === '23505') return sendProblem(reply, req, { status: 409, title: 'Registro duplicado', detail: 'Já existe um registro com estes dados.' });
   if (pgCode === '23503' || pgCode === '23514') return sendProblem(reply, req, { status: 422, title: 'Dados inválidos', detail: 'Referência ou valor não permitido.' });
   req.log.error({ err }, 'erro não tratado');
-  return sendProblem(reply, req, { status: 500, title: 'Erro interno', detail: 'Algo deu errado. Informe o código da requisição ao suporte.' });
+  // Gerência (Configurações = total) vê a causa técnica para diagnosticar sem acesso aos logs.
+  const auth = (req as { auth?: { access?: Record<string, string> } | null }).auth;
+  const diagnostic = auth?.access?.configuracoes === 'total' ? `${pgCode ? `[${pgCode}] ` : ''}${String(err.message ?? '').slice(0, 300)}` : undefined;
+  return sendProblem(reply, req, { status: 500, title: 'Erro interno', detail: 'Algo deu errado. Informe o código da requisição ao suporte.', ...(diagnostic ? { diagnostic } : {}) });
 }

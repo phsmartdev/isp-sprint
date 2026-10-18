@@ -21,7 +21,7 @@ import { ActivityComposer } from '../features/ActivityComposer';
 import { ActivityRow } from '../features/ActivityRow';
 import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
-import { AddressFields, CustomFieldsEditor, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type ViabilityValue } from '../features/DealFields';
+import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type KitValue, type ViabilityValue } from '../features/DealFields';
 import { Attachments } from '../features/Attachments';
 import { EmailComposer } from '../features/EmailComposer';
 import { Objections, StageScript } from '../features/Playbook';
@@ -271,6 +271,8 @@ type Fields = AddressValue & {
   cableMeters: string;
   activationFee: string;
   custom: CustomValues;
+  routeId: string;
+  equipment: KitValue;
 };
 
 const toFields = (o: Opportunity): Fields => ({
@@ -293,6 +295,8 @@ const toFields = (o: Opportunity): Fields => ({
   cableMeters: o.cableMeters === null ? '' : String(o.cableMeters),
   activationFee: toReais(o.activationFeeCents),
   custom: (o.custom ?? {}) as CustomValues,
+  routeId: o.routeId ?? '',
+  equipment: o.equipment,
 });
 
 const diffFields = (a: Fields, b: Fields) => (Object.keys(a) as (keyof Fields)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
@@ -307,6 +311,8 @@ function toPatch(f: Fields, keys: (keyof Fields)[], base: Fields) {
     else if (k === 'title') p.title = f.title.trim() || null;
     else if (k === 'saleType') p.saleType = f.saleType || null;
     else if (k === 'cableMeters') p.cableMeters = f.cableMeters === '' ? null : Number(f.cableMeters);
+    else if (k === 'routeId') p.routeId = f.routeId || null;
+    else if (k === 'equipment') p.equipment = f.equipment;
     else if (k === 'activationFee') p.activationFeeCents = f.activationFee.trim() === '' ? null : toCents(f.activationFee);
     else if (k === 'custom') {
       // só o que mudou; chave apagada vai como null
@@ -575,6 +581,7 @@ export function OpportunityWorkspacePage() {
           <FormField label="Quando" htmlFor="ws-nat"><Input id="ws-nat" type="datetime-local" value={f.nextActionAt} disabled={!editable} onChange={(e) => set('nextActionAt', e.target.value)} /></FormField>
         </div>
         <ViabilityInputs value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-vb" />
+        <EquipmentOverride routeId={f.routeId} equipment={f.equipment} suggested={{ routeName: opp.viability?.route?.name ?? null }} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-eq" />
         {pipeline && pipeline.fields.length > 0 && (
           <div>
             <p className="mb-2 text-sm font-semibold text-ink">Campos da jornada</p>
