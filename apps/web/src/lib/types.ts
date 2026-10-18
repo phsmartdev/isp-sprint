@@ -1,3 +1,4 @@
+import type { ViabilityResult } from '@isp/domain';
 import type { AccessLevel, ActivityPriority, ActivityType, CoverageStatus, ContractRequestStatus, CustomerLifecycle, LeadStatus, Module, OpportunityReason, OpportunityStage, ProposalStatus, Segment } from '@isp/domain';
 
 export type Me = {
@@ -15,10 +16,16 @@ export type Lookups = {
   users: { id: string; name: string; hasAvatar: boolean }[];
   sources: { id: string; name: string }[];
   campaigns: { id: string; name: string; sourceId: string | null }[];
-  stages: { id: string; key: OpportunityStage; name: string; position: number; isTerminal: boolean }[];
+  pipelines: LookupPipeline[];
+  /** Etapas da jornada padrão (compatibilidade). */
+  stages: LookupStage[];
   teams: { id: string; name: string }[];
-  plans: { id: string; name: string; line: string | null; segment: Segment; priceCents: number }[];
+  plans: { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null }[];
 };
+export type StageRequirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
+export type LookupStage = { id: string; key: string; name: string; position: number; kind: 'open' | 'won' | 'lost'; isTerminal: boolean; color: string | null; requirements: StageRequirements };
+export type LookupField = { key: string; label: string; type: 'texto' | 'texto_longo' | 'numero' | 'moeda' | 'data' | 'lista' | 'sim_nao'; options: string[]; required: boolean };
+export type LookupPipeline = { id: string; key: string; name: string; description: string | null; segments: Segment[]; isDefault: boolean; allowed: boolean; fields: LookupField[]; stages: LookupStage[] };
 
 export type Kpi = {
   key: string;
@@ -66,7 +73,34 @@ export type Opportunity = {
   id: string;
   code: number;
   title: string;
-  stage: OpportunityStage;
+  stage: string;
+  pipelineId: string;
+  pipelineName: string;
+  stageName: string | null;
+  attachmentCount: number;
+  proposalCount: number;
+  installCep: string | null;
+  installStreet: string | null;
+  installNumber: string | null;
+  installDistrict: string | null;
+  installCity: string | null;
+  condominiumId: string | null;
+  condominiumName: string | null;
+  regionName: string | null;
+  installBlock: string | null;
+  installUnit: string | null;
+  saleType: 'ativa' | 'receptiva' | null;
+  cableMeters: number | null;
+  activationFeeCents: number | null;
+  equipment: { equipmentId: string; qty: number }[] | null;
+  routeId: string | null;
+  viability: ViabilityResult | null;
+  commissionCents: number | null;
+  cacCents: number | null;
+  marginCents: number | null;
+  paybackMonths: string | null;
+  custom: Record<string, string | number | boolean>;
+  duplicatedFromId: string | null;
   proposalStatus: ProposalStatus;
   contractRequestStatus: ContractRequestStatus;
   coverageStatus: CoverageStatus;
@@ -111,7 +145,6 @@ export type Opportunity = {
   missingNextAction: boolean;
 };
 
-export type PipelineStage = { key: OpportunityStage; name: string; isTerminal: boolean; count: number; valueCents: number; cards: Opportunity[] };
 
 export type Activity = {
   id: string;
@@ -149,3 +182,6 @@ export type TimelineItem = {
   title?: string;
   activityType?: string;
 };
+
+export type { ViabilityResult };
+export type PipelineStage = { key: string; name: string; color: string | null; requirements: StageRequirements; isTerminal: boolean; count: number; valueCents: number; cards: Opportunity[] };

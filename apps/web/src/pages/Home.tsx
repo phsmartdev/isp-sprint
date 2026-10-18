@@ -2,15 +2,16 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Lightbulb, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
-import { STAGE_LABELS, type ActivityType, type OpportunityStage } from '@isp/domain';
+import { type ActivityType } from '@isp/domain';
 import { api } from '../lib/api';
 import { fmtBRL, fmtRelativeShort, fmtTime, fmtLongDate } from '../lib/format';
 import type { Kpi, Opportunity } from '../lib/types';
+import { useStageInfo } from '../lib/hooks';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip, Delta, ErrorState, LoadingRows, formatKpi } from '../components/ui/primitives';
 import { BrandImage } from '../components/brand';
 import { Progress } from '../components/charts/charts';
-import { STAGE_STYLE, productLabel } from '../components/badges';
+import { StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { useToast } from '../components/ui/overlay';
 
 type HomeData = {
@@ -18,7 +19,8 @@ type HomeData = {
   goal: { sales: number; target: number; progress: number | null; delta: number | null; formula: string };
   performance: { key: string; label: string; value: number; target: number; progress: number | null }[];
   agenda: { id: string; type: ActivityType; title: string; notes: string | null; dueAt: string | null; completedAt: string | null; rowVersion: number; opportunityId: string | null; overdue: boolean }[];
-  pipeline: { stage: OpportunityStage; count: number; valueCents: number }[];
+  pipelineName: string;
+  pipeline: { stage: string; name: string; color: string | null; count: number; valueCents: number }[];
   recent: Opportunity[];
 };
 
@@ -56,6 +58,7 @@ function GoalRing({ value, target }: { value: number; target: number }) {
 }
 
 export function HomePage() {
+  const stageInfo = useStageInfo();
   const { me } = useAuth();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -172,19 +175,19 @@ export function HomePage() {
         {/* Pipeline */}
         <section className="card p-5" aria-labelledby="h-pipe">
           <div className="mb-3 flex items-center justify-between">
-            <h2 id="h-pipe" className="flex items-center gap-2 whitespace-nowrap text-md font-bold text-ink"><BarChart3 className="h-5 w-5" />Pipeline de oportunidades</h2>
+            <h2 id="h-pipe" className="flex items-center gap-2 whitespace-nowrap text-md font-bold text-ink"><BarChart3 className="h-5 w-5" />Pipeline · {d?.pipelineName ?? 'oportunidades'}</h2>
             <Link to="/opportunities" className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-semibold text-primary hover:underline">Ver pipeline <ArrowRight className="h-4 w-4" /></Link>
           </div>
           {!d ? <LoadingRows rows={5} /> : (
             <ul className="divide-y divide-line">
               {d.pipeline.map((p) => {
                 const max = Math.max(1, ...d.pipeline.map((x) => x.count));
-                const st = STAGE_STYLE[p.stage];
+                const c = stageColor(p.stage, p.color, d.pipeline.indexOf(p));
                 return (
                   <li key={p.stage} className="grid grid-cols-[100px_1fr_auto] items-center gap-3 py-3.5">
-                    <span className={clsx('text-md font-medium', p.stage === 'novo_lead' ? 'text-ink' : st.text)}>{STAGE_LABELS[p.stage]}</span>
-                    <span className="relative flex h-7 items-center rounded-full" style={{ background: `${st.bar}33` }}>
-                      <span className="block h-7 rounded-full" style={{ width: `${Math.max(14, (p.count / max) * 55)}%`, background: st.bar }} />
+                    <span className="truncate text-md font-medium" style={{ color: d.pipeline.indexOf(p) === 0 ? undefined : inkOf(c) }}>{p.name}</span>
+                    <span className="relative flex h-7 items-center rounded-full" style={{ background: `${c}33` }}>
+                      <span className="block h-7 rounded-full" style={{ width: `${Math.max(14, (p.count / max) * 55)}%`, background: c }} />
                       <span className="num absolute right-3 text-sm font-semibold text-primary">{p.count}</span>
                     </span>
                     <span className="num whitespace-nowrap text-right text-md text-ink">{fmtBRL(p.valueCents)}</span>
@@ -229,7 +232,7 @@ export function HomePage() {
                       <Avatar name={o.contactName} size={34} tone={0} />
                       <span className="min-w-0"><span className="block truncate text-sm font-semibold text-ink">{o.contactName}</span><span className="block truncate text-2xs text-muted">{productLabel(o.contactSegment)}</span></span>
                       <span className="num whitespace-nowrap text-sm font-semibold text-ink">{o.valueCents !== null ? fmtBRL(o.valueCents) : '—'}</span>
-                      <span className="flex flex-col items-end gap-1"><Chip tone={STAGE_STYLE[o.stage].tone}>{STAGE_LABELS[o.stage]}</Chip><span className="text-2xs text-muted">{fmtRelativeShort(o.updatedAt)}</span></span>
+                      <span className="flex flex-col items-end gap-1"><StageChip stage={o.stage} name={o.stageName} color={stageInfo(o.pipelineId, o.stage).color} /><span className="text-2xs text-muted">{fmtRelativeShort(o.updatedAt)}</span></span>
                     </Link>
                   </li>
                 ))}

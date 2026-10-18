@@ -405,6 +405,33 @@ export const businessRoutes = [
     },
   }),
 
+  defineRoute({
+    method: 'GET',
+    url: '/meta/cep/:cep',
+    summary: 'Consulta CEP (ViaCEP) para preencher o endereço; sem resposta em 4s, segue manual',
+    tag: 'Área de atendimento',
+    anyAuthenticated: true,
+    params: z.object({ cep: z.string().regex(/^\d{5}-?\d{3}$/) }),
+    rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
+    handler: async ({ params, app, auth }) => {
+      const digits = params.cep.replace('-', '');
+      const cep = `${digits.slice(0, 5)}-${digits.slice(5)}`;
+      // condomínio cadastrado com esse CEP vem primeiro
+      const condos = await app.db.select({ id: s.condominiums.id, name: s.condominiums.name }).from(s.condominiums).where(and(eq(s.condominiums.tenantId, auth.tenantId), eq(s.condominiums.active, true), sql`replace(${s.condominiums.cep}, '-', '') = ${digits}`));
+      try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 4000);
+        const r = await fetch(`https://viacep.com.br/ws/${digits}/json/`, { signal: ctl.signal });
+        clearTimeout(t);
+        const j = (await r.json()) as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string };
+        if (j.erro) return { found: false, cep, condominiums: condos };
+        return { found: true, cep, street: j.logradouro ?? null, district: j.bairro ?? null, city: j.localidade ?? null, state: j.uf ?? null, condominiums: condos };
+      } catch {
+        return { found: false, cep, unavailable: true, condominiums: condos };
+      }
+    },
+  }),
+
   // ================================================================== viabilidade
   defineRoute({
     method: 'GET',

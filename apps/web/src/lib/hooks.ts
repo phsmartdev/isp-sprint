@@ -8,6 +8,17 @@ export function useLookups() {
   return useQuery({ queryKey: ['lookups'], queryFn: () => api<Lookups>('/meta/lookups'), staleTime: 10 * 60_000 });
 }
 
+/** Nome e cor de uma etapa pela jornada (as etapas são configuráveis). */
+export function useStageInfo() {
+  const l = useLookups();
+  return (pipelineId: string | null | undefined, key: string) => {
+    const p = l.data?.pipelines.find((x) => x.id === pipelineId) ?? l.data?.pipelines.find((x) => x.isDefault);
+    const idx = p?.stages.findIndex((st) => st.key === key) ?? -1;
+    const st = idx >= 0 ? p!.stages[idx]! : null;
+    return { name: st?.name ?? null, color: st?.color ?? null, index: Math.max(0, idx), stage: st, pipeline: p ?? null };
+  };
+}
+
 /**
  * Estado de filtros na URL: sobrevive a refresh, voltar/avançar e compartilhamento de link.
  * Também é o mecanismo de "vista salva" mais simples: o link é a vista.
