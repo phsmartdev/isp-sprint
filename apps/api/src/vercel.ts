@@ -27,6 +27,23 @@ function getApp() {
   return ready;
 }
 
+/** Diagnóstico sem expor segredos: diz qual variável falta ou está inválida. */
+function explain(e: unknown) {
+  const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
+  if (issues?.length) {
+    return issues
+      .map((i) => {
+        const v = String(i.path[0]);
+        if (!process.env[v]) return `a variável ${v} não está cadastrada na Vercel`;
+        if (v === 'DATABASE_URL') return 'DATABASE_URL não é uma URL válida (ela começa com postgresql:// e, se a senha tiver caracteres como @ # / ?, troque a senha do banco por uma só com letras e números)';
+        return `a variável ${v} está inválida (${i.message})`;
+      })
+      .join('; ') + '. Depois de corrigir, faça Redeploy.';
+  }
+  const msg = (e as Error)?.message ?? String(e);
+  return msg.replace(/postgres(ql)?:\/\/[^\s]+/gi, '[url do banco]') + ' (depois de corrigir a variável na Vercel, faça Redeploy).';
+}
+
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     const app = await getApp();
@@ -35,6 +52,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     console.error('Falha ao iniciar a API', e);
     res.statusCode = 500;
     res.setHeader('content-type', 'application/problem+json');
-    res.end(JSON.stringify({ type: 'about:blank', title: 'API indisponível', status: 500, detail: 'A API não conseguiu iniciar. Confira DATABASE_URL e COOKIE_SECRET nas variáveis do projeto na Vercel.' }));
+    res.end(JSON.stringify({ type: 'about:blank', title: 'API indisponível', status: 500, detail: `A API não conseguiu iniciar: ${explain(e)}` }));
   }
 }
