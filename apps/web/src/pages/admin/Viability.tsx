@@ -13,7 +13,7 @@ import { Button, ErrorState, FormField, Input, LoadingRows, Notice, Select } fro
 import { useToast } from '../../components/ui/overlay';
 import { ViabilityInputs, ViabilityPanel, viabilityPayload, type ViabilityValue } from '../../features/DealFields';
 
-type Deduction = { id?: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; routeIds: string[]; notes: string | null };
+type Deduction = { id?: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; routeIds: string[]; baseExcludeIds?: string[]; notes: string | null };
 type Equip = { id?: string; name: string; costCents: number };
 type Route = { id?: string; name: string; description: string | null; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; kit: { equipmentId: string; qty: number }[] };
 type Rule = { id?: string; name: string; minMeters: number | null; maxMeters: number | null; minMbps: number | null; maxMbps: number | null; routeId: string };
@@ -81,8 +81,9 @@ function NumInput({ value, onChange, label, suffix, prefix, int, className }: { 
 
 const del = (onClick: () => void) => <Button size="sm" variant="ghost" aria-label="Remover" onClick={onClick} icon={<Trash2 className="h-4 w-4 text-danger" />} />;
 
-function Deductions({ title, desc, url, initial, routes }: { title: string; desc: string; url: string; initial: Deduction[]; routes: Route[] }) {
-  const l = useList(initial, url, ({ id, name, kind, percentBp, amountCents, routeIds, notes }: Deduction) => ({ id, name, kind, percentBp, amountCents, routeIds, notes }));
+function Deductions({ title, desc, url, initial, routes, partners }: { title: string; desc: string; url: string; initial: Deduction[]; routes: Route[]; partners?: Deduction[] }) {
+  const l = useList(initial, url, ({ id, name, kind, percentBp, amountCents, routeIds, baseExcludeIds, notes }: Deduction) => ({ id, name, kind, percentBp, amountCents, routeIds, baseExcludeIds: baseExcludeIds ?? [], notes }));
+  const savedPartners = (partners ?? []).filter((x) => x.id);
   return (
     <Block title={title} desc={desc} onAdd={() => l.add({ name: '', kind: 'percent', percentBp: 0, amountCents: 0, routeIds: [], notes: null })} onSave={l.save} saving={l.saving} dirty={l.dirty}>
       {!l.items.length ? <p className="text-sm text-muted">Nada cadastrado.</p> : (
@@ -101,6 +102,17 @@ function Deductions({ title, desc, url, initial, routes }: { title: string; desc
                 </Select>
               )}
               {del(() => l.remove(i))}
+              {d.kind === 'percent' && savedPartners.length > 0 && (
+                <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-xs text-text">
+                  <span className="text-muted">Calcular sobre a mensalidade menos:</span>
+                  {savedPartners.map((pt) => (
+                    <label key={pt.id} className="flex items-center gap-1">
+                      <input type="checkbox" checked={!!d.baseExcludeIds?.includes(pt.id!)} onChange={(e) => l.set(i, { baseExcludeIds: e.target.checked ? [...(d.baseExcludeIds ?? []), pt.id!] : (d.baseExcludeIds ?? []).filter((x) => x !== pt.id) })} />
+                      {pt.name}
+                    </label>
+                  ))}
+                </div>
+              )}
             </li>
           ))}
         </ul>
@@ -299,7 +311,7 @@ export function AdminViability() {
       </section>
       <Simulator />
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
-        <Deductions title="Tributos" desc="Impostos sobre a mensalidade, em % ou valor fixo por mês." url="/admin/viability/taxes" initial={d.taxes} routes={d.routes} />
+        <Deductions title="Tributos" desc="Impostos sobre a mensalidade, em % ou valor fixo por mês. Um tributo em % pode ser calculado sobre o que sobra depois de tirar um parceiro (ex.: ISS sobre a mensalidade menos a UPNET)." url="/admin/viability/taxes" initial={d.taxes} routes={d.routes} partners={d.partners} />
         <Deductions title="Parceiros e fornecedores" desc="Custos mensais de terceiros: trânsito IP, suporte, aluguel de rede, em % ou valor fixo." url="/admin/viability/partners" initial={d.partners} routes={d.routes} />
       </div>
       <Equipments initial={d.equipments} />

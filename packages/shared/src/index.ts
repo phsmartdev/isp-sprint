@@ -366,6 +366,8 @@ export const DeductionItem = z.object({
   percentBp: z.number().int().min(0).max(10_000).default(0),
   amountCents: cents.default(0),
   routeIds: z.array(uuid).max(50).default([]),
+  /** Percentual calculado sobre a mensalidade menos estes parceiros. */
+  baseExcludeIds: z.array(uuid).max(50).default([]),
   notes: optText(300),
   active: z.boolean().default(true),
 });

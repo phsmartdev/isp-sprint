@@ -784,6 +784,8 @@ export const viabilityDeductions = pgTable(
     percentBp: integer('percent_bp').notNull().default(0),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull().default(0),
     routeIds: uuid('route_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Percentual sobre a mensalidade menos estes parceiros (ex.: ISS sobre o que sobra após a UPNET). */
+    baseExcludeIds: uuid('base_exclude_ids').array().notNull().default(sql`'{}'::uuid[]`),
     notes: text('notes'),
     active: boolean('active').notNull().default(true),
     createdAt: createdAt(),

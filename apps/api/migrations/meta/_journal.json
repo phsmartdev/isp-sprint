@@ -50,6 +50,13 @@
       "when": 1792354169481,
       "tag": "0006_plan_products",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792354389973,
+      "tag": "0007_tax_base",
+      "breakpoints": true
     }
   ]
 }

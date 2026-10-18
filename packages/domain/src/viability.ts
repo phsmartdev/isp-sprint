@@ -8,7 +8,7 @@
  *   LTV           = margem mensal × vida média do cliente (meses)
  */
 
-export type AmountRule = { id: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; active: boolean; routeIds?: string[] };
+export type AmountRule = { id: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; active: boolean; routeIds?: string[]; /** Percentual sobre a mensalidade menos estes parceiros. */ baseExcludeIds?: string[] };
 export type Equipment = { id: string; name: string; costCents: number; active: boolean };
 export type KitItem = { equipmentId: string; qty: number };
 export type DeliveryRoute = { id: string; name: string; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; kit: KitItem[]; active: boolean };
@@ -140,10 +140,19 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
   if (route?.requiresApproval) alerts.push(`O caminho “${route.name}” exige aprovação antes de fechar.`);
 
   const applies = (r: AmountRule) => r.active && (!r.routeIds?.length || (route && r.routeIds.includes(route.id)));
-  const ruleLine = (r: AmountRule): Line => ({ label: r.name, cents: r.kind === 'percent' ? pct(price, r.percentBp) : r.amountCents, detail: r.kind === 'percent' ? fmtBp(r.percentBp) : 'valor fixo' });
+  const ruleLine = (r: AmountRule, base = price, baseNote = ''): Line => ({ label: r.name, cents: r.kind === 'percent' ? pct(base, r.percentBp) : r.amountCents, detail: r.kind === 'percent' ? `${fmtBp(r.percentBp)}${baseNote}` : 'valor fixo' });
+  const partners = p.partners.filter(applies);
+  const partnerLines = partners.map((r) => ({ id: r.id, line: ruleLine(r) }));
+  // tributo em % pode ter base reduzida: mensalidade menos os parceiros indicados
+  const taxLine = (r: AmountRule) => {
+    const ex = partnerLines.filter((x) => r.baseExcludeIds?.includes(x.id));
+    if (r.kind !== 'percent' || !ex.length) return ruleLine(r);
+    const base = Math.max(0, price - ex.reduce((a, x) => a + x.line.cents, 0));
+    return ruleLine(r, base, ` sobre ${(base / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (sem ${ex.map((x) => x.line.label).join(', ')})`);
+  };
   const monthlyDeductions: Line[] = [
-    ...p.taxes.filter(applies).map((r) => ({ ...ruleLine(r), label: `Tributo · ${r.name}` })),
-    ...p.partners.filter(applies).map((r) => ({ ...ruleLine(r), label: `Parceiro · ${r.name}` })),
+    ...p.taxes.filter(applies).map((r) => ({ ...taxLine(r), label: `Tributo · ${r.name}` })),
+    ...partnerLines.map((x) => ({ ...x.line, label: `Parceiro · ${x.line.label}` })),
   ];
   if (route && route.monthlyCostCents) monthlyDeductions.push({ label: `Custo mensal · ${route.name}`, cents: route.monthlyCostCents });
 

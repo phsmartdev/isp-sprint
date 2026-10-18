@@ -1,0 +1,1 @@
+ALTER TABLE "viability_deductions" ADD COLUMN "base_exclude_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

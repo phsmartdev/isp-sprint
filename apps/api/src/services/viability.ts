@@ -12,7 +12,7 @@ export async function loadViabilityParams(db: DbOrTx, tenantId: string): Promise
   const rules = await db.select().from(s.routeRules).where(eq(s.routeRules.tenantId, tenantId)).orderBy(asc(s.routeRules.position));
   const commissions = await db.select().from(s.commissionRules).where(eq(s.commissionRules.tenantId, tenantId)).orderBy(asc(s.commissionRules.position));
   const [settings] = await db.select().from(s.viabilitySettings).where(eq(s.viabilitySettings.tenantId, tenantId)).limit(1);
-  const amount = (d: (typeof deductions)[number]) => ({ id: d.id, name: d.name, kind: d.kind as 'percent' | 'fixed', percentBp: d.percentBp, amountCents: d.amountCents, active: d.active, routeIds: d.routeIds });
+  const amount = (d: (typeof deductions)[number]) => ({ id: d.id, name: d.name, kind: d.kind as 'percent' | 'fixed', percentBp: d.percentBp, amountCents: d.amountCents, active: d.active, routeIds: d.routeIds, baseExcludeIds: d.baseExcludeIds });
   return {
     taxes: deductions.filter((d) => d.category === 'tributo').map(amount),
     partners: deductions.filter((d) => d.category === 'parceiro').map(amount),

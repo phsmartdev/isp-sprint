@@ -95,4 +95,11 @@ describe('viabilidade', () => {
     const none = computeViability({ priceCents: 9990, mbps: 300, cableMeters: 80, activationFeeCents: 0, saleType: 'receptiva', equipment: null, routeId: null, products: [{ ...products[1]!, commissionReceptiva: null }] }, params);
     expect(none.commission.rule).not.toBe('Produtos do plano');
   });
+
+  it('ISS em % sobre a mensalidade menos o parceiro indicado', () => {
+    const p2 = { ...params, taxes: [{ id: 'iss', name: 'ISS', kind: 'percent' as const, percentBp: 500, amountCents: 0, active: true, baseExcludeIds: ['upnet'] }], partners: [{ id: 'upnet', name: 'UPNET', kind: 'percent' as const, percentBp: 2000, amountCents: 0, active: true }] };
+    const r = computeViability({ priceCents: 9990, mbps: 300, cableMeters: 80, activationFeeCents: 0, saleType: 'ativa', equipment: null, routeId: null }, p2);
+    const iss = r.monthlyDeductions.find((l) => l.label === 'Tributo · ISS')!;
+    expect(iss.cents).toBe(400); // 5% de (99,90 − 19,98) = 3,996
+  });
 });
