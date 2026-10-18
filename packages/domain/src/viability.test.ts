@@ -102,4 +102,13 @@ describe('viabilidade', () => {
     const iss = r.monthlyDeductions.find((l) => l.label === 'Tributo · ISS')!;
     expect(iss.cents).toBe(400); // 5% de (99,90 − 19,98) = 3,996
   });
+
+  it('acima do limite de autonomia exige viabilidade da engenharia', () => {
+    const p2 = { ...params, autonomy: { maxMeters: 100, maxMbps: 500 } };
+    const base = { priceCents: 9990, activationFeeCents: 0, saleType: 'ativa' as const, equipment: null, routeId: null };
+    expect(computeViability({ ...base, mbps: 500, cableMeters: 100 }, p2).engineering.required).toBe(false);
+    const r = computeViability({ ...base, mbps: 600, cableMeters: 150 }, p2);
+    expect(r.engineering.required).toBe(true);
+    expect(r.engineering.reasons).toHaveLength(2);
+  });
 });

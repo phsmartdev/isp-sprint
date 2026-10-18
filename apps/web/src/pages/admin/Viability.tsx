@@ -15,10 +15,10 @@ import { ViabilityInputs, ViabilityPanel, viabilityPayload, type ViabilityValue 
 
 type Deduction = { id?: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; routeIds: string[]; baseExcludeIds?: string[]; notes: string | null };
 type Equip = { id?: string; name: string; costCents: number };
-type Route = { id?: string; name: string; description: string | null; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; kit: { equipmentId: string; qty: number }[] };
+type Route = { id?: string; name: string; description: string | null; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; appliesTo?: 'condominio' | 'rua' | null; kit: { equipmentId: string; qty: number }[] };
 type Rule = { id?: string; name: string; minMeters: number | null; maxMeters: number | null; minMbps: number | null; maxMbps: number | null; routeId: string };
 type Commission = { id?: string; name: string; saleType: 'ativa' | 'receptiva' | 'qualquer'; minPriceCents: number | null; maxPriceCents: number | null; kind: 'percent' | 'mensalidades' | 'fixo'; percentBp: number; multiplierX100: number; amountCents: number };
-type Settings = { defaultRouteId: string | null; ltvLifetimeMonths: number | null; monthlyChurnBp: number | null; ltvMinSample: number; maxPaybackMonths: number | null; defaultActivationFeeCents: number | null };
+type Settings = { defaultRouteId: string | null; ltvLifetimeMonths: number | null; monthlyChurnBp: number | null; ltvMinSample: number; maxPaybackMonths: number | null; defaultActivationFeeCents: number | null; autonomyMaxMeters?: number | null; autonomyMaxMbps?: number | null };
 type Data = { taxes: Deduction[]; partners: Deduction[]; equipments: Equip[]; routes: Route[]; rules: Rule[]; commissions: Commission[]; settings: Settings; base: { customers: number; avgLifetimeMonths: number | null; avgMarginCents: number | null } };
 
 /** Centavos e pontos-base usam a mesma escala de 2 casas: "6,5" → 650. */
@@ -139,9 +139,9 @@ function Equipments({ initial }: { initial: Equip[] }) {
 }
 
 function Routes({ initial, equipments }: { initial: Route[]; equipments: Equip[] }) {
-  const l = useList(initial, '/admin/viability/routes', ({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, kit }: Route) => ({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, kit: kit.filter((k) => k.qty > 0) }));
+  const l = useList(initial, '/admin/viability/routes', ({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, appliesTo, kit }: Route) => ({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, appliesTo: appliesTo ?? null, kit: kit.filter((k) => k.qty > 0) }));
   return (
-    <Block title="Caminhos de entrega" desc="Como a internet chega ao cliente. Cada caminho tem custo de cabo por metro, instalação, custo mensal e o kit de equipamentos." addLabel="Adicionar caminho" onAdd={() => l.add({ name: '', description: null, cablePerMeterCents: 0, installCostCents: 0, monthlyCostCents: 0, requiresApproval: false, kit: [] })} onSave={l.save} saving={l.saving} dirty={l.dirty}>
+    <Block title="Caminhos de entrega" desc="Dois padrões: Condomínio e Rua. O sistema escolhe pelo endereço da oportunidade (com condomínio ou na rua). Cada caminho tem custo de cabo por metro, instalação, custo mensal e o kit de equipamentos." addLabel="Adicionar caminho" onAdd={() => l.add({ name: l.items.some((x) => x.appliesTo === 'condominio') ? 'Rua' : 'Condomínio', description: null, cablePerMeterCents: 0, installCostCents: 0, monthlyCostCents: 0, requiresApproval: false, appliesTo: l.items.some((x) => x.appliesTo === 'condominio') ? 'rua' : 'condominio', kit: [] })} onSave={l.save} saving={l.saving} dirty={l.dirty}>
       <ul className="space-y-2">
         {l.items.map((r, i) => (
           <li key={r.id ?? `n${i}`} className="rounded-md border border-line p-3">
@@ -150,7 +150,9 @@ function Routes({ initial, equipments }: { initial: Route[]; equipments: Equip[]
               <NumInput label="Cabo por metro" prefix="Cabo R$" suffix="/m" value={r.cablePerMeterCents} onChange={(v) => l.set(i, { cablePerMeterCents: v ?? 0 })} />
               <NumInput label="Instalação" prefix="Instalação R$" value={r.installCostCents} onChange={(v) => l.set(i, { installCostCents: v ?? 0 })} />
               <NumInput label="Custo mensal" prefix="Mensal R$" value={r.monthlyCostCents} onChange={(v) => l.set(i, { monthlyCostCents: v ?? 0 })} />
-              <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={r.requiresApproval} onChange={(e) => l.set(i, { requiresApproval: e.target.checked })} />Exige aprovação</label>
+              <Select aria-label="Usar para" className="h-9 w-auto" value={r.appliesTo ?? ''} onChange={(e) => l.set(i, { appliesTo: (e.target.value || null) as Route['appliesTo'] })}>
+                <option value="">Usar para: —</option><option value="condominio">Usar para: Condomínio</option><option value="rua">Usar para: Rua</option>
+              </Select>
               {del(() => l.remove(i))}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
@@ -246,6 +248,14 @@ function SettingsForm({ initial, routes, base }: { initial: Settings; routes: Ro
   const useBase = base.customers >= s.ltvMinSample && base.avgLifetimeMonths !== null;
   return (
     <section className="card p-5">
+      <div className="mb-5 rounded-md border border-warning/30 bg-warning-soft/40 p-4">
+        <h3 className="text-md font-bold text-ink">Limite de autonomia da operação</h3>
+        <p className="mb-3 text-sm text-muted">Até estes limites o vendedor fecha sozinho. Acima de qualquer um deles, a oportunidade precisa da viabilidade da engenharia aprovada para virar venda fechada e, depois do fechamento, de um chamado de projeto executivo. Em branco = sem limite.</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <FormField label="Metragem máxima de cabo (m)" htmlFor="vs-am"><Input id="vs-am" type="number" min={0} value={s.autonomyMaxMeters ?? ''} onChange={(e) => setS({ ...s, autonomyMaxMeters: intOrNull(e.target.value) })} /></FormField>
+          <FormField label="Velocidade máxima (Mbps)" htmlFor="vs-ab"><Input id="vs-ab" type="number" min={0} value={s.autonomyMaxMbps ?? ''} onChange={(e) => setS({ ...s, autonomyMaxMbps: intOrNull(e.target.value) })} /></FormField>
+        </div>
+      </div>
       <h3 className="text-md font-bold text-ink">LTV, payback e padrões</h3>
       <p className="mb-3 max-w-3xl text-sm text-muted">O LTV histórico usa a carteira quando há clientes suficientes; senão usa a vida média informada aqui (ou 1 ÷ churn mensal).</p>
       <div className="mb-4 grid grid-cols-1 gap-3 rounded-md bg-surface-2 p-3 text-sm sm:grid-cols-3">
@@ -316,7 +326,6 @@ export function AdminViability() {
       </div>
       <Equipments initial={d.equipments} />
       <Routes initial={d.routes} equipments={d.equipments} />
-      <Rules initial={d.rules} routes={d.routes} />
       <Commissions initial={d.commissions} />
       <SettingsForm initial={d.settings} routes={d.routes} base={d.base} />
     </div>

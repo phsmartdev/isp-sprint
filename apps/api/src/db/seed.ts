@@ -154,8 +154,8 @@ export async function seedTenant(
   ]).returning();
   const [onu, rot, kitDrop] = eqs as [typeof eqs[number], typeof eqs[number], typeof eqs[number]];
   const routesRows = await db.insert(s.deliveryRoutes).values([
-    { tenantId: tenant.id, name: 'FTTH condomínio (rede própria)', description: 'Prédio já cabeado; lançamento curto até a unidade.', cablePerMeterCents: 120, installCostCents: 6000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 1 }] },
-    { tenantId: tenant.id, name: 'FTTH externo (lançamento longo)', description: 'Lançamento a partir da caixa na rua.', cablePerMeterCents: 180, installCostCents: 15000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 2 }] },
+    { tenantId: tenant.id, name: 'Condomínio', appliesTo: 'condominio', description: 'Prédio já cabeado; lançamento curto até a unidade.', cablePerMeterCents: 120, installCostCents: 6000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 1 }] },
+    { tenantId: tenant.id, name: 'Rua', appliesTo: 'rua', description: 'Lançamento a partir da caixa na rua.', cablePerMeterCents: 180, installCostCents: 15000, monthlyCostCents: 0, kit: [{ equipmentId: onu.id, qty: 1 }, { equipmentId: rot.id, qty: 1 }, { equipmentId: kitDrop.id, qty: 2 }] },
     { tenantId: tenant.id, name: 'Link dedicado via parceiro', description: 'Alta banda: entrega pelo parceiro de transporte.', cablePerMeterCents: 250, installCostCents: 40000, monthlyCostCents: 6000, requiresApproval: true, kit: [{ equipmentId: rot.id, qty: 1 }] },
   ]).returning();
   const [rCondo, rExt, rDed] = routesRows as [typeof routesRows[number], typeof routesRows[number], typeof routesRows[number]];

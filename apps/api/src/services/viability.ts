@@ -17,12 +17,13 @@ export async function loadViabilityParams(db: DbOrTx, tenantId: string): Promise
     taxes: deductions.filter((d) => d.category === 'tributo').map(amount),
     partners: deductions.filter((d) => d.category === 'parceiro').map(amount),
     equipments: equipments.map((e) => ({ id: e.id, name: e.name, costCents: e.costCents, active: e.active })),
-    routes: routes.map((r) => ({ id: r.id, name: r.name, cablePerMeterCents: r.cablePerMeterCents, installCostCents: r.installCostCents, monthlyCostCents: r.monthlyCostCents, requiresApproval: r.requiresApproval, kit: r.kit, active: r.active })),
+    routes: routes.map((r) => ({ id: r.id, name: r.name, cablePerMeterCents: r.cablePerMeterCents, installCostCents: r.installCostCents, monthlyCostCents: r.monthlyCostCents, requiresApproval: r.requiresApproval, kit: r.kit, active: r.active, appliesTo: (r.appliesTo as 'condominio' | 'rua' | null) ?? null })),
     rules: rules.map((r) => ({ id: r.id, name: r.name, position: r.position, minMeters: r.minMeters, maxMeters: r.maxMeters, minMbps: r.minMbps, maxMbps: r.maxMbps, routeId: r.routeId, active: r.active })),
     defaultRouteId: settings?.defaultRouteId ?? routes.find((r) => r.active)?.id ?? null,
     commissionRules: commissions.map((c) => ({ ...c, saleType: c.saleType as SaleType | 'qualquer', kind: c.kind as 'percent' | 'mensalidades' | 'fixo' })),
     ltv: { lifetimeMonths: settings?.ltvLifetimeMonths ?? null, monthlyChurnBp: settings?.monthlyChurnBp ?? null, minSample: settings?.ltvMinSample ?? 30 },
     maxPaybackMonths: settings?.maxPaybackMonths ?? null,
+    autonomy: { maxMeters: settings ? settings.autonomyMaxMeters : 100, maxMbps: settings ? settings.autonomyMaxMbps : 500 },
   };
 }
 
@@ -58,6 +59,9 @@ export type OppViabilityRow = {
   saleType: string | null;
   equipment: { equipmentId: string; qty: number }[] | null;
   routeId: string | null;
+  condominiumId?: string | null;
+  installStreet?: string | null;
+  location?: 'condominio' | 'rua' | null;
 };
 
 export async function viabilityFor(db: DbOrTx, tenantId: string, o: OppViabilityRow, cache?: { params?: ViabilityParams; base?: HistoricalBase }) {
@@ -78,6 +82,7 @@ export async function viabilityFor(db: DbOrTx, tenantId: string, o: OppViability
     saleType: (o.saleType as SaleType | null) ?? null,
     equipment: o.equipment,
     routeId: o.routeId,
+    location: o.location ?? (o.condominiumId ? 'condominio' : o.installStreet ? 'rua' : null),
     products,
   };
   return { input, result: computeViability(input, params, base) };
@@ -86,7 +91,7 @@ export async function viabilityFor(db: DbOrTx, tenantId: string, o: OppViability
 /** Guarda o resultado na oportunidade (para relatórios de comissão, CAC e payback). */
 export async function storeViability(db: DbOrTx, tenantId: string, opportunityId: string) {
   const [o] = await db
-    .select({ valueCents: s.opportunities.valueCents, planId: s.opportunities.planId, cableMeters: s.opportunities.cableMeters, activationFeeCents: s.opportunities.activationFeeCents, saleType: s.opportunities.saleType, equipment: s.opportunities.equipment, routeId: s.opportunities.routeId })
+    .select({ condominiumId: s.opportunities.condominiumId, installStreet: s.opportunities.installStreet, valueCents: s.opportunities.valueCents, planId: s.opportunities.planId, cableMeters: s.opportunities.cableMeters, activationFeeCents: s.opportunities.activationFeeCents, saleType: s.opportunities.saleType, equipment: s.opportunities.equipment, routeId: s.opportunities.routeId })
     .from(s.opportunities)
     .where(and(eq(s.opportunities.id, opportunityId), eq(s.opportunities.tenantId, tenantId)))
     .limit(1);

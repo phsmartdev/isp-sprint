@@ -25,6 +25,7 @@ import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, 
 import { Attachments } from '../features/Attachments';
 import { EmailComposer } from '../features/EmailComposer';
 import { Objections, StageScript } from '../features/Playbook';
+import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
@@ -79,7 +80,7 @@ export function NewOpportunityPage() {
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
 
-  const simInput = useDebounced(JSON.stringify({ planId: planId || null, ...viabilityPayload(vb) }), 350);
+  const simInput = useDebounced(JSON.stringify({ planId: planId || null, ...viabilityPayload(vb), location: address.condominiumId ? 'condominio' : address.installStreet ? 'rua' : null }), 350);
   const sim = useQuery({ queryKey: ['simulate', simInput], enabled: !!planId || vb.cableMeters !== '', queryFn: () => api<ViabilityResult>('/viability/simulate', { method: 'POST', body: JSON.parse(simInput) }), placeholderData: (p) => p });
 
   const create = useMutation({
@@ -273,6 +274,9 @@ type Fields = AddressValue & {
   custom: CustomValues;
   routeId: string;
   equipment: KitValue;
+  engineeringStatus: Opportunity['engineeringStatus'];
+  engineeringTicket: string;
+  executiveTicket: string;
 };
 
 const toFields = (o: Opportunity): Fields => ({
@@ -297,6 +301,9 @@ const toFields = (o: Opportunity): Fields => ({
   custom: (o.custom ?? {}) as CustomValues,
   routeId: o.routeId ?? '',
   equipment: o.equipment,
+  engineeringStatus: o.engineeringStatus ?? 'nao_necessaria',
+  engineeringTicket: o.engineeringTicket ?? '',
+  executiveTicket: o.executiveTicket ?? '',
 });
 
 const diffFields = (a: Fields, b: Fields) => (Object.keys(a) as (keyof Fields)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
@@ -313,6 +320,9 @@ function toPatch(f: Fields, keys: (keyof Fields)[], base: Fields) {
     else if (k === 'cableMeters') p.cableMeters = f.cableMeters === '' ? null : Number(f.cableMeters);
     else if (k === 'routeId') p.routeId = f.routeId || null;
     else if (k === 'equipment') p.equipment = f.equipment;
+    else if (k === 'engineeringStatus') p.engineeringStatus = f.engineeringStatus;
+    else if (k === 'engineeringTicket') p.engineeringTicket = f.engineeringTicket.trim() || null;
+    else if (k === 'executiveTicket') p.executiveTicket = f.executiveTicket.trim() || null;
     else if (k === 'activationFee') p.activationFeeCents = f.activationFee.trim() === '' ? null : toCents(f.activationFee);
     else if (k === 'custom') {
       // só o que mudou; chave apagada vai como null
@@ -452,6 +462,8 @@ function Pendencies({ opp, fields, unmetFields }: { opp: Opportunity; fields: Fi
   if (open && opp.coverageStatus !== 'elegivel') items.push({ tone: 'warning', text: `Cobertura ${opp.coverageStatus === 'nao_consultada' ? 'não consultada' : 'não confirmada'}: não prometa plano nem data de instalação.` });
   if (open && (!fields.nextAction || !fields.nextActionAt)) items.push({ tone: 'warning', text: 'Defina a próxima ação e quando ela acontece.' });
   if (open && opp.overdue) items.push({ tone: 'warning', text: 'A próxima ação está vencida. Reagende ou conclua.' });
+  if (open && opp.viability?.engineering?.required && fields.engineeringStatus !== 'aprovada') items.push({ tone: 'warning', text: `Fora da autonomia (${opp.viability.engineering.reasons.join(' e ')}): abra o chamado de viabilidade na engenharia. A venda só fecha com a viabilidade aprovada.` });
+  if (opp.stage === 'ganha' && opp.viability?.engineering?.required && !fields.executiveTicket) items.push({ tone: 'warning', text: 'Venda fechada fora da autonomia: abra o chamado de projeto executivo na engenharia.' });
   if (open && opp.viability?.route?.requiresApproval) items.push({ tone: 'info', text: `O caminho “${opp.viability.route.name}” exige aprovação antes de fechar.` });
   if (opp.customerLifecycle && opp.customerLifecycle !== 'prospect') items.push({ tone: 'info', text: 'Cliente já existente: confira os contratos ativos antes de uma nova contratação.' });
   if (opp.stage === 'ganha' && opp.contractRequestStatus !== 'confirmada') items.push({ tone: 'info', text: 'Venda fechada no comercial. O contrato só é confirmado depois da validação no IXC.' });
@@ -614,6 +626,7 @@ export function OpportunityWorkspacePage() {
   const right = (
     <div className="space-y-4">
       <ViabilityPanel v={opp.viability} loading={a.status === 'saving'} title={opp.stage === 'ganha' ? 'Viabilidade no fechamento' : 'Viabilidade da venda'} />
+      <EngineeringPanel opp={opp} planName={selectedPlan?.name ?? opp.planName ?? null} speedMbps={selectedPlan?.speedMbps ?? null} notes={f.notes} value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} />
       <Panel title="Próximo passo" icon={<ListChecks className="h-5 w-5 text-primary" />}><Pendencies opp={opp} fields={f} unmetFields={unmetFields} /></Panel>
       <Objections pipelineKey={pipeline?.key ?? ''} />
     </div>

@@ -158,6 +158,9 @@ export const opportunitySelect = {
   paybackMonths: s.opportunities.paybackMonths,
   custom: s.opportunities.custom,
   duplicatedFromId: s.opportunities.duplicatedFromId,
+  engineeringStatus: s.opportunities.engineeringStatus,
+  engineeringTicket: s.opportunities.engineeringTicket,
+  executiveTicket: s.opportunities.executiveTicket,
   stageName: s.pipelineStages.name,
   attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,
   proposalCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null and oa.kind = 'proposta')`,
@@ -251,7 +254,7 @@ export const bumpVersion = () => sql`${s.opportunities.rowVersion} + 1`;
 /** Valida referências da empresa e os campos personalizados da jornada; devolve o patch para o banco. */
 export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<OpportunityDetails>, pipelineId: string, currentCustom?: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  const copy = ['installCep', 'installStreet', 'installNumber', 'installDistrict', 'installCity', 'installBlock', 'installUnit', 'saleType', 'cableMeters', 'activationFeeCents', 'equipment'] as const;
+  const copy = ['installCep', 'installStreet', 'installNumber', 'installDistrict', 'installCity', 'installBlock', 'installUnit', 'saleType', 'cableMeters', 'activationFeeCents', 'equipment', 'engineeringStatus', 'engineeringTicket', 'executiveTicket'] as const;
   for (const k of copy) if (d[k] !== undefined) out[k] = d[k];
   if (d.installCep) out.installCep = d.installCep.replace(/^(\d{5})-?(\d{3})$/, '$1-$2');
   if (d.condominiumId !== undefined) {

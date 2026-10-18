@@ -57,6 +57,20 @@
       "when": 1792354389973,
       "tag": "0007_tax_base",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792355983726,
+      "tag": "0008_engineering_autonomy",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792356031082,
+      "tag": "0009_route_applies_to",
+      "breakpoints": true
     }
   ]
 }

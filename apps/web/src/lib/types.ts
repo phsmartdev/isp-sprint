@@ -101,6 +101,9 @@ export type Opportunity = {
   paybackMonths: string | null;
   custom: Record<string, string | number | boolean>;
   duplicatedFromId: string | null;
+  engineeringStatus: 'nao_necessaria' | 'pendente' | 'aprovada' | 'reprovada';
+  engineeringTicket: string | null;
+  executiveTicket: string | null;
   proposalStatus: ProposalStatus;
   contractRequestStatus: ContractRequestStatus;
   coverageStatus: CoverageStatus;

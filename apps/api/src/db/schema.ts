@@ -424,6 +424,10 @@ export const opportunities = pgTable(
     /** Campos personalizados da jornada: { chave: valor }. */
     custom: jsonb('custom').$type<Record<string, unknown>>().notNull().default({}),
     duplicatedFromId: uuid('duplicated_from_id'),
+    /** Viabilidade da engenharia: nao_necessaria | pendente | aprovada | reprovada. */
+    engineeringStatus: text('engineering_status').notNull().default('nao_necessaria'),
+    engineeringTicket: text('engineering_ticket'),
+    executiveTicket: text('executive_ticket'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
@@ -815,6 +819,8 @@ export const deliveryRoutes = pgTable('delivery_routes', {
   installCostCents: bigint('install_cost_cents', { mode: 'number' }).notNull().default(0),
   monthlyCostCents: bigint('monthly_cost_cents', { mode: 'number' }).notNull().default(0),
   requiresApproval: boolean('requires_approval').notNull().default(false),
+  /** condominio | rua: caminho padrão para esse tipo de endereço. */
+  appliesTo: text('applies_to'),
   kit: jsonb('kit').$type<{ equipmentId: string; qty: number }[]>().notNull().default([]),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
@@ -864,6 +870,9 @@ export const viabilitySettings = pgTable('viability_settings', {
   ltvMinSample: integer('ltv_min_sample').notNull().default(30),
   maxPaybackMonths: integer('max_payback_months'),
   defaultActivationFeeCents: bigint('default_activation_fee_cents', { mode: 'number' }),
+  /** Limite de autonomia da operação (acima: viabilidade da engenharia). */
+  autonomyMaxMeters: integer('autonomy_max_meters').default(100),
+  autonomyMaxMbps: integer('autonomy_max_mbps').default(500),
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 });

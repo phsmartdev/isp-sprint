@@ -11,7 +11,8 @@
 export type AmountRule = { id: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; active: boolean; routeIds?: string[]; /** Percentual sobre a mensalidade menos estes parceiros. */ baseExcludeIds?: string[] };
 export type Equipment = { id: string; name: string; costCents: number; active: boolean };
 export type KitItem = { equipmentId: string; qty: number };
-export type DeliveryRoute = { id: string; name: string; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; kit: KitItem[]; active: boolean };
+export type InstallLocation = 'condominio' | 'rua';
+export type DeliveryRoute = { id: string; name: string; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; kit: KitItem[]; active: boolean; /** Caminho padrão para endereço em condomínio ou na rua. */ appliesTo?: InstallLocation | null };
 export type RouteRule = { id: string; name: string; position: number; minMeters: number | null; maxMeters: number | null; minMbps: number | null; maxMbps: number | null; routeId: string; active: boolean };
 export const SALE_TYPES = ['ativa', 'receptiva'] as const;
 export type SaleType = (typeof SALE_TYPES)[number];
@@ -37,6 +38,8 @@ export type ViabilityParams = {
   commissionRules: CommissionRule[];
   ltv: LtvSettings;
   maxPaybackMonths: number | null;
+  /** Limite de autonomia da operação: acima disso precisa de viabilidade da engenharia. null = sem limite. */
+  autonomy?: { maxMeters: number | null; maxMbps: number | null };
 };
 
 /** Produto que compõe o plano: valor unitário e comissão por venda ativa e receptiva. */
@@ -66,8 +69,9 @@ export type ViabilityInput = {
   saleType: SaleType | null;
   /** Equipamentos escolhidos; null usa o kit do caminho. */
   equipment: KitItem[] | null;
-  /** Caminho escolhido à mão; null usa a regra. */
+  /** Caminho escolhido à mão; null usa o endereço (condomínio/rua) ou a regra. */
   routeId: string | null;
+  location?: InstallLocation | null;
   /** Produtos do plano; com comissão definida, substituem as regras gerais de comissão. */
   products?: PlanProduct[] | null;
 };
@@ -86,6 +90,8 @@ export type ViabilityResult = {
   paybackMonths: number | null;
   ltv: { months: number | null; source: 'base' | 'parametro' | null; sample: number; dealCents: number | null; historicalCents: number | null; ratio: number | null };
   alerts: string[];
+  /** Fora do limite de autonomia: viabilidade da engenharia antes de fechar e projeto executivo depois. */
+  engineering: { required: boolean; reasons: string[] };
 };
 
 const pct = (cents: number, bp: number) => Math.round((cents * bp) / 10_000);
@@ -97,7 +103,10 @@ const inRange = (v: number | null, min: number | null, max: number | null) => {
 export const fmtBp = (bp: number) => `${(bp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 
 /** Primeira regra ativa (pela ordem) que casa metragem e banda; senão o caminho padrão. */
-export function pickRoute(p: Pick<ViabilityParams, 'rules' | 'routes' | 'defaultRouteId'>, meters: number | null, mbps: number | null) {
+export function pickRoute(p: Pick<ViabilityParams, 'rules' | 'routes' | 'defaultRouteId'>, meters: number | null, mbps: number | null, location: InstallLocation | null = null) {
+  // condomínio usa o caminho de condomínio; rua, o de rua
+  const byLocation = location ? p.routes.find((x) => x.active && x.appliesTo === location) : null;
+  if (byLocation) return { route: byLocation, rule: { name: location === 'condominio' ? 'Endereço em condomínio' : 'Endereço na rua' } as RouteRule };
   const rule = [...p.rules].filter((r) => r.active).sort((a, b) => a.position - b.position).find((r) => inRange(meters, r.minMeters, r.maxMeters) && inRange(mbps, r.minMbps, r.maxMbps));
   const route = p.routes.find((x) => x.active && x.id === (rule?.routeId ?? p.defaultRouteId)) ?? null;
   return { route, rule: route && rule ? rule : null };
@@ -134,9 +143,13 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
   const meters = input.cableMeters ?? 0;
   const alerts: string[] = [];
 
-  const picked = input.routeId ? { route: p.routes.find((r) => r.id === input.routeId && r.active) ?? null, rule: null } : pickRoute(p, input.cableMeters, input.mbps);
+  const picked = input.routeId ? { route: p.routes.find((r) => r.id === input.routeId && r.active) ?? null, rule: null } : pickRoute(p, input.cableMeters, input.mbps, input.location ?? null);
   const route = picked.route;
-  if (!route) alerts.push('Nenhum caminho de entrega cadastrado para esta metragem e banda. Cadastre em Configurações → Viabilidade.');
+  if (!route && p.routes.some((r) => r.active)) alerts.push('Nenhum caminho de entrega cobre esta metragem e banda. Confira as regras em Configurações → Viabilidade.');
+  const engReasons: string[] = [];
+  if (p.autonomy?.maxMeters != null && input.cableMeters !== null && input.cableMeters > p.autonomy.maxMeters) engReasons.push(`${input.cableMeters} m de cabo (limite da operação: ${p.autonomy.maxMeters} m)`);
+  if (p.autonomy?.maxMbps != null && input.mbps !== null && input.mbps > p.autonomy.maxMbps) engReasons.push(`${input.mbps} Mbps (limite da operação: ${p.autonomy.maxMbps} Mbps)`);
+  if (engReasons.length) alerts.push(`Fora da autonomia da operação: ${engReasons.join(' e ')}. Precisa de viabilidade da engenharia antes de fechar.`);
   if (route?.requiresApproval) alerts.push(`O caminho “${route.name}” exige aprovação antes de fechar.`);
 
   const applies = (r: AmountRule) => r.active && (!r.routeIds?.length || (route && r.routeIds.includes(route.id)));
@@ -189,7 +202,7 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
   if (ratio !== null && ratio < 3) alerts.push(`LTV/CAC de ${ratio.toLocaleString('pt-BR')}: abaixo de 3, a venda devolve pouco do que custa.`);
 
   return {
-    complete: missing.length === 0 && !!route,
+    complete: missing.length === 0,
     missing,
     route: route ? { id: route.id, name: route.name, byRule: picked.rule?.name ?? null, requiresApproval: route.requiresApproval } : null,
     revenue: { monthlyCents: price, activationFeeCents: activation },
@@ -201,5 +214,6 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
     paybackMonths,
     ltv: { months: life.months, source: life.source, sample: life.sample, dealCents: dealLtv, historicalCents: historicalLtv, ratio },
     alerts,
+    engineering: { required: engReasons.length > 0, reasons: engReasons },
   };
 }

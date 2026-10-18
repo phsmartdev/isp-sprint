@@ -459,7 +459,7 @@ export const businessRoutes = [
         routes: routes.map(strip),
         rules: rules.map(strip),
         commissions: commissions.map(strip),
-        settings: settings ? strip(settings) : { defaultRouteId: null, ltvLifetimeMonths: null, monthlyChurnBp: null, ltvMinSample: 30, maxPaybackMonths: null, defaultActivationFeeCents: null },
+        settings: settings ? strip(settings) : { autonomyMaxMeters: 100, autonomyMaxMbps: 500, defaultRouteId: null, ltvLifetimeMonths: null, monthlyChurnBp: null, ltvMinSample: 30, maxPaybackMonths: null, defaultActivationFeeCents: null },
         base,
       };
     },
@@ -550,7 +550,7 @@ export const businessRoutes = [
         if (!pl) throw unprocessable('Plano inválido.', [{ path: 'planId', message: 'Plano não encontrado' }]);
         price = pl.price;
       }
-      const { result } = await viabilityFor(app.db, auth.tenantId, { valueCents: price, planId: body.planId ?? null, cableMeters: body.cableMeters ?? null, activationFeeCents: body.activationFeeCents ?? null, saleType: body.saleType ?? null, equipment: body.equipment ?? null, routeId: body.routeId ?? null });
+      const { result } = await viabilityFor(app.db, auth.tenantId, { valueCents: price, planId: body.planId ?? null, cableMeters: body.cableMeters ?? null, activationFeeCents: body.activationFeeCents ?? null, saleType: body.saleType ?? null, equipment: body.equipment ?? null, routeId: body.routeId ?? null, location: body.location ?? null });
       return result;
     },
   }),

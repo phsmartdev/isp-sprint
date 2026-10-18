@@ -118,6 +118,9 @@ export const OpportunityDetails = z.object({
   activationFeeCents: cents.optional().nullable(),
   equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
   routeId: uuid.optional().nullable(),
+  engineeringStatus: z.enum(['nao_necessaria', 'pendente', 'aprovada', 'reprovada']).optional(),
+  engineeringTicket: optText(60),
+  executiveTicket: optText(60),
   custom: z.record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type OpportunityDetails = z.infer<typeof OpportunityDetails>;
@@ -357,6 +360,7 @@ export const ViabilitySimulate = z.object({
   saleType: z.enum(['ativa', 'receptiva']).optional().nullable(),
   equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
   routeId: uuid.optional().nullable(),
+  location: z.enum(['condominio', 'rua']).optional().nullable(),
 });
 const optInt = z.number().int().min(0).max(10_000_000).optional().nullable();
 export const DeductionItem = z.object({
@@ -380,6 +384,7 @@ export const RouteItem = z.object({
   installCostCents: cents.default(0),
   monthlyCostCents: cents.default(0),
   requiresApproval: z.boolean().default(false),
+  appliesTo: z.enum(['condominio', 'rua']).optional().nullable(),
   kit: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(1).max(50) })).max(30).default([]),
   active: z.boolean().default(true),
 });
@@ -409,6 +414,8 @@ export const ViabilitySettingsUpdate = z.object({
   ltvMinSample: z.number().int().min(1).max(100_000).default(30),
   maxPaybackMonths: z.number().int().min(1).max(240).optional().nullable(),
   defaultActivationFeeCents: cents.optional().nullable(),
+  autonomyMaxMeters: z.number().int().min(0).max(100_000).optional().nullable(),
+  autonomyMaxMbps: z.number().int().min(0).max(100_000).optional().nullable(),
 });
 export const listOf = <T extends z.ZodTypeAny>(item: T) => z.object({ items: z.array(item).max(200) });
 

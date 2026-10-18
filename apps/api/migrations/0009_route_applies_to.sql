@@ -1,0 +1,1 @@
+ALTER TABLE "delivery_routes" ADD COLUMN "applies_to" text;

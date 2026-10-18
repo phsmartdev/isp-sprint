@@ -101,3 +101,24 @@ describe('telas de configuração (gerência)', () => {
     ok(await carlos.post('/admin/sources', { name: 'Instagram E2E' }), 201);
   });
 });
+
+describe('autonomia da operação e engenharia', () => {
+  it('acima do limite não fecha sem viabilidade aprovada; com aprovação fecha', async () => {
+    ok(await carlos.put('/admin/viability/settings', { ...(await carlos.get('/admin/viability')).json().settings, autonomyMaxMeters: 100, autonomyMaxMbps: 500 }));
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const created = await lucas.post('/opportunities', { newContact: { name: 'Cliente Engenharia Fictício', segment: 'residencial' }, planId: plan.id, saleType: 'ativa', cableMeters: 250, installStreet: 'Rua Fictícia' });
+    ok(created, 201);
+    const o = created.json();
+    expect(o.viability.engineering.required).toBe(true);
+    expect(o.viability.route.name).toBe('Rua');
+    const blocked = await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: o.rowVersion });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().detail).toContain('engenharia');
+    const upd = await lucas.patch(`/opportunities/${o.id}`, { engineeringStatus: 'aprovada', engineeringTicket: 'ENG-1', rowVersion: o.rowVersion });
+    ok(upd);
+    ok(await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: upd.json().rowVersion }));
+    const small = (await lucas.post('/opportunities', { newContact: { name: 'Cliente Curto Fictício', segment: 'residencial' }, planId: plan.id, cableMeters: 60, condominiumId: (await lucas.get('/meta/area')).json().condominiums[0].id })).json();
+    expect(small.viability.engineering.required).toBe(false);
+    expect(small.viability.route.name).toBe('Condomínio');
+  });
+});

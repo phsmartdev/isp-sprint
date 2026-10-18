@@ -11,7 +11,7 @@ import { conflict, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { storeViability } from '../services/viability';
+import { storeViability, viabilityFor } from '../services/viability';
 import { bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
@@ -231,7 +231,7 @@ export const opportunityRoutes = [
           .where(and(eq(s.opportunities.id, params.id), eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.rowVersion, body.rowVersion)))
           .returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(cur.rowVersion);
-        if (Object.keys(changed).some((k) => ['planId', 'cableMeters', 'activationFeeCents', 'saleType', 'equipment', 'routeId'].includes(k))) await storeViability(tx, auth.tenantId, params.id);
+        if (Object.keys(changed).some((k) => ['planId', 'cableMeters', 'activationFeeCents', 'saleType', 'equipment', 'routeId', 'condominiumId', 'installStreet'].includes(k))) await storeViability(tx, auth.tenantId, params.id);
         if (changed.ownerId) await tx.update(s.contacts).set({ ownerId: body.ownerId! }).where(and(eq(s.contacts.id, cur.contactId), eq(s.contacts.tenantId, auth.tenantId)));
         if (Object.keys(changed).length) {
           await tx.insert(s.opportunityEvents).values({
@@ -273,6 +273,12 @@ export const opportunityRoutes = [
           const { content } = await getActiveInstruction(tx, auth.tenantId);
           const issues = await checkStageRequirements(tx, auth.tenantId, cur, target, content, pipe.key);
           if (issues.length) throw unprocessable(`Para entrar em “${target.name}”: ${issues.map((i) => i.message).join(' ')}`, issues);
+        }
+        if (target.kind === 'won') {
+          // fora da autonomia da operação, só fecha com a viabilidade da engenharia aprovada
+          const { result } = await viabilityFor(tx, auth.tenantId, cur);
+          if (result.engineering.required && cur.engineeringStatus !== 'aprovada')
+            throw unprocessable(`Fora da autonomia da operação (${result.engineering.reasons.join(' e ')}). Registre a viabilidade aprovada pela engenharia antes de fechar.`, [{ path: 'engineeringStatus', message: 'Viabilidade da engenharia pendente' }]);
         }
         const now = new Date();
         const reopening = TERMINAL_STAGES.includes(from);
