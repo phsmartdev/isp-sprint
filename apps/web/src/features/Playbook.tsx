@@ -22,7 +22,7 @@ export function StageScript({ oppId, pipelineKey, stage, disabled }: { oppId: st
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const dirty = useRef<Record<string, string>>({});
   const timer = useRef<number>();
-  useEffect(() => { if (answersQ.data) setValues(Object.fromEntries(answersQ.data.items.map((a) => [a.questionId, a.answer]))); }, [answersQ.data]);
+  useEffect(() => { if (answersQ.data) setValues((cur) => ({ ...Object.fromEntries(answersQ.data.items.map((a) => [a.questionId, a.answer])), ...Object.fromEntries(Object.keys(dirty.current).map((k) => [k, cur[k] ?? ''])) })); }, [answersQ.data]);
   const flush = async () => {
     const entries = Object.entries(dirty.current);
     if (!entries.length) return;
@@ -45,10 +45,11 @@ export function StageScript({ oppId, pipelineKey, stage, disabled }: { oppId: st
   };
   if (!journey || !current) return null;
   const answered = (id: string) => !!values[id]?.trim();
-  const Q = ({ q }: { q: InstructionJourney['etapas'][number]['perguntas'][number] }) => {
+  // função comum (não componente): definida aqui dentro, um componente seria recriado a cada tecla e o campo perderia o foco
+  const renderQ = (q: InstructionJourney['etapas'][number]['perguntas'][number]) => {
     const id = `q-${q.id}`;
     return (
-      <div className="rounded-md border border-line p-3">
+      <div key={q.id} className="rounded-md border border-line p-3">
         <label htmlFor={id} className="flex items-start gap-2 text-sm font-semibold text-ink">
           {answered(q.id) ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden /> : <span className={clsx('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', q.obrigatoria ? 'bg-warning' : 'bg-line-strong')} aria-hidden />}
           <span>{q.texto}{q.obrigatoria && <span className="ml-1 text-xs font-normal text-[#B45309]">(obrigatória)</span>}</span>
@@ -84,7 +85,7 @@ export function StageScript({ oppId, pipelineKey, stage, disabled }: { oppId: st
           {current.dicas.map((d) => <li key={d} className="flex gap-2 rounded-md bg-primary-soft px-3 py-2 text-sm text-primary"><Lightbulb className="h-4 w-4 shrink-0" aria-hidden />{d}</li>)}
         </ul>
       )}
-      {current.perguntas.length ? <div className="space-y-2">{current.perguntas.map((q) => <Q key={q.id} q={q} />)}</div> : <p className="text-sm text-muted">Sem perguntas nesta etapa.</p>}
+      {current.perguntas.length ? <div className="space-y-2">{current.perguntas.map(renderQ)}</div> : <p className="text-sm text-muted">Sem perguntas nesta etapa.</p>}
       {earlier.length > 0 && (
         <details className="mt-3">
           <summary className="cursor-pointer text-sm font-semibold text-primary">Etapas anteriores ({earlier.reduce((a, e) => a + e.perguntas.filter((q) => answered(q.id)).length, 0)}/{earlier.reduce((a, e) => a + e.perguntas.length, 0)} respondidas)</summary>
@@ -92,7 +93,7 @@ export function StageScript({ oppId, pipelineKey, stage, disabled }: { oppId: st
             {earlier.map((e) => (
               <div key={e.chave}>
                 <p className="mb-1 text-xs font-semibold text-muted">{e.nome}</p>
-                <div className="space-y-2">{e.perguntas.map((q) => <Q key={q.id} q={q} />)}</div>
+                <div className="space-y-2">{e.perguntas.map(renderQ)}</div>
               </div>
             ))}
           </div>
