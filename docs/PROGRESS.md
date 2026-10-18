@@ -1,6 +1,6 @@
 # Progresso e pendências
 
-Atualizado em 2026-10-17. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
+Atualizado em 2026-10-18. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
 
 ## Fase 0 — Auditoria ✅
 - Legado v1.5 auditado (`AUDIT_LEGACY_v1.5.md`): 4 achados críticos (API aberta sem token, contrato confirmado forjável, XSS armazenado via `id`, sobrescrita arbitrária). Decisão: reescrever; portar só conteúdo de playbook e salvaguardas do adaptador IXC; migrar dados como `legacy_v1.5` não verificado (Fase 3).
@@ -60,7 +60,32 @@ Atualizado em 2026-10-17. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - Integrações e Notificações são telas honestas de “não conectado”; Campanhas é só lista de rótulos.
 - “Meta do mês” da gerência/supervisão soma as metas das pessoas visíveis.
 
-## Próxima etapa — Fase 2 (Sprint completo)
+## Fase 2a — Jornadas, viabilidade, instrução e e-mail ✅ (2026-10-18)
+
+### Implementado
+- **Telas em largura total.**
+- **Cadastro da oportunidade** com os campos pedidos: nome do deal, cliente (novo ou da carteira), telefone, e-mail, endereço (CEP com ViaCEP, logradouro, condomínio, bloco, apartamento), tipo do deal (Residencial/Corporativo), canal de entrada, responsável, jornada, plano, tipo de venda (ativa/receptiva), metragem de cabo, taxa de ativação e campos personalizados da jornada; prévia da viabilidade ao vivo.
+- **Workspace**: autosave dos novos campos, troca de jornada, etapa pelas etapas da jornada com exigências, painel de viabilidade (comissão, CAC, margem, payback, LTV desta venda × histórico, alertas), roteiro do Sprint com respostas, objeções, abas Atividades/Anexos/Histórico, enviar proposta e follow-up por e-mail.
+- **Oportunidades**: abas por jornada, colunas e cores dinâmicas. **Relatórios**: status por jornada e aba Comissões (detalhe e CSV, escopo pelo nível).
+- **Configurações**: Jornadas e automações (criar funil, etapas, exigências, membros, campos, automações, execuções), Área de atendimento, Viabilidade (tributos, parceiros, equipamentos, caminhos com kit, regras de metragem/banda, comissão, LTV, simulador), Modelo de instrução (exportar, enviar, prévia, ativar, versões), E-mail e alertas (SMTP com teste, alertas liga/desliga, registro), plano com velocidade (Mbps), Canais de entrada.
+- **Agendamento** Vercel Cron diário (`/api/v1/cron/alerts`, exige `CRON_SECRET`).
+- Migrations 0004 e 0005 (aplicadas no deploy de produção; jornada “residencial” criada para dados existentes).
+
+### Testes executados (2026-10-18, todos passando)
+| Suíte | Resultado |
+|---|---|
+| `packages/domain` | 24/24 (inclui 7 de viabilidade) |
+| `apps/api` integração | 42/42 (ajustados às exigências de etapa: venda fechada exige plano) |
+| E2E Playwright | 19/19 — os 17 anteriores + cadastro com condomínio/metragem/venda ativa mostrando comissão, CAC e LTV; telas novas de Configurações abrem para a gerência e são bloqueadas para o vendedor |
+| `typecheck` e `build` | OK |
+
+### Limitações conhecidas
+- Testes de API específicos para automações, anexos, SMTP (com servidor falso) e upload de instrução ainda não escritos; o caminho foi conferido manualmente (duplicar na perda gerou cópia na Recuperação com registro em `automation_runs`).
+- Sem `CRON_SECRET`, o resumo diário e o gatilho “parada há X dias” não rodam.
+- LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
+- Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
+
+## Próxima etapa — Fase 2b (Sprint completo)
 1. Tabelas `playbooks`, `playbook_versions`, `opportunity_answers`, `recommendations`, `offers`/`plans`/`plan_versions` (catálogo), `coverage_checks`, `proposals`, `objections`.
 2. Motor determinístico versionado em `packages/playbook` com testes por cenário; portar perguntas e objeções do `engine.js` legado.
 3. Ramo “interesse em oferta” completo (perguntas condicionais, comparação “situação atual × proposta” com origem de cada dado, objeções, desfechos).

@@ -70,3 +70,25 @@ Etapas: Novo lead → Qualificação → Cobertura → Proposta → Fechamento �
 
 ## ADR-021 — Insights por regra fixa
 “Principais insights” da Inteligência são frases geradas por regras sobre os números exibidos, com amostra mínima de 10 registros e o `n` visível. Mostram associação, não causa. Nada de modelo generativo aqui.
+
+## ADR-022 — Modelo de instrução versionado (exportar → adaptar → prévia → ativar)
+A “inteligência do negócio” é um JSON (`isp-sprint/instrucao@1`) com jornadas (etapas, exigências, membros por e-mail, campos, automações), roteiro do Sprint (perguntas e dicas por etapa), objeções, regras dos insights e modelos de e-mail. Upload valida, calcula a prévia (`diffInstruction`) e grava rascunho; só a ativação aplica. Versões antigas ficam (`business_instructions`, uma ativa por empresa) e podem ser reativadas. Estrutura (jornadas/etapas/campos/automações) vive nas tabelas — fonte de verdade, editável também pelo painel; o JSON ativo guarda roteiro, objeções, insights e e-mails, e o export junta os dois. Ativação é bloqueada se remover etapa com oportunidade aberta.
+
+## ADR-023 — Várias jornadas, etapas livres e membros
+`pipelines` por empresa; oportunidade tem `pipeline_id` e etapa por chave livre da jornada (sem CHECK fixo). `ganha` e `perdida` são chaves reservadas dos tipos venda fechada/perda: relatórios e regras de contrato continuam valendo. Jornada sem membros = todos; quem não é membro só vê as próprias oportunidades daquela jornada; gerência vê tudo. A jornada é escolhida pelo tipo do deal (segmento) ou à mão.
+
+## ADR-024 — Exigências por etapa e proposta anexada
+Cada etapa declara o que exige para entrar (plano, proposta anexada, próxima ação, perguntas obrigatórias). O servidor confere na transição; a janela de avanço permite anexar a proposta ali mesmo. Anexos em `bytea` (até 5 MB, tipos conferidos pelos bytes).
+
+## ADR-025 — Automações depois do commit
+Gatilhos: criada, entrou na etapa, venda fechada, perdida, parada há X dias (cron). Ações: criar tarefa, enviar e-mail, mover etapa, duplicar em outro funil (copia eventos, atividades, respostas e anexos, com `duplicated_from_id`), trocar responsável. Rodam após a gravação; falha não desfaz a mudança e fica em `automation_runs`. Profundidade máxima 3 para evitar laço. Perdida não pode “mover etapa” na mesma jornada: usa duplicar.
+
+## ADR-026 — Viabilidade: caminho por metragem e banda, comissão, CAC, payback, LTV
+Função pura em `packages/domain/viability.ts`, centavos e pontos-base. O caminho de entrega sai da primeira regra ativa que casa metros de cabo e Mbps do plano (senão o padrão). Margem = mensalidade − tributos − parceiros − custo mensal do caminho. CAC = comissão + cabo + instalação + equipamentos − taxa de ativação (mín. 0). Payback = CAC ÷ margem. Comissão em três formatos (% da mensalidade, nº de mensalidades, valor fixo) por tipo de venda e faixa de preço. LTV histórico: carteira quando a amostra ≥ mínimo; senão vida média ou 1/churn do parâmetro. O resultado fica gravado na oportunidade; na venda fechada vale o cálculo do dia (comissão não muda retroativamente). Relatório de comissões respeita o nível: vendedor vê só as próprias.
+
+## ADR-027 — Área de atendimento: região → condomínio
+Decisão do cliente (“90% da área é condomínio”): hierarquia de dois níveis, com blocos e endereço no condomínio. O cadastro escolhe condomínio, bloco e apartamento; CEP consulta ViaCEP com 4 s de limite e segue manual se falhar.
+
+## ADR-028 — E-mail por SMTP da empresa
+Senha cifrada com AES-256-GCM (chave de `APP_ENCRYPTION_KEY` ou `COOKIE_SECRET`), nunca devolvida à tela. Todo envio, inclusive falha, vai para `email_messages` (append-only). Usos: proposta e follow-up ao cliente, alertas ao time (resumo diário, lead atribuído, venda fechada) e acesso de usuários. Textos vêm dos modelos de e-mail da instrução.
+

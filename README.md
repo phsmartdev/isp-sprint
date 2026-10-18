@@ -45,7 +45,10 @@ O repositório já vem pronto (`vercel.json` + função `api/server.mjs`): o sit
    - `DATABASE_URL` — a URL do Postgres (com a senha).
    - `COOKIE_SECRET` — 64 caracteres aleatórios.
    - `SEED_DEMO` = `true` — só se quiser a empresa fictícia Yepnet de demonstração (criada uma vez, em banco vazio).
-4. **Deploy.** O build aplica as migrations no banco e, com `SEED_DEMO=true`, cria os dados de demonstração.
+   - `CRON_SECRET` (opcional) — senha longa qualquer. Liga o agendamento diário (07:00, Bahia) do `vercel.json`: resumo de atividades por e-mail e automações “parada há X dias”. A Vercel envia `Authorization: Bearer CRON_SECRET` sozinha.
+   - `APP_ENCRYPTION_KEY` (opcional) — chave para cifrar a senha do SMTP. Sem ela usa o `COOKIE_SECRET`; se trocar a chave depois, salve a senha do SMTP de novo.
+4. **Deploy.** O build aplica as migrations no banco (só em produção) e, com `SEED_DEMO=true`, cria os dados de demonstração.
+5. Em **Configurações → E-mail e alertas**, cadastre o SMTP e clique em **Testar**.
 
 Domínios próprios: acrescente-os em `WEB_ORIGIN` (separados por vírgula). As URLs `*.vercel.app` do projeto já são aceitas automaticamente.
 
@@ -64,8 +67,8 @@ Sem acesso ao download de navegadores do Playwright, aponte para um Chromium loc
 ```text
 apps/api          Fastify + Drizzle: auth por sessão, RBAC, rotas /api/v1, OpenAPI em /api/v1/openapi.json
 apps/web          React + Vite + Tailwind; tokens em src/styles/tokens.css
-packages/domain   Regras puras: permissões, estados e transições, temperatura, SLA, dinheiro, CSV seguro
-packages/shared   Schemas Zod compartilhados (entrada da API = validação do formulário)
+packages/domain   Regras puras: permissões, estados, temperatura, SLA, dinheiro, CSV seguro, viabilidade (CAC, margem, payback, LTV)
+packages/shared   Schemas Zod compartilhados e o modelo de instrução (jornadas, roteiro, insights, e-mails)
 tests/e2e         Jornadas Playwright
 docs/             AUDIT_LEGACY_v1.5, DECISIONS (ADRs), PROGRESS (estado e backlog)
 ```

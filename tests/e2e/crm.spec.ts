@@ -10,9 +10,10 @@ async function login(page: Page, email: string) {
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
 
-async function newOpportunity(page: Page, name: string) {
+async function newOpportunity(page: Page, name: string, opts: { plan?: boolean } = {}) {
   await page.goto('/opportunities/new');
-  await page.getByLabel('Nome').fill(name);
+  await page.getByLabel('Nome do cliente').fill(name);
+  if (opts.plan !== false) await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
   await page.getByText('Oferta / curiosidade').click();
   await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
@@ -105,14 +106,14 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
 
 test('Sprint: plano define o valor pelo catálogo', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
-  await newOpportunity(page, 'Cliente E2E Plano');
+  await newOpportunity(page, 'Cliente E2E Plano', { plan: false });
   const plan = page.getByLabel('Plano', { exact: true });
   const option = plan.locator('option').nth(1);
   const text = (await option.textContent())!;
   await plan.selectOption({ index: 1 });
   await expect(page.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
   const price = text.split('—')[1]!.trim();
-  await expect(page.getByText(`Valor do catálogo: ${price}/mês`)).toBeVisible();
+  await expect(page.getByText(new RegExp(`^Catálogo: ${price.replace(/[$.]/g, '\\$&')}/mês`))).toBeVisible();
 });
 
 test('Sprint: venda fechada pede confirmação e não confirma contrato', async ({ page }) => {
@@ -212,3 +213,47 @@ for (const width of [390, 768, 1280, 1440]) {
     }
   });
 }
+
+test('cadastro com condomínio, metragem e venda ativa mostra comissão, CAC e LTV', async ({ page }) => {
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/opportunities/new');
+  await page.getByLabel('Nome do cliente').fill('Cliente E2E Viabilidade');
+  await page.getByLabel('Nome do deal').fill('500 Mega Ap 101');
+  const condo = page.getByLabel('Condomínio');
+  await condo.selectOption({ index: 1 });
+  await page.getByLabel('Apartamento').fill('101');
+  await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
+  await page.getByRole('radiogroup', { name: 'Tipo de venda' }).getByRole('radio', { name: 'Ativa' }).click();
+  await page.getByLabel('Metragem de cabo (m)').fill('80');
+  const preview = page.locator('aside');
+  await expect(preview.getByText('CAC', { exact: true }).first()).toBeVisible();
+  await expect(preview.getByText('LTV histórico')).toBeVisible();
+  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+  await expect(page.getByText('Sua comissão').first()).toBeVisible();
+  await expect(page.getByLabel('Apartamento').first()).toHaveValue('101');
+});
+
+test('gerência abre jornadas, viabilidade, área, modelo de instrução e e-mail; vendedor não', async ({ browser }) => {
+  const g = await (await browser.newContext()).newPage();
+  await login(g, 'carlos@yepnet.test');
+  for (const [path, heading] of [
+    ['/settings/journeys', 'Jornadas de vendas'],
+    ['/settings/viability', 'Viabilidade da venda'],
+    ['/settings/area', 'Área de atendimento'],
+    ['/settings/instructions', 'Modelo de instrução da inteligência do negócio'],
+    ['/settings/email', 'Servidor de e-mail (SMTP)'],
+  ] as const) {
+    await g.goto(path);
+    await expect(g.getByRole('heading', { name: heading })).toBeVisible();
+  }
+  await g.goto('/settings/journeys');
+  await g.getByRole('button', { name: 'Configurar' }).first().click();
+  await g.getByRole('tab', { name: /Automações/ }).click();
+  await expect(g.getByText(/Perdeu|Recupera/).first()).toBeVisible();
+
+  const v = await (await browser.newContext()).newPage();
+  await login(v, 'lucas@yepnet.test');
+  await v.goto('/settings/viability');
+  await expect(v.getByText('Sem acesso a este módulo')).toBeVisible();
+});
