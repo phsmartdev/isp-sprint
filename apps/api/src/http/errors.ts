@@ -46,6 +46,12 @@ export function errorHandler(err: FastifyError | Error, req: FastifyRequest, rep
   const pgCode = (err as { code?: string }).code;
   if (pgCode === '23505') return sendProblem(reply, req, { status: 409, title: 'Registro duplicado', detail: 'Já existe um registro com estes dados.' });
   if (pgCode === '23503' || pgCode === '23514') return sendProblem(reply, req, { status: 422, title: 'Dados inválidos', detail: 'Referência ou valor não permitido.' });
+  const msg = String(err.message ?? '');
+  if (/max clients|too many clients|remaining connection slots|Connection terminated|ECONNRESET|timeout exceeded when trying to connect/i.test(msg)) {
+    req.log.warn({ err }, 'banco sem conexão disponível');
+    reply.header('retry-after', '2');
+    return sendProblem(reply, req, { status: 503, title: 'Banco ocupado', detail: 'O banco de dados está sem conexões livres no momento. Tente de novo em alguns segundos.' });
+  }
   req.log.error({ err }, 'erro não tratado');
   // Gerência (Configurações = total) vê a causa técnica para diagnosticar sem acesso aos logs.
   const auth = (req as { auth?: { access?: Record<string, string> } | null }).auth;

@@ -6,7 +6,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { FastifyInstance } from 'fastify';
 import { loadConfig } from './config';
-import { createDb } from './db/client';
+import { createDb, serverlessUrl } from './db/client';
 import { buildApp } from './app';
 
 let ready: Promise<FastifyInstance> | null = null;
@@ -15,7 +15,7 @@ function getApp() {
   if (!ready) {
     ready = (async () => {
       const config = loadConfig();
-      const { db } = createDb(config.databaseUrl, 3);
+      const { db } = createDb(serverlessUrl(config.databaseUrl), 3, { idleMs: 5_000 });
       const app = await buildApp({ config, db });
       await app.ready();
       return app;

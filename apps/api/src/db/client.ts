@@ -13,11 +13,31 @@ export function poolConfig(url: string, max = 10): pg.PoolConfig {
   const u = new URL(url);
   const local = ['localhost', '127.0.0.1', '::1'].includes(u.hostname) || process.env.DB_SSL === 'disable';
   u.searchParams.delete('sslmode');
-  return { connectionString: u.toString(), max, idleTimeoutMillis: 30_000, ssl: local ? undefined : { rejectUnauthorized: false } };
+  return { connectionString: u.toString(), max, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000, ssl: local ? undefined : { rejectUnauthorized: false } };
 }
 
-export function createDb(url: string, max = 10) {
-  const pool = new pg.Pool(poolConfig(url, max));
+/**
+ * Na Vercel cada instância da função abre conexões próprias. O pooler do Supabase em modo
+ * sessão (porta 5432) tem poucas vagas e esgota ("max clients reached"); o modo transação
+ * (porta 6543, mesmo host) devolve a conexão a cada transação. O driver usa consultas sem
+ * nome (sem prepared statements nomeados) e os bloqueios são por transação, então é seguro.
+ * DB_POOL_MODE=session desliga a troca.
+ */
+export function serverlessUrl(url: string) {
+  try {
+    const u = new URL(url);
+    if (process.env.DB_POOL_MODE !== 'session' && u.hostname.endsWith('.pooler.supabase.com') && (u.port === '5432' || u.port === '')) {
+      u.port = '6543';
+      return u.toString();
+    }
+  } catch { /* URL inválida: o config já explica */ }
+  return url;
+}
+
+export function createDb(url: string, max = 10, opts: { idleMs?: number } = {}) {
+  const pool = new pg.Pool({ ...poolConfig(url, max), ...(opts.idleMs ? { idleTimeoutMillis: opts.idleMs } : {}) });
+  // conexão derrubada pelo pooler não pode derrubar o processo
+  pool.on('error', () => {});
   const db = drizzle(pool, { schema });
   return { db, pool };
 }
