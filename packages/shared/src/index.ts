@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  OPPORTUNITY_STAGES, LEAD_STATUSES, OPPORTUNITY_REASONS, LOSS_REASONS, ACTIVITY_TYPES, ACTIVITY_PRIORITIES, SEGMENTS, CUSTOMER_LIFECYCLES,
+  LEAD_STATUSES, OPPORTUNITY_REASONS, LOSS_REASONS, ACTIVITY_TYPES, ACTIVITY_PRIORITIES, SEGMENTS, CUSTOMER_LIFECYCLES,
   MODULES, ACCESS_LEVELS, PROFILE_KEYS,
 } from '@isp/domain';
 
@@ -19,6 +19,7 @@ const phone = z
 const email = z.string().trim().toLowerCase().email('E-mail inválido').max(200).optional().nullable().or(z.literal('').transform(() => null));
 const cents = z.number().int().min(0).max(100_000_000);
 const rowVersion = z.number().int().min(1);
+const stageKey = z.string().trim().regex(/^[a-z][a-z0-9_]{1,39}$/, 'Etapa inválida');
 
 // ------------------------------------------------------------------ auth
 export const LoginInput = z.object({
@@ -91,7 +92,8 @@ export const BulkAssign = z.object({
 export const OPPORTUNITY_SORTS = ['updated_at', 'created_at', 'title', 'value_cents', 'next_action_at', 'stage'] as const;
 export const OpportunityListQuery = PageQuery.extend({
   q: trimmed(100).optional(),
-  stage: z.enum(OPPORTUNITY_STAGES).optional(),
+  stage: stageKey.optional(),
+  pipelineId: uuid.optional(),
   ownerId: z.union([uuid, z.literal('me')]).optional(),
   sourceId: uuid.optional(),
   planId: uuid.optional(),
@@ -113,6 +115,8 @@ export const OpportunityCreate = z
     reasons: z.array(z.enum(OPPORTUNITY_REASONS)).max(6).default([]),
     ownerId: uuid.optional().nullable(),
     planId: uuid.optional().nullable(),
+    /** Jornada. Em branco: a do segmento do cliente ou a padrão. */
+    pipelineId: uuid.optional().nullable(),
   })
   .refine((v) => !!v.contactId !== !!v.newContact, {
     message: 'Selecione um contato existente ou informe um novo contato (apenas um).',
@@ -129,6 +133,8 @@ export const OpportunityUpdate = z.object({
   reasons: z.array(z.enum(OPPORTUNITY_REASONS)).max(6).optional(),
   /** O valor vem do catálogo: escolher o plano define o preço. Não há valor digitado. */
   planId: uuid.optional().nullable(),
+  /** Trocar de jornada: a etapa passa para a de mesma chave na nova jornada, ou a primeira. */
+  pipelineId: uuid.optional(),
   nextAction: optText(200),
   nextActionAt: isoDate.optional().nullable(),
   notes: optText(4000),
@@ -137,7 +143,7 @@ export const OpportunityUpdate = z.object({
 export type OpportunityUpdate = z.infer<typeof OpportunityUpdate>;
 
 export const OpportunityTransition = z.object({
-  toStage: z.enum(OPPORTUNITY_STAGES),
+  toStage: stageKey,
   reason: optText(500),
   lossReason: z.enum(LOSS_REASONS).optional().nullable(),
   confirm: z.boolean().optional(),
@@ -195,12 +201,13 @@ export const CustomerListQuery = PageQuery.extend({
 });
 
 // ------------------------------------------------------------------ relatórios e inteligência
-export const PeriodQuery = z
-  .object({
-    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  })
-  .refine((v) => v.from <= v.to, { message: 'A data inicial deve ser anterior à final', path: ['from'] });
+export const PeriodFields = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+const periodOrder = (v: { from: string; to: string }) => v.from <= v.to;
+export const PeriodQuery = PeriodFields.refine(periodOrder, { message: 'A data inicial deve ser anterior à final', path: ['from'] });
+export const ReportQuery = PeriodFields.extend({ pipelineId: z.string().uuid().optional() }).refine(periodOrder, { message: 'A data inicial deve ser anterior à final', path: ['from'] });
 
 // ------------------------------------------------------------------ administração
 export const SecurityUpdate = z.object({
@@ -264,3 +271,47 @@ export type Problem = {
   errors?: { path: string; message: string }[];
   currentRowVersion?: number;
 };
+export * from './instruction';
+
+// ------------------------------------------------------------------ roteiro, anexos e e-mail da oportunidade
+export const AnswersPut = z.object({
+  answers: z.array(z.object({ questionId: stageKey, answer: z.string().trim().max(2000) })).min(1).max(60),
+});
+
+export const ATTACHMENT_KINDS = ['proposta', 'outro'] as const;
+export const AttachmentUpload = z.object({
+  kind: z.enum(ATTACHMENT_KINDS).default('proposta'),
+  filename: z.string().trim().min(1).max(160),
+  /** Conteúdo em base64 (até 3 MB). */
+  data: z.string().min(8).max(4_300_000),
+});
+
+export const OpportunityEmail = z.object({
+  kind: z.enum(['proposta', 'followup']),
+  to: z.string().trim().toLowerCase().email('E-mail do cliente inválido').max(200),
+  subject: z.string().trim().min(2).max(200),
+  body: z.string().trim().min(2).max(10_000),
+  attachmentId: uuid.optional().nullable(),
+});
+
+// ------------------------------------------------------------------ SMTP, notificações e modelo de instrução
+export const SmtpUpdate = z.object({
+  host: z.string().trim().min(3).max(200).regex(/^[a-zA-Z0-9.-]+$/, 'Servidor inválido'),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean(),
+  username: z.string().trim().max(200).optional().nullable().transform((v) => (v ? v : null)),
+  /** undefined = manter a senha atual; '' = remover. */
+  password: z.string().max(500).optional(),
+  fromName: z.string().trim().min(2).max(120),
+  fromEmail: z.string().trim().toLowerCase().email('Remetente inválido').max(200),
+  replyTo: z.string().trim().toLowerCase().email('Responder para inválido').max(200).optional().nullable().or(z.literal('').transform(() => null)),
+  enabled: z.boolean().default(true),
+});
+export const SmtpTest = z.object({ to: z.string().trim().toLowerCase().email('E-mail inválido').max(200) });
+export const NotificationUpdate = z.object({
+  activityDigest: z.boolean(),
+  leadAssigned: z.boolean(),
+  dealWon: z.boolean(),
+  userAccess: z.boolean(),
+});
+export const InstructionUpload = z.object({ content: z.unknown(), notes: z.string().trim().max(300).optional().nullable() });

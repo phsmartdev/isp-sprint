@@ -6,12 +6,34 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, STAGE_LABELS, TERMINAL_STAGES, type ProfileKey } from '@isp/domain';
+import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, type ProfileKey } from '@isp/domain';
+import { createHash } from 'node:crypto';
+import { getActiveInstruction } from '../services/instructions';
 import { createDb, type DB } from './client';
 import * as s from './schema';
 import { hashPassword } from '../auth/password';
 
 export const SEED_PASSWORD = 'Sprint@2026';
+
+/** PDF mínimo válido com texto fictício (só para demonstração). */
+function fakeProposalPdf(client: string, plan: string, cents: number) {
+  const ascii = (t: string) => t.normalize('NFD').replace(/[^\x20-\x7E]/g, '').replace(/[()\\]/g, '');
+  const lines = ['PROPOSTA COMERCIAL - DADOS FICTICIOS', `Cliente: ${ascii(client)}`, `Plano: ${ascii(plan)}`, `Valor mensal: R$ ${(cents / 100).toFixed(2).replace('.', ',')}`];
+  const stream = `BT /F1 14 Tf 60 760 Td ${lines.map((l, i) => `${i ? '0 -24 Td ' : ''}(${l}) Tj`).join(' ')} ET`;
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
 
 function rng(seed = 42) {
   let a = seed;
@@ -112,9 +134,12 @@ export async function seedTenant(
     .returning();
   const planWeights: [typeof planRows[number], number][] = [[planRows[0]!, 17], [planRows[1]!, 8], [planRows[2]!, 25], [planRows[3]!, 42], [planRows[4]!, 12], [planRows[5]!, 4]];
 
-  await db.insert(s.pipelineStages).values(
-    OPPORTUNITY_STAGES.map((key, i) => ({ tenantId: tenant.id, key, name: STAGE_LABELS[key], position: i, isTerminal: TERMINAL_STAGES.includes(key) })),
-  );
+  // jornadas vêm do modelo de instrução inicial (Residencial e Empresarial)
+  await getActiveInstruction(db, tenant.id);
+  const pipes = await db.select().from(s.pipelines).where(eq(s.pipelines.tenantId, tenant.id));
+  const pipeRes = pipes.find((p) => p.key === 'residencial')!;
+  const pipeEmp = pipes.find((p) => p.key === 'empresarial')!;
+  const EMP_STAGE: Record<string, string> = { qualificacao: 'diagnostico', cobertura: 'visita_tecnica', fechamento: 'negociacao' };
 
   const makeContact = async (ownerId: string | null, segment?: 'residencial' | 'empresarial' | 'governamental' | 'institucional') => {
     const seg = segment ?? (r() < 0.78 ? 'residencial' : 'empresarial');
@@ -171,7 +196,9 @@ export async function seedTenant(
     const ownerId = weighted(sellerWeights);
     const plan = weighted(planWeights);
     const c = await makeContact(ownerId, plan.segment === 'institucional' ? 'institucional' : plan.segment === 'empresarial' ? (r() > 0.7 ? 'governamental' : 'empresarial') : 'residencial');
-    const stage = weighted(stageW);
+    const baseStage = weighted(stageW);
+    const business = c.segment !== 'residencial';
+    const stage = business ? (EMP_STAGE[baseStage] ?? baseStage) : baseStage;
     const terminal = stage === 'ganha' || stage === 'perdida';
     const created = terminal ? at(-recentDay() - 3, 9 + Math.floor(r() * 8), Math.floor(r() * 60)) : at(-Math.floor(Math.pow(r(), 1.3) * 50), 8 + Math.floor(r() * 9), Math.floor(r() * 60));
     const changed = new Date(Math.min(now - 3_600_000, created.getTime() + (1 + r() * 12) * DAY));
@@ -182,16 +209,17 @@ export async function seedTenant(
         contactId: c.id,
         ownerId,
         title: `${plan.name} — ${c.segment === 'residencial' ? 'Internet residencial' : 'Internet empresarial'}`,
+        pipelineId: business ? pipeEmp.id : pipeRes.id,
         stage,
         planId: plan.id,
         reasons: [pick(['oferta', 'comparacao', 'nova_instalacao', 'satisfeito_aberto', 'problema'] as const)],
         channel: pick(CHANNELS),
         sourceId: sourceByName[weighted(SOURCES)],
         valueCents: plan.priceCents,
-        coverageStatus: ['proposta', 'fechamento', 'ganha'].includes(stage) ? 'elegivel' : stage === 'cobertura' ? 'pendente' : 'nao_consultada',
-        proposalStatus: stage === 'ganha' ? 'aceita' : ['proposta', 'fechamento'].includes(stage) ? 'enviada' : 'nao_criada',
+        coverageStatus: ['proposta', 'fechamento', 'ganha'].includes(baseStage) ? 'elegivel' : baseStage === 'cobertura' ? 'pendente' : 'nao_consultada',
+        proposalStatus: baseStage === 'ganha' ? 'aceita' : ['proposta', 'fechamento'].includes(baseStage) ? 'enviada' : 'nao_criada',
         // nenhuma venda da seed tem contrato confirmado: isso exige confirmação externa (IXC)
-        contractRequestStatus: stage === 'ganha' || stage === 'fechamento' ? 'pendente' : 'nao_solicitada',
+        contractRequestStatus: baseStage === 'ganha' || baseStage === 'fechamento' ? 'pendente' : 'nao_solicitada',
         nextAction: terminal ? null : pick(['Retornar com comparação', 'Verificar cobertura no endereço', 'Enviar condições da oferta', 'Confirmar decisão com cliente', 'Agendar instalação']),
         nextActionAt: terminal ? null : at(Math.floor(r() * 4) - 1, 9 + Math.floor(r() * 8), [0, 15, 30, 45][Math.floor(r() * 4)]!),
         lossReason: stage === 'perdida' ? pick(['preco', 'sem_cobertura', 'satisfeito_atual', 'sem_resposta']) : null,
@@ -205,6 +233,10 @@ export async function seedTenant(
       })
       .returning();
     opps.push({ id: o!.id, ownerId, contactId: c.id, stage, segment: c.segment });
+    if (['fechamento', 'ganha'].includes(baseStage)) {
+      const pdf = fakeProposalPdf(c.name, plan.name, plan.priceCents);
+      await db.insert(s.opportunityAttachments).values({ tenantId: tenant.id, opportunityId: o!.id, kind: 'proposta', filename: `Proposta ${plan.name} - ${c.name}.pdf`, mime: 'application/pdf', sizeBytes: pdf.length, sha256: createHash('sha256').update(pdf).digest('hex'), data: pdf, uploadedBy: ownerId, createdAt: changed });
+    }
     // boa parte das oportunidades nasceu de um lead convertido (alimenta o funil por coorte da Inteligência)
     if (r() < 0.55) {
       const leadCreated = new Date(created.getTime() - (2 + r() * 48) * 3_600_000);

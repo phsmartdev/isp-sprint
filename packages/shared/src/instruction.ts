@@ -1,0 +1,300 @@
+/**
+ * Modelo de instrução da inteligência do negócio.
+ *
+ * Um único documento JSON, versionado por empresa, que define:
+ *  - jornadas de venda (cada uma com seu pipeline e etapas, e o que cada etapa exige para entrar);
+ *  - roteiro do Sprint (perguntas por etapa, dicas e objeções);
+ *  - regras dos insights da tela Inteligência;
+ *  - modelos de e-mail.
+ *
+ * A gerência exporta o modelo ativo, adapta (à mão ou com ajuda de uma IA) e envia de volta.
+ * O sistema valida, mostra a prévia do que muda e só aplica quando alguém clica em Ativar.
+ */
+import { z } from 'zod';
+
+export const INSTRUCTION_SCHEMA_ID = 'isp-sprint/instrucao@1';
+
+const SEGMENTS = ['residencial', 'empresarial', 'governamental', 'institucional'] as const;
+const slug = z.string().trim().regex(/^[a-z][a-z0-9_]{1,39}$/, 'Use letras minúsculas, números e _ (2 a 40 caracteres, começando por letra)');
+const text = (max: number) => z.string().trim().min(1, 'Não pode ficar vazio').max(max);
+const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Cor no formato #RRGGBB').optional();
+
+export const EMAIL_TEMPLATE_KEYS = ['proposta', 'followup', 'convite_usuario', 'nova_senha', 'alerta_atividades', 'alerta_lead_atribuido', 'alerta_venda_fechada'] as const;
+export type EmailTemplateKey = (typeof EMAIL_TEMPLATE_KEYS)[number];
+export const EMAIL_TEMPLATE_LABELS: Record<EmailTemplateKey, string> = {
+  proposta: 'Proposta ao cliente',
+  followup: 'Follow-up ao cliente',
+  convite_usuario: 'Convite de usuário',
+  nova_senha: 'Nova senha de usuário',
+  alerta_atividades: 'Alerta de atividades vencidas',
+  alerta_lead_atribuido: 'Alerta de lead atribuído',
+  alerta_venda_fechada: 'Alerta de venda fechada',
+};
+
+/** Variáveis disponíveis em cada modelo de e-mail ({{variavel}}). */
+export const EMAIL_VARIABLES: Record<EmailTemplateKey, string[]> = {
+  proposta: ['cliente.nome', 'vendedor.nome', 'vendedor.email', 'plano.nome', 'plano.valor', 'empresa.nome'],
+  followup: ['cliente.nome', 'vendedor.nome', 'vendedor.email', 'plano.nome', 'plano.valor', 'empresa.nome'],
+  convite_usuario: ['usuario.nome', 'usuario.email', 'senha_temporaria', 'link', 'empresa.nome'],
+  nova_senha: ['usuario.nome', 'senha_temporaria', 'link', 'empresa.nome'],
+  alerta_atividades: ['usuario.nome', 'quantidade', 'lista', 'link', 'empresa.nome'],
+  alerta_lead_atribuido: ['usuario.nome', 'lead.nome', 'lead.telefone', 'atribuido_por', 'link', 'empresa.nome'],
+  alerta_venda_fechada: ['usuario.nome', 'cliente.nome', 'vendedor.nome', 'plano.nome', 'plano.valor', 'link', 'empresa.nome'],
+};
+
+export const QuestionSchema = z.object({
+  id: slug,
+  texto: text(300),
+  ajuda: z.string().trim().max(500).optional(),
+  tipo: z.enum(['texto', 'sim_nao', 'opcoes']).default('texto'),
+  opcoes: z.array(text(80)).max(12).optional(),
+  obrigatoria: z.boolean().default(false),
+});
+
+export const StageSchema = z.object({
+  chave: slug,
+  nome: text(40),
+  tipo: z.enum(['aberta', 'ganha', 'perdida']).default('aberta'),
+  cor: color,
+  /** O que a oportunidade precisa ter para ENTRAR nesta etapa. */
+  exige: z
+    .object({
+      proposta: z.boolean().default(false),
+      plano: z.boolean().default(false),
+      proximaAcao: z.boolean().default(false),
+      respostasObrigatorias: z.boolean().default(false),
+    })
+    .default({}),
+  perguntas: z.array(QuestionSchema).max(30).default([]),
+  dicas: z.array(text(300)).max(10).default([]),
+});
+
+export const JourneySchema = z.object({
+  chave: slug,
+  nome: text(60),
+  descricao: z.string().trim().max(300).optional(),
+  padrao: z.boolean().default(false),
+  /** Segmentos que usam esta jornada automaticamente ao criar uma oportunidade. */
+  segmentos: z.array(z.enum(SEGMENTS)).default([]),
+  etapas: z.array(StageSchema).min(3).max(15),
+});
+
+export const ObjectionSchema = z.object({
+  id: slug,
+  titulo: text(120),
+  resposta: text(1500),
+  jornadas: z.array(slug).default([]),
+});
+
+export const InsightRulesSchema = z.object({
+  amostraMinima: z.number().int().min(3).max(1000).default(10),
+  crescimentoLeads: z.object({ ativo: z.boolean().default(true) }).default({}),
+  planoMaisVendido: z.object({ ativo: z.boolean().default(true) }).default({}),
+  conversao: z.object({ ativo: z.boolean().default(true), metaPercentual: z.number().min(0).max(100).optional() }).default({}),
+  regiao: z.object({ ativo: z.boolean().default(true) }).default({}),
+});
+
+export const EmailTemplateSchema = z.object({ assunto: text(200), corpo: text(5000) });
+
+export const InstructionSchema = z.object({
+  schema: z.literal(INSTRUCTION_SCHEMA_ID),
+  _leia_me: z.array(z.string()).optional(),
+  versao: z.number().int().optional(),
+  descricao: z.string().trim().max(500).optional(),
+  jornadas: z.array(JourneySchema).min(1).max(20),
+  objecoes: z.array(ObjectionSchema).max(100).default([]),
+  insights: InsightRulesSchema.default({}),
+  emails: z.object({ modelos: z.object(Object.fromEntries(EMAIL_TEMPLATE_KEYS.map((k) => [k, EmailTemplateSchema])) as Record<EmailTemplateKey, typeof EmailTemplateSchema>) }),
+});
+export type Instruction = z.infer<typeof InstructionSchema>;
+export type InstructionJourney = z.infer<typeof JourneySchema>;
+export type InstructionStage = z.infer<typeof StageSchema>;
+export type InstructionQuestion = z.infer<typeof QuestionSchema>;
+
+export type InstructionIssue = { path: string; message: string };
+
+/** Regras que o schema sozinho não expressa. Retorna lista vazia quando está tudo certo. */
+export function checkInstruction(i: Instruction): InstructionIssue[] {
+  const issues: InstructionIssue[] = [];
+  const dup = <T>(arr: T[], key: (x: T) => string) => arr.map(key).filter((k, idx, all) => all.indexOf(k) !== idx);
+  for (const k of dup(i.jornadas, (j) => j.chave)) issues.push({ path: 'jornadas', message: `Chave de jornada repetida: ${k}` });
+  const defaults = i.jornadas.filter((j) => j.padrao).length;
+  if (defaults !== 1) issues.push({ path: 'jornadas', message: `Marque exatamente uma jornada como padrao (hoje: ${defaults})` });
+  const segOwners = new Map<string, string>();
+  i.jornadas.forEach((j, ji) => {
+    const base = `jornadas[${ji}] (${j.chave})`;
+    for (const s of j.segmentos) {
+      if (segOwners.has(s)) issues.push({ path: base, message: `Segmento ${s} já está na jornada ${segOwners.get(s)}` });
+      else segOwners.set(s, j.chave);
+    }
+    for (const k of dup(j.etapas, (e) => e.chave)) issues.push({ path: base, message: `Chave de etapa repetida: ${k}` });
+    const won = j.etapas.filter((e) => e.tipo === 'ganha');
+    const lost = j.etapas.filter((e) => e.tipo === 'perdida');
+    if (won.length !== 1 || won[0]!.chave !== 'ganha') issues.push({ path: base, message: 'Cada jornada precisa de exatamente uma etapa tipo "ganha", com chave "ganha"' });
+    if (lost.length !== 1 || lost[0]!.chave !== 'perdida') issues.push({ path: base, message: 'Cada jornada precisa de exatamente uma etapa tipo "perdida", com chave "perdida"' });
+    j.etapas.forEach((e, ei) => {
+      if (e.tipo === 'aberta' && (e.chave === 'ganha' || e.chave === 'perdida')) issues.push({ path: `${base}.etapas[${ei}]`, message: `A chave ${e.chave} é reservada` });
+      for (const q of dup(e.perguntas, (x) => x.id)) issues.push({ path: `${base}.etapas[${ei}]`, message: `Pergunta repetida: ${q}` });
+      e.perguntas.forEach((q, qi) => {
+        if (q.tipo === 'opcoes' && (!q.opcoes || q.opcoes.length < 2)) issues.push({ path: `${base}.etapas[${ei}].perguntas[${qi}]`, message: 'Pergunta do tipo opcoes precisa de ao menos 2 opções' });
+      });
+    });
+    if (j.etapas.filter((e) => e.tipo === 'aberta').length < 1) issues.push({ path: base, message: 'A jornada precisa de ao menos uma etapa aberta' });
+    if (j.etapas[0]?.tipo !== 'aberta') issues.push({ path: base, message: 'A primeira etapa precisa ser aberta' });
+  });
+  const allQ = i.jornadas.flatMap((j) => j.etapas.flatMap((e) => e.perguntas.map((q) => `${j.chave}.${q.id}`)));
+  for (const q of dup(allQ, (x) => x)) issues.push({ path: 'jornadas', message: `Pergunta repetida na mesma jornada: ${q}` });
+  for (const k of dup(i.objecoes, (o) => o.id)) issues.push({ path: 'objecoes', message: `Objeção repetida: ${k}` });
+  const keys = new Set(i.jornadas.map((j) => j.chave));
+  i.objecoes.forEach((o, oi) => o.jornadas.forEach((j) => { if (!keys.has(j)) issues.push({ path: `objecoes[${oi}]`, message: `Jornada inexistente: ${j}` }); }));
+  for (const k of EMAIL_TEMPLATE_KEYS) {
+    const t = i.emails.modelos[k];
+    const used = [...`${t.assunto} ${t.corpo}`.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map((m) => m[1]!);
+    for (const v of used) if (!EMAIL_VARIABLES[k].includes(v)) issues.push({ path: `emails.modelos.${k}`, message: `Variável desconhecida {{${v}}}. Disponíveis: ${EMAIL_VARIABLES[k].join(', ')}` });
+  }
+  return issues;
+}
+
+/** Lê e valida um JSON enviado. Erros com caminho legível. */
+export function parseInstruction(raw: unknown): { ok: true; value: Instruction } | { ok: false; issues: InstructionIssue[] } {
+  const r = InstructionSchema.safeParse(raw);
+  if (!r.success) return { ok: false, issues: r.error.issues.map((x) => ({ path: x.path.join('.') || '(raiz)', message: x.message })) };
+  const issues = checkInstruction(r.data);
+  return issues.length ? { ok: false, issues } : { ok: true, value: r.data };
+}
+
+export const INSTRUCTION_README = [
+  'Modelo de instrução do ISP Sprint. Edite e envie em Configurações → Modelo de instrução.',
+  'Nada muda até você revisar a prévia e clicar em Ativar. As versões anteriores ficam guardadas.',
+  'jornadas: cada jornada é um pipeline. "padrao": true em exatamente uma. "segmentos" escolhe a jornada automaticamente pelo segmento do cliente.',
+  'etapas: na ordem do funil. tipo "aberta", e no fim uma etapa tipo "ganha" (chave "ganha") e uma tipo "perdida" (chave "perdida").',
+  'Não renomeie a chave de uma etapa que tem oportunidades abertas; mude só o "nome". Chaves: letras minúsculas, números e _.',
+  'exige: o que a oportunidade precisa ter para ENTRAR na etapa (proposta anexada, plano escolhido, próxima ação, perguntas obrigatórias respondidas).',
+  'perguntas: roteiro mostrado no Sprint daquela etapa. tipo texto, sim_nao ou opcoes (com "opcoes").',
+  'objecoes: respostas sugeridas; "jornadas" vazio vale para todas.',
+  'insights: amostraMinima é o mínimo de registros para gerar uma frase; cada regra pode ser desligada.',
+  'emails.modelos: use {{variavel}}; o sistema recusa variáveis que não existem para aquele modelo.',
+];
+
+const t = (assunto: string, corpo: string) => ({ assunto, corpo });
+
+/** Modelo inicial: jornada Residencial (funil Yepnet) e jornada Empresarial com visita técnica. */
+export function defaultInstruction(): Instruction {
+  const fim = [
+    { chave: 'ganha', nome: 'Venda fechada', tipo: 'ganha' as const, cor: '#22C55E', exige: { proposta: false, plano: true, proximaAcao: false, respostasObrigatorias: false }, perguntas: [], dicas: ['Venda fechada é ganho comercial; o contrato só conta depois da confirmação no IXC.'] },
+    { chave: 'perdida', nome: 'Perdido', tipo: 'perdida' as const, cor: '#EF4444', exige: { proposta: false, plano: false, proximaAcao: false, respostasObrigatorias: false }, perguntas: [], dicas: [] },
+  ];
+  const none = { proposta: false, plano: false, proximaAcao: false, respostasObrigatorias: false };
+  return {
+    schema: INSTRUCTION_SCHEMA_ID,
+    _leia_me: INSTRUCTION_README,
+    descricao: 'Modelo inicial do ISP Sprint',
+    jornadas: [
+      {
+        chave: 'residencial',
+        nome: 'Residencial',
+        descricao: 'Venda de internet para casa, decisão em uma conversa.',
+        padrao: true,
+        segmentos: ['residencial'],
+        etapas: [
+          { chave: 'novo_lead', nome: 'Novo lead', tipo: 'aberta', cor: '#3B82F6', exige: none, perguntas: [
+            { id: 'motivo', texto: 'O que fez você procurar a gente hoje?', tipo: 'texto', obrigatoria: true, ajuda: 'Curiosidade e comparação também contam. Não presuma problema.' },
+            { id: 'quem_usa', texto: 'Quantas pessoas usam a internet em casa?', tipo: 'opcoes', opcoes: ['1', '2 a 3', '4 a 5', '6 ou mais'], obrigatoria: false },
+          ], dicas: ['Escute antes de oferecer plano.'] },
+          { chave: 'qualificacao', nome: 'Qualificação', tipo: 'aberta', cor: '#F59E0B', exige: none, perguntas: [
+            { id: 'uso_principal', texto: 'Para que vocês mais usam a internet?', tipo: 'opcoes', opcoes: ['Streaming', 'Jogos', 'Trabalho remoto', 'Estudo', 'Uso básico'], obrigatoria: true },
+            { id: 'provedor_atual', texto: 'Tem internet hoje? Com qual provedor?', tipo: 'texto', obrigatoria: false, ajuda: 'Registre só o que o cliente disser.' },
+            { id: 'fidelidade', texto: 'Tem fidelidade no contrato atual?', tipo: 'sim_nao', obrigatoria: false },
+          ], dicas: ['Anote o que o cliente valoriza: preço, estabilidade, atendimento.'] },
+          { chave: 'cobertura', nome: 'Cobertura', tipo: 'aberta', cor: '#8B5CF6', exige: { ...none, respostasObrigatorias: true }, perguntas: [
+            { id: 'endereco_confirmado', texto: 'Endereço de instalação confirmado?', tipo: 'sim_nao', obrigatoria: true },
+          ], dicas: ['Sem cobertura confirmada, não prometa plano nem data de instalação.'] },
+          { chave: 'proposta', nome: 'Proposta', tipo: 'aberta', cor: '#60A5FA', exige: { ...none, plano: true }, perguntas: [], dicas: ['Compare situação atual × proposta só com dados que o cliente informou.'] },
+          { chave: 'fechamento', nome: 'Fechamento', tipo: 'aberta', cor: '#4ADE80', exige: { ...none, proposta: true, plano: true, proximaAcao: true }, perguntas: [
+            { id: 'decisor', texto: 'Quem decide a contratação?', tipo: 'texto', obrigatoria: false },
+          ], dicas: ['Combine o próximo passo com data e hora.'] },
+          ...fim,
+        ],
+      },
+      {
+        chave: 'empresarial',
+        nome: 'Empresarial',
+        descricao: 'Venda consultiva para empresas, governo e instituições, com visita técnica.',
+        padrao: false,
+        segmentos: ['empresarial', 'governamental', 'institucional'],
+        etapas: [
+          { chave: 'novo_lead', nome: 'Novo lead', tipo: 'aberta', cor: '#3B82F6', exige: none, perguntas: [
+            { id: 'empresa_porte', texto: 'Quantos colaboradores usam a internet?', tipo: 'texto', obrigatoria: true },
+          ], dicas: [] },
+          { chave: 'diagnostico', nome: 'Diagnóstico', tipo: 'aberta', cor: '#F59E0B', exige: none, perguntas: [
+            { id: 'servicos_criticos', texto: 'Quais serviços não podem parar (ERP, telefonia, câmeras)?', tipo: 'texto', obrigatoria: true },
+            { id: 'sla', texto: 'Precisa de SLA contratual?', tipo: 'sim_nao', obrigatoria: false },
+          ], dicas: ['Entenda o custo de uma hora parada para o cliente.'] },
+          { chave: 'visita_tecnica', nome: 'Visita técnica', tipo: 'aberta', cor: '#8B5CF6', exige: { ...none, proximaAcao: true, respostasObrigatorias: true }, perguntas: [
+            { id: 'viabilidade', texto: 'Viabilidade técnica confirmada na visita?', tipo: 'sim_nao', obrigatoria: true },
+          ], dicas: [] },
+          { chave: 'proposta', nome: 'Proposta', tipo: 'aberta', cor: '#60A5FA', exige: { ...none, plano: true }, perguntas: [], dicas: [] },
+          { chave: 'negociacao', nome: 'Negociação', tipo: 'aberta', cor: '#4ADE80', exige: { ...none, proposta: true, plano: true, proximaAcao: true }, perguntas: [], dicas: ['Negocie prazo e escopo antes de preço.'] },
+          ...fim,
+        ],
+      },
+    ],
+    objecoes: [
+      { id: 'preco_alto', titulo: 'Está caro', resposta: 'Entendo. Posso comparar com o que você paga hoje e o que está incluso? Muitas vezes a diferença está na estabilidade e no suporte local.', jornadas: [] },
+      { id: 'fidelidade_atual', titulo: 'Tenho fidelidade com outro provedor', resposta: 'Vamos ver quando ela termina. Posso deixar a proposta pronta e agendar o contato para a data certa.', jornadas: [] },
+      { id: 'satisfeito', titulo: 'Estou satisfeito com o atual', resposta: 'Ótimo! O que você mais valoriza nele? Assim vejo se faz sentido apresentar algo ou só deixar o contato.', jornadas: [] },
+      { id: 'precisa_aprovar', titulo: 'Preciso aprovar internamente', resposta: 'Claro. Quem participa da decisão? Posso preparar um resumo para apresentar e marcar uma conversa com essa pessoa.', jornadas: ['empresarial'] },
+    ],
+    insights: { amostraMinima: 10, crescimentoLeads: { ativo: true }, planoMaisVendido: { ativo: true }, conversao: { ativo: true, metaPercentual: 20 }, regiao: { ativo: true } },
+    emails: {
+      modelos: {
+        proposta: t('Sua proposta {{empresa.nome}} — {{plano.nome}}', 'Olá, {{cliente.nome}}!\n\nConforme conversamos, segue em anexo a proposta do plano {{plano.nome}} por {{plano.valor}} por mês.\n\nQualquer dúvida, é só responder este e-mail.\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
+        followup: t('{{cliente.nome}}, conseguiu ver a proposta?', 'Olá, {{cliente.nome}}!\n\nPassando para saber se ficou alguma dúvida sobre o plano {{plano.nome}}. Posso ajudar com algo?\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
+        convite_usuario: t('Seu acesso ao ISP Sprint — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        nova_senha: t('Nova senha temporária — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        alerta_atividades: t('Você tem {{quantidade}} atividade(s) para hoje ou vencida(s)', 'Olá, {{usuario.nome}}!\n\n{{lista}}\n\nVeja em {{link}}'),
+        alerta_lead_atribuido: t('Novo lead para você: {{lead.nome}}', 'Olá, {{usuario.nome}}!\n\n{{atribuido_por}} atribuiu o lead {{lead.nome}} ({{lead.telefone}}) para você.\n\nAbra em {{link}}'),
+        alerta_venda_fechada: t('Venda fechada: {{cliente.nome}}', 'Olá, {{usuario.nome}}!\n\n{{vendedor.nome}} fechou a venda do plano {{plano.nome}} ({{plano.valor}}/mês) com {{cliente.nome}}.\n\nVeja em {{link}}'),
+      },
+    },
+  };
+}
+
+/** Resumo legível das diferenças entre duas instruções (prévia antes de ativar). */
+export function diffInstruction(prev: Instruction | null, next: Instruction): string[] {
+  const out: string[] = [];
+  if (!prev) return ['Primeira versão do modelo.'];
+  const pj = new Map(prev.jornadas.map((j) => [j.chave, j]));
+  const nj = new Map(next.jornadas.map((j) => [j.chave, j]));
+  for (const [k, j] of nj) if (!pj.has(k)) out.push(`Nova jornada “${j.nome}” com ${j.etapas.length} etapas.`);
+  for (const [k, j] of pj) if (!nj.has(k)) out.push(`Jornada “${j.nome}” removida.`);
+  for (const [k, n] of nj) {
+    const p = pj.get(k);
+    if (!p) continue;
+    if (p.nome !== n.nome) out.push(`Jornada “${p.nome}” renomeada para “${n.nome}”.`);
+    if (p.padrao !== n.padrao && n.padrao) out.push(`“${n.nome}” passa a ser a jornada padrão.`);
+    if (p.segmentos.join() !== n.segmentos.join()) out.push(`“${n.nome}”: segmentos ${n.segmentos.join(', ') || 'nenhum'}.`);
+    const ps = new Map(p.etapas.map((e) => [e.chave, e]));
+    const ns = new Map(n.etapas.map((e) => [e.chave, e]));
+    for (const [sk, s] of ns) if (!ps.has(sk)) out.push(`“${n.nome}”: nova etapa “${s.nome}”.`);
+    for (const [sk, s] of ps) if (!ns.has(sk)) out.push(`“${n.nome}”: etapa “${s.nome}” removida.`);
+    if (p.etapas.map((e) => e.chave).filter((x) => ns.has(x)).join() !== n.etapas.map((e) => e.chave).filter((x) => ps.has(x)).join()) out.push(`“${n.nome}”: ordem das etapas alterada.`);
+    for (const [sk, s] of ns) {
+      const o = ps.get(sk);
+      if (!o) continue;
+      if (o.nome !== s.nome) out.push(`“${n.nome}”: etapa “${o.nome}” renomeada para “${s.nome}”.`);
+      if (JSON.stringify(o.exige) !== JSON.stringify(s.exige)) out.push(`“${n.nome}” › “${s.nome}”: exigências alteradas.`);
+      if (JSON.stringify(o.perguntas) !== JSON.stringify(s.perguntas)) out.push(`“${n.nome}” › “${s.nome}”: roteiro de perguntas alterado (${s.perguntas.length} pergunta(s)).`);
+      if (JSON.stringify(o.dicas) !== JSON.stringify(s.dicas)) out.push(`“${n.nome}” › “${s.nome}”: dicas alteradas.`);
+    }
+  }
+  if (JSON.stringify(prev.objecoes) !== JSON.stringify(next.objecoes)) out.push(`Objeções: ${next.objecoes.length} cadastrada(s) (antes ${prev.objecoes.length}).`);
+  if (JSON.stringify(prev.insights) !== JSON.stringify(next.insights)) out.push('Regras dos insights alteradas.');
+  for (const k of EMAIL_TEMPLATE_KEYS) if (JSON.stringify(prev.emails.modelos[k]) !== JSON.stringify(next.emails.modelos[k])) out.push(`Modelo de e-mail “${EMAIL_TEMPLATE_LABELS[k]}” alterado.`);
+  return out.length ? out : ['Nenhuma diferença em relação à versão ativa.'];
+}
+
+/** Substitui {{variaveis}}; valores ausentes viram vazio. */
+export function renderTemplate(tpl: string, vars: Record<string, string | number | null | undefined>) {
+  return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, k: string) => String(vars[k] ?? ''));
+}

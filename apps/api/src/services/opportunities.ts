@@ -9,6 +9,7 @@ import type { AuthContext } from '../http/context';
 import { notFound, unprocessable } from '../http/errors';
 import { assertAssignableUser, assertTenantRefs, ownerScope } from './scope';
 import { audit } from './audit';
+import { resolvePipeline } from './instructions';
 
 export type CreateOpportunityInput = {
   contactId?: string | null;
@@ -18,6 +19,7 @@ export type CreateOpportunityInput = {
   sourceId?: string | null;
   campaignId?: string | null;
   planId?: string | null;
+  pipelineId?: string | null;
   channel: string | null;
   reasons: OpportunityReason[];
   title: string | null;
@@ -44,6 +46,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
 
   let contactId = input.contactId ?? null;
   let contactName: string;
+  let segment: string | null = input.newContact?.segment ?? null;
   if (!contactId) {
     if (!input.newContact) throw notFound('Contato não encontrado.');
     const [c] = await tx
@@ -65,13 +68,16 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   } else {
     // contato existente precisa estar visível na carteira do usuário (Clientes)
     const [c] = await tx
-      .select({ name: s.contacts.name })
+      .select({ name: s.contacts.name, segment: s.contacts.segment })
       .from(s.contacts)
       .where(and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
       .limit(1);
     if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Contato fora da sua carteira' }]);
     contactName = c.name;
+    segment = c.segment;
   }
+  const pipeline = await resolvePipeline(tx, auth.tenantId, { pipelineId: input.pipelineId, segment });
+  const firstStage = pipeline.stages.find((st) => st.kind === 'open')!;
 
   if (input.leadId) {
     const [l] = await tx.select({ id: s.leads.id }).from(s.leads).where(and(eq(s.leads.id, input.leadId), eq(s.leads.tenantId, auth.tenantId))).limit(1);
@@ -90,6 +96,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       leadId: input.leadId ?? null,
       ownerId,
       teamId: team?.teamId ?? null,
+      pipelineId: pipeline.id,
+      stage: firstStage.key,
       title: input.title ?? (plan ? `${plan.name} — ${contactName}` : `${contactName} — nova oportunidade`),
       reasons: input.reasons,
       channel: input.channel,
@@ -106,9 +114,9 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     opportunityId: opp!.id,
     type: 'created',
     actorId: auth.userId,
-    toValue: 'novo_lead',
+    toValue: firstStage.key,
     rowVersion: 1,
-    payload: { reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
+    payload: { pipeline: pipeline.key, reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
   });
   await audit(tx, req, { action: 'opportunity.create', entityType: 'opportunity', entityId: opp!.id });
   return opp!;
@@ -121,6 +129,11 @@ export const opportunitySelect = {
   code: s.opportunities.code,
   title: s.opportunities.title,
   stage: s.opportunities.stage,
+  pipelineId: s.opportunities.pipelineId,
+  pipelineName: s.pipelines.name,
+  stageName: s.pipelineStages.name,
+  attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,
+  proposalCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null and oa.kind = 'proposta')`,
   proposalStatus: s.opportunities.proposalStatus,
   contractRequestStatus: s.opportunities.contractRequestStatus,
   coverageStatus: s.opportunities.coverageStatus,
@@ -167,6 +180,8 @@ export function opportunityQuery(db: DbOrTx) {
     .from(s.opportunities)
     .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
     .innerJoin(owner, eq(owner.id, s.opportunities.ownerId))
+    .innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId))
+    .leftJoin(s.pipelineStages, and(eq(s.pipelineStages.pipelineId, s.opportunities.pipelineId), eq(s.pipelineStages.key, s.opportunities.stage)))
     .leftJoin(s.customers, eq(s.customers.id, s.opportunities.customerId))
     .leftJoin(s.plans, eq(s.plans.id, s.opportunities.planId))
     .leftJoin(s.leadSources, eq(s.leadSources.id, s.opportunities.sourceId))

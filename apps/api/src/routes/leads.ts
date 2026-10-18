@@ -10,6 +10,7 @@ import * as s from '../db/schema';
 import type { DbOrTx } from '../db/client';
 import { assertAssignableUser, assertTenantRefs, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
+import { notifyLeadAssigned } from '../services/alerts';
 import { createOpportunity } from '../services/opportunities';
 import { pctDelta } from '../services/metrics';
 
@@ -190,7 +191,9 @@ export const leadRoutes = [
         return lead!.id;
       });
       reply.code(201);
-      return toDto(await loadLead(app.db, auth, id));
+      const dto = toDto(await loadLead(app.db, auth, id));
+      if (dto.ownerId) await notifyLeadAssigned(app.db, app.config, auth, dto.ownerId, [{ id: dto.id, name: dto.name, phone: dto.phone }]);
+      return dto;
     },
   }),
 
@@ -204,8 +207,10 @@ export const leadRoutes = [
     body: LeadUpdate,
     handler: async ({ app, auth, params, body, req }) => {
       if (body.status === 'convertido') throw unprocessable('Use "Converter em oportunidade" para converter o lead.');
+      let beforeOwner: string | null = null;
       await app.db.transaction(async (tx) => {
         const current = await loadLead(tx, auth, params.id);
+        beforeOwner = current.ownerId;
         if (current.rowVersion !== body.rowVersion) throw conflict(current.rowVersion);
         if (body.ownerId !== undefined && body.ownerId !== current.ownerId) {
           if (!body.ownerId) throw unprocessable('Responsável obrigatório.');
@@ -249,7 +254,9 @@ export const leadRoutes = [
           .returning({ id: s.leads.id });
         if (!updated.length) throw conflict(current.rowVersion);
       });
-      return toDto(await loadLead(app.db, auth, params.id));
+      const dto = toDto(await loadLead(app.db, auth, params.id));
+      if (body.ownerId && body.ownerId !== beforeOwner) await notifyLeadAssigned(app.db, app.config, auth, body.ownerId, [{ id: dto.id, name: dto.name, phone: dto.phone }]);
+      return dto;
     },
   }),
 
@@ -262,7 +269,7 @@ export const leadRoutes = [
     min: 'equipe',
     body: BulkAssign,
     handler: async ({ app, auth, body, req }) => {
-      return app.db.transaction(async (tx) => {
+      const out = await app.db.transaction(async (tx) => {
         await assertAssignableUser(tx, auth, 'leads', body.ownerId);
         const rows = await tx
           .update(s.leads)
@@ -271,8 +278,13 @@ export const leadRoutes = [
           .returning({ id: s.leads.id, contactId: s.leads.contactId });
         if (rows.length) await tx.update(s.contacts).set({ ownerId: body.ownerId }).where(and(eq(s.contacts.tenantId, auth.tenantId), inArray(s.contacts.id, rows.map((r) => r.contactId))));
         await audit(tx, req, { action: 'lead.bulk_assign', entityType: 'lead', metadata: { ownerId: body.ownerId, count: rows.length, ids: rows.map((r) => r.id) } });
-        return { updated: rows.length };
+        return { updated: rows.length, ids: rows.map((r) => r.id) };
       });
+      if (out.ids.length) {
+        const names = await app.db.select({ id: s.leads.id, name: s.contacts.name, phone: s.contacts.phone }).from(s.leads).innerJoin(s.contacts, eq(s.contacts.id, s.leads.contactId)).where(inArray(s.leads.id, out.ids));
+        await notifyLeadAssigned(app.db, app.config, auth, body.ownerId, names);
+      }
+      return { updated: out.updated };
     },
   }),
 

@@ -338,18 +338,45 @@ export const leads = pgTable(
 
 // --------------------------------------------------------------- funil
 
-export const pipelineStages = pgTable(
-  'pipeline_stages',
+/** Jornada de venda = um pipeline com etapas próprias. Definidas pelo modelo de instrução ativo. */
+export const pipelines = pgTable(
+  'pipelines',
   {
     id: id(),
     tenantId: tenantId(),
     key: text('key').notNull(),
     name: text('name').notNull(),
+    description: text('description'),
+    segments: text('segments').array().notNull().default(sql`'{}'::text[]`),
+    isDefault: boolean('is_default').notNull().default(false),
+    position: integer('position').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('pipelines_uq').on(t.tenantId, t.key) }),
+);
+
+export const pipelineStages = pgTable(
+  'pipeline_stages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    key: text('key').notNull(),
+    name: text('name').notNull(),
     position: integer('position').notNull(),
     isTerminal: boolean('is_terminal').notNull().default(false),
+    /** open | won | lost — won/lost têm sempre as chaves 'ganha' / 'perdida'. */
+    kind: text('kind').notNull().default('open'),
+    color: text('color'),
+    /** Exigências para ENTRAR na etapa: { proposta, plano, proximaAcao, respostasObrigatorias }. */
+    requirements: jsonb('requirements').$type<{ proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean }>().notNull().default({}),
     active: boolean('active').notNull().default(true),
   },
-  (t) => ({ uq: uniqueIndex('pipeline_stages_uq').on(t.tenantId, t.key) }),
+  (t) => ({
+    uq: uniqueIndex('pipeline_stages_pipe_uq').on(t.pipelineId, t.key),
+    kindCk: check('pipeline_stages_kind_ck', inList('kind', ['open', 'won', 'lost'])),
+  }),
 );
 
 export const opportunities = pgTable(
@@ -365,6 +392,8 @@ export const opportunities = pgTable(
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     teamId: uuid('team_id').references(() => teams.id),
     title: text('title').notNull(),
+    pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
+    /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
     proposalStatus: text('proposal_status').notNull().default('nao_criada'),
@@ -392,7 +421,7 @@ export const opportunities = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => ({
-    stageCk: check('opp_stage_ck', inList('stage', ['novo_lead', 'qualificacao', 'cobertura', 'proposta', 'fechamento', 'ganha', 'perdida'])),
+    pipelineIdx: index('opp_pipeline_idx').on(t.tenantId, t.pipelineId, t.stage),
     proposalCk: check('opp_proposal_ck', inList('proposal_status', ['nao_criada', 'rascunho', 'enviada', 'aceita', 'recusada', 'expirada'])),
     contractCk: check('opp_contract_ck', inList('contract_request_status', ['nao_solicitada', 'pendente', 'enviada', 'erro', 'confirmada', 'rejeitada'])),
     coverageCk: check('opp_coverage_ck', inList('coverage_status', ['nao_consultada', 'pendente', 'elegivel', 'inelegivel', 'indeterminada'])),
@@ -489,4 +518,121 @@ export const auditLogs = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ tenantIdx: index('audit_tenant_created_idx').on(t.tenantId, t.createdAt) }),
+);
+
+// --------------------------------------------------------------- modelo de instrução, roteiro, anexos, e-mail
+
+/** Versões do modelo de instrução da inteligência do negócio. Só uma 'ativa' por empresa. */
+export const businessInstructions = pgTable(
+  'business_instructions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('rascunho'),
+    content: jsonb('content').notNull(),
+    changes: jsonb('changes').$type<string[]>().notNull().default([]),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    activatedBy: uuid('activated_by').references(() => users.id),
+    activatedAt: ts('activated_at'),
+  },
+  (t) => ({
+    uq: uniqueIndex('business_instructions_version_uq').on(t.tenantId, t.version),
+    activeUq: uniqueIndex('business_instructions_active_uq').on(t.tenantId).where(sql`status = 'ativa'`),
+    statusCk: check('business_instructions_status_ck', inList('status', ['rascunho', 'ativa', 'arquivada'])),
+  }),
+);
+
+/** Respostas do roteiro do Sprint por oportunidade. */
+export const opportunityAnswers = pgTable(
+  'opportunity_answers',
+  {
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    questionId: text('question_id').notNull(),
+    answer: text('answer').notNull(),
+    instructionVersion: integer('instruction_version'),
+    answeredBy: uuid('answered_by').references(() => users.id),
+    answeredAt: ts('answered_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.opportunityId, t.questionId] }) }),
+);
+
+/** Anexos da oportunidade (proposta e outros). Guardados no banco, até 3 MB. */
+export const opportunityAttachments = pgTable(
+  'opportunity_attachments',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    kind: text('kind').notNull().default('proposta'),
+    filename: text('filename').notNull(),
+    mime: text('mime').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    data: bytea('data').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+    deletedAt: ts('deleted_at'),
+    deletedBy: uuid('deleted_by').references(() => users.id),
+  },
+  (t) => ({
+    oppIdx: index('opp_attach_opp_idx').on(t.tenantId, t.opportunityId),
+    kindCk: check('opp_attach_kind_ck', inList('kind', ['proposta', 'outro'])),
+  }),
+);
+
+/** Servidor SMTP da empresa. A senha fica cifrada (AES-256-GCM) e nunca volta para a tela. */
+export const smtpSettings = pgTable('smtp_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  host: text('host').notNull(),
+  port: integer('port').notNull(),
+  secure: boolean('secure').notNull().default(false),
+  username: text('username'),
+  passwordEnc: text('password_enc'),
+  fromName: text('from_name').notNull(),
+  fromEmail: text('from_email').notNull(),
+  replyTo: text('reply_to'),
+  enabled: boolean('enabled').notNull().default(true),
+  lastTestAt: ts('last_test_at'),
+  lastTestOk: boolean('last_test_ok'),
+  lastTestError: text('last_test_error'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});
+
+/** Quais alertas automáticos por e-mail estão ligados. */
+export const notificationSettings = pgTable('notification_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  activityDigest: boolean('activity_digest').notNull().default(true),
+  leadAssigned: boolean('lead_assigned').notNull().default(true),
+  dealWon: boolean('deal_won').notNull().default(true),
+  userAccess: boolean('user_access').notNull().default(true),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});
+
+/** Registro de cada e-mail enviado ou que falhou. */
+export const emailMessages = pgTable(
+  'email_messages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    kind: text('kind').notNull(),
+    toAddress: text('to_address').notNull(),
+    subject: text('subject').notNull(),
+    status: text('status').notNull(),
+    error: text('error'),
+    messageId: text('message_id'),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    attachmentId: uuid('attachment_id').references(() => opportunityAttachments.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    tenantIdx: index('email_messages_tenant_idx').on(t.tenantId, t.createdAt),
+    statusCk: check('email_messages_status_ck', inList('status', ['enviado', 'falhou', 'ignorado'])),
+  }),
 );

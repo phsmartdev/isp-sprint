@@ -21,6 +21,8 @@ import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
 import { adminRoutes } from './routes/admin';
 import { metaRoutes } from './routes/meta';
+import { sprintRoutes } from './routes/sprint';
+import { settingsRoutes } from './routes/settings';
 
 export const API_PREFIX = '/api/v1';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -92,6 +94,8 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
   registerRoutes(app, API_PREFIX, [
     ...authRoutes,
     ...metaRoutes,
+    ...sprintRoutes,
+    ...settingsRoutes,
     ...homeRoutes,
     ...leadRoutes,
     ...opportunityRoutes,

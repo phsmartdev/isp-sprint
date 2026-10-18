@@ -1,13 +1,14 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PeriodQuery } from '@isp/shared';
-import { CONTRACT_LABELS, OPEN_STAGES, csvSafe, STAGE_LABELS, type ContractRequestStatus, SEGMENT_PRODUCT_LABELS, type OpportunityStage, type Segment } from '@isp/domain';
+import { PeriodQuery, ReportQuery } from '@isp/shared';
+import { CONTRACT_LABELS, csvSafe, STAGE_LABELS, type ContractRequestStatus, SEGMENT_PRODUCT_LABELS, type OpportunityStage, type Segment } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import type { AuthContext } from '../http/context';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { ownerScope, visibleUserIds, level } from '../services/scope';
 import { opportunityQuery } from '../services/opportunities';
+import { resolvePipeline } from '../services/instructions';
 import { pctDelta } from '../services/metrics';
 import { monthsEnding, periodBounds } from '../services/period';
 import { audit } from '../services/audit';
@@ -95,9 +96,10 @@ export const reportRoutes = [
     summary: 'Relatórios — visão geral do período (vendas, leads, funil, planos, equipe)',
     tag: 'Relatórios',
     module: 'relatorios',
-    query: PeriodQuery,
+    query: ReportQuery,
     handler: async ({ app, auth, query }) => {
       const p = periodBounds(auth, query.from, query.to);
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId });
       const [t, evolution, origins, plans, statusRows, latest] = await Promise.all([
         salesTotals(app.db, auth, 'relatorios', p),
         monthlySeries(app.db, auth, 'relatorios', query.to, 5),
@@ -106,7 +108,7 @@ export const reportRoutes = [
         app.db
           .select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int` })
           .from(s.opportunities)
-          .where(and(oppScopeFor(auth, 'relatorios'), p.inCur(s.opportunities.createdAt)))
+          .where(and(oppScopeFor(auth, 'relatorios'), eq(s.opportunities.pipelineId, pipe.id), p.inCur(s.opportunities.createdAt)))
           .groupBy(s.opportunities.stage),
         opportunityQuery(app.db)
           .where(and(oppScopeFor(auth, 'relatorios'), eq(s.opportunities.stage, 'ganha'), p.inCur(s.opportunities.wonAt)))
@@ -125,8 +127,8 @@ export const reportRoutes = [
         })
         .from(s.users)
         .where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), users === 'all' ? undefined : inArray(s.users.id, users.length ? users : [auth.userId])));
-      const statusOrder: OpportunityStage[] = [...(OPEN_STAGES as OpportunityStage[]), 'perdida'];
-      const statusTotal = statusOrder.reduce((a, st) => a + (statusRows.find((r) => r.stage === st)?.n ?? 0), 0);
+      const statusStages = pipe.stages.filter((st) => st.kind !== 'won');
+      const statusTotal = statusStages.reduce((a, st) => a + (statusRows.find((r) => r.stage === st.key)?.n ?? 0), 0);
       return {
         period: p.label,
         kpis: [
@@ -137,7 +139,7 @@ export const reportRoutes = [
         ],
         evolution,
         origins,
-        status: { total: statusTotal, items: statusOrder.map((st) => { const n = statusRows.find((r) => r.stage === st)?.n ?? 0; return { stage: st, label: STAGE_LABELS[st], n, share: statusTotal ? n / statusTotal : null }; }) },
+        status: { pipeline: { id: pipe.id, name: pipe.name }, total: statusTotal, items: statusStages.map((st) => { const n = statusRows.find((r) => r.stage === st.key)?.n ?? 0; return { stage: st.key, label: st.name, color: st.color, n, share: statusTotal ? n / statusTotal : null }; }) },
         plans,
         team: {
           ranking: level(auth, 'relatorios') !== 'proprio',
@@ -174,7 +176,7 @@ export const reportRoutes = [
           and(oppScopeFor(auth, 'relatorios'), query.kind === 'vendas' ? and(eq(s.opportunities.stage, 'ganha'), p.inCur(s.opportunities.wonAt)) : p.inCur(s.opportunities.createdAt)),
         );
         header = ['Código', 'Cliente', 'Plano', 'Valor mensal (R$)', 'Etapa', 'Responsável', 'Criada em', 'Venda fechada em', 'Contrato'];
-        lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, o.valueCents === null ? '' : (o.valueCents / 100).toFixed(2).replace('.', ','), STAGE_LABELS[o.stage as OpportunityStage], o.ownerName, o.createdAt.toISOString(), o.wonAt?.toISOString() ?? '', CONTRACT_LABELS[o.contractRequestStatus as ContractRequestStatus] ?? o.contractRequestStatus]);
+        lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, o.valueCents === null ? '' : (o.valueCents / 100).toFixed(2).replace('.', ','), o.stageName ?? STAGE_LABELS[o.stage as OpportunityStage] ?? o.stage, o.ownerName, o.createdAt.toISOString(), o.wonAt?.toISOString() ?? '', CONTRACT_LABELS[o.contractRequestStatus as ContractRequestStatus] ?? o.contractRequestStatus]);
       }
       await audit(app.db, req, { action: 'export.csv', entityType: 'report', metadata: { kind: query.kind, from: query.from, to: query.to, rows: lines.length } });
       const meta = [`# ISP Sprint — exportação de ${query.kind}`, `# Período: ${query.from} a ${query.to} (${auth.timezone})`, `# Gerado em: ${new Date().toISOString()} por ${auth.name}`];
