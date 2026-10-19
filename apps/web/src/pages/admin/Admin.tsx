@@ -31,6 +31,7 @@ const TABS = [
   { to: '/settings/instructions', label: 'Modelo de instrução' },
   { to: '/settings/email', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },
+  { to: '/settings/data', label: 'Base de dados' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },
   { to: '/settings/logs', label: 'Logs' },

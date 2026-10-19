@@ -239,4 +239,25 @@ describe('autonomia da operação e engenharia', () => {
     expect(h.cities.length).toBeGreaterThan(0);
     ok(await carlos.get('/intelligence/heatmap?from=2020-01-01&to=2026-12-31&status=cancelados'));
   });
+
+  it('importação de clientes: modelo, prévia com erros e gravação', async () => {
+    const tpl = await carlos.get('/admin/customers/template');
+    ok(tpl);
+    expect(tpl.body).toContain('codigo_cliente;nome;tipo');
+    const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+    const csv = ['codigo_cliente;nome;tipo;telefone;plano;situacao;data_inicio;data_cancelamento;motivo_cancelamento;bairro;cidade',
+      'EX1;EXEMPLO - apague esta linha;residencial;;;;;;;;',
+      `IMP-1;Cliente Importado Um;residencial;(79) 90000-0001;${plan.name};ativo;10/01/2025;;;Centro;Aracaju`,
+      `IMP-2;Cliente Importado Dois;residencial;;${plan.name};cancelado;10/01/2024;05/06/2025;Mudança;Atalaia;Aracaju`,
+      'IMP-3;;residencial;;Plano Que Não Existe;ativo;31/02/2025;;;;'].join('\n');
+    const dry = (await carlos.post('/admin/customers/import', { csv, dryRun: true })).json();
+    expect(dry.valid).toBe(2);
+    expect(dry.errorCount).toBe(1);
+    expect(dry.imported).toBeNull();
+    const done = (await carlos.post('/admin/customers/import', { csv, dryRun: false })).json();
+    expect(done.imported).toEqual({ created: 2, updated: 0 });
+    const again = (await carlos.post('/admin/customers/import', { csv, dryRun: false })).json();
+    expect(again.imported).toEqual({ created: 0, updated: 2 });
+    expect((await lucas.post('/admin/customers/import', { csv, dryRun: true })).statusCode).toBe(403);
+  });
 });

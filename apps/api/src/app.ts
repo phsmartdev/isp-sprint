@@ -22,6 +22,7 @@ import { intelligenceRoutes } from './routes/intelligence';
 import { insightsRoutes } from './routes/insights';
 import { integrationRoutes } from './routes/integrations';
 import { campaignRoutes } from './routes/campaigns';
+import { dataAdminRoutes } from './routes/dataAdmin';
 import { adminRoutes } from './routes/admin';
 import { metaRoutes } from './routes/meta';
 import { sprintRoutes } from './routes/sprint';
@@ -114,6 +115,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...insightsRoutes,
     ...integrationRoutes,
     ...campaignRoutes,
+    ...dataAdminRoutes,
     ...adminRoutes,
   ]);
   app.get(`${API_PREFIX}/openapi.json`, async () => buildOpenApi(routeRegistry));

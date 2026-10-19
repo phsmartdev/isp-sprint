@@ -257,6 +257,8 @@ export const contacts = pgTable(
     name: text('name').notNull(),
     phone: text('phone'),
     email: text('email'),
+    /** CPF ou CNPJ (opcional; vem do IXC ou da importação). */
+    document: text('document'),
     createdBy: uuid('created_by').references(() => users.id),
     isProvisional: boolean('is_provisional').notNull().default(false),
     /** Responsável pela carteira: define o que o vendedor (nível Próprio) enxerga em Clientes. */

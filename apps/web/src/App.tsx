@@ -21,6 +21,7 @@ import { AdminArea } from './pages/admin/Area';
 import { AdminViability } from './pages/admin/Viability';
 import { AdminInstructions } from './pages/admin/Instructions';
 import { AdminEmail } from './pages/admin/Email';
+import { AdminData } from './pages/admin/DataAdmin';
 import { ProfilePage } from './pages/admin/Profile';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -67,6 +68,7 @@ export function App() {
           <Route path="viability" element={<AdminViability />} />
           <Route path="instructions" element={<AdminInstructions />} />
           <Route path="email" element={<AdminEmail />} />
+          <Route path="data" element={<AdminData />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />
           <Route path="notifications" element={<Navigate to="/settings/email" replace />} />
