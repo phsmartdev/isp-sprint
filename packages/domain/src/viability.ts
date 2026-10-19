@@ -8,7 +8,7 @@
  *   LTV           = margem mensal × vida média do cliente (meses)
  */
 
-export type AmountRule = { id: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; active: boolean; routeIds?: string[]; /** Percentual sobre a mensalidade menos estes parceiros. */ baseExcludeIds?: string[] };
+export type AmountRule = { id: string; name: string; kind: 'percent' | 'fixed' | 'per_plan'; percentBp: number; amountCents: number; active: boolean; routeIds?: string[]; /** Percentual sobre a mensalidade menos estes parceiros. */ baseExcludeIds?: string[] };
 export type Equipment = { id: string; name: string; costCents: number; active: boolean };
 export type KitItem = { equipmentId: string; qty: number };
 export type InstallLocation = 'condominio' | 'rua';
@@ -74,6 +74,8 @@ export type ViabilityInput = {
   location?: InstallLocation | null;
   /** Produtos do plano; com comissão definida, substituem as regras gerais de comissão. */
   products?: PlanProduct[] | null;
+  /** Valor dos parceiros cobrados por plano (ex.: PlayHub), por id do parceiro. */
+  planPartnerCosts?: Record<string, number> | null;
 };
 
 export type Line = { label: string; cents: number; detail?: string };
@@ -153,8 +155,14 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
   if (route?.requiresApproval) alerts.push(`O caminho “${route.name}” exige aprovação antes de fechar.`);
 
   const applies = (r: AmountRule) => r.active && (!r.routeIds?.length || (route && r.routeIds.includes(route.id)));
-  const ruleLine = (r: AmountRule, base = price, baseNote = ''): Line => ({ label: r.name, cents: r.kind === 'percent' ? pct(base, r.percentBp) : r.amountCents, detail: r.kind === 'percent' ? `${fmtBp(r.percentBp)}${baseNote}` : 'valor fixo' });
-  const partners = p.partners.filter(applies);
+  const planCost = (r: AmountRule) => input.planPartnerCosts?.[r.id] ?? 0;
+  const ruleLine = (r: AmountRule, base = price, baseNote = ''): Line => ({
+    label: r.name,
+    cents: r.kind === 'percent' ? pct(base, r.percentBp) : r.kind === 'per_plan' ? planCost(r) : r.amountCents,
+    detail: r.kind === 'percent' ? `${fmtBp(r.percentBp)}${baseNote}` : r.kind === 'per_plan' ? 'valor do plano' : 'valor fixo',
+  });
+  // parceiro "por plano" só entra quando o plano tem valor para ele (ex.: PlayHub nos residenciais)
+  const partners = p.partners.filter((r) => applies(r) && (r.kind !== 'per_plan' || planCost(r) > 0));
   const partnerLines = partners.map((r) => ({ id: r.id, line: ruleLine(r) }));
   // tributo em % pode ter base reduzida: mensalidade menos os parceiros indicados
   const taxLine = (r: AmountRule) => {

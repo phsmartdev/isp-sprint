@@ -116,7 +116,7 @@ export const OpportunityDetails = z.object({
   saleType: z.enum(['ativa', 'receptiva']).optional().nullable(),
   cableMeters: z.number().int().min(0).max(100_000).optional().nullable(),
   activationFeeCents: cents.optional().nullable(),
-  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
+  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(100_000) })).max(30).optional().nullable(),
   routeId: uuid.optional().nullable(),
   engineeringStatus: z.enum(['nao_necessaria', 'pendente', 'aprovada', 'reprovada']).optional(),
   engineeringTicket: optText(60),
@@ -275,12 +275,14 @@ export const PlanUpsert = z.object({
   /** Nome do serviço como sai na fatura do cliente. */
   invoiceServiceName: optText(120),
   products: z.array(PlanProductItem).max(30).default([]),
+  /** Valor mensal dos parceiros cobrados por plano (ex.: PlayHub), por id do parceiro. Só planos residenciais. */
+  partnerCosts: z.record(uuid, z.number().int().min(0).max(100_000_00)).default({}),
   active: z.boolean().default(true),
 });
 export const SourceUpsert = z.object({ name: trimmed(60).min(2), active: z.boolean().default(true) });
 export const StageRename = z.object({ name: trimmed(40).min(2) });
 export const BRAND_SLOTS = [
-  'logo_escuro', 'logo_claro', 'favicon', 'banner_inicio', 'card_sidebar',
+  'logo_escuro', 'logo_claro', 'favicon', 'login_fundo', 'banner_inicio', 'card_sidebar',
   'mascote_leads', 'mascote_oportunidades', 'mascote_clientes', 'mascote_atividades', 'mascote_relatorios', 'mascote_inteligencia', 'mascote_administracao',
 ] as const;
 export type BrandSlot = (typeof BRAND_SLOTS)[number];
@@ -358,7 +360,7 @@ export const ViabilitySimulate = z.object({
   cableMeters: z.number().int().min(0).max(100_000).optional().nullable(),
   activationFeeCents: cents.optional().nullable(),
   saleType: z.enum(['ativa', 'receptiva']).optional().nullable(),
-  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(50) })).max(30).optional().nullable(),
+  equipment: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(0).max(100_000) })).max(30).optional().nullable(),
   routeId: uuid.optional().nullable(),
   location: z.enum(['condominio', 'rua']).optional().nullable(),
 });
@@ -366,7 +368,8 @@ const optInt = z.number().int().min(0).max(10_000_000).optional().nullable();
 export const DeductionItem = z.object({
   id: uuid.optional(),
   name: z.string().trim().min(2).max(80),
-  kind: z.enum(['percent', 'fixed']),
+  /** per_plan: só parceiros; o valor vem do cadastro de cada plano residencial. */
+  kind: z.enum(['percent', 'fixed', 'per_plan']),
   percentBp: z.number().int().min(0).max(10_000).default(0),
   amountCents: cents.default(0),
   routeIds: z.array(uuid).max(50).default([]),
@@ -385,7 +388,7 @@ export const RouteItem = z.object({
   monthlyCostCents: cents.default(0),
   requiresApproval: z.boolean().default(false),
   appliesTo: z.enum(['condominio', 'rua']).optional().nullable(),
-  kit: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(1).max(50) })).max(30).default([]),
+  kit: z.array(z.object({ equipmentId: uuid, qty: z.number().int().min(1).max(100_000) })).max(30).default([]),
   active: z.boolean().default(true),
 });
 export const RouteRuleItem = z.object({

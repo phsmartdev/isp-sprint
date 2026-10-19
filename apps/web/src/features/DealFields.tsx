@@ -159,8 +159,8 @@ export function EquipmentOverride({ routeId, equipment, suggested, onChange, dis
           <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {meta.data.equipments.map((eq) => (
               <li key={eq.id} className="flex items-center gap-2 text-sm">
-                <Input aria-label={`Quantidade de ${eq.name}`} type="number" min={0} max={50} className="h-8 w-16" disabled={disabled} value={qty(eq.id)}
-                  onChange={(e) => { const q = Math.max(0, Math.min(50, Number(e.target.value || 0))); onChange({ equipment: [...(equipment ?? []).filter((x) => x.equipmentId !== eq.id), ...(q ? [{ equipmentId: eq.id, qty: q }] : [])] }); }} />
+                <Input aria-label={`Quantidade de ${eq.name}`} type="number" min={0} className="h-8 w-20" disabled={disabled} value={qty(eq.id)}
+                  onChange={(e) => { const q = Math.max(0, Math.min(100_000, Math.round(Number(e.target.value || 0)))); onChange({ equipment: [...(equipment ?? []).filter((x) => x.equipmentId !== eq.id), ...(q ? [{ equipmentId: eq.id, qty: q }] : [])] }); }} />
                 <span className="text-ink">{eq.name}</span><span className="num text-muted">{fmtBRL(eq.costCents)}</span>
               </li>
             ))}

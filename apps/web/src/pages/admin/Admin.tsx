@@ -507,7 +507,8 @@ export function AdminSecurity() {
 // =================================================================== personalização
 const SLOT_INFO: Record<BrandSlot, { label: string; where: string; size: string; bg: string }> = {
   logo_escuro: { label: 'Logo (fundo escuro)', where: 'Menu lateral e tela de login', size: '400 × 120 px', bg: 'bg-navy' },
-  logo_claro: { label: 'Logo (fundo claro)', where: 'Exportações e e-mails', size: '400 × 120 px', bg: 'bg-surface-2' },
+  logo_claro: { label: 'Logo (fundo claro)', where: 'Quadro de login, exportações e e-mails', size: '400 × 120 px', bg: 'bg-surface-2' },
+  login_fundo: { label: 'Fundo do login', where: 'Imagem fixa à esquerda da tela de login (sem texto)', size: '1600 × 1200 px', bg: 'bg-navy' },
   favicon: { label: 'Ícone do navegador', where: 'Aba do navegador', size: '256 × 256 px', bg: 'bg-surface-2' },
   banner_inicio: { label: 'Banner do Início', where: 'Arte à direita do destaque “Uma venda mais fácil…” (sem texto)', size: '1600 × 600 px', bg: 'bg-[#0B3AA6]' },
   card_sidebar: { label: 'Card do menu lateral', where: 'Arte de fundo do “Confiar ficou fácil.” (o texto é aplicado pelo sistema)', size: '400 × 600 px', bg: 'bg-navy' },

@@ -71,6 +71,13 @@
       "when": 1792356031082,
       "tag": "0009_route_applies_to",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792422991438,
+      "tag": "0010_partner_per_plan",
+      "breakpoints": true
     }
   ]
 }

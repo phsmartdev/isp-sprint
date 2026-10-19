@@ -13,7 +13,7 @@ import { Button, ErrorState, FormField, Input, LoadingRows, Notice, Select } fro
 import { useToast } from '../../components/ui/overlay';
 import { ViabilityInputs, ViabilityPanel, viabilityPayload, type ViabilityValue } from '../../features/DealFields';
 
-type Deduction = { id?: string; name: string; kind: 'percent' | 'fixed'; percentBp: number; amountCents: number; routeIds: string[]; baseExcludeIds?: string[]; notes: string | null };
+type Deduction = { id?: string; name: string; kind: 'percent' | 'fixed' | 'per_plan'; percentBp: number; amountCents: number; routeIds: string[]; baseExcludeIds?: string[]; notes: string | null };
 type Equip = { id?: string; name: string; costCents: number };
 type Route = { id?: string; name: string; description: string | null; cablePerMeterCents: number; installCostCents: number; monthlyCostCents: number; requiresApproval: boolean; appliesTo?: 'condominio' | 'rua' | null; kit: { equipmentId: string; qty: number }[] };
 type Rule = { id?: string; name: string; minMeters: number | null; maxMeters: number | null; minMbps: number | null; maxMbps: number | null; routeId: string };
@@ -92,9 +92,9 @@ function Deductions({ title, desc, url, initial, routes, partners }: { title: st
             <li key={d.id ?? `n${i}`} className="flex flex-wrap items-center gap-2 rounded-md border border-line p-2">
               <Input aria-label="Nome" className="min-w-[180px] flex-1" value={d.name} onChange={(e) => l.set(i, { name: e.target.value })} placeholder="Ex.: Simples Nacional" />
               <Select aria-label="Forma" className="w-auto" value={d.kind} onChange={(e) => l.set(i, { kind: e.target.value as Deduction['kind'] })}>
-                <option value="percent">% da mensalidade</option><option value="fixed">R$ por mês</option>
+                <option value="percent">% da mensalidade</option><option value="fixed">R$ por mês</option>{url.endsWith('partners') && <option value="per_plan">Valor por plano (residencial)</option>}
               </Select>
-              {d.kind === 'percent' ? <NumInput label="Percentual" value={d.percentBp} suffix="%" onChange={(v) => l.set(i, { percentBp: v ?? 0 })} /> : <NumInput label="Valor" prefix="R$" value={d.amountCents} onChange={(v) => l.set(i, { amountCents: v ?? 0 })} />}
+              {d.kind === 'per_plan' ? <span className="text-xs text-muted">Valor informado em cada plano residencial (Planos e produtos)</span> : d.kind === 'percent' ? <NumInput label="Percentual" value={d.percentBp} suffix="%" onChange={(v) => l.set(i, { percentBp: v ?? 0 })} /> : <NumInput label="Valor" prefix="R$" value={d.amountCents} onChange={(v) => l.set(i, { amountCents: v ?? 0 })} />}
               {routes.length > 0 && (
                 <Select aria-label="Vale para" className="w-auto" value={d.routeIds[0] ?? ''} onChange={(e) => l.set(i, { routeIds: e.target.value ? [e.target.value] : [] })}>
                   <option value="">Todos os caminhos</option>
@@ -161,7 +161,7 @@ function Routes({ initial, equipments }: { initial: Route[]; equipments: Equip[]
                 const qty = r.kit.find((k) => k.equipmentId === e.id)?.qty ?? 0;
                 return (
                   <label key={e.id} className="flex items-center gap-1">
-                    <Input aria-label={`Quantidade de ${e.name}`} type="number" min={0} max={50} className="h-8 w-14" value={qty} onChange={(ev) => { const q = Math.max(0, Number(ev.target.value || 0)); l.set(i, { kit: [...r.kit.filter((k) => k.equipmentId !== e.id), ...(q ? [{ equipmentId: e.id!, qty: q }] : [])] }); }} />
+                    <Input aria-label={`Quantidade de ${e.name}`} type="number" min={0} className="h-8 w-20" value={qty} onChange={(ev) => { const q = Math.max(0, Number(ev.target.value || 0)); l.set(i, { kit: [...r.kit.filter((k) => k.equipmentId !== e.id), ...(q ? [{ equipmentId: e.id!, qty: q }] : [])] }); }} />
                     {e.name}
                   </label>
                 );

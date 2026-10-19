@@ -112,8 +112,10 @@ function describeAudit(action: string, metadata: Record<string, unknown> | null)
 }
 
 /** Plano com produtos: a mensalidade é a soma (quantidade × valor unitário) dos produtos. */
-function withProductPrice<T extends { priceCents?: number; products?: { qty: number; unitPriceCents: number }[] }>(b: T): T {
-  return b.products?.length ? { ...b, priceCents: b.products.reduce((a, i) => a + i.qty * i.unitPriceCents, 0) } : b;
+function withProductPrice<T extends { priceCents?: number; segment?: string; partnerCosts?: Record<string, number>; products?: { qty: number; unitPriceCents: number }[] }>(b: T): T {
+  // custos de parceiro por plano (ex.: PlayHub) valem só para planos residenciais
+  const out = b.segment && b.segment !== 'residencial' && b.partnerCosts ? { ...b, partnerCosts: {} } : b;
+  return out.products?.length ? { ...out, priceCents: out.products.reduce((a, i) => a + i.qty * i.unitPriceCents, 0) } : out;
 }
 
 export const adminRoutes = [

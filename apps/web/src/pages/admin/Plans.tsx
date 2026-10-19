@@ -10,7 +10,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 
 type Commission = { kind: 'percent' | 'fixo'; value: number } | null;
 type Product = { name: string; qty: number; unitPriceCents: number; commissionAtiva: Commission; commissionReceptiva: Commission };
-type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; invoiceServiceName: string | null; products: Product[]; active: boolean; sourceSystem: string };
+type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; invoiceServiceName: string | null; products: Product[]; partnerCosts: Record<string, number>; active: boolean; sourceSystem: string };
 
 /** Linha do formulário: valores digitados como texto ("79,90", "50"). */
 type ProductRow = { name: string; qty: string; unit: string; aKind: 'percent' | 'fixo' | ''; aValue: string; rKind: 'percent' | 'fixo' | ''; rValue: string };
@@ -40,12 +40,14 @@ export function AdminPlans() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['admin', 'plans'], queryFn: () => api<{ items: Plan[] }>('/admin/plans') });
+  const viab = useQuery({ queryKey: ['admin', 'viability'], queryFn: () => api<{ partners: { id: string; name: string; kind: string }[] }>('/admin/viability') });
+  const perPlan = (viab.data?.partners ?? []).filter((p) => p.kind === 'per_plan');
   const [editing, setEditing] = useState<Plan | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
-  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', active: true, products: [] as ProductRow[] };
+  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', active: true, products: [] as ProductRow[], partnerCosts: {} as Record<string, string> };
   const [form, setForm] = useState(empty);
   const open = (p: Plan | 'new') => {
     setEditing(p);
-    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', active: p.active, products: (p.products ?? []).map(toRow) });
+    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', active: p.active, products: (p.products ?? []).map(toRow), partnerCosts: Object.fromEntries(Object.entries(p.partnerCosts ?? {}).map(([k, v]) => [k, dec(v)])) });
   };
   const setRow = (i: number, v: Partial<ProductRow>) => setForm((f) => ({ ...f, products: f.products.map((r, j) => (j === i ? { ...r, ...v } : r)) }));
   const total = form.products.reduce((a, r) => a + rowUnit(r) * rowQty(r), 0);
@@ -61,7 +63,8 @@ export function AdminPlans() {
       const products: Product[] = form.products.map((r) => ({ name: r.name.trim(), qty: rowQty(r), unitPriceCents: rowUnit(r), commissionAtiva: commissionOf(r.aKind, r.aValue), commissionReceptiva: commissionOf(r.rKind, r.rValue) }));
       const priceCents = hasProducts ? total : toCents(form.price);
       if (priceCents === null) throw new Error('Informe o preço no formato 99,90 ou cadastre os produtos.');
-      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, products, active: form.active };
+      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, products, active: form.active,
+        partnerCosts: form.segment === 'residencial' ? Object.fromEntries(Object.entries(form.partnerCosts).filter(([k, v]) => perPlan.some((p) => p.id === k) && toCents(v)).map(([k, v]) => [k, toCents(v)!])) : {} };
       return editing === 'new' ? api('/admin/plans', { method: 'POST', body }) : api(`/admin/plans/${(editing as Plan).id}`, { method: 'PATCH', body });
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); toast({ tone: 'success', message: 'Plano salvo' }); },
@@ -108,6 +111,19 @@ export function AdminPlans() {
             </FormField>
           </div>
 
+          {perPlan.length > 0 && (form.segment === 'residencial' ? (
+            <fieldset className="rounded-md border border-line p-3">
+              <legend className="px-1 text-sm font-semibold text-ink">Parceiros cobrados por plano</legend>
+              <p className="mb-2 text-xs text-muted">Custo mensal deste plano com cada parceiro. Entra na margem só deste plano.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {perPlan.map((pt) => (
+                  <FormField key={pt.id} label={`${pt.name} (R$/mês)`} htmlFor={`pl-pc-${pt.id}`}>
+                    <Input id={`pl-pc-${pt.id}`} inputMode="decimal" value={form.partnerCosts[pt.id] ?? ''} onChange={(e) => setForm({ ...form, partnerCosts: { ...form.partnerCosts, [pt.id]: e.target.value } })} placeholder="7,90" />
+                  </FormField>
+                ))}
+              </div>
+            </fieldset>
+          ) : <p className="text-xs text-muted">Parceiros cobrados por plano ({perPlan.map((p) => p.name).join(', ')}) valem só para planos residenciais.</p>)}
           <fieldset className="rounded-md border border-line p-3">
             <legend className="px-1 text-sm font-semibold text-ink">Produtos do plano</legend>
             <p className="mb-2 text-xs text-muted">Tudo que compõe o plano (internet, ponto extra, TV, telefone…). Comissão em % do valor do produto ou em R$ por unidade, separada para venda ativa e receptiva. Sem comissão nos produtos, vale a regra geral de Configurações → Viabilidade.</p>

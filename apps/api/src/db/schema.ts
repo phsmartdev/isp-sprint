@@ -126,6 +126,8 @@ export const plans = pgTable(
     speedMbps: integer('speed_mbps'),
     /** Nome do serviço como sai na fatura. */
     invoiceServiceName: text('invoice_service_name'),
+    /** Custo mensal de parceiros cobrados por plano (ex.: PlayHub), por id do parceiro, em centavos. Só residencial. */
+    partnerCosts: jsonb('partner_costs').$type<Record<string, number>>().notNull().default({}),
     /** Produtos que compõem o plano: nome, quantidade, valor unitário e comissão por tipo de venda. */
     products: jsonb('products').$type<{ name: string; qty: number; unitPriceCents: number; commissionAtiva: { kind: 'percent' | 'fixo'; value: number } | null; commissionReceptiva: { kind: 'percent' | 'fixo'; value: number } | null }[]>().notNull().default([]),
     active: boolean('active').notNull().default(true),
@@ -796,7 +798,7 @@ export const viabilityDeductions = pgTable(
   },
   (t) => ({
     catCk: check('viability_deductions_cat_ck', inList('category', ['tributo', 'parceiro'])),
-    kindCk: check('viability_deductions_kind_ck', inList('kind', ['percent', 'fixed'])),
+    kindCk: check('viability_deductions_kind_ck', inList('kind', ['percent', 'fixed', 'per_plan'])),
   }),
 );
 

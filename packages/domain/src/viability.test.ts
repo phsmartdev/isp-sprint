@@ -111,4 +111,12 @@ describe('viabilidade', () => {
     expect(r.engineering.required).toBe(true);
     expect(r.engineering.reasons).toHaveLength(2);
   });
+
+  it('parceiro com valor por plano só entra quando o plano tem valor', () => {
+    const p2 = { ...params, partners: [{ id: 'playhub', name: 'PLAYHUB', kind: 'per_plan' as const, percentBp: 0, amountCents: 0, active: true }] };
+    const base = { priceCents: 9990, mbps: 300, cableMeters: 50, activationFeeCents: 0, saleType: 'ativa' as const, equipment: null, routeId: null };
+    expect(computeViability(base, p2).monthlyDeductions.some((l) => l.label.includes('PLAYHUB'))).toBe(false);
+    const r = computeViability({ ...base, planPartnerCosts: { playhub: 790 } }, p2);
+    expect(r.monthlyDeductions.find((l) => l.label.includes('PLAYHUB'))!.cents).toBe(790);
+  });
 });
