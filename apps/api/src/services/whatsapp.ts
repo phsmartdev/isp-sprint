@@ -2,6 +2,8 @@
  * Envio pelo WhatsApp.
  *  - API (WhatsApp Cloud): envia o PDF pelo número da empresa. O WhatsApp só deixa a empresa mandar
  *    mensagem livre para quem falou com ela nas últimas 24 h; fora disso a API recusa.
+ *  - Z-API (licença usada pela empresa): manda o PDF pelo número conectado à instância, sem a janela de 24 h.
+ *    Docs: https://developer.z-api.io (send-document/{extensão}, status; cabeçalho Client-Token).
  *  - Link: abre o WhatsApp do vendedor com a mensagem pronta e um link seguro (expira) para o PDF.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -65,4 +67,43 @@ export async function sendWhatsAppDocument(cfg: { phoneNumberId: string; accessT
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'document', document: { id: media.id, filename: file.filename, caption: caption.slice(0, 1000) } }),
   });
   return msg.messages?.[0]?.id ?? null;
+}
+
+// ------------------------------------------------------------------ Z-API
+const ZAPI = 'https://api.z-api.io/instances';
+export type ZapiCfg = { instanceId: string; instanceToken: string; clientToken: string | null };
+async function zapi<T>(cfg: ZapiCfg, path: string, init: { method: 'GET' | 'POST'; body?: unknown }): Promise<T> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 30_000);
+  try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (cfg.clientToken) headers['client-token'] = cfg.clientToken;
+    const r = await fetch(`${ZAPI}/${encodeURIComponent(cfg.instanceId)}/token/${encodeURIComponent(cfg.instanceToken)}/${path}`, { method: init.method, headers, body: init.body ? JSON.stringify(init.body) : undefined, signal: ctl.signal });
+    const j = (await r.json().catch(() => ({}))) as T & { error?: string; message?: string };
+    if (!r.ok || (path !== 'status' && j.error)) {
+      const why = j.error ?? j.message ?? `HTTP ${r.status}`;
+      throw new Error(/client-token/i.test(why) ? 'Token de segurança (Client-Token) ausente ou errado.' : why);
+    }
+    return j;
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new Error('A Z-API não respondeu a tempo.');
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Conexão da instância com o celular (status). */
+export async function zapiStatus(cfg: ZapiCfg) {
+  return zapi<{ connected?: boolean; error?: string; smartphoneConnected?: boolean }>(cfg, 'status', { method: 'GET' });
+}
+
+/** Envia documento em Base64 (o PDF não precisa ficar público). */
+export async function sendZapiDocument(cfg: ZapiCfg, to: string, file: { data: Buffer; filename: string; mime: string }, caption: string) {
+  const ext = (file.filename.split('.').pop() ?? 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '') || 'pdf';
+  const r = await zapi<{ zaapId?: string; messageId?: string; id?: string }>(cfg, `send-document/${ext}`, {
+    method: 'POST',
+    body: { phone: to, document: `data:${file.mime};base64,${file.data.toString('base64')}`, fileName: file.filename.replace(/\.[^.]+$/, ''), caption: caption.slice(0, 1000) || undefined },
+  });
+  return r.messageId ?? r.id ?? null;
 }

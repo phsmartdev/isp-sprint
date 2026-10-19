@@ -8,6 +8,7 @@ import * as s from '../db/schema';
 import type { DB } from '../db/client';
 import { decryptSecret } from '../services/email';
 import { audit } from '../services/audit';
+import { zapiStatus } from '../services/whatsapp';
 import { INTEGRATION_KINDS, INTEGRATION_SPECS, ingestLead, integrationRow, logEvent, rotateToken, saveIntegration, type IntegrationKind } from '../services/integrations';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
@@ -93,7 +94,52 @@ export const integrationRoutes = [
     },
   }),
 
+  defineRoute({
+    method: 'POST',
+    url: '/admin/integrations/zapi/test',
+    summary: 'Confere se a instância da Z-API está conectada ao celular',
+    tag: 'Integrações',
+    ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const r = await integrationRow(app.db, auth.tenantId, 'zapi');
+      const token = secretOf(r, 'instanceToken');
+      if (!r.config.instanceId || !token) return { ok: false, message: 'Preencha e salve o ID e o token da instância.' };
+      try {
+        const st = await zapiStatus({ instanceId: r.config.instanceId, instanceToken: token, clientToken: secretOf(r, 'clientToken') });
+        const message = st.connected ? `Conectada${st.smartphoneConnected === false ? ', mas o celular está sem internet' : ''}.` : `Instância não conectada: ${st.error ?? 'leia o QR code no painel da Z-API'}.`;
+        await logEvent(app.db, auth.tenantId, 'zapi', st.connected ? 'recebido' : 'erro', `Teste de conexão: ${message}`);
+        return { ok: !!st.connected, message };
+      } catch (e) {
+        await logEvent(app.db, auth.tenantId, 'zapi', 'erro', `Teste de conexão: ${(e as Error).message}`);
+        return { ok: false, message: (e as Error).message };
+      }
+    },
+  }),
+
   // ------------------------------------------------------------------ recebimento (públicos, por código secreto)
+  defineRoute({
+    method: 'POST',
+    url: '/hooks/zapi/:token',
+    summary: 'Z-API “Ao receber”: cada nova conversa (não grupo, não enviada por nós) vira lead',
+    tag: 'Integrações',
+    public: true,
+    params: HookParams,
+    body: z.record(z.string(), z.unknown()),
+    rateLimit: () => ({ max: 600, timeWindow: '1 minute' }),
+    handler: async ({ app, params, body }) => {
+      const r = await byToken(app, 'zapi', params.token);
+      if (!r.enabled) return { ok: true };
+      if (r.config.instanceId && typeof body.instanceId === 'string' && body.instanceId !== r.config.instanceId) return { ok: true };
+      if (body.fromMe === true || body.isGroup === true || body.isNewsletter === true || body.broadcast === true || body.isStatusReply === true) return { ok: true };
+      const phone = typeof body.phone === 'string' ? body.phone.replace(/\D/g, '') : '';
+      if (phone.length < 10) return { ok: true };
+      const text = (body.text as { message?: string } | undefined)?.message;
+      const kind = ['image', 'audio', 'video', 'document', 'sticker', 'location', 'contact'].find((k) => body[k] && typeof body[k] === 'object');
+      const name = [body.senderName, body.chatName].find((v) => typeof v === 'string' && v.trim()) as string | undefined;
+      await ingestLead(app.db, r, { name: name ?? `+${phone}`, phone: `+${phone}`, message: text ?? `[${kind ?? 'mensagem'}]` });
+      return { ok: true };
+    },
+  }),
   defineRoute({
     method: 'POST',
     url: '/hooks/site/:token',

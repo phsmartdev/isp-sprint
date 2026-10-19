@@ -1,7 +1,7 @@
-/** Configurações → Integrações: IXC, WhatsApp Cloud API, Meta Lead Ads e formulário do site. */
+/** Configurações → Integrações: IXC, WhatsApp (Z-API e Cloud API), Meta Lead Ads e formulário do site. */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Database, Globe, MessageSquare, RefreshCw, Users } from 'lucide-react';
+import { Copy, Database, Globe, MessageCircle, MessageSquare, PlugZap, RefreshCw, Users } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { useLookups } from '../../lib/hooks';
@@ -9,12 +9,12 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Select } from 
 import { useToast } from '../../components/ui/overlay';
 
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
-type Item = { kind: 'ixc' | 'whatsapp' | 'meta' | 'site'; name: string; description: string; status: string; fields: Field[]; receivesLeads: boolean; enabled: boolean; config: Record<string, string | null>; secretsSet: Record<string, boolean>; webhookUrl: string | null; lastEventAt: string | null };
+type Item = { kind: 'ixc' | 'zapi' | 'whatsapp' | 'meta' | 'site'; name: string; description: string; status: string; fields: Field[]; receivesLeads: boolean; enabled: boolean; config: Record<string, string | null>; secretsSet: Record<string, boolean>; webhookUrl: string | null; lastEventAt: string | null };
 type Event = { id: string; kind: string; status: string; summary: string; leadId: string | null; createdAt: string };
 
-const ICONS = { ixc: Database, whatsapp: MessageSquare, meta: Users, site: Globe };
-const EVENT_LABEL: Record<string, { label: string; tone: 'green' | 'neutral' | 'red' | 'yellow' }> = { lead_criado: { label: 'Lead criado', tone: 'green' }, duplicado: { label: 'Já existia', tone: 'yellow' }, ignorado: { label: 'Ignorado', tone: 'neutral' }, erro: { label: 'Erro', tone: 'red' }, recebido: { label: 'Recebido', tone: 'neutral' } };
-const KIND_NAME: Record<string, string> = { ixc: 'IXC', whatsapp: 'WhatsApp', meta: 'Meta', site: 'Site' };
+const ICONS = { ixc: Database, zapi: MessageCircle, whatsapp: MessageSquare, meta: Users, site: Globe };
+const EVENT_LABEL: Record<string, { label: string; tone: 'green' | 'neutral' | 'red' | 'yellow' }> = { lead_criado: { label: 'Lead criado', tone: 'green' }, duplicado: { label: 'Já existia', tone: 'yellow' }, ignorado: { label: 'Ignorado', tone: 'neutral' }, erro: { label: 'Erro', tone: 'red' }, recebido: { label: 'Recebido', tone: 'neutral' }, enviado: { label: 'Enviado', tone: 'green' } };
+const KIND_NAME: Record<string, string> = { ixc: 'IXC', zapi: 'Z-API', whatsapp: 'WhatsApp Cloud', meta: 'Meta', site: 'Site' };
 
 function copy(text: string, toast: ReturnType<typeof useToast>) {
   void navigator.clipboard?.writeText(text).then(() => toast({ tone: 'success', message: 'Copiado' }), () => toast({ tone: 'error', message: 'Não foi possível copiar' }));
@@ -47,6 +47,11 @@ function IntegrationCard({ item }: { item: Item }) {
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [showSnippet, setShowSnippet] = useState(false);
   const Icon = ICONS[item.kind];
+  const test = useMutation({
+    mutationFn: () => api<{ ok: boolean; message: string }>(`/admin/integrations/${item.kind}/test`, { method: 'POST' }),
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: r.ok ? 'success' : 'error', message: `Z-API: ${r.message}` }); },
+    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
+  });
   const save = useMutation({
     mutationFn: () => api(`/admin/integrations/${item.kind}`, { method: 'PUT', body: { enabled, config, secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== '')) } }),
     onSuccess: () => { setSecrets({}); qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: 'success', message: `${item.name}: salvo` }); },
@@ -117,7 +122,10 @@ function IntegrationCard({ item }: { item: Item }) {
           )}
         </div>
       )}
-      <div className="mt-4 flex justify-end"><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button></div>
+      <div className="mt-4 flex flex-wrap justify-end gap-2">
+        {item.kind === 'zapi' && <Button icon={<PlugZap className="h-4 w-4" />} loading={test.isPending} onClick={() => test.mutate()}>Testar conexão</Button>}
+        <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>
+      </div>
     </section>
   );
 }

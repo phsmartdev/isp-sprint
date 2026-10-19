@@ -9,7 +9,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { encryptSecret } from './email';
 
-export const INTEGRATION_KINDS = ['ixc', 'whatsapp', 'meta', 'site'] as const;
+export const INTEGRATION_KINDS = ['ixc', 'zapi', 'whatsapp', 'meta', 'site'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
 
@@ -26,8 +26,21 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
       { key: 'token', label: 'Token da API', secret: true },
     ],
   },
+  zapi: {
+    name: 'WhatsApp (Z-API)',
+    description: 'Envia propostas pelo WhatsApp da empresa conectado à Z-API e transforma cada nova conversa recebida em lead. No painel da Z-API, em Webhooks, cole o endereço abaixo em “Ao receber”.',
+    receivesLeads: true,
+    status: '',
+    fields: [
+      { key: 'instanceId', label: 'ID da instância', hint: 'Painel da Z-API → Instâncias' },
+      { key: 'instanceToken', label: 'Token da instância', secret: true },
+      { key: 'clientToken', label: 'Token de segurança da conta (Client-Token)', secret: true, hint: 'Painel → Segurança. Obrigatório se estiver ativado lá.' },
+      { key: 'defaultOwnerId', label: 'Responsável pelos leads', type: 'user' },
+      { key: 'sourceName', label: 'Canal de entrada', hint: 'Padrão: WhatsApp' },
+    ],
+  },
   whatsapp: {
-    name: 'WhatsApp Business (Cloud API)',
+    name: 'WhatsApp Business (Cloud API da Meta)',
     description: 'Cada nova conversa recebida vira um lead com o telefone e o nome do perfil. Configure o webhook no Meta for Developers com o endereço e o código de verificação abaixo.',
     receivesLeads: true,
     status: '',
@@ -100,7 +113,7 @@ export async function logEvent(db: DbOrTx, tenantId: string, kind: IntegrationKi
   await db.update(s.integrations).set({ lastEventAt: new Date() }).where(and(eq(s.integrations.tenantId, tenantId), eq(s.integrations.kind, kind)));
 }
 
-const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
+const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
 const clean = (v: unknown, max = 200) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const digits = (v: string | null) => (v ? v.replace(/\D/g, '') : '');
 

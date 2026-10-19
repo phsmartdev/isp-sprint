@@ -38,7 +38,7 @@ export function WhatsAppSend({ opp, attachment, open, onClose }: { opp: Pick<Opp
         <p className="text-sm text-muted">Arquivo: <span className="font-semibold text-ink">{attachment?.filename}</span></p>
         <FormField label="WhatsApp do cliente" htmlFor="wa-phone" hint="Com DDD"><Input id="wa-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} /></FormField>
         <FormField label="Mensagem" htmlFor="wa-msg"><Textarea id="wa-msg" className="min-h-[96px]" value={message} onChange={(e) => setMessage(e.target.value)} /></FormField>
-        <p className="text-xs text-muted">“Enviar pela empresa” manda o PDF pelo número do WhatsApp Business (precisa da integração ligada e de o cliente ter falado com vocês nas últimas 24 h). “Abrir no meu WhatsApp” abre a conversa com a mensagem e um link seguro para o PDF, válido por 15 dias.</p>
+        <p className="text-xs text-muted">“Enviar pela empresa” manda o PDF pelo WhatsApp da empresa conectado à Z-API (Configurações → Integrações). “Abrir no meu WhatsApp” abre a conversa com a mensagem e um link seguro para o PDF, válido por 15 dias.</p>
       </div>
     </Modal>
   );

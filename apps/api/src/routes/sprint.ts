@@ -6,7 +6,7 @@ import { AnswersPut, AttachmentUpload, OpportunityEmail } from '@isp/shared';
 import { decryptSecret } from '../services/email';
 import { integrationRow, logEvent } from '../services/integrations';
 import { publicLink } from '../services/alerts';
-import { signFileToken, verifyFileToken, waPhone, sendWhatsAppDocument } from '../services/whatsapp';
+import { signFileToken, verifyFileToken, waPhone, sendWhatsAppDocument, sendZapiDocument } from '../services/whatsapp';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -314,13 +314,20 @@ export const sprintRoutes = [
       const link = publicLink(app.config, `/api/v1/public/files/${signFileToken(app.config.cookieSecret, a.id)}`);
       let result: { mode: 'api' | 'link'; waUrl?: string; link: string };
       if (body.mode === 'api') {
+        const file = { data: a.data, filename: a.filename, mime: a.mime };
+        const z = await integrationRow(app.db, auth.tenantId, 'zapi');
+        const zt = z.secrets.instanceToken ? decryptSecret(z.secrets.instanceToken) : null;
         const integ = await integrationRow(app.db, auth.tenantId, 'whatsapp');
         const token = integ.secrets.accessToken ? decryptSecret(integ.secrets.accessToken) : null;
-        if (!integ.enabled || !integ.config.phoneNumberId || !token) throw unprocessable('O WhatsApp Business não está configurado. Use “Abrir no meu WhatsApp” ou configure em Configurações → Integrações.');
+        const useZapi = z.enabled && !!z.config.instanceId && !!zt;
+        if (!useZapi && (!integ.enabled || !integ.config.phoneNumberId || !token)) throw unprocessable('O WhatsApp da empresa não está configurado. Use “Abrir no meu WhatsApp” ou configure a Z-API em Configurações → Integrações.');
+        const kind = useZapi ? 'zapi' : 'whatsapp';
         try {
-          await sendWhatsAppDocument({ phoneNumberId: integ.config.phoneNumberId, accessToken: token }, to, { data: a.data, filename: a.filename, mime: a.mime }, body.message);
+          if (useZapi) await sendZapiDocument({ instanceId: z.config.instanceId!, instanceToken: zt!, clientToken: z.secrets.clientToken ? decryptSecret(z.secrets.clientToken) : null }, to, file, body.message);
+          else await sendWhatsAppDocument({ phoneNumberId: integ.config.phoneNumberId!, accessToken: token! }, to, file, body.message);
+          await logEvent(app.db, auth.tenantId, kind, 'enviado', `${a.filename} enviado para ${to}.`);
         } catch (e) {
-          await logEvent(app.db, auth.tenantId, 'whatsapp', 'erro', `Envio de ${a.filename} para ${to}: ${(e as Error).message}`);
+          await logEvent(app.db, auth.tenantId, kind, 'erro', `Envio de ${a.filename} para ${to}: ${(e as Error).message}`);
           throw unprocessable(`O WhatsApp não aceitou o envio: ${(e as Error).message}`);
         }
         result = { mode: 'api', link };

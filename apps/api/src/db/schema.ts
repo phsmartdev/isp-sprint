@@ -962,7 +962,7 @@ export const integrations = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.kind] }),
     tokenUq: uniqueIndex('integrations_token_uq').on(t.webhookToken),
-    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'whatsapp', 'meta', 'site'])),
+    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'whatsapp', 'meta', 'site'])),
   }),
 );
 
