@@ -122,24 +122,38 @@ describe('autonomia da operação e engenharia', () => {
     expect(small.viability.route.name).toBe('Condomínio');
   });
 
-  it('portas da CTO: venda ocupa, CTO cheia bloqueia, cancelamento libera', async () => {
+  it('portas da CTO: oportunidade reserva, venda ocupa, perda e cancelamento liberam', async () => {
     const r = (await carlos.post('/admin/regions', { name: 'Região Portas' })).json();
-    const c = (await carlos.post('/admin/condominiums', { regionId: r.id, name: 'Cond Portas', ctoPorts: 1, blocks: [], hasNetwork: true, active: true })).json();
+    const c = (await carlos.post('/admin/condominiums', { regionId: r.id, name: 'Cond Portas', ctoPorts: 2, blocks: [], hasNetwork: true, active: true })).json();
     const plan = (await carlos.get('/meta/lookups')).json().plans[0];
-    const mk = async (name: string) => (await carlos.post('/opportunities', { newContact: { name, segment: 'residencial' }, planId: plan.id, condominiumId: c.id })).json();
-    const a = await mk('Cliente Porta A');
+    const mk = (name: string) => carlos.post('/opportunities', { newContact: { name, segment: 'residencial' }, planId: plan.id, condominiumId: c.id });
+    const a = (await mk('Cliente Porta A')).json();
+    const b = (await mk('Cliente Porta B')).json();
+    let rep = (await carlos.get('/reports/ports')).json().items.find((x: { id: string }) => x.id === c.id);
+    expect(rep.reserved).toBe(2);
+    expect(rep.free).toBe(0);
+    const full = await mk('Cliente Porta C');
+    expect(full.statusCode).toBe(422);
+    expect(full.json().detail).toContain('sem portas livres');
     ok(await carlos.post(`/opportunities/${a.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: a.rowVersion }));
-    const b = await mk('Cliente Porta B');
-    const blocked = await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: b.rowVersion });
-    expect(blocked.statusCode).toBe(422);
-    expect(blocked.json().detail).toContain('sem portas livres');
-    const rep = (await carlos.get('/reports/ports')).json().items.find((x: { id: string }) => x.id === c.id);
+    ok(await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'perdida', confirm: true, lossReason: 'preco', rowVersion: b.rowVersion }));
+    // a automação "perdeu → Recuperação" cria uma cópia aberta no mesmo condomínio: ela mantém a reserva
+    rep = (await carlos.get('/reports/ports')).json().items.find((x: { id: string }) => x.id === c.id);
     expect(rep.used).toBe(1);
+    expect(rep.reserved).toBe(1);
+    const copy = rep.reservations[0];
+    const copyOpp = (await carlos.get(`/opportunities/${copy.opportunityId}`)).json();
+    ok(await carlos.patch(`/opportunities/${copyOpp.id}`, { condominiumId: null, rowVersion: copyOpp.rowVersion }));
+    rep = (await carlos.get('/reports/ports')).json().items.find((x: { id: string }) => x.id === c.id);
+    expect(rep.reserved).toBe(0);
     expect(rep.clients[0].contactName).toBe('Cliente Porta A');
+    const cc = (await mk('Cliente Porta C')).json();
+    expect(cc.id).toBeTruthy();
+    expect((await mk('Cliente Porta D')).statusCode).toBe(422);
     const won = (await carlos.get(`/opportunities/${a.id}`)).json();
     expect((await lucas.post(`/opportunities/${a.id}/release-port`, { reason: 'mudou de endereço', rowVersion: won.rowVersion })).statusCode).toBe(403);
     ok(await carlos.post(`/opportunities/${a.id}/release-port`, { reason: 'mudou de endereço', rowVersion: won.rowVersion }));
-    ok(await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: b.rowVersion }));
+    ok(await mk('Cliente Porta D'), 201);
   });
 
   it('inteligência geral: base, motivos e cohort; vendedor sem acesso', async () => {

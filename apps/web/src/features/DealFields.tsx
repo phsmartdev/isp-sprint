@@ -56,7 +56,7 @@ export function AddressFields({ value, onChange, disabled, idPrefix = 'ad' }: { 
           <option value="">Não é condomínio / não cadastrado</option>
           {area.data?.regions.map((r) => (
             <optgroup key={r.id} label={r.name}>
-              {area.data!.condominiums.filter((c) => c.regionId === r.id).map((c) => <option key={c.id} value={c.id}>{c.name}{c.portsFree != null ? ` · ${c.portsFree} porta(s) livre(s)` : ''}</option>)}
+              {area.data!.condominiums.filter((c) => c.regionId === r.id).map((c) => <option key={c.id} value={c.id}>{c.name}{c.portsFree != null ? (c.portsFree > 0 ? ` · ${c.portsFree} porta(s) livre(s)` : ' · sem porta livre') : ''}</option>)}
             </optgroup>
           ))}
         </Select>

@@ -123,7 +123,7 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
         <>
           {view === 'geral' && <h2 className="text-lg font-bold text-ink">Negócio</h2>}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-6">
-            <Stat label={`Clientes ativos em ${fmtDate(n.activeOn.date).slice(0, 5)}`} value={fmtInt(n.activeOn.n)} title="Posição da base na data final do filtro. Escolha hoje para ver a base atual." hint={`Dia anterior ${fmtInt(n.activeOn.dayBefore.n)} · mês anterior ${fmtInt(n.activeOn.monthBefore.n)}`} tone={n.activeOn.n < n.activeOn.monthBefore.n ? 'danger' : undefined} />
+            <Stat label="Clientes ativos" value={fmtInt(n.activeOn.n)} title={`Posição da base em ${fmtDate(n.activeOn.date)} (data final do filtro). Escolha hoje para ver a base atual.`} hint={`Mês anterior ${fmtInt(n.activeOn.monthBefore.n)}`} tone={n.activeOn.n < n.activeOn.monthBefore.n ? 'danger' : undefined} />
             <Stat label="Clientes cancelados" value={fmtInt(n.cancelledCustomers)} hint={`${fmtInt(n.cancelledInPeriod)} no período`} />
             <Stat label="Base de faturamento" value={brlCompact(n.billingCents)} title={fmtBRL(n.billingCents)} hint={`${fmtBRL(n.billingCents)}/mês`} />
             <Stat label="Ticket médio" value={fmtBRL(n.ticketCents)} hint="Por cliente ativo" />

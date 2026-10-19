@@ -12,7 +12,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { storeViability, viabilityFor } from '../services/viability';
-import { portUsage } from '../services/ports';
+import { assertPortAvailable, portUsage } from '../services/ports';
 import { bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
@@ -217,7 +217,7 @@ export const opportunityRoutes = [
           notes: body.notes,
           pipelineId: pipelineChange?.pipelineId,
           stage: pipelineChange?.stage,
-          ...(await detailsPatch(tx, auth, body, pipelineChange?.pipelineId ?? cur.pipelineId, cur.custom ?? {})),
+          ...(await detailsPatch(tx, auth, body, pipelineChange?.pipelineId ?? cur.pipelineId, cur.custom ?? {}, { id: cur.id, stage: cur.stage, condominiumId: cur.condominiumId })),
         };
         const changed: Record<string, { from: unknown; to: unknown }> = {};
         for (const [k, v] of Object.entries(patch)) {
@@ -275,11 +275,13 @@ export const opportunityRoutes = [
           const issues = await checkStageRequirements(tx, auth.tenantId, cur, target, content, pipe.key);
           if (issues.length) throw unprocessable(`Para entrar em “${target.name}”: ${issues.map((i) => i.message).join(' ')}`, issues);
         }
+        // reabrir uma perdida volta a reservar a porta do condomínio
+        if (target.kind === 'open' && from === 'perdida' && cur.condominiumId) await assertPortAvailable(tx, auth.tenantId, cur.condominiumId, cur.id);
         if (target.kind === 'won' && cur.condominiumId) {
           // a venda ocupa uma porta da CTO do condomínio
           const [c] = await tx.select({ name: s.condominiums.name, ports: s.condominiums.ctoPorts }).from(s.condominiums).where(eq(s.condominiums.id, cur.condominiumId)).limit(1);
           if (c?.ports != null) {
-            const used = (await portUsage(tx, auth.tenantId, [cur.condominiumId])).get(cur.condominiumId) ?? 0;
+            const used = (await portUsage(tx, auth.tenantId, [cur.condominiumId], cur.id)).get(cur.condominiumId) ?? 0;
             if (used >= c.ports) throw unprocessable(`A CTO do ${c.name} está sem portas livres (${used} de ${c.ports} ocupadas). Libere uma porta ou fale com a engenharia antes de fechar.`, [{ path: 'condominiumId', message: 'Sem portas livres na CTO' }]);
           }
         }

@@ -11,6 +11,7 @@ import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './sco
 import { audit } from './audit';
 import { resolvePipeline } from './instructions';
 import { storeViability } from './viability';
+import { assertPortAvailable } from './ports';
 
 export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   contactId?: string | null;
@@ -254,7 +255,7 @@ export function opportunityDto(r: OpportunityRow, now = new Date()) {
 export const bumpVersion = () => sql`${s.opportunities.rowVersion} + 1`;
 
 /** Valida referências da empresa e os campos personalizados da jornada; devolve o patch para o banco. */
-export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<OpportunityDetails>, pipelineId: string, currentCustom?: Record<string, unknown>) {
+export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<OpportunityDetails>, pipelineId: string, currentCustom?: Record<string, unknown>, current?: { id: string; stage: string; condominiumId: string | null }) {
   const out: Record<string, unknown> = {};
   const copy = ['installCep', 'installStreet', 'installNumber', 'installDistrict', 'installCity', 'installBlock', 'installUnit', 'saleType', 'cableMeters', 'activationFeeCents', 'equipment', 'engineeringStatus', 'engineeringTicket', 'executiveTicket'] as const;
   for (const k of copy) if (d[k] !== undefined) out[k] = d[k];
@@ -263,6 +264,9 @@ export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<Opp
     if (d.condominiumId) {
       const [c] = await tx.select({ id: s.condominiums.id }).from(s.condominiums).where(and(eq(s.condominiums.id, d.condominiumId), eq(s.condominiums.tenantId, auth.tenantId))).limit(1);
       if (!c) throw unprocessable('Condomínio inválido.', [{ path: 'condominiumId', message: 'Condomínio não encontrado' }]);
+      // indicar o condomínio numa oportunidade aberta reserva uma porta da CTO
+      const open = !current || (current.stage !== 'ganha' && current.stage !== 'perdida');
+      if (open && d.condominiumId !== current?.condominiumId) await assertPortAvailable(tx, auth.tenantId, d.condominiumId, current?.id);
     }
     out.condominiumId = d.condominiumId;
   }

@@ -12,7 +12,7 @@ import { resolvePipeline } from '../services/instructions';
 import { pctDelta } from '../services/metrics';
 import { monthsEnding, periodBounds } from '../services/period';
 import { audit } from '../services/audit';
-import { occupiesPort, portUsage } from '../services/ports';
+import { occupiesPort, portReservations, portUsage, reservesPort } from '../services/ports';
 
 type Mod = 'relatorios' | 'inteligencia';
 export const oppScopeFor = (auth: AuthContext, m: Mod) => ownerScope(auth, m, { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
@@ -111,6 +111,14 @@ export const reportRoutes = [
         .innerJoin(s.regions, eq(s.regions.id, s.condominiums.regionId))
         .where(eq(s.condominiums.tenantId, auth.tenantId));
       const used = await portUsage(app.db, auth.tenantId);
+      const reservedMap = await portReservations(app.db, auth.tenantId);
+      const reservations = await app.db
+        .select({ opportunityId: s.opportunities.id, code: s.opportunities.code, condominiumId: s.opportunities.condominiumId, contactName: s.contacts.name, block: s.opportunities.installBlock, unit: s.opportunities.installUnit, stage: s.opportunities.stage, since: s.opportunities.createdAt, ownerName: s.users.name })
+        .from(s.opportunities)
+        .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
+        .innerJoin(s.users, eq(s.users.id, s.opportunities.ownerId))
+        .where(and(reservesPort(auth.tenantId), oppScopeFor(auth, 'relatorios')))
+        .orderBy(desc(s.opportunities.createdAt));
       const clients = await app.db
         .select({ opportunityId: s.opportunities.id, code: s.opportunities.code, condominiumId: s.opportunities.condominiumId, contactName: s.contacts.name, block: s.opportunities.installBlock, unit: s.opportunities.installUnit, wonAt: s.opportunities.wonAt, ownerName: s.users.name })
         .from(s.opportunities)
@@ -119,16 +127,18 @@ export const reportRoutes = [
         .where(and(occupiesPort(auth.tenantId), oppScopeFor(auth, 'relatorios')))
         .orderBy(desc(s.opportunities.wonAt));
       const items = condos
-        .filter((c) => c.active || (used.get(c.id) ?? 0) > 0)
+        .filter((c) => c.active || (used.get(c.id) ?? 0) > 0 || (reservedMap.get(c.id) ?? 0) > 0)
         .map((c) => {
           const u = used.get(c.id) ?? 0;
-          return { ...c, used: u, free: c.ports == null ? null : Math.max(0, c.ports - u), rate: c.ports ? u / c.ports : null, clients: clients.filter((x) => x.condominiumId === c.id) };
+          const r = reservedMap.get(c.id) ?? 0;
+          return { ...c, used: u, reserved: r, free: c.ports == null ? null : Math.max(0, c.ports - u - r), rate: c.ports ? u / c.ports : null, commitRate: c.ports ? (u + r) / c.ports : null, clients: clients.filter((x) => x.condominiumId === c.id), reservations: reservations.filter((x) => x.condominiumId === c.id) };
         })
         .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
       const withPorts = items.filter((i) => i.ports);
       const total = withPorts.reduce((a, i) => a + i.ports!, 0);
       const usedTotal = withPorts.reduce((a, i) => a + Math.min(i.used, i.ports!), 0);
-      return { total, used: usedTotal, rate: total ? usedTotal / total : null, items };
+      const reservedTotal = withPorts.reduce((a, i) => a + i.reserved, 0);
+      return { total, used: usedTotal, reserved: reservedTotal, free: Math.max(0, total - usedTotal - reservedTotal), rate: total ? usedTotal / total : null, items };
     },
   }),
   defineRoute({

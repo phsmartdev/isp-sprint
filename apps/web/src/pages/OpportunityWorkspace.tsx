@@ -569,7 +569,7 @@ export function OpportunityWorkspacePage() {
           <dt className="text-muted">Criada</dt><dd className="num text-text">{fmtDateTime(opp.createdAt)}</dd>
           <dt className="text-muted">Na etapa há</dt><dd className="num text-text">{opp.daysInStage} dia(s)</dd>
           {opp.lossReason && (<><dt className="text-muted">Perda</dt><dd className="text-text">{LOSS_REASON_LABELS[opp.lossReason as LossReason] ?? opp.lossReason}</dd></>)}
-          {opp.stage === 'ganha' && opp.condominiumId && (<><dt className="text-muted">Porta CTO</dt><dd className="text-text">{opp.portReleasedAt ? `Liberada em ${fmtDate(opp.portReleasedAt)}` : 'Ocupada'}</dd></>)}
+          {opp.condominiumId && opp.stage !== 'perdida' && (<><dt className="text-muted">Porta CTO</dt><dd className="text-text">{opp.stage !== 'ganha' ? 'Reservada (libera se perder)' : opp.portReleasedAt ? `Liberada em ${fmtDate(opp.portReleasedAt)}` : 'Ocupada'}</dd></>)}
           {opp.duplicatedFromId && (<><dt className="text-muted">Origem</dt><dd><Link className="link" to={`/opportunities/${opp.duplicatedFromId}`}>oportunidade anterior</Link></dd></>)}
         </dl>
         {opp.stage === 'ganha' && opp.condominiumId && !opp.portReleasedAt && canReopen && (

@@ -8,7 +8,7 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Se
 import { Modal, useToast } from '../../components/ui/overlay';
 
 type Region = { id: string; name: string; active: boolean };
-type Condo = { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; units: number | null; hasNetwork: boolean; ctoPorts: number | null; portsUsed: number; notes: string | null; active: boolean; opportunities: number; won: number };
+type Condo = { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; units: number | null; hasNetwork: boolean; ctoPorts: number | null; portsUsed: number; portsReserved: number; notes: string | null; active: boolean; opportunities: number; won: number };
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message);
 
 export function AdminArea() {
@@ -89,7 +89,7 @@ export function AdminArea() {
                         <td className="px-5 py-3 text-text">{c.blocks.length ? c.blocks.join(', ') : '—'}</td>
                         <td className="num px-5 py-3 text-text">{c.units ?? '—'}</td>
                         <td className="px-5 py-3"><Chip tone={c.hasNetwork ? 'green' : 'neutral'}>{c.hasNetwork ? 'Cabeado' : 'A cabear'}</Chip></td>
-                        <td className="num px-5 py-3 text-text">{c.ctoPorts == null ? <span className="text-muted">—</span> : <><span className={c.portsUsed >= c.ctoPorts ? 'font-bold text-danger' : 'text-ink'}>{c.portsUsed}/{c.ctoPorts}</span><span className="block text-xs text-muted">{Math.round((c.portsUsed / Math.max(1, c.ctoPorts)) * 100)}% ocupadas</span></>}</td>
+                        <td className="num px-5 py-3 text-text">{c.ctoPorts == null ? <span className="text-muted">—</span> : <><span className={c.portsUsed >= c.ctoPorts ? 'font-bold text-danger' : 'text-ink'}>{c.portsUsed}/{c.ctoPorts}</span><span className="block text-xs text-muted">{c.portsReserved ? `+${c.portsReserved} reservada(s) · ` : ''}{Math.round((c.portsUsed / Math.max(1, c.ctoPorts)) * 100)}% ocupadas</span></>}</td>
                         <td className="num px-5 py-3 text-text">{c.opportunities}{c.won ? <span className="text-xs text-success"> · {c.won} fechada(s)</span> : null}</td>
                         <td className="px-5 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => setEditing(c)}>Editar</Button></td>
                       </tr>
