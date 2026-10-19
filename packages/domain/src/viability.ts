@@ -44,7 +44,14 @@ export type ViabilityParams = {
 
 /** Produto que compõe o plano: valor unitário e comissão por venda ativa e receptiva. */
 export type ProductCommission = { kind: 'percent' | 'fixo'; value: number };
-export type PlanProduct = { name: string; qty: number; unitPriceCents: number; commissionAtiva: ProductCommission | null; commissionReceptiva: ProductCommission | null };
+export type PlanProduct = { name: string; qty: number; unitPriceCents: number; commissionAtiva: ProductCommission | null; commissionReceptiva: ProductCommission | null; partnerId?: string | null; partnerCostCents?: number | null };
+
+/** Custo mensal por parceiro a partir dos produtos do plano ligados a ele. */
+export const partnerCostsFromProducts = (items: PlanProduct[]) => {
+  const out: Record<string, number> = {};
+  for (const i of items) if (i.partnerId) out[i.partnerId] = (out[i.partnerId] ?? 0) + i.qty * (i.partnerCostCents ?? i.unitPriceCents);
+  return out;
+};
 export const productsTotal = (items: PlanProduct[]) => items.reduce((a, i) => a + i.unitPriceCents * i.qty, 0);
 
 /** Comissão pelos produtos do plano; null quando nenhum produto define comissão para o tipo de venda. */
@@ -156,10 +163,12 @@ export function computeViability(input: ViabilityInput, p: ViabilityParams, base
 
   const applies = (r: AmountRule) => r.active && (!r.routeIds?.length || (route && r.routeIds.includes(route.id)));
   const planCost = (r: AmountRule) => input.planPartnerCosts?.[r.id] ?? 0;
+  // parceiro ligado a produtos do plano: o custo vem do plano, qualquer que seja a forma cadastrada
+  const byPlan = (r: AmountRule) => r.kind === 'per_plan' || input.planPartnerCosts?.[r.id] !== undefined;
   const ruleLine = (r: AmountRule, base = price, baseNote = ''): Line => ({
     label: r.name,
-    cents: r.kind === 'percent' ? pct(base, r.percentBp) : r.kind === 'per_plan' ? planCost(r) : r.amountCents,
-    detail: r.kind === 'percent' ? `${fmtBp(r.percentBp)}${baseNote}` : r.kind === 'per_plan' ? 'valor do plano' : 'valor fixo',
+    cents: byPlan(r) ? planCost(r) : r.kind === 'percent' ? pct(base, r.percentBp) : r.amountCents,
+    detail: byPlan(r) ? 'pelos produtos do plano' : r.kind === 'percent' ? `${fmtBp(r.percentBp)}${baseNote}` : 'valor fixo',
   });
   // parceiro "por plano" só entra quando o plano tem valor para ele (ex.: PlayHub nos residenciais)
   const partners = p.partners.filter((r) => applies(r) && (r.kind !== 'per_plan' || planCost(r) > 0));

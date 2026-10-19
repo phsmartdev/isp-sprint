@@ -44,12 +44,12 @@ function useDialogFocus(open: boolean, onClose: () => void) {
   return ref;
 }
 
-export function Modal({ open, onClose, title, children, footer, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' }) {
+export function Modal({ open, onClose, title, children, footer, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const ref = useDialogFocus(open, onClose);
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="modal-title" className={clsx('flex max-h-[92vh] w-full flex-col rounded-t-lg bg-surface shadow-overlay sm:rounded-lg', size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : 'sm:max-w-xl')}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="modal-title" className={clsx('flex max-h-[92vh] w-full flex-col rounded-t-lg bg-surface shadow-overlay sm:rounded-lg', size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : size === 'xl' ? 'sm:max-w-6xl' : 'sm:max-w-xl')}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
           <h2 id="modal-title" className="text-lg font-bold text-ink">{title}</h2>
           <button onClick={onClose} className="rounded-sm p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Fechar"><X className="h-5 w-5" /></button>

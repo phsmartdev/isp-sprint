@@ -9,16 +9,17 @@ import { Button, Chip, FormField, Input, LoadingRows, Select } from '../../compo
 import { Modal, useToast } from '../../components/ui/overlay';
 
 type Commission = { kind: 'percent' | 'fixo'; value: number } | null;
-type Product = { name: string; qty: number; unitPriceCents: number; commissionAtiva: Commission; commissionReceptiva: Commission };
+type Product = { name: string; qty: number; unitPriceCents: number; commissionAtiva: Commission; commissionReceptiva: Commission; partnerId?: string | null; partnerCostCents?: number | null };
 type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; invoiceServiceName: string | null; products: Product[]; partnerCosts: Record<string, number>; active: boolean; sourceSystem: string };
 
 /** Linha do formulário: valores digitados como texto ("79,90", "50"). */
-type ProductRow = { name: string; qty: string; unit: string; aKind: 'percent' | 'fixo' | ''; aValue: string; rKind: 'percent' | 'fixo' | ''; rValue: string };
+type ProductRow = { name: string; qty: string; unit: string; aKind: 'percent' | 'fixo' | ''; aValue: string; rKind: 'percent' | 'fixo' | ''; rValue: string; partnerId: string; partnerCost: string };
 const dec = (n: number) => (n / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
 const toRow = (p: Product): ProductRow => ({
   name: p.name, qty: String(p.qty), unit: dec(p.unitPriceCents),
   aKind: p.commissionAtiva?.kind ?? '', aValue: p.commissionAtiva ? dec(p.commissionAtiva.value) : '',
   rKind: p.commissionReceptiva?.kind ?? '', rValue: p.commissionReceptiva ? dec(p.commissionReceptiva.value) : '',
+  partnerId: p.partnerId ?? '', partnerCost: p.partnerCostCents != null ? dec(p.partnerCostCents) : '',
 });
 /** Percentual e reais usam 2 casas: "50" → 5000 pontos-base; "10,00" → 1000 centavos. */
 const commissionOf = (kind: ProductRow['aKind'], v: string): Commission => (kind && toCents(v) !== null ? { kind, value: toCents(v)! } : null);
@@ -41,13 +42,13 @@ export function AdminPlans() {
   const toast = useToast();
   const q = useQuery({ queryKey: ['admin', 'plans'], queryFn: () => api<{ items: Plan[] }>('/admin/plans') });
   const viab = useQuery({ queryKey: ['admin', 'viability'], queryFn: () => api<{ partners: { id: string; name: string; kind: string }[] }>('/admin/viability') });
-  const perPlan = (viab.data?.partners ?? []).filter((p) => p.kind === 'per_plan');
+  const partners = viab.data?.partners ?? [];
   const [editing, setEditing] = useState<Plan | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
-  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', active: true, products: [] as ProductRow[], partnerCosts: {} as Record<string, string> };
+  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', active: true, products: [] as ProductRow[] };
   const [form, setForm] = useState(empty);
   const open = (p: Plan | 'new') => {
     setEditing(p);
-    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', active: p.active, products: (p.products ?? []).map(toRow), partnerCosts: Object.fromEntries(Object.entries(p.partnerCosts ?? {}).map(([k, v]) => [k, dec(v)])) });
+    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', active: p.active, products: (p.products ?? []).map(toRow) });
   };
   const setRow = (i: number, v: Partial<ProductRow>) => setForm((f) => ({ ...f, products: f.products.map((r, j) => (j === i ? { ...r, ...v } : r)) }));
   const total = form.products.reduce((a, r) => a + rowUnit(r) * rowQty(r), 0);
@@ -60,14 +61,13 @@ export function AdminPlans() {
         if (toCents(r.unit) === null) throw new Error(`Valor unitário inválido em “${r.name}”. Use o formato 79,90.`);
         if ((r.aKind && toCents(r.aValue) === null) || (r.rKind && toCents(r.rValue) === null)) throw new Error(`Comissão inválida em “${r.name}”.`);
       }
-      const products: Product[] = form.products.map((r) => ({ name: r.name.trim(), qty: rowQty(r), unitPriceCents: rowUnit(r), commissionAtiva: commissionOf(r.aKind, r.aValue), commissionReceptiva: commissionOf(r.rKind, r.rValue) }));
+      const products: Product[] = form.products.map((r) => ({ name: r.name.trim(), qty: rowQty(r), unitPriceCents: rowUnit(r), commissionAtiva: commissionOf(r.aKind, r.aValue), commissionReceptiva: commissionOf(r.rKind, r.rValue), partnerId: r.partnerId || null, partnerCostCents: r.partnerId && r.partnerCost.trim() ? toCents(r.partnerCost) : null }));
       const priceCents = hasProducts ? total : toCents(form.price);
       if (priceCents === null) throw new Error('Informe o preço no formato 99,90 ou cadastre os produtos.');
-      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, products, active: form.active,
-        partnerCosts: form.segment === 'residencial' ? Object.fromEntries(Object.entries(form.partnerCosts).filter(([k, v]) => perPlan.some((p) => p.id === k) && toCents(v)).map(([k, v]) => [k, toCents(v)!])) : {} };
+      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, products, active: form.active };
       return editing === 'new' ? api('/admin/plans', { method: 'POST', body }) : api(`/admin/plans/${(editing as Plan).id}`, { method: 'PATCH', body });
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); toast({ tone: 'success', message: 'Plano salvo' }); },
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); const sw = (r as { partnersSwitched?: string[] }).partnersSwitched ?? []; toast({ tone: 'success', message: sw.length ? `Plano salvo. ${sw.join(', ')} agora é cobrado pelos produtos de cada plano.` : 'Plano salvo' }); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
   });
 
@@ -98,7 +98,7 @@ export function AdminPlans() {
           </table>
         </div>
       )}
-      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Cadastrar plano' : 'Editar plano'} size="lg" footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar</Button></>}>
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Cadastrar plano' : 'Editar plano'} size="xl" footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar</Button></>}>
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <FormField label="Nome" htmlFor="pl-name" required><Input id="pl-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex.: 350 Mega" data-autofocus /></FormField>
@@ -111,26 +111,13 @@ export function AdminPlans() {
             </FormField>
           </div>
 
-          {perPlan.length > 0 && (form.segment === 'residencial' ? (
-            <fieldset className="rounded-md border border-line p-3">
-              <legend className="px-1 text-sm font-semibold text-ink">Parceiros cobrados por plano</legend>
-              <p className="mb-2 text-xs text-muted">Custo mensal deste plano com cada parceiro. Entra na margem só deste plano.</p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {perPlan.map((pt) => (
-                  <FormField key={pt.id} label={`${pt.name} (R$/mês)`} htmlFor={`pl-pc-${pt.id}`}>
-                    <Input id={`pl-pc-${pt.id}`} inputMode="decimal" value={form.partnerCosts[pt.id] ?? ''} onChange={(e) => setForm({ ...form, partnerCosts: { ...form.partnerCosts, [pt.id]: e.target.value } })} placeholder="7,90" />
-                  </FormField>
-                ))}
-              </div>
-            </fieldset>
-          ) : <p className="text-xs text-muted">Parceiros cobrados por plano ({perPlan.map((p) => p.name).join(', ')}) valem só para planos residenciais.</p>)}
           <fieldset className="rounded-md border border-line p-3">
             <legend className="px-1 text-sm font-semibold text-ink">Produtos do plano</legend>
-            <p className="mb-2 text-xs text-muted">Tudo que compõe o plano (internet, ponto extra, TV, telefone…). Comissão em % do valor do produto ou em R$ por unidade, separada para venda ativa e receptiva. Sem comissão nos produtos, vale a regra geral de Configurações → Viabilidade.</p>
+            <p className="mb-2 text-xs text-muted">Tudo que compõe o plano (internet, ponto extra, TV, telefone…). Comissão em % do valor do produto ou em R$ por unidade, separada para venda ativa e receptiva. Ligue o produto ao parceiro que o fornece (ex.: SKY+ → PlayHub): o custo entra na margem só dos planos que têm esse produto.</p>
             {hasProducts && (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">
-                  <thead className="text-xs text-muted"><tr><th className="py-1 pr-2 font-medium">Produto</th><th className="py-1 pr-2 font-medium">Qtd.</th><th className="py-1 pr-2 font-medium">Valor unitário (R$)</th><th className="py-1 pr-2 font-medium">Comissão ativa</th><th className="py-1 pr-2 font-medium">Comissão receptiva</th><th /></tr></thead>
+                  <thead className="text-xs text-muted"><tr><th className="py-1 pr-2 font-medium">Produto</th><th className="py-1 pr-2 font-medium">Qtd.</th><th className="py-1 pr-2 font-medium">Valor unitário (R$)</th><th className="py-1 pr-2 font-medium">Comissão ativa</th><th className="py-1 pr-2 font-medium">Comissão receptiva</th><th className="py-1 pr-2 font-medium">Parceiro</th><th className="py-1 pr-2 font-medium">Custo ao parceiro (R$)</th><th /></tr></thead>
                   <tbody>
                     {form.products.map((r, i) => (
                       <tr key={i} className="border-t border-line">
@@ -139,15 +126,22 @@ export function AdminPlans() {
                         <td className="py-2 pr-2"><Input aria-label={`Valor unitário do produto ${i + 1}`} inputMode="decimal" className="h-9 w-24" value={r.unit} onChange={(e) => setRow(i, { unit: e.target.value })} placeholder="79,90" /></td>
                         <td className="py-2 pr-2"><CommissionInput id={`pl-a-${i}`} label={`Comissão ativa do produto ${i + 1}`} kind={r.aKind} value={r.aValue} onKind={(k) => setRow(i, { aKind: k })} onValue={(v) => setRow(i, { aValue: v })} /></td>
                         <td className="py-2 pr-2"><CommissionInput id={`pl-r-${i}`} label={`Comissão receptiva do produto ${i + 1}`} kind={r.rKind} value={r.rValue} onKind={(k) => setRow(i, { rKind: k })} onValue={(v) => setRow(i, { rValue: v })} /></td>
+                        <td className="py-2 pr-2">
+                          <Select aria-label={`Parceiro do produto ${i + 1}`} className="h-9 w-[150px] px-2" value={r.partnerId} onChange={(e) => setRow(i, { partnerId: e.target.value })}>
+                            <option value="">Nenhum</option>
+                            {partners.map((pt) => <option key={pt.id} value={pt.id}>{pt.name}</option>)}
+                          </Select>
+                        </td>
+                        <td className="py-2 pr-2"><Input aria-label={`Custo ao parceiro do produto ${i + 1}`} inputMode="decimal" className="h-9 w-24" disabled={!r.partnerId} value={r.partnerCost} onChange={(e) => setRow(i, { partnerCost: e.target.value })} placeholder={r.partnerId ? r.unit || '0,00' : ''} /></td>
                         <td className="py-2"><Button size="sm" variant="ghost" aria-label={`Remover produto ${i + 1}`} onClick={() => setForm((f) => ({ ...f, products: f.products.filter((_, j) => j !== i) }))} icon={<Trash2 className="h-4 w-4 text-danger" />} /></td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t border-line font-semibold"><td className="py-2 text-ink" colSpan={2}>Mensalidade</td><td className="num py-2 text-ink">{fmtBRL(total)}</td><td colSpan={3} /></tr></tfoot>
+                  <tfoot><tr className="border-t border-line font-semibold"><td className="py-2 text-ink" colSpan={2}>Mensalidade</td><td className="num py-2 text-ink">{fmtBRL(total)}</td><td colSpan={5} /></tr></tfoot>
                 </table>
               </div>
             )}
-            <Button size="sm" className="mt-2" icon={<Plus className="h-4 w-4" />} disabled={form.products.length >= 30} onClick={() => setForm((f) => ({ ...f, products: [...f.products, { name: f.products.length ? '' : f.name, qty: '1', unit: f.products.length ? '' : f.price, aKind: '', aValue: '', rKind: '', rValue: '' }] }))}>Adicionar produto</Button>
+            <Button size="sm" className="mt-2" icon={<Plus className="h-4 w-4" />} disabled={form.products.length >= 30} onClick={() => setForm((f) => ({ ...f, products: [...f.products, { name: f.products.length ? '' : f.name, qty: '1', unit: f.products.length ? '' : f.price, aKind: '', aValue: '', rKind: '', rValue: '', partnerId: '', partnerCost: '' }] }))}>Adicionar produto</Button>
           </fieldset>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />Ativo (aparece para novas oportunidades)</label>
         </div>

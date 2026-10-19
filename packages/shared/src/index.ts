@@ -264,6 +264,10 @@ export const PlanProductItem = z.object({
   unitPriceCents: z.number().int().min(0).max(100_000_00),
   commissionAtiva: ProductCommission,
   commissionReceptiva: ProductCommission,
+  /** Parceiro que fornece o produto (ex.: PlayHub para o SKY+): o custo entra na margem pelo plano. */
+  partnerId: uuid.optional().nullable(),
+  /** Custo mensal pago ao parceiro por unidade; em branco = valor unitário do produto. */
+  partnerCostCents: z.number().int().min(0).max(100_000_00).optional().nullable(),
 });
 export const PlanUpsert = z.object({
   name: trimmed(80).min(2),

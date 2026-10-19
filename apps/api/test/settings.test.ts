@@ -212,4 +212,19 @@ describe('autonomia da operação e engenharia', () => {
     expect(h.period).toEqual({ from: '2026-01-01', to: '2026-12-31' });
     ok(await carlos.get('/home'));
   });
+
+  it('custo do parceiro vem dos produtos do plano (PlayHub ligado ao SKY+)', async () => {
+    const v = (await carlos.get('/admin/viability')).json();
+    ok(await carlos.put('/admin/viability/partners', { items: [...v.partners.map(({ id, name, kind, percentBp, amountCents, routeIds, notes }: Record<string, unknown>) => ({ id, name, kind, percentBp, amountCents, routeIds, notes })), { name: 'PLAYHUB TESTE', kind: 'fixed', percentBp: 0, amountCents: 790, routeIds: [], notes: null }] }));
+    const ph = (await carlos.get('/admin/viability')).json().partners.find((x: { name: string }) => x.name === 'PLAYHUB TESTE');
+    const mk = async (name: string, withSky: boolean) => (await carlos.post('/admin/plans', { name, segment: 'residencial', priceCents: 1, speedMbps: 350, products: [{ name: 'Internet', qty: 1, unitPriceCents: 9000, commissionAtiva: null, commissionReceptiva: null }, ...(withSky ? [{ name: 'SKY+', qty: 1, unitPriceCents: 799, commissionAtiva: null, commissionReceptiva: null, partnerId: ph.id, partnerCostCents: 650 }] : [])] })).json();
+    const a = await mk('Plano Com SKY', true);
+    expect(a.partnersSwitched).toEqual(['PLAYHUB TESTE']);
+    const b = await mk('Plano Sem SKY', false);
+    const simA = (await carlos.post('/viability/simulate', { planId: a.id, saleType: 'ativa', cableMeters: 50 })).json();
+    const line = simA.monthlyDeductions.find((l: { label: string }) => l.label.includes('PLAYHUB TESTE'));
+    expect(line.cents).toBe(650);
+    const simB = (await carlos.post('/viability/simulate', { planId: b.id, saleType: 'ativa', cableMeters: 50 })).json();
+    expect(simB.monthlyDeductions.some((l: { label: string }) => l.label.includes('PLAYHUB TESTE'))).toBe(false);
+  });
 });
