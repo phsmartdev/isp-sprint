@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { AnswersPut, AttachmentUpload, OpportunityEmail } from '@isp/shared';
+import { decryptSecret } from '../services/email';
+import { integrationRow, logEvent } from '../services/integrations';
+import { publicLink } from '../services/alerts';
+import { signFileToken, verifyFileToken, waPhone, sendWhatsAppDocument } from '../services/whatsapp';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -289,6 +293,68 @@ export const sprintRoutes = [
         .where(and(eq(s.emailMessages.opportunityId, params.id), eq(s.emailMessages.tenantId, auth.tenantId)))
         .orderBy(asc(s.emailMessages.createdAt));
       return { items };
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/opportunities/:id/attachments/:aid/whatsapp',
+    summary: 'Envia um anexo (ex.: proposta) pelo WhatsApp: pela API da empresa ou por link no WhatsApp do vendedor',
+    tag: 'Sprint',
+    module: 'oportunidades',
+    params: AttachParams,
+    body: z.object({ phone: z.string().trim().min(8).max(30), message: z.string().trim().max(1000).default(''), mode: z.enum(['api', 'link']) }),
+    rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const [a] = await app.db.select().from(s.opportunityAttachments).where(and(eq(s.opportunityAttachments.id, params.aid), eq(s.opportunityAttachments.opportunityId, o.id), eq(s.opportunityAttachments.tenantId, auth.tenantId), isNull(s.opportunityAttachments.deletedAt))).limit(1);
+      if (!a) throw notFound('Anexo não encontrado.');
+      const to = waPhone(body.phone);
+      if (!to) throw unprocessable('Telefone inválido para WhatsApp. Use DDD + número.', [{ path: 'phone', message: 'Telefone inválido' }]);
+      const link = publicLink(app.config, `/api/v1/public/files/${signFileToken(app.config.cookieSecret, a.id)}`);
+      let result: { mode: 'api' | 'link'; waUrl?: string; link: string };
+      if (body.mode === 'api') {
+        const integ = await integrationRow(app.db, auth.tenantId, 'whatsapp');
+        const token = integ.secrets.accessToken ? decryptSecret(integ.secrets.accessToken) : null;
+        if (!integ.enabled || !integ.config.phoneNumberId || !token) throw unprocessable('O WhatsApp Business não está configurado. Use “Abrir no meu WhatsApp” ou configure em Configurações → Integrações.');
+        try {
+          await sendWhatsAppDocument({ phoneNumberId: integ.config.phoneNumberId, accessToken: token }, to, { data: a.data, filename: a.filename, mime: a.mime }, body.message);
+        } catch (e) {
+          await logEvent(app.db, auth.tenantId, 'whatsapp', 'erro', `Envio de ${a.filename} para ${to}: ${(e as Error).message}`);
+          throw unprocessable(`O WhatsApp não aceitou o envio: ${(e as Error).message}`);
+        }
+        result = { mode: 'api', link };
+      } else {
+        const text = `${body.message ? `${body.message}\n\n` : ''}${a.filename}: ${link}`;
+        result = { mode: 'link', link, waUrl: `https://wa.me/${to}?text=${encodeURIComponent(text)}` };
+      }
+      await app.db.transaction(async (tx) => {
+        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'whatsapp_sent', actorId: auth.userId, payload: { filename: a.filename, to, mode: body.mode }, rowVersion: o.rowVersion });
+        if (a.kind === 'proposta' && ['nao_criada', 'rascunho'].includes(o.proposalStatus)) await tx.update(s.opportunities).set({ proposalStatus: 'enviada', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));
+      });
+      await audit(app.db, req, { action: 'attachment.whatsapp', entityType: 'opportunity', entityId: o.id, metadata: { filename: a.filename, mode: body.mode } });
+      return result;
+    },
+  }),
+  defineRoute({
+    method: 'GET',
+    url: '/public/files/:token',
+    summary: 'Arquivo compartilhado por link seguro (expira); usado no envio pelo WhatsApp',
+    tag: 'Sprint',
+    public: true,
+    params: z.object({ token: z.string().min(20).max(300) }),
+    rateLimit: () => ({ max: 60, timeWindow: '1 minute' }),
+    handler: async ({ app, params, reply }) => {
+      const id = verifyFileToken(app.config.cookieSecret, params.token);
+      if (!id) throw notFound('Link expirado ou inválido. Peça um novo ao seu consultor.');
+      const [a] = await app.db.select({ data: s.opportunityAttachments.data, mime: s.opportunityAttachments.mime, filename: s.opportunityAttachments.filename }).from(s.opportunityAttachments).where(and(eq(s.opportunityAttachments.id, id), isNull(s.opportunityAttachments.deletedAt))).limit(1);
+      if (!a) throw notFound('Arquivo não encontrado.');
+      return reply
+        .header('content-type', a.mime)
+        .header('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(a.filename)}`)
+        .header('x-content-type-options', 'nosniff')
+        .header('cache-control', 'private, max-age=300')
+        .send(a.data);
     },
   }),
 ];

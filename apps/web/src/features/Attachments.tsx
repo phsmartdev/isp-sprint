@@ -1,17 +1,21 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, FileText, Paperclip, Trash2 } from 'lucide-react';
+import { Download, FileText, MessageCircle, Paperclip, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
 import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, fileToBase64, fmtBytes } from '../lib/files';
 import { useAuth } from '../auth/AuthProvider';
 import { Button, Chip, EmptyState, LoadingRows } from '../components/ui/primitives';
 import { useToast } from '../components/ui/overlay';
+import type { Opportunity } from '../lib/types';
+import { WhatsAppSend } from './WhatsAppSend';
 
 export type Attachment = { id: string; kind: 'proposta' | 'outro'; filename: string; mime: string; sizeBytes: number; createdAt: string; uploadedBy: string | null; uploadedByName: string | null };
 export const useAttachments = (oppId: string) => useQuery({ queryKey: ['attachments', oppId], queryFn: () => api<{ items: Attachment[] }>(`/opportunities/${oppId}/attachments`) });
 
 export function Attachments({ oppId }: { oppId: string }) {
+  const oppQ = useQuery({ queryKey: ['opportunity', oppId], queryFn: () => api<Opportunity>(`/opportunities/${oppId}`) });
+  const [wa, setWa] = useState<{ id: string; filename: string } | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
   const { me, can } = useAuth();
@@ -51,6 +55,7 @@ export function Attachments({ oppId }: { oppId: string }) {
                 <span className="block text-xs text-muted">{fmtBytes(a.sizeBytes)} · {fmtDateTime(a.createdAt)}{a.uploadedByName ? ` · ${a.uploadedByName}` : ''}</span>
               </span>
               <Chip tone={a.kind === 'proposta' ? 'green' : 'neutral'}>{a.kind === 'proposta' ? 'Proposta' : 'Outro'}</Chip>
+              <button type="button" className="rounded-sm p-1.5 text-success hover:bg-surface-2" onClick={() => setWa({ id: a.id, filename: a.filename })} aria-label={`Enviar ${a.filename} pelo WhatsApp`} title="Enviar pelo WhatsApp"><MessageCircle className="h-4 w-4" /></button>
               <a className="rounded-sm p-1.5 text-ink hover:bg-surface-2" href={`/api/v1/opportunities/${oppId}/attachments/${a.id}/download`} aria-label={`Baixar ${a.filename}`}><Download className="h-4 w-4" /></a>
               {(a.uploadedBy === me?.user.id || can('oportunidades', 'equipe')) && (
                 <button className="rounded-sm p-1.5 text-danger hover:bg-danger-soft" aria-label={`Remover ${a.filename}`} onClick={() => del.mutate(a.id)}><Trash2 className="h-4 w-4" /></button>
@@ -59,6 +64,7 @@ export function Attachments({ oppId }: { oppId: string }) {
           ))}
         </ul>
       )}
+      {oppQ.data && <WhatsAppSend opp={oppQ.data} attachment={wa} open={!!wa} onClose={() => setWa(null)} />}
     </div>
   );
 }

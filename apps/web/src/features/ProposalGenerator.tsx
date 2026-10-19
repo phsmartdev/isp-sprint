@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
 import { Button, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
+import type { Opportunity } from '../lib/types';
+import { WhatsAppSend } from './WhatsAppSend';
 import { ProposalCanvas, type PField, type PPage } from './ProposalCanvas';
 
 type Tpl = { id: string; name: string; matches: boolean; variables: { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string }[]; fields: PField[]; pages: PPage[] };
@@ -14,14 +16,17 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
   const q = useQuery({ queryKey: ['proposal-templates', oppId], enabled: open, queryFn: () => api<{ items: Tpl[]; system: Record<string, string> }>(`/opportunities/${oppId}/proposal-templates`) });
   const [tplId, setTplId] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
+  const [sent, setSent] = useState<{ id: string; filename: string } | null>(null);
+  const oppQ = useQuery({ queryKey: ['opportunity', oppId], enabled: open, queryFn: () => api<Opportunity>(`/opportunities/${oppId}`) });
   const tpl = q.data?.items.find((t) => t.id === tplId) ?? q.data?.items[0];
   useEffect(() => { if (tpl) setValues(Object.fromEntries(tpl.variables.map((v) => [v.key, v.default]))); }, [tpl?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const gen = useMutation({
-    mutationFn: () => api<{ filename: string }>(`/opportunities/${oppId}/proposal`, { method: 'POST', body: { templateId: tpl!.id, values } }),
-    onSuccess: (r) => { for (const k of ['attachments', 'opportunity', 'timeline']) qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Proposta gerada e anexada: ${r.filename}` }); onClose(); },
+    mutationFn: () => api<{ id: string; filename: string }>(`/opportunities/${oppId}/proposal`, { method: 'POST', body: { templateId: tpl!.id, values } }),
+    onSuccess: (r) => { for (const k of ['attachments', 'opportunity', 'timeline']) qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Proposta gerada e anexada: ${r.filename}` }); setSent(r); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
   });
   const all = { ...(q.data?.system ?? {}), ...values };
+  if (sent && oppQ.data) return <WhatsAppSend opp={oppQ.data} attachment={sent} open={open} onClose={() => { setSent(null); onClose(); }} />;
   return (
     <Modal open={open} onClose={onClose} title="Gerar proposta" size="xl" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={gen.isPending} disabled={!tpl} onClick={() => gen.mutate()}>Gerar PDF e anexar</Button></>}>
       {q.isLoading ? <LoadingRows rows={5} /> : !tpl ? (

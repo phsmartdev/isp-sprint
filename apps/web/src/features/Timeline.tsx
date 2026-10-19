@@ -28,6 +28,7 @@ function describe(i: TimelineItem): string {
     case 'assigned': return 'Responsável alterado';
     case 'updated': return `Atualizou ${Object.keys((i.payload?.changed as Record<string, unknown>) ?? {}).map((c) => FIELD_LABELS[c] ?? c).join(', ')}`;
     case 'attachment_added': return `Anexo adicionado${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}`;
+    case 'whatsapp_sent': return `Enviado por WhatsApp${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}${i.payload?.to ? ` para ${String(i.payload.to)}` : ''}`;
     case 'email_sent': return `E-mail enviado${i.payload?.subject ? `: ${String(i.payload.subject)}` : ''}`;
     case 'automation_ran': return `Automação executada${i.payload?.automation ? `: ${String(i.payload.automation)}` : ''}`;
     case 'duplicated_from': return 'Criada a partir de outra oportunidade (histórico copiado)';

@@ -34,4 +34,13 @@ it('modelo Yepempresa: arte, variáveis criadas pela empresa e PDF anexado', asy
   expect(att[0].mime).toBe('application/pdf');
   const file = await lucas.get(`/opportunities/${o.id}/attachments/${att[0].id}/download`);
   expect(file.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+  const wa = await lucas.post(`/opportunities/${o.id}/attachments/${att[0].id}/whatsapp`, { phone: '(79) 99999-0000', message: 'Olá! Segue a proposta.', mode: 'link' });
+  expect(wa.statusCode).toBe(200);
+  expect(wa.json().waUrl).toMatch(/^https:\/\/wa\.me\/5579999990000\?text=/);
+  const token = new URL(wa.json().link).pathname.split('/').pop()!;
+  const pub = await ctx.app.inject({ method: 'GET', url: `/api/v1/public/files/${token}` });
+  expect(pub.statusCode).toBe(200);
+  expect(pub.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+  expect((await ctx.app.inject({ method: 'GET', url: `/api/v1/public/files/${token.slice(0, -2)}xx` })).statusCode).toBe(404);
+  expect((await lucas.get(`/opportunities/${o.id}`)).json().proposalStatus).toBe('enviada');
 });
