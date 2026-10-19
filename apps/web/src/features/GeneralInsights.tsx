@@ -21,16 +21,16 @@ const monthName = (k: string) => `${MONTHS[Number(k.slice(5, 7)) - 1]}/${k.slice
 
 function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'danger' | 'success' }) {
   return (
-    <div className="card p-4">
+    <div className="card min-w-0 p-4">
       <p className="text-sm text-muted">{label}</p>
-      <p className={`num text-2xl font-extrabold ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</p>
+      <p className={`num break-words text-xl font-extrabold sm:text-2xl ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</p>
       {hint && <p className="text-xs text-muted">{hint}</p>}
     </div>
   );
 }
 function Block({ title, desc, children }: { title: string; desc?: string; children: ReactNode }) {
   return (
-    <section className="card p-5">
+    <section className="card min-w-0 p-5">
       <h2 className="text-md font-bold text-ink">{title}</h2>
       {desc && <p className="mb-3 text-sm text-muted">{desc}</p>}
       {children}
@@ -78,7 +78,7 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
   const { negocio: n, relacionamento: r, comercial: c, cohorts } = q.data!;
   const show = (v: InsightView) => view === 'geral' || view === v;
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {show('negocio') && (
         <>
           {view === 'geral' && <h2 className="text-lg font-bold text-ink">Negócio</h2>}

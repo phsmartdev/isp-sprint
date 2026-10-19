@@ -27,3 +27,16 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
   await expect(notes).toBeFocused();
   await expect(notes).toHaveValue('Cliente quer fibra no apto');
 });
+
+test('sair leva ao login sem erro e a sessão termina', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('E-mail').fill('carlos@yepnet.test');
+  await page.getByLabel('Senha').fill('Sprint@2026');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await page.getByRole('button', { name: /^Conta de / }).click();
+  await page.getByRole('menuitem', { name: /Sair/ }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByText('Faça login para continuar')).toHaveCount(0);
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/login/);
+});

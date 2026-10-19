@@ -182,4 +182,22 @@ describe('autonomia da operação e engenharia', () => {
     const leads = (await lucas.get('/leads?q=Fict%C3%ADcio&pageSize=50')).json();
     expect(leads.items.some((l: { name?: string; contactName?: string }) => (l.name ?? l.contactName) === 'Lead do Site Fictício')).toBe(true);
   });
+
+  it('campanha: concepção, orçamento, gastos e ROI pelas vendas atreladas', async () => {
+    const c = await carlos.post('/campaigns', { name: 'Campanha ROI Fictícia', objective: 'Vender fibra', channels: ['Instagram'], startsOn: '2026-10-01', endsOn: '2026-10-31', budgetCents: 100000, targetSales: 5 });
+    ok(c, 201);
+    const id = c.json().id;
+    expect((await carlos.post('/campaigns', { name: 'X', startsOn: '2026-10-10', endsOn: '2026-10-01' })).statusCode).toBe(422);
+    ok(await carlos.post(`/campaigns/${id}/costs`, { spentOn: '2026-10-05', category: 'Mídia paga', description: 'Impulsionamento', amountCents: 50000 }), 201);
+    const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+    const o = (await carlos.post('/opportunities', { newContact: { name: 'Cliente Campanha', segment: 'residencial' }, planId: plan.id, campaignId: id })).json();
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: o.rowVersion }));
+    const d = (await carlos.get(`/campaigns/${id}`)).json();
+    expect(d.metrics.won).toBe(1);
+    expect(d.metrics.spentCents).toBe(50000);
+    expect(d.result.basis).toBe('gastos');
+    expect(d.result.roi).not.toBeNull();
+    expect(d.opportunities[0].contactName).toBe('Cliente Campanha');
+    expect((await lucas.get('/campaigns')).statusCode).toBe(403);
+  });
 });

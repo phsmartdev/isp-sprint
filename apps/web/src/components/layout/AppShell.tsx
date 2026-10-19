@@ -147,7 +147,7 @@ function UserMenu() {
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/settings/profile'); }}>
             <UserRound className="h-4 w-4" /> Meu perfil
           </button>
-          <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={async () => { await logout(); nav('/login'); }}>
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => void logout()}>
             <LogOut className="h-4 w-4" /> Sair
           </button>
         </div>

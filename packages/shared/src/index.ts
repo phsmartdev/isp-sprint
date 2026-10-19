@@ -453,3 +453,29 @@ export const StageItem = z.object({
   requirements: z.object({ proposta: z.boolean().default(false), plano: z.boolean().default(false), proximaAcao: z.boolean().default(false), respostasObrigatorias: z.boolean().default(false) }).default({}),
 });
 export const StagesPut = z.object({ stages: z.array(StageItem).min(3).max(15) });
+
+// ------------------------------------------------------------------ campanhas
+export const CAMPAIGN_CHANNELS = ['Instagram', 'Facebook', 'Google', 'WhatsApp', 'Rádio', 'Panfleto', 'Outdoor', 'Porta a porta', 'Evento', 'E-mail', 'Site', 'Indicação'] as const;
+export const CampaignUpsert = z.object({
+  name: z.string().trim().min(2).max(120),
+  objective: optText(1000),
+  audience: optText(1000),
+  offer: optText(1000),
+  message: optText(1000),
+  channels: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
+  notes: optText(2000),
+  ownerId: uuid.optional().nullable(),
+  sourceId: uuid.optional().nullable(),
+  startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  budgetCents: z.number().int().min(0).max(1_000_000_000_00).optional().nullable(),
+  targetLeads: z.number().int().min(0).max(1_000_000).optional().nullable(),
+  targetSales: z.number().int().min(0).max(1_000_000).optional().nullable(),
+  active: z.boolean().default(true),
+});
+export const CampaignCostCreate = z.object({
+  spentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  category: z.string().trim().min(2).max(60),
+  description: z.string().trim().min(2).max(300),
+  amountCents: z.number().int().min(1).max(1_000_000_000_00),
+});

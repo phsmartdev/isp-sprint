@@ -52,12 +52,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     can: (m, min = 'proprio') => atLeast(level(m), min),
     refresh: () => q.refetch(),
     logout: async () => {
+      // para tudo antes de sair: nenhuma tela tenta recarregar sem sessão (o que mostrava "Faça login para continuar")
+      await qc.cancelQueries();
       try {
         await api('/auth/logout', { method: 'POST' });
-      } finally {
-        qc.clear();
-        qc.setQueryData(['me'], null);
+      } catch {
+        /* mesmo com falha de rede, a saída segue: o cookie expira e a próxima chamada pede login */
       }
+      qc.clear();
+      // recarrega a aplicação já na tela de login, sem estado anterior
+      window.location.replace('/login');
     },
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

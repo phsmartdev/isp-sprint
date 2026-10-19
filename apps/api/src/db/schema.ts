@@ -211,9 +211,39 @@ export const campaigns = pgTable(
     startsOn: ts('starts_on'),
     endsOn: ts('ends_on'),
     active: boolean('active').notNull().default(true),
+    // concepção
+    objective: text('objective'),
+    audience: text('audience'),
+    offer: text('offer'),
+    message: text('message'),
+    channels: text('channels').array().notNull().default(sql`'{}'::text[]`),
+    notes: text('notes'),
+    ownerId: uuid('owner_id').references(() => users.id),
+    /** Orçamento total previsto, em centavos. */
+    budgetCents: bigint('budget_cents', { mode: 'number' }),
+    targetLeads: integer('target_leads'),
+    targetSales: integer('target_sales'),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => ({ uq: uniqueIndex('campaigns_tenant_name_uq').on(t.tenantId, t.name) }),
+);
+
+/** Gastos realizados da campanha (mídia, produção, brindes…). */
+export const campaignCosts = pgTable(
+  'campaign_costs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    campaignId: uuid('campaign_id').notNull().references(() => campaigns.id),
+    spentOn: date('spent_on', { mode: 'string' }).notNull(),
+    category: text('category').notNull(),
+    description: text('description').notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ byCampaign: index('campaign_costs_campaign_idx').on(t.tenantId, t.campaignId) }),
 );
 
 // --------------------------------------------------------------- pessoas e clientes

@@ -14,7 +14,7 @@ import { CustomerDetailPage } from './pages/CustomerDetail';
 import { ActivitiesPage } from './pages/Activities';
 import { ReportsPage } from './pages/Reports';
 import { IntelligencePage } from './pages/Intelligence';
-import { CampaignsPage } from './pages/Campaigns';
+import { CampaignDetailPage, CampaignsPage } from './pages/Campaigns';
 import { AdminLayout, AdminOverview, AdminUsers, AdminPlans, AdminSources, AdminIntegrations, AdminSecurity, AdminBranding, AdminLogs } from './pages/admin/Admin';
 import { AdminJourneys } from './pages/admin/Journeys';
 import { AdminArea } from './pages/admin/Area';
@@ -55,6 +55,7 @@ export function App() {
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />
+        <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings" element={<Gate module="configuracoes" min="total"><AdminLayout /></Gate>}>
           <Route index element={<AdminOverview />} />

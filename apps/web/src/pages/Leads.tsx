@@ -40,6 +40,7 @@ function LeadForm({ lead, onDone }: { lead?: Lead; onDone: () => void }) {
     city: lead?.city ?? '',
     channel: lead?.channel ?? '',
     sourceId: lead?.sourceId ?? '',
+    campaignId: lead?.campaignId ?? '',
     ownerId: lead?.ownerId ?? me?.user.id ?? '',
     interests: lead?.interests ?? [],
     status: lead?.status ?? 'novo',
@@ -55,7 +56,7 @@ function LeadForm({ lead, onDone }: { lead?: Lead; onDone: () => void }) {
     mutationFn: async (extra: { registerContact?: boolean } = {}) => {
       const body: Record<string, unknown> = {
         name: form.name, phone: form.phone || null, email: form.email || null, segment: form.segment, city: form.city || null, channel: form.channel || null,
-        sourceId: form.sourceId || null, interests: form.interests, nextAction: form.nextAction || null, nextActionAt: localInputToIso(form.nextActionAt), notes: form.notes || null,
+        sourceId: form.sourceId || null, campaignId: form.campaignId || null, interests: form.interests, nextAction: form.nextAction || null, nextActionAt: localInputToIso(form.nextActionAt), notes: form.notes || null,
       };
       if (canAssign || !lead) body.ownerId = form.ownerId || null;
       if (lead) {
@@ -95,6 +96,7 @@ function LeadForm({ lead, onDone }: { lead?: Lead; onDone: () => void }) {
         <FormField label="Cidade" htmlFor="lf-city"><Input id="lf-city" value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Ex.: Aracaju" /></FormField>
         <FormField label="Canal" htmlFor="lf-channel"><Select id="lf-channel" value={form.channel} onChange={(e) => set('channel', e.target.value)}><option value="">Não informado</option>{CHANNELS.map((c) => <option key={c}>{c}</option>)}</Select></FormField>
         <FormField label="Origem" htmlFor="lf-source"><Select id="lf-source" value={form.sourceId} onChange={(e) => set('sourceId', e.target.value)}><option value="">Não informada</option>{lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></FormField>
+        <FormField label="Campanha" htmlFor="lf-campaign"><Select id="lf-campaign" value={form.campaignId} onChange={(e) => set('campaignId', e.target.value)}><option value="">Nenhuma</option>{lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></FormField>
         {(canAssign || !lead) && (
           <FormField label="Responsável" htmlFor="lf-owner" error={errors.ownerId}>
             <Select id="lf-owner" value={form.ownerId} disabled={!canAssign} onChange={(e) => set('ownerId', e.target.value)}>{lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select>

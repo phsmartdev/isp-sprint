@@ -59,6 +59,7 @@ export function NewOpportunityPage() {
   const [search, setSearch] = useState('');
   const [contact, setContact] = useState<ContactHit | null>(null);
   const [sourceId, setSourceId] = useState('');
+  const [campaignId, setCampaignId] = useState('');
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [pipelineId, setPipelineId] = useState(params.get('pipelineId') ?? '');
@@ -92,6 +93,7 @@ export function NewOpportunityPage() {
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
+          campaignId: campaignId || null,
           channel: lookups.data?.sources.find((s) => s.id === sourceId)?.name ?? null,
           planId: planId || null,
           ownerId: ownerId || null,
@@ -153,6 +155,12 @@ export function NewOpportunityPage() {
                 <Select id="no-source" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
                   <option value="">Não informado</option>
                   {lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Campanha" htmlFor="no-campaign" hint="Liga a venda ao resultado da campanha">
+                <Select id="no-campaign" value={campaignId} onChange={(e) => setCampaignId(e.target.value)}>
+                  <option value="">Nenhuma</option>
+                  {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Responsável" htmlFor="no-owner" hint={assign ? 'Em branco: você' : 'Você'}>
@@ -264,6 +272,7 @@ type Fields = AddressValue & {
   title: string;
   reasons: OpportunityReason[];
   sourceId: string;
+  campaignId: string;
   planId: string;
   nextAction: string;
   nextActionAt: string;
@@ -283,6 +292,7 @@ const toFields = (o: Opportunity): Fields => ({
   title: o.title,
   reasons: o.reasons,
   sourceId: o.sourceId ?? '',
+  campaignId: o.campaignId ?? '',
   planId: o.planId ?? '',
   nextAction: o.nextAction ?? '',
   nextActionAt: isoToLocalInput(o.nextActionAt),
@@ -314,6 +324,7 @@ function toPatch(f: Fields, keys: (keyof Fields)[], base: Fields) {
   for (const k of keys) {
     if (k === 'nextActionAt') p.nextActionAt = localInputToIso(f.nextActionAt);
     else if (k === 'sourceId') p.sourceId = f.sourceId || null;
+    else if (k === 'campaignId') p.campaignId = f.campaignId || null;
     else if (k === 'planId') p.planId = f.planId || null;
     else if (k === 'title') p.title = f.title.trim() || null;
     else if (k === 'saleType') p.saleType = f.saleType || null;
@@ -593,6 +604,12 @@ export function OpportunityWorkspacePage() {
             <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
               <option value="">Não informado</option>
               {lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+          </FormField>
+          <FormField label="Campanha" htmlFor="ws-campaign">
+            <Select id="ws-campaign" value={f.campaignId} disabled={!editable} onChange={(e) => set('campaignId', e.target.value)}>
+              <option value="">Nenhuma</option>
+              {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
           </FormField>
           <FormField label="Jornada" htmlFor="ws-pipe" hint={a.dirty ? 'Aguarde salvar para trocar' : 'Trocar de jornada mantém o histórico'}>

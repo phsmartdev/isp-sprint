@@ -99,6 +99,13 @@
       "when": 1792423489494,
       "tag": "0013_integrations",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792423747500,
+      "tag": "0014_campaigns",
+      "breakpoints": true
     }
   ]
 }
