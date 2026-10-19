@@ -14,7 +14,7 @@ import type { LookupField } from '../lib/types';
 import { Button, FormField, Input, Select, Textarea } from '../components/ui/primitives';
 
 // ------------------------------------------------------------------ dados de apoio
-export type Area = { regions: { id: string; name: string }[]; condominiums: { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; hasNetwork: boolean }[] };
+export type Area = { regions: { id: string; name: string }[]; condominiums: { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; hasNetwork: boolean; ctoPorts?: number | null; portsFree?: number | null }[] };
 export const useArea = () => useQuery({ queryKey: ['area'], queryFn: () => api<Area>('/meta/area'), staleTime: 5 * 60_000 });
 export type ViabilityMeta = { equipments: { id: string; name: string; costCents: number }[]; routes: { id: string; name: string; requiresApproval: boolean }[]; defaultActivationFeeCents: number | null; configured: boolean };
 export const useViabilityMeta = () => useQuery({ queryKey: ['viability-meta'], queryFn: () => api<ViabilityMeta>('/meta/viability'), staleTime: 5 * 60_000 });
@@ -56,7 +56,7 @@ export function AddressFields({ value, onChange, disabled, idPrefix = 'ad' }: { 
           <option value="">Não é condomínio / não cadastrado</option>
           {area.data?.regions.map((r) => (
             <optgroup key={r.id} label={r.name}>
-              {area.data!.condominiums.filter((c) => c.regionId === r.id).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {area.data!.condominiums.filter((c) => c.regionId === r.id).map((c) => <option key={c.id} value={c.id}>{c.name}{c.portsFree != null ? ` · ${c.portsFree} porta(s) livre(s)` : ''}</option>)}
             </optgroup>
           ))}
         </Select>

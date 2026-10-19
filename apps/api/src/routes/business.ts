@@ -16,6 +16,7 @@ import { getActiveInstruction, journeyBlockers, pipelinesOf, replaceFields, reso
 import { historicalBase, loadViabilityParams, viabilityFor } from '../services/viability';
 import { loadOpportunity } from '../services/opportunities';
 import { audit } from '../services/audit';
+import { portUsage } from '../services/ports';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
 const slugify = (v: string) =>
@@ -325,7 +326,8 @@ export const businessRoutes = [
         app.db.select({ id: s.regions.id, name: s.regions.name }).from(s.regions).where(and(eq(s.regions.tenantId, auth.tenantId), eq(s.regions.active, true))).orderBy(asc(s.regions.name)),
         app.db.select().from(s.condominiums).where(and(eq(s.condominiums.tenantId, auth.tenantId), eq(s.condominiums.active, true))).orderBy(asc(s.condominiums.name)),
       ]);
-      return { regions, condominiums: condos.map(({ tenantId: _t, createdAt: _c, ...c }) => c) };
+      const used = await portUsage(app.db, auth.tenantId);
+      return { regions, condominiums: condos.map(({ tenantId: _t, createdAt: _c, ...c }) => ({ ...c, portsUsed: used.get(c.id) ?? 0, portsFree: c.ctoPorts == null ? null : Math.max(0, c.ctoPorts - (used.get(c.id) ?? 0)) })) };
     },
   }),
   defineRoute({
@@ -340,7 +342,8 @@ export const businessRoutes = [
         app.db.select().from(s.condominiums).where(eq(s.condominiums.tenantId, auth.tenantId)).orderBy(asc(s.condominiums.name)),
         app.db.select({ id: s.opportunities.condominiumId, n: sql<number>`count(*)::int`, won: sql<number>`count(*) filter (where ${s.opportunities.stage} = 'ganha')::int` }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, auth.tenantId), sql`${s.opportunities.condominiumId} is not null`)).groupBy(s.opportunities.condominiumId),
       ]);
-      return { regions, condominiums: condos.map((c) => ({ ...c, opportunities: counts.find((x) => x.id === c.id)?.n ?? 0, won: counts.find((x) => x.id === c.id)?.won ?? 0 })) };
+      const used = await portUsage(app.db, auth.tenantId);
+      return { regions, condominiums: condos.map((c) => ({ ...c, opportunities: counts.find((x) => x.id === c.id)?.n ?? 0, won: counts.find((x) => x.id === c.id)?.won ?? 0, portsUsed: used.get(c.id) ?? 0 })) };
     },
   }),
   defineRoute({

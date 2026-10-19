@@ -12,6 +12,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { storeViability, viabilityFor } from '../services/viability';
+import { portUsage } from '../services/ports';
 import { bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
@@ -274,6 +275,14 @@ export const opportunityRoutes = [
           const issues = await checkStageRequirements(tx, auth.tenantId, cur, target, content, pipe.key);
           if (issues.length) throw unprocessable(`Para entrar em “${target.name}”: ${issues.map((i) => i.message).join(' ')}`, issues);
         }
+        if (target.kind === 'won' && cur.condominiumId) {
+          // a venda ocupa uma porta da CTO do condomínio
+          const [c] = await tx.select({ name: s.condominiums.name, ports: s.condominiums.ctoPorts }).from(s.condominiums).where(eq(s.condominiums.id, cur.condominiumId)).limit(1);
+          if (c?.ports != null) {
+            const used = (await portUsage(tx, auth.tenantId, [cur.condominiumId])).get(cur.condominiumId) ?? 0;
+            if (used >= c.ports) throw unprocessable(`A CTO do ${c.name} está sem portas livres (${used} de ${c.ports} ocupadas). Libere uma porta ou fale com a engenharia antes de fechar.`, [{ path: 'condominiumId', message: 'Sem portas livres na CTO' }]);
+          }
+        }
         if (target.kind === 'won') {
           // fora da autonomia da operação, só fecha com a viabilidade da engenharia aprovada
           const { result } = await viabilityFor(tx, auth.tenantId, cur);
@@ -288,6 +297,8 @@ export const opportunityRoutes = [
             stage: body.toStage,
             stageChangedAt: now,
             wonAt: body.toStage === 'ganha' ? now : reopening ? null : undefined,
+            portReleasedAt: body.toStage === 'ganha' ? null : undefined,
+            portReleaseReason: body.toStage === 'ganha' ? null : undefined,
             lostAt: body.toStage === 'perdida' ? now : reopening ? null : undefined,
             lossReason: body.toStage === 'perdida' ? body.lossReason : reopening ? null : undefined,
             updatedAt: now,
@@ -356,6 +367,30 @@ export const opportunityRoutes = [
         ...acts.map((a) => ({ kind: 'activity' as const, ...a, observedAt: a.occurredAt, sourceSystem: 'crm' })),
       ].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
       return { items };
+    },
+  }),
+  defineRoute({
+    method: 'POST',
+    url: '/opportunities/:id/release-port',
+    summary: 'Cliente cancelou: libera a porta da CTO ocupada por esta venda (supervisão ou gerência)',
+    tag: 'Oportunidades',
+    module: 'oportunidades',
+    min: 'equipe',
+    params: IdParams,
+    body: z.object({ reason: z.string().trim().min(3).max(300), rowVersion: z.number().int() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const dto = await app.db.transaction(async (tx) => {
+        const cur = await loadOpportunity(tx, auth, params.id);
+        if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+        if (cur.stage !== 'ganha' || !cur.condominiumId) throw unprocessable('Só venda fechada em condomínio ocupa porta da CTO.');
+        if (cur.portReleasedAt) throw unprocessable('A porta desta venda já foi liberada.');
+        const now = new Date();
+        await tx.update(s.opportunities).set({ portReleasedAt: now, portReleaseReason: body.reason, updatedAt: now, rowVersion: bumpVersion() }).where(eq(s.opportunities.id, cur.id));
+        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: cur.id, type: 'port_released', actorId: auth.userId, reason: body.reason });
+        return opportunityDto(await loadOpportunity(tx, auth, params.id));
+      });
+      await audit(app.db, req, { action: 'opportunity.port_release', entityType: 'opportunity', entityId: params.id, metadata: { reason: body.reason } });
+      return dto;
     },
   }),
 ];

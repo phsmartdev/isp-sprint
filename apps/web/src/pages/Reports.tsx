@@ -15,6 +15,7 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { ConfiarFacil } from '../components/brand';
 import { BarRows, CHART, ComboChart, Donut, FunnelShape, Legend } from '../components/charts/charts';
 import { stageColor } from '../components/badges';
+import { PortsReport } from '../features/PortsReport';
 import { CommissionsReport } from '../features/CommissionsReport';
 
 type Overview = {
@@ -45,7 +46,7 @@ export function ReportsPage() {
   const p0 = defaultPeriod();
   const [f, setF] = useUrlState({ from: p0.from, to: p0.to, tab: 'geral', pipelineId: '' });
   const lookups = useLookups();
-  const q = useQuery({ queryKey: ['reports', f.from, f.to, f.pipelineId], enabled: f.tab !== 'comissoes', queryFn: () => api<Overview>(`/reports/overview${qs({ from: f.from, to: f.to, pipelineId: f.pipelineId })}`) });
+  const q = useQuery({ queryKey: ['reports', f.from, f.to, f.pipelineId], enabled: f.tab !== 'comissoes' && f.tab !== 'portas', queryFn: () => api<Overview>(`/reports/overview${qs({ from: f.from, to: f.to, pipelineId: f.pipelineId })}`) });
   const customers = useQuery({ queryKey: ['customers', 'summary'], enabled: f.tab === 'clientes' && can('clientes'), queryFn: () => api<{ kpis: Kpi[] }>('/customers/summary') });
   const days = Math.min(31, Math.round((new Date(f.to).getTime() - new Date(f.from).getTime()) / 86_400_000) + 1);
   const acts = useQuery({ queryKey: ['activities', 'report', f.from, days], enabled: f.tab === 'atividades', queryFn: () => api<{ typeCounts: Record<ActivityType, number>; total: number }>(`/activities${qs({ scope: can('atividades', 'equipe') ? 'equipe' : 'minhas', status: 'concluidas', from: f.from, days, pageSize: 1 })}`) });
@@ -73,12 +74,13 @@ export function ReportsPage() {
         className="mb-5"
         value={f.tab}
         onChange={(t) => setF({ tab: t }, { resetPage: false })}
-        tabs={[{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }]}
+        tabs={[{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }]}
       />
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
 
       {f.tab === 'comissoes' && <CommissionsReport from={f.from} to={f.to} />}
-      {f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && (
+      {f.tab === 'portas' && <PortsReport />}
+      {f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && f.tab !== 'portas' && (
         <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {d ? d.kpis.map((k, i) => <KpiCard key={k.key} k={k} icon={KPI_LOOK[i]!.icon} tone={KPI_LOOK[i]!.tone} />) : Array.from({ length: 4 }).map((_, i) => <div key={i} className="card h-[92px] animate-pulse" />)}
         </section>
@@ -98,7 +100,7 @@ export function ReportsPage() {
         </section>
       )}
 
-      {d && f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && (
+      {d && f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && f.tab !== 'portas' && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           {show('vendas') && (
             <section className="card p-5 xl:col-span-7" aria-labelledby="h-evo">

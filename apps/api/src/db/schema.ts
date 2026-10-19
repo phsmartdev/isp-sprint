@@ -428,6 +428,9 @@ export const opportunities = pgTable(
     duplicatedFromId: uuid('duplicated_from_id'),
     /** Viabilidade da engenharia: nao_necessaria | pendente | aprovada | reprovada. */
     engineeringStatus: text('engineering_status').notNull().default('nao_necessaria'),
+    /** Porta da CTO liberada (cliente cancelou). Venda fechada sem esta data ocupa uma porta do condomínio. */
+    portReleasedAt: ts('port_released_at'),
+    portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
@@ -769,6 +772,8 @@ export const condominiums = pgTable(
     blocks: text('blocks').array().notNull().default(sql`'{}'::text[]`),
     units: integer('units'),
     hasNetwork: boolean('has_network').notNull().default(false),
+    /** Total de portas da CTO que atende o condomínio. Venda fechada ocupa uma; cancelamento libera. */
+    ctoPorts: integer('cto_ports'),
     notes: text('notes'),
     active: boolean('active').notNull().default(true),
     createdAt: createdAt(),

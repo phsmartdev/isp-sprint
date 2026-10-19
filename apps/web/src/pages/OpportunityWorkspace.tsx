@@ -488,6 +488,13 @@ export function OpportunityWorkspacePage() {
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
   const [scheduling, setScheduling] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseReason, setReleaseReason] = useState('');
+  const release = useMutation({
+    mutationFn: () => api<Opportunity>(`/opportunities/${id}/release-port`, { method: 'POST', body: { reason: releaseReason, rowVersion: (a.base ?? q.data)!.rowVersion } }),
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['timeline', o.id] }); qc.invalidateQueries({ queryKey: ['area'] }); setReleasing(false); setReleaseReason(''); toast({ tone: 'success', message: 'Porta da CTO liberada' }); void q.refetch(); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
   const [email, setEmail] = useState<'proposta' | 'followup' | null>(null);
   const [copilot, setCopilot] = useState(false);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
@@ -551,8 +558,12 @@ export function OpportunityWorkspacePage() {
           <dt className="text-muted">Criada</dt><dd className="num text-text">{fmtDateTime(opp.createdAt)}</dd>
           <dt className="text-muted">Na etapa há</dt><dd className="num text-text">{opp.daysInStage} dia(s)</dd>
           {opp.lossReason && (<><dt className="text-muted">Perda</dt><dd className="text-text">{LOSS_REASON_LABELS[opp.lossReason as LossReason] ?? opp.lossReason}</dd></>)}
+          {opp.stage === 'ganha' && opp.condominiumId && (<><dt className="text-muted">Porta CTO</dt><dd className="text-text">{opp.portReleasedAt ? `Liberada em ${fmtDate(opp.portReleasedAt)}` : 'Ocupada'}</dd></>)}
           {opp.duplicatedFromId && (<><dt className="text-muted">Origem</dt><dd><Link className="link" to={`/opportunities/${opp.duplicatedFromId}`}>oportunidade anterior</Link></dd></>)}
         </dl>
+        {opp.stage === 'ganha' && opp.condominiumId && !opp.portReleasedAt && canReopen && (
+          <Button size="sm" className="mt-3" onClick={() => setReleasing(true)}>Cliente cancelou: liberar porta</Button>
+        )}
       </Panel>
     </div>
   );
@@ -676,6 +687,10 @@ export function OpportunityWorkspacePage() {
       </div>
 
       <Drawer open={copilot} onClose={() => setCopilot(false)} title="Viabilidade e próximo passo" width="lg">{right}</Drawer>
+      <Modal open={releasing} onClose={() => setReleasing(false)} title="Liberar porta da CTO" size="sm" footer={<><Button onClick={() => setReleasing(false)}>Cancelar</Button><Button variant="primary" loading={release.isPending} disabled={releaseReason.trim().length < 3} onClick={() => release.mutate()}>Liberar porta</Button></>}>
+        <p className="mb-3 text-sm text-text">Use quando o cliente cancelar. A porta volta a ficar livre na CTO do condomínio e o registro fica no histórico.</p>
+        <FormField label="Motivo do cancelamento" htmlFor="rel-reason" required><Input id="rel-reason" value={releaseReason} onChange={(e) => setReleaseReason(e.target.value)} placeholder="Ex.: mudou de endereço" data-autofocus /></FormField>
+      </Modal>
       <Modal open={scheduling} onClose={() => setScheduling(false)} title="Agendar retorno" footer={<><Button onClick={() => setScheduling(false)}>Cancelar</Button><Button variant="primary" type="submit" form="ws-activity">Agendar</Button></>}>
         <ActivityComposer formId="ws-activity" hideSubmit opportunityId={opp.id} defaultTitle={f.nextAction} onDone={() => setScheduling(false)} />
       </Modal>

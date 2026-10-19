@@ -8,7 +8,7 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Se
 import { Modal, useToast } from '../../components/ui/overlay';
 
 type Region = { id: string; name: string; active: boolean };
-type Condo = { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; units: number | null; hasNetwork: boolean; notes: string | null; active: boolean; opportunities: number; won: number };
+type Condo = { id: string; regionId: string; name: string; cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null; blocks: string[]; units: number | null; hasNetwork: boolean; ctoPorts: number | null; portsUsed: number; notes: string | null; active: boolean; opportunities: number; won: number };
 const errMsg = (e: unknown) => (e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message);
 
 export function AdminArea() {
@@ -80,7 +80,7 @@ export function AdminArea() {
             {condos.length === 0 ? <p className="px-5 pb-4 text-sm text-muted">{f ? 'Nenhum condomínio encontrado nesta região.' : 'Nenhum condomínio cadastrado.'}</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="bg-surface-2 text-xs text-muted"><tr>{['Condomínio', 'Endereço', 'Blocos', 'Unidades', 'Rede', 'Oportunidades', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
+                  <thead className="bg-surface-2 text-xs text-muted"><tr>{['Condomínio', 'Endereço', 'Blocos', 'Unidades', 'Rede', 'Portas CTO', 'Oportunidades', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
                   <tbody>
                     {condos.map((c) => (
                       <tr key={c.id} className={clsx('border-t border-line', !c.active && 'text-muted')}>
@@ -89,6 +89,7 @@ export function AdminArea() {
                         <td className="px-5 py-3 text-text">{c.blocks.length ? c.blocks.join(', ') : '—'}</td>
                         <td className="num px-5 py-3 text-text">{c.units ?? '—'}</td>
                         <td className="px-5 py-3"><Chip tone={c.hasNetwork ? 'green' : 'neutral'}>{c.hasNetwork ? 'Cabeado' : 'A cabear'}</Chip></td>
+                        <td className="num px-5 py-3 text-text">{c.ctoPorts == null ? <span className="text-muted">—</span> : <><span className={c.portsUsed >= c.ctoPorts ? 'font-bold text-danger' : 'text-ink'}>{c.portsUsed}/{c.ctoPorts}</span><span className="block text-xs text-muted">{Math.round((c.portsUsed / Math.max(1, c.ctoPorts)) * 100)}% ocupadas</span></>}</td>
                         <td className="num px-5 py-3 text-text">{c.opportunities}{c.won ? <span className="text-xs text-success"> · {c.won} fechada(s)</span> : null}</td>
                         <td className="px-5 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => setEditing(c)}>Editar</Button></td>
                       </tr>
@@ -110,7 +111,7 @@ function CondoForm({ regions, condo, regionId, onClose, onSaved }: { regions: Re
   const toast = useToast();
   const [form, setForm] = useState({
     regionId, name: condo?.name ?? '', cep: condo?.cep ?? '', street: condo?.street ?? '', number: condo?.number ?? '', district: condo?.district ?? '', city: condo?.city ?? '',
-    blocks: condo?.blocks.join(', ') ?? '', units: condo?.units === null || condo?.units === undefined ? '' : String(condo.units), hasNetwork: condo?.hasNetwork ?? false, notes: condo?.notes ?? '', active: condo?.active ?? true,
+    blocks: condo?.blocks.join(', ') ?? '', units: condo?.units === null || condo?.units === undefined ? '' : String(condo.units), hasNetwork: condo?.hasNetwork ?? false, ctoPorts: condo?.ctoPorts == null ? '' : String(condo.ctoPorts), notes: condo?.notes ?? '', active: condo?.active ?? true,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [looking, setLooking] = useState(false);
@@ -126,7 +127,7 @@ function CondoForm({ regions, condo, regionId, onClose, onSaved }: { regions: Re
   };
   const m = useMutation({
     mutationFn: () => {
-      const body = { ...form, cep: form.cep || null, street: form.street || null, number: form.number || null, district: form.district || null, city: form.city || null, notes: form.notes || null, units: form.units === '' ? null : Number(form.units), blocks: form.blocks.split(',').map((b) => b.trim()).filter(Boolean) };
+      const body = { ...form, cep: form.cep || null, street: form.street || null, number: form.number || null, district: form.district || null, city: form.city || null, notes: form.notes || null, units: form.units === '' ? null : Number(form.units), ctoPorts: form.ctoPorts === '' ? null : Number(form.ctoPorts), blocks: form.blocks.split(',').map((b) => b.trim()).filter(Boolean) };
       return condo ? api(`/admin/condominiums/${condo.id}`, { method: 'PATCH', body }) : api('/admin/condominiums', { method: 'POST', body });
     },
     onSuccess: () => { toast({ tone: 'success', message: 'Condomínio salvo' }); onSaved(); },
@@ -143,6 +144,7 @@ function CondoForm({ regions, condo, regionId, onClose, onSaved }: { regions: Re
         <FormField label="Bairro" htmlFor="co-dist"><Input id="co-dist" value={form.district} onChange={(e) => set({ district: e.target.value })} /></FormField>
         <FormField label="Cidade" htmlFor="co-city"><Input id="co-city" value={form.city} onChange={(e) => set({ city: e.target.value })} /></FormField>
         <FormField label="Blocos (separados por vírgula)" htmlFor="co-blocks" hint="Em branco: o vendedor digita o bloco"><Input id="co-blocks" value={form.blocks} onChange={(e) => set({ blocks: e.target.value })} placeholder="A, B, C" /></FormField>
+        <FormField label="Portas na CTO" htmlFor="co-ports" hint={condo ? `${condo.portsUsed} ocupada(s) por vendas fechadas` : 'Cada venda fechada ocupa uma; o cancelamento libera'}><Input id="co-ports" type="number" min={0} value={form.ctoPorts} onChange={(e) => set({ ctoPorts: e.target.value })} placeholder="Ex.: 16" /></FormField>
         <FormField label="Unidades" htmlFor="co-units"><Input id="co-units" type="number" min={0} value={form.units} onChange={(e) => set({ units: e.target.value })} /></FormField>
         <FormField label="Observações" htmlFor="co-notes" className="sm:col-span-2"><Textarea id="co-notes" value={form.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Ex.: síndico libera instalação só pela manhã" /></FormField>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.hasNetwork} onChange={(e) => set({ hasNetwork: e.target.checked })} />Prédio já cabeado (rede interna pronta)</label>

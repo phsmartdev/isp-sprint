@@ -121,4 +121,24 @@ describe('autonomia da operação e engenharia', () => {
     expect(small.viability.engineering.required).toBe(false);
     expect(small.viability.route.name).toBe('Condomínio');
   });
+
+  it('portas da CTO: venda ocupa, CTO cheia bloqueia, cancelamento libera', async () => {
+    const r = (await carlos.post('/admin/regions', { name: 'Região Portas' })).json();
+    const c = (await carlos.post('/admin/condominiums', { regionId: r.id, name: 'Cond Portas', ctoPorts: 1, blocks: [], hasNetwork: true, active: true })).json();
+    const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+    const mk = async (name: string) => (await carlos.post('/opportunities', { newContact: { name, segment: 'residencial' }, planId: plan.id, condominiumId: c.id })).json();
+    const a = await mk('Cliente Porta A');
+    ok(await carlos.post(`/opportunities/${a.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: a.rowVersion }));
+    const b = await mk('Cliente Porta B');
+    const blocked = await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: b.rowVersion });
+    expect(blocked.statusCode).toBe(422);
+    expect(blocked.json().detail).toContain('sem portas livres');
+    const rep = (await carlos.get('/reports/ports')).json().items.find((x: { id: string }) => x.id === c.id);
+    expect(rep.used).toBe(1);
+    expect(rep.clients[0].contactName).toBe('Cliente Porta A');
+    const won = (await carlos.get(`/opportunities/${a.id}`)).json();
+    expect((await lucas.post(`/opportunities/${a.id}/release-port`, { reason: 'mudou de endereço', rowVersion: won.rowVersion })).statusCode).toBe(403);
+    ok(await carlos.post(`/opportunities/${a.id}/release-port`, { reason: 'mudou de endereço', rowVersion: won.rowVersion }));
+    ok(await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: b.rowVersion }));
+  });
 });

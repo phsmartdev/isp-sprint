@@ -159,6 +159,8 @@ export const opportunitySelect = {
   custom: s.opportunities.custom,
   duplicatedFromId: s.opportunities.duplicatedFromId,
   engineeringStatus: s.opportunities.engineeringStatus,
+  portReleasedAt: s.opportunities.portReleasedAt,
+  portReleaseReason: s.opportunities.portReleaseReason,
   engineeringTicket: s.opportunities.engineeringTicket,
   executiveTicket: s.opportunities.executiveTicket,
   stageName: s.pipelineStages.name,

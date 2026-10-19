@@ -94,6 +94,8 @@ export type Opportunity = {
   activationFeeCents: number | null;
   equipment: { equipmentId: string; qty: number }[] | null;
   routeId: string | null;
+  portReleasedAt: string | null;
+  portReleaseReason: string | null;
   viability: ViabilityResult | null;
   commissionCents: number | null;
   cacCents: number | null;
