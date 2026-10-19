@@ -2,10 +2,11 @@
  * Importação manual da base de clientes por planilha (CSV do Excel, separado por ";" ou ",").
  * Valida tudo antes de gravar (prévia); linha com erro não entra. Código do cliente repetido atualiza.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { SEGMENTS } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { customerFieldList } from './customFields';
 
 export const IMPORT_COLUMNS = [
   ['codigo_cliente', 'Código do cliente no seu sistema (IXC). Repetido = atualiza.', '1001'],
@@ -32,9 +33,17 @@ export const IMPORT_COLUMNS = [
 type Col = (typeof IMPORT_COLUMNS)[number][0];
 
 /** Modelo para baixar: cabeçalho, uma linha de exemplo (ignorada na importação) e BOM para o Excel abrir com acentos. */
-export function importTemplate() {
-  const head = IMPORT_COLUMNS.map((c) => c[0]).join(';');
-  const example = IMPORT_COLUMNS.map((c) => (c[0] === 'nome' ? 'EXEMPLO - apague esta linha' : c[2])).join(';');
+type CF = { key: string; label: string; type: string; options: string[]; required: boolean };
+const CF_EXAMPLE: Record<string, string> = { texto: 'texto', texto_longo: 'texto', numero: '10', moeda: '99,90', data: '01/02/2025', sim_nao: 'sim' };
+/** Colunas dos campos personalizados de cliente: campo_<chave>. */
+export function customColumns(fields: CF[]) {
+  return fields.map((f) => ({ key: `campo_${f.key}`, hint: `${f.label}${f.type === 'lista' ? ` (uma de: ${f.options.join(', ')})` : f.type === 'data' ? ' (dd/mm/aaaa)' : f.type === 'sim_nao' ? ' (sim ou não)' : ''}${f.required ? ' · obrigatório' : ' (opcional)'}`, example: f.type === 'lista' ? f.options[0] ?? '' : CF_EXAMPLE[f.type] ?? '' }));
+}
+
+export function importTemplate(fields: CF[] = []) {
+  const extra = customColumns(fields);
+  const head = [...IMPORT_COLUMNS.map((c) => c[0]), ...extra.map((c) => c.key)].join(';');
+  const example = [...IMPORT_COLUMNS.map((c) => (c[0] === 'nome' ? 'EXEMPLO - apague esta linha' : c[2])), ...extra.map((c) => c.example)].join(';');
   return `\uFEFF${head}\r\n${example}\r\n`;
 }
 
@@ -73,7 +82,7 @@ const brDate = (v: string) => {
 };
 const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
-export type ImportRow = { condominiumId: string | null; line: number; externalId: string | null; name: string; segment: string; document: string | null; phone: string | null; email: string | null; planId: string | null; lifecycle: string; start: string | null; end: string | null; cancelReason: string | null; address: { postalCode: string | null; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; state: string | null }; ownerId: string | null };
+export type ImportRow = { condominiumId: string | null; line: number; externalId: string | null; name: string; segment: string; document: string | null; phone: string | null; email: string | null; planId: string | null; lifecycle: string; start: string | null; end: string | null; cancelReason: string | null; address: { postalCode: string | null; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; state: string | null }; ownerId: string | null; custom: Record<string, unknown> };
 
 export async function validateImport(db: DbOrTx, tenantId: string, csv: string) {
   const rows = parseCsv(csv);
@@ -84,12 +93,29 @@ export async function validateImport(db: DbOrTx, tenantId: string, csv: string) 
   const plans = await db.select({ id: s.plans.id, name: s.plans.name }).from(s.plans).where(eq(s.plans.tenantId, tenantId));
   const users = await db.select({ id: s.users.id, email: s.users.email }).from(s.users).where(eq(s.users.tenantId, tenantId));
   const condos = await db.select({ id: s.condominiums.id, name: s.condominiums.name }).from(s.condominiums).where(eq(s.condominiums.tenantId, tenantId));
+  const cfs = await customerFieldList(db, tenantId);
+  const readCustom = (get: (k: string) => string, errs: string[]) => {
+    const out: Record<string, unknown> = {};
+    for (const f of cfs) {
+      const raw = header.includes(`campo_${f.key}`) ? get(`campo_${f.key}`) : '';
+      if (!raw) { if (f.required) errs.push(`${f.label} obrigatório`); continue; }
+      if (f.type === 'numero' || f.type === 'moeda') {
+        const n = Number(raw.replace(/[R$\s]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+        if (Number.isFinite(n)) out[f.key] = f.type === 'moeda' ? Math.round(n * 100) / 100 : n; else errs.push(`${f.label}: número inválido`);
+      } else if (f.type === 'data') { const d = brDate(raw); if (d) out[f.key] = d; else errs.push(`${f.label}: data inválida`); }
+      else if (f.type === 'sim_nao') { const v = norm(raw); if (['sim', 's', 'true', '1'].includes(v)) out[f.key] = true; else if (['nao', 'n', 'false', '0'].includes(v)) out[f.key] = false; else errs.push(`${f.label}: use sim ou não`); }
+      else if (f.type === 'lista') { const o = f.options.find((x) => norm(x) === norm(raw)); if (o) out[f.key] = o; else errs.push(`${f.label}: "${raw}" não é uma opção`); }
+      else out[f.key] = raw.slice(0, f.type === 'texto' ? 300 : 5000);
+    }
+    return out;
+  };
   const out: ImportRow[] = [];
   const errors: { line: number; message: string }[] = [];
   const seen = new Set<string>();
   rows.slice(1).forEach((r, i) => {
     const line = i + 2;
     const get = (c: Col) => (idx(c) >= 0 ? (r[idx(c)] ?? '').trim() : '');
+    const getAny = (c: string) => (header.indexOf(c) >= 0 ? (r[header.indexOf(c)] ?? '').trim() : '');
     const name = get('nome');
     if (/^exemplo\b/i.test(name)) return;
     const errs: string[] = [];
@@ -113,11 +139,12 @@ export async function validateImport(db: DbOrTx, tenantId: string, csv: string) 
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.push('e-mail inválido');
     const ext = get('codigo_cliente') || null;
     if (ext) { if (seen.has(ext)) errs.push(`código ${ext} repetido no arquivo`); seen.add(ext); }
+    const custom = readCustom(getAny, errs);
     if (errs.length) { errors.push({ line, message: `${name || '(sem nome)'}: ${errs.join('; ')}` }); return; }
     out.push({
       condominiumId,
       line, externalId: ext, name, segment: seg, document: get('cpf_cnpj') || null, phone: get('telefone') || null, email, planId, lifecycle: life,
-      start: start ?? null, end: end ?? null, cancelReason: get('motivo_cancelamento') || null, ownerId,
+      start: start ?? null, end: end ?? null, cancelReason: get('motivo_cancelamento') || null, ownerId, custom,
       address: { postalCode: get('cep') || null, street: get('logradouro') || null, number: get('numero') || null, complement: get('complemento') || null, district: get('bairro') || null, city: get('cidade') || null, state: get('uf').toUpperCase() || null },
     });
   });
@@ -134,13 +161,13 @@ export async function applyImport(tx: DbOrTx, tenantId: string, userId: string, 
     const contactValues = { name: r.name, phone: r.phone, email: r.email, document: r.document, segment: r.segment, city: r.address.city, ownerId: r.ownerId, updatedAt: new Date() };
     const customerValues = { condominiumId: r.condominiumId, displayName: r.name, lifecycle: r.lifecycle, planId: r.planId, contractStart: r.start, contractEnd: r.end, cancelReason: r.cancelReason, updatedAt: new Date(), sourceUpdatedAt: new Date(), ingestedAt: new Date() };
     if (existing) {
-      await tx.update(s.contacts).set(contactValues).where(eq(s.contacts.id, existing.contactId));
+      await tx.update(s.contacts).set({ ...contactValues, custom: sql`${s.contacts.custom} || ${JSON.stringify(r.custom)}::jsonb` }).where(eq(s.contacts.id, existing.contactId));
       await tx.update(s.customers).set(customerValues).where(eq(s.customers.id, existing.id));
       await tx.delete(s.addresses).where(eq(s.addresses.customerId, existing.id));
       await tx.insert(s.addresses).values({ tenantId, contactId: existing.contactId, customerId: existing.id, ...r.address });
       updated++;
     } else {
-      const [c] = await tx.insert(s.contacts).values({ tenantId, ...contactValues, createdBy: userId, sourceSystem: 'importacao', externalId: r.externalId }).returning({ id: s.contacts.id });
+      const [c] = await tx.insert(s.contacts).values({ tenantId, ...contactValues, custom: r.custom, createdBy: userId, sourceSystem: 'importacao', externalId: r.externalId }).returning({ id: s.contacts.id });
       const [cu] = await tx.insert(s.customers).values({ tenantId, contactId: c!.id, ...customerValues, sourceSystem: 'importacao', externalId: r.externalId }).returning({ id: s.customers.id });
       await tx.insert(s.addresses).values({ tenantId, contactId: c!.id, customerId: cu!.id, ...r.address });
       created++;

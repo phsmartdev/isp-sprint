@@ -154,6 +154,7 @@ export const contactRoutes = [
           segment: s.contacts.segment,
           city: s.contacts.city,
           isProvisional: s.contacts.isProvisional,
+          custom: s.contacts.custom,
           createdAt: s.contacts.createdAt,
           ownerId: s.contacts.ownerId,
           ownerName: owner.name,

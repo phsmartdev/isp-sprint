@@ -134,6 +134,13 @@
       "when": 1792428881804,
       "tag": "0018_customer_condominium",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792429801687,
+      "tag": "0019_customer_fields",
+      "breakpoints": true
     }
   ]
 }

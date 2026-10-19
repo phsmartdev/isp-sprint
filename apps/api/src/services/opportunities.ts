@@ -5,6 +5,7 @@ import type { OpportunityReason } from '@isp/domain';
 import type { ContactCreate, OpportunityDetails } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { mergeCustom } from './customFields';
 import type { AuthContext } from '../http/context';
 import { notFound, unprocessable } from '../http/errors';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './scope';
@@ -286,18 +287,7 @@ export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<Opp
   }
   if (d.custom !== undefined) {
     const fields = await tx.select().from(s.pipelineFields).where(and(eq(s.pipelineFields.pipelineId, pipelineId), eq(s.pipelineFields.active, true)));
-    const merged: Record<string, unknown> = { ...(currentCustom ?? {}) };
-    for (const [k, v] of Object.entries(d.custom)) {
-      const f = fields.find((x) => x.key === k);
-      if (!f) throw unprocessable('Campo personalizado desconhecido.', [{ path: `custom.${k}`, message: 'Campo não existe nesta jornada' }]);
-      if (v === null || v === '') { delete merged[k]; continue; }
-      const bad = (m: string) => unprocessable(`${f.label}: ${m}`, [{ path: `custom.${k}`, message: m }]);
-      if ((f.type === 'numero' || f.type === 'moeda') && typeof v !== 'number') throw bad('informe um número');
-      if (f.type === 'sim_nao' && typeof v !== 'boolean') throw bad('informe sim ou não');
-      if (f.type === 'data' && (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v))) throw bad('informe uma data');
-      if (f.type === 'lista' && !f.options.includes(String(v))) throw bad('escolha uma das opções');
-      merged[k] = v;
-    }
+    const merged = mergeCustom(fields, currentCustom ?? {}, d.custom);
     out.custom = merged;
   }
   return out;

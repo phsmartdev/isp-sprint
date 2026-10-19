@@ -14,6 +14,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { stageColor } from '../../components/badges';
+import { FieldDefsEditor, type FieldDef } from '../../features/FieldDefsEditor';
 
 type Req = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
 type JStage = { id?: string; key?: string; name: string; kind: 'open' | 'won' | 'lost'; color: string | null; requirements: Req; count?: number };
@@ -29,7 +30,7 @@ export type Journey = {
 };
 type Run = { id: string; status: string; detail: { actions?: { action: string; error?: string }[] } | null; createdAt: string; automation: string; opportunityId: string; opportunityTitle: string };
 
-const useJourneys = () => useQuery({ queryKey: ['admin', 'journeys'], queryFn: () => api<{ items: Journey[] }>('/admin/journeys') });
+export const useJourneys = () => useQuery({ queryKey: ['admin', 'journeys'], queryFn: () => api<{ items: Journey[] }>('/admin/journeys') });
 const REQ_LABELS: Record<keyof Req, string> = { plano: 'Plano escolhido', proposta: 'Proposta anexada', proximaAcao: 'Próxima ação definida', respostasObrigatorias: 'Perguntas obrigatórias respondidas' };
 const KIND_LABELS = { open: 'Aberta', won: 'Venda fechada', lost: 'Perdida' } as const;
 const errMsg = (e: unknown) => (e instanceof ApiError ? [e.problem.detail ?? e.message, ...(e.problem.errors ?? []).map((x) => x.message)].filter((v, i, a) => a.indexOf(v) === i).join(' ') : (e as Error).message);
@@ -180,7 +181,7 @@ function JourneyEditor({ journey, all, onClose }: { journey: Journey; all: Journ
       ]} />
       {tab === 'geral' && <GeneralTab journey={journey} onClose={onClose} />}
       {tab === 'etapas' && <StagesTab journey={journey} />}
-      {tab === 'campos' && <FieldsTab journey={journey} />}
+      {tab === 'campos' && <FieldsTab journey={journey} all={all} />}
       {tab === 'automacoes' && <AutomationsTab journey={journey} all={all} />}
     </Drawer>
   );
@@ -279,37 +280,25 @@ function StagesTab({ journey }: { journey: Journey }) {
   );
 }
 
-function FieldsTab({ journey }: { journey: Journey }) {
+export function FieldsTab({ journey, all }: { journey: Journey; all?: Journey[] }) {
   const toast = useToast();
   const invalidate = useInvalidate();
-  const [fields, setFields] = useState<(JField & { opcoesText: string })[]>(() => journey.fields.map((f) => ({ ...f, opcoesText: f.opcoes.join(', ') })));
-  const upd = (i: number, v: Partial<JField & { opcoesText: string }>) => setFields((x) => x.map((f, j) => (j === i ? { ...f, ...v } : f)));
   const save = useMutation({
-    mutationFn: () => api(`/admin/journeys/${journey.id}/fields`, { method: 'PUT', body: { fields: fields.map((f) => ({ chave: f.chave, rotulo: f.rotulo, tipo: f.tipo, obrigatorio: f.obrigatorio, opcoes: f.tipo === 'lista' ? f.opcoesText.split(',').map((o) => o.trim()).filter(Boolean) : [] })) } }),
+    mutationFn: (fields: FieldDef[]) => api(`/admin/journeys/${journey.id}/fields`, { method: 'PUT', body: { fields } }),
     onSuccess: () => { invalidate(); toast({ tone: 'success', message: 'Campos salvos' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const copy = useMutation({
+    mutationFn: () => api<{ journeys: number }>(`/admin/journeys/${journey.id}/fields/copy`, { method: 'POST', body: {} }),
+    onSuccess: (r) => { invalidate(); toast({ tone: 'success', message: `Campos copiados para ${r.journeys} jornada(s)` }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted">Estes campos aparecem no cadastro e na tela da oportunidade, além dos campos fixos (nome do deal, cliente, telefone, e-mail, endereço, tipo, canal e responsável). Remover um campo esconde o campo; o valor já preenchido continua guardado.</p>
-      {!fields.length && <EmptyState title="Sem campos próprios" description="Adicione o que esta jornada precisa saber, como CNPJ ou melhor horário." />}
-      <ul className="space-y-2">
-        {fields.map((f, i) => (
-          <li key={f.chave ?? `new-${i}`} className="grid grid-cols-1 gap-2 rounded-md border border-line p-3 sm:grid-cols-[minmax(0,1fr)_160px_auto_auto] sm:items-end">
-            <FormField label="Rótulo" htmlFor={`jf-l-${i}`}><Input id={`jf-l-${i}`} value={f.rotulo} onChange={(e) => upd(i, { rotulo: e.target.value })} /></FormField>
-            <FormField label="Tipo" htmlFor={`jf-t-${i}`}>
-              <Select id={`jf-t-${i}`} value={f.tipo} onChange={(e) => upd(i, { tipo: e.target.value as JField['tipo'] })}>{FIELD_TYPES.map((t) => <option key={t} value={t}>{FIELD_TYPE_LABELS[t]}</option>)}</Select>
-            </FormField>
-            <label className="flex h-10 items-center gap-2 text-sm"><input type="checkbox" checked={f.obrigatorio} onChange={(e) => upd(i, { obrigatorio: e.target.checked })} />Obrigatório</label>
-            <Button variant="ghost" aria-label="Remover campo" onClick={() => setFields((x) => x.filter((_, j) => j !== i))} icon={<Trash2 className="h-4 w-4 text-danger" />} />
-            {f.tipo === 'lista' && <FormField className="sm:col-span-4" label="Opções (separadas por vírgula)" htmlFor={`jf-o-${i}`}><Input id={`jf-o-${i}`} value={f.opcoesText} onChange={(e) => upd(i, { opcoesText: e.target.value })} placeholder="Manhã, Tarde, Noite" /></FormField>}
-          </li>
-        ))}
-      </ul>
-      <div className="flex justify-between gap-2">
-        <Button icon={<Plus className="h-4 w-4" />} disabled={fields.length >= 40} onClick={() => setFields((x) => [...x, { rotulo: '', tipo: 'texto', opcoes: [], opcoesText: '', obrigatorio: false }])}>Adicionar campo</Button>
-        <Button variant="primary" loading={save.isPending} disabled={fields.some((f) => f.rotulo.trim().length < 2)} onClick={() => save.mutate()}>Salvar campos</Button>
-      </div>
+      <FieldDefsEditor key={journey.id + journey.fields.map((f) => f.chave).join()} initial={journey.fields} idPrefix={`jf-${journey.key}`} saving={save.isPending} onSave={(f) => save.mutate(f)}
+        emptyHint="Adicione o que esta jornada precisa saber, como CNPJ ou melhor horário."
+        extraActions={(all?.length ?? 2) > 1 && journey.fields.length > 0 && <Button loading={copy.isPending} onClick={() => { if (window.confirm('Copiar os campos salvos desta jornada para todas as outras? Os campos que só existem nelas continuam.')) copy.mutate(); }}>Aplicar em todas as jornadas</Button>} />
     </div>
   );
 }

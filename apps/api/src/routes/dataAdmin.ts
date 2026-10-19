@@ -1,4 +1,5 @@
 /** Base de clientes: modelo de planilha, importação com prévia e limpeza da base (gerência + senha). */
+import { customerFieldList } from '../services/customFields';
 import { and, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute } from '../http/route';
@@ -6,7 +7,7 @@ import { forbidden, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { verifyPassword } from '../auth/password';
 import { audit } from '../services/audit';
-import { applyImport, importTemplate, IMPORT_COLUMNS, validateImport } from '../services/customerImport';
+import { applyImport, customColumns, importTemplate, IMPORT_COLUMNS, validateImport } from '../services/customerImport';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
 export const CLEAR_SCOPES = ['clientes', 'comercial'] as const;
@@ -19,8 +20,8 @@ export const dataAdminRoutes = [
     summary: 'Modelo de planilha (CSV para Excel) com os campos do CRM para preencher a base de clientes',
     tag: 'Base de dados',
     ...ADMIN,
-    handler: async ({ reply }) =>
-      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="modelo-clientes-isp-sprint.csv"').send(importTemplate()),
+    handler: async ({ app, auth, reply }) =>
+      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="modelo-clientes-isp-sprint.csv"').send(importTemplate(await customerFieldList(app.db, auth.tenantId))),
   }),
   defineRoute({
     method: 'GET',
@@ -28,7 +29,7 @@ export const dataAdminRoutes = [
     summary: 'Explicação de cada coluna do modelo',
     tag: 'Base de dados',
     ...ADMIN,
-    handler: async () => ({ columns: IMPORT_COLUMNS.map(([key, hint, example]) => ({ key, hint, example })) }),
+    handler: async ({ app, auth }) => ({ columns: [...IMPORT_COLUMNS.map(([key, hint, example]) => ({ key, hint, example })), ...customColumns(await customerFieldList(app.db, auth.tenantId))] }),
   }),
   defineRoute({
     method: 'POST',

@@ -21,6 +21,7 @@ import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
 import { insightsRoutes } from './routes/insights';
 import { integrationRoutes } from './routes/integrations';
+import { customFieldRoutes } from './routes/customFields';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -115,6 +116,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...intelligenceRoutes,
     ...insightsRoutes,
     ...integrationRoutes,
+    ...customFieldRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

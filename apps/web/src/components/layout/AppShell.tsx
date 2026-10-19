@@ -41,6 +41,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/instructions', label: 'Modelo de instrução', admin: true },
   { to: '/settings/email', label: 'E-mail e alertas', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
+  { to: '/settings/fields', label: 'Campos personalizados', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },

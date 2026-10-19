@@ -267,6 +267,8 @@ export const contacts = pgTable(
     city: text('city'),
     sourceSystem: text('source_system').notNull().default('crm'),
     externalId: text('external_id'),
+    /** Valores dos campos personalizados de cliente (definidos em customer_fields). */
+    custom: jsonb('custom').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: ts('deleted_at'),
@@ -722,6 +724,26 @@ export const pipelineMembers = pgTable(
     userId: uuid('user_id').notNull().references(() => users.id),
   },
   (t) => ({ pk: primaryKey({ columns: [t.pipelineId, t.userId] }) }),
+);
+
+/** Campos personalizados da ficha do cliente (iguais para toda a empresa). */
+export const customerFields = pgTable(
+  'customer_fields',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    key: text('key').notNull(),
+    label: text('label').notNull(),
+    type: text('type').notNull().default('texto'),
+    options: text('options').array().notNull().default(sql`'{}'::text[]`),
+    required: boolean('required').notNull().default(false),
+    position: integer('position').notNull().default(0),
+    active: boolean('active').notNull().default(true),
+  },
+  (t) => ({
+    uq: uniqueIndex('customer_fields_uq').on(t.tenantId, t.key),
+    typeCk: check('customer_fields_type_ck', inList('type', ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'])),
+  }),
 );
 
 export const pipelineFields = pgTable(

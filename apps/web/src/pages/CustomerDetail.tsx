@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Mail, MapPin, Phone, RefreshCw, UserRound } from 'lucide-react';
 import type { CustomerLifecycle, Segment } from '@isp/domain';
-import { api, qs } from '../lib/api';
+import { api, ApiError, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime, fmtRelative } from '../lib/format';
-import type { Activity, Opportunity, Paged } from '../lib/types';
+import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
+import { CustomFieldsEditor, type CustomValues } from '../features/DealFields';
+import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
@@ -19,6 +21,7 @@ type Detail = {
   segment: Segment;
   city: string | null;
   isProvisional: boolean;
+  custom: CustomValues;
   createdAt: string;
   ownerId: string | null;
   ownerName: string | null;
@@ -36,6 +39,32 @@ type Detail = {
   freshness: { ingestedAt: string; stale: boolean } | null;
   opportunities: Opportunity[];
 };
+
+function CustomerCustomFields({ contactId, initial }: { contactId: string; initial: CustomValues }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const fq = useQuery({ queryKey: ['customer-fields'], queryFn: () => api<{ items: LookupField[] }>('/customer-fields'), staleTime: 60_000 });
+  const [vals, setVals] = useState<CustomValues>(initial ?? {});
+  const [dirty, setDirty] = useState<Record<string, true>>({});
+  const save = useMutation({
+    mutationFn: () => api<{ custom: CustomValues }>(`/contacts/${contactId}/custom`, { method: 'PATCH', body: { custom: Object.fromEntries(Object.keys(dirty).map((k) => [k, vals[k] ?? null])) } }),
+    onSuccess: (r) => { setVals(r.custom); setDirty({}); qc.invalidateQueries({ queryKey: ['contact', contactId] }); toast({ tone: 'success', message: 'Campos salvos' }); },
+    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
+  });
+  const fields = fq.data?.items ?? [];
+  if (!fields.length) return null;
+  const missing = fields.some((f) => f.required && (vals[f.key] === undefined || vals[f.key] === null || vals[f.key] === ''));
+  return (
+    <section className="mt-6 border-t border-line pt-5" aria-labelledby="cust-cf">
+      <h2 id="cust-cf" className="mb-3 font-bold text-ink">Campos personalizados</h2>
+      <CustomFieldsEditor fields={fields} value={vals} idPrefix="cust-cf" onChange={(k, v) => { setVals((x) => ({ ...x, [k]: v })); setDirty((d) => ({ ...d, [k]: true })); }} />
+      <div className="mt-3 flex items-center gap-3">
+        <Button variant="primary" disabled={!Object.keys(dirty).length} loading={save.isPending} onClick={() => save.mutate()}>Salvar campos</Button>
+        {missing && <span className="text-sm text-warning">Há campos obrigatórios em branco.</span>}
+      </div>
+    </section>
+  );
+}
 
 const FUTURE_TABS: Record<string, string> = {
   contratos: 'Contratos chegam com a importação do IXC (Fases 3 e 4), preservando o histórico de cada mudança.',
@@ -123,6 +152,7 @@ export function CustomerDetailPage() {
               </div>
             </dl>
           )}
+          {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
           {tab === 'oportunidades' && (c.opportunities.length === 0 ? <EmptyState title="Nenhuma oportunidade visível" /> : (
             <ul className="divide-y divide-line">
               {c.opportunities.map((o) => (
