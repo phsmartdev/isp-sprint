@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtBRL, fmtDuration, fmtPct, isoToLocalInput, localInputToIso } from './format';
+import { fmtBRL, fmtDate, fmtDuration, fmtPct, isoToLocalInput, localInputToIso } from './format';
 import { qs } from './api';
 
 describe('formatação da interface', () => {
@@ -24,4 +24,9 @@ describe('formatação da interface', () => {
   it('querystring ignora vazios', () => {
     expect(qs({ a: '1', b: '', c: undefined, d: 0 })).toBe('?a=1&d=0');
   });
+});
+
+it('data sem hora não muda de dia por causa do fuso', () => {
+  expect(fmtDate('2026-10-03')).toBe('03/10/2026');
+  expect(fmtDate('2027-01-01')).toBe('01/01/2027');
 });

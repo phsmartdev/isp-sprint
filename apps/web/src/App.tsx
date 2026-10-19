@@ -25,6 +25,10 @@ import { AdminData } from './pages/admin/DataAdmin';
 import { AdminCustomFields } from './pages/admin/CustomFields';
 import { AdminProposalTemplates } from './pages/admin/ProposalTemplates';
 import { ProfilePage } from './pages/admin/Profile';
+import { ContractsPage } from './pages/contracts/Contracts';
+import { ContractDetailPage } from './pages/contracts/ContractDetail';
+import { NewContractPage } from './pages/contracts/NewContract';
+import { AdminContractSettings } from './pages/admin/ContractSettings';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -59,6 +63,9 @@ export function App() {
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />
         <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
+        <Route path="contracts" element={<Gate module="contratos"><ContractsPage /></Gate>} />
+        <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />
+        <Route path="contracts/:id" element={<Gate module="contratos"><ContractDetailPage /></Gate>} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings" element={<Gate module="configuracoes" min="total"><AdminLayout /></Gate>}>
           <Route index element={<AdminOverview />} />
@@ -72,6 +79,7 @@ export function App() {
           <Route path="email" element={<AdminEmail />} />
           <Route path="data" element={<AdminData />} />
           <Route path="fields" element={<AdminCustomFields />} />
+          <Route path="contracts" element={<AdminContractSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />

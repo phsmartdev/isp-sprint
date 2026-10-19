@@ -205,7 +205,7 @@ for (const width of [390, 768, 1280, 1440]) {
   test(`sem rolagem horizontal da página em ${width}px`, async ({ browser }) => {
     const page = await (await browser.newContext({ viewport: { width, height: 900 } })).newPage();
     await login(page, 'carlos@yepnet.test');
-    for (const path of ['/', '/leads', '/opportunities', '/customers', '/activities', '/reports', '/intelligence', '/settings', '/settings/security']) {
+    for (const path of ['/', '/leads', '/opportunities', '/customers', '/activities', '/reports', '/intelligence', '/settings', '/settings/security', '/contracts', '/contracts?t=lista', '/contracts?t=funil', '/contracts?t=calendario', '/contracts?t=renovacoes', '/contracts?t=relatorios', '/intelligence?v=contratos', '/settings/contracts']) {
       await page.goto(path);
       await page.waitForLoadState('networkidle');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

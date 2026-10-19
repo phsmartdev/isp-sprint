@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, CalendarCheck, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Send, Settings, UserRound, Users, UsersRound, X,
+  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Send, Settings, UserRound, Users, UsersRound, X,
 } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useAuth } from '../../auth/AuthProvider';
@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { to: '/activities', label: 'Atividades', icon: <CalendarCheck className={ICON} />, module: 'atividades', badge: true },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
   { to: '/campaigns', label: 'Campanhas', icon: <Send className={ICON} />, module: 'campanhas' },
+  { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
   { to: '/intelligence', label: 'Inteligência', icon: <Lightbulb className={ICON} />, module: 'inteligencia' },
   { to: '/settings', label: 'Configurações', icon: <Settings className={ICON} />, module: 'configuracoes' },
 ];
@@ -42,6 +43,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/email', label: 'E-mail e alertas', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
+  { to: '/settings/contracts', label: 'Contratos', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
@@ -85,7 +87,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 }
               >
                 {n.icon}
-                <span className="flex-1 truncate">{n.label}</span>
+                <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
                 {n.badge && badge > 0 && <span className="num rounded-full bg-[#5DBB2F] px-2.5 py-0.5 text-xs font-bold text-white">{badge}</span>}
               </NavLink>
               {n.to === '/settings' && inSettings && (

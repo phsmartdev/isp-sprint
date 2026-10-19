@@ -1,4 +1,4 @@
-import type { ViabilityResult } from '@isp/domain';
+import type { Sector, ViabilityResult } from '@isp/domain';
 import type { AccessLevel, ActivityPriority, ActivityType, CoverageStatus, ContractRequestStatus, CustomerLifecycle, LeadStatus, Module, OpportunityReason, OpportunityStage, ProposalStatus, Segment } from '@isp/domain';
 
 export type Me = {
@@ -8,6 +8,7 @@ export type Me = {
   access: Record<Module, AccessLevel>;
   teamIds: string[];
   teamMemberIds: string[];
+  sectors: Sector[];
 };
 
 export type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
@@ -105,6 +106,8 @@ export type Opportunity = {
   duplicatedFromId: string | null;
   engineeringStatus: 'nao_necessaria' | 'pendente' | 'aprovada' | 'reprovada';
   engineeringTicket: string | null;
+  handoffStage: string | null;
+  contractId: string | null;
   executiveTicket: string | null;
   proposalStatus: ProposalStatus;
   contractRequestStatus: ContractRequestStatus;

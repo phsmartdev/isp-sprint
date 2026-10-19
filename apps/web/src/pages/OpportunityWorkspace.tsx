@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Send, UserRound, XCircle } from 'lucide-react';
+import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment, type ViabilityResult,
@@ -491,6 +491,7 @@ function Pendencies({ opp, fields, unmetFields }: { opp: Opportunity; fields: Fi
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can } = useAuth();
+  const nav = useNavigate();
   const lookups = useLookups();
   const toast = useToast();
   const qc = useQueryClient();
@@ -693,6 +694,9 @@ export function OpportunityWorkspacePage() {
           </>
         )}
         <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>Viabilidade e próximo passo</Button>
+        {opp.stage === 'ganha' && can('contratos') && (opp.contractId
+          ? <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
+          : <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? ' — mude a etapa para reabrir.' : '. Reabrir é com a supervisão.'}</span>}
       </div>
 

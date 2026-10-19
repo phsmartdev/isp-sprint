@@ -8,6 +8,8 @@ const d = (v: string | Date) => (typeof v === 'string' ? new Date(v) : v);
 
 export function fmtDate(v?: string | Date | null) {
   if (!v) return '—';
+  // data sem hora (AAAA-MM-DD) é um dia do calendário: não converte fuso (senão volta um dia)
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return `${v.slice(8, 10)}/${v.slice(5, 7)}/${v.slice(0, 4)}`;
   return d(v).toLocaleDateString('pt-BR', { timeZone: tz, day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 export function fmtDateTime(v?: string | Date | null) {

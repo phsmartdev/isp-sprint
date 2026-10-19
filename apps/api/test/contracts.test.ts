@@ -45,6 +45,7 @@ describe('contrato privado: oportunidade → implantação → renovação → r
   it('só cadastra a partir de oportunidade concluída, com dados do CRM e sem copiar o cliente', async () => {
     const w = await wonOpportunity('Empresa Contrato Fictícia LTDA');
     oppId = w.o.id;
+    expect((await mariana.get(`/contracts/prefill?opportunityId=${oppId}`)).statusCode).toBe(404);
     const pre1 = (await lucas.get(`/contracts/prefill?opportunityId=${oppId}`)).json();
     expect(pre1.won).toBe(false);
     const base = { commercialOwnerId: lucas.me.user.id, version: { number: 'CT-PRIV-001', object: 'Link dedicado fictício', items: pre1.suggestion.version.items, monthlyCents: 150_000 } };

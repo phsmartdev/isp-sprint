@@ -7,7 +7,7 @@ import {
   Palette, Plus, RefreshCw, Settings, Shield, Target, Trash2, Upload, UserPlus, Users, Workflow,
 } from 'lucide-react';
 import {
-  LEVEL_LABELS, MODULE_LABELS, PROFILE_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Segment,
+  LEVEL_LABELS, MODULE_LABELS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
 } from '@isp/domain';
 import type { BrandSlot } from '@isp/shared';
 import { api, ApiError, qs } from '../../lib/api';
@@ -33,6 +33,7 @@ const TABS = [
   { to: '/settings/email', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },
   { to: '/settings/fields', label: 'Campos personalizados' },
+  { to: '/settings/contracts', label: 'Contratos' },
   { to: '/settings/data', label: 'Base de dados' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },
@@ -204,7 +205,7 @@ export function AdminOverview() {
 // =================================================================== usuários
 type AdminUser = {
   id: string; name: string; email: string; jobTitle: string | null; active: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
-  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[];
+  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[];
 };
 
 async function fileToBase64(file: File) {
@@ -222,7 +223,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
   const { me } = useAuth();
   const [form, setForm] = useState({
     name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true,
-    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
+    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -231,8 +232,8 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds } });
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -285,6 +286,13 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
           </ul>
         </fieldset>
       )}
+      <fieldset>
+        <legend className="mb-1 text-sm font-semibold text-ink">Setores (Gestão de Contratos)</legend>
+        <p className="mb-2 text-xs text-muted">Definem quem recebe as tarefas e notificações dos contratos e quem conclui cada etapa. Setores de apoio enxergam todos os contratos.</p>
+        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          {SECTORS.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sectors.includes(x)} onChange={() => set('sectors', form.sectors.includes(x) ? form.sectors.filter((y) => y !== x) : [...form.sectors, x])} />{SECTOR_LABELS[x]}</label>)}
+        </div>
+      </fieldset>
       {user && (
         <fieldset>
           <legend className="mb-1.5 text-sm font-semibold text-ink">Metas do mês</legend>
@@ -341,7 +349,7 @@ export function AdminUsers() {
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Usuário', 'Perfil', 'Times', 'Metas (vendas/propostas/leads)', 'Último acesso', 'Situação', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
+            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Usuário', 'Perfil', 'Times', 'Setores', 'Metas (vendas/propostas/leads)', 'Último acesso', 'Situação', ''].map((h) => <th key={h} className="px-5 py-2 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-line">
@@ -353,6 +361,7 @@ export function AdminUsers() {
                   </td>
                   <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'gerencia' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
                   <td className="px-5 py-3 text-text">{u.teamIds.map((t) => `${teamName(t)}${u.leadTeamIds.includes(t) ? ' (lidera)' : ''}`).join(', ') || '—'}</td>
+                  <td className="px-5 py-3 text-text">{u.sectors?.map((x) => SECTOR_LABELS[x]).join(', ') || '—'}</td>
                   <td className="num px-5 py-3 text-text">{u.goalSales} / {u.goalProposals} / {u.goalLeads}</td>
                   <td className="num px-5 py-3 text-text">{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Nunca'}</td>
                   <td className="px-5 py-3"><Chip tone={u.active ? 'green' : 'neutral'}>{u.active ? 'Ativo' : 'Inativo'}</Chip></td>

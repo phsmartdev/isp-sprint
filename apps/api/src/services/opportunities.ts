@@ -165,6 +165,8 @@ export const opportunitySelect = {
   portReleaseReason: s.opportunities.portReleaseReason,
   engineeringTicket: s.opportunities.engineeringTicket,
   executiveTicket: s.opportunities.executiveTicket,
+  handoffStage: s.opportunities.handoffStage,
+  contractId: sql<string | null>`(select c.id from contracts c where c.opportunity_id = "opportunities"."id" limit 1)`,
   stageName: s.pipelineStages.name,
   attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,
   proposalCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null and oa.kind = 'proposta')`,

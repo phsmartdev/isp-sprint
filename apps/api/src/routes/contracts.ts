@@ -13,6 +13,7 @@ import * as s from '../db/schema';
 import type { DbOrTx } from '../db/client';
 import { audit } from '../services/audit';
 import { level } from '../services/scope';
+import { oppVisibility } from '../services/opportunities';
 import { brl } from '../services/email';
 import {
   addEvent, contractScope, contractSettingsOf, contractSummary, createTask, currentVersion, hasSector, isAdmin, loadContract, mailTo,
@@ -122,7 +123,7 @@ export const contractRoutes = [
       const [o] = await app.db
         .select({ id: s.opportunities.id, code: s.opportunities.code, stage: s.opportunities.stage, title: s.opportunities.title, contactId: s.opportunities.contactId, customerId: s.opportunities.customerId, ownerId: s.opportunities.ownerId, planId: s.opportunities.planId, valueCents: s.opportunities.valueCents, wonAt: s.opportunities.wonAt, notes: s.opportunities.notes, contactName: s.contacts.name, document: s.contacts.document, segment: s.contacts.segment, email: s.contacts.email, phone: s.contacts.phone })
         .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
-        .where(and(eq(s.opportunities.id, query.opportunityId), eq(s.opportunities.tenantId, auth.tenantId))).limit(1);
+        .where(and(eq(s.opportunities.id, query.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
       if (!o) throw notFound('Oportunidade não encontrada.');
       const [existing] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
       const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
@@ -153,7 +154,7 @@ export const contractRoutes = [
     handler: async ({ app, auth, body, req, reply }) => {
       let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null;
       if (body.opportunityId) {
-        const [o] = await app.db.select().from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId))).limit(1);
+        const [o] = await app.db.select().from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
         if (!o) throw notFound('Oportunidade não encontrada.');
         if (o.stage !== 'ganha') throw unprocessable('O contrato é cadastrado depois que a oportunidade é concluída (venda fechada).');
         const [dup] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);

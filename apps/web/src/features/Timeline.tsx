@@ -28,6 +28,14 @@ function describe(i: TimelineItem): string {
     case 'assigned': return 'Responsável alterado';
     case 'updated': return `Atualizou ${Object.keys((i.payload?.changed as Record<string, unknown>) ?? {}).map((c) => FIELD_LABELS[c] ?? c).join(', ')}`;
     case 'attachment_added': return `Anexo adicionado${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}`;
+    case 'contrato_cadastrado': return `Contrato ${String(i.payload?.number ?? '')} cadastrado`;
+    case 'contrato_validado': return `Contrato ${String(i.payload?.number ?? '')} validado`;
+    case 'erp_solicitado': return 'Cadastro no ERP solicitado (tarefa criada)';
+    case 'erp_atualizado': return `ERP atualizado${i.payload?.ref ? `: ${String(i.payload.ref)}` : ''}`;
+    case 'provisionamento_solicitado': return 'Provisionamento do faturamento solicitado ao Financeiro';
+    case 'implantacao_notificada': return 'Time de implantação e entrega notificado';
+    case 'sucesso_cliente': return 'Negociação passou para Sucesso do Cliente';
+    case 'contrato_encerrado': return 'Contrato encerrado e arquivado';
     case 'whatsapp_sent': return `Enviado por WhatsApp${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}${i.payload?.to ? ` para ${String(i.payload.to)}` : ''}`;
     case 'email_sent': return `E-mail enviado${i.payload?.subject ? `: ${String(i.payload.subject)}` : ''}`;
     case 'automation_ran': return `Automação executada${i.payload?.automation ? `: ${String(i.payload.automation)}` : ''}`;
