@@ -170,6 +170,28 @@ describe('modelos de contrato e ZapSign', () => {
   });
 });
 
+describe('modelo de contrato igual ao de proposta (arte + campos)', () => {
+  it('cria modelo de contrato no mesmo editor, gera o PDF com o timbrado e não aparece nas propostas', async () => {
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAAY0lEQVR4nO3OUQkAIBBAMb8tYTH75zCG72CwAFv73HHW94F0mLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0wMj0A7oIvkjy3AeBAAAAAElFTkSuQmCC';
+    const t = ok(await carlos.post('/admin/proposal-templates', { name: 'Contrato Yepnet', purpose: 'contrato', billingType: 'recorrente', variables: [{ key: 'foro', label: 'Foro', type: 'texto', default: 'Aracaju/SE' }], fields: [{ id: 'f1', page: 0, x: 10, y: 10, w: 80, size: 12, color: '#000000', align: 'left', bold: true, text: 'Contrato {{contrato.numero}} - {{cliente.nome}} - foro {{foro}}' }] }), 201).json();
+    ok(await carlos.post(`/admin/proposal-templates/${t.id}/pages`, { data: PNG }), 201);
+    const list = (await carlos.get('/admin/proposal-templates?purpose=contrato')).json();
+    expect(list.items.map((x: { id: string }) => x.id)).toContain(t.id);
+    expect(list.systemVariables.map((v: { key: string }) => v.key)).toContain('contrato.valor_mensal');
+    expect((await carlos.get('/admin/proposal-templates')).json().items.some((x: { id: string }) => x.id === t.id)).toBe(false);
+    const rec = await wonContract('Cliente Arte Fictício', 'recorrente');
+    const avail = (await lucas.get('/contract-templates')).json();
+    expect(avail.art.map((x: { id: string }) => x.id)).toContain(t.id);
+    const g = ok(await lucas.post(`/contracts/${rec.id}/generate`, { templateId: t.id, source: 'arte', values: { foro: 'Itabaiana/SE' } }), 201).json();
+    const file = await lucas.get(`/contracts/${rec.id}/documents/${g.id}/download`);
+    expect(file.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    expect(g.name).toMatch(/ - CONTRATO - CLIENTE ARTE FICTÍCIO - /);
+    const o = (await lucas.get(`/contracts/${rec.id}`)).json().opportunity;
+    const props = (await lucas.get(`/opportunities/${o.id}/proposal-templates`)).json().items;
+    expect(props.some((x: { id: string }) => x.id === t.id)).toBe(false);
+  });
+});
+
 describe('relatório completo', () => {
   it('traz todos os contratos com faturamento do período, saldo e pendências; exporta planilha', async () => {
     const r = (await carlos.get(`/contracts/reports/full?from=${today.slice(0, 4)}-01-01&to=${today}`)).json();

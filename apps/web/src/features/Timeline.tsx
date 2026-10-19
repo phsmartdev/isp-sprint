@@ -28,6 +28,8 @@ function describe(i: TimelineItem): string {
     case 'assigned': return 'Responsável alterado';
     case 'updated': return `Atualizou ${Object.keys((i.payload?.changed as Record<string, unknown>) ?? {}).map((c) => FIELD_LABELS[c] ?? c).join(', ')}`;
     case 'attachment_added': return `Anexo adicionado${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}`;
+    case 'medicao_vinculada': return i.payload?.contractId ? 'Consumo de contrato por medição vinculado' : 'Consumo de contrato por medição removido';
+    case 'sucesso_cliente_decisao': return i.payload?.acionar ? 'Cliente da base: Sucesso do Cliente acionado' : 'Cliente da base: Sucesso do Cliente não acionado';
     case 'contrato_cadastrado': return `Contrato ${String(i.payload?.number ?? '')} cadastrado`;
     case 'contrato_validado': return `Contrato ${String(i.payload?.number ?? '')} validado`;
     case 'erp_solicitado': return 'Cadastro no ERP solicitado (tarefa criada)';

@@ -23,7 +23,7 @@ import { AdminInstructions } from './pages/admin/Instructions';
 import { AdminEmail } from './pages/admin/Email';
 import { AdminData } from './pages/admin/DataAdmin';
 import { AdminCustomFields } from './pages/admin/CustomFields';
-import { AdminProposalTemplates } from './pages/admin/ProposalTemplates';
+import { AdminContractTemplates, AdminProposalTemplates } from './pages/admin/ProposalTemplates';
 import { ProfilePage } from './pages/admin/Profile';
 import { ContractsPage } from './pages/contracts/Contracts';
 import { ContractDetailPage } from './pages/contracts/ContractDetail';
@@ -81,6 +81,7 @@ export function App() {
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<AdminContractSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
+          <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />
           <Route path="notifications" element={<Navigate to="/settings/email" replace />} />

@@ -32,7 +32,7 @@ export function NewContractPage() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (pre.data) setF(formFrom({ kind: pre.data.suggestion.kind, legalRegime: pre.data.suggestion.legalRegime, commercialOwnerId: pre.data.suggestion.commercialOwnerId }, pre.data.suggestion.version)); }, [pre.data]);
   const create = useMutation({
-    mutationFn: () => { const p = payloadOf(f); return api<{ id: string }>('/contracts', { method: 'POST', body: { ...p.header, opportunityId: oppId, contactId: oppId ? null : contact?.id ?? null, version: p.version } }); },
+    mutationFn: () => { const p = payloadOf(f); return api<{ id: string }>('/contracts', { method: 'POST', body: { ...p.header, initialBalanceCents: p.initialBalanceCents, opportunityId: oppId, contactId: oppId ? null : contact?.id ?? null, version: p.version } }); },
     onSuccess: (r) => nav(`/contracts/${r.id}`),
     onError: (e) => { setError(errMsg(e)); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   });

@@ -1,7 +1,7 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL } from '../../lib/format';
 import { Button, FormField, Input, Select, Textarea } from '../../components/ui/primitives';
@@ -9,7 +9,7 @@ import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version 
 
 type ItemRow = { planId: string; description: string; qty: string; unit: string };
 export type FormState = {
-  kind: 'privado' | 'publico'; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
+  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
   items: ItemRow[]; monthly: string; total: string; billingDay: string; billingTerms: string;
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
@@ -17,10 +17,10 @@ export type FormState = {
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
 };
 
-export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
+export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
   const g = v.guarantee, p = v.publicTerms;
   return {
-    kind: h.kind ?? 'privado', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
+    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
     items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents) })),
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
@@ -37,14 +37,17 @@ const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.descri
 export function payloadOf(f: FormState) {
   const items = itemsOf(f.items);
   const itemsTotal = items.reduce((a, i) => a + i.qty * i.unitCents, 0);
-  const monthlyCents = f.monthly.trim() ? toCents(f.monthly) : itemsTotal;
+  const monthlyCents = f.monthly.trim() ? toCents(f.monthly) : f.billingType === 'medicao' ? 0 : itemsTotal;
   if (monthlyCents === null) throw new Error('Valor mensal inválido. Use o formato 1.500,00.');
   const totalCents = f.total.trim() ? toCents(f.total) : null;
   if (f.total.trim() && totalCents === null) throw new Error('Valor global inválido.');
   const guarantee: Guarantee | null = f.hasGuarantee ? { type: f.gType.trim() || 'Seguro-garantia', amountCents: f.gAmount.trim() ? toCents(f.gAmount) : null, insurer: nul(f.gInsurer), policy: nul(f.gPolicy), expiresAt: nul(f.gExpires), renewalAt: nul(f.gRenewal) } : null;
   const publicTerms: PublicTerms | null = f.kind === 'publico' ? { agency: nul(f.agency), processNumber: nul(f.processNumber), modality: nul(f.modality), commitmentNote: nul(f.commitmentNote), budgetLine: nul(f.budgetLine), extensionMaxMonths: f.extensionMax ? Number(f.extensionMax) : null } : null;
+  const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
+  if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
-    header: { kind: f.kind, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt) },
+    initialBalanceCents,
+    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt) },
     version: {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
@@ -85,7 +88,10 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
     <div className="space-y-4">
       <Fieldset title="Contrato">
         <FormField label="Número do contrato" htmlFor="cf-number" required><Input id="cf-number" value={f.number} onChange={(e) => onChange({ number: e.target.value })} placeholder="Ex.: 045/2025" /></FormField>
-        <FormField label="Tipo" htmlFor="cf-kind">
+        <FormField label="Tipo de contrato" htmlFor="cf-btype" hint={BILLING_TYPE_HINTS[f.billingType]}>
+          <Select id="cf-btype" value={f.billingType} onChange={(e) => onChange({ billingType: e.target.value as BillingType })}>{BILLING_TYPES.map((t) => <option key={t} value={t}>{BILLING_TYPE_LABELS[t]}</option>)}</Select>
+        </FormField>
+        <FormField label="Público ou privado" htmlFor="cf-kind">
           <Select id="cf-kind" value={f.kind} onChange={(e) => onChange({ kind: e.target.value as FormState['kind'], legalRegime: e.target.value === 'privado' ? 'privado' : f.legalRegime === 'privado' ? 'lei_14133' : f.legalRegime })}>
             <option value="privado">Privado</option><option value="publico">Público</option>
           </Select>
@@ -138,7 +144,8 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
       </fieldset>
 
       <Fieldset title="Valores e faturamento">
-        <FormField label="Valor mensal (R$)" htmlFor="cf-monthly" hint="Em branco usa a soma dos itens."><Input id="cf-monthly" inputMode="decimal" value={f.monthly} onChange={(e) => onChange({ monthly: e.target.value })} placeholder={dec(itemsTotal)} /></FormField>
+        {f.billingType === 'medicao' && !editing && <FormField label="Saldo contratado (R$)" htmlFor="cf-balance" required hint="Crédito inicial do contrato; as oportunidades consomem esse saldo."><Input id="cf-balance" inputMode="decimal" value={f.initialBalance} onChange={(e) => onChange({ initialBalance: e.target.value })} placeholder="100.000,00" /></FormField>}
+        <FormField label={f.billingType === 'recorrente' ? 'Valor mensal (R$)' : 'Valor mensal estimado (R$)'} htmlFor="cf-monthly" hint={f.billingType === 'recorrente' ? 'Em branco usa a soma dos itens.' : 'Opcional: referência para a carteira.'}><Input id="cf-monthly" inputMode="decimal" value={f.monthly} onChange={(e) => onChange({ monthly: e.target.value })} placeholder={dec(itemsTotal)} /></FormField>
         <FormField label="Valor global (R$)" htmlFor="cf-total"><Input id="cf-total" inputMode="decimal" value={f.total} onChange={(e) => onChange({ total: e.target.value })} /></FormField>
         <FormField label="Dia de faturamento" htmlFor="cf-bday"><Input id="cf-bday" inputMode="numeric" value={f.billingDay} onChange={(e) => onChange({ billingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })} /></FormField>
         <FormField label="Condições de faturamento" htmlFor="cf-bterms" className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-bterms" className="min-h-[60px]" value={f.billingTerms} onChange={(e) => onChange({ billingTerms: e.target.value })} placeholder="Ex.: fatura mensal, vencimento em 30 dias, medição até o dia 5" /></FormField>

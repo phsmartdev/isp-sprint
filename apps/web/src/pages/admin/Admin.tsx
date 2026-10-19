@@ -29,6 +29,7 @@ const TABS = [
   { to: '/settings/plans', label: 'Planos e produtos' },
   { to: '/settings/sources', label: 'Canais de entrada' },
   { to: '/settings/proposals', label: 'Modelos de proposta' },
+  { to: '/settings/contract-templates', label: 'Modelos de contrato' },
   { to: '/settings/instructions', label: 'Modelo de instrução' },
   { to: '/settings/email', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },

@@ -29,3 +29,12 @@
   .skeleton { @apply animate-pulse rounded-sm bg-surface-2; }
   .scroll-thin { scrollbar-width: thin; }
 }
+
+/* Impressão (relatórios): só o conteúdo, sem menus, cabeçalho de página e abas */
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body { background: #fff !important; }
+  [role='tablist'], .print\:hidden { display: none !important; }
+  main#conteudo { padding: 0 !important; }
+  .card { box-shadow: none !important; }
+}

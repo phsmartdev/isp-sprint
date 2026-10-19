@@ -22,6 +22,7 @@ import { ActivityRow } from '../features/ActivityRow';
 import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
 import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type KitValue, type ViabilityValue } from '../features/DealFields';
+import { MeasurementBox } from '../features/MeasurementBox';
 import { Attachments } from '../features/Attachments';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
@@ -59,6 +60,7 @@ export function NewOpportunityPage() {
   const [segment, setSegment] = useState<Segment>('residencial');
   const [search, setSearch] = useState('');
   const [contact, setContact] = useState<ContactHit | null>(null);
+  const [cs, setCs] = useState<'' | 'sim' | 'nao'>('');
   const [sourceId, setSourceId] = useState('');
   const [campaignId, setCampaignId] = useState('');
   const [planId, setPlanId] = useState('');
@@ -85,12 +87,13 @@ export function NewOpportunityPage() {
   const simInput = useDebounced(JSON.stringify({ planId: planId || null, ...viabilityPayload(vb), location: address.condominiumId ? 'condominio' : address.installStreet ? 'rua' : null }), 350);
   const sim = useQuery({ queryKey: ['simulate', simInput], enabled: !!planId || vb.cableMeters !== '', queryFn: () => api<ViabilityResult>('/viability/simulate', { method: 'POST', body: JSON.parse(simInput) }), placeholderData: (p) => p });
 
+  const isBase = mode === 'existente' && !!contact?.lifecycle && contact.lifecycle !== 'prospect';
   const create = useMutation({
     mutationFn: () =>
       api<Opportunity>('/opportunities', {
         method: 'POST',
         body: {
-          ...(mode === 'existente' ? { contactId: contact?.id } : { newContact: { name, phone: phone || null, email: email || null, segment, city: address.installCity || null } }),
+          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment, city: address.installCity || null } }),
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
@@ -106,6 +109,7 @@ export function NewOpportunityPage() {
         },
       }),
     onSuccess: (o) => {
+      if ((o as Opportunity & { customerSuccessId?: string | null }).customerSuccessId) toast({ tone: 'success', message: 'Sucesso do Cliente acionado: a oportunidade também foi para o funil Sucesso do Cliente.' });
       qc.setQueryData(['opportunity', o.id], o);
       for (const k of ['pipeline', 'opportunities', 'home', 'leads']) qc.invalidateQueries({ queryKey: [k] });
       nav(`/opportunities/${o.id}`, { replace: true });
@@ -122,6 +126,7 @@ export function NewOpportunityPage() {
     const errs: Record<string, string> = {};
     if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome do cliente (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
+    if (mode === 'existente' && isBase && !cs) errs.customerSuccess = 'Responda se aciona Sucesso do Cliente';
     if (vb.activationFee.trim() && toCents(vb.activationFee) === null) errs.activationFeeCents = 'Use o formato 50,00';
     for (const f of journey?.fields ?? []) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
     setErrors(errs);
@@ -213,7 +218,7 @@ export function NewOpportunityPage() {
                     {hits.data?.items.length === 0 && <li className="px-3 py-2 text-sm text-muted">Nenhum cliente encontrado na sua carteira. Use “Cliente novo”.</li>}
                     {hits.data?.items.map((c) => (
                       <li key={c.id}>
-                        <button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-2" onClick={() => { setContact(c); setPlanId(''); }}>
+                        <button type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-2" onClick={() => { setContact(c); setPlanId(''); setCs(''); }}>
                           <span><span className="block font-semibold text-ink">{c.name}</span><span className="block text-sm text-muted">{c.phone ?? 'sem telefone'} · {SEGMENT_LABELS[c.segment]}</span></span>
                           {c.lifecycle && <LifecycleChip s={c.lifecycle} />}
                         </button>
@@ -221,7 +226,18 @@ export function NewOpportunityPage() {
                     ))}
                   </ul>
                 )}
-                {contact?.lifecycle && contact.lifecycle !== 'prospect' && <div className="mt-2"><Notice tone="warning">Cliente já existente{contact.externalId ? ` (${contact.externalId})` : ''}. Confira os contratos ativos antes de qualquer nova contratação.</Notice></div>}
+                {isBase && <div className="mt-2"><Notice tone="warning">Cliente já existente{contact!.externalId ? ` (${contact!.externalId})` : ''}. Confira os contratos ativos antes de qualquer nova contratação.</Notice></div>}
+                {isBase && (
+                  <fieldset className="mt-3 rounded-md border border-line p-3" aria-describedby={errors.customerSuccess ? 'cs-err' : undefined}>
+                    <legend className="px-1 text-sm font-semibold text-ink">Acionar o processo de Sucesso do Cliente? <span className="text-danger">*</span></legend>
+                    <p className="mb-2 text-xs text-muted">Sim: a oportunidade também vai para o funil Sucesso do Cliente. Não: segue só aqui, sem duplicar.</p>
+                    <div className="flex gap-5 text-sm">
+                      <label className="flex items-center gap-2"><input type="radio" name="no-cs" checked={cs === 'sim'} onChange={() => setCs('sim')} />Sim, acionar</label>
+                      <label className="flex items-center gap-2"><input type="radio" name="no-cs" checked={cs === 'nao'} onChange={() => setCs('nao')} />Não</label>
+                    </div>
+                    {errors.customerSuccess && <p id="cs-err" className="mt-1 text-sm text-danger">{errors.customerSuccess}</p>}
+                  </fieldset>
+                )}
               </div>
             )}
           </Panel>
@@ -558,6 +574,7 @@ export function OpportunityWorkspacePage() {
           {opp.contactProvisional && <span className="text-xs text-muted">Contato provisório</span>}
         </div>
         {can('clientes') && <Link to={`/customers/${opp.contactId}`} className="link mt-3 inline-block text-sm font-semibold">Abrir ficha do cliente</Link>}
+        <MeasurementBox opp={opp} />
       </Panel>
       <Panel title="Endereço de instalação" icon={<MapPin className="h-5 w-5 text-primary" />}>
         <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" />

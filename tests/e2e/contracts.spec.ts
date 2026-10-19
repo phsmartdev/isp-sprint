@@ -71,3 +71,75 @@ test('oportunidade fechada: cadastrar contrato com os dados do CRM', async ({ pa
   await expect(page.getByText('Aguardando ERP').first()).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-intel.png', fullPage: true });
 });
+
+test('modelos com timbrado, gerar contrato, saldo de medição, painel por tipo e relatório completo', async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/contracts');
+  await expect(page.getByText('Faturamento total no período')).toBeVisible();
+  for (const t of ['Recorrente', 'Frequente', 'Medição']) await expect(page.getByLabel('Faturamento por tipo de contrato').getByText(t, { exact: false }).first()).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-painel2.png', fullPage: true });
+  // modelo .docx
+  await page.getByRole('tab', { name: 'Modelos' }).click();
+  // modelo com a arte (mesmo editor dos modelos de proposta)
+  await expect(page.getByRole('heading', { name: 'Modelos de contrato' })).toBeVisible();
+  await page.getByRole('button', { name: 'Novo modelo' }).click();
+  await expect(page.getByRole('heading', { name: 'Modelo: Contrato padrão' })).toBeVisible();
+  await expect(page.getByLabel('Usado para contratos do tipo')).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-modelo-arte.png', fullPage: true });
+  await page.getByRole('button', { name: 'Fechar', exact: true }).last().click();
+  await page.getByRole('button', { name: 'Subir modelo' }).click();
+  await page.getByLabel('Nome do modelo').fill('Contrato padrão Yepnet');
+  await page.locator('#tm-file').setInputFiles('tests/e2e/fixtures/modelo-contrato.docx');
+  await page.getByRole('button', { name: 'Salvar modelo' }).click();
+  await expect(page.getByText(/Modelo salvo: \d+ campo/)).toBeVisible();
+  await page.locator('section').filter({ hasText: 'Modelos em Word (opcional)' }).getByRole('button', { name: 'Editar' }).first().click();
+  await expect(page.getByText('{{prazo_instalacao}}', { exact: true })).toBeVisible();
+  await page.getByLabel('Rótulo').first().fill('Prazo de instalação');
+  await page.getByRole('button', { name: 'Salvar modelo' }).click();
+  await page.screenshot({ path: 'test-results/contracts-modelos.png', fullPage: true });
+  // gera para um contrato vigente
+  await page.getByRole('tab', { name: 'Lista' }).click();
+  await page.getByLabel('Buscar contratos').fill('CTR-2025-031');
+  await page.getByRole('link', { name: 'CTR-2025-031' }).click();
+  await page.getByRole('tab', { name: 'Documentos' }).click();
+  await page.getByRole('button', { name: 'Gerar pelo modelo' }).click();
+  await page.getByLabel('Modelo', { exact: true }).selectOption({ label: 'Contrato padrão Yepnet (Word)' });
+  await page.getByLabel('Prazo de instalação').fill('10 dias úteis');
+  await page.getByRole('button', { name: 'Gerar documento' }).click();
+  await expect(page.getByText(/Contrato gerado: .* - CONTRATO - /)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Assinar (ZapSign)' }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Assinar (ZapSign)' }).first().click();
+  await expect(page.getByRole('heading', { name: 'Enviar para assinatura (ZapSign)' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-assinar.png', fullPage: true });
+  await page.getByRole('button', { name: 'Cancelar' }).click();
+  // medição
+  await page.goto('/contracts?t=lista');
+  await page.getByLabel('Buscar contratos').fill('ATA-2025-007');
+  await page.getByRole('link', { name: 'ATA-2025-007' }).click();
+  await page.getByRole('tab', { name: 'Saldo e consumo' }).click();
+  await expect(page.getByText('Disponível', { exact: true })).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-saldo.png', fullPage: true });
+  // relatório completo
+  await page.goto('/contracts?t=relatorios');
+  await expect(page.getByRole('heading', { name: 'Relatório completo de contratos' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'ATA-2025-007' })).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-relatorio.png', fullPage: true });
+});
+
+test('oportunidade de cliente da base pergunta sobre Sucesso do Cliente', async ({ page }) => {
+  test.setTimeout(90_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/opportunities/new');
+  await page.getByRole('radio', { name: /Cliente da carteira/ }).click();
+  await page.locator('#no-search').fill('Sérgio Torres');
+  await page.getByRole('list', { name: 'Resultados' }).getByRole('button').filter({ hasText: 'Ativo' }).first().click();
+  await expect(page.getByText('Acionar o processo de Sucesso do Cliente?')).toBeVisible();
+  await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
+  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(page.getByText('Responda se aciona Sucesso do Cliente')).toBeVisible();
+  await page.getByRole('radio', { name: 'Sim, acionar' }).check();
+  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(page.getByText(/Sucesso do Cliente acionado/)).toBeVisible();
+  await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+});

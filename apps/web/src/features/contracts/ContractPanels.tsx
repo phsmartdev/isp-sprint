@@ -2,7 +2,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Download, FileUp, Lock, Trash2 } from 'lucide-react';
+import { Download, FileText, FileUp, Lock, PenLine, Trash2 } from 'lucide-react';
+import { SignaturesList } from './SignaturePanels';
 import { DOC_TYPES, SECTORS, SECTOR_LABELS, documentName, type Sector } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
@@ -63,7 +64,7 @@ export function UploadModal({ c, open, onClose, category: cat0, processId, newVe
   );
 }
 
-export function DocumentsPanel({ c, onUpload }: { c: ContractDetail; onUpload: (opts: { newVersionOf?: Doc }) => void }) {
+export function DocumentsPanel({ c, onUpload, onGenerate, onSign }: { c: ContractDetail; onUpload: (opts: { newVersionOf?: Doc }) => void; onGenerate: () => void; onSign: (d: { id: string; name: string }) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['contract-docs', c.id], queryFn: () => api<{ items: Doc[] }>(`/contracts/${c.id}/documents`) });
@@ -79,8 +80,12 @@ export function DocumentsPanel({ c, onUpload }: { c: ContractDetail; onUpload: (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted">Nome padrão: AAMMDD - TIPO DO DOCUMENTO - CLIENTE - RESUMO DO OBJETO. Nova versão não substitui a anterior.</p>
-        <Button variant="primary" icon={<FileUp className="h-4 w-4" />} onClick={() => onUpload({})}>Enviar documento</Button>
+        <div className="flex flex-wrap gap-2">
+          {c.stage !== 'arquivado' && <Button icon={<FileText className="h-4 w-4" />} onClick={onGenerate}>Gerar pelo modelo</Button>}
+          <Button variant="primary" icon={<FileUp className="h-4 w-4" />} onClick={() => onUpload({})}>Enviar documento</Button>
+        </div>
       </div>
+      <SignaturesList c={c} />
       {!groups.length ? <EmptyState title="Nenhum documento" description="Envie o contrato assinado, aditivos, ofícios e garantias." /> : (
         <ul className="divide-y divide-line rounded-md border border-line">
           {groups.map((list) => {
@@ -100,6 +105,7 @@ export function DocumentsPanel({ c, onUpload }: { c: ContractDetail; onUpload: (
                   </div>
                   <div className="flex items-center gap-1">
                     {d.canOpen ? <a className="rounded-sm p-2 text-ink hover:bg-surface-2" href={`/api/v1/contracts/${c.id}/documents/${d.id}/download`} aria-label={`Baixar ${d.name}`}><Download className="h-4 w-4" /></a> : <span className="p-2 text-muted" title="Restrito a outro setor"><Lock className="h-4 w-4" /></span>}
+                    {d.canOpen && !d.signed && ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(d.mime) && c.stage !== 'arquivado' && <Button size="sm" variant="primary" icon={<PenLine className="h-4 w-4" />} onClick={() => onSign({ id: d.id, name: d.name })}>Assinar (ZapSign)</Button>}
                     {d.canOpen && <Button size="sm" onClick={() => onUpload({ newVersionOf: d })}>Nova versão</Button>}
                     <Button size="sm" variant="ghost" onClick={() => folder.mutate(d)}>{d.folder === 'Ativos' ? 'Mover p/ Encerrados' : 'Mover p/ Ativos'}</Button>
                     <Button size="sm" variant="ghost" aria-label={`Remover ${d.name}`} icon={<Trash2 className="h-4 w-4 text-danger" />} onClick={() => { if (window.confirm('Remover este documento da lista? Ele continua guardado no histórico.')) del.mutate(d.id); }} />

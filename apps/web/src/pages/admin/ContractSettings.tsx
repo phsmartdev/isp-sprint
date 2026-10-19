@@ -28,7 +28,7 @@ export function AdminContractSettings() {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['admin', 'contract-settings'], queryFn: () => api<S>('/admin/contract-settings') });
-  const tpls = useQuery({ queryKey: ['admin', 'proposal-templates'], queryFn: () => api<{ items: { id: string; name: string }[] }>('/admin/proposal-templates') });
+  const tpls = useQuery({ queryKey: ['admin', 'proposal-templates', 'contrato'], queryFn: () => api<{ items: { id: string; name: string }[] }>('/admin/proposal-templates?purpose=contrato') });
   const [f, setF] = useState<S | null>(null);
   useEffect(() => { if (q.data && !f) setF(q.data); }, [q.data, f]);
   const save = useMutation({ mutationFn: () => api('/admin/contract-settings', { method: 'PUT', body: { ...f, financeEmail: f!.financeEmail || null, deliveryEmail: f!.deliveryEmail || null } }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'contract-settings'] }); toast({ tone: 'success', message: 'Parâmetros de contratos salvos' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
@@ -56,7 +56,7 @@ export function AdminContractSettings() {
       </section>
       <section className="card p-5">
         <h2 className="mb-1 text-md font-bold text-ink">Ofício de renovação</h2>
-        <p className="mb-3 max-w-3xl text-sm text-muted">Texto do ofício com variáveis. Para usar o papel timbrado institucional, crie um modelo em <Link className="link" to="/settings/proposals">Modelos de proposta</Link> com a arte e um campo {'{{oficio.corpo}}'} e escolha abaixo.</p>
+        <p className="mb-3 max-w-3xl text-sm text-muted">Texto do ofício com variáveis. Para usar o papel timbrado institucional, crie um modelo em <Link className="link" to="/settings/contract-templates">Modelos de contrato</Link> com a arte e um campo {'{{oficio.corpo}}'} e escolha abaixo.</p>
         <FormField label="Modelo institucional (papel timbrado)" htmlFor="cs-tpl" className="mb-3 max-w-md">
           <Select id="cs-tpl" value={f.oficioTemplateId ?? ''} onChange={(e) => set({ oficioTemplateId: e.target.value || null })}><option value="">Sem arte (PDF simples com o nome da empresa)</option>{tpls.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
         </FormField>

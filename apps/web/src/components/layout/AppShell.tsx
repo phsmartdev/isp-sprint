@@ -39,6 +39,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/plans', label: 'Planos e produtos', admin: true },
   { to: '/settings/sources', label: 'Canais de entrada', admin: true },
   { to: '/settings/proposals', label: 'Modelos de proposta', admin: true },
+  { to: '/settings/contract-templates', label: 'Modelos de contrato', admin: true },
   { to: '/settings/instructions', label: 'Modelo de instrução', admin: true },
   { to: '/settings/email', label: 'E-mail e alertas', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
@@ -195,7 +196,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen">
       <a href="#conteudo" className="sr-only z-50 rounded bg-primary px-3 py-2 text-white focus:not-sr-only focus:fixed focus:left-2 focus:top-2">Pular para o conteúdo</a>
-      <aside className="hidden w-[228px] shrink-0 bg-navy lg:block">
+      <aside className="hidden w-[228px] shrink-0 bg-navy lg:block print:!hidden">
         <div className="sticky top-0 h-screen"><Sidebar /></div>
       </aside>
       {mobileOpen && (
@@ -205,7 +206,7 @@ export function AppShell() {
         </div>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-[72px] items-center gap-3 border-b border-line/60 bg-surface/95 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-20 flex print:hidden h-[72px] items-center gap-3 border-b border-line/60 bg-surface/95 px-4 backdrop-blur sm:px-6">
           <button className="rounded-sm p-1.5 text-ink hover:bg-surface-2 lg:hidden" aria-label="Abrir menu" onClick={() => setMobileOpen(true)}><Menu className="h-6 w-6" /></button>
           <GlobalSearch ref={search} />
           <div className="ml-auto flex items-center gap-2 sm:gap-4">

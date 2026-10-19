@@ -162,6 +162,13 @@
       "when": 1792449153280,
       "tag": "0022_contract_types_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792450495752,
+      "tag": "0023_template_purpose",
+      "breakpoints": true
     }
   ]
 }

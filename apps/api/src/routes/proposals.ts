@@ -7,6 +7,7 @@ import { notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity } from '../services/opportunities';
+import { CONTRACT_TEMPLATE_VARIABLES } from '@isp/domain';
 import { SYSTEM_VARIABLES, buildProposalPdf, imageSize, systemValues } from '../services/proposals';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
@@ -21,6 +22,8 @@ const TemplateBody = z.object({
   fields: z.array(Field).max(80).default([]),
   variables: z.array(Variable).max(40).default([]),
   active: z.boolean().default(true),
+  purpose: z.enum(['proposta', 'contrato']).default('proposta'),
+  billingType: z.enum(['recorrente', 'frequente', 'medicao']).nullable().default(null),
 });
 const PageParams = z.object({ id: z.string().uuid(), pageId: z.string().uuid() });
 
@@ -41,14 +44,16 @@ export const proposalRoutes = [
   defineRoute({
     method: 'GET',
     url: '/admin/proposal-templates',
-    summary: 'Modelos de proposta com páginas, campos e variáveis',
+    summary: 'Modelos (arte + campos + variáveis) de proposta ou de contrato (purpose=contrato)',
     tag: 'Propostas',
     ...ADMIN,
-    handler: async ({ app, auth }) => {
-      const rows = await app.db.select().from(s.proposalTemplates).where(eq(s.proposalTemplates.tenantId, auth.tenantId)).orderBy(asc(s.proposalTemplates.name));
+    query: z.object({ purpose: z.enum(['proposta', 'contrato']).default('proposta') }),
+    handler: async ({ app, auth, query }) => {
+      const rows = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.purpose, query.purpose))).orderBy(asc(s.proposalTemplates.name));
       const items = [];
       for (const t of rows) items.push({ ...t, pages: await pagesOf(app.db, auth.tenantId, t.id) });
-      return { items, systemVariables: SYSTEM_VARIABLES.map(([key, label]) => ({ key, label })) };
+      const systemVariables = query.purpose === 'contrato' ? CONTRACT_TEMPLATE_VARIABLES : SYSTEM_VARIABLES.map(([key, label]) => ({ key, label }));
+      return { items, systemVariables };
     },
   }),
   defineRoute({
@@ -143,7 +148,7 @@ export const proposalRoutes = [
     params: IdParams,
     handler: async ({ app, auth, params }) => {
       const o = await loadOpportunity(app.db, auth, params.id);
-      const rows = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.active, true))).orderBy(asc(s.proposalTemplates.name));
+      const rows = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.active, true), eq(s.proposalTemplates.purpose, 'proposta'))).orderBy(asc(s.proposalTemplates.name));
       const items = [];
       for (const t of rows) {
         const pages = await pagesOf(app.db, auth.tenantId, t.id);

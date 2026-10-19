@@ -5,7 +5,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
 import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, RefreshCw, Search, TrendingUp, Wallet } from 'lucide-react';
-import { CONTRACT_STAGES, CONTRACT_STAGE_LABELS, PROCESS_LABELS, processSteps, type ContractStage } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, PROCESS_LABELS, processSteps, type ContractStage } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../../lib/hooks';
@@ -14,83 +14,29 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Pa
 import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { AlertList } from '../../features/contracts/ContractPanels';
+import { ContractsDashboard } from '../../features/contracts/Dashboard';
+import { FullReport } from '../../features/contracts/FullReport';
+import { TemplatesManager } from '../../features/contracts/SignaturePanels';
+import { AdminContractTemplates } from '../admin/ProposalTemplates';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
 
-type View = 'painel' | 'lista' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios';
+type View = 'painel' | 'lista' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
 const TABS: { key: View; label: string }[] = [
   { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
-  { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' },
+  { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
 ];
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#1D5FE6', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
-
-// ------------------------------------------------------------------ painel
-type Dash = {
-  byStage: { stage: ContractStage; label: string; n: number; monthlyCents: number }[]; active: number; archived: number; pendingValidation: number; monthlyCents: number; globalCents: number;
-  expiring: { d30: number; d60: number; d90: number }; atRisk: { n: number; monthlyCents: number }; alerts: { open: number; overdue: number; byKind: { kind: string; label: string; n: number }[] };
-  nextExpiring: ContractRow[]; attention: ContractRow[];
-};
-function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub?: string; tone: string }) {
-  return (
-    <div className="card flex items-center gap-4 p-4">
-      <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
-      <div className="min-w-0"><p className="text-sm text-muted">{label}</p><p className="num truncate text-xl font-extrabold text-ink">{value}</p>{sub && <p className="text-xs text-muted">{sub}</p>}</div>
-    </div>
-  );
-}
-function MiniTable({ rows, empty }: { rows: ContractRow[]; empty: string }) {
-  if (!rows.length) return <p className="py-4 text-sm text-muted">{empty}</p>;
-  return (
-    <ul className="divide-y divide-line">
-      {rows.map((r) => (
-        <li key={r.id}><Link to={`/contracts/${r.id}`} className="flex flex-wrap items-center justify-between gap-2 px-1 py-2.5 hover:bg-surface-2">
-          <span className="min-w-0"><span className="block truncate font-semibold text-ink">{r.clientName}</span><span className="text-xs text-muted">{r.number} · vence {fmtDate(r.endAt)}</span></span>
-          <span className="flex items-center gap-3"><span className="num text-sm font-semibold">{fmtBRL(r.monthlyCents)}</span><DaysLeft days={r.daysLeft} /></span>
-        </Link></li>
-      ))}
-    </ul>
-  );
-}
-function Painel() {
-  const q = useQuery({ queryKey: ['contracts', 'dashboard'], queryFn: () => api<Dash>('/contracts/dashboard') });
-  if (q.isLoading) return <div className="card"><LoadingRows /></div>;
-  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
-  const d = q.data!;
-  const totalStage = d.byStage.reduce((a, s) => a + s.n, 0);
-  return (
-    <div className="space-y-4">
-      <section aria-label="Indicadores" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat icon={<FileSignature className="h-6 w-6" />} tone="bg-primary-soft text-primary" label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} />
-        <Stat icon={<Wallet className="h-6 w-6" />} tone="bg-success-soft text-success" label="Receita mensal contratada" value={fmtBRL(d.monthlyCents)} sub={`Global ${fmtBRL(d.globalCents)}`} />
-        <Stat icon={<CalendarDays className="h-6 w-6" />} tone="bg-warning-soft text-[#C2610C]" label="Vencem em 30 / 60 / 90 dias" value={`${d.expiring.d30} / ${d.expiring.d60} / ${d.expiring.d90}`} />
-        <Stat icon={<AlertTriangle className="h-6 w-6" />} tone="bg-danger-soft text-danger" label="Receita em risco (90 dias)" value={fmtBRL(d.atRisk.monthlyCents)} sub={`${d.atRisk.n} contrato(s) · ${d.alerts.open} notificação(ões), ${d.alerts.overdue} atrasada(s)`} />
-      </section>
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <section className="card p-5">
-          <h2 className="mb-3 font-bold text-ink">Contratos por etapa</h2>
-          <MoneyRows items={d.byStage.map((s) => ({ key: s.stage, label: s.label, n: s.n, monthlyCents: s.monthlyCents }))} colorOf={(k) => STAGE_COLOR[k as ContractStage]} />
-          <p className="mt-3 text-xs text-muted">{totalStage} contrato(s) no total.</p>
-        </section>
-        <section className="card p-5"><h2 className="mb-1 font-bold text-ink">Próximos vencimentos</h2><MiniTable rows={d.nextExpiring} empty="Nenhum contrato vence nos próximos 120 dias." /></section>
-        <section className="card p-5">
-          <h2 className="mb-1 font-bold text-ink">Precisa de atenção</h2>
-          <MiniTable rows={d.attention} empty="Nada atrasado." />
-          {d.alerts.byKind.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{d.alerts.byKind.map((k) => <Chip key={k.kind} tone="yellow">{k.label}: {k.n}</Chip>)}</div>}
-        </section>
-      </div>
-    </div>
-  );
-}
 
 // ------------------------------------------------------------------ lista
 function Lista() {
   const nav = useNavigate();
   const lookups = useLookups();
   const { can } = useAuth();
-  const [f, setF] = useUrlState({ q: '', stage: '', kind: '', status: 'ativos', ownerId: '', exp: '', page: '1', size: '25' });
+  const [f, setF] = useUrlState({ q: '', stage: '', kind: '', btype: '', status: 'ativos', ownerId: '', exp: '', page: '1', size: '25' });
   const [search, setSearch] = useState(f.q);
   const dq = useDebounced(search, 300);
   useEffect(() => { if (dq !== f.q) setF({ q: dq }); }, [dq]); // eslint-disable-line react-hooks/exhaustive-deps
-  const q = useQuery({ queryKey: ['contracts', 'list', f], placeholderData: keepPreviousData, queryFn: () => api<{ items: ContractRow[]; total: number }>(`/contracts${qs({ q: f.q, stage: f.stage, kind: f.kind, status: f.status, ownerId: f.ownerId, expiringDays: f.exp, page: f.page, pageSize: f.size })}`) });
+  const q = useQuery({ queryKey: ['contracts', 'list', f], placeholderData: keepPreviousData, queryFn: () => api<{ items: ContractRow[]; total: number }>(`/contracts${qs({ q: f.q, stage: f.stage, kind: f.kind, billingType: f.btype, status: f.status, ownerId: f.ownerId, expiringDays: f.exp, page: f.page, pageSize: f.size })}`) });
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3" role="search">
@@ -101,7 +47,8 @@ function Lista() {
         </div>
         <Select aria-label="Situação" className="h-12 w-auto" value={f.status} onChange={(e) => setF({ status: e.target.value })}><option value="ativos">Ativos</option><option value="encerrados">Arquivados</option><option value="todos">Todos</option></Select>
         <Select aria-label="Etapa" className="h-12 w-auto" value={f.stage} onChange={(e) => setF({ stage: e.target.value })}><option value="">Todas as etapas</option>{CONTRACT_STAGES.map((s) => <option key={s} value={s}>{CONTRACT_STAGE_LABELS[s]}</option>)}</Select>
-        <Select aria-label="Tipo" className="h-12 w-auto" value={f.kind} onChange={(e) => setF({ kind: e.target.value })}><option value="">Público e privado</option><option value="publico">Público</option><option value="privado">Privado</option></Select>
+        <Select aria-label="Tipo de contrato" className="h-12 w-auto" value={f.btype} onChange={(e) => setF({ btype: e.target.value })}><option value="">Todos os tipos</option>{BILLING_TYPES.map((t) => <option key={t} value={t}>{BILLING_TYPE_LABELS[t]}</option>)}</Select>
+        <Select aria-label="Público ou privado" className="h-12 w-auto" value={f.kind} onChange={(e) => setF({ kind: e.target.value })}><option value="">Público e privado</option><option value="publico">Público</option><option value="privado">Privado</option></Select>
         <Select aria-label="Vencimento" className="h-12 w-auto" value={f.exp} onChange={(e) => setF({ exp: e.target.value })}><option value="">Qualquer vencimento</option><option value="30">Vence em 30 dias</option><option value="60">Vence em 60 dias</option><option value="90">Vence em 90 dias</option></Select>
         {can('contratos', 'equipe') && <Select aria-label="Responsável" className="h-12 w-auto" value={f.ownerId} onChange={(e) => setF({ ownerId: e.target.value })}><option value="">Todos os responsáveis</option>{lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select>}
       </div>
@@ -115,7 +62,7 @@ function Lista() {
               <tbody>
                 {q.data!.items.map((r) => (
                   <tr key={r.id} className="cursor-pointer border-t border-line hover:bg-surface-2/60" onClick={() => nav(`/contracts/${r.id}`)}>
-                    <td className="px-4 py-3"><Link to={`/contracts/${r.id}`} className="font-semibold text-ink hover:underline" onClick={(e) => e.stopPropagation()}>{r.number}</Link><span className="block text-xs text-muted">CT-{r.code} · {KIND_LABEL[r.kind]}</span></td>
+                    <td className="px-4 py-3"><Link to={`/contracts/${r.id}`} className="font-semibold text-ink hover:underline" onClick={(e) => e.stopPropagation()}>{r.number}</Link><span className="block text-xs text-muted">CT-{r.code} · {BILLING_TYPE_LABELS[r.billingType]} · {KIND_LABEL[r.kind]}</span></td>
                     <td className="px-4 py-3 text-ink">{r.clientName}</td>
                     <td className="px-4 py-3"><StageChip stage={r.stage} /></td>
                     <td className="px-4 py-3">{r.ownerName ?? '—'}</td>
@@ -147,7 +94,7 @@ function BoardCard({ r }: { r: ContractRow }) {
       onClick={() => nav(`/contracts/${r.id}`)}
       className={clsx('cursor-pointer rounded-md bg-surface p-3 shadow-card ring-1 ring-line/70 hover:ring-line-strong', isDragging && 'z-30 opacity-90 shadow-overlay')}>
       <p className="line-clamp-2 text-sm font-bold leading-tight text-ink">{r.clientName}</p>
-      <p className="text-xs text-muted">{r.number} · {KIND_LABEL[r.kind]}</p>
+      <p className="text-xs text-muted">{r.number} · {BILLING_TYPE_LABELS[r.billingType]} · {KIND_LABEL[r.kind]}</p>
       <div className="mt-2 flex items-center justify-between gap-2"><span className="num text-sm font-bold text-ink">{fmtBRL(r.monthlyCents)}</span><DaysLeft days={r.daysLeft} archived={r.stage === 'arquivado'} /></div>
       <p className="mt-1 truncate text-xs text-text">{r.nextAction ?? 'Sem próxima ação'}</p>
       <div className="mt-1 flex items-center justify-between gap-2 text-xs"><span className="truncate text-muted">{r.ownerName}</span>{(r.pendencies.alerts + r.pendencies.steps) > 0 && <span className={clsx('font-semibold', r.pendencies.overdue ? 'text-danger' : 'text-[#C2610C]')}>{r.pendencies.alerts + r.pendencies.steps} pend.</span>}</div>
@@ -334,7 +281,8 @@ function Relatorios() {
   const q = useQuery({ queryKey: ['contracts', 'report', month], queryFn: () => api<{ items: (ContractRow & { renewal: string })[]; monthlyCents: number }>(`/contracts/reports/expiring${qs({ month })}`) });
   return (
     <div className="space-y-4">
-      <section className="card p-5">
+      <FullReport />
+      <section className="card p-5 print:hidden">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div><h2 className="text-lg font-bold text-ink">Contratos que vencem no mês</h2><p className="text-sm text-muted">Relatório mensal: por padrão, o mês seguinte.</p></div>
           <div className="flex items-end gap-2">
@@ -362,6 +310,7 @@ function Relatorios() {
 
 export function ContractsPage() {
   const nav = useNavigate();
+  const { can } = useAuth();
   const [f, setF] = useUrlState({ t: 'painel' });
   const view = (TABS.some((t) => t.key === f.t) ? f.t : 'painel') as View;
   return (
@@ -372,8 +321,8 @@ export function ContractsPage() {
         subtitle="Vigências, renovações, reajustes e encerramentos com histórico e responsáveis."
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button>}
       />
-      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={TABS} />
-      {view === 'painel' && <Painel />}
+      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={TABS.filter((t) => t.key !== 'modelos' || can('configuracoes', 'total'))} />
+      {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
@@ -382,6 +331,7 @@ export function ContractsPage() {
       {view === 'encerramentos' && <Processos kind="encerramento" intro="Encerramentos previstos (sem renovação, limite legal ou decisão registrada): avisos de 90 e 30 dias, validação com Sucesso do Cliente, desmobilização, faturamento final, baixas e arquivamento." />}
       {view === 'notificacoes' && <Notificacoes />}
       {view === 'relatorios' && <Relatorios />}
+      {view === 'modelos' && <div className="space-y-4"><AdminContractTemplates /><TemplatesManager /></div>}
     </div>
   );
 }

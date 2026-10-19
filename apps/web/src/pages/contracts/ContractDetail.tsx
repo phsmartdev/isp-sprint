@@ -10,10 +10,12 @@ import { Breadcrumb, Button, Chip, EmptyState, ErrorState, FormField, Input, Loa
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { ContractForm, formFrom, payloadOf, type FormState } from '../../features/contracts/ContractForm';
 import { ProcessPanel } from '../../features/contracts/ProcessPanel';
+import { LedgerPanel } from '../../features/contracts/LedgerPanel';
+import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
-import { DaysLeft, KIND_LABEL, PendBadge, StageChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
+import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'historico';
+type Tab = 'resumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -95,6 +97,8 @@ export function ContractDetailPage() {
   const [edit, setEdit] = useState(false);
   const [validate, setValidate] = useState(false);
   const [move, setMove] = useState(false);
+  const [generate, setGenerate] = useState(false);
+  const [sign, setSign] = useState<{ id: string; name: string } | null>(null);
   const [upload, setUpload] = useState<null | { category?: string; processId?: string; newVersionOf?: Parameters<typeof UploadModal>[0]['newVersionOf'] }>(null);
   const q = useQuery({ queryKey: ['contract', id], queryFn: () => api<ContractDetail>(`/contracts/${id}`) });
   if (q.isLoading) return <div className="card"><LoadingRows rows={8} /></div>;
@@ -113,6 +117,7 @@ export function ContractDetailPage() {
           <p className="text-md text-text"><Link to={`/customers/${c.contactId}`} className="link font-semibold">{c.contact.name}</Link>{c.contact.document ? ` · ${c.contact.document}` : ''}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <StageChip stage={c.stage} />
+            <TypeChip type={c.billingType} />
             <Chip tone={c.kind === 'publico' ? 'purple' : 'neutral'}>{KIND_LABEL[c.kind]}{c.kind === 'publico' ? ` · ${LEGAL_REGIME_LABELS[c.legalRegime]}` : ''}</Chip>
             {c.renewed && <Chip tone="green">Contrato Renovado</Chip>}
             {c.closureExpected && c.stage !== 'arquivado' && <Chip tone="red">Encerramento previsto {fmtDate(c.closureAt)}</Chip>}
@@ -129,7 +134,7 @@ export function ContractDetailPage() {
       <section aria-label="Situação" className="card mb-4 grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 xl:grid-cols-6">
         <Info label="Vigência">{fmtDate(v.startAt)} a {fmtDate(v.endAt)}</Info>
         <Info label="Dias restantes"><DaysLeft days={c.daysLeft} archived={c.stage === 'arquivado'} /></Info>
-        <Info label="Valor mensal"><span className="num font-semibold">{fmtBRL(v.monthlyCents)}</span></Info>
+        <Info label={c.billingType === 'medicao' ? 'Saldo contratado' : c.billingType === 'frequente' ? 'Valor mensal estimado' : 'Valor mensal'}><span className="num font-semibold">{c.billingType === 'medicao' ? fmtBRL(v.totalCents) : fmtBRL(v.monthlyCents)}</span></Info>
         <Info label="Responsável">{c.commercialOwnerName ?? '—'}</Info>
         <Info label="Pendências"><PendBadge p={c.pendencies} /></Info>
         <Info label="Próxima ação">{c.nextAction ?? '—'}{c.nextActionAt ? <span className="block text-xs text-muted">{fmtDate(c.nextActionAt)}</span> : null}</Info>
@@ -142,6 +147,7 @@ export function ContractDetailPage() {
         <div className="px-5 pt-2">
           <Tabs<Tab> label="Ficha do contrato" value={tab} onChange={setTab} tabs={[
             { key: 'resumo', label: 'Resumo' },
+            ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
@@ -189,7 +195,8 @@ export function ContractDetailPage() {
               {!c.processes.length ? <EmptyState title="Nenhum processo" description={c.validatedAt ? 'Renovação, reajuste e encerramento abrem pelos alertas automáticos ou pelo botão Mover no funil.' : 'A implantação abre na validação do cadastro.'} /> : c.processes.map((p) => <ProcessPanel key={p.id} c={c} p={p} onUpload={(category, processId) => setUpload({ category, processId })} />)}
             </div>
           )}
-          {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} />}
+          {tab === 'extrato' && <LedgerPanel c={c} />}
+          {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} onGenerate={() => setGenerate(true)} onSign={setSign} />}
           {tab === 'versoes' && <VersionsPanel c={c} />}
           {tab === 'notificacoes' && <AlertsPanel c={c} />}
           {tab === 'historico' && <TimelinePanel c={c} />}
@@ -198,6 +205,8 @@ export function ContractDetailPage() {
       {edit && <EditDrawer c={c} onClose={() => setEdit(false)} />}
       <ValidateModal c={c} open={validate} onClose={() => setValidate(false)} />
       {move && <MoveModal c={c} open onClose={() => setMove(false)} />}
+      {generate && <GenerateModal c={c} open onClose={() => setGenerate(false)} />}
+      {sign && <SignModal c={c} doc={sign} open onClose={() => setSign(null)} />}
       {upload && <UploadModal c={c} open onClose={() => setUpload(null)} category={upload.category} processId={upload.processId} newVersionOf={upload.newVersionOf ?? null} />}
     </div>
   );

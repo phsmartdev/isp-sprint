@@ -14,6 +14,7 @@ import { addEvent, hasSector, isAdmin, loadContract, pendingRequired, setStage, 
 import { contractTemplateValues, customKeys, inspectTemplate, renderTemplate } from '../services/contractTemplates';
 import { createZapsignDoc, downloadFile, getZapsignDoc, zapsignConfig, type ZapDoc } from '../services/zapsign';
 import { logEvent } from '../services/integrations';
+import { buildProposalPdf } from '../services/proposals';
 
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const canManage = (auth: AuthContext) => isAdmin(auth) || level(auth, 'contratos') === 'total' || hasSector(auth, ['administracao', 'inteligencia_comercial', 'diretoria', 'juridico']);
@@ -84,7 +85,11 @@ export const contractTemplateRoutes = [
     handler: async ({ app, auth }) => {
       const items = await app.db.select({ id: s.contractTemplates.id, name: s.contractTemplates.name, description: s.contractTemplates.description, billingType: s.contractTemplates.billingType, docType: s.contractTemplates.docType, variables: s.contractTemplates.variables, detected: s.contractTemplates.detected, fileName: s.contractTemplates.fileName, size: s.contractTemplates.size, active: s.contractTemplates.active, updatedAt: s.contractTemplates.updatedAt })
         .from(s.contractTemplates).where(eq(s.contractTemplates.tenantId, auth.tenantId)).orderBy(desc(s.contractTemplates.active), s.contractTemplates.name);
-      return { items, systemVariables: CONTRACT_TEMPLATE_VARIABLES, itemLoop: CONTRACT_ITEM_LOOP, canManage: canManage(auth) };
+      // modelos com a arte (timbrado) feitos no mesmo editor dos modelos de proposta
+      const artRows = await app.db.select({ id: s.proposalTemplates.id, name: s.proposalTemplates.name, billingType: s.proposalTemplates.billingType, variables: s.proposalTemplates.variables, pages: sql<number>`(select count(*)::int from proposal_template_pages p where p.template_id = "proposal_templates"."id")` })
+        .from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.purpose, 'contrato'), eq(s.proposalTemplates.active, true))).orderBy(s.proposalTemplates.name);
+      const art = artRows.filter((t) => t.pages > 0).map((t) => ({ ...t, variables: t.variables.map((v) => ({ key: v.key, label: v.label, type: v.type === 'moeda' ? 'moeda' : 'texto', default: v.default })) }));
+      return { items, art, systemVariables: CONTRACT_TEMPLATE_VARIABLES, itemLoop: CONTRACT_ITEM_LOOP, canManage: canManage(auth) };
     },
   }),
   defineRoute({
@@ -148,10 +153,26 @@ export const contractTemplateRoutes = [
     tag: 'Contratos',
     module: 'contratos',
     params: IdParams,
-    body: z.object({ templateId: z.string().uuid(), values: z.record(z.string(), z.string().max(4000)).default({}), summary: z.string().trim().min(2).max(120).optional() }),
+    body: z.object({ templateId: z.string().uuid(), source: z.enum(['arte', 'word']).default('word'), values: z.record(z.string(), z.string().max(4000)).default({}), summary: z.string().trim().min(2).max(120).optional() }),
     handler: async ({ app, auth, params, body, req, reply }) => {
       const c = await loadContract(app.db, auth, params.id);
       if (!canSend(auth, c)) throw forbidden();
+      if (body.source === 'arte') {
+        const [t] = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.id, body.templateId), eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.purpose, 'contrato'))).limit(1);
+        if (!t || !t.active) throw notFound('Modelo de contrato não encontrado.');
+        const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default ?? '']));
+        const all = await contractTemplateValues(app.db, auth, c, custom);
+        const vars = Object.fromEntries(Object.entries(all).filter(([, x]) => typeof x === 'string')) as Record<string, string>;
+        const out = await buildProposalPdf(app.db, auth.tenantId, t.id, vars);
+        if (!out) throw unprocessable('O modelo ainda não tem a arte. Envie as páginas em Configurações → Modelos de contrato.');
+        const summary = body.summary ?? String(all['contrato.objeto']).slice(0, 80);
+        const name = documentName(new Date().toISOString().slice(0, 10), 'CONTRATO', String(all._client), summary);
+        const [d] = await app.db.insert(s.contractDocuments).values({ tenantId: auth.tenantId, contractId: c.id, groupId: randomUUID(), version: 1, category: 'CONTRATO', name, docDate: new Date().toISOString().slice(0, 10), summary, mime: 'application/pdf', size: out.pdf.length, sha256: createHash('sha256').update(out.pdf).digest('hex'), data: out.pdf, folder: c.stage === 'arquivado' ? 'Encerrados' : 'Ativos', uploadedBy: auth.userId }).returning({ id: s.contractDocuments.id });
+        await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'documento', `Contrato gerado pelo modelo “${t.name}”: ${name}`, { documentId: d!.id, templateId: t.id });
+        await audit(app.db, req, { action: 'contract.generate', entityType: 'contract', entityId: c.id, metadata: { templateId: t.id, source: 'arte' } });
+        reply.code(201);
+        return { id: d!.id, name };
+      }
       const t = await templateRow(app.db, auth.tenantId, body.templateId);
       if (!t.active) throw unprocessable('Modelo inativo.');
       const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default ?? '']));

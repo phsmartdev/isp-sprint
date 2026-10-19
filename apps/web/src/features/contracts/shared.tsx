@@ -1,6 +1,6 @@
 /** Tipos e peças compartilhadas do módulo Gestão de Contratos. */
 import clsx from 'clsx';
-import { CONTRACT_STAGE_LABELS, type ContractStage } from '@isp/domain';
+import { BILLING_TYPE_LABELS, CONTRACT_STAGE_LABELS, type BillingType, type ContractStage } from '@isp/domain';
 import { ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import { Chip } from '../../components/ui/primitives';
@@ -20,12 +20,12 @@ export type Process = { id: string; kind: 'implantacao' | 'renovacao' | 'reajust
 export type Alert = { id: string; kind: string; label: string; cycleKey: string; dueAt: string | null; status: 'aberto' | 'concluido' | 'cancelado'; detail: string | null; emails: { to: string; status: string; error: string | null }[]; activityIds: string[]; createdAt: string; resolvedAt: string | null; resolution: string | null; ownerId: string | null; ownerName?: string | null; number?: string; clientName?: string; code?: number; contractId: string };
 export type Pend = { alerts: number; overdue: number; steps: number };
 export type ContractRow = {
-  id: string; code: number; stage: ContractStage; kind: 'publico' | 'privado'; legalRegime: string; contactId: string; clientName: string; segment: string; opportunityId: string | null;
+  id: string; code: number; stage: ContractStage; kind: 'publico' | 'privado'; billingType: BillingType; legalRegime: string; contactId: string; clientName: string; segment: string; opportunityId: string | null;
   ownerId: string; ownerName: string | null; validatedAt: string | null; renewed: boolean; closureExpected: boolean; closureAt: string | null; nextAction: string | null; nextActionAt: string | null;
   number: string; object: string; startAt: string | null; endAt: string | null; monthlyCents: number; totalCents: number | null; termMonths: number | null; daysLeft: number | null; pendencies: Pend; erpRef: string | null;
 };
 export type ContractDetail = {
-  id: string; code: number; stage: ContractStage; kind: 'publico' | 'privado'; legalRegime: 'privado' | 'lei_8666' | 'lei_14133' | 'outro'; contactId: string; customerId: string | null; opportunityId: string | null;
+  id: string; code: number; stage: ContractStage; kind: 'publico' | 'privado'; billingType: BillingType; legalRegime: 'privado' | 'lei_8666' | 'lei_14133' | 'outro'; contactId: string; customerId: string | null; opportunityId: string | null;
   commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; commercialOwnerName: string | null; operationalOwnerName: string | null; csmName: string | null;
   validatedAt: string | null; validatedByName: string | null; erpRef: string | null; renewed: boolean; closureExpected: boolean; closureReason: string | null; closureAt: string | null; legalLimitAt: string | null;
   closedAt: string | null; archivedAt: string | null; archiveLocation: string | null; archiveResponsibleName: string | null; finalNote: string | null; nextAction: string | null; nextActionAt: string | null;
@@ -71,4 +71,10 @@ export function MoneyRows({ items, colorOf }: { items: { key: string; label: str
       ))}
     </ul>
   );
+}
+
+export const TYPE_TONE: Record<BillingType, 'blue' | 'purple' | 'orange'> = { recorrente: 'blue', frequente: 'purple', medicao: 'orange' };
+export const TYPE_COLOR: Record<BillingType, string> = { recorrente: '#1D5FE6', frequente: '#7C3AED', medicao: '#EA7A0C' };
+export function TypeChip({ type }: { type: BillingType }) {
+  return <Chip tone={TYPE_TONE[type]}>{BILLING_TYPE_LABELS[type]}</Chip>;
 }

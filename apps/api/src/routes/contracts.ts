@@ -171,6 +171,7 @@ export const contractRoutes = [
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId]);
       const ver = normalizeVersion(body.version);
+      if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
           tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,

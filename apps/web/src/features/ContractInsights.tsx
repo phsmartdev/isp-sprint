@@ -19,7 +19,7 @@ type D = {
   renewal: { renewed: number; notRenewed: number; rate: number | null; renewedMonthlyCents: number; closedMonthlyCents: number };
   adjustments: { forecast: number; done: number; increaseCents: number }; guarantees: { expired: number; expiring30: number };
   implantation: { n: number; avgDays: number | null }; pendencies: { alerts: number; overdue: number; openProcesses: number };
-  byStage: G[]; byKind: G[]; bySegment: G[]; byPlan: G[]; byRegion: G[]; expiringByMonth: { month: string; n: number; monthlyCents: number }[];
+  byStage: G[]; byBillingType: G[]; byKind: G[]; bySegment: G[]; byPlan: G[]; byRegion: G[]; expiringByMonth: { month: string; n: number; monthlyCents: number }[];
   topRisk: { id: string; number: string; clientName: string; endAt: string | null; monthlyCents: number; closureExpected: boolean }[];
 };
 
@@ -41,7 +41,7 @@ export function ContractInsights({ from, to }: { from: string; to: string }) {
   const { can } = useAuth();
   const lookups = useLookups();
   const area = useArea();
-  const [f, setF] = useUrlState({ segment: '', planId: '', regionId: '', termMonths: '', kind: '', contactId: '' });
+  const [f, setF] = useUrlState({ segment: '', planId: '', regionId: '', termMonths: '', kind: '', billingType: '', contactId: '' });
   const clients = useQuery({ queryKey: ['contracts', 'clients'], enabled: can('contratos'), queryFn: () => api<{ items: { contactId: string; clientName: string }[] }>(`/contracts${qs({ status: 'todos', pageSize: 500 })}`) });
   const clientList = useMemo(() => [...new Map((clients.data?.items ?? []).map((c) => [c.contactId, c.clientName])).entries()].sort((a, b) => a[1].localeCompare(b[1])), [clients.data]);
   const q = useQuery({ queryKey: ['intelligence-contracts', from, to, f], queryFn: () => api<D>(`/intelligence/contracts${qs({ from, to, ...f })}`) });
@@ -54,7 +54,8 @@ export function ContractInsights({ from, to }: { from: string; to: string }) {
         <Select aria-label="Plano" className="w-auto" value={f.planId} onChange={(e) => setF({ planId: e.target.value })}><option value="">Todos os planos</option>{lookups.data?.plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>
         <Select aria-label="Região" className="w-auto" value={f.regionId} onChange={(e) => setF({ regionId: e.target.value })}><option value="">Todas as regiões</option>{area.data?.regions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</Select>
         <Select aria-label="Ciclo" className="w-auto" value={f.termMonths} onChange={(e) => setF({ termMonths: e.target.value })}><option value="">Todos os ciclos</option>{[12, 24, 36, 48, 60].map((m) => <option key={m} value={m}>{m} meses</option>)}</Select>
-        <Select aria-label="Tipo" className="w-auto" value={f.kind} onChange={(e) => setF({ kind: e.target.value })}><option value="">Público e privado</option><option value="publico">Público</option><option value="privado">Privado</option></Select>
+        <Select aria-label="Tipo de contrato" className="w-auto" value={f.billingType} onChange={(e) => setF({ billingType: e.target.value })}><option value="">Todos os tipos</option><option value="recorrente">Recorrente</option><option value="frequente">Frequente</option><option value="medicao">Medição</option></Select>
+        <Select aria-label="Público ou privado" className="w-auto" value={f.kind} onChange={(e) => setF({ kind: e.target.value })}><option value="">Público e privado</option><option value="publico">Público</option><option value="privado">Privado</option></Select>
       </div>
       {q.isLoading ? <div className="card"><LoadingRows rows={6} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (() => {
         const d = q.data!;
@@ -90,6 +91,7 @@ export function ContractInsights({ from, to }: { from: string; to: string }) {
               </div>
             </section>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <Breakdown title="Por tipo de contrato" items={d.byBillingType} />
               <Breakdown title="Por plano/produto" items={d.byPlan} />
               <Breakdown title="Por região" items={d.byRegion} />
               <Breakdown title="Por categoria" items={d.bySegment} />

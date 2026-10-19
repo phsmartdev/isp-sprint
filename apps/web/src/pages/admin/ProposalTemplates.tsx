@@ -1,8 +1,8 @@
-/** Configurações → Modelos de proposta: arte do Canva como fundo, campos variáveis posicionados por clique. */
+/** Configurações → Modelos de proposta e de contrato: arte (timbrado/Canva) como fundo, campos variáveis posicionados por clique. */
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Upload } from 'lucide-react';
-import { SEGMENTS, SEGMENT_LABELS, type Segment } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_LABELS, SEGMENTS, SEGMENT_LABELS, type BillingType, type Segment } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fileToBase64 } from '../../lib/files';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
@@ -10,12 +10,17 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { ProposalCanvas, type PField, type PPage } from '../../features/ProposalCanvas';
 
 type Variable = { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string };
-type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[] };
+type Purpose = 'proposta' | 'contrato';
+type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[]; purpose: Purpose; billingType: BillingType | null };
 type Data = { items: Template[]; systemVariables: { key: string; label: string }[] };
 
 const SAMPLE: Record<string, string> = {
   'cliente.nome': 'EMPRESA EXEMPLO LTDA', 'cliente.documento': '00.000.000/0001-00', 'cliente.telefone': '(79) 99999-0000', 'cliente.email': 'contato@exemplo.com', 'cliente.endereco': 'Rua Exemplo, 100 · Centro · Aracaju',
   'plano.nome': 'Link Dedicado 300Mbps', 'plano.servico_fatura': 'Link Dedicado 300Mbps', 'plano.velocidade': '300 Mbps', 'plano.valor': 'R$ 729,90', 'plano.valor_numero': '729,90', 'plano.produtos': '• Link Dedicado 300Mbps',
+  'contrato.numero': '045/2025', 'contrato.codigo': 'CT-12', 'contrato.objeto': 'Link dedicado 300 Mbps com IP fixo', 'contrato.tipo': 'Recorrente', 'contrato.assinatura': '10/01/2026', 'contrato.inicio': '15/01/2026', 'contrato.termino': '14/01/2027',
+  'contrato.prazo_meses': '12', 'contrato.valor_mensal': 'R$ 1.890,00', 'contrato.valor_global': 'R$ 22.680,00', 'contrato.saldo': 'R$ 120.000,00', 'contrato.dia_faturamento': '10', 'contrato.condicoes_faturamento': 'Fatura mensal, vencimento no dia 10',
+  'contrato.indice_reajuste': 'IPCA', 'contrato.data_base': '15/01/2026', 'contrato.condicoes_especificas': 'SLA de 99,5%', 'contrato.orgao': 'Secretaria Municipal', 'contrato.processo': 'PROC-2025-0099',
+  'contrato.itens_texto': '1 × Link dedicado 300 Mbps — R$ 1.890,00', 'responsavel.nome': 'Responsável Exemplo', data_hoje: new Date().toLocaleDateString('pt-BR'), data_extenso: new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }),
   'oportunidade.taxa_ativacao': 'R$ 0,00', 'oportunidade.titulo': 'Link dedicado escritório', 'vendedor.nome': 'Vendedor Exemplo', 'vendedor.email': 'vendas@exemplo.com', 'empresa.nome': 'Yepnet', 'data.hoje': new Date().toLocaleDateString('pt-BR'),
 };
 const newId = () => Math.random().toString(36).slice(2, 10);
@@ -37,7 +42,7 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
   const allVars = [...systemVariables, ...t.variables.map((v) => ({ key: v.key, label: `${v.label} (sua variável)` }))];
 
   const save = useMutation({
-    mutationFn: () => api(`/admin/proposal-templates/${t.id}`, { method: 'PUT', body: { name: t.name, segments: t.segments, fields: t.fields, variables: t.variables, active: t.active } }),
+    mutationFn: () => api(`/admin/proposal-templates/${t.id}`, { method: 'PUT', body: { name: t.name, segments: t.segments, fields: t.fields, variables: t.variables, active: t.active, purpose: t.purpose, billingType: t.billingType } }),
     onSuccess: () => { setDirty(false); qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }); toast({ tone: 'success', message: 'Modelo salvo' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -87,10 +92,14 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
 
         <div className="space-y-4">
           <FormField label="Nome do modelo" htmlFor="pt-name"><Input id="pt-name" value={t.name} onChange={(e) => update({ name: e.target.value })} /></FormField>
-          <fieldset>
+          {t.purpose === 'contrato' ? (
+            <FormField label="Usado para contratos do tipo" htmlFor="pt-bt">
+              <Select id="pt-bt" value={t.billingType ?? ''} onChange={(e) => update({ billingType: (e.target.value || null) as BillingType | null })}><option value="">Todos os tipos</option>{BILLING_TYPES.map((b) => <option key={b} value={b}>{BILLING_TYPE_LABELS[b]}</option>)}</Select>
+            </FormField>
+          ) : <fieldset>
             <legend className="mb-1 text-sm font-semibold text-ink">Usado para</legend>
             <div className="flex flex-wrap gap-3">{SEGMENTS.map((sg) => <label key={sg} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={t.segments.includes(sg)} onChange={(e) => update({ segments: e.target.checked ? [...t.segments, sg] : t.segments.filter((x) => x !== sg) })} />{SEGMENT_LABELS[sg]}</label>)}</div>
-          </fieldset>
+          </fieldset>}
 
           {field ? (
             <fieldset className="space-y-2 rounded-md border border-primary/40 bg-primary-soft/40 p-3">
@@ -116,7 +125,7 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
 
           <fieldset className="space-y-2">
             <legend className="mb-1 text-sm font-semibold text-ink">Suas variáveis</legend>
-            <p className="text-xs text-muted">O vendedor preenche ao gerar a proposta. Use no texto como {'{{chave}}'}.</p>
+            <p className="text-xs text-muted">Quem gera o documento preenche na hora. Use no texto como {'{{chave}}'}.</p>
             {t.variables.map((v, i) => (
               <div key={i} className="space-y-1 rounded-md border border-line p-2">
                 <div className="flex gap-1">
@@ -138,19 +147,45 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
   );
 }
 
-export function AdminProposalTemplates() {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const q = useQuery({ queryKey: ['admin', 'proposal-templates'], queryFn: () => api<Data>('/admin/proposal-templates') });
-  const [editing, setEditing] = useState<string | null>(null);
-  const create = useMutation({
-    mutationFn: () => api<{ id: string }>('/admin/proposal-templates', { method: 'POST', body: { name: 'Yepempresa', segments: ['empresarial'], variables: [
+const COPY: Record<Purpose, { title: string; intro: string; empty: string; first: Record<string, unknown> }> = {
+  proposta: {
+    title: 'Modelos de proposta',
+    intro: 'Use a arte do Canva como fundo e marque onde entram os dados: nome e CNPJ do cliente, plano, valor, taxa de ativação e as variáveis que você criar (vigência, benefícios…). Na oportunidade, “Gerar proposta” cria o PDF e anexa como proposta.',
+    empty: 'Crie o modelo Yepempresa para as propostas PJ.',
+    first: { name: 'Yepempresa', segments: ['empresarial'], variables: [
       { key: 'servico_adicional', label: 'Serviço adicional', type: 'texto', default: '' },
       { key: 'vigencia', label: 'Vigência contratual', type: 'texto', default: '36 meses' },
       { key: 'beneficios', label: 'Benefícios contratuais', type: 'texto_longo', default: '• Valor fixo, com reajuste.' },
       { key: 'preco_de', label: 'Preço "De" (riscado)', type: 'moeda', default: '' },
       { key: 'validade', label: 'Validade da proposta', type: 'texto', default: '15 dias' },
-    ] } }),
+    ] },
+  },
+  contrato: {
+    title: 'Modelos de contrato',
+    intro: 'Igual aos modelos de proposta: envie as páginas do contrato com o timbrado da empresa (PNG/JPG exportado do Canva ou do Word) e marque onde entram os dados do cliente, do contrato e as variáveis que você criar. Na ficha do contrato, “Gerar pelo modelo” cria o PDF, que pode ir para assinatura na ZapSign.',
+    empty: 'Crie o modelo de contrato com o timbrado da empresa.',
+    first: { name: 'Contrato padrão', purpose: 'contrato', segments: [], variables: [
+      { key: 'prazo_instalacao', label: 'Prazo de instalação', type: 'texto', default: '30 dias' },
+      { key: 'foro', label: 'Foro', type: 'texto', default: 'Aracaju/SE' },
+      { key: 'clausulas_adicionais', label: 'Cláusulas adicionais', type: 'texto_longo', default: '' },
+    ] },
+  },
+};
+
+export function AdminContractTemplates() {
+  return <TemplatesAdmin purpose="contrato" />;
+}
+export function AdminProposalTemplates() {
+  return <TemplatesAdmin purpose="proposta" />;
+}
+function TemplatesAdmin({ purpose }: { purpose: Purpose }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['admin', 'proposal-templates', purpose], queryFn: () => api<Data>(`/admin/proposal-templates?purpose=${purpose}`) });
+  const copy = COPY[purpose];
+  const [editing, setEditing] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: () => api<{ id: string }>('/admin/proposal-templates', { method: 'POST', body: copy.first }),
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }).then(() => setEditing(r.id)); toast({ tone: 'success', message: 'Modelo criado. Envie as páginas da arte.' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -161,18 +196,18 @@ export function AdminProposalTemplates() {
     <section className="card p-5">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold text-ink">Modelos de proposta</h2>
-          <p className="max-w-3xl text-sm text-muted">Use a arte do Canva como fundo e marque onde entram os dados: nome e CNPJ do cliente, plano, valor, taxa de ativação e as variáveis que você criar (vigência, benefícios…). Na oportunidade, “Gerar proposta” cria o PDF e anexa como proposta.</p>
+          <h2 className="text-lg font-bold text-ink">{copy.title}</h2>
+          <p className="max-w-3xl text-sm text-muted">{copy.intro}</p>
         </div>
         <Button variant="primary" icon={<Plus className="h-4 w-4" />} loading={create.isPending} onClick={() => create.mutate()}>Novo modelo</Button>
       </div>
-      {!q.data!.items.length ? <EmptyState title="Nenhum modelo" description="Crie o modelo Yepempresa para as propostas PJ." /> : (
+      {!q.data!.items.length ? <EmptyState title="Nenhum modelo" description={copy.empty} /> : (
         <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {q.data!.items.map((t) => (
             <li key={t.id} className="flex items-start justify-between gap-3 rounded-md border border-line p-4">
               <div>
                 <p className="flex items-center gap-2 font-bold text-ink"><FileText className="h-4 w-4 text-primary" />{t.name}</p>
-                <p className="text-sm text-muted">{t.segments.length ? t.segments.map((s) => SEGMENT_LABELS[s]).join(', ') : 'Todos os tipos'} · {t.pages.length} página(s) · {t.fields.length} campo(s)</p>
+                <p className="text-sm text-muted">{purpose === 'contrato' ? (t.billingType ? BILLING_TYPE_LABELS[t.billingType] : 'Todos os tipos') : t.segments.length ? t.segments.map((s) => SEGMENT_LABELS[s]).join(', ') : 'Todos os tipos'} · {t.pages.length} página(s) · {t.fields.length} campo(s)</p>
                 {!t.pages.length && <Chip tone="yellow" className="mt-1">Falta enviar a arte</Chip>}
               </div>
               <Button size="sm" onClick={() => setEditing(t.id)}>Editar</Button>
