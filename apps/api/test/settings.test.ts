@@ -141,4 +141,15 @@ describe('autonomia da operação e engenharia', () => {
     ok(await carlos.post(`/opportunities/${a.id}/release-port`, { reason: 'mudou de endereço', rowVersion: won.rowVersion }));
     ok(await carlos.post(`/opportunities/${b.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: b.rowVersion }));
   });
+
+  it('inteligência geral: base, motivos e cohort; vendedor sem acesso', async () => {
+    const r = await carlos.get('/intelligence/general?from=2026-01-01&to=2026-12-31');
+    ok(r);
+    const d = r.json();
+    expect(d.negocio.activeCustomers).toBeGreaterThan(0);
+    expect(d.negocio.billingCents).toBeGreaterThan(0);
+    expect(d.cohorts).toHaveLength(12);
+    expect(d.relacionamento.cancelReasons.length).toBeGreaterThan(0);
+    expect((await lucas.get('/intelligence/general')).statusCode).toBe(403);
+  });
 });

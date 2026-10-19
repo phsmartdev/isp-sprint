@@ -325,6 +325,7 @@ export async function seedTenant(
         contractStart: iso(start),
         nextDueOn: iso(anniversary),
         contractEnd: life === 'cancelado' ? iso(new Date(start.getTime() + r() * (now - start.getTime()))) : null,
+        cancelReason: life === 'cancelado' ? pick(['Mudança de endereço', 'Preço', 'Instabilidade na conexão', 'Foi para a concorrência', 'Atendimento', 'Questões financeiras']) : null,
         sourceSystem: 'seed_ficticio',
         externalId: ext,
         sourceUpdatedAt: ingested,

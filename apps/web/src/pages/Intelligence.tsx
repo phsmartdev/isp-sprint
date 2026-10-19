@@ -5,7 +5,8 @@ import { api, qs } from '../lib/api';
 import { fmtBRL, fmtInt } from '../lib/format';
 import { defaultPeriod, useUrlState } from '../lib/hooks';
 import type { Kpi } from '../lib/types';
-import { Avatar, ErrorState, KpiCard, LoadingRows } from '../components/ui/primitives';
+import { Avatar, ErrorState, KpiCard, LoadingRows, Tabs } from '../components/ui/primitives';
+import { GeneralInsights, type InsightView } from '../features/GeneralInsights';
 import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
 import { ConfiarFacil } from '../components/brand';
@@ -40,8 +41,8 @@ const KPI_LOOK = [
 
 export function IntelligencePage() {
   const p0 = defaultPeriod();
-  const [f, setF] = useUrlState({ from: p0.from, to: p0.to });
-  const q = useQuery({ queryKey: ['intelligence', f.from, f.to], queryFn: () => api<Data>(`/intelligence/overview${qs(f)}`) });
+  const [f, setF] = useUrlState({ from: p0.from, to: p0.to, v: 'geral' });
+  const q = useQuery({ queryKey: ['intelligence', f.from, f.to], enabled: f.v === 'comercial', queryFn: () => api<Data>(`/intelligence/overview${qs({ from: f.from, to: f.to })}`) });
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
   return (
@@ -58,6 +59,15 @@ export function IntelligencePage() {
           </>
         }
       />
+      <Tabs<string>
+        label="Visão do relatório"
+        className="mb-5"
+        value={f.v}
+        onChange={(v) => setF({ v })}
+        tabs={[{ key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }]}
+      />
+      <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />
+      {f.v === 'comercial' && (<div className="mt-6">
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
       <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {d ? d.kpis.map((k, i) => <KpiCard key={k.key} k={k} icon={KPI_LOOK[i]!.icon} tone={KPI_LOOK[i]!.tone} />) : Array.from({ length: 4 }).map((_, i) => <div key={i} className="card h-[92px] animate-pulse" />)}
@@ -163,6 +173,7 @@ export function IntelligencePage() {
           </section>
         </div>
       )}
+      </div>)}
     </div>
   );
 }

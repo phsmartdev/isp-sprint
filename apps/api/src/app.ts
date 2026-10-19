@@ -19,6 +19,7 @@ import { contactRoutes } from './routes/contacts';
 import { homeRoutes } from './routes/home';
 import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
+import { insightsRoutes } from './routes/insights';
 import { adminRoutes } from './routes/admin';
 import { metaRoutes } from './routes/meta';
 import { sprintRoutes } from './routes/sprint';
@@ -105,6 +106,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contactRoutes,
     ...reportRoutes,
     ...intelligenceRoutes,
+    ...insightsRoutes,
     ...adminRoutes,
   ]);
   app.get(`${API_PREFIX}/openapi.json`, async () => buildOpenApi(routeRegistry));

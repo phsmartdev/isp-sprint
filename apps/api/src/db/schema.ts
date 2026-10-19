@@ -262,6 +262,8 @@ export const customers = pgTable(
     nextDueOn: date('next_due_on', { mode: 'string' }),
     /** Fim do contrato (cancelamento). Usado na vida média do LTV histórico. */
     contractEnd: date('contract_end', { mode: 'string' }),
+    /** Motivo do cancelamento (vem do IXC na integração; aqui pode ser informado à mão). */
+    cancelReason: text('cancel_reason'),
     sourceSystem: text('source_system').notNull().default('crm'),
     externalId: text('external_id'),
     sourceUpdatedAt: ts('source_updated_at'),
