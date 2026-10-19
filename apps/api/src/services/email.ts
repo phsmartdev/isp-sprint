@@ -49,6 +49,8 @@ export type SendInput = {
   attachments?: MailAttachment[];
   opportunityId?: string | null;
   attachmentId?: string | null;
+  contractId?: string | null;
+  cc?: string | null;
   createdBy?: string | null;
   replyTo?: string | null;
 };
@@ -81,7 +83,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
   const log = async (status: 'enviado' | 'falhou' | 'ignorado', error: string | null, messageId: string | null) => {
     const [row] = await db
       .insert(s.emailMessages)
-      .values({ tenantId: input.tenantId, kind: input.kind, toAddress: input.to, subject, status, error, messageId, opportunityId: input.opportunityId ?? null, attachmentId: input.attachmentId ?? null, createdBy: input.createdBy ?? null })
+      .values({ tenantId: input.tenantId, kind: input.kind, toAddress: input.to, subject, status, error, messageId, opportunityId: input.opportunityId ?? null, attachmentId: input.attachmentId ?? null, contractId: input.contractId ?? null, ccAddress: input.cc ?? null, createdBy: input.createdBy ?? null })
       .returning({ id: s.emailMessages.id });
     return row!.id;
   };
@@ -109,6 +111,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
       transport.sendMail({
         from: { name: cfg.fromName, address: cfg.fromEmail },
         to: input.to,
+        cc: input.cc ?? undefined,
         replyTo: input.replyTo ?? cfg.replyTo ?? undefined,
         subject,
         text: input.text,

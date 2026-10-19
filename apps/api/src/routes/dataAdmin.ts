@@ -69,6 +69,18 @@ export const dataAdminRoutes = [
       await app.db.transaction(async (tx) => {
         await tx.execute(sql`select set_config('isp.allow_purge', 'on', true)`);
         const del = async (name: string, q: Promise<unknown[]>) => { counts[name] = (await q).length; };
+        if (body.scopes.includes('comercial') || body.scopes.includes('clientes')) {
+          // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
+          const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
+          await tx.delete(s.contractAlerts).where(eq(s.contractAlerts.tenantId, t));
+          await tx.delete(s.contractDocuments).where(eq(s.contractDocuments.tenantId, t));
+          await tx.delete(s.contractProcesses).where(eq(s.contractProcesses.tenantId, t));
+          await tx.delete(s.contractEvents).where(eq(s.contractEvents.tenantId, t));
+          await tx.delete(s.contractVersions).where(eq(s.contractVersions.tenantId, t));
+          await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)));
+          await tx.update(s.activities).set({ contractId: null }).where(eq(s.activities.tenantId, t));
+          await del('contratos', tx.delete(s.contracts).where(eq(s.contracts.tenantId, t)).returning({ id: s.contracts.id }));
+        }
         if (body.scopes.includes('comercial')) {
           const opps = tx.select({ id: s.opportunities.id }).from(s.opportunities).where(eq(s.opportunities.tenantId, t));
           const acts = tx.select({ id: s.activities.id }).from(s.activities).where(eq(s.activities.tenantId, t));

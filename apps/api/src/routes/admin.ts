@@ -183,7 +183,7 @@ export const adminRoutes = [
       const users = await app.db
         .select({
           id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, active: s.users.active, lastLoginAt: s.users.lastLoginAt,
-          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, createdAt: s.users.createdAt,
+          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, createdAt: s.users.createdAt,
           hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")`,
           profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'gerencia' then 0 when 'supervisor' then 1 else 2 end limit 1)`,
         })
@@ -219,7 +219,7 @@ export const adminRoutes = [
         const [exists] = await tx.select({ id: s.users.id }).from(s.users).where(sql`lower(${s.users.email}) = ${body.email}`).limit(1);
         if (exists) throw unprocessable('E-mail já cadastrado.', [{ path: 'email', message: 'Já existe um usuário com este e-mail' }]);
         if (body.profile === 'supervisor' && !body.leadTeamIds.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
-        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, passwordHash: await hashPassword(temp) }).returning();
+        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, sectors: body.sectors, passwordHash: await hashPassword(temp) }).returning();
         await tx.insert(s.userRoles).values({ userId: u!.id, roleId: roles[body.profile]! });
         await setTeams(tx, auth, u!.id, body.teamIds, body.leadTeamIds);
         await audit(tx, req, { action: 'user.create', entityType: 'user', entityId: u!.id, metadata: { name: body.name, profile: body.profile } });
@@ -247,7 +247,7 @@ export const adminRoutes = [
         }
         await tx
           .update(s.users)
-          .set({ name: body.name, jobTitle: body.jobTitle, active: body.active, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, updatedAt: new Date() })
+          .set({ name: body.name, jobTitle: body.jobTitle, active: body.active, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, updatedAt: new Date() })
           .where(eq(s.users.id, u.id));
         if (body.active === false) await tx.update(s.sessions).set({ revokedAt: new Date() }).where(eq(s.sessions.userId, u.id));
         if (body.profile) {
@@ -260,7 +260,7 @@ export const adminRoutes = [
         const [role] = await tx.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, u.id)).limit(1);
         if ((body.profile ?? role?.key) === 'supervisor' && !leads.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
         if (body.teamIds || body.leadTeamIds) await setTeams(tx, auth, u.id, body.teamIds ?? current.map((c) => c.teamId), leads);
-        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active } });
+        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active, sectors: body.sectors } });
       });
       return { ok: true };
     },

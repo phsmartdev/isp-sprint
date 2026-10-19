@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
-import { MODULES, mergeLevels, type AccessLevel, type Module } from '@isp/domain';
+import { MODULES, mergeLevels, type AccessLevel, type Module, type Sector } from '@isp/domain';
 import type { DB } from '../db/client';
 import type { Config } from '../config';
 import * as s from '../db/schema';
@@ -22,6 +22,8 @@ export type AuthContext = {
   teamIds: string[];
   /** Usuários visíveis no nível "Equipe": membros dos times que ele LIDERA + ele mesmo. */
   teamMemberIds: string[];
+  /** Setores do usuário (contratos): definem tarefas e quem conclui cada etapa. */
+  sectors: Sector[];
 };
 
 declare module 'fastify' {
@@ -51,6 +53,7 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
       name: s.users.name,
       email: s.users.email,
       jobTitle: s.users.jobTitle,
+      sectors: s.users.sectors,
       active: s.users.active,
       timezone: s.tenants.timezone,
       tenantName: s.tenants.name,
@@ -98,5 +101,6 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
     access,
     teamIds: memberships.map((m) => m.teamId),
     teamMemberIds: [...new Set([row.userId, ...members.map((m) => m.userId)])],
+    sectors: (row.sectors ?? []) as Sector[],
   };
 }

@@ -49,6 +49,8 @@ export const users = pgTable(
     goalSales: integer('goal_sales').notNull().default(0),
     goalProposals: integer('goal_proposals').notNull().default(0),
     goalLeads: integer('goal_leads').notNull().default(0),
+    /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
+    sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -84,7 +86,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'inteligencia', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'inteligencia', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -471,6 +473,8 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Pós-venda: 'sucesso_cliente' quando o contrato foi cadastrado e validado. */
+    handoffStage: text('handoff_stage'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
@@ -549,6 +553,7 @@ export const activities = pgTable(
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     leadId: uuid('lead_id').references(() => leads.id),
     contactId: uuid('contact_id').references(() => contacts.id),
+    contractId: uuid('contract_id'),
     completedAt: ts('completed_at'),
     completedBy: uuid('completed_by').references(() => users.id),
     createdBy: uuid('created_by').references(() => users.id),
@@ -706,6 +711,8 @@ export const emailMessages = pgTable(
     messageId: text('message_id'),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     attachmentId: uuid('attachment_id').references(() => opportunityAttachments.id),
+    contractId: uuid('contract_id'),
+    ccAddress: text('cc_address'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },
@@ -1007,3 +1014,213 @@ export const proposalTemplatePages = pgTable('proposal_template_pages', {
   data: bytea('data').notNull(),
   createdAt: createdAt(),
 });
+
+// --------------------------------------------------------------- gestão de contratos
+
+export const contractSettings = pgTable('contract_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+  updatedBy: uuid('updated_by'),
+  updatedAt: updatedAt(),
+});
+
+/** Cabeçalho do contrato. Dados contratuais ficam em contract_versions (só INSERT). Cliente vem de contacts (sem cópia). */
+export const contracts = pgTable(
+  'contracts',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    code: serial('code').notNull(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    kind: text('kind').notNull().default('privado'),
+    legalRegime: text('legal_regime').notNull().default('privado'),
+    stage: text('stage').notNull().default('cadastro_validacao'),
+    stageChangedAt: ts('stage_changed_at').notNull().defaultNow(),
+    currentVersion: integer('current_version').notNull().default(1),
+    commercialOwnerId: uuid('commercial_owner_id').notNull().references(() => users.id),
+    operationalOwnerId: uuid('operational_owner_id').references(() => users.id),
+    csmId: uuid('csm_id').references(() => users.id),
+    validatedAt: ts('validated_at'),
+    validatedBy: uuid('validated_by').references(() => users.id),
+    erpRef: text('erp_ref'),
+    renewed: boolean('renewed').notNull().default(false),
+    /** Encerramento previsto (sem renovação, limite legal ou decisão registrada). Nunca encerra sozinho. */
+    closureExpected: boolean('closure_expected').notNull().default(false),
+    closureReason: text('closure_reason'),
+    closureAt: date('closure_at', { mode: 'string' }),
+    /** Limite total de vigência informado e validado por uma pessoa (sugestão pelo regime). */
+    legalLimitAt: date('legal_limit_at', { mode: 'string' }),
+    closedAt: ts('closed_at'),
+    archivedAt: ts('archived_at'),
+    archiveLocation: text('archive_location'),
+    archiveResponsibleId: uuid('archive_responsible_id').references(() => users.id),
+    finalNote: text('final_note'),
+    nextAction: text('next_action'),
+    nextActionAt: date('next_action_at', { mode: 'string' }),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    stageCk: check('contracts_stage_ck', inList('stage', ['cadastro_validacao', 'implantacao', 'vigente', 'renovacao', 'reajuste', 'encerramento', 'arquivado'])),
+    kindCk: check('contracts_kind_ck', inList('kind', ['privado', 'publico'])),
+    regimeCk: check('contracts_regime_ck', inList('legal_regime', ['privado', 'lei_8666', 'lei_14133', 'outro'])),
+    codeUq: uniqueIndex('contracts_code_uq').on(t.code),
+    oppUq: uniqueIndex('contracts_opp_uq').on(t.opportunityId),
+    tenantStageIdx: index('contracts_tenant_stage_idx').on(t.tenantId, t.stage),
+    contactIdx: index('contracts_contact_idx').on(t.tenantId, t.contactId),
+  }),
+);
+
+export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number };
+export type ContractGuarantee = { type: string; amountCents: number | null; insurer: string | null; policy: string | null; expiresAt: string | null; renewalAt: string | null };
+export type ContractPublicTerms = { agency: string | null; processNumber: string | null; modality: string | null; commitmentNote: string | null; budgetLine: string | null; extensionMaxMonths: number | null };
+
+/** Versões do contrato: append-only. Cada alteração relevante é um INSERT com motivo. */
+export const contractVersions = pgTable(
+  'contract_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    version: integer('version').notNull(),
+    changeKind: text('change_kind').notNull().default('cadastro'),
+    reason: text('reason'),
+    number: text('number').notNull(),
+    object: text('object').notNull(),
+    signedAt: date('signed_at', { mode: 'string' }),
+    startAt: date('start_at', { mode: 'string' }),
+    endAt: date('end_at', { mode: 'string' }),
+    termMonths: integer('term_months'),
+    activationAt: date('activation_at', { mode: 'string' }),
+    billingStartAt: date('billing_start_at', { mode: 'string' }),
+    renewalAt: date('renewal_at', { mode: 'string' }),
+    monthlyCents: bigint('monthly_cents', { mode: 'number' }).notNull().default(0),
+    totalCents: bigint('total_cents', { mode: 'number' }),
+    billingDay: integer('billing_day'),
+    billingTerms: text('billing_terms'),
+    items: jsonb('items').$type<ContractItem[]>().notNull().default([]),
+    guarantee: jsonb('guarantee').$type<ContractGuarantee | null>(),
+    publicTerms: jsonb('public_terms').$type<ContractPublicTerms | null>(),
+    adjustmentIndex: text('adjustment_index'),
+    adjustmentBaseDate: date('adjustment_base_date', { mode: 'string' }),
+    adjustmentRule: text('adjustment_rule'),
+    specialConditions: text('special_conditions'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('contract_versions_uq').on(t.contractId, t.version),
+    changeCk: check('contract_versions_change_ck', inList('change_kind', ['cadastro', 'edicao', 'ativacao', 'renovacao', 'reajuste', 'encerramento'])),
+    valueCk: check('contract_versions_value_ck', sql`monthly_cents >= 0`),
+  }),
+);
+
+/** Linha do tempo do contrato: append-only. */
+export const contractEvents = pgTable(
+  'contract_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    type: text('type').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    summary: text('summary').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
+    occurredAt: ts('occurred_at').notNull().defaultNow(),
+  },
+  (t) => ({ idx: index('contract_events_idx').on(t.tenantId, t.contractId, t.occurredAt) }),
+);
+
+export type ProcessStepState = { doneAt: string; doneBy: string; doneByName: string; note: string | null; value: unknown; skipped?: boolean };
+/** Processos paralelos (implantação, renovação, reajuste, encerramento), cada um com o próprio roteiro. */
+export const contractProcesses = pgTable(
+  'contract_processes',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    kind: text('kind').notNull(),
+    cycleKey: text('cycle_key').notNull(),
+    status: text('status').notNull().default('aberto'),
+    steps: jsonb('steps').$type<Record<string, ProcessStepState>>().notNull().default({}),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    ownerId: uuid('owner_id').references(() => users.id),
+    dueAt: date('due_at', { mode: 'string' }),
+    outcome: text('outcome'),
+    openedBy: uuid('opened_by').references(() => users.id),
+    openedAt: ts('opened_at').notNull().defaultNow(),
+    closedAt: ts('closed_at'),
+    closedBy: uuid('closed_by').references(() => users.id),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    uq: uniqueIndex('contract_processes_uq').on(t.contractId, t.kind, t.cycleKey),
+    kindCk: check('contract_processes_kind_ck', inList('kind', ['implantacao', 'renovacao', 'reajuste', 'encerramento'])),
+    statusCk: check('contract_processes_status_ck', inList('status', ['aberto', 'concluido', 'cancelado'])),
+  }),
+);
+
+/** Documentos do contrato. Nova versão = novo registro no mesmo grupo; nada é sobrescrito. */
+export const contractDocuments = pgTable(
+  'contract_documents',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    processId: uuid('process_id').references(() => contractProcesses.id),
+    groupId: uuid('group_id').notNull(),
+    version: integer('version').notNull().default(1),
+    category: text('category').notNull(),
+    name: text('name').notNull(),
+    docDate: date('doc_date', { mode: 'string' }).notNull(),
+    summary: text('summary').notNull(),
+    mime: text('mime').notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    data: bytea('data').notNull(),
+    folder: text('folder').notNull().default('Ativos'),
+    /** Setores que podem abrir. Vazio = todos com acesso ao contrato. */
+    restrictedTo: text('restricted_to').array().notNull().default(sql`'{}'::text[]`),
+    signed: boolean('signed').notNull().default(false),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+    deletedAt: ts('deleted_at'),
+    deletedBy: uuid('deleted_by'),
+  },
+  (t) => ({
+    idx: index('contract_documents_idx').on(t.tenantId, t.contractId),
+    groupUq: uniqueIndex('contract_documents_group_uq').on(t.groupId, t.version),
+    folderCk: check('contract_documents_folder_ck', inList('folder', ['Ativos', 'Encerrados'])),
+  }),
+);
+
+/** Alertas/notificações do contrato: um por evento (contrato + tipo + ciclo). */
+export const contractAlerts = pgTable(
+  'contract_alerts',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    kind: text('kind').notNull(),
+    cycleKey: text('cycle_key').notNull(),
+    dueAt: date('due_at', { mode: 'string' }),
+    ownerId: uuid('owner_id').references(() => users.id),
+    status: text('status').notNull().default('aberto'),
+    detail: text('detail'),
+    activityIds: uuid('activity_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    emails: jsonb('emails').$type<{ to: string; status: string; error: string | null }[]>().notNull().default([]),
+    createdAt: createdAt(),
+    resolvedAt: ts('resolved_at'),
+    resolvedBy: uuid('resolved_by').references(() => users.id),
+    resolution: text('resolution'),
+  },
+  (t) => ({
+    uq: uniqueIndex('contract_alerts_uq').on(t.contractId, t.kind, t.cycleKey),
+    statusCk: check('contract_alerts_status_ck', inList('status', ['aberto', 'concluido', 'cancelado'])),
+    openIdx: index('contract_alerts_open_idx').on(t.tenantId, t.status, t.dueAt),
+  }),
+);

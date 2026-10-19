@@ -18,6 +18,7 @@ export function meDto(auth: NonNullable<Awaited<ReturnType<typeof resolveSession
     access: auth.access,
     teamIds: auth.teamIds,
     teamMemberIds: auth.teamMemberIds,
+    sectors: auth.sectors,
   };
 }
 

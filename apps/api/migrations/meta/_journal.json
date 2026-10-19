@@ -148,6 +148,13 @@
       "when": 1792430295420,
       "tag": "0020_integration_zapi",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792443666921,
+      "tag": "0021_contracts",
+      "breakpoints": true
     }
   ]
 }

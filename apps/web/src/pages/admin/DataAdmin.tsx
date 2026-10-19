@@ -10,8 +10,8 @@ import { Modal, useToast } from '../../components/ui/overlay';
 
 type Preview = { total: number; valid: number; errors: { line: number; message: string }[]; errorCount: number; imported: { created: number; updated: number } | null };
 const SCOPES = [
-  { key: 'clientes', label: 'Base de clientes', desc: 'Clientes, endereços e códigos externos.' },
-  { key: 'comercial', label: 'Comercial', desc: 'Leads, oportunidades, atividades, anexos e o histórico delas.' },
+  { key: 'clientes', label: 'Base de clientes', desc: 'Clientes, endereços, códigos externos e os contratos deles.' },
+  { key: 'comercial', label: 'Comercial', desc: 'Leads, oportunidades, contratos, atividades, anexos e o histórico deles.' },
 ] as const;
 const CONFIRM = 'LIMPAR BASE';
 

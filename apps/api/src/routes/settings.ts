@@ -10,6 +10,7 @@ import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipel
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
 import { sendActivityDigests } from '../services/alerts';
 import { runIdleAutomations } from '../services/automations';
+import { runContractAlerts } from '../services/contractAlerts';
 import { audit } from '../services/audit';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
@@ -261,7 +262,7 @@ export const settingsRoutes = [
   defineRoute({
     method: 'GET',
     url: '/cron/alerts',
-    summary: 'Resumo diário de atividades por e-mail. Exige Authorization: Bearer CRON_SECRET.',
+    summary: 'Rotina diária: resumo de atividades, automações paradas e monitoramento de contratos. Exige Authorization: Bearer CRON_SECRET.',
     tag: 'E-mail',
     public: true,
     handler: async ({ app, req }) => {
@@ -272,7 +273,8 @@ export const settingsRoutes = [
       if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw unauthorized();
       const digests = await sendActivityDigests(app.db, app.config);
       const idle = await runIdleAutomations(app.db, app.config);
-      return { ...digests, ...idle };
+      const contracts = await runContractAlerts(app.db, app.config);
+      return { ...digests, ...idle, ...contracts };
     },
   }),
 ];

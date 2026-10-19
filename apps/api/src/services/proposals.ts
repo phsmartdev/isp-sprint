@@ -65,11 +65,11 @@ export const fill = (text: string, vars: Record<string, string>) => text.replace
 /** Largura de referência: tamanho da fonte é guardado em milésimos da largura da página. */
 const A4_W = 595.28;
 
-function safeText(font: PDFFont, t: string) {
+export function safeText(font: PDFFont, t: string) {
   // Helvetica só tem WinAnsi: troca o que não dá para escrever
   return [...t].map((ch) => { try { font.encodeText(ch); return ch; } catch { return ch === '•' ? '-' : '?'; } }).join('');
 }
-function wrap(font: PDFFont, text: string, size: number, maxW: number) {
+export function wrap(font: PDFFont, text: string, size: number, maxW: number) {
   const out: string[] = [];
   for (const para of text.split('\n')) {
     const words = para.split(/\s+/).filter(Boolean);
