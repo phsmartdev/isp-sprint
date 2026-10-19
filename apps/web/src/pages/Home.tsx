@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Lightbulb, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
 import { type ActivityType } from '@isp/domain';
-import { api } from '../lib/api';
+import { api, qs } from '../lib/api';
 import { fmtBRL, fmtRelativeShort, fmtTime, fmtLongDate } from '../lib/format';
 import type { Kpi, Opportunity } from '../lib/types';
-import { useStageInfo } from '../lib/hooks';
+import { defaultPeriod, useStageInfo, useUrlState } from '../lib/hooks';
+import { DateRange } from '../components/ui/DateRange';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip, Delta, ErrorState, LoadingRows, formatKpi } from '../components/ui/primitives';
 import { BrandImage } from '../components/brand';
@@ -63,7 +64,10 @@ export function HomePage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['home'], queryFn: () => api<HomeData>('/home') });
+  const p0 = defaultPeriod();
+  const [f, setF] = useUrlState({ from: p0.from, to: p0.to });
+  const isMonth = f.from === p0.from && f.to === p0.to;
+  const q = useQuery({ queryKey: ['home', f.from, f.to], queryFn: () => api<HomeData>(`/home${qs({ from: f.from, to: f.to })}`), placeholderData: (x) => x });
   const done = useMutation({
     mutationFn: (a: HomeData['agenda'][number]) => api(`/activities/${a.id}`, { method: 'PATCH', body: { completed: !a.completedAt, rowVersion: a.rowVersion } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['home'] }); qc.invalidateQueries({ queryKey: ['activities'] }); },
@@ -79,7 +83,10 @@ export function HomePage() {
           <h1 className="text-2xl font-extrabold tracking-tight text-ink">Olá, {first}!</h1>
           <p className="mt-0.5 text-md text-muted">Seu dia de vendas, mais simples e produtivo.</p>
         </div>
-        <p className="text-sm text-muted first-letter:uppercase">{fmtLongDate(new Date())}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted first-letter:uppercase">{fmtLongDate(new Date())}</p>
+          <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
+        </div>
       </header>
 
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
@@ -127,7 +134,7 @@ export function HomePage() {
         {/* Meta do mês */}
         <section className="card p-5" aria-labelledby="h-meta">
           <div className="mb-3 flex items-center justify-between">
-            <h2 id="h-meta" className="flex items-center gap-2 text-md font-bold text-ink"><HomeIcon className="h-5 w-5" />Meta do mês</h2>
+            <h2 id="h-meta" className="flex items-center gap-2 text-md font-bold text-ink"><HomeIcon className="h-5 w-5" />{isMonth ? 'Meta do mês' : 'Meta no período'}</h2>
             <Link to="/reports" className="text-sm font-semibold text-primary hover:underline">Ver detalhes</Link>
           </div>
           {d ? (
@@ -137,7 +144,7 @@ export function HomePage() {
                 <div className="flex-1">
                   <p className="flex items-center justify-between text-md text-text">Vendas fechadas <span className="num text-xl font-extrabold text-ink">{d.goal.progress === null ? 'N/D' : `${Math.round(d.goal.progress * 100)}%`}</span></p>
                   <p className="mt-2 text-right"><Delta k={{ delta: d.goal.delta }} /></p>
-                  <p className="mt-2 text-right text-sm text-muted">em relação ao mês passado</p>
+                  <p className="mt-2 text-right text-sm text-muted">{isMonth ? 'em relação ao mês passado' : 'em relação ao período anterior'}</p>
                 </div>
               </div>
             ) : (
@@ -203,7 +210,7 @@ export function HomePage() {
           <section className="card p-5" aria-labelledby="h-perf">
             <div className="mb-3 flex items-center justify-between">
               <h2 id="h-perf" className="flex items-center gap-2 text-md font-bold text-ink"><BarChart3 className="h-5 w-5" />Meu desempenho</h2>
-              <span className="rounded-sm border border-line px-3 py-1.5 text-sm text-text">Este mês</span>
+              <span className="rounded-sm border border-line px-3 py-1.5 text-sm text-text">{isMonth ? 'Este mês' : 'No período'}</span>
             </div>
             {!d ? <LoadingRows rows={3} /> : (
               <ul className="space-y-3">

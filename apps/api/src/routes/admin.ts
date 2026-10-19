@@ -44,6 +44,7 @@ async function userRow(db: DbOrTx, auth: AuthContext, id: string) {
   return u;
 }
 
+const SUP_NEEDS_TEAM = 'O supervisor precisa supervisionar ao menos um time: ele só vê as informações dos times que lidera.';
 async function setTeams(db: DbOrTx, auth: AuthContext, userId: string, teamIds: string[], leadTeamIds: string[]) {
   const all = [...new Set([...teamIds, ...leadTeamIds])];
   if (all.length) {
@@ -204,6 +205,7 @@ export const adminRoutes = [
         const roles = await ensureRoles(tx, auth.tenantId);
         const [exists] = await tx.select({ id: s.users.id }).from(s.users).where(sql`lower(${s.users.email}) = ${body.email}`).limit(1);
         if (exists) throw unprocessable('E-mail já cadastrado.', [{ path: 'email', message: 'Já existe um usuário com este e-mail' }]);
+        if (body.profile === 'supervisor' && !body.leadTeamIds.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
         const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, passwordHash: await hashPassword(temp) }).returning();
         await tx.insert(s.userRoles).values({ userId: u!.id, roleId: roles[body.profile]! });
         await setTeams(tx, auth, u!.id, body.teamIds, body.leadTeamIds);
@@ -240,10 +242,11 @@ export const adminRoutes = [
           await tx.delete(s.userRoles).where(eq(s.userRoles.userId, u.id));
           await tx.insert(s.userRoles).values({ userId: u.id, roleId: roles[body.profile]! });
         }
-        if (body.teamIds || body.leadTeamIds) {
-          const current = await tx.select().from(s.teamMemberships).where(eq(s.teamMemberships.userId, u.id));
-          await setTeams(tx, auth, u.id, body.teamIds ?? current.map((c) => c.teamId), body.leadTeamIds ?? current.filter((c) => c.isLead).map((c) => c.teamId));
-        }
+        const current = await tx.select().from(s.teamMemberships).where(eq(s.teamMemberships.userId, u.id));
+        const leads = body.leadTeamIds ?? current.filter((c) => c.isLead).map((c) => c.teamId);
+        const [role] = await tx.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, u.id)).limit(1);
+        if ((body.profile ?? role?.key) === 'supervisor' && !leads.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
+        if (body.teamIds || body.leadTeamIds) await setTeams(tx, auth, u.id, body.teamIds ?? current.map((c) => c.teamId), leads);
         await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active } });
       });
       return { ok: true };

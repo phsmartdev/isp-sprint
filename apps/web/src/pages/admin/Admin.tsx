@@ -213,7 +213,7 @@ async function fileToBase64(file: File) {
 }
 const IMG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
-function UserForm({ user, teams, onDone }: { user?: AdminUser; teams: { id: string; name: string }[]; onDone: (temp?: string) => void }) {
+function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams: { id: string; name: string }[]; users?: AdminUser[]; onDone: (temp?: string) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();
@@ -224,9 +224,13 @@ function UserForm({ user, teams, onDone }: { user?: AdminUser; teams: { id: stri
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   const m = useMutation({
-    mutationFn: () => user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds: form.leadTeamIds, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds: form.leadTeamIds } }),
+    mutationFn: () => {
+      if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
+      const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
+      return user
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds } });
+    },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
   });
@@ -241,22 +245,43 @@ function UserForm({ user, teams, onDone }: { user?: AdminUser; teams: { id: stri
           <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => set('profile', e.target.value as ProfileKey)}>{(['vendedor', 'supervisor', 'gerencia'] as ProfileKey[]).map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
         </FormField>
       </div>
-      <fieldset>
-        <legend className="mb-1.5 text-sm font-semibold text-ink">Times</legend>
-        <p className="mb-2 text-xs text-muted">Marque “lidera” para o supervisor ver o time inteiro (nível Equipe).</p>
-        <ul className="space-y-1.5">
-          {teams.map((t) => {
-            const member = form.teamIds.includes(t.id) || form.leadTeamIds.includes(t.id);
-            const lead = form.leadTeamIds.includes(t.id);
-            return (
-              <li key={t.id} className="flex items-center gap-4 rounded-sm border border-line px-3 py-2 text-sm">
-                <label className="flex flex-1 items-center gap-2"><input type="checkbox" checked={member} onChange={() => { set('teamIds', member ? form.teamIds.filter((x) => x !== t.id) : [...form.teamIds, t.id]); if (member) set('leadTeamIds', form.leadTeamIds.filter((x) => x !== t.id)); }} />{t.name}</label>
-                <label className="flex items-center gap-2 text-muted"><input type="checkbox" checked={lead} onChange={() => { set('leadTeamIds', lead ? form.leadTeamIds.filter((x) => x !== t.id) : [...form.leadTeamIds, t.id]); if (!member) set('teamIds', [...form.teamIds, t.id]); }} />lidera</label>
-              </li>
-            );
-          })}
-        </ul>
-      </fieldset>
+      {form.profile === 'supervisor' ? (
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold text-ink">Times que supervisiona</legend>
+          <p className="mb-2 text-xs text-muted">O supervisor vê leads, oportunidades, clientes, atividades e relatórios só das pessoas destes times.</p>
+          {errors.leadTeamIds && <p className="mb-2 text-sm text-danger">{errors.leadTeamIds}</p>}
+          <ul className="space-y-1.5">
+            {teams.map((t) => {
+              const lead = form.leadTeamIds.includes(t.id);
+              const people = users.filter((x) => x.id !== user?.id && x.teamIds.includes(t.id));
+              return (
+                <li key={t.id} className={`rounded-sm border px-3 py-2 text-sm ${lead ? 'border-primary bg-primary-soft' : 'border-line'}`}>
+                  <label className="flex items-center gap-2 font-semibold text-ink">
+                    <input type="checkbox" checked={lead} onChange={() => { set('leadTeamIds', lead ? form.leadTeamIds.filter((x) => x !== t.id) : [...form.leadTeamIds, t.id]); set('teamIds', lead ? form.teamIds.filter((x) => x !== t.id) : [...new Set([...form.teamIds, t.id])]); }} />
+                    {t.name}
+                  </label>
+                  <p className="ml-6 text-xs text-muted">{people.length ? people.map((x) => x.name).join(', ') : 'Ninguém neste time ainda'}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      ) : (
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold text-ink">{form.profile === 'gerencia' ? 'Times (opcional)' : 'Time de que faz parte'}</legend>
+          <p className="mb-2 text-xs text-muted">{form.profile === 'gerencia' ? 'A gerência vê todos os times.' : 'O supervisor deste time vê o trabalho desta pessoa.'}</p>
+          <ul className="space-y-1.5">
+            {teams.map((t) => {
+              const member = form.teamIds.includes(t.id);
+              return (
+                <li key={t.id} className="rounded-sm border border-line px-3 py-2 text-sm">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={member} onChange={() => { set('teamIds', member ? form.teamIds.filter((x) => x !== t.id) : [...form.teamIds, t.id]); set('leadTeamIds', []); }} />{t.name}</label>
+                </li>
+              );
+            })}
+          </ul>
+        </fieldset>
+      )}
       {user && (
         <fieldset>
           <legend className="mb-1.5 text-sm font-semibold text-ink">Metas do mês</legend>
@@ -348,7 +373,7 @@ export function AdminUsers() {
       </section>
       <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && avatarFor) avatar.mutate({ u: avatarFor, f }); e.target.value = ''; }} />
       <Drawer open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Novo usuário' : editing?.name ?? ''} footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" type="submit" form="user-form">{editing === 'new' ? 'Cadastrar' : 'Salvar'}</Button></>}>
-        {editing && <UserForm key={editing === 'new' ? 'new' : editing.id} user={editing === 'new' ? undefined : editing} teams={teams} onDone={(tp) => { if (tp && editing === 'new') setTemp({ name: 'novo usuário', password: tp }); setEditing(null); }} />}
+        {editing && <UserForm key={editing === 'new' ? 'new' : editing.id} user={editing === 'new' ? undefined : editing} teams={teams} users={users} onDone={(tp) => { if (tp && editing === 'new') setTemp({ name: 'novo usuário', password: tp }); setEditing(null); }} />}
       </Drawer>
       <Modal open={!!temp} onClose={() => setTemp(null)} title="Senha temporária" size="sm" footer={<Button variant="primary" onClick={() => setTemp(null)}>Já copiei</Button>}>
         <p className="text-sm">Senha temporária para {temp?.name}. Ela aparece só agora; peça para trocar no primeiro acesso em Meu perfil.</p>

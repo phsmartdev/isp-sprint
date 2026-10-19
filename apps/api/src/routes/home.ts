@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { resolvePipeline } from '../services/instructions';
+import { z } from 'zod';
 import { defineRoute } from '../http/route';
+import { periodBounds } from '../services/period';
 import * as s from '../db/schema';
 import { level, ownerScope, visibleUserIds } from '../services/scope';
 import { opportunityDto, opportunityQuery } from '../services/opportunities';
@@ -15,14 +17,17 @@ export const homeRoutes = [
     summary: 'Início: indicadores, meta do mês, agenda de hoje, pipeline e oportunidades recentes',
     tag: 'Início',
     module: 'inicio',
-    handler: async ({ app, auth }) => {
+    query: z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+    handler: async ({ app, auth, query }) => {
       const tz = auth.timezone;
+      // período escolhido no Início; padrão: do dia 1 do mês até hoje (no fuso da empresa)
+      const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+      const from = query.from ?? `${todayStr.slice(0, 7)}-01`;
+      const to = query.to && query.to >= from ? query.to : todayStr < from ? from : todayStr;
+      const p = periodBounds(auth, from, to);
       const oppScope = ownerScope(auth, 'inicio', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
       const leadScope = ownerScope(auth, 'inicio', { tenantId: s.leads.tenantId, ownerId: s.leads.ownerId, deletedAt: s.leads.deletedAt });
       const users = visibleUserIds(auth, 'inicio');
-      const monthStart = sql`(date_trunc('month', now() at time zone ${tz}) at time zone ${tz})`;
-      const prevMonthStart = sql`(date_trunc('month', (now() at time zone ${tz}) - interval '1 month') at time zone ${tz})`;
-      const prevSame = sql`(now() - interval '1 month')`;
       const localDay = sql`(${s.activities.dueAt} at time zone ${tz})::date`;
       const today = sql`(now() at time zone ${tz})::date`;
 
@@ -38,12 +43,12 @@ export const homeRoutes = [
           .where(and(eq(s.activities.tenantId, auth.tenantId), isNull(s.activities.deletedAt), eq(s.activities.ownerId, auth.userId))),
         app.db.execute<{ won: number; won_prev: number; proposals: number; proposals_prev: number; leads: number; leads_prev: number }>(sql`
           select
-            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.wonAt} >= ${monthStart})::int won,
-            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.wonAt} >= ${prevMonthStart} and ${s.opportunities.wonAt} < ${prevSame})::int won_prev,
-            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.proposalStatus} in ('enviada','aceita') and ${s.opportunities.createdAt} >= ${monthStart})::int proposals,
-            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.proposalStatus} in ('enviada','aceita') and ${s.opportunities.createdAt} >= ${prevMonthStart} and ${s.opportunities.createdAt} < ${prevSame})::int proposals_prev,
-            (select count(*) from ${s.leads} where ${leadScope} and ${s.leads.createdAt} >= ${monthStart})::int leads,
-            (select count(*) from ${s.leads} where ${leadScope} and ${s.leads.createdAt} >= ${prevMonthStart} and ${s.leads.createdAt} < ${prevSame})::int leads_prev`),
+            (select count(*) from ${s.opportunities} where ${oppScope} and ${p.inCur(s.opportunities.wonAt)})::int won,
+            (select count(*) from ${s.opportunities} where ${oppScope} and ${p.inPrev(s.opportunities.wonAt)})::int won_prev,
+            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.proposalStatus} in ('enviada','aceita') and ${p.inCur(s.opportunities.createdAt)})::int proposals,
+            (select count(*) from ${s.opportunities} where ${oppScope} and ${s.opportunities.proposalStatus} in ('enviada','aceita') and ${p.inPrev(s.opportunities.createdAt)})::int proposals_prev,
+            (select count(*) from ${s.leads} where ${leadScope} and ${p.inCur(s.leads.createdAt)})::int leads,
+            (select count(*) from ${s.leads} where ${leadScope} and ${p.inPrev(s.leads.createdAt)})::int leads_prev`),
         app.db
           .select({ sales: sql<number>`coalesce(sum(${s.users.goalSales}),0)::int`, proposals: sql<number>`coalesce(sum(${s.users.goalProposals}),0)::int`, leads: sql<number>`coalesce(sum(${s.users.goalLeads}),0)::int` })
           .from(s.users)
@@ -76,7 +81,7 @@ export const homeRoutes = [
           target: g.sales,
           progress: ratio(m.won, g.sales),
           delta: pctDelta(m.won, m.won_prev),
-          formula: 'Vendas fechadas (ganho comercial) no mês até hoje ÷ meta de vendas cadastrada em Configurações → Usuários. Comparação: mesmo intervalo do mês anterior.',
+          formula: 'Vendas fechadas (ganho comercial) no período escolhido ÷ meta de vendas cadastrada em Configurações → Usuários. Comparação: período anterior de mesmo tamanho.',
         },
         performance: [
           { key: 'vendas', label: 'Vendas', value: m.won, target: g.sales, progress: ratio(m.won, g.sales) },
@@ -91,6 +96,7 @@ export const homeRoutes = [
         }),
         recent: recent.map((o) => opportunityDto(o)),
         today: new Date().toISOString(),
+        period: { from, to },
       };
     },
   }),

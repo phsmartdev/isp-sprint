@@ -200,4 +200,16 @@ describe('autonomia da operação e engenharia', () => {
     expect(d.opportunities[0].contactName).toBe('Cliente Campanha');
     expect((await lucas.get('/campaigns')).statusCode).toBe(403);
   });
+
+  it('supervisor precisa supervisionar ao menos um time; Início aceita período', async () => {
+    const teams = (await carlos.get('/admin/users')).json().teams;
+    const bad = await carlos.post('/admin/users', { name: 'Supervisor Sem Time', email: 'sup.semtime@yepnet.test', profile: 'supervisor', teamIds: [], leadTeamIds: [] });
+    expect(bad.statusCode).toBe(422);
+    const good = await carlos.post('/admin/users', { name: 'Supervisor Com Time', email: 'sup.comtime@yepnet.test', profile: 'supervisor', teamIds: [teams[0].id], leadTeamIds: [teams[0].id] });
+    ok(good, 201);
+    expect((await carlos.patch(`/admin/users/${good.json().id}`, { leadTeamIds: [] })).statusCode).toBe(422);
+    const h = (await carlos.get('/home?from=2026-01-01&to=2026-12-31')).json();
+    expect(h.period).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+    ok(await carlos.get('/home'));
+  });
 });

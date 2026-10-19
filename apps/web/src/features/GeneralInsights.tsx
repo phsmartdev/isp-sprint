@@ -15,15 +15,23 @@ type Data = {
 };
 export type InsightView = 'geral' | 'comercial' | 'negocio' | 'relacionamento';
 
+/** Valor curto para os cartões: R$ 48,8 mil, R$ 1,2 mi. O valor exato aparece ao passar o mouse. */
+const brlCompact = (c: number | null | undefined) => {
+  if (c == null) return 'N/D';
+  const v = c / 100;
+  if (Math.abs(v) >= 1_000_000) return `R$ ${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (Math.abs(v) >= 10_000) return `R$ ${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  return fmtBRL(c);
+};
 const pct = (r: number | null | undefined, digits = 1) => (r == null ? 'N/D' : `${(r * 100).toLocaleString('pt-BR', { maximumFractionDigits: digits })}%`);
 const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 const monthName = (k: string) => `${MONTHS[Number(k.slice(5, 7)) - 1]}/${k.slice(2, 4)}`;
 
-function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'danger' | 'success' }) {
+function Stat({ label, value, hint, tone, title }: { label: string; value: string; hint?: string; tone?: 'danger' | 'success'; title?: string }) {
   return (
-    <div className="card min-w-0 p-4">
-      <p className="text-sm text-muted">{label}</p>
-      <p className={`num break-words text-xl font-extrabold sm:text-2xl ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</p>
+    <div className="card min-w-0 p-4" title={title}>
+      <p className="truncate text-sm text-muted">{label}</p>
+      <p className={`num truncate whitespace-nowrap text-xl font-extrabold leading-tight sm:text-[26px] ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</p>
       {hint && <p className="text-xs text-muted">{hint}</p>}
     </div>
   );
@@ -85,10 +93,10 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-6">
             <Stat label="Clientes ativos" value={fmtInt(n.activeCustomers)} />
             <Stat label="Clientes cancelados" value={fmtInt(n.cancelledCustomers)} hint={`${fmtInt(n.cancelledInPeriod)} no período`} />
-            <Stat label="Base de faturamento" value={fmtBRL(n.billingCents)} hint="Mensalidades dos ativos" />
-            <Stat label="Ticket médio" value={fmtBRL(n.ticketCents)} />
+            <Stat label="Base de faturamento" value={brlCompact(n.billingCents)} title={fmtBRL(n.billingCents)} hint={`${fmtBRL(n.billingCents)}/mês`} />
+            <Stat label="Ticket médio" value={fmtBRL(n.ticketCents)} hint="Por cliente ativo" />
             <Stat label="Planos ativos" value={fmtInt(n.plans.length)} />
-            <Stat label="Ocupação das portas" value={pct(n.portsRate)} hint={n.portsTotal ? `${n.portsUsed} de ${n.portsTotal} portas` : 'Informe as portas por condomínio'} />
+            <Stat label="Ocupação das portas" value={n.portsTotal ? pct(n.portsRate) : '—'} hint={n.portsTotal ? `${n.portsUsed} de ${n.portsTotal} portas` : 'Cadastre as portas da CTO'} />
           </div>
           <Block title="Planos ativos" desc="Clientes e faturamento mensal por plano.">
             <div className="overflow-x-auto">
@@ -104,8 +112,8 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
         <>
           {view === 'geral' && <h2 className="pt-2 text-lg font-bold text-ink">Relacionamento com o cliente</h2>}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Stat label="Inadimplência" value={pct(r.overdueRate)} tone={r.overdueRate && r.overdueRate > 0.05 ? 'danger' : undefined} hint={`${fmtInt(r.overdueCustomers)} clientes inadimplentes`} />
-            <Stat label="Faturas em aberto" value={fmtBRL(r.openInvoicesCents)} hint="Mensalidade dos inadimplentes; o valor exato vem do IXC" />
+            <Stat label="Inadimplência" value={pct(r.overdueRate)} tone={r.overdueRate && r.overdueRate > 0.05 ? 'danger' : undefined} hint={`${fmtInt(r.overdueCustomers)} inadimplentes`} />
+            <Stat label="Faturas em aberto" value={brlCompact(r.openInvoicesCents)} title={fmtBRL(r.openInvoicesCents)} hint="Estimado pelos inadimplentes" />
             <Stat label="Cancelamento no período" value={pct(r.churnRate)} />
             <Stat label="Cancelados no período" value={fmtInt(n.cancelledInPeriod)} />
           </div>
@@ -118,8 +126,8 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <Stat label="Leads no período" value={fmtInt(c.leads)} />
             <Stat label="Oportunidades abertas" value={fmtInt(c.openOpportunities)} />
-            <Stat label="Vendas fechadas" value={fmtInt(c.won)} tone="success" hint={fmtBRL(c.wonCents) + '/mês'} />
-            <Stat label="Vendas perdidas" value={fmtInt(c.lost)} tone="danger" hint={fmtBRL(c.lostCents) + '/mês'} />
+            <Stat label="Vendas fechadas" value={fmtInt(c.won)} tone="success" hint={`${brlCompact(c.wonCents)}/mês`} />
+            <Stat label="Vendas perdidas" value={fmtInt(c.lost)} tone="danger" hint={`${brlCompact(c.lostCents)}/mês`} />
             <Stat label="Taxa de ganho" value={pct(c.won + c.lost ? c.won / (c.won + c.lost) : null)} hint="Fechadas ÷ (fechadas + perdidas)" />
           </div>
           <Block title="Motivos de objeção e perda" desc="Por que as oportunidades foram perdidas no período.">{reasonBars(c.lossReasons)}</Block>
