@@ -5,7 +5,9 @@ import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
 import { ErrorState, LoadingRows } from '../components/ui/primitives';
 import { BarRows } from '../components/charts/charts';
-import { SergipeMap } from '../components/charts/SergipeMap';
+import { AracajuZonesMap } from '../components/charts/AracajuZonesMap';
+
+const ZONE_LABEL: Record<string, string> = { norte: 'Zona Norte', sul: 'Zona Sul', leste: 'Zona Leste', oeste: 'Zona Oeste', outras: 'Outras regiões' };
 
 type Reason = { label: string; n: number; share: number };
 type Data = {
@@ -80,7 +82,7 @@ function Cohort({ cohorts }: { cohorts: Data['cohorts'] }) {
   );
 }
 
-type Heat = { status: 'ativos' | 'cancelados'; date: string; total: number; cities: { city: string; n: number }[]; districts: { city: string; district: string; n: number }[]; withoutAddress: number };
+type Heat = { zones: { zone: string; n: number; condos: number }[]; condos: { id: string; name: string; region: string; zone: string; n: number; ports: number | null }[]; inCondos: number; status: 'ativos' | 'cancelados'; date: string; total: number; cities: { city: string; n: number }[]; districts: { city: string; district: string; n: number }[]; withoutAddress: number };
 
 function Heatmap({ from, to }: { from: string; to: string }) {
   const [status, setStatus] = useState<'ativos' | 'cancelados'>('ativos');
@@ -91,19 +93,20 @@ function Heatmap({ from, to }: { from: string; to: string }) {
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-md font-bold text-ink">Mapa de calor da base</h2>
-          <p className="text-sm text-muted">{status === 'ativos' ? `Clientes ativos em ${d ? fmtDate(d.date) : '…'}, pelo endereço de instalação.` : 'Clientes que cancelaram no período, pelo endereço.'}</p>
+          <p className="text-sm text-muted">{status === 'ativos' ? `Clientes ativos em ${d ? fmtDate(d.date) : '…'}, por zona de Aracaju e condomínio.` : 'Clientes que cancelaram no período, por zona e condomínio.'}</p>
         </div>
         <div className="flex rounded-md border border-line bg-surface p-1" role="radiogroup" aria-label="Clientes no mapa">
           {(['ativos', 'cancelados'] as const).map((k) => <button key={k} type="button" role="radio" aria-checked={status === k} onClick={() => setStatus(k)} className={`rounded-sm px-4 py-1.5 text-sm ${status === k ? (k === 'ativos' ? 'bg-primary font-semibold text-white' : 'bg-danger font-semibold text-white') : 'text-ink hover:bg-surface-2'}`}>{k === 'ativos' ? 'Ativos' : 'Cancelados'}</button>)}
         </div>
       </div>
       {!d ? <LoadingRows rows={4} /> : (
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
-          <div className="rounded-md bg-[#F3F7FE] p-2"><SergipeMap data={d.cities} /></div>
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="h-[480px] rounded-md bg-[#F3F7FE] p-2 sm:h-[560px]"><AracajuZonesMap zones={d.zones} condos={d.condos} tone={status === 'cancelados' ? 'red' : 'blue'} /></div>
           <div className="min-w-0 space-y-4">
-            <p className="text-sm text-text"><span className="num text-xl font-extrabold text-ink">{fmtInt(d.total)}</span> clientes{d.withoutAddress ? <span className="text-muted"> · {fmtInt(d.withoutAddress)} sem cidade no cadastro</span> : null}</p>
-            <div><h3 className="mb-2 text-sm font-semibold text-muted">Por cidade</h3><BarRows items={d.cities.slice(0, 6).map((c) => ({ label: `${c.city} (${c.n})`, value: c.n, share: d.total ? c.n / d.total : null }))} /></div>
-            {d.districts.length > 0 && <div><h3 className="mb-2 text-sm font-semibold text-muted">Bairros com mais clientes</h3><BarRows items={d.districts.slice(0, 8).map((c) => ({ label: `${c.district} · ${c.city} (${c.n})`, value: c.n, share: d.total ? c.n / d.total : null }))} /></div>}
+            <p className="text-sm text-text"><span className="num text-xl font-extrabold text-ink">{fmtInt(d.total)}</span> clientes · <span className="num font-semibold text-ink">{fmtInt(d.inCondos)}</span> em condomínios cadastrados</p>
+            <div><h3 className="mb-2 text-sm font-semibold text-muted">Por zona</h3><BarRows items={d.zones.filter((z) => z.zone !== 'outras' || z.n > 0).map((z) => ({ label: `${ZONE_LABEL[z.zone] ?? z.zone} (${z.condos} cond.)`, value: z.n, share: d.inCondos ? z.n / d.inCondos : null }))} /></div>
+            <div><h3 className="mb-2 text-sm font-semibold text-muted">Condomínios com mais clientes</h3>{d.condos.length ? <BarRows items={d.condos.slice(0, 10).map((c) => ({ label: c.name, value: c.n, share: d.inCondos ? c.n / d.inCondos : null }))} /> : <p className="text-sm text-muted">Nenhum cliente ligado a condomínio. Informe o condomínio na oportunidade ou na planilha de importação.</p>}</div>
+            {d.zones.find((z) => z.zone === 'outras')?.n ? <p className="text-xs text-muted">"Outras": condomínios em regiões sem Norte, Sul, Leste ou Oeste no nome. Renomeie as regiões em Área de atendimento.</p> : null}
           </div>
         </div>
       )}

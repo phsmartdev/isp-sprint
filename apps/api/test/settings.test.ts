@@ -251,6 +251,9 @@ describe('autonomia da operação e engenharia', () => {
     const h = (await carlos.get('/intelligence/heatmap?from=2026-01-01&to=2026-12-31&status=ativos')).json();
     expect(h.total).toBeGreaterThan(0);
     expect(h.cities.length).toBeGreaterThan(0);
+    expect(h.zones.map((z: { zone: string }) => z.zone)).toEqual(['norte', 'sul', 'leste', 'oeste', 'outras']);
+    expect(h.inCondos).toBeGreaterThan(0);
+    expect(h.condos[0].zone).toMatch(/norte|sul|leste|oeste/);
     ok(await carlos.get('/intelligence/heatmap?from=2020-01-01&to=2026-12-31&status=cancelados'));
   });
 

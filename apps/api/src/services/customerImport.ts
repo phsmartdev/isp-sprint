@@ -22,6 +22,7 @@ export const IMPORT_COLUMNS = [
   ['cep', '', '49000-000'],
   ['logradouro', '', 'Rua Exemplo'],
   ['numero', '', '100'],
+  ['condominio', 'Nome igual ao cadastro de condomínios (Área de atendimento)', ''],
   ['complemento', 'Bloco, apartamento…', 'Bl. 2 Ap. 302'],
   ['bairro', '', 'Centro'],
   ['cidade', '', 'Aracaju'],
@@ -72,7 +73,7 @@ const brDate = (v: string) => {
 };
 const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 
-export type ImportRow = { line: number; externalId: string | null; name: string; segment: string; document: string | null; phone: string | null; email: string | null; planId: string | null; lifecycle: string; start: string | null; end: string | null; cancelReason: string | null; address: { postalCode: string | null; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; state: string | null }; ownerId: string | null };
+export type ImportRow = { condominiumId: string | null; line: number; externalId: string | null; name: string; segment: string; document: string | null; phone: string | null; email: string | null; planId: string | null; lifecycle: string; start: string | null; end: string | null; cancelReason: string | null; address: { postalCode: string | null; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; state: string | null }; ownerId: string | null };
 
 export async function validateImport(db: DbOrTx, tenantId: string, csv: string) {
   const rows = parseCsv(csv);
@@ -82,6 +83,7 @@ export async function validateImport(db: DbOrTx, tenantId: string, csv: string) 
   if (idx('nome') < 0) return { rows: [], errors: [{ line: 1, message: 'Cabeçalho sem a coluna "nome". Use o modelo baixado.' }], total: 0 };
   const plans = await db.select({ id: s.plans.id, name: s.plans.name }).from(s.plans).where(eq(s.plans.tenantId, tenantId));
   const users = await db.select({ id: s.users.id, email: s.users.email }).from(s.users).where(eq(s.users.tenantId, tenantId));
+  const condos = await db.select({ id: s.condominiums.id, name: s.condominiums.name }).from(s.condominiums).where(eq(s.condominiums.tenantId, tenantId));
   const out: ImportRow[] = [];
   const errors: { line: number; message: string }[] = [];
   const seen = new Set<string>();
@@ -105,12 +107,15 @@ export async function validateImport(db: DbOrTx, tenantId: string, csv: string) 
     if (get('plano')) { planId = plans.find((p) => norm(p.name) === norm(get('plano')))?.id ?? null; if (!planId) errs.push(`plano "${get('plano')}" não existe no cadastro`); }
     let ownerId: string | null = null;
     if (get('responsavel_email')) { ownerId = users.find((u) => u.email.toLowerCase() === get('responsavel_email').toLowerCase())?.id ?? null; if (!ownerId) errs.push(`responsável "${get('responsavel_email')}" não é usuário`); }
+    let condominiumId: string | null = null;
+    if (get('condominio')) { condominiumId = condos.find((c) => norm(c.name) === norm(get('condominio')))?.id ?? null; if (!condominiumId) errs.push(`condomínio "${get('condominio')}" não está cadastrado`); }
     const email = get('email').toLowerCase() || null;
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.push('e-mail inválido');
     const ext = get('codigo_cliente') || null;
     if (ext) { if (seen.has(ext)) errs.push(`código ${ext} repetido no arquivo`); seen.add(ext); }
     if (errs.length) { errors.push({ line, message: `${name || '(sem nome)'}: ${errs.join('; ')}` }); return; }
     out.push({
+      condominiumId,
       line, externalId: ext, name, segment: seg, document: get('cpf_cnpj') || null, phone: get('telefone') || null, email, planId, lifecycle: life,
       start: start ?? null, end: end ?? null, cancelReason: get('motivo_cancelamento') || null, ownerId,
       address: { postalCode: get('cep') || null, street: get('logradouro') || null, number: get('numero') || null, complement: get('complemento') || null, district: get('bairro') || null, city: get('cidade') || null, state: get('uf').toUpperCase() || null },
@@ -127,7 +132,7 @@ export async function applyImport(tx: DbOrTx, tenantId: string, userId: string, 
       ? (await tx.select({ id: s.customers.id, contactId: s.customers.contactId }).from(s.customers).where(and(eq(s.customers.tenantId, tenantId), eq(s.customers.sourceSystem, 'importacao'), eq(s.customers.externalId, r.externalId))).limit(1))[0]
       : undefined;
     const contactValues = { name: r.name, phone: r.phone, email: r.email, document: r.document, segment: r.segment, city: r.address.city, ownerId: r.ownerId, updatedAt: new Date() };
-    const customerValues = { displayName: r.name, lifecycle: r.lifecycle, planId: r.planId, contractStart: r.start, contractEnd: r.end, cancelReason: r.cancelReason, updatedAt: new Date(), sourceUpdatedAt: new Date(), ingestedAt: new Date() };
+    const customerValues = { condominiumId: r.condominiumId, displayName: r.name, lifecycle: r.lifecycle, planId: r.planId, contractStart: r.start, contractEnd: r.end, cancelReason: r.cancelReason, updatedAt: new Date(), sourceUpdatedAt: new Date(), ingestedAt: new Date() };
     if (existing) {
       await tx.update(s.contacts).set(contactValues).where(eq(s.contacts.id, existing.contactId));
       await tx.update(s.customers).set(customerValues).where(eq(s.customers.id, existing.id));

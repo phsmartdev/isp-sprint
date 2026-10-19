@@ -172,7 +172,7 @@ export async function seedTenant(
   await db.insert(s.viabilitySettings).values({ tenantId: tenant.id, defaultRouteId: rCondo.id, ltvLifetimeMonths: 36, ltvMinSample: 30, maxPaybackMonths: 12, defaultActivationFeeCents: 5000 });
 
   // ---------- regiões e condomínios (nomes fictícios)
-  const regionRows = await db.insert(s.regions).values(['Zona Sul', 'Zona Norte', 'Centro', 'Grande Aracaju'].map((name) => ({ tenantId: tenant.id, name }))).returning();
+  const regionRows = await db.insert(s.regions).values(['Zona Sul', 'Zona Norte', 'Zona Leste', 'Zona Oeste'].map((name) => ({ tenantId: tenant.id, name }))).returning();
   const CONDOS: [string, number, string[], boolean][] = [
     ['Cond. Jardins do Mar (fictício)', 0, ['A', 'B', 'C'], true], ['Cond. Vila Atlântica (fictício)', 0, ['1', '2'], true], ['Res. Porto Sereno (fictício)', 0, ['Única'], false],
     ['Cond. Parque das Árvores (fictício)', 1, ['A', 'B'], true], ['Res. Sol Nascente (fictício)', 1, ['1', '2', '3', '4'], true],
@@ -325,6 +325,7 @@ export async function seedTenant(
         contractStart: iso(start),
         nextDueOn: iso(anniversary),
         contractEnd: life === 'cancelado' ? iso(new Date(start.getTime() + r() * (now - start.getTime()))) : null,
+        condominiumId: seg === 'residencial' && r() < 0.75 ? pick(condoRows).id : null,
         cancelReason: life === 'cancelado' ? pick(['Mudança de endereço', 'Preço', 'Instabilidade na conexão', 'Foi para a concorrência', 'Atendimento', 'Questões financeiras']) : null,
         sourceSystem: 'seed_ficticio',
         externalId: ext,

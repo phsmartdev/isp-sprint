@@ -156,6 +156,32 @@ export const insightsRoutes = [
         .leftJoin(s.addresses, eq(s.addresses.customerId, s.customers.id))
         .where(and(custScope, where))
         .groupBy(sql`1`, sql`2`);
+      // por condomínio: clientes da base com condomínio + vendas fechadas ainda sem cadastro de cliente
+      const custByCondo = await app.db
+        .select({ id: s.customers.condominiumId, n: sql<number>`count(*)::int` })
+        .from(s.customers)
+        .innerJoin(s.contacts, eq(s.contacts.id, s.customers.contactId))
+        .where(and(custScope, where, sql`${s.customers.condominiumId} is not null`))
+        .groupBy(s.customers.condominiumId);
+      const oppWhere = query.status === 'ativos'
+        ? sql`${s.opportunities.stage} = 'ganha' and ${s.opportunities.portReleasedAt} is null`
+        : sql`${s.opportunities.portReleasedAt} is not null and ${s.opportunities.portReleasedAt}::date between ${query.from}::date and ${query.to}::date`;
+      const oppByCondo = await app.db
+        .select({ id: s.opportunities.condominiumId, n: sql<number>`count(*)::int` })
+        .from(s.opportunities)
+        .where(and(eq(s.opportunities.tenantId, auth.tenantId), sql`${s.opportunities.deletedAt} is null`, sql`${s.opportunities.condominiumId} is not null`, sql`${s.opportunities.customerId} is null`, oppWhere))
+        .groupBy(s.opportunities.condominiumId);
+      const condoRows = await app.db
+        .select({ id: s.condominiums.id, name: s.condominiums.name, region: s.regions.name, ports: s.condominiums.ctoPorts })
+        .from(s.condominiums)
+        .innerJoin(s.regions, eq(s.regions.id, s.condominiums.regionId))
+        .where(eq(s.condominiums.tenantId, auth.tenantId));
+      const zoneOf = (region: string) => { const r = region.toLowerCase(); return r.includes('norte') ? 'norte' : r.includes('sul') ? 'sul' : r.includes('leste') ? 'leste' : r.includes('oeste') ? 'oeste' : 'outras'; };
+      const condos = condoRows
+        .map((c) => ({ id: c.id, name: c.name, region: c.region, zone: zoneOf(c.region), ports: c.ports, n: (custByCondo.find((x) => x.id === c.id)?.n ?? 0) + (oppByCondo.find((x) => x.id === c.id)?.n ?? 0) }))
+        .filter((c) => c.n > 0)
+        .sort((a, b) => b.n - a.n);
+      const zones = (['norte', 'sul', 'leste', 'oeste', 'outras'] as const).map((z) => ({ zone: z, n: condos.filter((c) => c.zone === z).reduce((a, c) => a + c.n, 0), condos: condos.filter((c) => c.zone === z).length }));
       const cities = new Map<string, number>();
       for (const r of rows) cities.set(r.city ?? 'Sem cidade', (cities.get(r.city ?? 'Sem cidade') ?? 0) + r.n);
       const total = rows.reduce((a, r) => a + r.n, 0);
@@ -166,6 +192,9 @@ export const insightsRoutes = [
         cities: [...cities.entries()].map(([city, n]) => ({ city, n })).sort((a, b) => b.n - a.n),
         districts: rows.filter((r) => r.district).map((r) => ({ city: r.city ?? '—', district: r.district!, n: r.n })).sort((a, b) => b.n - a.n).slice(0, 40),
         withoutAddress: rows.filter((r) => !r.city).reduce((a, r) => a + r.n, 0),
+        zones,
+        condos,
+        inCondos: condos.reduce((a, c) => a + c.n, 0),
       };
     },
   }),
