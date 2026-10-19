@@ -58,7 +58,7 @@ export const integrationRoutes = [
         items.push({
           kind, ...spec, enabled: r.enabled, config: r.config,
           secretsSet: Object.fromEntries(spec.fields.filter((f) => f.secret).map((f) => [f.key, !!r.secrets[f.key]])),
-          webhookUrl: spec.receivesLeads ? `${base}/${kind}/${r.webhookToken}` : null,
+          webhookUrl: spec.receivesLeads || spec.webhook ? `${base}/${kind}/${r.webhookToken}` : null,
           lastEventAt: r.lastEventAt,
         });
       }

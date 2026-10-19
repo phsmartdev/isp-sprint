@@ -473,6 +473,9 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Contrato por medição de onde sai o consumo quando a venda fecha (e o valor consumido). */
+    measurementContractId: uuid('measurement_contract_id'),
+    measurementCents: bigint('measurement_cents', { mode: 'number' }),
     /** Pós-venda: 'sucesso_cliente' quando o contrato foi cadastrado e validado. */
     handoffStage: text('handoff_stage'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
@@ -969,7 +972,7 @@ export const integrations = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.kind] }),
     tokenUq: uniqueIndex('integrations_token_uq').on(t.webhookToken),
-    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'whatsapp', 'meta', 'site'])),
+    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'zapsign', 'whatsapp', 'meta', 'site'])),
   }),
 );
 
@@ -1036,6 +1039,8 @@ export const contracts = pgTable(
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     kind: text('kind').notNull().default('privado'),
     legalRegime: text('legal_regime').notNull().default('privado'),
+    /** Recorrente (mensalidade fixa), Frequente (lançamentos por ocorrência) ou Medição (consumo de saldo). */
+    billingType: text('billing_type').notNull().default('recorrente'),
     stage: text('stage').notNull().default('cadastro_validacao'),
     stageChangedAt: ts('stage_changed_at').notNull().defaultNow(),
     currentVersion: integer('current_version').notNull().default(1),
@@ -1067,6 +1072,7 @@ export const contracts = pgTable(
   (t) => ({
     stageCk: check('contracts_stage_ck', inList('stage', ['cadastro_validacao', 'implantacao', 'vigente', 'renovacao', 'reajuste', 'encerramento', 'arquivado'])),
     kindCk: check('contracts_kind_ck', inList('kind', ['privado', 'publico'])),
+    billingCk: check('contracts_billing_ck', inList('billing_type', ['recorrente', 'frequente', 'medicao'])),
     regimeCk: check('contracts_regime_ck', inList('legal_regime', ['privado', 'lei_8666', 'lei_14133', 'outro'])),
     codeUq: uniqueIndex('contracts_code_uq').on(t.code),
     oppUq: uniqueIndex('contracts_opp_uq').on(t.opportunityId),
@@ -1222,5 +1228,78 @@ export const contractAlerts = pgTable(
     uq: uniqueIndex('contract_alerts_uq').on(t.contractId, t.kind, t.cycleKey),
     statusCk: check('contract_alerts_status_ck', inList('status', ['aberto', 'concluido', 'cancelado'])),
     openIdx: index('contract_alerts_open_idx').on(t.tenantId, t.status, t.dueAt),
+  }),
+);
+
+/** Extrato do contrato (append-only): créditos de saldo, consumos, estornos e lançamentos de faturamento. */
+export const contractLedger = pgTable(
+  'contract_ledger',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    kind: text('kind').notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+    description: text('description').notNull(),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    reversesId: uuid('reverses_id'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('contract_ledger_idx').on(t.tenantId, t.contractId, t.occurredOn),
+    kindCk: check('contract_ledger_kind_ck', inList('kind', ['credito', 'consumo', 'estorno', 'faturamento'])),
+    amountCk: check('contract_ledger_amount_ck', sql`amount_cents > 0`),
+    oppIdx: index('contract_ledger_opp_idx').on(t.opportunityId),
+  }),
+);
+
+/** Modelos de contrato (Word com {{variáveis}}). */
+export const contractTemplates = pgTable(
+  'contract_templates',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    description: text('description'),
+    billingType: text('billing_type'),
+    docType: text('doc_type').notNull().default('CONTRATO'),
+    variables: jsonb('variables').$type<{ key: string; label: string; type: 'texto' | 'moeda' | 'data' | 'numero'; default: string }[]>().notNull().default([]),
+    detected: text('detected').array().notNull().default(sql`'{}'::text[]`),
+    fileName: text('file_name').notNull(),
+    size: integer('size').notNull(),
+    data: bytea('data').notNull(),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ idx: index('contract_templates_idx').on(t.tenantId) }),
+);
+
+/** Envio para assinatura eletrônica (ZapSign). */
+export const contractSignatures = pgTable(
+  'contract_signatures',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contractId: uuid('contract_id').notNull().references(() => contracts.id),
+    documentId: uuid('document_id').notNull().references(() => contractDocuments.id),
+    provider: text('provider').notNull().default('zapsign'),
+    providerToken: text('provider_token'),
+    status: text('status').notNull().default('enviado'),
+    signers: jsonb('signers').$type<{ name: string; email: string | null; phone: string | null; token: string | null; signUrl: string | null; status: string; signedAt: string | null }[]>().notNull().default([]),
+    signedDocumentId: uuid('signed_document_id').references(() => contractDocuments.id),
+    error: text('error'),
+    sandbox: boolean('sandbox').notNull().default(false),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    idx: index('contract_signatures_idx').on(t.tenantId, t.contractId),
+    tokenIdx: index('contract_signatures_token_idx').on(t.providerToken),
+    statusCk: check('contract_signatures_status_ck', inList('status', ['enviado', 'assinado', 'recusado', 'cancelado', 'erro'])),
   }),
 );

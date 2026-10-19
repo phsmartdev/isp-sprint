@@ -155,6 +155,13 @@
       "when": 1792443666921,
       "tag": "0021_contracts",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792449153280,
+      "tag": "0022_contract_types_templates",
+      "breakpoints": true
     }
   ]
 }

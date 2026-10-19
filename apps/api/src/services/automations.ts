@@ -151,7 +151,7 @@ export async function duplicateOpportunity(db: DB, tenantId: string, actorId: st
     const now = new Date();
     const [copy] = await tx
       .insert(s.opportunities)
-      .values({ ...rest, pipelineId: target.id, stage: stage.key, ownerId, duplicatedFromId: src.id, stageChangedAt: now, sprintStartedAt: now, sprintElapsedSeconds: 0, contractRequestStatus: 'nao_solicitada', createdBy: actorId, title: src.title })
+      .values({ ...rest, pipelineId: target.id, stage: stage.key, ownerId, duplicatedFromId: src.id, stageChangedAt: now, sprintStartedAt: now, sprintElapsedSeconds: 0, contractRequestStatus: 'nao_solicitada', measurementContractId: null, measurementCents: null, createdBy: actorId, title: src.title })
       .returning({ id: s.opportunities.id });
     const newId = copy!.id;
     // histórico: eventos com a data original

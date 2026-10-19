@@ -7,7 +7,7 @@ import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import { PeriodQuery } from '@isp/shared';
-import { CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, SEGMENT_LABELS, addDays, daysBetween, nextAnniversary, type Segment } from '@isp/domain';
+import { BILLING_TYPE_LABELS, CONTRACT_KINDS, type BillingType, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, SEGMENT_LABELS, addDays, daysBetween, nextAnniversary, type Segment } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { level } from '../services/scope';
@@ -19,6 +19,7 @@ const Q = PeriodQuery.and(z.object({
   regionId: z.string().uuid().optional(),
   termMonths: z.coerce.number().int().min(1).max(600).optional(),
   kind: z.enum(CONTRACT_KINDS).optional(),
+  billingType: z.enum(['recorrente', 'frequente', 'medicao']).optional(),
 }));
 
 export const contractInsightRoutes = [
@@ -39,7 +40,7 @@ export const contractInsightRoutes = [
       const cc = alias(s.condominiums, 'cc');
       const rows = await app.db
         .select({
-          id: s.contracts.id, stage: s.contracts.stage, kind: s.contracts.kind, contactId: s.contracts.contactId, clientName: s.contacts.name, segment: s.contacts.segment,
+          id: s.contracts.id, stage: s.contracts.stage, kind: s.contracts.kind, billingType: s.contracts.billingType, contactId: s.contracts.contactId, clientName: s.contacts.name, segment: s.contacts.segment,
           validatedAt: s.contracts.validatedAt, closedAt: s.contracts.closedAt, closureExpected: s.contracts.closureExpected, renewed: s.contracts.renewed,
           number: v.number, endAt: v.endAt, monthlyCents: v.monthlyCents, totalCents: v.totalCents, termMonths: v.termMonths, items: v.items, guarantee: v.guarantee, adjustmentBaseDate: v.adjustmentBaseDate, activationAt: v.activationAt,
           regionId: sql<string | null>`coalesce(${oc.regionId}, ${cc.regionId})`,
@@ -57,6 +58,7 @@ export const contractInsightRoutes = [
           query.contactId ? eq(s.contracts.contactId, query.contactId) : undefined,
           query.segment ? eq(s.contacts.segment, query.segment) : undefined,
           query.kind ? eq(s.contracts.kind, query.kind) : undefined,
+          query.billingType ? eq(s.contracts.billingType, query.billingType) : undefined,
           query.termMonths ? eq(v.termMonths, query.termMonths) : undefined,
           query.planId ? sql`${v.items} @> ${JSON.stringify([{ planId: query.planId }])}::jsonb` : undefined,
           query.regionId ? sql`coalesce(${oc.regionId}, ${cc.regionId}) = ${query.regionId}` : undefined,
@@ -110,6 +112,7 @@ export const contractInsightRoutes = [
         implantation: { n: impl.length, avgDays: implDays.length ? Math.round(implDays.reduce((a, b) => a + b, 0) / implDays.length) : null },
         pendencies: { alerts: alerts.length, overdue: alerts.filter((a) => a.dueAt && a.dueAt < today).length, openProcesses: pendSteps },
         byStage: CONTRACT_STAGES.map((st) => ({ key: st, label: CONTRACT_STAGE_LABELS[st], n: rows.filter((r) => r.stage === st).length, monthlyCents: sum(rows.filter((r) => r.stage === st)) })),
+        byBillingType: group((r) => [r.billingType as BillingType], (k) => BILLING_TYPE_LABELS[k as BillingType] ?? k),
         byKind: group((r) => [r.kind as 'publico' | 'privado'], (k) => (k === 'publico' ? 'Público' : 'Privado')),
         bySegment: group((r) => [r.segment as Segment], (k) => SEGMENT_LABELS[k as Segment] ?? k),
         byPlan: group((r) => { const ks = [...new Set(r.items.map((i) => i.planId ?? 'sem'))]; return ks.length ? ks : ['sem']; }, (k) => plans.find((p) => p.id === k)?.name ?? 'Sem plano vinculado'),

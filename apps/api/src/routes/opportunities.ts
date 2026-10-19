@@ -1,10 +1,12 @@
+import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
+import { ensureCustomerSuccessPipeline, isBaseCustomer } from '../services/customerSuccess';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, OpportunityUpdate } from '@isp/shared';
 import { pipelinesOf, resolvePipeline, getActiveInstruction } from '../services/instructions';
 import { checkStageRequirements } from '../services/requirements';
 import { notifyDealWon } from '../services/alerts';
-import { runAutomations } from '../services/automations';
+import { duplicateOpportunity, runAutomations } from '../services/automations';
 import { TERMINAL_STAGES, atLeast, validateTransition, type OpportunityStage } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
@@ -166,8 +168,19 @@ export const opportunityRoutes = [
         return created;
       });
       await runAutomations(app.db, app.config, auth.tenantId, auth.userId, opp.id, { type: 'criada' });
+      // cliente da base: o vendedor escolhe se aciona Sucesso do Cliente (duplica no funil); se não, nada é duplicado
+      let customerSuccessId: string | null = null;
+      const contactId = (await loadOpportunity(app.db, auth, opp.id)).contactId;
+      if (await isBaseCustomer(app.db, auth.tenantId, contactId)) {
+        await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'sucesso_cliente_decisao', actorId: auth.userId, payload: { acionar: !!body.customerSuccess } });
+        if (body.customerSuccess) {
+          const cs = await ensureCustomerSuccessPipeline(app.db, auth.tenantId);
+          customerSuccessId = await duplicateOpportunity(app.db, auth.tenantId, auth.userId, opp.id, { tipo: 'duplicar', jornada: cs.key, etapa: null, responsavel: 'mesmo' }, 'Sucesso do Cliente acionado na criação');
+          await audit(app.db, req, { action: 'opportunity.customer_success', entityType: 'opportunity', entityId: opp.id, metadata: { copy: customerSuccessId } });
+        }
+      }
       reply.code(201);
-      return opportunityDto(await loadOpportunity(app.db, auth, opp.id));
+      return { ...opportunityDto(await loadOpportunity(app.db, auth, opp.id)), customerSuccessId };
     },
   }),
 
@@ -309,6 +322,9 @@ export const opportunityRoutes = [
           .where(and(eq(s.opportunities.id, params.id), eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.rowVersion, body.rowVersion)))
           .returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(cur.rowVersion);
+        // contrato por medição: venda fechada dá saída no saldo; reabrir uma venda fechada estorna
+        if (target.kind === 'won') await consumeForOpportunity(tx, auth.tenantId, auth.userId, cur);
+        if (reopening && from === 'ganha') await reverseForOpportunity(tx, auth.tenantId, auth.userId, cur);
         await tx.insert(s.opportunityEvents).values({
           tenantId: auth.tenantId,
           opportunityId: params.id,

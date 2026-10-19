@@ -39,3 +39,15 @@ describe('contratos', () => {
     expect(fillSubject(C.renewalSubject, '12/2024', 'Prefeitura X')).toBe('Ofício de Renovação Contratual – Contrato 12/2024 – Cliente Prefeitura X');
   });
 });
+
+import { ledgerTotals, recurringBilledInPeriod } from './contracts';
+describe('tipos e extrato', () => {
+  it('saldo de medição', () => {
+    expect(ledgerTotals([{ kind: 'credito', amountCents: 100_000 }, { kind: 'consumo', amountCents: 30_000 }, { kind: 'estorno', amountCents: 10_000 }, { kind: 'faturamento', amountCents: 5_000 }])).toEqual({ credited: 100_000, consumed: 20_000, billed: 5_000, available: 80_000, usedShare: 0.2 });
+  });
+  it('recorrente fatura pelos meses ativos no período', () => {
+    expect(recurringBilledInPeriod(1000, '2026-02-15', '2026-12-31', '2026-01-01', '2026-03-31')).toBe(2000);
+    expect(recurringBilledInPeriod(1000, '2025-01-01', '2026-01-31', '2026-01-01', '2026-03-31')).toBe(1000);
+    expect(recurringBilledInPeriod(1000, null, null, '2026-01-01', '2026-03-31')).toBe(0);
+  });
+});

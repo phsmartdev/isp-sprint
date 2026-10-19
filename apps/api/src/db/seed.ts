@@ -395,10 +395,11 @@ async function seedContracts(db: DB, tenantId: string, won: { id: string; ownerI
   const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
   const scenarios = [
     { stage: 'vigente', kind: 'privado', start: -200, term: 24, monthly: 189_000, validated: true, activation: -190, number: 'CTR-2025-031', object: 'Link dedicado 500 Mbps com IP fixo (fictício)', base: -200, index: 'IPCA' },
-    { stage: 'vigente', kind: 'privado', start: -320, term: 12, monthly: 99_900, validated: true, activation: -310, number: 'CTR-2025-018', object: 'Internet corporativa 1 Gbps (fictício)', base: -320, index: 'IGP-M' },
+    { stage: 'vigente', kind: 'privado', start: -320, term: 12, monthly: 99_900, validated: true, activation: -310, number: 'CTR-2025-018', object: 'Suporte técnico sob demanda (fictício)', base: -320, index: 'IGP-M', billing: 'frequente' },
     { stage: 'implantacao', kind: 'privado', start: -6, term: 36, monthly: 249_000, validated: true, activation: null, number: 'CTR-2026-044', object: 'Rede MPLS entre três filiais (fictício)', base: -6, index: 'IPCA' },
     { stage: 'cadastro_validacao', kind: 'privado', start: 3, term: 12, monthly: 59_900, validated: false, activation: null, number: 'CTR-2026-052', object: 'Internet empresarial 600 Mega (fictício)', base: 3, index: null },
     { stage: 'vigente', kind: 'publico', start: -280, term: 12, monthly: 412_000, validated: true, activation: -270, number: '045/2025', object: 'Internet para unidades escolares (fictício)', base: -280, index: 'IPCA', agency: 'Secretaria Municipal de Educação (fictícia)', guarantee: day(25) },
+    { stage: 'vigente', kind: 'publico', start: -150, term: 24, monthly: 0, validated: true, activation: -140, number: 'ATA-2025-007', object: 'Horas técnicas e instalações por medição (fictício)', base: -150, index: 'IPCA', billing: 'medicao', agency: 'Prefeitura Municipal (fictícia)', balance: 12_000_000 },
     { stage: 'arquivado', kind: 'privado', start: -500, term: 12, monthly: 75_000, validated: true, activation: -495, number: 'CTR-2024-077', object: 'Link de contingência (fictício)', base: -500, index: 'IPCA' },
   ] as const;
   for (const [i, sc] of scenarios.entries()) {
@@ -407,7 +408,7 @@ async function seedContracts(db: DB, tenantId: string, won: { id: string; ownerI
     const start = day(sc.start);
     const end = new Date(Date.parse(`${start}T12:00:00Z`) + (sc.term * 30.4 - 1) * 86_400_000).toISOString().slice(0, 10);
     const [c] = await db.insert(s.contracts).values({
-      tenantId, contactId: o.contactId, opportunityId: o.id, kind: sc.kind, legalRegime: sc.kind === 'publico' ? 'lei_14133' : 'privado', stage: sc.stage,
+      tenantId, contactId: o.contactId, opportunityId: o.id, kind: sc.kind, billingType: 'billing' in sc ? sc.billing : 'recorrente', legalRegime: sc.kind === 'publico' ? 'lei_14133' : 'privado', stage: sc.stage,
       commercialOwnerId: o.ownerId, operationalOwnerId: userIds[1] ?? null, csmId: userIds[0] ?? null,
       validatedAt: sc.validated ? new Date(Date.parse(`${start}T12:00:00Z`) - 5 * 86_400_000) : null, validatedBy: sc.validated ? userIds[0] ?? null : null,
       erpRef: sc.validated && sc.stage !== 'implantacao' ? `ERP-${1000 + i}` : null,
@@ -419,13 +420,20 @@ async function seedContracts(db: DB, tenantId: string, won: { id: string; ownerI
       tenantId, contractId: c!.id, version: 1, changeKind: 'cadastro', reason: 'Cadastro inicial (fictício)', number: sc.number, object: sc.object,
       signedAt: day(sc.start - 8), startAt: start, endAt: end, termMonths: sc.term, renewalAt: day(0) > end ? end : end,
       activationAt: sc.activation === null ? null : day(sc.activation), billingStartAt: sc.activation === null ? null : day(sc.activation + 1),
-      monthlyCents: sc.monthly, totalCents: sc.monthly * sc.term, billingDay: 10, billingTerms: 'Fatura mensal, vencimento no dia 10',
-      items: [{ planId: null, description: sc.object.replace(' (fictício)', ''), qty: 1, unitCents: sc.monthly }],
+      monthlyCents: sc.monthly, totalCents: 'balance' in sc ? sc.balance : sc.monthly * sc.term, billingDay: 10, billingTerms: 'Fatura mensal, vencimento no dia 10',
+      items: sc.monthly ? [{ planId: null, description: sc.object.replace(' (fictício)', ''), qty: 1, unitCents: sc.monthly }] : [],
       guarantee: 'guarantee' in sc ? { type: 'Seguro-garantia', amountCents: sc.monthly * 6, insurer: 'Seguradora Fictícia', policy: 'AP-0001', expiresAt: sc.guarantee, renewalAt: null } : null,
       publicTerms: 'agency' in sc ? { agency: sc.agency, processNumber: 'PROC-2025-0099', modality: 'Pregão eletrônico', commitmentNote: '2025NE000123', budgetLine: null, extensionMaxMonths: 120 } : null,
       adjustmentIndex: sc.index, adjustmentBaseDate: sc.index ? day(sc.base) : null, createdBy: o.ownerId,
     });
     await db.insert(s.contractEvents).values({ tenantId, contractId: c!.id, actorId: o.ownerId, type: 'cadastro', summary: `Contrato ${sc.number} cadastrado (dado fictício de demonstração)` });
+    if ('balance' in sc) {
+      await db.insert(s.contractLedger).values({ tenantId, contractId: c!.id, kind: 'credito', amountCents: sc.balance, occurredOn: start, description: 'Saldo inicial (fictício)', createdBy: o.ownerId });
+      for (const [k, d] of [[1_850_000, -120], [2_400_000, -70], [1_300_000, -20], [900_000, -3]] as const) await db.insert(s.contractLedger).values({ tenantId, contractId: c!.id, kind: 'consumo', amountCents: k, occurredOn: day(d), description: 'Ordem de serviço (fictícia)', createdBy: o.ownerId });
+    }
+    if ('billing' in sc && sc.billing === 'frequente') {
+      for (const [k, d] of [[45_000, -95], [62_000, -64], [38_000, -33], [71_000, -8], [29_000, -1]] as const) await db.insert(s.contractLedger).values({ tenantId, contractId: c!.id, kind: 'faturamento', amountCents: k, occurredOn: day(d), description: 'Atendimento avulso (fictício)', createdBy: o.ownerId });
+    }
     if (sc.stage === 'implantacao') {
       const done = { doneAt: new Date().toISOString(), doneBy: userIds[0]!, doneByName: 'Demonstração', note: 'Feito (fictício)', value: null };
       await db.insert(s.contractProcesses).values({ tenantId, contractId: c!.id, kind: 'implantacao', cycleKey: 'inicial', steps: { provisionamento: done, implantacao_entrega: done }, dueAt: day(24), ownerId: userIds[1] ?? o.ownerId, openedBy: userIds[0] });

@@ -166,6 +166,8 @@ export const opportunitySelect = {
   engineeringTicket: s.opportunities.engineeringTicket,
   executiveTicket: s.opportunities.executiveTicket,
   handoffStage: s.opportunities.handoffStage,
+  measurementContractId: s.opportunities.measurementContractId,
+  measurementCents: s.opportunities.measurementCents,
   contractId: sql<string | null>`(select c.id from contracts c where c.opportunity_id = "opportunities"."id" limit 1)`,
   stageName: s.pipelineStages.name,
   attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,

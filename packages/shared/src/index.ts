@@ -139,6 +139,8 @@ export const OpportunityCreate = z
     planId: uuid.optional().nullable(),
     /** Jornada. Em branco: a do segmento do cliente ou a padrão. */
     pipelineId: uuid.optional().nullable(),
+    /** Cliente da base: true duplica a oportunidade no funil Sucesso do Cliente. */
+    customerSuccess: z.boolean().optional(),
   })
   .merge(OpportunityDetails)
   .refine((v) => !!v.contactId !== !!v.newContact, {

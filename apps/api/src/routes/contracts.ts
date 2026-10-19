@@ -3,8 +3,8 @@ import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql, type 
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
-  CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS,
-  addDays, daysBetween, endFromTerm, nextAnniversary, type AlertKind,
+  BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS,
+  SEGMENT_LABELS, addDays, daysBetween, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, type AlertKind, type Segment,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -20,6 +20,7 @@ import {
   newVersion, openPendencies, openProcess, sectorOwners, setStage, userById, type ContractRow, type VersionPatch,
 } from '../services/contracts';
 import { runContractAlerts } from '../services/contractAlerts';
+import { ledgerOf } from '../services/contractLedger';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD');
 const optDay = day.nullable().optional();
@@ -45,6 +46,7 @@ const VersionFields = z.object({
 });
 const Header = z.object({
   kind: z.enum(CONTRACT_KINDS).default('privado'),
+  billingType: z.enum(BILLING_TYPES).default('recorrente'),
   legalRegime: z.enum(LEGAL_REGIMES).default('privado'),
   commercialOwnerId: uuid,
   operationalOwnerId: uuid.nullable().default(null),
@@ -52,7 +54,7 @@ const Header = z.object({
   legalLimitAt: optDay,
   nextAction: optText(300), nextActionAt: optDay,
 });
-const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null), contactId: uuid.nullable().default(null), version: VersionFields });
+const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null), contactId: uuid.nullable().default(null), initialBalanceCents: z.number().int().min(0).max(1_000_000_000_000).default(0), version: VersionFields });
 const UpdateBody = Header.partial().extend({ version: VersionFields.partial().optional(), reason: z.string().trim().max(500).optional() });
 
 /** Datas derivadas: término pelo prazo e renovação prevista no dia seguinte ao término. */
@@ -79,7 +81,7 @@ async function assertUsers(db: DbOrTx, auth: AuthContext, ids: (string | null | 
 const owner = alias(s.users, 'ct_owner');
 const v = s.contractVersions;
 const listSelect = {
-  id: s.contracts.id, code: s.contracts.code, stage: s.contracts.stage, kind: s.contracts.kind, legalRegime: s.contracts.legalRegime,
+  id: s.contracts.id, code: s.contracts.code, stage: s.contracts.stage, kind: s.contracts.kind, billingType: s.contracts.billingType, legalRegime: s.contracts.legalRegime,
   contactId: s.contracts.contactId, clientName: s.contacts.name, segment: s.contacts.segment, opportunityId: s.contracts.opportunityId,
   ownerId: s.contracts.commercialOwnerId, ownerName: owner.name, validatedAt: s.contracts.validatedAt, renewed: s.contracts.renewed,
   closureExpected: s.contracts.closureExpected, closureAt: s.contracts.closureAt, nextAction: s.contracts.nextAction, nextActionAt: s.contracts.nextActionAt,
@@ -104,6 +106,7 @@ const ListQuery = z.object({
   q: z.string().trim().max(100).optional(),
   stage: z.enum(CONTRACT_STAGES).optional(),
   kind: z.enum(CONTRACT_KINDS).optional(),
+  billingType: z.enum(BILLING_TYPES).optional(),
   ownerId: uuid.optional(),
   status: z.enum(['ativos', 'encerrados', 'todos']).default('todos'),
   expiringDays: z.coerce.number().int().min(1).max(730).optional(),
@@ -170,12 +173,15 @@ export const contractRoutes = [
       const ver = normalizeVersion(body.version);
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
-          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, kind: body.kind, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
+          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
           commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
         await tx.insert(s.contractVersions).values({ ...ver, tenantId: auth.tenantId, contractId: c!.id, version: 1, changeKind: 'cadastro', reason: 'Cadastro inicial', guarantee: ver.guarantee ?? null, publicTerms: ver.publicTerms ?? null, createdBy: auth.userId } as typeof s.contractVersions.$inferInsert);
-        await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Contrato ${ver.number} cadastrado${oppTitle ? ` a partir da oportunidade “${oppTitle}”` : ''}`, { opportunityId: body.opportunityId });
+        if (body.billingType === 'medicao' && body.initialBalanceCents > 0) {
+          await tx.insert(s.contractLedger).values({ tenantId: auth.tenantId, contractId: c!.id, kind: 'credito', amountCents: body.initialBalanceCents, occurredOn: ver.signedAt ?? new Date().toISOString().slice(0, 10), description: 'Saldo inicial do contrato', createdBy: auth.userId });
+        }
+        await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Contrato ${ver.number} (${BILLING_TYPE_LABELS[body.billingType]}) cadastrado${oppTitle ? ` a partir da oportunidade “${oppTitle}”` : ''}`, { opportunityId: body.opportunityId });
         if (body.opportunityId) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: body.opportunityId, type: 'contrato_cadastrado', actorId: auth.userId, payload: { contractId: c!.id, number: ver.number } });
         return c!;
       });
@@ -198,6 +204,7 @@ export const contractRoutes = [
       if (query.q) { const t = `%${query.q.replace(/[%_\\]/g, '\\$&')}%`; where.push(or(ilike(v.number, t), ilike(s.contacts.name, t), ilike(v.object, t), sql`('CT-' || ${s.contracts.code}::text) ilike ${t}`)); }
       if (query.stage) where.push(eq(s.contracts.stage, query.stage));
       if (query.kind) where.push(eq(s.contracts.kind, query.kind));
+      if (query.billingType) where.push(eq(s.contracts.billingType, query.billingType));
       if (query.ownerId) where.push(eq(s.contracts.commercialOwnerId, query.ownerId));
       if (query.status === 'ativos') where.push(sql`${s.contracts.stage} <> 'arquivado'`);
       if (query.status === 'encerrados') where.push(eq(s.contracts.stage, 'arquivado'));
@@ -212,11 +219,17 @@ export const contractRoutes = [
   defineRoute({
     method: 'GET',
     url: '/contracts/dashboard',
-    summary: 'Painel: contratos por etapa, receita contratada, vencimentos, receita em risco e alertas',
+    summary: 'Painel: faturamento por tipo no período, carteira estratificada, saldo de medição, vencimentos, risco e alertas',
     tag: 'Contratos',
     module: 'contratos',
-    handler: async ({ app, auth }) => {
+    query: z.object({ from: day.optional(), to: day.optional() }),
+    handler: async ({ app, auth, query }) => {
       const today = new Date().toISOString().slice(0, 10);
+      const from = query.from ?? `${today.slice(0, 7)}-01`;
+      const to = query.to ?? today;
+      if (to < from || daysBetween(from, to) > 1100) throw unprocessable('Período inválido (até 3 anos).');
+      const span = daysBetween(from, to) + 1;
+      const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(span - 1));
       const rows = await decorate(app.db, await listQuery(app.db).where(contractScope(auth)));
       const active = rows.filter((r) => r.stage !== 'arquivado' && r.validatedAt);
       const within = (d: number) => active.filter((r) => r.endAt && r.endAt >= today && r.endAt <= addDays(today, d));
@@ -224,7 +237,52 @@ export const contractRoutes = [
       const atRisk = active.filter((r) => r.closureExpected || (r.endAt && r.endAt <= addDays(today, 90) && !renewOpen.some((p) => p.contractId === r.id && p.cycleKey === r.endAt && p.status === 'concluido')));
       const ids = rows.map((r) => r.id);
       const alerts = ids.length ? await app.db.select({ kind: s.contractAlerts.kind, dueAt: s.contractAlerts.dueAt, contractId: s.contractAlerts.contractId, id: s.contractAlerts.id, detail: s.contractAlerts.detail }).from(s.contractAlerts).where(and(inArray(s.contractAlerts.contractId, ids), eq(s.contractAlerts.status, 'aberto'))).orderBy(asc(s.contractAlerts.dueAt)) : [];
+      const ledger = ids.length ? await app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : [];
+      // faturamento do período por contrato (registrado no CRM; recorrente = previsto pela mensalidade)
+      const billed = (r: (typeof rows)[number], f: string, t: string) => {
+        if (r.billingType === 'recorrente') return r.validatedAt ? recurringBilledInPeriod(r.monthlyCents, r.billingStartAt ?? r.activationAt ?? r.startAt, r.archivedAt ? r.archivedAt.toISOString().slice(0, 10) : r.endAt, f, t) : 0;
+        const inP = ledger.filter((e) => e.contractId === r.id && e.occurredOn >= f && e.occurredOn <= t);
+        if (r.billingType === 'frequente') return inP.filter((e) => e.kind === 'faturamento').reduce((a, e) => a + e.amountCents, 0);
+        return inP.reduce((a, e) => a + (e.kind === 'consumo' ? e.amountCents : e.kind === 'estorno' ? -e.amountCents : 0), 0);
+      };
+      const withBilling = rows.map((r) => ({ ...r, billedCents: billed(r, from, to), billedPrevCents: billed(r, prevFrom, prevTo), ledger: ledgerTotals(ledger.filter((e) => e.contractId === r.id)) }));
+      const sumBy = <K extends string>(keyOf: (r: (typeof withBilling)[number]) => K, label: (k: K) => string) => {
+        const m = new Map<K, { n: number; monthlyCents: number; billedCents: number }>();
+        for (const r of withBilling.filter((x) => (x.stage !== 'arquivado' && x.validatedAt) || x.billedCents)) { const k = keyOf(r); const v = m.get(k) ?? { n: 0, monthlyCents: 0, billedCents: 0 }; if (r.stage !== 'arquivado') { v.n++; v.monthlyCents += r.monthlyCents; } v.billedCents += r.billedCents; m.set(k, v); }
+        return [...m.entries()].map(([key, v]) => ({ key, label: label(key), ...v })).sort((a, b) => b.billedCents - a.billedCents || b.monthlyCents - a.monthlyCents);
+      };
+      const meas = withBilling.filter((r) => r.billingType === 'medicao' && r.stage !== 'arquivado');
+      const byType = BILLING_TYPES.map((t) => {
+        const list = withBilling.filter((r) => r.billingType === t);
+        const act = list.filter((r) => r.stage !== 'arquivado' && r.validatedAt);
+        return {
+          type: t, label: BILLING_TYPE_LABELS[t], active: act.length,
+          billedCents: list.reduce((a, r) => a + r.billedCents, 0), billedPrevCents: list.reduce((a, r) => a + r.billedPrevCents, 0),
+          monthlyCents: act.reduce((a, r) => a + r.monthlyCents, 0),
+          ...(t === 'medicao' ? { balance: { credited: meas.reduce((a, r) => a + r.ledger.credited, 0), consumed: meas.reduce((a, r) => a + r.ledger.consumed, 0), available: meas.reduce((a, r) => a + r.ledger.available, 0) } } : {}),
+        };
+      });
+      const months = Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 1 + i, 1)).toISOString().slice(0, 7));
+      const ages = active.filter((r) => r.startAt).map((r) => Math.max(0, daysBetween(r.startAt!, today)) / 30.4);
+      const remaining = active.filter((r) => r.endAt && r.endAt >= today).map((r) => daysBetween(today, r.endAt!) / 30.4);
+      const avg = (a: number[]) => (a.length ? Math.round((a.reduce((x, y) => x + y, 0) / a.length) * 10) / 10 : null);
+      const clientMap = new Map<string, { contactId: string; name: string; contracts: number; monthlyCents: number; billedCents: number }>();
+      for (const r of withBilling) { const c = clientMap.get(r.contactId) ?? { contactId: r.contactId, name: r.clientName, contracts: 0, monthlyCents: 0, billedCents: 0 }; if (r.stage !== 'arquivado') { c.contracts++; c.monthlyCents += r.monthlyCents; } c.billedCents += r.billedCents; clientMap.set(r.contactId, c); }
+      const totalBilled = byType.reduce((a, t) => a + t.billedCents, 0);
       return {
+        period: { from, to, prevFrom, prevTo },
+        billing: { totalCents: totalBilled, prevTotalCents: byType.reduce((a, t) => a + t.billedPrevCents, 0), byType, note: 'Faturamento registrado no CRM: recorrente pela mensalidade dos meses faturáveis (previsto), frequente pelos lançamentos e medição pelos consumos. O faturado no ERP entra com a integração.' },
+        byBillingType: sumBy((r) => r.billingType as (typeof BILLING_TYPES)[number], (k) => BILLING_TYPE_LABELS[k]),
+        byKind: sumBy((r) => r.kind, (k) => (k === 'publico' ? 'Público' : 'Privado')),
+        bySegment: sumBy((r) => r.segment, (k) => SEGMENT_LABELS[k as Segment] ?? k),
+        byOwner: sumBy((r) => r.ownerName ?? 'Sem responsável', (k) => k),
+        topClients: [...clientMap.values()].sort((a, b) => b.billedCents - a.billedCents || b.monthlyCents - a.monthlyCents).slice(0, 10),
+        expiringByMonth: months.map((m) => ({ month: m, ...Object.fromEntries(BILLING_TYPES.map((t) => [t, active.filter((r) => r.billingType === t && r.endAt?.startsWith(m)).length])), monthlyCents: active.filter((r) => r.endAt?.startsWith(m)).reduce((a, r) => a + r.monthlyCents, 0) })),
+        measurement: {
+          contracts: meas.length,
+          lowBalance: meas.filter((r) => r.ledger.credited > 0 && r.ledger.available / r.ledger.credited < 0.2).map((r) => ({ id: r.id, number: r.number, clientName: r.clientName, credited: r.ledger.credited, available: r.ledger.available, usedShare: r.ledger.usedShare })),
+        },
+        portfolio: { avgTicketCents: active.length ? Math.round(active.reduce((a, r) => a + r.monthlyCents, 0) / active.length) : null, avgAgeMonths: avg(ages), avgRemainingMonths: avg(remaining), renewalPipelineCents: within(90).reduce((a, r) => a + r.monthlyCents, 0), publicShare: active.length ? active.filter((r) => r.kind === 'publico').length / active.length : null },
         byStage: CONTRACT_STAGES.map((st) => ({ stage: st, label: CONTRACT_STAGE_LABELS[st], n: rows.filter((r) => r.stage === st).length, monthlyCents: rows.filter((r) => r.stage === st).reduce((a, r) => a + r.monthlyCents, 0) })),
         active: active.length,
         archived: rows.filter((r) => r.stage === 'arquivado').length,
@@ -298,6 +356,84 @@ export const contractRoutes = [
         return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="contratos-vencendo-${month}.csv"`).send(`﻿${[head.join(';'), ...lines].join('\r\n')}\r\n`);
       }
       return { month, from, to, items, monthlyCents: items.reduce((a, r) => a + r.monthlyCents, 0) };
+    },
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/contracts/reports/full',
+    summary: 'Relatório completo de contratos: cadastro, datas, valores, faturamento no período, saldo, reajuste, garantia, processos e pendências. format=csv para planilha.',
+    tag: 'Contratos',
+    module: 'contratos',
+    query: z.object({ from: day.optional(), to: day.optional(), status: z.enum(['ativos', 'encerrados', 'todos']).default('todos'), billingType: z.enum(BILLING_TYPES).optional(), kind: z.enum(CONTRACT_KINDS).optional(), stage: z.enum(CONTRACT_STAGES).optional(), ownerId: uuid.optional(), format: z.enum(['json', 'csv']).default('json') }),
+    handler: async ({ app, auth, query, reply }) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const from = query.from ?? `${today.slice(0, 4)}-01-01`, to = query.to ?? today;
+      if (to < from) throw unprocessable('Período inválido.');
+      const where: (SQL | undefined)[] = [contractScope(auth)];
+      if (query.status === 'ativos') where.push(sql`${s.contracts.stage} <> 'arquivado'`);
+      if (query.status === 'encerrados') where.push(eq(s.contracts.stage, 'arquivado'));
+      if (query.billingType) where.push(eq(s.contracts.billingType, query.billingType));
+      if (query.kind) where.push(eq(s.contracts.kind, query.kind));
+      if (query.stage) where.push(eq(s.contracts.stage, query.stage));
+      if (query.ownerId) where.push(eq(s.contracts.commercialOwnerId, query.ownerId));
+      const rows = await decorate(app.db, await listQuery(app.db).where(and(...where)).orderBy(asc(s.contacts.name), asc(v.number)));
+      const ids = rows.map((r) => r.id);
+      const extra = ids.length ? await app.db.select({ id: s.contracts.id, document: s.contacts.document, operationalOwnerId: s.contracts.operationalOwnerId, csmId: s.contracts.csmId, closureReason: s.contracts.closureReason, legalLimitAt: s.contracts.legalLimitAt, renewalAt: v.renewalAt, adjustmentRule: v.adjustmentRule, billingDay: v.billingDay, opportunityCode: s.opportunities.code })
+        .from(s.contracts).innerJoin(v, and(eq(v.contractId, s.contracts.id), eq(v.version, s.contracts.currentVersion))).innerJoin(s.contacts, eq(s.contacts.id, s.contracts.contactId)).leftJoin(s.opportunities, eq(s.opportunities.id, s.contracts.opportunityId)).where(inArray(s.contracts.id, ids)) : [];
+      const people = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(eq(s.users.tenantId, auth.tenantId));
+      const pname = (id: string | null | undefined) => people.find((p) => p.id === id)?.name ?? '';
+      const ledger = ids.length ? await app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : [];
+      const procs = ids.length ? await app.db.select({ contractId: s.contractProcesses.contractId, kind: s.contractProcesses.kind, status: s.contractProcesses.status }).from(s.contractProcesses).where(inArray(s.contractProcesses.contractId, ids)) : [];
+      const items = rows.map((r) => {
+        const x = extra.find((e) => e.id === r.id);
+        const led = ledger.filter((e) => e.contractId === r.id);
+        const inP = led.filter((e) => e.occurredOn >= from && e.occurredOn <= to);
+        const billedCents = r.billingType === 'recorrente'
+          ? (r.validatedAt ? recurringBilledInPeriod(r.monthlyCents, r.billingStartAt ?? r.activationAt ?? r.startAt, r.archivedAt ? r.archivedAt.toISOString().slice(0, 10) : r.endAt, from, to) : 0)
+          : r.billingType === 'frequente' ? inP.filter((e) => e.kind === 'faturamento').reduce((a, e) => a + e.amountCents, 0)
+            : inP.reduce((a, e) => a + (e.kind === 'consumo' ? e.amountCents : e.kind === 'estorno' ? -e.amountCents : 0), 0);
+        const totals = ledgerTotals(led);
+        return {
+          ...r, document: x?.document ?? null, operationalOwnerName: pname(x?.operationalOwnerId), csmName: pname(x?.csmId), closureReason: x?.closureReason ?? null, legalLimitAt: x?.legalLimitAt ?? null,
+          renewalAt: x?.renewalAt ?? null, adjustmentRule: x?.adjustmentRule ?? null, billingDay: x?.billingDay ?? null, opportunityCode: x?.opportunityCode ?? null,
+          billedCents, balance: r.billingType === 'medicao' ? totals : null,
+          openProcesses: procs.filter((p) => p.contractId === r.id && p.status === 'aberto').map((p) => p.kind),
+        };
+      });
+      const sum = (list: typeof items, f: (r: (typeof items)[number]) => number) => list.reduce((a, r) => a + f(r), 0);
+      const summary = {
+        contracts: items.length, active: items.filter((r) => r.stage !== 'arquivado' && r.validatedAt).length, archived: items.filter((r) => r.stage === 'arquivado').length,
+        monthlyCents: sum(items.filter((r) => r.stage !== 'arquivado'), (r) => r.monthlyCents), globalCents: sum(items.filter((r) => r.stage !== 'arquivado'), (r) => r.totalCents ?? r.monthlyCents * (r.termMonths ?? 12)),
+        billedCents: sum(items, (r) => r.billedCents),
+        byType: BILLING_TYPES.map((t) => ({ type: t, label: BILLING_TYPE_LABELS[t], n: items.filter((r) => r.billingType === t).length, monthlyCents: sum(items.filter((r) => r.billingType === t && r.stage !== 'arquivado'), (r) => r.monthlyCents), billedCents: sum(items.filter((r) => r.billingType === t), (r) => r.billedCents) })),
+        byStage: CONTRACT_STAGES.map((st) => ({ stage: st, label: CONTRACT_STAGE_LABELS[st], n: items.filter((r) => r.stage === st).length })).filter((x) => x.n),
+        measurement: { credited: sum(items, (r) => r.balance?.credited ?? 0), consumed: sum(items, (r) => r.balance?.consumed ?? 0), available: sum(items, (r) => r.balance?.available ?? 0) },
+        pendencies: { alerts: sum(items, (r) => r.pendencies.alerts), overdue: sum(items, (r) => r.pendencies.overdue) },
+      };
+      if (query.format === 'csv') {
+        const esc = (val: unknown) => { const t = String(val ?? ''); return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+        const d = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
+        const money = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
+        const cols: [string, (r: (typeof items)[number]) => unknown][] = [
+          ['Código', (r) => `CT-${r.code}`], ['Número', (r) => r.number], ['Cliente', (r) => r.clientName], ['CPF/CNPJ', (r) => r.document], ['Categoria', (r) => SEGMENT_LABELS[r.segment as Segment] ?? r.segment],
+          ['Tipo de contrato', (r) => BILLING_TYPE_LABELS[r.billingType as keyof typeof BILLING_TYPE_LABELS]], ['Público/privado', (r) => (r.kind === 'publico' ? 'Público' : 'Privado')], ['Regime', (r) => r.legalRegime],
+          ['Etapa', (r) => CONTRACT_STAGE_LABELS[r.stage as keyof typeof CONTRACT_STAGE_LABELS]], ['Objeto', (r) => r.object],
+          ['Responsável comercial', (r) => r.ownerName], ['Responsável operacional', (r) => r.operationalOwnerName], ['CSM', (r) => r.csmName],
+          ['Assinatura', (r) => d(r.signedAt)], ['Início vigência', (r) => d(r.startAt)], ['Término vigência', (r) => d(r.endAt)], ['Prazo (meses)', (r) => r.termMonths], ['Dias restantes', (r) => (r.stage === 'arquivado' ? '' : r.daysLeft)],
+          ['Renovação prevista', (r) => d(r.renewalAt)], ['Ativação técnica', (r) => d(r.activationAt)], ['Início faturamento', (r) => d(r.billingStartAt)], ['Dia faturamento', (r) => r.billingDay],
+          ['Valor mensal (R$)', (r) => money(r.monthlyCents)], ['Valor global (R$)', (r) => money(r.totalCents)], [`Faturado ${d(from)} a ${d(to)} (R$)`, (r) => money(r.billedCents)],
+          ['Saldo contratado (R$)', (r) => money(r.balance?.credited)], ['Saldo consumido (R$)', (r) => money(r.balance?.consumed)], ['Saldo disponível (R$)', (r) => money(r.balance?.available)],
+          ['Índice reajuste', (r) => r.adjustmentIndex], ['Data-base', (r) => d(r.adjustmentBaseDate)], ['Regra de reajuste', (r) => r.adjustmentRule],
+          ['Garantia', (r) => r.guarantee?.type], ['Vencimento garantia', (r) => d(r.guarantee?.expiresAt)], ['Limite legal', (r) => d(r.legalLimitAt)],
+          ['ERP', (r) => r.erpRef], ['Renovado', (r) => (r.renewed ? 'Sim' : 'Não')], ['Encerramento previsto', (r) => (r.closureExpected ? `${d(r.closureAt)} ${r.closureReason ?? ''}`.trim() : '')],
+          ['Processos abertos', (r) => r.openProcesses.join(', ')], ['Alertas abertos', (r) => r.pendencies.alerts], ['Alertas atrasados', (r) => r.pendencies.overdue],
+          ['Próxima ação', (r) => r.nextAction], ['Data próxima ação', (r) => d(r.nextActionAt)], ['Versão', (r) => r.version], ['Validado em', (r) => (r.validatedAt ? r.validatedAt.toISOString().slice(0, 10).split('-').reverse().join('/') : '')], ['Oportunidade', (r) => (r.opportunityCode ? `OP-${r.opportunityCode}` : '')],
+        ];
+        const lines = [cols.map(([h]) => esc(h)).join(';'), ...items.map((r) => cols.map(([, f]) => esc(f(r))).join(';'))];
+        return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="relatorio-contratos-${from}-a-${to}.csv"`).send(`\uFEFF${lines.join('\r\n')}\r\n`);
+      }
+      return { period: { from, to }, summary, items };
     },
   }),
 
@@ -425,7 +561,7 @@ export const contractRoutes = [
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId]);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
-        for (const k of ['kind', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'legalLimitAt', 'nextAction', 'nextActionAt'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
+        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'legalLimitAt', 'nextAction', 'nextActionAt'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
         if (header.kind === 'privado') header.legalRegime = 'privado';
         const changedHeader = Object.keys(header).filter((k) => JSON.stringify((header as Record<string, unknown>)[k]) !== JSON.stringify((c as Record<string, unknown>)[k]));
         if (changedHeader.length) {
@@ -466,7 +602,8 @@ export const contractRoutes = [
       if (!canManage(auth)) throw forbidden('A validação é feita por Administração, Inteligência Comercial, Diretoria ou gerência.');
       const cur = await currentVersion(app.db, c);
       const missing = [
-        !cur.signedAt && 'data de assinatura', !cur.startAt && 'início da vigência', !cur.endAt && 'término da vigência', !cur.monthlyCents && 'valor mensal', !cur.items.length && 'produtos e serviços',
+        !cur.signedAt && 'data de assinatura', !cur.startAt && 'início da vigência', !cur.endAt && 'término da vigência', c.billingType === 'recorrente' && !cur.monthlyCents && 'valor mensal',
+        c.billingType === 'medicao' && !(await ledgerOf(app.db, c.id)).totals.credited && 'saldo do contrato (medição)', c.billingType !== 'medicao' && !cur.items.length && 'produtos e serviços',
         c.kind === 'publico' && !cur.publicTerms?.agency && 'órgão contratante',
       ].filter(Boolean);
       if (missing.length) throw unprocessable(`Complete antes de validar: ${missing.join(', ')}.`, missing.map((m) => ({ path: 'version', message: String(m) })));

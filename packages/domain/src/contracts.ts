@@ -257,3 +257,58 @@ Atenciosamente,
 
 {{responsavel.nome}}
 {{empresa.nome}}`;
+
+// ------------------------------------------------------------------ tipos de contrato e extrato
+export const BILLING_TYPES = ['recorrente', 'frequente', 'medicao'] as const;
+export type BillingType = (typeof BILLING_TYPES)[number];
+export const BILLING_TYPE_LABELS: Record<BillingType, string> = { recorrente: 'Recorrente', frequente: 'Frequente', medicao: 'Medição' };
+export const BILLING_TYPE_HINTS: Record<BillingType, string> = {
+  recorrente: 'Mensalidade fixa durante a vigência.',
+  frequente: 'Cobranças lançadas a cada ocorrência, com valor variável.',
+  medicao: 'Saldo contratado consumido pelas negociações (oportunidades).',
+};
+export const LEDGER_KINDS = ['credito', 'consumo', 'estorno', 'faturamento'] as const;
+export type LedgerKind = (typeof LEDGER_KINDS)[number];
+export const LEDGER_LABELS: Record<LedgerKind, string> = { credito: 'Crédito de saldo', consumo: 'Consumo', estorno: 'Estorno', faturamento: 'Lançamento de faturamento' };
+
+/** Saldo do contrato por medição: créditos − consumos + estornos. */
+export function ledgerTotals(entries: { kind: string; amountCents: number }[]) {
+  const sum = (k: string) => entries.filter((e) => e.kind === k).reduce((a, e) => a + e.amountCents, 0);
+  const credited = sum('credito'), consumed = sum('consumo') - sum('estorno'), billed = sum('faturamento');
+  return { credited, consumed, billed, available: credited - consumed, usedShare: credited ? consumed / credited : null };
+}
+
+/**
+ * Faturamento do período por tipo (registrado no CRM até o ERP ser integrado):
+ * recorrente = mensalidade × meses de vigência ativos no período (previsto);
+ * frequente = lançamentos de faturamento; medição = consumos líquidos.
+ */
+export function recurringBilledInPeriod(monthlyCents: number, billingStart: string | null, endAt: string | null, from: string, to: string) {
+  if (!billingStart || monthlyCents <= 0) return 0;
+  let months = 0;
+  let cur = `${from.slice(0, 7)}-01`;
+  while (cur <= to) {
+    const monthEnd = addDays(addMonths(cur, 1), -1);
+    if (billingStart <= monthEnd && (!endAt || endAt >= cur)) months++;
+    cur = addMonths(cur, 1);
+  }
+  return months * monthlyCents;
+}
+
+/** Variáveis do sistema disponíveis nos modelos de contrato. */
+export const CONTRACT_TEMPLATE_VARIABLES: { key: string; label: string }[] = [
+  { key: 'cliente.nome', label: 'Nome/razão social do cliente' }, { key: 'cliente.documento', label: 'CPF/CNPJ' }, { key: 'cliente.email', label: 'E-mail do cliente' },
+  { key: 'cliente.telefone', label: 'Telefone do cliente' }, { key: 'cliente.endereco', label: 'Endereço do cliente' },
+  { key: 'contrato.numero', label: 'Número do contrato' }, { key: 'contrato.codigo', label: 'Código interno (CT-…)' }, { key: 'contrato.objeto', label: 'Objeto' },
+  { key: 'contrato.tipo', label: 'Tipo (Recorrente, Frequente, Medição)' }, { key: 'contrato.assinatura', label: 'Data de assinatura' },
+  { key: 'contrato.inicio', label: 'Início da vigência' }, { key: 'contrato.termino', label: 'Término da vigência' }, { key: 'contrato.prazo_meses', label: 'Prazo em meses' },
+  { key: 'contrato.valor_mensal', label: 'Valor mensal (R$)' }, { key: 'contrato.valor_global', label: 'Valor global (R$)' }, { key: 'contrato.saldo', label: 'Saldo contratado (medição)' },
+  { key: 'contrato.dia_faturamento', label: 'Dia de faturamento' }, { key: 'contrato.condicoes_faturamento', label: 'Condições de faturamento' },
+  { key: 'contrato.indice_reajuste', label: 'Índice de reajuste' }, { key: 'contrato.data_base', label: 'Data-base do reajuste' }, { key: 'contrato.condicoes_especificas', label: 'Condições específicas' },
+  { key: 'contrato.orgao', label: 'Órgão contratante (público)' }, { key: 'contrato.processo', label: 'Processo administrativo' },
+  { key: 'contrato.itens_texto', label: 'Itens em texto (uma linha por item)' },
+  { key: 'responsavel.nome', label: 'Responsável comercial' }, { key: 'empresa.nome', label: 'Nome da empresa' },
+  { key: 'data_hoje', label: 'Data de hoje' }, { key: 'data_extenso', label: 'Data de hoje por extenso' },
+];
+/** Bloco de repetição para a tabela de itens: {{#itens}} {{descricao}} {{quantidade}} {{valor_unitario}} {{valor_total}} {{/itens}} */
+export const CONTRACT_ITEM_LOOP = ['descricao', 'quantidade', 'valor_unitario', 'valor_total'];

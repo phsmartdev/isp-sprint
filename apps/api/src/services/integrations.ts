@@ -9,12 +9,12 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { encryptSecret } from './email';
 
-export const INTEGRATION_KINDS = ['ixc', 'zapi', 'whatsapp', 'meta', 'site'] as const;
+export const INTEGRATION_KINDS = ['ixc', 'zapi', 'zapsign', 'whatsapp', 'meta', 'site'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
 
 /** O que cada integração pede. A tela é montada a partir daqui. */
-export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; description: string; fields: Field[]; receivesLeads: boolean; status: string }> = {
+export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; description: string; fields: Field[]; receivesLeads: boolean; status: string; webhook?: boolean }> = {
   ixc: {
     name: 'IXC Provedor',
     description: 'Clientes, contratos, planos, cobertura e faturas. Credenciais guardadas cifradas; a leitura automática é ativada na Fase 4, depois de conferir os endpoints na sua instância.',
@@ -37,6 +37,17 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
       { key: 'clientToken', label: 'Token de segurança da conta (Client-Token)', secret: true, hint: 'Painel → Segurança. Obrigatório se estiver ativado lá.' },
       { key: 'defaultOwnerId', label: 'Responsável pelos leads', type: 'user' },
       { key: 'sourceName', label: 'Canal de entrada', hint: 'Padrão: WhatsApp' },
+    ],
+  },
+  zapsign: {
+    name: 'ZapSign (assinatura eletrônica)',
+    description: 'Envia contratos e aditivos para assinatura e traz o documento assinado de volta para a ficha do contrato. No painel da ZapSign, em Configurações → Integrações → Webhooks, cadastre o endereço abaixo.',
+    receivesLeads: false,
+    webhook: true,
+    status: '',
+    fields: [
+      { key: 'apiToken', label: 'Token da API', secret: true, hint: 'ZapSign → Configurações → Integrações → ZAPSIGN API' },
+      { key: 'environment', label: 'Ambiente', hint: 'producao ou sandbox (sandbox não tem validade jurídica)' },
     ],
   },
   whatsapp: {
@@ -113,7 +124,7 @@ export async function logEvent(db: DbOrTx, tenantId: string, kind: IntegrationKi
   await db.update(s.integrations).set({ lastEventAt: new Date() }).where(and(eq(s.integrations.tenantId, tenantId), eq(s.integrations.kind, kind)));
 }
 
-const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
+const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', zapsign: 'ZapSign', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
 const clean = (v: unknown, max = 200) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const digits = (v: string | null) => (v ? v.replace(/\D/g, '') : '');
 

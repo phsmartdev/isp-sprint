@@ -73,6 +73,8 @@ export const dataAdminRoutes = [
           // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
           await tx.delete(s.contractAlerts).where(eq(s.contractAlerts.tenantId, t));
+          await tx.delete(s.contractLedger).where(eq(s.contractLedger.tenantId, t));
+          await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));
           await tx.delete(s.contractDocuments).where(eq(s.contractDocuments.tenantId, t));
           await tx.delete(s.contractProcesses).where(eq(s.contractProcesses.tenantId, t));
           await tx.delete(s.contractEvents).where(eq(s.contractEvents.tenantId, t));

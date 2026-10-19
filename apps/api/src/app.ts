@@ -25,6 +25,8 @@ import { customFieldRoutes } from './routes/customFields';
 import { contractRoutes } from './routes/contracts';
 import { contractWorkRoutes } from './routes/contractWork';
 import { contractInsightRoutes } from './routes/contractInsights';
+import { contractLedgerRoutes } from './routes/contractLedger';
+import { contractTemplateRoutes } from './routes/contractTemplates';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -123,6 +125,8 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractRoutes,
     ...contractWorkRoutes,
     ...contractInsightRoutes,
+    ...contractLedgerRoutes,
+    ...contractTemplateRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,
