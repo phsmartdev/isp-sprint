@@ -399,32 +399,7 @@ export function AdminSources() {
 }
 
 // =================================================================== integrações e notificações
-export function AdminIntegrations() {
-  const q = useQuery({ queryKey: ['admin', 'overview'], queryFn: () => api<Overview>('/admin/overview') });
-  const smtp = useQuery({ queryKey: ['admin', 'smtp'], queryFn: () => api<{ configured: boolean; enabled?: boolean; lastTestOk?: boolean | null }>('/admin/smtp') });
-  const smtpStatus = !smtp.data?.configured ? 'Não configurado' : !smtp.data.enabled ? 'Desligado' : smtp.data.lastTestOk === false ? 'Último teste falhou' : 'Configurado';
-  const items = [
-    { name: 'IXC Provedor', desc: 'Clientes, contratos, planos, cobertura e faturas.', status: `Simulado (${q.data?.system.ixcMode ?? 'mock'}) — leitura real na Fase 4`, icon: <Database className="h-6 w-6" /> },
-    { name: 'WhatsApp Business', desc: 'Envio de propostas e lembretes pelo WhatsApp.', status: 'Não conectado', icon: <MessageSquare className="h-6 w-6" /> },
-    { name: 'E-mail (SMTP)', desc: 'Alertas e envio de propostas por e-mail.', status: smtpStatus, icon: <FileText className="h-6 w-6" />, to: '/settings/email' },
-  ];
-  return (
-    <section className="card p-5">
-      <h2 className="text-lg font-bold text-ink">Integrações</h2>
-      <p className="mb-4 text-sm text-muted">Credenciais ficam só no servidor e nunca aparecem aqui.</p>
-      <ul className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        {items.map((i) => (
-          <li key={i.name} className="rounded-md border border-line p-4">
-            <span className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-primary-soft text-primary">{i.icon}</span>
-            <p className="font-bold text-ink">{i.name}</p>
-            <p className="text-sm text-muted">{i.desc}</p>
-            <p className="mt-3 flex items-center gap-2"><Chip tone="neutral">{i.status}</Chip>{'to' in i && i.to && <Link className="link text-sm" to={i.to}>Configurar</Link>}</p>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
+export { AdminIntegrations } from './Integrations';
 
 // =================================================================== segurança
 type SecurityData = { profiles: { key: ProfileKey; users: number }[]; modules: { key: Module; allowed: AccessLevel[] }[]; matrix: Record<ProfileKey, Record<Module, AccessLevel>>; defaults: Record<ProfileKey, Record<Module, AccessLevel>> };

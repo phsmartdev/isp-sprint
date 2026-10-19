@@ -20,6 +20,7 @@ import { homeRoutes } from './routes/home';
 import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
 import { insightsRoutes } from './routes/insights';
+import { integrationRoutes } from './routes/integrations';
 import { adminRoutes } from './routes/admin';
 import { metaRoutes } from './routes/meta';
 import { sprintRoutes } from './routes/sprint';
@@ -53,7 +54,10 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
   app.decorateRequest('auth', null);
 
   await app.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } });
-  await app.register(cors, { origin: config.webOrigins, credentials: true, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] });
+  // webhooks de integração (formulário do site em outro domínio) aceitam qualquer origem, sem cookies
+  await app.register(cors, {
+    delegator: (req, cb) => cb(null, req.url?.startsWith('/api/v1/hooks/') ? { origin: true, credentials: false, methods: ['GET', 'POST'] } : { origin: config.webOrigins, credentials: true, methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] }),
+  });
   await app.register(cookie, { secret: config.cookieSecret });
   await app.register(rateLimit, { max: opts.rateLimitMax ?? 600, timeWindow: '1 minute' });
 
@@ -62,7 +66,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     reply.header('cache-control', 'no-store');
     if (!req.url.startsWith('/api/')) return;
     // CSRF: navegador sempre envia Origin em requisições que alteram estado; se vier, precisa ser permitido.
-    if (MUTATING.has(req.method)) {
+    if (MUTATING.has(req.method) && !req.url.startsWith('/api/v1/hooks/')) {
       const origin = req.headers.origin;
       if (origin && !config.webOrigins.includes(origin)) {
         return sendProblem(reply, req, { status: 403, title: 'Origem não permitida', detail: 'Requisição bloqueada (proteção CSRF).' });
@@ -107,6 +111,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...reportRoutes,
     ...intelligenceRoutes,
     ...insightsRoutes,
+    ...integrationRoutes,
     ...adminRoutes,
   ]);
   app.get(`${API_PREFIX}/openapi.json`, async () => buildOpenApi(routeRegistry));

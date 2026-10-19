@@ -152,4 +152,34 @@ describe('autonomia da operação e engenharia', () => {
     expect(d.relacionamento.cancelReasons.length).toBeGreaterThan(0);
     expect((await lucas.get('/intelligence/general')).statusCode).toBe(403);
   });
+
+  it('integrações: site cria lead sem duplicar, WhatsApp verifica webhook e cria lead, segredo não volta', async () => {
+    ok(await carlos.put('/admin/integrations/site', { enabled: true, config: { defaultOwnerId: lucas.me.user.id, sourceName: 'Site' }, secrets: {} }));
+    ok(await carlos.put('/admin/integrations/whatsapp', { enabled: true, config: { phoneNumberId: '123' }, secrets: { verifyToken: 'codigo-secreto', accessToken: 'tok-123' } }));
+    const list = (await carlos.get('/admin/integrations')).json();
+    expect(JSON.stringify(list)).not.toContain('tok-123');
+    const site = list.items.find((i: { kind: string }) => i.kind === 'site');
+    const wa = list.items.find((i: { kind: string }) => i.kind === 'whatsapp');
+    expect(wa.secretsSet.accessToken).toBe(true);
+    const sitePath = new URL(site.webhookUrl).pathname;
+    const post = (url: string, payload: unknown, origin = 'https://www.site-externo.test') => ctx.app.inject({ method: 'POST', url, headers: { origin, 'content-type': 'application/json' }, payload: payload as object });
+    const r1 = await post(sitePath, { nome: 'Lead do Site Fictício', telefone: '(00) 98888-7777', email: 'site@exemplo.test', mensagem: 'Quero 500 Mega', utm_source: 'google' });
+    expect(r1.statusCode).toBe(201);
+    expect(r1.json().status).toBe('lead_criado');
+    expect(r1.headers['access-control-allow-origin']).toBeTruthy();
+    const r2 = await post(sitePath, { nome: 'Lead do Site Fictício', telefone: '00988887777' });
+    expect(r2.json().status).toBe('duplicado');
+    expect((await post(sitePath.replace(/[^/]+$/, 'x'.repeat(30)), { nome: 'X', telefone: '1' })).statusCode).toBe(404);
+    const waPath = new URL(wa.webhookUrl).pathname;
+    const bad = await ctx.app.inject({ method: 'GET', url: `${waPath}?hub.mode=subscribe&hub.verify_token=errado&hub.challenge=42` });
+    expect(bad.statusCode).toBe(401);
+    const good = await ctx.app.inject({ method: 'GET', url: `${waPath}?hub.mode=subscribe&hub.verify_token=codigo-secreto&hub.challenge=42` });
+    expect(good.body).toBe('42');
+    const msg = await post(waPath, { entry: [{ changes: [{ value: { contacts: [{ wa_id: '5500911112222', profile: { name: 'Contato WhatsApp Fictício' } }], messages: [{ from: '5500911112222', type: 'text', text: { body: 'Oi, quero internet' } }] } }] }] }, 'https://graph.facebook.com');
+    ok(msg);
+    const events = (await carlos.get('/admin/integrations')).json().events;
+    expect(events.map((e: { status: string }) => e.status)).toEqual(expect.arrayContaining(['lead_criado', 'duplicado']));
+    const leads = (await lucas.get('/leads?q=Fict%C3%ADcio&pageSize=50')).json();
+    expect(leads.items.some((l: { name?: string; contactName?: string }) => (l.name ?? l.contactName) === 'Lead do Site Fictício')).toBe(true);
+  });
 });

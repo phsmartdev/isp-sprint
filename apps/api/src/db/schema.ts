@@ -885,3 +885,42 @@ export const viabilitySettings = pgTable('viability_settings', {
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 });
+
+// ------------------------------------------------------------------ integrações (IXC, WhatsApp, Meta, Site)
+export const integrations = pgTable(
+  'integrations',
+  {
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    kind: text('kind').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    /** Configuração sem segredo (endereço, ids, responsável e origem padrão dos leads). */
+    config: jsonb('config').$type<Record<string, string | null>>().notNull().default({}),
+    /** Segredos cifrados (AES-256-GCM), por nome. Nunca voltam para a tela. */
+    secrets: jsonb('secrets').$type<Record<string, string>>().notNull().default({}),
+    /** Código secreto na URL do webhook (recebimento). */
+    webhookToken: text('webhook_token').notNull(),
+    lastEventAt: ts('last_event_at'),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.kind] }),
+    tokenUq: uniqueIndex('integrations_token_uq').on(t.webhookToken),
+    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'whatsapp', 'meta', 'site'])),
+  }),
+);
+
+export const integrationEvents = pgTable(
+  'integration_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    kind: text('kind').notNull(),
+    /** recebido | lead_criado | duplicado | ignorado | erro */
+    status: text('status').notNull(),
+    summary: text('summary').notNull(),
+    leadId: uuid('lead_id'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ byTenant: index('integration_events_tenant_idx').on(t.tenantId, t.createdAt) }),
+);
