@@ -227,4 +227,16 @@ describe('autonomia da operação e engenharia', () => {
     const simB = (await carlos.post('/viability/simulate', { planId: b.id, saleType: 'ativa', cableMeters: 50 })).json();
     expect(simB.monthlyDeductions.some((l: { label: string }) => l.label.includes('PLAYHUB TESTE'))).toBe(false);
   });
+
+  it('ativos em uma data e mapa de calor por endereço', async () => {
+    const d = (await carlos.get('/intelligence/general?from=2026-01-01&to=2026-06-30')).json();
+    expect(d.negocio.activeOn.date).toBe('2026-06-30');
+    expect(d.negocio.activeOn.monthBefore.date).toBe('2026-05-30');
+    const hoje = (await carlos.get('/intelligence/general?from=2026-01-01&to=2099-12-31')).json();
+    expect(hoje.negocio.activeOn.n).toBeGreaterThanOrEqual(d.negocio.activeOn.n - 50);
+    const h = (await carlos.get('/intelligence/heatmap?from=2026-01-01&to=2026-12-31&status=ativos')).json();
+    expect(h.total).toBeGreaterThan(0);
+    expect(h.cities.length).toBeGreaterThan(0);
+    ok(await carlos.get('/intelligence/heatmap?from=2020-01-01&to=2026-12-31&status=cancelados'));
+  });
 });

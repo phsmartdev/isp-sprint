@@ -4,6 +4,7 @@
  * Faturas vêm do IXC (Fase 4); até lá, "em aberto" usa os clientes marcados como inadimplentes.
  */
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { PeriodQuery } from '@isp/shared';
 import { LOSS_REASON_LABELS, type LossReason } from '@isp/domain';
 import { defineRoute } from '../http/route';
@@ -34,7 +35,19 @@ export const insightsRoutes = [
         .innerJoin(s.contacts, eq(s.contacts.id, s.customers.contactId))
         .leftJoin(s.plans, eq(s.plans.id, s.customers.planId))
         .where(and(custScope, sql`${s.customers.lifecycle} <> 'prospect'`));
-      const active = customers.filter((c) => ACTIVE.includes(c.lifecycle));
+      // posição da base na data final do filtro: ativo = já tinha começado e ainda não tinha cancelado
+      const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: auth.timezone }).format(new Date());
+      const refDate = query.to > todayStr ? todayStr : query.to;
+      const shift = (d: string, days: number, months = 0) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCMonth(x.getUTCMonth() + months); x.setUTCDate(x.getUTCDate() + days); return x.toISOString().slice(0, 10); };
+      const activeOn = (d: string) => customers.filter((c) => {
+        if (c.start && c.start > d) return false;
+        if (c.end) return c.end > d;
+        if (c.lifecycle === 'cancelado') return false; // cancelado sem data: fora da base
+        return d >= todayStr ? ACTIVE.includes(c.lifecycle) : true;
+      });
+      const active = activeOn(refDate);
+      const activeYesterday = activeOn(shift(refDate, -1)).length;
+      const activeLastMonth = activeOn(shift(refDate, 0, -1)).length;
       const cancelled = customers.filter((c) => c.lifecycle === 'cancelado');
       const overdue = active.filter((c) => c.lifecycle === 'inadimplente');
       const billing = active.reduce((a, c) => a + (c.price ?? 0), 0);
@@ -88,6 +101,7 @@ export const insightsRoutes = [
       return {
         negocio: {
           activeCustomers: active.length,
+          activeOn: { date: refDate, n: active.length, dayBefore: { date: shift(refDate, -1), n: activeYesterday }, monthBefore: { date: shift(refDate, 0, -1), n: activeLastMonth } },
           cancelledCustomers: cancelled.length,
           cancelledInPeriod: cancelledInPeriod.length,
           billingCents: billing,
@@ -114,6 +128,44 @@ export const insightsRoutes = [
           lossReasons: reasons(lost.map((l) => (l.reason ? LOSS_REASON_LABELS[l.reason as LossReason] ?? l.reason : null))),
         },
         cohorts,
+      };
+    },
+  }),
+  defineRoute({
+    method: 'GET',
+    url: '/intelligence/heatmap',
+    summary: 'Mapa de calor da base pelo endereço: clientes ativos numa data ou cancelados no período',
+    tag: 'Inteligência',
+    module: 'inteligencia',
+    query: PeriodQuery.and(z.object({ status: z.enum(['ativos', 'cancelados']).default('ativos') })),
+    handler: async ({ app, auth, query }) => {
+      const custScope = ownerScope(auth, 'inteligencia', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt });
+      const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: auth.timezone }).format(new Date());
+      const ref = query.to > todayStr ? todayStr : query.to;
+      const where = query.status === 'ativos'
+        ? sql`${s.customers.lifecycle} <> 'prospect' and (${s.customers.contractStart} is null or ${s.customers.contractStart} <= ${ref}) and (case when ${s.customers.contractEnd} is not null then ${s.customers.contractEnd} > ${ref} else ${s.customers.lifecycle} <> 'cancelado' end)`
+        : sql`${s.customers.lifecycle} = 'cancelado' and (${s.customers.contractEnd} is null or (${s.customers.contractEnd} >= ${query.from} and ${s.customers.contractEnd} <= ${query.to}))`;
+      const rows = await app.db
+        .select({
+          city: sql<string | null>`coalesce(nullif(trim(${s.addresses.city}), ''), nullif(trim(${s.contacts.city}), ''))`,
+          district: sql<string | null>`nullif(trim(${s.addresses.district}), '')`,
+          n: sql<number>`count(distinct ${s.customers.id})::int`,
+        })
+        .from(s.customers)
+        .innerJoin(s.contacts, eq(s.contacts.id, s.customers.contactId))
+        .leftJoin(s.addresses, eq(s.addresses.customerId, s.customers.id))
+        .where(and(custScope, where))
+        .groupBy(sql`1`, sql`2`);
+      const cities = new Map<string, number>();
+      for (const r of rows) cities.set(r.city ?? 'Sem cidade', (cities.get(r.city ?? 'Sem cidade') ?? 0) + r.n);
+      const total = rows.reduce((a, r) => a + r.n, 0);
+      return {
+        status: query.status,
+        date: ref,
+        total,
+        cities: [...cities.entries()].map(([city, n]) => ({ city, n })).sort((a, b) => b.n - a.n),
+        districts: rows.filter((r) => r.district).map((r) => ({ city: r.city ?? '—', district: r.district!, n: r.n })).sort((a, b) => b.n - a.n).slice(0, 40),
+        withoutAddress: rows.filter((r) => !r.city).reduce((a, r) => a + r.n, 0),
       };
     },
   }),

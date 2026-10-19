@@ -1,14 +1,15 @@
 /** Inteligência geral: indicadores por visão (Comercial, Negócio, Relacionamento) e cohort de retenção. */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
-import { fmtBRL, fmtInt } from '../lib/format';
+import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
 import { ErrorState, LoadingRows } from '../components/ui/primitives';
 import { BarRows } from '../components/charts/charts';
+import { SergipeMap } from '../components/charts/SergipeMap';
 
 type Reason = { label: string; n: number; share: number };
 type Data = {
-  negocio: { activeCustomers: number; cancelledCustomers: number; cancelledInPeriod: number; billingCents: number; ticketCents: number | null; plans: { name: string; customers: number; billingCents: number }[]; portsTotal: number; portsUsed: number; portsRate: number | null };
+  negocio: { activeCustomers: number; activeOn: { date: string; n: number; dayBefore: { date: string; n: number }; monthBefore: { date: string; n: number } }; cancelledCustomers: number; cancelledInPeriod: number; billingCents: number; ticketCents: number | null; plans: { name: string; customers: number; billingCents: number }[]; portsTotal: number; portsUsed: number; portsRate: number | null };
   relacionamento: { overdueCustomers: number; overdueRate: number | null; openInvoicesCents: number; churnRate: number | null; cancelReasons: Reason[]; cancelReasonsScope: 'periodo' | 'todos' };
   comercial: { leads: number; won: number; wonCents: number; lost: number; lostCents: number; openOpportunities: number; lossReasons: Reason[] };
   cohorts: { month: string; size: number; active: number; cancelled: number; retention: (number | null)[] }[];
@@ -79,6 +80,37 @@ function Cohort({ cohorts }: { cohorts: Data['cohorts'] }) {
   );
 }
 
+type Heat = { status: 'ativos' | 'cancelados'; date: string; total: number; cities: { city: string; n: number }[]; districts: { city: string; district: string; n: number }[]; withoutAddress: number };
+
+function Heatmap({ from, to }: { from: string; to: string }) {
+  const [status, setStatus] = useState<'ativos' | 'cancelados'>('ativos');
+  const q = useQuery({ queryKey: ['intelligence-heat', status, from, to], queryFn: () => api<Heat>(`/intelligence/heatmap${qs({ from, to, status })}`), placeholderData: (x) => x });
+  const d = q.data;
+  return (
+    <section className="card min-w-0 p-5">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-md font-bold text-ink">Mapa de calor da base</h2>
+          <p className="text-sm text-muted">{status === 'ativos' ? `Clientes ativos em ${d ? fmtDate(d.date) : '…'}, pelo endereço de instalação.` : 'Clientes que cancelaram no período, pelo endereço.'}</p>
+        </div>
+        <div className="flex rounded-md border border-line bg-surface p-1" role="radiogroup" aria-label="Clientes no mapa">
+          {(['ativos', 'cancelados'] as const).map((k) => <button key={k} type="button" role="radio" aria-checked={status === k} onClick={() => setStatus(k)} className={`rounded-sm px-4 py-1.5 text-sm ${status === k ? (k === 'ativos' ? 'bg-primary font-semibold text-white' : 'bg-danger font-semibold text-white') : 'text-ink hover:bg-surface-2'}`}>{k === 'ativos' ? 'Ativos' : 'Cancelados'}</button>)}
+        </div>
+      </div>
+      {!d ? <LoadingRows rows={4} /> : (
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+          <div className="rounded-md bg-[#F3F7FE] p-2"><SergipeMap data={d.cities} /></div>
+          <div className="min-w-0 space-y-4">
+            <p className="text-sm text-text"><span className="num text-xl font-extrabold text-ink">{fmtInt(d.total)}</span> clientes{d.withoutAddress ? <span className="text-muted"> · {fmtInt(d.withoutAddress)} sem cidade no cadastro</span> : null}</p>
+            <div><h3 className="mb-2 text-sm font-semibold text-muted">Por cidade</h3><BarRows items={d.cities.slice(0, 6).map((c) => ({ label: `${c.city} (${c.n})`, value: c.n, share: d.total ? c.n / d.total : null }))} /></div>
+            {d.districts.length > 0 && <div><h3 className="mb-2 text-sm font-semibold text-muted">Bairros com mais clientes</h3><BarRows items={d.districts.slice(0, 8).map((c) => ({ label: `${c.district} · ${c.city} (${c.n})`, value: c.n, share: d.total ? c.n / d.total : null }))} /></div>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function GeneralInsights({ from, to, view }: { from: string; to: string; view: InsightView }) {
   const q = useQuery({ queryKey: ['intelligence-general', from, to], queryFn: () => api<Data>(`/intelligence/general${qs({ from, to })}`) });
   if (q.isLoading) return <div className="card"><LoadingRows rows={6} /></div>;
@@ -91,7 +123,7 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
         <>
           {view === 'geral' && <h2 className="text-lg font-bold text-ink">Negócio</h2>}
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 2xl:grid-cols-6">
-            <Stat label="Clientes ativos" value={fmtInt(n.activeCustomers)} />
+            <Stat label={`Clientes ativos em ${fmtDate(n.activeOn.date).slice(0, 5)}`} value={fmtInt(n.activeOn.n)} title="Posição da base na data final do filtro. Escolha hoje para ver a base atual." hint={`Dia anterior ${fmtInt(n.activeOn.dayBefore.n)} · mês anterior ${fmtInt(n.activeOn.monthBefore.n)}`} tone={n.activeOn.n < n.activeOn.monthBefore.n ? 'danger' : undefined} />
             <Stat label="Clientes cancelados" value={fmtInt(n.cancelledCustomers)} hint={`${fmtInt(n.cancelledInPeriod)} no período`} />
             <Stat label="Base de faturamento" value={brlCompact(n.billingCents)} title={fmtBRL(n.billingCents)} hint={`${fmtBRL(n.billingCents)}/mês`} />
             <Stat label="Ticket médio" value={fmtBRL(n.ticketCents)} hint="Por cliente ativo" />
@@ -133,6 +165,7 @@ export function GeneralInsights({ from, to, view }: { from: string; to: string; 
           <Block title="Motivos de objeção e perda" desc="Por que as oportunidades foram perdidas no período.">{reasonBars(c.lossReasons)}</Block>
         </>
       )}
+      {(view === 'geral' || view === 'negocio' || view === 'relacionamento') && <Heatmap from={from} to={to} />}
       {(view === 'geral' || view === 'negocio' || view === 'relacionamento') && <Cohort cohorts={cohorts} />}
     </div>
   );
