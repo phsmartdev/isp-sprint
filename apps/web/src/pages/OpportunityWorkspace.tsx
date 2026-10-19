@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Send, UserRound, XCircle } from 'lucide-react';
+import { Building2, CalendarPlus, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment, type ViabilityResult,
@@ -24,6 +24,7 @@ import { useTransitionMutation } from '../features/useTransition';
 import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type KitValue, type ViabilityValue } from '../features/DealFields';
 import { Attachments } from '../features/Attachments';
 import { EmailComposer } from '../features/EmailComposer';
+import { ProposalGenerator } from '../features/ProposalGenerator';
 import { Objections, StageScript } from '../features/Playbook';
 import { EngineeringPanel } from '../features/Engineering';
 
@@ -507,6 +508,7 @@ export function OpportunityWorkspacePage() {
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const [email, setEmail] = useState<'proposta' | 'followup' | null>(null);
+  const [genProposal, setGenProposal] = useState(false);
   const [copilot, setCopilot] = useState(false);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
   const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos'>('atividades');
@@ -681,6 +683,7 @@ export function OpportunityWorkspacePage() {
           {stages.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
         </Select>
         {can('atividades') && <Button icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setScheduling(true)}>Agendar retorno</Button>}
+        <Button icon={<FileText className="h-4 w-4" />} onClick={() => setGenProposal(true)}>Gerar proposta</Button>
         <Button icon={<Send className="h-4 w-4" />} onClick={() => setEmail('proposta')}>Enviar proposta</Button>
         <Button icon={<Mail className="h-4 w-4" />} onClick={() => setEmail('followup')}>Follow-up</Button>
         {editable && (
@@ -711,6 +714,7 @@ export function OpportunityWorkspacePage() {
       <Modal open={scheduling} onClose={() => setScheduling(false)} title="Agendar retorno" footer={<><Button onClick={() => setScheduling(false)}>Cancelar</Button><Button variant="primary" type="submit" form="ws-activity">Agendar</Button></>}>
         <ActivityComposer formId="ws-activity" hideSubmit opportunityId={opp.id} defaultTitle={f.nextAction} onDone={() => setScheduling(false)} />
       </Modal>
+      <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
       <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => void q.refetch() })} />
     </div>

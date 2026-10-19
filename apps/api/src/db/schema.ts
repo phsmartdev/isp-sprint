@@ -956,3 +956,30 @@ export const integrationEvents = pgTable(
   },
   (t) => ({ byTenant: index('integration_events_tenant_idx').on(t.tenantId, t.createdAt) }),
 );
+
+// ------------------------------------------------------------------ modelos de proposta (arte do Canva + campos variáveis)
+export type ProposalField = { id: string; page: number; x: number; y: number; w: number; size: number; color: string; align: 'left' | 'center' | 'right'; bold: boolean; text: string; strike?: boolean };
+export type ProposalVariable = { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string };
+export const proposalTemplates = pgTable('proposal_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  /** Tipos de deal que usam este modelo (ex.: empresarial = Yepempresa). */
+  segments: text('segments').array().notNull().default(sql`'{}'::text[]`),
+  fields: jsonb('fields').$type<ProposalField[]>().notNull().default([]),
+  variables: jsonb('variables').$type<ProposalVariable[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+export const proposalTemplatePages = pgTable('proposal_template_pages', {
+  id: id(),
+  tenantId: tenantId(),
+  templateId: uuid('template_id').notNull().references(() => proposalTemplates.id, { onDelete: 'cascade' }),
+  position: integer('position').notNull(),
+  mime: text('mime').notNull(),
+  width: integer('width').notNull(),
+  height: integer('height').notNull(),
+  data: bytea('data').notNull(),
+  createdAt: createdAt(),
+});

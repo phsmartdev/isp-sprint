@@ -120,6 +120,13 @@
       "when": 1792427161189,
       "tag": "0016_purge_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792427740893,
+      "tag": "0017_proposal_templates",
+      "breakpoints": true
     }
   ]
 }

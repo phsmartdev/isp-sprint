@@ -37,6 +37,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/viability', label: 'Viabilidade', admin: true },
   { to: '/settings/plans', label: 'Planos e produtos', admin: true },
   { to: '/settings/sources', label: 'Canais de entrada', admin: true },
+  { to: '/settings/proposals', label: 'Modelos de proposta', admin: true },
   { to: '/settings/instructions', label: 'Modelo de instrução', admin: true },
   { to: '/settings/email', label: 'E-mail e alertas', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
