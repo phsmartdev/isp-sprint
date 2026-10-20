@@ -3,7 +3,7 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
   test.setTimeout(120_000);
   await page.goto('/login');
   await page.getByLabel('E-mail').fill('lucas@yepnet.test');
-  await page.getByLabel('Senha').fill('Sprint@2026');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
   await page.goto('/opportunities/new');
@@ -31,7 +31,7 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
 test('sair leva ao login sem erro e a sessão termina', async ({ page }) => {
   await page.goto('/login');
   await page.getByLabel('E-mail').fill('carlos@yepnet.test');
-  await page.getByLabel('Senha').fill('Sprint@2026');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.getByRole('button', { name: /^Conta de / }).click();
   await page.getByRole('menuitem', { name: /Sair/ }).click();

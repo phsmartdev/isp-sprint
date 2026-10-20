@@ -251,6 +251,7 @@ export const UserCreate = z.object({
 });
 export const UserUpdate = z.object({
   name: trimmed(120).min(2).optional(),
+  email: z.string().trim().toLowerCase().email('E-mail inválido').max(200).optional(),
   jobTitle: optText(80),
   profile: z.enum(PROFILE_KEYS).optional(),
   active: z.boolean().optional(),

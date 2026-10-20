@@ -27,7 +27,7 @@ async function roleMap(db: DbOrTx, tenantId: string) {
 }
 
 /** Garante papéis e matriz padrão para empresas antigas (idempotente). */
-async function ensureRoles(db: DbOrTx, tenantId: string) {
+export async function ensureRoles(db: DbOrTx, tenantId: string) {
   const map = await roleMap(db, tenantId);
   for (const key of PROFILE_KEYS) {
     if (!map[key]) {
@@ -245,6 +245,12 @@ export const adminRoutes = [
         if (params.id === auth.userId && (body.active === false || (body.profile && body.profile !== 'gerencia'))) {
           throw unprocessable('Você não pode remover o próprio acesso de gerência nem se desativar.');
         }
+        if (body.email && body.email !== u.email.toLowerCase()) {
+          const [exists] = await tx.select({ id: s.users.id }).from(s.users).where(sql`lower(${s.users.email}) = ${body.email} and ${s.users.id} <> ${u.id}`).limit(1);
+          if (exists) throw unprocessable('E-mail já cadastrado.', [{ path: 'email', message: 'Já existe um usuário com este e-mail' }]);
+          // e-mail novo: desfaz o vínculo com a conta Google anterior
+          await tx.update(s.users).set({ email: body.email, googleSub: null }).where(eq(s.users.id, u.id));
+        }
         await tx
           .update(s.users)
           .set({ name: body.name, jobTitle: body.jobTitle, active: body.active, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, updatedAt: new Date() })
@@ -260,7 +266,7 @@ export const adminRoutes = [
         const [role] = await tx.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, u.id)).limit(1);
         if ((body.profile ?? role?.key) === 'supervisor' && !leads.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
         if (body.teamIds || body.leadTeamIds) await setTeams(tx, auth, u.id, body.teamIds ?? current.map((c) => c.teamId), leads);
-        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active, sectors: body.sectors } });
+        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active, sectors: body.sectors, ...(body.email && body.email !== u.email.toLowerCase() ? { emailFrom: u.email, emailTo: body.email } : {}) } });
       });
       return { ok: true };
     },

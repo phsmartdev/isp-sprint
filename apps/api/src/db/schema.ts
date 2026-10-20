@@ -51,6 +51,8 @@ export const users = pgTable(
     goalLeads: integer('goal_leads').notNull().default(0),
     /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
+    /** Conta Google vinculada no primeiro login com Google (identificador "sub"). */
+    googleSub: text('google_sub'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -172,6 +174,16 @@ export const teamMemberships = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.teamId, t.userId] }) }),
 );
+
+/** Redefinição de senha por e-mail: só o hash do código, uso único, expira em 1 hora. */
+export const passwordResets = pgTable('password_resets', {
+  id: id(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
+  createdAt: createdAt(),
+});
 
 export const sessions = pgTable(
   'sessions',

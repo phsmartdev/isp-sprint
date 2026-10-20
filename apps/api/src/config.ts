@@ -34,6 +34,8 @@ export type Config = {
   logLevel: string;
   cookieSecret: string;
   loginRateLimitPerMinute: number;
+  /** Login com Google (OAuth). Sem as duas variáveis, o botão não aparece. */
+  google: { clientId: string; clientSecret: string; allowedDomains: string[] } | null;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -54,5 +56,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     isProd,
     loginRateLimitPerMinute: e.LOGIN_RATE_LIMIT_PER_MINUTE,
     logLevel: e.LOG_LEVEL,
+    google: env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+      ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, allowedDomains: (env.GOOGLE_ALLOWED_DOMAINS ?? '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean) }
+      : null,
   };
 }

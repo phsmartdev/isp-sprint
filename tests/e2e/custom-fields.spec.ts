@@ -3,7 +3,7 @@ test('gerência cria campo de cliente e preenche na ficha', async ({ page }) => 
   test.setTimeout(90_000);
   await page.goto('/login');
   await page.getByLabel('E-mail').fill('carlos@yepnet.test');
-  await page.getByLabel('Senha').fill('Sprint@2026');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
   await page.goto('/settings/fields');

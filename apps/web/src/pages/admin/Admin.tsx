@@ -233,7 +233,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
       : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
@@ -243,7 +243,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
   return (
     <form id="user-form" className="space-y-4" noValidate onSubmit={(e: FormEvent) => { e.preventDefault(); if (!m.isPending) m.mutate(); }}>
       <FormField label="Nome" htmlFor="uf-name" required error={errors.name}><Input id="uf-name" value={form.name} onChange={(e) => set('name', e.target.value)} data-autofocus /></FormField>
-      {!user && <FormField label="E-mail" htmlFor="uf-email" required error={errors.email}><Input id="uf-email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></FormField>}
+      <FormField label="E-mail" htmlFor="uf-email" required error={errors.email} hint={user ? 'É o login e o e-mail usado no “Entrar com Google”. Ao trocar, a conta Google vinculada é desfeita.' : 'Use o e-mail real da pessoa (o mesmo da conta Google, se for entrar com Google).'}><Input id="uf-email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></FormField>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="Cargo" htmlFor="uf-job" hint="Aparece abaixo do nome no topo"><Input id="uf-job" value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Ex.: Comercial" /></FormField>
         <FormField label="Perfil de acesso" htmlFor="uf-profile" hint={self ? 'Você não pode tirar o próprio acesso de gerência' : 'Níveis por módulo em Segurança'}>

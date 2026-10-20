@@ -5,7 +5,7 @@ const PASSWORD = 'Sprint@2026';
 async function login(page: Page, email: string) {
   await page.goto('/login');
   await page.getByLabel('E-mail').fill(email);
-  await page.getByLabel('Senha').fill(PASSWORD);
+  await page.getByLabel('Senha', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
@@ -24,17 +24,38 @@ async function newOpportunity(page: Page, name: string, opts: { plan?: boolean }
 test('login inválido mostra erro e não entra', async ({ page }) => {
   await page.goto('/login');
   await page.getByLabel('E-mail').fill('lucas@yepnet.test');
-  await page.getByLabel('Senha').fill('errada');
+  await page.getByLabel('Senha', { exact: true }).fill('errada');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('alert')).toContainText('E-mail ou senha incorretos');
   await expect(page).toHaveURL(/\/login/);
+});
+
+test('login: mostrar senha, esqueci minha senha e link de redefinição inválido', async ({ page }) => {
+  await page.goto('/login');
+  const pwd = page.getByLabel('Senha', { exact: true });
+  await pwd.fill('Sprint@2026');
+  await expect(pwd).toHaveAttribute('type', 'password');
+  await page.getByRole('button', { name: 'Mostrar senha' }).click();
+  await expect(pwd).toHaveAttribute('type', 'text');
+  await expect(page.getByRole('link', { name: 'Entrar com Google' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Esqueci minha senha' }).click();
+  await page.getByLabel('E-mail').fill('ninguem@exemplo.test');
+  await page.getByRole('button', { name: 'Enviar link' }).click();
+  await expect(page.getByRole('status')).toContainText('Se o e-mail estiver cadastrado');
+  await page.goto('/redefinir-senha?token=token-invalido-de-teste-123');
+  await page.getByLabel('Nova senha', { exact: true }).fill('NovaSenha@2026');
+  await page.getByLabel('Repita a nova senha', { exact: true }).fill('NovaSenha@2026');
+  await page.getByRole('button', { name: 'Salvar nova senha' }).click();
+  await expect(page.getByRole('alert')).toContainText('Link inválido ou expirado');
+  await page.goto('/login?erro=google_sem_usuario');
+  await expect(page.getByRole('alert')).toContainText('Não há usuário ativo no CRM');
 });
 
 test('rota protegida redireciona para login e volta depois', async ({ page }) => {
   await page.goto('/opportunities');
   await expect(page).toHaveURL(/\/login\?next=%2Fopportunities/);
   await page.getByLabel('E-mail').fill('lucas@yepnet.test');
-  await page.getByLabel('Senha').fill(PASSWORD);
+  await page.getByLabel('Senha', { exact: true }).fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).toHaveURL(/\/opportunities$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Oportunidades' })).toBeVisible();

@@ -1,4 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { LoginInput } from '@isp/shared';
 import { defineRoute } from '../http/route';
 import { AppError } from '../http/errors';
@@ -25,6 +26,19 @@ export function meDto(auth: NonNullable<Awaited<ReturnType<typeof resolveSession
 async function hasAvatar(app: Parameters<typeof resolveSession>[0], userId: string) {
   const r = await app.db.select({ u: s.userAvatars.userId }).from(s.userAvatars).where(eq(s.userAvatars.userId, userId)).limit(1);
   return r.length > 0;
+}
+
+/** Cria a sessão em cookie (senha ou Google) e devolve o contexto. */
+export async function startSession(app: FastifyInstance, req: FastifyRequest, reply: FastifyReply, user: { id: string; tenantId: string }, via = 'senha') {
+  const now = new Date();
+  const token = newSessionToken();
+  const expiresAt = new Date(now.getTime() + app.config.sessionTtlHours * 3_600_000);
+  await app.db.insert(s.sessions).values({ userId: user.id, tenantId: user.tenantId, tokenHash: hashToken(token), expiresAt, userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300) });
+  await app.db.update(s.users).set({ failedLogins: 0, lockedUntil: null, lastLoginAt: now }).where(eq(s.users.id, user.id));
+  await audit(app.db, req, { action: 'auth.login', tenantId: user.tenantId, actorId: user.id, metadata: { via } });
+  reply.setCookie(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: app.config.cookieSecure, path: '/', signed: true, expires: expiresAt });
+  req.cookies[SESSION_COOKIE] = reply.signCookie(token);
+  return resolveSession(app, req);
 }
 
 export const authRoutes = [
@@ -61,28 +75,7 @@ export const authRoutes = [
         throw generic;
       }
 
-      const token = newSessionToken();
-      const expiresAt = new Date(now.getTime() + app.config.sessionTtlHours * 3_600_000);
-      await app.db.insert(s.sessions).values({
-        userId: user.id,
-        tenantId: user.tenantId,
-        tokenHash: hashToken(token),
-        expiresAt,
-        userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300),
-      });
-      await app.db.update(s.users).set({ failedLogins: 0, lockedUntil: null, lastLoginAt: now }).where(eq(s.users.id, user.id));
-      await audit(app.db, req, { action: 'auth.login', tenantId: user.tenantId, actorId: user.id });
-
-      reply.setCookie(SESSION_COOKIE, token, {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: app.config.cookieSecure,
-        path: '/',
-        signed: true,
-        expires: expiresAt,
-      });
-      req.cookies[SESSION_COOKIE] = reply.signCookie(token);
-      const ctx = await resolveSession(app, req);
+      const ctx = await startSession(app, req, reply, user);
       return meDto(ctx!, await hasAvatar(app, user.id));
     },
   }),

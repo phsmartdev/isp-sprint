@@ -169,6 +169,13 @@
       "when": 1792450495752,
       "tag": "0023_template_purpose",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792496390160,
+      "tag": "0024_auth_google_reset",
+      "breakpoints": true
     }
   ]
 }

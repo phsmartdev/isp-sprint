@@ -4,7 +4,7 @@ import type { Module } from '@isp/domain';
 import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/layout/AppShell';
 import { EmptyState, LoadingRows } from './components/ui/primitives';
-import { LoginPage } from './pages/Login';
+import { LoginPage, ResetPasswordPage } from './pages/Login';
 import { HomePage } from './pages/Home';
 import { LeadsPage } from './pages/Leads';
 import { OpportunitiesPage } from './pages/Opportunities';
@@ -49,6 +49,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />

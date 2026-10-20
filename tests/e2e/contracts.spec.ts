@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function login(page: Page, email: string) {
   await page.goto('/login');
   await page.getByLabel('E-mail').fill(email);
-  await page.getByLabel('Senha').fill('Sprint@2026');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
@@ -50,12 +50,15 @@ test('oportunidade fechada: cadastrar contrato com os dados do CRM', async ({ pa
   await expect(rows.first()).toBeVisible();
   // procura uma venda fechada ainda sem contrato
   let found = false;
-  for (let i = 0; i < 15 && !found; i++) {
+  const total = Math.min(15, await rows.count());
+  for (let i = 0; i < total && !found; i++) {
     await page.goto('/opportunities?view=lista&status=encerradas');
+    await expect(rows.first()).toBeVisible();
     await rows.nth(i).click();
     await page.waitForURL(/\/opportunities\/[0-9a-f-]{36}$/);
     const btn = page.getByRole('button', { name: 'Cadastrar contrato' });
-    if (await btn.isVisible().catch(() => false)) { await btn.click(); found = true; }
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    if (await btn.waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)) { await btn.click(); found = true; }
   }
   expect(found).toBe(true);
   await expect(page.getByRole('heading', { name: 'Novo contrato' })).toBeVisible();

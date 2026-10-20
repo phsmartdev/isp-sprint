@@ -7,6 +7,7 @@ import pg from 'pg';
 import { runMigrations } from './db/migrate';
 import { seed, SEED_PASSWORD } from './db/seed';
 import { poolConfig } from './db/client';
+import { recoverAccess, RECOVER_MESSAGES } from './db/recover';
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -22,6 +23,15 @@ async function main() {
   console.log('[setup] aplicando migrations…');
   await runMigrations(url);
   console.log('[setup] migrations aplicadas.');
+  await seedDemo(url);
+  const re = process.env.ADMIN_RESET_EMAIL, rp = process.env.ADMIN_RESET_PASSWORD;
+  if (re && rp) {
+    const r = await recoverAccess(url, re, rp);
+    console.log(`[setup] recuperação de acesso (${re.trim().toLowerCase()}): ${RECOVER_MESSAGES[r]}`);
+  }
+}
+
+async function seedDemo(url: string) {
   if (process.env.SEED_DEMO !== 'true') return;
   const pool = new pg.Pool(poolConfig(url, 1));
   const { rows } = await pool.query<{ n: number }>('select count(*)::int n from tenants');

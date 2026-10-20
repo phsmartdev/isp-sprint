@@ -27,6 +27,7 @@ import { contractWorkRoutes } from './routes/contractWork';
 import { contractInsightRoutes } from './routes/contractInsights';
 import { contractLedgerRoutes } from './routes/contractLedger';
 import { contractTemplateRoutes } from './routes/contractTemplates';
+import { authRecoveryRoutes } from './routes/authRecovery';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -127,6 +128,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractInsightRoutes,
     ...contractLedgerRoutes,
     ...contractTemplateRoutes,
+    ...authRecoveryRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,
