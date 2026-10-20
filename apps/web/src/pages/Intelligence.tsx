@@ -14,6 +14,7 @@ import { ConfiarFacil } from '../components/brand';
 import { BarRows, CHART, ComboChart, Donut, Legend } from '../components/charts/charts';
 import { SergipeMap } from '../components/charts/SergipeMap';
 import { brlShort, monthLabel, monthYear } from './Reports';
+import { MoneyToggle } from '../lib/privacy';
 
 type Data = {
   kpis: Kpi[];
@@ -56,6 +57,7 @@ export function IntelligencePage() {
         actions={
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
+            <MoneyToggle />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
         }

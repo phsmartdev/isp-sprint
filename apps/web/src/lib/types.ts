@@ -108,6 +108,7 @@ export type Opportunity = {
   engineeringTicket: string | null;
   handoffStage: string | null;
   contractId: string | null;
+  approvalStatus?: string | null;
   measurementContractId: string | null;
   measurementCents: number | null;
   executiveTicket: string | null;

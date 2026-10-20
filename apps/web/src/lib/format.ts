@@ -1,4 +1,5 @@
 import { formatBRL } from '@isp/domain';
+import { MASK, moneyHidden } from './privacy';
 
 let tz = 'America/Sao_Paulo';
 export const setTimezone = (t: string) => { tz = t; };
@@ -25,7 +26,8 @@ export function fmtRelative(v?: string | Date | null) {
   if (abs < 86_400_000) return rtf.format(Math.round(diff / 3_600_000), 'hour');
   return rtf.format(Math.round(diff / 86_400_000), 'day');
 }
-export const fmtBRL = (cents?: number | null) => formatBRL(cents ?? null);
+/** Valor em R$; com o olhinho fechado, mostra a máscara (o número não aparece). */
+export const fmtBRL = (cents?: number | null) => (moneyHidden() && cents !== null && cents !== undefined ? MASK : formatBRL(cents ?? null));
 export const fmtPct = (r?: number | null) => (r === null || r === undefined ? 'N/D' : `${(r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
 export const fmtInt = (n?: number | null) => (n === null || n === undefined ? 'N/D' : n.toLocaleString('pt-BR'));
 export function fmtDuration(seconds: number) {

@@ -5,6 +5,10 @@ import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/layout/AppShell';
 import { EmptyState, LoadingRows } from './components/ui/primitives';
 import { LoginPage, ResetPasswordPage } from './pages/Login';
+import { useMoneyHidden } from './lib/privacy';
+import { ApprovalPage } from './pages/Approval';
+import { ApprovalsPage } from './pages/Approvals';
+import { AdminApprovalSettings } from './pages/admin/ApprovalSettings';
 import { HomePage } from './pages/Home';
 import { LeadsPage } from './pages/Leads';
 import { OpportunitiesPage } from './pages/Opportunities';
@@ -46,6 +50,8 @@ function Gate({ module, min, children }: { module: Module; min?: 'proprio' | 'eq
 }
 
 export function App() {
+  // olhinho dos valores: redesenha as telas ao ocultar/mostrar (sem perder o estado)
+  useMoneyHidden();
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -57,6 +63,8 @@ export function App() {
         <Route path="pipeline" element={<Navigate to="/opportunities" replace />} />
         <Route path="opportunities/new" element={<Gate module="oportunidades"><NewOpportunityPage /></Gate>} />
         <Route path="opportunities/:id" element={<Gate module="oportunidades"><OpportunityWorkspacePage /></Gate>} />
+        <Route path="opportunities/:id/aprovacao" element={<ApprovalPage />} />
+        <Route path="aprovacoes" element={<ApprovalsPage />} />
         <Route path="customers" element={<Gate module="clientes"><CustomersPage /></Gate>} />
         <Route path="customers/:id" element={<Gate module="clientes"><CustomerDetailPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
@@ -81,6 +89,7 @@ export function App() {
           <Route path="data" element={<AdminData />} />
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<AdminContractSettings />} />
+          <Route path="approvals" element={<AdminApprovalSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

@@ -244,6 +244,7 @@ export const UserCreate = z.object({
   name: trimmed(120).min(2),
   email: z.string().trim().toLowerCase().email().max(200),
   jobTitle: optText(80),
+  phone: optText(30),
   profile: z.enum(PROFILE_KEYS),
   teamIds: z.array(uuid).max(20).default([]),
   leadTeamIds: z.array(uuid).max(20).default([]),
@@ -253,6 +254,8 @@ export const UserUpdate = z.object({
   name: trimmed(120).min(2).optional(),
   email: z.string().trim().toLowerCase().email('E-mail inválido').max(200).optional(),
   jobTitle: optText(80),
+  /** Ausente = não muda; vazio = apaga. */
+  phone: z.string().trim().max(30).nullable().optional().transform((v) => (v === undefined ? undefined : v || null)),
   profile: z.enum(PROFILE_KEYS).optional(),
   active: z.boolean().optional(),
   teamIds: z.array(uuid).max(20).optional(),

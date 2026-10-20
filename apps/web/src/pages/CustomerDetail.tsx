@@ -12,6 +12,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
+import { ClassificationSection } from '../features/Classification';
 
 type Detail = {
   id: string;
@@ -152,6 +153,7 @@ export function CustomerDetailPage() {
               </div>
             </dl>
           )}
+          {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
           {tab === 'oportunidades' && (c.opportunities.length === 0 ? <EmptyState title="Nenhuma oportunidade visível" /> : (
             <ul className="divide-y divide-line">

@@ -1,3 +1,4 @@
+import { MoneyToggle } from '../../lib/privacy';
 /** Painel da Gestão de Contratos: faturamento por tipo no período e carteira estratificada. */
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -75,7 +76,7 @@ export function ContractsDashboard() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">Faturamento de {fmtDate(d.period.from)} a {fmtDate(d.period.to)}, comparado com {fmtDate(d.period.prevFrom)} a {fmtDate(d.period.prevTo)}.</p>
-        <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
+        <div className="flex flex-wrap items-center gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
       </div>
 
       <section aria-label="Faturamento por tipo de contrato" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">

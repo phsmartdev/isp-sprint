@@ -115,3 +115,12 @@ Recorrente, Frequente e Medição; movimentos em `contract_ledger` (append-only:
 - **Esqueci minha senha:** resposta idêntica exista ou não a conta. Token de 32 bytes guardado só como hash (`password_resets`), 1 h, uso único; um pedido invalida os anteriores. Redefinir desbloqueia e revoga as sessões.
 - **Recuperação pelo deploy:** `ADMIN_RESET_EMAIL`/`ADMIN_RESET_PASSWORD` aplicados pelo `vercel-setup` em produção. A senha nunca vai para o log. As variáveis devem ser removidas após o uso.
 
+## ADR-036 — Análise de aprovação sem base financeira paralela (20/10/2026)
+A análise é calculada na hora a partir de cadastro, contratos, vendas e viabilidade (`services/approvals.ts`, regras puras em `packages/domain/src/approvals.ts`). Receita atual = contratos recorrentes ativos + vendas sem contrato (a venda com contrato conta só pelo contrato) + plano do cadastro quando não há nada. Custo atribuível = custo estimado na viabilidade da venda; se o valor atual diverge mais de 20% do vendido, o custo é tratado como desconhecido. Pagamentos, inadimplência, pontualidade, LTV realizado e rentabilidade realizada ficam “Aguardando IXC” (decisão do cliente: não importar planilha por enquanto).
+
+## ADR-037 — Pedido = versão; decisão separada e append-only
+`approval_requests` (imutável, versão por oportunidade, resumo financeiro e impressão digital) e `approval_decisions` (uma por pedido: aprovada, reprovada, correção, substituída). Alçada do usuário: setor Diretoria > perfil. Política configurável por alçada (desconto máximo e margem mínima opcional); acima da Diretoria = excepcional. Quem pede não decide. Mudança material (valor, preço de tabela, investimento, margem do novo serviço, receita atual, contratos ativos, classificação, situação, proposta anexada) exige confirmação explícita para aprovar e fica gravada na decisão.
+
+## ADR-038 — Classificação, identidade e chat append-only
+`contact_classifications` (vigente = mais recente), `contact_identity_links` (decisão humana “mesmo/diferente”; nada é consolidado sozinho) e `negotiation_messages` (chat interno; não entra no histórico do relacionamento). Avisos por WhatsApp/e-mail levam só o resumo seguro; o modelo recusa variáveis financeiras.
+

@@ -85,6 +85,21 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Análise e aprovação da negociação ✅ (2026-10-20)
+- **Tela de análise** (`/opportunities/:id/aprovacao`) que se adapta: **novo cliente** (dados, origem do lead, perfil comercial, produto, condições, investimento, CAC, margem prevista, receita projetada, payback, viabilidade técnica e financeira) × **cliente da base** (seção **Inteligência do Cliente**: relacionamento, receita contratada, serviços que a compõem, CAC histórico, LTV projetado, faturamento lançado; pagamentos, inadimplência, pontualidade e LTV realizado aparecem como **Aguardando IXC**).
+- Cliente da base = qualquer relacionamento (cadastro não-prospect, contrato, venda anterior ou importação do ERP); cancelado continua da base. Cadastros parecidos (CPF/CNPJ, telefone, e-mail) são listados; só entram na análise os marcados “mesmo cliente” (decisão registrada, append-only).
+- **Contratos e serviços** com vigência, itens, reajustes, renovações, encerramento e pendências, cada um abrindo o contrato.
+- **Classificação estratégica** no cadastro do cliente (classe, categoria, perfil, perfil pagador, potencial, risco, observações, data e responsável), append-only, com opções configuráveis; “Não classificado” + tarefa de atualização cadastral.
+- **Margem e capacidade de negociação**: atual × incremento × depois, custo atribuível (estimado na venda; desconhecido se o valor mudou >20%), investimento, payback incremental, desconto × alçadas, aprovação excepcional. Nunca usa total pago como margem; avisa quando não dá para calcular.
+- **Resumo executivo** no topo e **parecer de apoio à decisão** por regras (favoráveis, atenção, financeiro, estratégico, pendências, alçada), cada item com a origem.
+- **Pedido de aprovação** = versão da proposta (imutável, com resumo financeiro e impressão digital dos dados); nova versão substitui a pendente. **Decisão** (aprovar, reprovar, pedir correção) por quem tem alçada, nunca o próprio solicitante; grava aprovador, alçada, data, comentário, resumo considerado, versão dos dados e condições aprovadas. Mudança material entre pedido e decisão exige confirmação.
+- **Chat da negociação** (interno, append-only) com mensagens de sistema (pedido, avisos, decisão); fora do histórico do relacionamento.
+- **Histórico consolidado** em duas abas: desta negociação × do relacionamento.
+- **Avisos** por e-mail e WhatsApp (Z-API, número no cadastro do usuário) só com resumo seguro; modelo configurável em Configurações → Aprovações e alçadas.
+- **Fila de Aprovações** no menu com contador do que aguarda a minha alçada.
+- **Relatórios em tela cheia (modo TV)** com relógio, atualização a cada 5 min e alternância de abas; **olhinho** que oculta valores em R$ (Relatórios, Inteligência, Contratos e telas abertas).
+- Testes: domínio 47/47, API 98/98, E2E 32/32.
+
 ## Acesso / login ✅ (2026-10-20)
 - **Entrar com Google** (OAuth/OpenID): só entra em usuário já cadastrado, ativo, com o mesmo e-mail verificado; vincula o `sub` do Google no primeiro acesso; domínios permitidos opcionais. Variáveis: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ALLOWED_DOMAINS` (opcional). Redirect URI: `https://<domínio>/api/v1/auth/google/callback`.
 - **Esqueci minha senha**: link por e-mail (SMTP da empresa), 1 hora, uso único; encerra as sessões. Página `/redefinir-senha`.

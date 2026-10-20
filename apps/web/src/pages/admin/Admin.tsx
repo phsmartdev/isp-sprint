@@ -35,6 +35,7 @@ const TABS = [
   { to: '/settings/integrations', label: 'Integrações' },
   { to: '/settings/fields', label: 'Campos personalizados' },
   { to: '/settings/contracts', label: 'Contratos' },
+  { to: '/settings/approvals', label: 'Aprovações e alçadas' },
   { to: '/settings/data', label: 'Base de dados' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },
@@ -205,7 +206,7 @@ export function AdminOverview() {
 
 // =================================================================== usuários
 type AdminUser = {
-  id: string; name: string; email: string; jobTitle: string | null; active: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
+  id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
   goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[];
 };
 
@@ -223,7 +224,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
   const toast = useToast();
   const { me } = useAuth();
   const [form, setForm] = useState({
-    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true,
+    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true,
     teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -233,8 +234,8 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -246,6 +247,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       <FormField label="E-mail" htmlFor="uf-email" required error={errors.email} hint={user ? 'É o login e o e-mail usado no “Entrar com Google”. Ao trocar, a conta Google vinculada é desfeita.' : 'Use o e-mail real da pessoa (o mesmo da conta Google, se for entrar com Google).'}><Input id="uf-email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></FormField>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="Cargo" htmlFor="uf-job" hint="Aparece abaixo do nome no topo"><Input id="uf-job" value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Ex.: Comercial" /></FormField>
+        <FormField label="WhatsApp" htmlFor="uf-phone" hint="Para avisos internos (pedidos de aprovação)"><Input id="uf-phone" inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="(79) 99999-0000" /></FormField>
         <FormField label="Perfil de acesso" htmlFor="uf-profile" hint={self ? 'Você não pode tirar o próprio acesso de gerência' : 'Níveis por módulo em Segurança'}>
           <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => set('profile', e.target.value as ProfileKey)}>{(['vendedor', 'supervisor', 'gerencia'] as ProfileKey[]).map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
         </FormField>

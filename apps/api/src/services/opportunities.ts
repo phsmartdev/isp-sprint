@@ -169,6 +169,7 @@ export const opportunitySelect = {
   measurementContractId: s.opportunities.measurementContractId,
   measurementCents: s.opportunities.measurementCents,
   contractId: sql<string | null>`(select c.id from contracts c where c.opportunity_id = "opportunities"."id" limit 1)`,
+  approvalStatus: sql<string | null>`(select coalesce(d.decision, 'pendente') from approval_requests r left join approval_decisions d on d.request_id = r.id where r.opportunity_id = "opportunities"."id" order by r.version desc limit 1)`,
   stageName: s.pipelineStages.name,
   attachmentCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null)`,
   proposalCount: sql<number>`(select count(*)::int from opportunity_attachments oa where oa.opportunity_id = "opportunities"."id" and oa.deleted_at is null and oa.kind = 'proposta')`,

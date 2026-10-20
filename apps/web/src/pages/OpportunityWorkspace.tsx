@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Send, UserRound, XCircle } from 'lucide-react';
+import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment, type ViabilityResult,
@@ -711,6 +711,9 @@ export function OpportunityWorkspacePage() {
           </>
         )}
         <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>Viabilidade e próximo passo</Button>
+        <Button icon={<Scale className="h-4 w-4" />} onClick={() => nav(`/opportunities/${opp.id}/aprovacao`)}>
+          Análise e aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
+        </Button>
         {opp.stage === 'ganha' && can('contratos') && (opp.contractId
           ? <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
           : <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}

@@ -45,6 +45,8 @@ export const users = pgTable(
     lockedUntil: ts('locked_until'),
     /** Cargo exibido no topo (ex.: "Comercial"). */
     jobTitle: text('job_title'),
+    /** WhatsApp para avisos internos (pedidos de aprovação). */
+    phone: text('phone'),
     /** Metas mensais usadas em "Meta do mês" e "Meu desempenho" no Início. */
     goalSales: integer('goal_sales').notNull().default(0),
     goalProposals: integer('goal_proposals').notNull().default(0),
@@ -1319,3 +1321,138 @@ export const contractSignatures = pgTable(
     statusCk: check('contract_signatures_status_ck', inList('status', ['enviado', 'assinado', 'recusado', 'cancelado', 'erro'])),
   }),
 );
+
+// --------------------------------------------------------------- análise e aprovação da negociação
+
+/** Parâmetros das aprovações por empresa: alçadas, opções da classificação e aviso por WhatsApp/e-mail. */
+export const approvalSettings = pgTable('approval_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  policy: jsonb('policy').$type<{ limits: { level: string; maxDiscountBp: number; minMarginBp: number | null }[] }>(),
+  classificationOptions: jsonb('classification_options').$type<Record<string, string[]>>(),
+  notifyEmail: boolean('notify_email').notNull().default(true),
+  notifyWhatsapp: boolean('notify_whatsapp').notNull().default(false),
+  /** Mostrar a classe estratégica no aviso por WhatsApp/e-mail. */
+  notifyShowClass: boolean('notify_show_class').notNull().default(false),
+  template: text('template'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});
+
+/** Classificação estratégica do cliente. Append-only: a vigente é a mais recente. */
+export const contactClassifications = pgTable(
+  'contact_classifications',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    classKey: text('class_key'),
+    category: text('category'),
+    profile: text('profile'),
+    payerProfile: text('payer_profile'),
+    potential: text('potential'),
+    risk: text('risk'),
+    notes: text('notes'),
+    classifiedBy: uuid('classified_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('contact_classifications_idx').on(t.tenantId, t.contactId, t.createdAt) }),
+);
+
+/** Identidades possivelmente duplicadas: a decisão (mesmo cliente ou não) é de uma pessoa. Append-only; vale a mais recente. */
+export const contactIdentityLinks = pgTable(
+  'contact_identity_links',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    otherContactId: uuid('other_contact_id').notNull().references(() => contacts.id),
+    decision: text('decision').notNull(),
+    note: text('note'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('contact_identity_links_idx').on(t.tenantId, t.contactId),
+    decisionCk: check('contact_identity_links_decision_ck', inList('decision', ['mesmo', 'diferente'])),
+  }),
+);
+
+/** Pedido de aprovação = uma versão da proposta. Imutável; a decisão fica em approval_decisions. */
+export const approvalRequests = pgTable(
+  'approval_requests',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    version: integer('version').notNull(),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    negotiationType: text('negotiation_type').notNull(),
+    listMonthlyCents: bigint('list_monthly_cents', { mode: 'number' }),
+    proposedMonthlyCents: bigint('proposed_monthly_cents', { mode: 'number' }).notNull(),
+    discountBp: integer('discount_bp').notNull().default(0),
+    activationFeeCents: bigint('activation_fee_cents', { mode: 'number' }),
+    replacesMonthlyCents: bigint('replaces_monthly_cents', { mode: 'number' }).notNull().default(0),
+    termMonths: integer('term_months'),
+    conditions: text('conditions'),
+    justification: text('justification').notNull(),
+    risks: text('risks'),
+    proposalAttachmentId: uuid('proposal_attachment_id'),
+    proposalSha256: text('proposal_sha256'),
+    requiredLevel: text('required_level').notNull(),
+    exceptional: boolean('exceptional').notNull().default(false),
+    /** Resumo financeiro e de contexto no momento do pedido (o que o aprovador viu). */
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    fingerprint: jsonb('fingerprint').$type<Record<string, unknown>>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('approval_requests_uq').on(t.opportunityId, t.version),
+    tenantIdx: index('approval_requests_tenant_idx').on(t.tenantId, t.createdAt),
+    levelCk: check('approval_requests_level_ck', inList('required_level', ['supervisor', 'gerencia', 'diretoria'])),
+  }),
+);
+
+/** Decisão sobre uma versão: aprovada, reprovada, correção ou substituída por nova versão. Uma por pedido; append-only. */
+export const approvalDecisions = pgTable(
+  'approval_decisions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    requestId: uuid('request_id').notNull().references(() => approvalRequests.id),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    decision: text('decision').notNull(),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    level: text('level'),
+    comment: text('comment'),
+    financialSummary: jsonb('financial_summary').$type<Record<string, unknown>>(),
+    dataVersion: jsonb('data_version').$type<Record<string, unknown>>(),
+    materialChanges: jsonb('material_changes').$type<string[]>().notNull().default([]),
+    approvedConditions: jsonb('approved_conditions').$type<Record<string, unknown> | null>(),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('approval_decisions_uq').on(t.requestId),
+    oppIdx: index('approval_decisions_opp_idx').on(t.tenantId, t.opportunityId),
+    decisionCk: check('approval_decisions_decision_ck', inList('decision', ['aprovada', 'reprovada', 'correcao', 'substituida'])),
+  }),
+);
+
+/** Chat da negociação: conversa interna da oportunidade (não entra no histórico do relacionamento). Append-only. */
+export const negotiationMessages = pgTable(
+  'negotiation_messages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    authorId: uuid('author_id').references(() => users.id),
+    kind: text('kind').notNull().default('mensagem'),
+    body: text('body').notNull(),
+    requestId: uuid('request_id'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('negotiation_messages_idx').on(t.tenantId, t.opportunityId, t.createdAt),
+    kindCk: check('negotiation_messages_kind_ck', inList('kind', ['mensagem', 'sistema'])),
+  }),
+);
+

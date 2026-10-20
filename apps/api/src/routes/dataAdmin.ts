@@ -1,6 +1,6 @@
 /** Base de clientes: modelo de planilha, importação com prévia e limpeza da base (gerência + senha). */
 import { customerFieldList } from '../services/customFields';
-import { and, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import { or, and, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
@@ -90,6 +90,9 @@ export const dataAdminRoutes = [
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           await tx.delete(s.automationRuns).where(eq(s.automationRuns.tenantId, t));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
+          await tx.delete(s.negotiationMessages).where(eq(s.negotiationMessages.tenantId, t));
+          await tx.delete(s.approvalDecisions).where(eq(s.approvalDecisions.tenantId, t));
+          await tx.delete(s.approvalRequests).where(eq(s.approvalRequests.tenantId, t));
           await tx.delete(s.opportunityAnswers).where(inArray(s.opportunityAnswers.opportunityId, opps));
           await tx.delete(s.opportunityAttachments).where(inArray(s.opportunityAttachments.opportunityId, opps));
           await del('historico_oportunidades', tx.delete(s.opportunityEvents).where(eq(s.opportunityEvents.tenantId, t)).returning({ id: s.opportunityEvents.id }));
@@ -103,12 +106,14 @@ export const dataAdminRoutes = [
           const custs = tx.select({ id: s.customers.id }).from(s.customers).where(eq(s.customers.tenantId, t));
           await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), inArray(s.addresses.customerId, custs)));
           await tx.delete(s.customerExternalIds).where(eq(s.customerExternalIds.tenantId, t));
+          await tx.delete(s.contactIdentityLinks).where(eq(s.contactIdentityLinks.tenantId, t));
+          await tx.delete(s.contactClassifications).where(eq(s.contactClassifications.tenantId, t));
           await del('clientes', tx.delete(s.customers).where(eq(s.customers.tenantId, t)).returning({ id: s.customers.id }));
         }
         // contatos que não estão mais em lead, oportunidade, cliente ou atividade
         const used = (tbl: typeof s.leads | typeof s.opportunities | typeof s.customers | typeof s.activities) => tx.select({ x: sql`1` }).from(tbl).where(eq((tbl as typeof s.leads).contactId, s.contacts.id));
         await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), isNull(s.addresses.customerId), notExists(tx.select({ x: sql`1` }).from(s.leads).where(eq(s.leads.contactId, s.addresses.contactId)))));
-        await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));
+        await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.contactClassifications).where(eq(s.contactClassifications.contactId, s.contacts.id))), notExists(tx.select({ x: sql`1` }).from(s.contactIdentityLinks).where(or(eq(s.contactIdentityLinks.contactId, s.contacts.id), eq(s.contactIdentityLinks.otherContactId, s.contacts.id)))), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));
       });
       await audit(app.db, req, { action: 'base.clear', entityType: 'tenant', entityId: t, metadata: { scopes: body.scopes, counts } });
       return { ok: true, counts };

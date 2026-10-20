@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -6,6 +6,7 @@ import { ArrowDown, ArrowRight, ArrowUp, BarChart3, Clock3, Download, Filter, Ha
 import { type ActivityType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
+import { MASK, moneyHidden } from '../lib/privacy';
 import { defaultPeriod, useLookups, useUrlState } from '../lib/hooks';
 import type { Kpi } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
@@ -17,6 +18,8 @@ import { BarRows, CHART, ComboChart, Donut, FunnelShape, Legend } from '../compo
 import { stageColor } from '../components/badges';
 import { PortsReport } from '../features/PortsReport';
 import { CommissionsReport } from '../features/CommissionsReport';
+import { MoneyToggle } from '../lib/privacy';
+import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 
 type Overview = {
   kpis: Kpi[];
@@ -31,7 +34,7 @@ type Overview = {
 const MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 export const monthLabel = (m: string) => MONTHS[Number(m.slice(5, 7)) - 1]!;
 export const monthYear = (m: string) => `${monthLabel(m)}/${m.slice(0, 4)}`;
-export const brlShort = (cents: number) => `R$ ${Math.round(cents / 100).toLocaleString('pt-BR')}`;
+export const brlShort = (cents: number) => (moneyHidden() ? MASK : `R$ ${Math.round(cents / 100).toLocaleString('pt-BR')}`);
 
 const KPI_LOOK = [
   { icon: <BarChart3 className="h-7 w-7" />, tone: 'green' as const },
@@ -54,6 +57,10 @@ export function ReportsPage() {
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: f.tab === 'leads' ? 'leads' : f.tab === 'oportunidades' ? 'oportunidades' : f.tab === 'comissoes' ? 'comissoes' : 'vendas' })}`;
   const show = (s: string) => f.tab === 'geral' || f.tab === s;
+  const tvRef = useRef<HTMLDivElement>(null);
+  const tv = useTvMode(tvRef);
+  const TABS = [{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }];
+  const TV_TABS = TABS.filter((t) => ['geral', 'vendas', 'leads', 'oportunidades', 'atividades'].includes(t.key) || (t.key === 'clientes' && can('clientes')));
 
   return (
     <div className="w-full">
@@ -65,16 +72,20 @@ export function ReportsPage() {
         actions={
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
+            <MoneyToggle />
+            <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
         }
       />
+      <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
+      {tv.active && <TvBar title="Relatórios" period={`${fmtDate(f.from)} a ${fmtDate(f.to)}`} tabs={TV_TABS} tab={f.tab} onTab={(t) => setF({ tab: t }, { resetPage: false })} onExit={tv.exit} queryKeys={[['reports'], ['customers', 'summary'], ['activities', 'report']]} />}
       <Tabs<string>
         label="Relatórios"
         className="mb-5"
         value={f.tab}
         onChange={(t) => setF({ tab: t }, { resetPage: false })}
-        tabs={[{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }]}
+        tabs={TABS}
       />
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
 
@@ -210,6 +221,7 @@ export function ReportsPage() {
       )}
       {!d && q.isLoading && <div className="card"><LoadingRows rows={8} /></div>}
       {d && <Button variant="ghost" className="sr-only" onClick={() => q.refetch()}>Atualizar</Button>}
+      </TvArea>
     </div>
   );
 }

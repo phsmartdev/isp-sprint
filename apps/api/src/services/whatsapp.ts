@@ -107,3 +107,9 @@ export async function sendZapiDocument(cfg: ZapiCfg, to: string, file: { data: B
   });
   return r.messageId ?? r.id ?? null;
 }
+
+/** Mensagem de texto pela Z-API (avisos internos). */
+export async function sendZapiText(cfg: ZapiCfg, to: string, message: string) {
+  const r = await zapi<{ zaapId?: string; messageId?: string; id?: string }>(cfg, 'send-text', { method: 'POST', body: { phone: to, message: message.slice(0, 4000) } });
+  return r.messageId ?? r.id ?? null;
+}

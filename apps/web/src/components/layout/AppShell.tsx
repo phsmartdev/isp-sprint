@@ -3,9 +3,10 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Send, Settings, UserRound, Users, UsersRound, X,
+  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X,
 } from 'lucide-react';
 import type { Module } from '@isp/domain';
+import { useApprovalCount } from '../../pages/Approvals';
 import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
 import { useHotkey } from '../../lib/hooks';
@@ -14,12 +15,13 @@ import { Modal } from '../ui/overlay';
 import { BrandImage, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
-type NavItem = { to: string; label: string; icon: ReactNode; module: Module; badge?: boolean };
+type NavItem = { to: string; label: string; icon: ReactNode; module: Module; badge?: boolean | 'approvals' };
 const ICON = 'h-[22px] w-[22px] shrink-0';
 const NAV: NavItem[] = [
   { to: '/', label: 'Início', icon: <Home className={ICON} />, module: 'inicio' },
   { to: '/leads', label: 'Leads', icon: <UsersRound className={ICON} />, module: 'leads' },
   { to: '/opportunities', label: 'Oportunidades', icon: <ClipboardList className={ICON} />, module: 'oportunidades' },
+  { to: '/aprovacoes', label: 'Aprovações', icon: <Scale className={ICON} />, module: 'oportunidades', badge: 'approvals' },
   { to: '/customers', label: 'Clientes', icon: <Users className={ICON} />, module: 'clientes' },
   { to: '/activities', label: 'Atividades', icon: <CalendarCheck className={ICON} />, module: 'atividades', badge: true },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
@@ -45,6 +47,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/integrations', label: 'Integrações', admin: true },
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
   { to: '/settings/contracts', label: 'Contratos', admin: true },
+  { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
@@ -66,6 +69,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const loc = useLocation();
   const counts = useOpenActivities().data?.counts;
   const badge = counts ? counts.today + counts.overdue : 0;
+  const approvals = useApprovalCount().data?.toDecide ?? 0;
   const inSettings = loc.pathname.startsWith('/settings');
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-navy to-navy-2 text-white">
@@ -89,7 +93,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               >
                 {n.icon}
                 <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                {n.badge && badge > 0 && <span className="num rounded-full bg-[#5DBB2F] px-2.5 py-0.5 text-xs font-bold text-white">{badge}</span>}
+                {n.badge === true && badge > 0 && <span className="num rounded-full bg-[#5DBB2F] px-2.5 py-0.5 text-xs font-bold text-white">{badge}</span>}
+                {n.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-[#F5B400] px-2.5 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
               </NavLink>
               {n.to === '/settings' && inSettings && (
                 <ul className="mb-2 mt-1 space-y-0.5 pl-9">
