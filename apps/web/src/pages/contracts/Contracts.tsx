@@ -1,5 +1,6 @@
+import { TvArea, TvBar, TvButton, useTvMode } from '../../features/TvMode';
 /** Gestão de Contratos: painel, lista, funil, calendário, renovações, reajustes, encerramentos, notificações e relatórios. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -313,14 +314,19 @@ export function ContractsPage() {
   const { can } = useAuth();
   const [f, setF] = useUrlState({ t: 'painel' });
   const view = (TABS.some((t) => t.key === f.t) ? f.t : 'painel') as View;
+  const tvRef = useRef<HTMLDivElement>(null);
+  const tv = useTvMode(tvRef);
+  const TV_TABS = TABS.filter((t) => ['painel', 'lista', 'funil', 'calendario', 'relatorios'].includes(t.key));
   return (
     <div className="w-full">
       <PageHeader
         icon={<FileSignature className="h-9 w-9" strokeWidth={2.2} />}
         title="Gestão de Contratos"
         subtitle="Vigências, renovações, reajustes e encerramentos com histórico e responsáveis."
-        actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button>}
+        actions={<><TvButton onClick={() => void tv.enter()} /><Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button></>}
       />
+      <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
+      {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report']]} />}
       <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={TABS.filter((t) => t.key !== 'modelos' || can('configuracoes', 'total'))} />
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
@@ -332,6 +338,7 @@ export function ContractsPage() {
       {view === 'notificacoes' && <Notificacoes />}
       {view === 'relatorios' && <Relatorios />}
       {view === 'modelos' && <div className="space-y-4"><AdminContractTemplates /><TemplatesManager /></div>}
+      </TvArea>
     </div>
   );
 }

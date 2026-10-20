@@ -1,8 +1,9 @@
+import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowUp, BarChart3, CalendarDays, ChevronRight, DollarSign, Download, Filter, Lightbulb, Mail, MapPin, Phone, Trophy, Users } from 'lucide-react';
 import { api, qs } from '../lib/api';
-import { fmtBRL, fmtInt } from '../lib/format';
+import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
 import { defaultPeriod, useUrlState } from '../lib/hooks';
 import type { Kpi } from '../lib/types';
 import { Avatar, ErrorState, KpiCard, LoadingRows, Tabs } from '../components/ui/primitives';
@@ -15,6 +16,7 @@ import { BarRows, CHART, ComboChart, Donut, Legend } from '../components/charts/
 import { SergipeMap } from '../components/charts/SergipeMap';
 import { brlShort, monthLabel, monthYear } from './Reports';
 import { MoneyToggle } from '../lib/privacy';
+import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 
 type Data = {
   kpis: Kpi[];
@@ -47,6 +49,9 @@ export function IntelligencePage() {
   const q = useQuery({ queryKey: ['intelligence', f.from, f.to], enabled: f.v === 'comercial', queryFn: () => api<Data>(`/intelligence/overview${qs({ from: f.from, to: f.to })}`) });
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
+  const tvRef = useRef<HTMLDivElement>(null);
+  const tv = useTvMode(tvRef);
+  const TABS = [{ key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }];
   return (
     <div className="w-full">
       <PageHeader
@@ -58,16 +63,19 @@ export function IntelligencePage() {
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
             <MoneyToggle />
+            <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
         }
       />
+      <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
+      {tv.active && <TvBar title="Inteligência" period={`${fmtDate(f.from)} a ${fmtDate(f.to)}`} tabs={TABS} tab={f.v} onTab={(v) => setF({ v })} onExit={tv.exit} queryKeys={[['intelligence'], ['insights'], ['contract-insights']]} />}
       <Tabs<string>
         label="Visão do relatório"
         className="mb-5"
         value={f.v}
         onChange={(v) => setF({ v })}
-        tabs={[{ key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }]}
+        tabs={TABS}
       />
       {f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
       {f.v === 'comercial' && (<div className="mt-6">
@@ -177,6 +185,7 @@ export function IntelligencePage() {
         </div>
       )}
       </div>)}
+      </TvArea>
     </div>
   );
 }

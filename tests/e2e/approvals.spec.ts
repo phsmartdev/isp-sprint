@@ -177,3 +177,15 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   await mgr.goto(oppUrl);
   await expect(mgr.getByRole('tab', { name: /^Chat$/ })).toBeVisible();
 });
+
+test('tela cheia também em Inteligência e Gestão de Contratos', async ({ page }) => {
+  await login(page, 'carlos@yepnet.test');
+  for (const path of ['/intelligence', '/contracts?t=relatorios']) {
+    await page.goto(path);
+    await page.getByRole('button', { name: 'Tela cheia' }).click();
+    await expect(page.getByRole('button', { name: 'Sair (Esc)' })).toBeVisible();
+    await expect(page.getByLabel('Hora atual')).toBeVisible();
+    await page.getByRole('button', { name: 'Sair (Esc)' }).click();
+    await expect(page.getByRole('button', { name: 'Sair (Esc)' })).toHaveCount(0);
+  }
+});
