@@ -60,7 +60,7 @@ describe('comentários e histórico de alterações', () => {
   it('comentário entra no histórico formal com menção; alterações mostram nomes', async () => {
     sent.length = 0;
     ok(await lucas.post(`/opportunities/${oppId}/comments`, { body: 'Cliente pediu instalação no sábado. @Ana', mentions: [ana.me.user.id] }), 201);
-    expect(sent.some((x) => x.to === ana.me.user.email || x.subject.includes('mencionou'))).toBe(true);
+    expect(sent.some((x) => x.subject.includes('mencionou'))).toBe(true);
     expect(ok(await ana.get(`/opportunities/${oppId}/unread`)).json()).toMatchObject({ comments: 1, mentions: 1 });
 
     const plans = (await lucas.get('/meta/lookups')).json().plans as { id: string; name: string }[];
