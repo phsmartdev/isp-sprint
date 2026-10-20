@@ -90,6 +90,7 @@ export const dataAdminRoutes = [
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           await tx.delete(s.automationRuns).where(eq(s.automationRuns.tenantId, t));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
+          await tx.delete(s.negotiationReads).where(eq(s.negotiationReads.tenantId, t));
           await tx.delete(s.negotiationMessages).where(eq(s.negotiationMessages.tenantId, t));
           await tx.delete(s.approvalDecisions).where(eq(s.approvalDecisions.tenantId, t));
           await tx.delete(s.approvalRequests).where(eq(s.approvalRequests.tenantId, t));

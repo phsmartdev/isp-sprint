@@ -5,7 +5,7 @@ import { Copy, Download, FileUp, PenLine, RefreshCw } from 'lucide-react';
 import { BILLING_TYPES, BILLING_TYPE_LABELS, DOC_TYPES } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
-import { fileToBase64, fmtBytes } from '../../lib/files';
+import { MAX_UPLOAD_BYTES, fileToBase64, fmtBytes } from '../../lib/files';
 import { Button, Chip, EmptyState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg, type ContractDetail } from './shared';
@@ -143,7 +143,7 @@ export function TemplatesManager() {
   const save = useMutation({
     mutationFn: async () => {
       if (file && !file.name.toLowerCase().endsWith('.docx')) throw new Error('Envie o modelo em Word (.docx).');
-      if (file && file.size > 6 * 1024 * 1024) throw new Error('Modelo maior que 6 MB.');
+      if (file && file.size > MAX_UPLOAD_BYTES) throw new Error(`Modelo com ${fmtBytes(file.size)}: o limite de envio é 3 MB. Reduza as imagens do timbrado no Word (Arquivo → Compactar imagens) e envie de novo.`);
       const body = { name, description: null, billingType: btype || null, docType, variables: vars, active, ...(file ? { fileName: file.name, data: await fileToBase64(file) } : {}) };
       if (edit === 'new') { if (!file) throw new Error('Escolha o arquivo .docx do modelo.'); return api<{ variables: Var[]; detected: string[] }>('/contract-templates', { method: 'POST', body }); }
       return api<{ variables: Var[]; detected: string[] }>(`/contract-templates/${(edit as Template).id}`, { method: 'PUT', body });

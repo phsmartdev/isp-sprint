@@ -125,3 +125,55 @@ test('cliente da base: Inteligência do Cliente, contratos e margem antes/depois
   await page.waitForLoadState('networkidle');
   await shot(page, 'aprov-base-1440');
 });
+
+test('negociação: comentário com @, chat com @, menções no topo e histórico legível', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const seller = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await login(seller, 'lucas@yepnet.test');
+  await seller.goto('/opportunities/new');
+  await seller.getByLabel('Nome do cliente').fill('Cliente Chat E2E');
+  await seller.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
+  await seller.getByText('Oferta / curiosidade').click();
+  await seller.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+  const oppUrl = seller.url();
+
+  // comentário formal com menção
+  await seller.getByRole('tab', { name: /Comentários e histórico/ }).click();
+  const box = seller.getByRole('combobox', { name: 'Comentário' });
+  await box.click();
+  await box.pressSequentially('Cliente quer instalar no sábado. @Car');
+  await seller.getByRole('option', { name: /Carlos Silva/ }).click();
+  await expect(box).toHaveValue(/@Carlos Silva $/);
+  await seller.getByRole('button', { name: 'Comentar' }).click();
+  await expect(seller.getByText('Cliente quer instalar no sábado.', { exact: false })).toBeVisible();
+  await seller.getByRole('button', { name: /^Comentários/ }).click();
+  await expect(seller.getByText(/comentou/)).toHaveCount(1);
+
+  // chat com menção
+  await seller.getByRole('tab', { name: /^Chat/ }).click();
+  const chat = seller.getByRole('combobox', { name: 'Mensagem para o time' });
+  await chat.click();
+  await chat.pressSequentially('@Carl');
+  await chat.press('Enter');
+  await chat.pressSequentially('consegue aprovar hoje?');
+  await chat.press('Enter');
+  await expect(seller.getByText('consegue aprovar hoje?')).toBeVisible();
+  await shot(seller, 'negociacao-chat');
+
+  // gerência vê a menção no topo e abre direto no chat
+  const mgr = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await login(mgr, 'carlos@yepnet.test');
+  const at = mgr.getByRole('button', { name: /menç(ão|ões) não lida/ });
+  await expect(at).toBeVisible();
+  await at.click();
+  await mgr.getByRole('dialog', { name: 'Menções' }).getByRole('link', { name: /consegue aprovar hoje/ }).click();
+  await expect(mgr).toHaveURL(/aba=chat/);
+  await expect(mgr.getByText('consegue aprovar hoje?')).toBeVisible();
+  await expect(mgr.getByRole('tab', { name: /Comentários e histórico • 1 novo/ })).toBeVisible();
+  await mgr.getByRole('tab', { name: /Comentários e histórico/ }).click();
+  await expect(mgr.getByText('Oportunidade criada')).toBeVisible();
+  await shot(mgr, 'negociacao-historico');
+  await mgr.goto(oppUrl);
+  await expect(mgr.getByRole('tab', { name: /^Chat$/ })).toBeVisible();
+});

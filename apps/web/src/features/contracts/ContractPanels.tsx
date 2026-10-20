@@ -7,7 +7,7 @@ import { SignaturesList } from './SignaturePanels';
 import { DOC_TYPES, SECTORS, SECTOR_LABELS, documentName, type Sector } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
-import { fileToBase64, fmtBytes } from '../../lib/files';
+import { MAX_UPLOAD_BYTES, compressImage, fileToBase64, fmtBytes } from '../../lib/files';
 import { Button, Chip, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { CHANGE_LABEL, errMsg, todayIso, type Alert, type ContractDetail, type Version } from './shared';
@@ -33,8 +33,9 @@ export function UploadModal({ c, open, onClose, category: cat0, processId, newVe
       const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
       const mime = MIMES[ext];
       if (!mime) throw new Error('Use PDF, DOCX, PNG ou JPG.');
-      if (file.size > 10 * 1024 * 1024) throw new Error('Arquivo maior que 10 MB.');
-      return api<{ name: string; version: number }>(`/contracts/${c.id}/documents`, { method: 'POST', body: { category, docDate, summary, mime, data: await fileToBase64(file), signed, restrictedTo: restricted, groupId: newVersionOf?.groupId, processId } });
+      const up = mime.startsWith('image/') ? await compressImage(file) : file;
+      if (up.size > MAX_UPLOAD_BYTES) throw new Error(`Arquivo com ${fmtBytes(up.size)}: o limite de envio é 3 MB. Comprima o PDF (ex.: “Reduzir tamanho” no leitor de PDF) e envie de novo.`);
+      return api<{ name: string; version: number }>(`/contracts/${c.id}/documents`, { method: 'POST', body: { category, docDate, summary, mime: up.type || mime, data: await fileToBase64(up), signed, restrictedTo: restricted, groupId: newVersionOf?.groupId, processId } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['contract-docs', c.id] }); qc.invalidateQueries({ queryKey: ['contract', c.id] }); toast({ tone: 'success', message: `Documento salvo: ${r.name}${r.version > 1 ? ` (v${r.version})` : ''}` }); onClose(); },
     onError: (e) => setError(errMsg(e)),

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Upload } from 'lucide-react';
 import { BILLING_TYPES, BILLING_TYPE_LABELS, SEGMENTS, SEGMENT_LABELS, type BillingType, type Segment } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
-import { fileToBase64 } from '../../lib/files';
+import { compressImage, fileToBase64 } from '../../lib/files';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { ProposalCanvas, type PField, type PPage } from '../../features/ProposalCanvas';
@@ -47,7 +47,7 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const upload = useMutation({
-    mutationFn: async (f: File) => api<PPage>(`/admin/proposal-templates/${t.id}/pages`, { method: 'POST', body: { data: await fileToBase64(f) } }),
+    mutationFn: async (f: File) => api<PPage>(`/admin/proposal-templates/${t.id}/pages`, { method: 'POST', body: { data: await fileToBase64(await compressImage(f)) } }),
     onSuccess: (p) => { setT((x) => ({ ...x, pages: [...x.pages, p] })); setPageIdx(t.pages.length); qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });

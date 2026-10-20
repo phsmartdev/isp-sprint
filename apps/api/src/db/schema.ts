@@ -1448,11 +1448,25 @@ export const negotiationMessages = pgTable(
     kind: text('kind').notNull().default('mensagem'),
     body: text('body').notNull(),
     requestId: uuid('request_id'),
+    /** Usuários mencionados com @ (recebem aviso). */
+    mentions: uuid('mentions').array().notNull().default(sql`'{}'::uuid[]`),
     createdAt: createdAt(),
   },
   (t) => ({
     idx: index('negotiation_messages_idx').on(t.tenantId, t.opportunityId, t.createdAt),
     kindCk: check('negotiation_messages_kind_ck', inList('kind', ['mensagem', 'sistema'])),
   }),
+);
+
+/** Até onde cada pessoa leu o chat e os comentários de cada negociação (não lidas e menções). */
+export const negotiationReads = pgTable(
+  'negotiation_reads',
+  {
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    lastReadAt: ts('last_read_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.opportunityId] }) }),
 );
 

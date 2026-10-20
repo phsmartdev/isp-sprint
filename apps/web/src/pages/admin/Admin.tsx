@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { compressImage } from '../../lib/files';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -333,8 +334,9 @@ export function AdminUsers() {
   const avatar = useMutation({
     mutationFn: async ({ u, f }: { u: AdminUser; f: File }) => {
       if (!IMG_TYPES.includes(f.type)) throw new Error('Envie PNG, JPG ou WebP.');
-      if (f.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB.');
-      return api(`/admin/users/${u.id}/avatar`, { method: 'PUT', body: { data: await fileToBase64(f) } });
+      const img = await compressImage(f, { maxBytes: 1_800_000, maxDim: 2400, keepAlpha: true });
+      if (img.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB mesmo reduzida. Exporte em tamanho menor.');
+      return api(`/admin/users/${u.id}/avatar`, { method: 'PUT', body: { data: await fileToBase64(img) } });
     },
     onSuccess: () => { toast({ tone: 'success', message: 'Foto atualizada' }); qc.invalidateQueries(); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
@@ -545,8 +547,9 @@ function SlotCard({ slot, info }: { slot: BrandSlot; info?: { hasImage: boolean;
   const upload = useMutation({
     mutationFn: async (f: File) => {
       if (!IMG_TYPES.includes(f.type)) throw new Error('Formato não aceito. Envie PNG, JPG ou WebP (SVG não é aceito).');
-      if (f.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB.');
-      return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(f) } });
+      const img = await compressImage(f, { maxBytes: 1_800_000, maxDim: 2400, keepAlpha: true });
+      if (img.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB mesmo reduzida. Exporte em tamanho menor.');
+      return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(img) } });
     },
     onSuccess: () => { bump(); qc.invalidateQueries({ queryKey: ['admin', 'branding'] }); toast({ tone: 'success', message: `${meta.label} atualizado` }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
@@ -563,7 +566,7 @@ function SlotCard({ slot, info }: { slot: BrandSlot; info?: { hasImage: boolean;
       <div className="flex flex-1 flex-col p-4">
         <p className="font-bold text-ink">{meta.label}</p>
         <p className="text-sm text-muted">{meta.where}</p>
-        <p className="mt-1 text-xs text-faint">Recomendado: {meta.size} · PNG, JPG ou WebP até 2 MB</p>
+        <p className="mt-1 text-xs text-faint">Recomendado: {meta.size} · PNG, JPG ou WebP (imagens grandes são reduzidas automaticamente)</p>
         {info?.hasImage && info.updatedAt && <p className="mt-1 text-xs text-faint">Enviado {fmtDateTime(info.updatedAt)}{info.updatedByName ? ` por ${info.updatedByName}` : ''} · {Math.round((info.sizeBytes ?? 0) / 1024)} KB</p>}
         <div className="mt-auto flex gap-2 pt-3">
           <Button size="sm" variant="primary" icon={info?.hasImage ? <RefreshCw className="h-4 w-4" /> : <Upload className="h-4 w-4" />} loading={upload.isPending} onClick={() => file.current?.click()}>{info?.hasImage ? 'Trocar' : 'Enviar imagem'}</Button>

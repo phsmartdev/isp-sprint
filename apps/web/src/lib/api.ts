@@ -30,9 +30,18 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   }
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    // resposta que não é JSON (ex.: limite da hospedagem): mensagem legível em vez de erro técnico
+    const detail = res.status === 413 ? 'Arquivo grande demais para enviar. Reduza o tamanho (até 3 MB) e tente de novo.'
+      : res.status >= 500 ? 'O servidor não respondeu como esperado. Tente de novo em instantes.'
+      : `Resposta inesperada do servidor (${res.status}).`;
+    throw new ApiError(res.status || 0, { type: 'about:blank', title: 'Erro', status: res.status, detail });
+  }
   if (!res.ok) {
-    const problem: Problem = data ?? { type: 'about:blank', title: 'Erro', status: res.status };
+    const problem: Problem = (data as Problem | undefined) ?? { type: 'about:blank', title: 'Erro', status: res.status };
     if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event('isp:unauthorized'));
     throw new ApiError(res.status, problem);
   }

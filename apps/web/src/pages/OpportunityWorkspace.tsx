@@ -17,6 +17,7 @@ import { Drawer, Modal, useToast } from '../components/ui/overlay';
 import { ContractChip, CoverageChip, LifecycleChip, ProposalChip, StageChip, productLabel } from '../components/badges';
 import { SprintTimer } from '../features/SprintTimer';
 import { Timeline } from '../features/Timeline';
+import { NegotiationChat, useUnread } from '../features/NegotiationChat';
 import { ActivityComposer } from '../features/ActivityComposer';
 import { ActivityRow } from '../features/ActivityRow';
 import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
@@ -528,7 +529,9 @@ export function OpportunityWorkspacePage() {
   const [genProposal, setGenProposal] = useState(false);
   const [copilot, setCopilot] = useState(false);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
-  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos'>('atividades');
+  const [search] = useSearchParams();
+  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' ? t : 'atividades'; });
+  const unread = useUnread(id!);
   const move = useMutation({
     mutationFn: (pipelineId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { pipelineId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['pipeline'] }); toast({ tone: 'success', message: `Movida para a jornada ${o.pipelineName}` }); },
@@ -657,7 +660,8 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Detalhes" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'atividades', label: 'Atividades', count: acts.data?.items.filter((x) => !x.completedAt).length },
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount },
-            { key: 'historico', label: 'Histórico' },
+            { key: 'historico', label: unread.data?.comments ? `Comentários e histórico • ${unread.data.comments} novo(s)` : 'Comentários e histórico' },
+            { key: 'chat', label: unread.data?.chat ? `Chat • ${unread.data.chat} nova(s)${unread.data.mentions ? ' @' : ''}` : 'Chat' },
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
@@ -666,6 +670,7 @@ export function OpportunityWorkspacePage() {
             : <EmptyState title="Nenhuma atividade" description="Agende um retorno para não perder o fio da conversa." action={<Button variant="primary" onClick={() => setScheduling(true)}>Agendar retorno</Button>} />)}
           {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
+          {centerTab === 'chat' && <div className="-m-5"><NegotiationChat oppId={opp.id} title={false} className="max-h-[620px]" /></div>}
         </div>
       </section>
     </div>

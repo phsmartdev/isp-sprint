@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
+import { MentionsMenu } from '../../features/MentionsMenu';
 import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
 import { useHotkey } from '../../lib/hooks';
@@ -219,6 +220,7 @@ export function AppShell() {
               <Bell className="h-7 w-7" strokeWidth={1.6} />
               {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-[#5DBB2F]" aria-hidden />}
             </Link>
+            <MentionsMenu />
             <HelpButton />
             <UserMenu />
           </div>

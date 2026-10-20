@@ -1,3 +1,4 @@
+import zlib from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 
 async function login(page: Page, email: string) {
@@ -145,4 +146,29 @@ test('oportunidade de cliente da base pergunta sobre Sucesso do Cliente', async 
   await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
   await expect(page.getByText(/Sucesso do Cliente acionado/)).toBeVisible();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+});
+
+/** PNG pesado (ruído, sem compressão) para simular uma arte grande exportada do Canva. */
+function heavyPng(w: number, h: number) {
+  const crc = (b: Buffer) => { const c = Buffer.alloc(4); c.writeUInt32BE(zlib.crc32(b) >>> 0); return c; };
+  const chunk = (type: string, data: Buffer) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); return Buffer.concat([len, td, crc(td)]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w * 3; x++) raw[y * (w * 3 + 1) + 1 + x] = (x * 7 + y * 13 + ((x * y) % 251)) & 0xff ^ ((Math.random() * 40) | 0); }
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 0 })), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('arte grande do modelo é reduzida no navegador e cabe no limite de envio da hospedagem', async ({ page }) => {
+  test.setTimeout(90_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/contract-templates');
+  await page.getByRole('button', { name: 'Novo modelo' }).click();
+  const png = heavyPng(1700, 1150);
+  expect(png.length).toBeGreaterThan(5_000_000);
+  const sizes: number[] = [];
+  page.on('request', (r) => { if (r.url().includes('/pages') && r.method() === 'POST') sizes.push(r.postDataBuffer()?.length ?? 0); });
+  await page.locator('input[type="file"][accept="image/png,image/jpeg"]').setInputFiles({ name: 'timbrado.png', mimeType: 'image/png', buffer: png });
+  await expect.poll(() => sizes.length, { timeout: 20_000 }).toBe(1);
+  expect(sizes[0]).toBeLessThan(4_400_000);
+  await expect(page.getByText(/Página 1|1 página|página 1/i).first()).toBeVisible({ timeout: 15_000 });
 });

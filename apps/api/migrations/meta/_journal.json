@@ -183,6 +183,13 @@
       "when": 1792500687287,
       "tag": "0025_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792505126214,
+      "tag": "0026_negotiation_chat",
+      "breakpoints": true
     }
   ]
 }

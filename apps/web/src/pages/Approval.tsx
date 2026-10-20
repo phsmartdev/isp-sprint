@@ -3,14 +3,14 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle2, MessageSquare, RotateCcw, Send, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RotateCcw, Send, XCircle } from 'lucide-react';
 import { APPROVAL_LEVEL_LABELS, NEGOTIATION_TYPES, NEGOTIATION_TYPE_LABELS, toCents, type NegotiationType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDateTime } from '../lib/format';
-import { useAuth } from '../auth/AuthProvider';
 import { Breadcrumb, Button, Chip, ErrorState, FormField, Input, LoadingRows, Select, Textarea, type Tone } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
 import { MoneyToggle } from '../lib/privacy';
+import { NegotiationChat } from '../features/NegotiationChat';
 import { dec, errMsg } from '../features/contracts/shared';
 import type { Analysis, RequestStatus } from '../features/approval/types';
 import {
@@ -228,37 +228,5 @@ function RequestDialog({ a, onClose }: { a: Analysis; onClose: () => void }) {
 // ------------------------------------------------------------------ chat da negociação
 
 function ChatPanel({ a }: { a: Analysis }) {
-  const { me } = useAuth();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [text, setText] = useState('');
-  const chat = useQuery({ queryKey: ['approval', a.opportunity.id, 'chat'], queryFn: () => api<{ items: Analysis['chat'] }>(`/opportunities/${a.opportunity.id}/chat`), initialData: { items: a.chat }, refetchInterval: 20_000 });
-  const listRef = useRef<HTMLOListElement>(null);
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [chat.data.items.length]);
-  const send = useMutation({
-    mutationFn: () => api(`/opportunities/${a.opportunity.id}/chat`, { method: 'POST', body: { body: text } }),
-    onSuccess: () => { setText(''); qc.invalidateQueries({ queryKey: ['approval', a.opportunity.id, 'chat'] }); },
-    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
-  });
-  return (
-    <section className="card flex max-h-[640px] flex-col" aria-labelledby="chat-h">
-      <h2 id="chat-h" className="flex items-center gap-2 px-5 pb-2 pt-4 text-md font-bold text-ink"><MessageSquare className="h-5 w-5 text-primary" aria-hidden />Chat da negociação</h2>
-      <ol ref={listRef} className="scroll-thin min-h-[120px] flex-1 space-y-2 overflow-y-auto px-5 pb-3">
-        {chat.data.items.length === 0 && <li className="text-sm text-muted">Converse com o time sobre esta negociação. Não vai para o cliente.</li>}
-        {chat.data.items.map((m) => m.kind === 'sistema' ? (
-          <li key={m.id} className="rounded-md bg-surface-2 px-3 py-2 text-xs text-muted"><span className="num">{fmtDateTime(m.createdAt)}</span> · {m.body}</li>
-        ) : (
-          <li key={m.id} className={clsx('max-w-[90%] rounded-lg px-3 py-2 text-sm', m.authorId === me?.user.id ? 'ml-auto bg-primary text-white' : 'bg-primary-soft text-ink')}>
-            <p className={clsx('text-2xs font-semibold', m.authorId === me?.user.id ? 'text-white/80' : 'text-muted')}>{m.authorName} · {fmtDateTime(m.createdAt)}</p>
-            <p className="whitespace-pre-wrap">{m.body}</p>
-          </li>
-        ))}
-      </ol>
-      <form className="flex gap-2 border-t border-line p-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) send.mutate(); }}>
-        <label htmlFor="chat-in" className="sr-only">Mensagem para o time</label>
-        <Input id="chat-in" value={text} onChange={(e) => setText(e.target.value)} placeholder="Escreva para o time…" maxLength={2000} />
-        <Button type="submit" variant="primary" aria-label="Enviar mensagem" loading={send.isPending} icon={<Send className="h-4 w-4" />} />
-      </form>
-    </section>
-  );
+  return <section className="card max-h-[680px]"><NegotiationChat oppId={a.opportunity.id} className="max-h-[680px]" /></section>;
 }

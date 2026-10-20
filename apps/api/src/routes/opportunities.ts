@@ -384,7 +384,29 @@ export const opportunityRoutes = [
         ...events.map((e) => ({ kind: 'opportunity' as const, ...e })),
         ...acts.map((a) => ({ kind: 'activity' as const, ...a, observedAt: a.occurredAt, sourceSystem: 'crm' })),
       ].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
-      return { items };
+      // nomes legíveis para os IDs que aparecem nas alterações (responsável, plano, origem, jornada...)
+      const ids = new Set<string>();
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      for (const e of events) {
+        const ch = (e.payload?.changed ?? {}) as Record<string, { from?: unknown; to?: unknown }>;
+        for (const v of Object.values(ch)) for (const x of [v?.from, v?.to]) if (typeof x === 'string' && UUID.test(x)) ids.add(x);
+      }
+      const labels: Record<string, string> = {};
+      if (ids.size) {
+        const list = [...ids];
+        const t = auth.tenantId;
+        const groups = await Promise.all([
+          app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, t), inArray(s.users.id, list))),
+          app.db.select({ id: s.plans.id, name: s.plans.name }).from(s.plans).where(and(eq(s.plans.tenantId, t), inArray(s.plans.id, list))),
+          app.db.select({ id: s.leadSources.id, name: s.leadSources.name }).from(s.leadSources).where(and(eq(s.leadSources.tenantId, t), inArray(s.leadSources.id, list))),
+          app.db.select({ id: s.campaigns.id, name: s.campaigns.name }).from(s.campaigns).where(and(eq(s.campaigns.tenantId, t), inArray(s.campaigns.id, list))),
+          app.db.select({ id: s.pipelines.id, name: s.pipelines.name }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, t), inArray(s.pipelines.id, list))),
+          app.db.select({ id: s.condominiums.id, name: s.condominiums.name }).from(s.condominiums).where(and(eq(s.condominiums.tenantId, t), inArray(s.condominiums.id, list))),
+          app.db.select({ id: s.deliveryRoutes.id, name: s.deliveryRoutes.name }).from(s.deliveryRoutes).where(and(eq(s.deliveryRoutes.tenantId, t), inArray(s.deliveryRoutes.id, list))),
+        ]);
+        for (const g of groups) for (const r of g) labels[r.id] = r.name;
+      }
+      return { items, labels };
     },
   }),
   defineRoute({

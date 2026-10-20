@@ -20,6 +20,7 @@ import { integrationRow, logEvent } from '../services/integrations';
 import { publicLink } from '../services/alerts';
 import { sendZapiText, waPhone } from '../services/whatsapp';
 import { level, ownerScope } from '../services/scope';
+import { chatOf } from '../services/negotiation';
 import { loadOpportunity } from '../services/opportunities';
 import {
   approvalLevelOf, approvalSettingsOf, buildAnalysis, classificationHistory, financialSummary, latestProposal, loadForAnalysis, requestsOf, timelines, type Analysis, type RequestView,
@@ -52,10 +53,6 @@ const DecisionBody = z.object({
 });
 const Classification = z.object(Object.fromEntries(CLASSIFICATION_DIMENSIONS.map((k) => [k, z.string().trim().max(80).nullable().default(null)])) as Record<(typeof CLASSIFICATION_DIMENSIONS)[number], z.ZodDefault<z.ZodNullable<z.ZodString>>>).extend({ notes: z.string().trim().max(2000).nullable().default(null) });
 
-async function chatOf(db: DbOrTx, tenantId: string, oppId: string) {
-  const rows = await db.select({ m: s.negotiationMessages, who: s.users.name }).from(s.negotiationMessages).leftJoin(s.users, eq(s.users.id, s.negotiationMessages.authorId)).where(and(eq(s.negotiationMessages.tenantId, tenantId), eq(s.negotiationMessages.opportunityId, oppId))).orderBy(s.negotiationMessages.createdAt).limit(500);
-  return rows.map(({ m, who }) => ({ id: m.id, kind: m.kind, body: m.body, authorId: m.authorId, authorName: who, requestId: m.requestId, createdAt: m.createdAt }));
-}
 const postSystem = (db: DbOrTx, tenantId: string, oppId: string, body: string, requestId: string | null, authorId: string | null = null) =>
   db.insert(s.negotiationMessages).values({ tenantId, opportunityId: oppId, kind: 'sistema', body: body.slice(0, 4000), requestId, authorId });
 
@@ -251,35 +248,6 @@ export const approvalRoutes = [
         .filter((r) => r.decision !== 'substituida')
         .map((r) => ({ ...r, status: r.decision ?? 'pendente', canDecide: !r.decision && r.requestedBy !== auth.userId && canDecide(myLevel, r.requiredLevel as ApprovalLevel), requiredLabel: APPROVAL_LEVEL_LABELS[r.requiredLevel as ApprovalLevel], negotiationLabel: NEGOTIATION_TYPE_LABELS[r.negotiationType as keyof typeof NEGOTIATION_TYPE_LABELS] ?? r.negotiationType }));
       return { items, myLevel, myLevelLabel: APPROVAL_LEVEL_LABELS[myLevel], toDecide: items.filter((i) => i.canDecide).length };
-    },
-  }),
-
-  defineRoute({
-    method: 'GET',
-    url: '/opportunities/:id/chat',
-    summary: 'Chat da negociação',
-    tag: 'Aprovações',
-    anyAuthenticated: true,
-    params: IdParams,
-    handler: async ({ app, auth, params }) => {
-      const { opp } = await loadForAnalysis(app.db, auth, params.id);
-      return { items: await chatOf(app.db, auth.tenantId, opp.id) };
-    },
-  }),
-  defineRoute({
-    method: 'POST',
-    url: '/opportunities/:id/chat',
-    summary: 'Envia mensagem no chat da negociação (interno, não vai ao cliente)',
-    tag: 'Aprovações',
-    anyAuthenticated: true,
-    params: IdParams,
-    body: z.object({ body: z.string().trim().min(1).max(2000) }),
-    rateLimit: () => ({ max: 60, timeWindow: '1 minute' }),
-    handler: async ({ app, auth, params, body, reply }) => {
-      const { opp } = await loadForAnalysis(app.db, auth, params.id);
-      const [m] = await app.db.insert(s.negotiationMessages).values({ tenantId: auth.tenantId, opportunityId: opp.id, authorId: auth.userId, kind: 'mensagem', body: body.body }).returning();
-      reply.code(201);
-      return { id: m!.id, kind: m!.kind, body: m!.body, authorId: auth.userId, authorName: auth.name, requestId: null, createdAt: m!.createdAt };
     },
   }),
 

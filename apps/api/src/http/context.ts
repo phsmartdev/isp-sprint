@@ -66,27 +66,44 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
     .limit(1);
   if (!row || !row.active) return null;
 
-  const roleRows = await app.db
+  if (now.getTime() - row.lastSeenAt.getTime() > 60_000) {
+    await app.db.update(s.sessions).set({ lastSeenAt: now }).where(eq(s.sessions.id, row.sessionId));
+  }
+  return buildAuth(app.db, row);
+}
+
+type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; timezone: string; tenantName: string };
+
+/** Contexto de acesso de qualquer usuário ativo (ex.: conferir se a pessoa mencionada vê a negociação). */
+export async function authForUser(db: DB, tenantId: string, userId: string): Promise<AuthContext | null> {
+  const [row] = await db
+    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, active: s.users.active, timezone: s.tenants.timezone, tenantName: s.tenants.name })
+    .from(s.users)
+    .innerJoin(s.tenants, eq(s.tenants.id, s.users.tenantId))
+    .where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId)))
+    .limit(1);
+  if (!row || !row.active) return null;
+  return buildAuth(db, { ...row, sessionId: '' });
+}
+
+async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
+  const roleRows = await db
     .select({ key: s.roles.key, roleId: s.roles.id })
     .from(s.userRoles)
     .innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId))
     .where(and(eq(s.userRoles.userId, row.userId), eq(s.roles.tenantId, row.tenantId)));
   const policies = roleRows.length
-    ? await app.db.select().from(s.accessPolicies).where(inArray(s.accessPolicies.roleId, roleRows.map((r) => r.roleId)))
+    ? await db.select().from(s.accessPolicies).where(inArray(s.accessPolicies.roleId, roleRows.map((r) => r.roleId)))
     : [];
   const access = Object.fromEntries(
     MODULES.map((m) => [m, mergeLevels(policies.filter((p) => p.module === m).map((p) => p.level as AccessLevel))]),
   ) as Record<Module, AccessLevel>;
 
-  const memberships = await app.db.select().from(s.teamMemberships).where(eq(s.teamMemberships.userId, row.userId));
+  const memberships = await db.select().from(s.teamMemberships).where(eq(s.teamMemberships.userId, row.userId));
   const ledTeams = memberships.filter((m) => m.isLead).map((m) => m.teamId);
   const members = ledTeams.length
-    ? await app.db.select({ userId: s.teamMemberships.userId }).from(s.teamMemberships).where(inArray(s.teamMemberships.teamId, ledTeams))
+    ? await db.select({ userId: s.teamMemberships.userId }).from(s.teamMemberships).where(inArray(s.teamMemberships.teamId, ledTeams))
     : [];
-
-  if (now.getTime() - row.lastSeenAt.getTime() > 60_000) {
-    await app.db.update(s.sessions).set({ lastSeenAt: now }).where(eq(s.sessions.id, row.sessionId));
-  }
 
   return {
     sessionId: row.sessionId,
