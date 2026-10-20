@@ -11,7 +11,6 @@ import { GeneralInsights, type InsightView } from '../features/GeneralInsights';
 import { ContractInsights } from '../features/ContractInsights';
 import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacil } from '../components/brand';
 import { BarRows, CHART, ComboChart, Donut, Legend } from '../components/charts/charts';
 import { SergipeMap } from '../components/charts/SergipeMap';
 import { brlShort, monthLabel, monthYear } from './Reports';
@@ -58,7 +57,6 @@ export function IntelligencePage() {
         icon={<Lightbulb className="h-9 w-9" strokeWidth={2.2} />}
         title="Inteligência"
         subtitle="Transforme dados em oportunidades e tome decisões mais estratégicas."
-        mascot={{ slot: 'mascote_inteligencia', lines: ['Informação certa', 'para você vender mais.'], highlight: <ConfiarFacil /> }}
         actions={
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
@@ -116,7 +114,7 @@ export function IntelligencePage() {
           </section>
           <section className="card p-5 xl:col-span-4" aria-labelledby="h-plans">
             <h2 id="h-plans" className="mb-4 text-lg font-bold text-ink">Vendas por plano</h2>
-            {d.plans.total === 0 ? <p className="text-sm text-muted">Nenhuma venda no período.</p> : <BarRows color="#1D5FE6" items={d.plans.items.map((x) => ({ label: x.plan, value: x.n, share: x.share }))} />}
+            {d.plans.total === 0 ? <p className="text-sm text-muted">Nenhuma venda no período.</p> : <BarRows color="#2F5986" items={d.plans.items.map((x) => ({ label: x.plan, value: x.n, share: x.share }))} />}
           </section>
           <section className="card p-5 xl:col-span-4" aria-labelledby="h-reg">
             <div className="mb-3 flex items-center justify-between">

@@ -11,14 +11,13 @@ import { useAuth } from '../auth/AuthProvider';
 import { Button, EmptyState, ErrorState, Input, LoadingRows, Select, Tabs } from '../components/ui/primitives';
 import { Modal } from '../components/ui/overlay';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacil } from '../components/brand';
 import { ActivityComposer } from '../features/ActivityComposer';
 import { ActivityRow, TYPE_ICON } from '../features/ActivityRow';
 
 type ListResp = Paged<Activity> & { counts: { overdue: number; today: number; open: number }; typeCounts: Record<ActivityType, number> };
 type CalResp = { days: { day: string; types: ActivityType[] }[]; upcoming: Activity[]; week: Record<ActivityType, number> };
 
-const DOT: Record<ActivityType, string> = { tarefa: 'bg-[#2563EB]', ligacao: 'bg-[#22A447]', reuniao: 'bg-[#7C3AED]', email: 'bg-[#F59E0B]', whatsapp: 'bg-[#4ADE80]', visita: 'bg-[#A78BFA]' };
+const DOT: Record<ActivityType, string> = { tarefa: 'bg-[#2F5986]', ligacao: 'bg-[#22A447]', reuniao: 'bg-[#7C3AED]', email: 'bg-[#F59E0B]', whatsapp: 'bg-[#4ADE80]', visita: 'bg-[#A78BFA]' };
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const addDays = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return isoDay(d); };
@@ -96,7 +95,6 @@ export function ActivitiesPage() {
         icon={<CalendarCheck className="h-9 w-9" strokeWidth={2.2} />}
         title="Atividades"
         subtitle="Organize suas tarefas e mantenha o foco nas suas vendas."
-        mascot={{ slot: 'mascote_atividades', lines: ['Planeje, acompanhe', 'e não perca nenhuma', 'oportunidade.'], highlight: <ConfiarFacil /> }}
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => setCreating(true)}>Nova atividade</Button>}
       />
       <Tabs<string>

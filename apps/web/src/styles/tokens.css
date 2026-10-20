@@ -1,47 +1,48 @@
 /*
- * Tokens da identidade Yepnet (fiel às telas de referência de 17/10/2026).
- * ÚNICA fonte de cor, raio e sombra. Tema claro, como nos designs.
+ * Tokens da identidade visual BKT (Brand Book 2025): azul #2F5986, grafite #2D3339 e branco na paleta primária;
+ * azuis e grafites secundários/terciários com moderação. ÚNICA fonte de cor, raio e sombra.
  * Valores em canais RGB para permitir opacidade (rgb(var(--x) / .5)).
+ * Nomes antigos (navy, lime) mantidos para não mexer nos componentes: navy = grafite, lime = azul de destaque.
  */
 :root {
   /* base */
-  --bg: 244 247 252;            /* #F4F7FC fundo das páginas */
+  --bg: 242 244 246;            /* #F2F4F6 fundo das páginas (neutro) */
   --surface: 255 255 255;
-  --surface-2: 247 249 253;     /* cabeçalho de tabela, áreas internas */
-  --line: 229 234 243;          /* #E5EAF3 bordas */
-  --line-strong: 205 214 230;
-  --ink: 10 26 79;              /* #0A1A4F títulos e texto forte */
-  --text: 30 41 73;             /* #1E2949 texto corrido */
-  --muted: 92 106 138;          /* #5C6A8A texto secundário (AA) */
-  --faint: 128 141 168;         /* legendas pequenas */
+  --surface-2: 246 247 249;     /* cabeçalho de tabela, áreas internas */
+  --line: 225 229 234;          /* #E1E5EA bordas */
+  --line-strong: 201 207 214;
+  --ink: 45 51 57;              /* #2D3339 grafite BKT: títulos e texto forte */
+  --text: 58 66 74;             /* #3A424A texto corrido */
+  --muted: 95 107 118;          /* #5F6B76 texto secundário (AA) */
+  --faint: 125 135 145;         /* legendas pequenas */
 
   /* marca */
-  --navy: 8 31 92;              /* #081F5C sidebar */
-  --navy-2: 6 23 69;            /* #061745 sidebar (base do gradiente) */
-  --navy-active: 21 54 133;     /* #153685 item ativo */
-  --lime: 126 217 87;           /* #7ED957 verde Yepnet */
-  --lime-ink: 52 140 30;        /* #348C1E verde sobre claro (AA) */
-  --primary: 21 101 240;        /* #1565F0 azul dos botões */
-  --primary-hover: 13 82 204;
-  --primary-soft: 232 240 254;  /* #E8F0FE balões e fundos suaves */
+  --navy: 45 51 57;             /* #2D3339 grafite: menu */
+  --navy-2: 35 40 45;           /* #23282D base do gradiente do menu */
+  --navy-active: 47 89 134;     /* #2F5986 item ativo (azul BKT) */
+  --lime: 79 187 255;           /* #4FBBFF azul claro de destaque sobre fundo escuro */
+  --lime-ink: 47 89 134;        /* #2F5986 destaque sobre claro */
+  --primary: 47 89 134;         /* #2F5986 azul BKT: botões e links */
+  --primary-hover: 37 72 110;   /* #25486E */
+  --primary-soft: 232 238 245;  /* #E8EEF5 fundos suaves */
 
   /* semânticos */
   --success: 22 163 74;         /* #16A34A */
   --success-soft: 227 246 233;
   --warning: 234 122 18;        /* #EA7A12 */
   --warning-soft: 255 240 222;
-  --danger: 220 38 38;          /* #DC2626 */
-  --danger-soft: 254 228 226;
-  --purple: 124 58 237;         /* #7C3AED */
-  --purple-soft: 240 233 255;
-  --sky: 56 132 255;
-  --sky-soft: 234 242 255;
+  --danger: 210 52 52;          /* #D23434 (próximo do vermelho terciário #FF5050, com contraste AA) */
+  --danger-soft: 254 230 230;
+  --purple: 103 118 128;        /* #677680 grafite terciário (usado onde antes era roxo) */
+  --purple-soft: 236 239 241;
+  --sky: 56 133 211;            /* #3885D3 azul secundário */
+  --sky-soft: 234 242 251;
   --yellow: 245 180 0;
-  --focus: 21 101 240;
+  --focus: 56 133 211;          /* #3885D3 */
 
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --shadow-card: 0 1px 2px rgb(16 34 87 / 0.04), 0 2px 8px rgb(16 34 87 / 0.04);
-  --shadow-overlay: 0 16px 40px rgb(10 26 79 / 0.18);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --shadow-card: 0 1px 2px rgb(45 51 57 / 0.05), 0 2px 8px rgb(45 51 57 / 0.05);
+  --shadow-overlay: 0 16px 40px rgb(45 51 57 / 0.22);
 }

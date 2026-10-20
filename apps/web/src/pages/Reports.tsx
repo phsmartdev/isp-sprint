@@ -13,7 +13,6 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, KpiCard, LoadingRows, Select, Tabs } from '../components/ui/primitives';
 import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacil } from '../components/brand';
 import { BarRows, CHART, ComboChart, Donut, FunnelShape, Legend } from '../components/charts/charts';
 import { stageColor } from '../components/badges';
 import { PortsReport } from '../features/PortsReport';
@@ -68,7 +67,6 @@ export function ReportsPage() {
         icon={<BarChart3 className="h-9 w-9" strokeWidth={2.4} />}
         title="Relatórios"
         subtitle="Acompanhe seus resultados e tome decisões com mais segurança."
-        mascot={{ slot: 'mascote_relatorios', lines: ['Transforme dados', 'em oportunidades.'], highlight: <ConfiarFacil /> }}
         actions={
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />

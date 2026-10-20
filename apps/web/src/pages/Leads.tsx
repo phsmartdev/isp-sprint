@@ -12,7 +12,6 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Notice, Pagination, Select, Tabs, Textarea } from '../components/ui/primitives';
 import { ConfirmDialog, Drawer, Modal, useToast } from '../components/ui/overlay';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacilPartial } from '../components/brand';
 import { InterestTag, LeadStatusChip, SourceChip, productLabel } from '../components/badges';
 
 const INTERESTS = ['Oferta', 'Velocidade', 'Benefícios', 'Curiosidade', 'Preço', 'Estabilidade'];
@@ -218,7 +217,6 @@ export function LeadsPage() {
         icon={<UsersRound className="h-9 w-9" strokeWidth={2.2} />}
         title="Leads"
         subtitle="Gerencie seus leads e transforme interesse em oportunidades."
-        mascot={{ slot: 'mascote_leads', lines: ['Mais oportunidades', 'para o seu dia.'], highlight: <ConfiarFacilPartial /> }}
         actions={
           <>
             <Button variant="outline" size="lg" icon={<Upload className="h-5 w-5" />} onClick={() => setImporting(true)}>Importar</Button>

@@ -66,7 +66,7 @@ export function MoneyRows({ items, colorOf }: { items: { key: string; label: str
       {items.map((x) => (
         <li key={x.key}>
           <div className="mb-1 flex items-baseline justify-between gap-3 text-sm"><span className="min-w-0 text-ink">{x.label} <span className="num text-muted">({x.n})</span></span><span className="num shrink-0 font-semibold text-ink">{fmtBRL(x.monthlyCents)}/mês</span></div>
-          <div className="h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full" style={{ width: `${(x.monthlyCents / max) * 100}%`, background: colorOf?.(x.key) ?? '#1D5FE6', minWidth: x.n ? 4 : 0 }} /></div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full" style={{ width: `${(x.monthlyCents / max) * 100}%`, background: colorOf?.(x.key) ?? '#2F5986', minWidth: x.n ? 4 : 0 }} /></div>
         </li>
       ))}
     </ul>
@@ -74,7 +74,7 @@ export function MoneyRows({ items, colorOf }: { items: { key: string; label: str
 }
 
 export const TYPE_TONE: Record<BillingType, 'blue' | 'purple' | 'orange'> = { recorrente: 'blue', frequente: 'purple', medicao: 'orange' };
-export const TYPE_COLOR: Record<BillingType, string> = { recorrente: '#1D5FE6', frequente: '#7C3AED', medicao: '#EA7A0C' };
+export const TYPE_COLOR: Record<BillingType, string> = { recorrente: '#2F5986', frequente: '#7C3AED', medicao: '#EA7A0C' };
 export function TypeChip({ type }: { type: BillingType }) {
   return <Chip tone={TYPE_TONE[type]}>{BILLING_TYPE_LABELS[type]}</Chip>;
 }

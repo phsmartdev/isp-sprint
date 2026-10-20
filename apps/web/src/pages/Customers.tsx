@@ -12,7 +12,6 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacil } from '../components/brand';
 import { LifecycleChip, segmentLabel } from '../components/badges';
 import { WhatsIcon } from './Leads';
 
@@ -84,7 +83,6 @@ export function CustomersPage() {
         icon={<Users className="h-9 w-9" strokeWidth={2.2} />}
         title="Clientes"
         subtitle="Acompanhe seus clientes e todo o histórico de relacionamento."
-        mascot={{ slot: 'mascote_clientes', lines: ['Clientes conectados', 'a crescimentos reais.'], highlight: <ConfiarFacil /> }}
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => setCreating(true)}>Novo cliente</Button>}
       />
       <section aria-label="Indicadores" className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -119,12 +119,12 @@ export const businessRoutes = [
         if (body.isDefault) await tx.update(s.pipelines).set({ isDefault: false }).where(eq(s.pipelines.tenantId, auth.tenantId));
         const [p] = await tx.insert(s.pipelines).values({ tenantId: auth.tenantId, key, name: body.name, description: body.description, segments: body.segments, isDefault: body.isDefault, position: n }).returning({ id: s.pipelines.id });
         let stages: { key: string; name: string; kind: string; color: string | null; requirements: Record<string, boolean> }[] = [
-          { key: 'novo_lead', name: 'Novo lead', kind: 'open', color: '#3B82F6', requirements: {} },
-          { key: 'em_andamento', name: 'Em andamento', kind: 'open', color: '#F59E0B', requirements: {} },
-          { key: 'proposta', name: 'Proposta', kind: 'open', color: '#60A5FA', requirements: { plano: true } },
-          { key: 'negociacao', name: 'Negociação', kind: 'open', color: '#4ADE80', requirements: { proposta: true, plano: true } },
-          { key: 'ganha', name: 'Venda fechada', kind: 'won', color: '#22C55E', requirements: { plano: true } },
-          { key: 'perdida', name: 'Perdido', kind: 'lost', color: '#EF4444', requirements: {} },
+          { key: 'novo_lead', name: 'Novo lead', kind: 'open', color: '#3885D3', requirements: {} },
+          { key: 'em_andamento', name: 'Em andamento', kind: 'open', color: '#4FBBFF', requirements: {} },
+          { key: 'proposta', name: 'Proposta', kind: 'open', color: '#2F5986', requirements: { plano: true } },
+          { key: 'negociacao', name: 'Negociação', kind: 'open', color: '#00C2E0', requirements: { proposta: true, plano: true } },
+          { key: 'ganha', name: 'Venda fechada', kind: 'won', color: '#22A447', requirements: { plano: true } },
+          { key: 'perdida', name: 'Perdido', kind: 'lost', color: '#FF5050', requirements: {} },
         ];
         if (body.copyFromId) {
           const src = await tx.select().from(s.pipelineStages).where(and(eq(s.pipelineStages.pipelineId, body.copyFromId), eq(s.pipelineStages.tenantId, auth.tenantId), eq(s.pipelineStages.active, true))).orderBy(asc(s.pipelineStages.position));

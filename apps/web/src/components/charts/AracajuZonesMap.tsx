@@ -33,7 +33,7 @@ export function AracajuZonesMap({ zones, condos, tone = 'blue' }: { zones: { zon
     const t = Math.sqrt(n / max);
     return tone === 'red' ? `hsl(0 ${60 + t * 20}% ${92 - t * 30}%)` : `hsl(219 ${70 + t * 15}% ${92 - t * 32}%)`;
   };
-  const dot = tone === 'red' ? '#B91C1C' : '#0A1F5C';
+  const dot = tone === 'red' ? '#B91C1C' : '#2D3339';
   const placed = useMemo(() => {
     const byZone = new Map<string, number>();
     return condos.filter((c) => c.zone in ZONES).slice(0, 60).map((c) => {
@@ -57,8 +57,8 @@ export function AracajuZonesMap({ zones, condos, tone = 'blue' }: { zones: { zon
           return (
             <g key={k}>
               <path d={z.path} fill={fill(n)} stroke="#FFFFFF" strokeWidth={3}><title>{`${z.label}: ${n} cliente(s)`}</title></path>
-              <text x={z.labelAt[0]} y={z.labelAt[1]} textAnchor="middle" fontSize="15" fontWeight={800} fill="#0A1F5C" stroke="#FFFFFF" strokeWidth={4} paintOrder="stroke">{z.label}</text>
-              <text x={z.labelAt[0]} y={z.labelAt[1] + 18} textAnchor="middle" fontSize="13" fontWeight={700} fill="#0A1F5C" stroke="#FFFFFF" strokeWidth={4} paintOrder="stroke">{n} cliente(s)</text>
+              <text x={z.labelAt[0]} y={z.labelAt[1]} textAnchor="middle" fontSize="15" fontWeight={800} fill="#2D3339" stroke="#FFFFFF" strokeWidth={4} paintOrder="stroke">{z.label}</text>
+              <text x={z.labelAt[0]} y={z.labelAt[1] + 18} textAnchor="middle" fontSize="13" fontWeight={700} fill="#2D3339" stroke="#FFFFFF" strokeWidth={4} paintOrder="stroke">{n} cliente(s)</text>
             </g>
           );
         })}

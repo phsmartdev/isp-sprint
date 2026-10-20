@@ -21,7 +21,7 @@ const SAMPLE: Record<string, string> = {
   'contrato.prazo_meses': '12', 'contrato.valor_mensal': 'R$ 1.890,00', 'contrato.valor_global': 'R$ 22.680,00', 'contrato.saldo': 'R$ 120.000,00', 'contrato.dia_faturamento': '10', 'contrato.condicoes_faturamento': 'Fatura mensal, vencimento no dia 10',
   'contrato.indice_reajuste': 'IPCA', 'contrato.data_base': '15/01/2026', 'contrato.condicoes_especificas': 'SLA de 99,5%', 'contrato.orgao': 'Secretaria Municipal', 'contrato.processo': 'PROC-2025-0099',
   'contrato.itens_texto': '1 × Link dedicado 300 Mbps — R$ 1.890,00', 'responsavel.nome': 'Responsável Exemplo', data_hoje: new Date().toLocaleDateString('pt-BR'), data_extenso: new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }),
-  'oportunidade.taxa_ativacao': 'R$ 0,00', 'oportunidade.titulo': 'Link dedicado escritório', 'vendedor.nome': 'Vendedor Exemplo', 'vendedor.email': 'vendas@exemplo.com', 'empresa.nome': 'Yepnet', 'data.hoje': new Date().toLocaleDateString('pt-BR'),
+  'oportunidade.taxa_ativacao': 'R$ 0,00', 'oportunidade.titulo': 'Link dedicado escritório', 'vendedor.nome': 'Vendedor Exemplo', 'vendedor.email': 'vendas@exemplo.com', 'empresa.nome': 'BKT', 'data.hoje': new Date().toLocaleDateString('pt-BR'),
 };
 const newId = () => Math.random().toString(36).slice(2, 10);
 const errMsg = (e: unknown) => (e instanceof ApiError ? [e.problem.detail ?? e.message, ...(e.problem.errors ?? []).map((x) => x.message)].join(' ') : (e as Error).message);

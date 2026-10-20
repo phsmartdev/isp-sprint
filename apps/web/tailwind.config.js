@@ -30,7 +30,7 @@ export default {
       },
       borderRadius: { sm: 'var(--radius-sm)', DEFAULT: 'var(--radius-md)', md: 'var(--radius-md)', lg: 'var(--radius-lg)' },
       boxShadow: { card: 'var(--shadow-card)', overlay: 'var(--shadow-overlay)' },
-      fontFamily: { sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'] },
+      fontFamily: { sans: ['"Work Sans"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'], display: ['Orbitron', '"Work Sans"', 'system-ui', 'sans-serif'] },
       fontSize: {
         '2xs': ['0.6875rem', '1rem'],
         xs: ['0.75rem', '1.05rem'],

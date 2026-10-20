@@ -13,7 +13,7 @@ import { api } from '../../lib/api';
 import { useHotkey } from '../../lib/hooks';
 import { Avatar } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
-import { BrandImage, Logo } from '../brand';
+import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
 type NavItem = { to: string; label: string; icon: ReactNode; module: Module; badge?: boolean | 'approvals' };
@@ -94,8 +94,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               >
                 {n.icon}
                 <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                {n.badge === true && badge > 0 && <span className="num rounded-full bg-[#5DBB2F] px-2.5 py-0.5 text-xs font-bold text-white">{badge}</span>}
-                {n.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-[#F5B400] px-2.5 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
+                {n.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2.5 py-0.5 text-xs font-bold text-navy">{badge}</span>}
+                {n.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2.5 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
               </NavLink>
               {n.to === '/settings' && inSettings && (
                 <ul className="mb-2 mt-1 space-y-0.5 pl-9">
@@ -117,13 +117,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           ))}
         </ul>
       </nav>
-      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-[18px] bg-gradient-to-br from-[#0E3A9A] via-[#0B2A72] to-[#05174A]', inSettings ? 'h-[170px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[300px] min-h-[200px] shrink-0 [@media(max-height:640px)]:hidden')} aria-hidden>
-        <BrandImage slot="card_sidebar" className="absolute inset-0 h-full w-full object-cover object-bottom" />
-        <p className="relative px-5 pt-5 text-[30px] font-extrabold leading-[1.05] text-white drop-shadow">
-          Confiar
-          <br />
-          ficou <span className="text-lime">fácil.</span>
-        </p>
+      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[140px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[200px] min-h-[140px] shrink-0 [@media(max-height:720px)]:hidden')} aria-hidden>
+        <Hexagons className="absolute inset-0 h-full w-full" />
+        <img src="/brand/bkt-symbol-white.png" alt="" className="absolute bottom-4 left-5 h-10 w-auto opacity-90" draggable={false} />
       </div>
     </div>
   );
@@ -218,7 +214,7 @@ export function AppShell() {
           <div className="ml-auto flex items-center gap-2 sm:gap-4">
             <Link to="/activities" className="relative flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface-2" aria-label={notify ? `${notify} atividades para hoje ou vencidas` : 'Sem atividades pendentes hoje'}>
               <Bell className="h-7 w-7" strokeWidth={1.6} />
-              {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-[#5DBB2F]" aria-hidden />}
+              {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-danger" aria-hidden />}
             </Link>
             <MentionsMenu />
             <HelpButton />

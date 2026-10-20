@@ -27,7 +27,7 @@ type Dash = {
   alerts: { open: number; overdue: number; byKind: { kind: string; label: string; n: number }[] };
   nextExpiring: ContractRow[]; attention: ContractRow[];
 };
-const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#1D5FE6', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
+const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
 
 function Delta({ cur, prev }: { cur: number; prev: number }) {
   if (!prev) return <span className="text-xs text-muted">sem base no período anterior</span>;
@@ -53,7 +53,7 @@ function StratCard({ title, items, colorOf }: { title: string; items: Strat[]; c
             return (
               <li key={x.key}>
                 <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 text-sm"><span className="min-w-0 text-ink">{x.label} <span className="num text-muted">({x.n})</span></span><span className="num text-ink"><strong>{fmtBRL(x.billedCents)}</strong> <span className="text-muted">no período · {fmtBRL(x.monthlyCents)}/mês</span></span></div>
-                <div className="h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full" style={{ width: `${((x.billedCents || x.monthlyCents) / max) * 100}%`, background: colorOf?.(x.key) ?? '#1D5FE6', minWidth: x.n ? 4 : 0 }} /></div>
+                <div className="h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full" style={{ width: `${((x.billedCents || x.monthlyCents) / max) * 100}%`, background: colorOf?.(x.key) ?? '#2F5986', minWidth: x.n ? 4 : 0 }} /></div>
               </li>
             );
           })}
@@ -112,7 +112,7 @@ export function ContractsDashboard() {
         <StratCard title="Por tipo de contrato" items={d.byBillingType} colorOf={(k) => TYPE_COLOR[k as BillingType]} />
         <StratCard title="Por responsável" items={d.byOwner} />
         <StratCard title="Por categoria de cliente" items={d.bySegment} colorOf={() => '#7C3AED'} />
-        <StratCard title="Público e privado" items={d.byKind} colorOf={(k) => (k === 'publico' ? '#0E7490' : '#1D5FE6')} />
+        <StratCard title="Público e privado" items={d.byKind} colorOf={(k) => (k === 'publico' ? '#0E7490' : '#2F5986')} />
       </div>
 
       <section className="card p-5">

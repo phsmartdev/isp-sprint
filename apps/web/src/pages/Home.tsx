@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Lightbulb, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
+import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
 import { type ActivityType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtRelativeShort, fmtTime, fmtLongDate } from '../lib/format';
@@ -10,7 +10,7 @@ import { defaultPeriod, useStageInfo, useUrlState } from '../lib/hooks';
 import { DateRange } from '../components/ui/DateRange';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip, Delta, ErrorState, LoadingRows, formatKpi } from '../components/ui/primitives';
-import { BrandImage } from '../components/brand';
+import { Hexagons } from '../components/brand';
 import { Progress } from '../components/charts/charts';
 import { StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { useToast } from '../components/ui/overlay';
@@ -80,8 +80,8 @@ export function HomePage() {
     <div className="w-full">
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-ink">Olá, {first}!</h1>
-          <p className="mt-0.5 text-md text-muted">Seu dia de vendas, mais simples e produtivo.</p>
+          <h1 className="text-[1.65rem] font-bold leading-tight text-ink">Olá, {first}!</h1>
+          <p className="mt-0.5 text-md text-muted">Resumo do seu dia de vendas.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted first-letter:uppercase">{fmtLongDate(new Date())}</p>
@@ -110,24 +110,14 @@ export function HomePage() {
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(400px,1fr)]">
         {/* Banner */}
-        <section className="relative min-h-[300px] overflow-hidden rounded-[18px] bg-gradient-to-br from-[#0F4FD8] via-[#0B3AA6] to-[#0A1F66] text-white xl:col-span-2" aria-label="Destaque">
-          <BrandImage slot="banner_inicio" className="absolute inset-y-0 right-0 h-full w-[62%] object-cover object-left" />
-          <div className="relative z-10 max-w-[440px] p-8 sm:p-10">
-            <p className="text-[38px] font-extrabold leading-[1.1] sm:text-[44px]">
-              Uma venda
-              <br />
-              <span className="text-lime">mais fácil,</span>
-              <br />
-              do início ao fim.
-            </p>
-            <p className="mt-4 text-md text-white/90">O ISP Sprint te guia em um passo a passo simples, com perguntas inteligentes e as melhores recomendações para fechar mais vendas.</p>
+        <section className="relative min-h-[260px] overflow-hidden rounded-lg bg-gradient-to-br from-navy to-primary text-white xl:col-span-2" aria-label="Nova oportunidade">
+          <Hexagons className="absolute inset-y-0 right-0 h-full w-[70%]" />
+          <div className="relative z-10 max-w-[480px] p-8 sm:p-10">
+            <h2 className="font-display text-[30px] font-bold leading-[1.15] tracking-wide sm:text-[34px]">Nova oportunidade</h2>
+            <p className="mt-4 text-md text-white/90">Qualifique o cliente, consulte a cobertura e monte a proposta em um passo a passo guiado.</p>
             <button onClick={() => nav('/opportunities/new')} className="mt-6 inline-flex h-12 items-center gap-2 rounded-md bg-white px-6 text-md font-bold text-primary hover:bg-primary-soft">
               <Plus className="h-5 w-5" /> Nova oportunidade
             </button>
-          </div>
-          <div className="absolute right-5 top-8 z-10 hidden max-w-[210px] rounded-lg bg-white/95 p-4 text-ink shadow-overlay md:block">
-            <p className="flex items-center gap-1.5 text-sm font-bold text-lime-ink"><Lightbulb className="h-4 w-4" />Dica do Dino</p>
-            <p className="mt-1 text-xs text-muted">Entenda o que o cliente precisa, consulte a cobertura e apresente a melhor oferta.</p>
           </div>
         </section>
 

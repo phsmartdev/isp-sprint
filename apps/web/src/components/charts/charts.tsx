@@ -4,11 +4,11 @@ import clsx from 'clsx';
 /* Gráficos em SVG próprios, fiéis ao visual dos designs. Todos têm alternativa textual (tabela sr-only). */
 
 export const CHART = {
-  leads: '#8DB7FF',
-  sales: '#1D5FE6',
-  revenue: '#22A447',
-  value: '#5B9BFF',
-  donut: ['#22A447', '#2F7BF5', '#8B5CF6', '#F59E0B', '#60A5FA', '#B8BFCC'],
+  leads: '#4FBBFF',
+  sales: '#2F5986',
+  revenue: '#2D3339',
+  value: '#3885D3',
+  donut: ['#2F5986', '#3885D3', '#4FBBFF', '#677680', '#00A9C6', '#AAAAAA'],
 };
 
 function niceMax(v: number) {
@@ -145,7 +145,7 @@ export function Donut({ items, centerValue, centerLabel, ariaLabel }: { items: {
 }
 
 /** Lista de barras horizontais (rótulo, barra, valor, %), como "Vendas por plano" e "Conversão por etapa". */
-export function BarRows({ items, color = '#1D5FE6', track = '#EEF2F9', gradient }: { items: { label: string; value: number; share: number | null; color?: string }[]; color?: string; track?: string; gradient?: boolean }) {
+export function BarRows({ items, color = '#2F5986', track = '#EEF2F9', gradient }: { items: { label: string; value: number; share: number | null; color?: string }[]; color?: string; track?: string; gradient?: boolean }) {
   const max = Math.max(1, ...items.map((i) => i.value));
   return (
     <ul className="space-y-3.5">

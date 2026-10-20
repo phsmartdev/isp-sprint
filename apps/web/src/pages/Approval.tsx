@@ -95,7 +95,7 @@ function DecisionPanel({ a }: { a: Analysis }) {
   const [ack, setAck] = useState(false);
   const decide = useMutation({
     mutationFn: (decision: 'aprovada' | 'reprovada' | 'correcao') => api(`/approval-requests/${r.id}/decision`, { method: 'POST', body: { decision, comment, acknowledgeChanges: ack, analysisAt: a.generatedAt } }),
-    onSuccess: (_, d) => { qc.invalidateQueries({ queryKey: ['approval', a.opportunity.id] }); qc.invalidateQueries({ queryKey: ['approvals'] }); toast({ tone: 'success', message: d === 'aprovada' ? 'Aprovada' : d === 'reprovada' ? 'Reprovada' : 'Correção solicitada' }); },
+    onSuccess: (_, d) => { qc.invalidateQueries({ queryKey: ['approval', a.opportunity.id] }); qc.invalidateQueries({ queryKey: ['approvals'] }); qc.invalidateQueries({ queryKey: ['chat', a.opportunity.id] }); toast({ tone: 'success', message: d === 'aprovada' ? 'Aprovada' : d === 'reprovada' ? 'Reprovada' : 'Correção solicitada' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   return (

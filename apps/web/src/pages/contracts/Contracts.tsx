@@ -26,7 +26,7 @@ const TABS: { key: View; label: string }[] = [
   { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
   { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
 ];
-const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#1D5FE6', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
+const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
 
 // ------------------------------------------------------------------ lista
 function Lista() {

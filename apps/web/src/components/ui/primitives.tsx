@@ -96,7 +96,7 @@ export type Tone = 'neutral' | 'blue' | 'sky' | 'green' | 'orange' | 'purple' | 
 const tones: Record<Tone, string> = {
   neutral: 'bg-surface-2 text-muted',
   blue: 'bg-primary-soft text-primary',
-  sky: 'bg-sky-soft text-[#2563EB]',
+  sky: 'bg-sky-soft text-[#1F7DB8]',
   green: 'bg-success-soft text-[#15803D]',
   orange: 'bg-warning-soft text-[#C2610C]',
   purple: 'bg-purple-soft text-purple',
@@ -108,7 +108,7 @@ export function Chip({ tone = 'neutral', children, className, title }: { tone?: 
 }
 
 // ------------------------------------------------------------------ Avatar
-const AV_COLORS = ['bg-primary-soft text-primary', 'bg-success-soft text-[#15803D]', 'bg-purple-soft text-purple', 'bg-warning-soft text-[#C2610C]', 'bg-danger-soft text-danger', 'bg-sky-soft text-[#2563EB]'];
+const AV_COLORS = ['bg-primary-soft text-primary', 'bg-success-soft text-[#15803D]', 'bg-purple-soft text-purple', 'bg-warning-soft text-[#C2610C]', 'bg-danger-soft text-danger', 'bg-sky-soft text-[#1F7DB8]'];
 export const initials = (name?: string | null) => (name ?? '?').split(/\s+/).filter((p) => p.length > 2 || /^[A-ZÁ-Ú]/.test(p)).map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?';
 
 /** Foto do usuário (se enviada) ou iniciais coloridas. */

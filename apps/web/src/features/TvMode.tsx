@@ -76,7 +76,7 @@ export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExi
       <p className="num text-3xl font-extrabold tabular-nums" aria-label="Hora atual">{time(now)}</p>
       <div className="flex flex-wrap items-center gap-2">
         <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white/10 px-3 text-sm font-semibold hover:bg-white/15">
-          <input type="checkbox" className="h-4 w-4 accent-[#7ED957]" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />
+          <input type="checkbox" className="h-4 w-4 accent-[#4FBBFF]" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />
           <RefreshCw className="h-4 w-4" aria-hidden />Alternar abas ({ROTATE_SECONDS}s)
         </label>
         <MoneyToggle compact className="border-white/20 bg-white/10 text-white hover:bg-white/15" />

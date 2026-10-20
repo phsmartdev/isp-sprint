@@ -11,7 +11,6 @@ import type { Kpi, LookupStage, Opportunity, Paged, PipelineStage } from '../lib
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
 import { PageHeader } from '../components/layout/PageHeader';
-import { ConfiarFacil } from '../components/brand';
 import { CLOSING_TAG, SourceChip, StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { TransitionDialog, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
@@ -160,7 +159,6 @@ export function OpportunitiesPage() {
         icon={<ClipboardList className="h-9 w-9" strokeWidth={2.2} />}
         title="Oportunidades"
         subtitle="Visualize e gerencie seu funil de vendas de forma simples."
-        mascot={{ slot: 'mascote_oportunidades', lines: ['Arraste as oportunidades', 'pelo funil e acompanhe', 'o progresso das suas vendas.'], highlight: <ConfiarFacil /> }}
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav(`/opportunities/new${qs({ pipelineId: f.pipelineId })}`)}>Nova oportunidade</Button>}
       />
 

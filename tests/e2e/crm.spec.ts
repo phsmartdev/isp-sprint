@@ -98,15 +98,12 @@ test('gerência muda nível na matriz e o vendedor sente na hora', async ({ brow
   await expect(g.getByText('Vendedor · Inteligência: Sem acesso')).toBeVisible();
 });
 
-test('Personalização: espaços de imagem com envio na tela de configurações', async ({ page }) => {
+test('Personalização: identidade BKT fixa, sem envio de imagens', async ({ page }) => {
   await login(page, 'carlos@yepnet.test');
   await page.goto('/settings/branding');
-  await expect(page.getByText('Mascote — Leads')).toBeVisible();
-  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex');
-  await page.getByLabel('Arquivo para Mascote — Leads').setInputFiles({ name: 'dino.png', mimeType: 'image/png', buffer: png });
-  await expect(page.getByText('Mascote — Leads atualizado')).toBeVisible();
-  await page.getByLabel('Arquivo para Logo (fundo escuro)').setInputFiles({ name: 'x.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg/>') });
-  await expect(page.getByText(/SVG não é aceito/)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Identidade visual BKT' })).toBeVisible();
+  await expect(page.getByText('Mascote — Leads')).toHaveCount(0);
+  await expect(page.getByRole('img', { name: 'BKT' }).first()).toBeVisible();
 });
 
 test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async ({ page }) => {
