@@ -12,6 +12,7 @@ import { fmtBRL, fmtDate, fmtDateTime, isoToLocalInput, localInputToIso } from '
 import { useDebounced, useLookups } from '../lib/hooks';
 import type { Activity, Opportunity, Paged } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
+import { OpportunityArpPanel } from '../features/arp/OpportunityArp';
 import { Avatar, Breadcrumb, Button, ChipGroup, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, SaveStatus, Select, Tabs, Textarea } from '../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../components/ui/overlay';
 import { ContractChip, CoverageChip, LifecycleChip, ProposalChip, StageChip, productLabel } from '../components/badges';
@@ -655,6 +656,7 @@ export function OpportunityWorkspacePage() {
           <Textarea id="ws-notes" className="min-h-[120px]" value={f.notes} disabled={!editable} onChange={(e) => set('notes', e.target.value)} />
         </FormField>
       </section>
+      <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">
           <Tabs label="Detalhes" value={centerTab} onChange={setCenterTab} tabs={[

@@ -96,6 +96,7 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Conversões e remanejamentos (simular, pedir, aprovar, efetivar).
   - Documentos, relatórios (9 tipos + CSV) e histórico.
 - **Inteligência → Atas de registro de preços**, com período.
+- **Na oportunidade:** painel “Ata de registro de preços” para atrelar ao saldo (cota ou adesão já autorizada) ou pedir nova adesão de órgão/instituição. A adesão autorizada reserva sozinha para a oportunidade; desatrelar libera o saldo.
 - **Testes:** API 13 testes de atas; E2E da ata (cadastro → importação com erro → vigente → oportunidade reserva → remanejamento simulado e pedido → relatórios).
 
 ## Identidade visual BKT ✅ (2026-10-20)

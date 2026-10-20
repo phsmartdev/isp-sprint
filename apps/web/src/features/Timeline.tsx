@@ -91,6 +91,13 @@ function describe(i: TimelineItem): string {
     case 'port_released': return 'Porta da CTO liberada';
     case 'approval_requested': return `Aprovação solicitada (${i.toValue ?? ''})`;
     case 'approval_decided': return `Decisão de aprovação ${i.fromValue ?? ''}: ${i.toValue ?? ''}`;
+    case 'ata_vinculada': return `Atrelada à ata${i.payload?.number ? ` ${String(i.payload.number)}` : ''}${i.payload?.agency ? ` (${String(i.payload.agency)})` : ''}: saldo reservado`;
+    case 'ata_reserva_ajustada': return `Reservas da ata ajustadas${i.payload?.agency ? ` (${String(i.payload.agency)})` : ''}`;
+    case 'ata_adesao_pedida': return `Adesão à ata pedida para ${String(i.payload?.agency ?? 'órgão')}${i.payload?.withinLimits === false ? ' (fora dos limites legais)' : ''}`;
+    case 'ata_adesao_autorizada': return 'Adesão autorizada: quantidade reservada na ata';
+    case 'ata_desvinculada': return `Desatrelada da ata${i.payload?.reason ? `: ${String(i.payload.reason)}` : ''}`;
+    case 'ata_formalizacao_pendente': return 'Venda fechada: falta formalizar o consumo da ata';
+    case 'ata_consumo': return 'Contratação formalizada: saldo da ata consumido';
     default: return i.type.replace(/_/g, ' ');
   }
 }

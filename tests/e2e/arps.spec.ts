@@ -112,4 +112,39 @@ test('atas: cadastra, importa planilha com prévia, torna vigente, cria oportuni
   await shot(page, 'arp-lista');
   await page.goto('/intelligence?v=atas');
   await expect(page.getByText('Reservado em oportunidades')).toBeVisible();
+
+  // vendedor: dentro da oportunidade, atrela ao saldo da ata e pede adesão para outro órgão
+  const seller = await (await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await login(seller, 'lucas@yepnet.test');
+  await seller.goto('/opportunities/new');
+  await seller.getByLabel('Nome do cliente').fill('Secretaria de Saúde E2E (compra)');
+  await seller.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
+  await seller.getByText('Oferta / curiosidade').click();
+  await seller.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+  await seller.getByRole('button', { name: 'Atrelar ao saldo da ata' }).click();
+  const ad = seller.getByRole('dialog', { name: 'Atrelar ao saldo de uma ata' });
+  await ad.getByRole('combobox', { name: /^Ata/ }).selectOption({ index: 1 });
+  await ad.getByLabel('Órgão contratante').selectOption({ label: 'Secretaria de Saúde E2E' });
+  await ad.getByLabel('Quantidade do item 1').fill('5');
+  await ad.getByRole('button', { name: 'Reservar saldo' }).click();
+  await expect(ad).toBeHidden();
+  const panel = seller.getByRole('region', { name: 'Ata de registro de preços' });
+  await expect(panel.getByText('Reservado', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('link', { name: `Ata ${number}` })).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Alterar saldo ou pedir adesão' }).click();
+  const ad2 = seller.getByRole('dialog', { name: `Saldo da ata ${number}` });
+  await ad2.getByText('Pedir nova adesão').click();
+  await ad2.getByRole('combobox', { name: /^Órgão ou instituição/ }).selectOption({ value: 'novo' });
+  await ad2.getByLabel('Nome do órgão ou instituição').fill('Universidade Fictícia E2E');
+  await ad2.getByLabel('Justificativa do órgão').fill('Conectividade dos campi do interior.');
+  await ad2.getByLabel('Quantidade do item 1').fill('100');
+  await expect(ad2.getByText('Acima do limite legal')).toBeVisible();
+  await ad2.getByLabel('Quantidade do item 1').fill('10');
+  await ad2.getByRole('button', { name: 'Pedir adesão' }).click();
+  await expect(ad2).toBeHidden();
+  await expect(panel.getByText('Adesão solicitada')).toBeVisible();
+  await expect(panel.getByText('Universidade Fictícia E2E')).toBeVisible();
+  await shot(seller, 'arp-na-oportunidade');
 });

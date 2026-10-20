@@ -204,3 +204,53 @@ describe('relatórios e permissões', () => {
     ok(await ana.post('/arp-rules', { regime: 'municipal', rules: { adhesionPerAgencyBp: 1000, adhesionTotalBp: 1000, contractDeadlineDays: 30, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'x x x x x' }, note: 'teste de permissão' }), 403);
   });
 });
+
+describe('ata a partir da oportunidade', () => {
+  const newOpp = async (c: Client, name: string) => ok(await c.post('/opportunities', { newContact: { name, segment: 'governamental' }, reasons: ['oferta'], channel: 'Licitação' }), 201).json().id as string;
+
+  it('vendedor atrela a oportunidade à cota do órgão, refaz a reserva e desatrela', async () => {
+    const opp = await newOpp(lucas, 'Órgão Fictício Vendedor');
+    const atas = ok(await lucas.get(`/opportunities/${opp}/arp/options`)).json().atas;
+    expect(atas.map((a: { id: string }) => a.id)).toContain(arpId);
+    const opt = ok(await lucas.get(`/opportunities/${opp}/arp/options?arpId=${arpId}`)).json();
+    expect(opt.agencies.find((g: { id: string }) => g.id === manager).mode).toBe('cota');
+    const before = (await itemOf(item2)).reservedMilli;
+    ok(await lucas.post(`/opportunities/${opp}/arp/reserve`, { arpId, agencyId: manager, lines: [{ itemId: item2, qtyMilli: 2_000 }] }));
+    ok(await lucas.post(`/opportunities/${opp}/arp/reserve`, { arpId, agencyId: manager, lines: [{ itemId: item2, qtyMilli: 1_000 }] }));
+    expect((await itemOf(item2)).reservedMilli).toBe(before + 1_000);
+    const linked = ok(await lucas.get(`/opportunities/${opp}/arp`)).json().linked;
+    expect(linked.arp.id).toBe(arpId);
+    expect(linked.lines.filter((l: { status: string }) => l.status === 'reservada')).toHaveLength(1);
+    ok(await lucas.post(`/opportunities/${opp}/arp/unlink`, { reason: 'Órgão desistiu da compra.' }));
+    expect((await itemOf(item2)).reservedMilli).toBe(before);
+    expect(ok(await lucas.get(`/opportunities/${opp}/arp`)).json().linked).toBeNull();
+  });
+
+  it('consumo do que já foi aderido respeita a cota da adesão; órgão sem adesão autorizada não reserva', async () => {
+    const opp = await newOpp(lucas, 'Câmara Fictícia (venda)');
+    const a = await ata();
+    const camara = a.agencies.find((g: { name: string }) => g.name === 'Câmara Fictícia').id;
+    const pref = a.agencies.find((g: { name: string }) => g.name === 'Prefeitura Fictícia de Teste').id;
+    const opt = ok(await lucas.get(`/opportunities/${opp}/arp/options?arpId=${arpId}`)).json();
+    expect(opt.agencies.find((g: { id: string }) => g.id === camara).mode).toBe('adesao_autorizada');
+    expect(opt.agencies.find((g: { id: string }) => g.id === pref).mode).toBe('sem_adesao');
+    expect(ok(await lucas.post(`/opportunities/${opp}/arp/reserve`, { arpId, agencyId: pref, lines: [{ itemId: item1, qtyMilli: 1_000 }] }), 422).json().detail).toContain('adesão autorizada');
+    expect(ok(await lucas.post(`/opportunities/${opp}/arp/reserve`, { arpId, agencyId: camara, lines: [{ itemId: item1, qtyMilli: 1_000 }] }), 422).json().detail).toContain('Saldo insuficiente');
+  });
+
+  it('nova adesão pedida pela oportunidade: ao ser autorizada, a quantidade já fica reservada para ela', async () => {
+    const opp = await newOpp(lucas, 'Instituto Fictício de Pesquisa');
+    const r = ok(await lucas.post(`/opportunities/${opp}/arp/adhesion`, { arpId, newAgency: { name: 'Instituto Fictício de Pesquisa' }, requestedAt: '2026-04-01', justification: 'Conectividade dos laboratórios do instituto.', items: [{ itemId: item1, qtyMilli: 5_000 }] }), 201).json();
+    expect(r.check.ok).toBe(true);
+    let cur = ok(await lucas.get(`/opportunities/${opp}/arp`)).json();
+    expect(cur.linked.arp.id).toBe(arpId);
+    expect(cur.linked.lines).toHaveLength(0);
+    expect(cur.adhesions[0]).toMatchObject({ status: 'solicitada', agencyName: 'Instituto Fictício de Pesquisa' });
+    ok(await carlos.post(`/arp-adhesions/${r.id}/supplier-accept`, {}));
+    ok(await carlos.post(`/arp-adhesions/${r.id}/authorize`, { managerAuthorizationRef: 'Ofício 20/2026', documentId: await doc(carlos, 'autorizacao_gerenciador') }));
+    cur = ok(await lucas.get(`/opportunities/${opp}/arp`)).json();
+    expect(cur.linked.lines).toEqual([expect.objectContaining({ status: 'reservada', qtyMilli: 5_000, agencyName: 'Instituto Fictício de Pesquisa' })]);
+    const ev = await ctx.db.execute(sql`select type from opportunity_events where opportunity_id = ${opp} order by occurred_at`);
+    expect(ev.rows.map((x) => (x as { type: string }).type)).toEqual(expect.arrayContaining(['ata_adesao_pedida', 'ata_adesao_autorizada']));
+  });
+});

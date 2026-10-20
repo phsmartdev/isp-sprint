@@ -140,3 +140,15 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Sem slogan e sem mascotes.** A Personalização deixou de aceitar imagens: a identidade é fixa para não ser alterada por engano.
 - **Funil:** as cores padrão antigas das etapas são trocadas na exibição pela paleta da marca; cores escolhidas pelo admin são mantidas.
 
+## ADR-041 — Ata atrelada pela própria oportunidade (20/10/2026)
+- **Onde:** na oportunidade, quem edita a negociação pode atrelá-la a uma ata vigente sem precisar de acesso a Gestão de Contratos.
+- **Usar saldo existente:**
+  - cota do gerenciador ou de um participante;
+  - ou adesão já autorizada de um não participante (consome só a quantidade aderida, dentro do prazo).
+  - Refazer a escolha libera a reserva anterior e reserva a nova na mesma transação.
+- **Pedir nova adesão:**
+  - para órgão ou instituição não participante, já cadastrado ou novo;
+  - o pedido fica ligado à oportunidade; quando o gerenciador autoriza, a quantidade autorizada é reservada para ela automaticamente (idempotente; só se a oportunidade estiver aberta e sem outra reserva).
+- **Desatrelar:** libera as reservas; não é permitido se já houve consumo formalizado.
+- **Formalizar** continua na ficha da ata, com documento e perfil de Contratos, Jurídico ou Administração.
+

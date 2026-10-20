@@ -13,7 +13,7 @@ import type { AuthContext } from '../http/context';
 import { audit } from '../services/audit';
 import { createOpportunity, loadOpportunity } from '../services/opportunities';
 import { releaseOpportunity } from '../services/arpOpportunity';
-import { addDaysIso, agencyContact, arpEvent, arpState, canEffectArp, isJuridico, loadArp, lockArp, requireArp, rulesFor, todayIso, writeLedger, type ArpState } from '../services/arp';
+import { addDaysIso, agencyContact, arpEvent, arpState, canEffectArp, checkAvailable, isJuridico, loadArp, lockArp, requireArp, reserveAdhesionForOpportunity, rulesFor, todayIso, writeLedger, type ArpState } from '../services/arp';
 
 const Line = z.object({ itemId: z.string().uuid(), agencyId: z.string().uuid(), qtyMilli: z.number().int().positive() });
 const OpLine = z.object({ itemId: z.string().uuid(), agencyId: z.string().uuid(), qtyMilli: z.number().int().min(0) });
@@ -37,19 +37,6 @@ async function docOf(db: DbOrTx, arpId: string, docId: string | null | undefined
   if (!d) throw unprocessable('Documento não encontrado nesta ata. Anexe em Documentos primeiro.', [{ path: 'documentId', message: 'Documento inválido' }]);
   if (categories && !categories.includes(d.category)) throw unprocessable(`O documento precisa ser do tipo ${categories.join(', ')}.`, [{ path: 'documentId', message: 'Tipo de documento' }]);
   return d;
-}
-function checkAvailable(st: ArpState, lines: { itemId: string; agencyId: string; qtyMilli: number }[], release: Map<string, number> = new Map()) {
-  const want = new Map<string, number>();
-  for (const l of lines) want.set(`${l.itemId}|${l.agencyId}`, (want.get(`${l.itemId}|${l.agencyId}`) ?? 0) + l.qtyMilli);
-  for (const [k, q] of want) {
-    const b = st.balances.byItemAgency.get(k);
-    const avail = (b?.available ?? 0) + (release.get(k) ?? 0);
-    const [itemId, agencyId] = k.split('|');
-    const it = st.items.find((i) => i.id === itemId);
-    const ag = st.agencies.find((a) => a.id === agencyId);
-    if (!it || !ag) throw unprocessable('Item ou órgão fora da ata.');
-    if (q > avail) throw unprocessable(`Saldo insuficiente no item ${it.itemNumber} para ${ag.name}: disponível ${fmtQty(Math.max(0, avail))} ${it.unit}, pedido ${fmtQty(q)}.`, [{ path: 'lines', message: 'Saldo insuficiente' }]);
-  }
 }
 const opView = (o: typeof s.arpOperations.$inferSelect) => ({ ...o, label: OPERATION_LABELS[o.kind as keyof typeof OPERATION_LABELS] ?? o.kind });
 
@@ -427,6 +414,7 @@ export const arpOpsRoutes = [
         const deadline = addDaysIso(todayIso(), rule.rules.contractDeadlineDays);
         await writeLedger(tx, auth, a.id, st, r!.items.map((i) => ({ kind: 'adesao' as const, itemId: i.itemId, agencyId: r!.agencyId, qtyMilli: i.qtyMilli })), { origin: 'adesao', adhesionId: r!.id, documentId: body.documentId, justification: r!.justification, approvalRef: body.managerAuthorizationRef, ruleVersion: rule.version, idem: `adesao:${r!.id}` });
         await tx.update(s.arpAdhesions).set({ status: 'autorizada', managerAuthorizedAt: new Date(), managerAuthorizationRef: body.managerAuthorizationRef, authorizedBy: auth.userId, deadlineAt: deadline, limitsSnapshot: { rules: rule.rules, check } as unknown as Record<string, unknown>, ruleVersion: rule.version, exception, updatedAt: new Date(), rowVersion: sql`${s.arpAdhesions.rowVersion} + 1` }).where(eq(s.arpAdhesions.id, r!.id));
+        if (r!.opportunityId) await reserveAdhesionForOpportunity(tx, auth, a.id, r!.id);
         await arpEvent(tx, auth, auth.tenantId, a.id, 'adesao_autorizada', `Adesão autorizada (${body.managerAuthorizationRef}). Prazo para contratar: ${deadline.split('-').reverse().join('/')}.${exception ? ' Com exceção validada pelo Jurídico.' : ''}`, { adhesionId: r!.id, ruleVersion: rule.version });
         return { deadlineAt: deadline, exception: !!exception };
       });

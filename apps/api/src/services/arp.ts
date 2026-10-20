@@ -9,6 +9,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { AuthContext } from '../http/context';
 import { forbidden, notFound, unprocessable } from '../http/errors';
+import { fmtQty } from '@isp/domain';
 import { level } from './scope';
 import { atLeast } from '@isp/domain';
 
@@ -112,3 +113,43 @@ export async function agencyContact(tx: DbOrTx, auth: AuthContext, agency: typeo
 
 export const todayIso = () => new Date().toISOString().slice(0, 10);
 export const addDaysIso = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/** Confere o saldo disponível por item e órgão (somando linhas repetidas); `release` devolve o que esta mesma operação libera. */
+export function checkAvailable(st: ArpState, lines: { itemId: string; agencyId: string; qtyMilli: number }[], release: Map<string, number> = new Map()) {
+  const want = new Map<string, number>();
+  for (const l of lines) want.set(`${l.itemId}|${l.agencyId}`, (want.get(`${l.itemId}|${l.agencyId}`) ?? 0) + l.qtyMilli);
+  for (const [k, q] of want) {
+    const b = st.balances.byItemAgency.get(k);
+    const avail = (b?.available ?? 0) + (release.get(k) ?? 0);
+    const [itemId, agencyId] = k.split('|');
+    const it = st.items.find((i) => i.id === itemId);
+    const ag = st.agencies.find((a) => a.id === agencyId);
+    if (!it || !ag) throw unprocessable('Item ou órgão fora da ata.');
+    if (q > avail) throw unprocessable(`Saldo insuficiente no item ${it.itemNumber} para ${ag.name}: disponível ${fmtQty(Math.max(0, avail))} ${it.unit}, pedido ${fmtQty(q)}.`, [{ path: 'lines', message: 'Saldo insuficiente' }]);
+  }
+}
+
+/**
+ * Adesão autorizada que nasceu de uma oportunidade: a quantidade autorizada já fica reservada para ela
+ * (é para isso que o órgão pediu). Só reserva se a oportunidade estiver aberta e sem outras reservas. Idempotente.
+ */
+export async function reserveAdhesionForOpportunity(tx: DbOrTx, auth: AuthContext, arpId: string, adhesionId: string) {
+  const [r] = await tx.select().from(s.arpAdhesions).where(eq(s.arpAdhesions.id, adhesionId)).limit(1);
+  if (!r?.opportunityId) return 0;
+  const [o] = await tx.select({ id: s.opportunities.id, stage: s.opportunities.stage, code: s.opportunities.code, arpId: s.opportunities.arpId, deletedAt: s.opportunities.deletedAt }).from(s.opportunities).where(eq(s.opportunities.id, r.opportunityId)).limit(1);
+  if (!o || o.deletedAt || o.stage === 'perdida' || (o.arpId && o.arpId !== arpId)) return 0;
+  const [busy] = await tx.select({ id: s.arpOpportunityLines.id }).from(s.arpOpportunityLines).where(and(eq(s.arpOpportunityLines.opportunityId, o.id), eq(s.arpOpportunityLines.status, 'reservada'))).limit(1);
+  if (busy) return 0;
+  const st = await arpState(tx, arpId);
+  const lines = r.items.map((i) => ({ itemId: i.itemId, agencyId: r.agencyId, qtyMilli: Math.min(i.qtyMilli, Math.max(0, st.balances.byItemAgency.get(`${i.itemId}|${r.agencyId}`)?.available ?? 0)) })).filter((l) => l.qtyMilli > 0);
+  if (!lines.length) return 0;
+  const [arp] = await tx.select({ regime: s.arps.regime }).from(s.arps).where(eq(s.arps.id, arpId)).limit(1);
+  const rule = await rulesFor(tx, auth.tenantId, arp!.regime as ArpRegime);
+  const n = await writeLedger(tx, auth, arpId, st, lines.map((l) => ({ kind: 'reserva' as const, ...l })), { origin: 'oportunidade', opportunityId: o.id, adhesionId: r.id, justification: 'Reserva da adesão autorizada', ruleVersion: rule.version, idem: `reserva:${o.id}:adesao:${r.id}` });
+  if (!n) return 0;
+  for (const l of lines) await tx.insert(s.arpOpportunityLines).values({ tenantId: auth.tenantId, arpId, opportunityId: o.id, itemId: l.itemId, agencyId: l.agencyId, qtyMilli: l.qtyMilli, unitCents: st.items.find((i) => i.id === l.itemId)!.unitCents }).onConflictDoUpdate({ target: [s.arpOpportunityLines.opportunityId, s.arpOpportunityLines.itemId, s.arpOpportunityLines.agencyId], set: { qtyMilli: l.qtyMilli, status: 'reservada', updatedAt: new Date() } });
+  await tx.update(s.opportunities).set({ arpId, updatedAt: new Date() }).where(eq(s.opportunities.id, o.id));
+  await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'ata_adesao_autorizada', actorId: auth.userId, payload: { arpId, adhesionId: r.id, lines: lines.length } });
+  await arpEvent(tx, auth, auth.tenantId, arpId, 'reserva', `Adesão autorizada: quantidade reservada para a OP-${o.code}.`, { opportunityId: o.id, adhesionId: r.id });
+  return n;
+}
