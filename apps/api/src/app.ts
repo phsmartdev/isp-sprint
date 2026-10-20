@@ -78,7 +78,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     // CSRF: navegador sempre envia Origin em requisições que alteram estado; se vier, precisa ser permitido.
     if (MUTATING.has(req.method) && !req.url.startsWith('/api/v1/hooks/')) {
       const origin = req.headers.origin;
-      if (origin && !config.webOrigins.includes(origin)) {
+      if (origin && !config.webOrigins.includes(origin) && !sameOrigin(origin, req.headers['x-forwarded-host'] ?? req.headers.host)) {
         return sendProblem(reply, req, { status: 403, title: 'Origem não permitida', detail: 'Requisição bloqueada (proteção CSRF).' });
       }
       const ct = req.headers['content-type'] ?? '';
@@ -137,4 +137,11 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
   app.get(`${API_PREFIX}/openapi.json`, async () => buildOpenApi(routeRegistry));
 
   return app;
+}
+
+/** Mesma origem: o navegador enviou o Origin do mesmo endereço que recebeu a requisição (domínio próprio, alias da Vercel). */
+function sameOrigin(origin: string, host: string | string[] | undefined) {
+  const h = (Array.isArray(host) ? host[0] : host)?.split(',')[0]?.trim().toLowerCase();
+  if (!h) return false;
+  try { return new URL(origin).host.toLowerCase() === h; } catch { return false; }
 }

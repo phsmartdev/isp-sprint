@@ -16,7 +16,7 @@ const Env = z.object({
 function vercelDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   if (!env.VERCEL) return env;
   const hosts = [env.VERCEL_URL, env.VERCEL_BRANCH_URL, env.VERCEL_PROJECT_PRODUCTION_URL].filter(Boolean).map((h) => `https://${h}`);
-  const origins = [...(env.WEB_ORIGIN ? env.WEB_ORIGIN.split(',') : []), ...hosts].map((s) => s.trim()).filter(Boolean);
+  const origins = [...(env.WEB_ORIGIN ? env.WEB_ORIGIN.split(',') : []), ...(env.PUBLIC_URL ? [env.PUBLIC_URL.replace(/\/$/, '')] : []), ...hosts].map((s) => s.trim()).filter(Boolean);
   return { ...env, NODE_ENV: env.NODE_ENV ?? 'production', COOKIE_SECURE: env.COOKIE_SECURE ?? 'true', WEB_ORIGIN: [...new Set(origins)].join(',') || undefined };
 }
 

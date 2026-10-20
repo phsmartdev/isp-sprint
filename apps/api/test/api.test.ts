@@ -73,6 +73,16 @@ describe('autenticação', () => {
   it('CSRF: origem não permitida é bloqueada antes da rota', async () => {
     const r = await ctx.app.inject({ method: 'POST', url: '/api/v1/opportunities', headers: { cookie: lucas.cookie, origin: 'https://atacante.test' }, payload: {} });
     expect(r.statusCode).toBe(403);
+    // atacante não controla o Host do próprio site: origem diferente do host continua bloqueada
+    const r2 = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://atacante.test', host: 'crm.yepnet.test' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
+    expect(r2.statusCode).toBe(403);
+  });
+
+  it('mesma origem (domínio próprio ou alias da Vercel) é aceita', async () => {
+    const r = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://crm.yepnet.test', host: 'crm.yepnet.test' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
+    expect(r.statusCode).toBe(200);
+    const fwd = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://isp-sprint-di5r-time.vercel.app', host: 'interno', 'x-forwarded-host': 'isp-sprint-di5r-time.vercel.app' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
+    expect(fwd.statusCode).toBe(200);
   });
 
   it('senhas e cookies não aparecem na trilha de auditoria', async () => {
