@@ -32,6 +32,7 @@ import { ProfilePage } from './pages/admin/Profile';
 import { ContractsPage } from './pages/contracts/Contracts';
 import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
+import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { AdminContractSettings } from './pages/admin/ContractSettings';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -74,6 +75,7 @@ export function App() {
         <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
         <Route path="contracts" element={<Gate module="contratos"><ContractsPage /></Gate>} />
         <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />
+        <Route path="contracts/atas/:id" element={<Gate module="contratos"><ArpDetailPage /></Gate>} />
         <Route path="contracts/:id" element={<Gate module="contratos"><ContractDetailPage /></Gate>} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings" element={<Gate module="configuracoes" min="total"><AdminLayout /></Gate>}>

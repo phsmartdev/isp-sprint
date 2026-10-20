@@ -17,13 +17,14 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { AlertList } from '../../features/contracts/ContractPanels';
 import { ContractsDashboard } from '../../features/contracts/Dashboard';
 import { FullReport } from '../../features/contracts/FullReport';
+import { AtasTab } from '../../features/arp/AtasTab';
 import { TemplatesManager } from '../../features/contracts/SignaturePanels';
 import { AdminContractTemplates } from '../admin/ProposalTemplates';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
 
-type View = 'painel' | 'lista' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
+type View = 'painel' | 'lista' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
 const TABS: { key: View; label: string }[] = [
-  { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
+  { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
   { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
 ];
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
@@ -316,7 +317,7 @@ export function ContractsPage() {
   const view = (TABS.some((t) => t.key === f.t) ? f.t : 'painel') as View;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TV_TABS = TABS.filter((t) => ['painel', 'lista', 'funil', 'calendario', 'relatorios'].includes(t.key));
+  const TV_TABS = TABS.filter((t) => ['painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
   return (
     <div className="w-full">
       <PageHeader
@@ -326,10 +327,11 @@ export function ContractsPage() {
         actions={<><TvButton onClick={() => void tv.enter()} /><Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button></>}
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
-      {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report']]} />}
+      {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
       <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={TABS.filter((t) => t.key !== 'modelos' || can('configuracoes', 'total'))} />
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
+      {view === 'atas' && <AtasTab />}
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
       {view === 'renovacoes' && <Processos kind="renovacao" intro="Renovações abertas automaticamente 60 dias antes do término (ou manualmente). Contratos públicos seguem o roteiro com ofício, aditivo e assinaturas; privados, proposta de continuidade e formalização." />}

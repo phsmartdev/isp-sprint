@@ -85,6 +85,24 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Atas de registro de preços ✅ (2026-10-20)
+- **Gestão de Contratos → aba Atas:** painel (registrado, contratado, reservado, saldo, adesões, consumo mensal, órgãos, limites), lista, nova ata, relatórios e regras legais versionadas.
+- **Ficha da ata:**
+  - Itens e saldos por item e órgão.
+  - Importação de planilha (.xlsx/.csv) com mapeamento automático, modelos salvos, prévia validada e aplicação tudo-ou-nada.
+  - Oportunidades: criar, vincular, ajustar, liberar e formalizar com documento.
+  - Órgãos e adesões, com limites legais na hora e exceção só pelo Jurídico.
+  - Movimentações (livro imutável, execução e faturamento).
+  - Conversões e remanejamentos (simular, pedir, aprovar, efetivar).
+  - Documentos, relatórios (9 tipos + CSV) e histórico.
+- **Inteligência → Atas de registro de preços**, com período.
+- **Testes:** API 13 testes de atas; E2E da ata (cadastro → importação com erro → vigente → oportunidade reserva → remanejamento simulado e pedido → relatórios).
+
+## Identidade visual BKT ✅ (2026-10-20)
+- **Marca:** logo oficial, azul e grafite da marca, Orbitron e Work Sans, hexágonos no menu, login e Início.
+- **Removido:** slogan e mascotes.
+- **Funil e gráficos** na paleta da marca.
+
 ## Análise e aprovação da negociação ✅ (2026-10-20)
 - **Tela de análise** (`/opportunities/:id/aprovacao`) que se adapta: **novo cliente** (dados, origem do lead, perfil comercial, produto, condições, investimento, CAC, margem prevista, receita projetada, payback, viabilidade técnica e financeira) × **cliente da base** (seção **Inteligência do Cliente**: relacionamento, receita contratada, serviços que a compõem, CAC histórico, LTV projetado, faturamento lançado; pagamentos, inadimplência, pontualidade e LTV realizado aparecem como **Aguardando IXC**).
 - Cliente da base = qualquer relacionamento (cadastro não-prospect, contrato, venda anterior ou importação do ERP); cancelado continua da base. Cadastros parecidos (CPF/CNPJ, telefone, e-mail) são listados; só entram na análise os marcados “mesmo cliente” (decisão registrada, append-only).

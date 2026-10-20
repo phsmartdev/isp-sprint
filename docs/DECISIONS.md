@@ -124,3 +124,19 @@ A análise é calculada na hora a partir de cadastro, contratos, vendas e viabil
 ## ADR-038 — Classificação, identidade e chat append-only
 `contact_classifications` (vigente = mais recente), `contact_identity_links` (decisão humana “mesmo/diferente”; nada é consolidado sozinho) e `negotiation_messages` (chat interno; não entra no histórico do relacionamento). Avisos por WhatsApp/e-mail levam só o resumo seguro; o modelo recusa variáveis financeiras.
 
+## ADR-039 — Atas de registro de preços dentro de Gestão de Contratos (20/10/2026)
+- **Lugar:** aba “Atas de registro de preços” em Gestão de Contratos e ficha `/contracts/atas/:id`. Não é um módulo à parte: usa o mesmo nível de acesso de Contratos, mais os setores Comercial, Jurídico e Administração.
+- **Saldo só pelo livro:** `arp_ledger` é append-only, com chave de idempotência única por tenant. O saldo é sempre recalculado (`computeBalances`), com a ata travada (`SELECT … FOR UPDATE`) em toda gravação. Correções entram como lançamentos compensatórios.
+- **Reservar ≠ consumir:** a oportunidade reserva; a venda fechada não consome e gera tarefa de formalização. O consumo só acontece com empenho, contrato ou ordem de serviço anexado. Oportunidade de ata nunca gera negócio no Sucesso do Cliente; a perda libera a reserva.
+- **Limites legais:** Lei 14.133/2021, art. 86, §§ 4º e 5º (50% por órgão e 200% no total, por item) são tetos fixos (`LEGAL_CAPS`). A configuração por regime só pode ser mais restritiva e é versionada; cada decisão guarda a versão usada. Acima do limite, só com exceção validada por alguém do setor Jurídico, com fundamento e parecer.
+- **Operações entre itens** (conversão, remanejamento, correção, alteração de preço, cancelamento): simular → pedir → aprovar (outra pessoa) → efetivar com documento. Na efetivação o saldo é conferido de novo.
+- **Importação em massa:** o arquivo (.xlsx ou .csv) é lido no navegador (`read-excel-file`, sem a biblioteca `xlsx` por causa de vulnerabilidades conhecidas). Só as linhas mapeadas vão ao servidor, que valida de novo. A prévia mostra o que entra, completa, corrige ou é bloqueado. Aplicar grava tudo ou nada. Ata vigente não aceita item, quantidade ou preço novos por planilha.
+
+## ADR-040 — Identidade visual BKT (20/10/2026)
+O visual segue o Brand Book BKT (GUIA_BKT_v4):
+- **Cores e fontes:** azul #2F5986 e grafite #2D3339; Orbitron nos títulos e Work Sans no texto.
+- **Grafismo:** hexágonos como elemento gráfico; o degradê grafite→azul aparece só em fundos.
+- **Logo:** arquivos oficiais extraídos do guia, em `public/brand`; não é redesenhado.
+- **Sem slogan e sem mascotes.** A Personalização deixou de aceitar imagens: a identidade é fixa para não ser alterada por engano.
+- **Funil:** as cores padrão antigas das etapas são trocadas na exibição pela paleta da marca; cores escolhidas pelo admin são mantidas.
+
