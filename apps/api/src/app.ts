@@ -78,8 +78,12 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     // CSRF: navegador sempre envia Origin em requisições que alteram estado; se vier, precisa ser permitido.
     if (MUTATING.has(req.method) && !req.url.startsWith('/api/v1/hooks/')) {
       const origin = req.headers.origin;
-      if (origin && !config.webOrigins.includes(origin) && !sameOrigin(origin, req.headers['x-forwarded-host'] ?? req.headers.host)) {
-        return sendProblem(reply, req, { status: 403, title: 'Origem não permitida', detail: 'Requisição bloqueada (proteção CSRF).' });
+      // Sec-Fetch-Site é definido pelo navegador (página não consegue forjar): same-origin = mesma aba/site do CRM.
+      const fetchSite = req.headers['sec-fetch-site'];
+      const sameSite = fetchSite === 'same-origin' || sameOrigin(origin ?? '', req.headers['x-forwarded-host']) || sameOrigin(origin ?? '', req.headers.host);
+      if (origin && !config.webOrigins.includes(origin) && !sameSite) {
+        req.log.warn({ origin, host: req.headers.host, fwdHost: req.headers['x-forwarded-host'], fetchSite }, 'csrf bloqueado');
+        return sendProblem(reply, req, { status: 403, title: 'Origem não permitida', detail: `Requisição bloqueada (proteção CSRF). Origem: ${origin.slice(0, 120)}` });
       }
       const ct = req.headers['content-type'] ?? '';
       const hasBody = Number(req.headers['content-length'] ?? 0) > 0 || !!req.headers['transfer-encoding'];

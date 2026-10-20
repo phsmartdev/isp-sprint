@@ -83,6 +83,10 @@ describe('autenticação', () => {
     expect(r.statusCode).toBe(200);
     const fwd = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://isp-sprint-di5r-time.vercel.app', host: 'interno', 'x-forwarded-host': 'isp-sprint-di5r-time.vercel.app' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
     expect(fwd.statusCode).toBe(200);
+    const sfs = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://crm.exemplo.test', host: 'outro-host', 'sec-fetch-site': 'same-origin' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
+    expect(sfs.statusCode).toBe(200);
+    const cross = await ctx.app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'https://atacante.test', host: 'outro-host', 'sec-fetch-site': 'cross-site' }, payload: { email: 'carlos@yepnet.test', password: 'Sprint@2026' } });
+    expect(cross.statusCode).toBe(403);
   });
 
   it('senhas e cookies não aparecem na trilha de auditoria', async () => {
