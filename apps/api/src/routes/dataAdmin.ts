@@ -72,6 +72,9 @@ export const dataAdminRoutes = [
         if (body.scopes.includes('comercial') || body.scopes.includes('clientes')) {
           // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
+          // atas de registro de preços (dependem de oportunidades, contratos e contatos)
+          for (const tbl of [s.arpLedger, s.arpOpportunityLines, s.arpAllocations, s.arpItemChanges, s.arpDocuments, s.arpEvents, s.arpOperations, s.arpAdhesions, s.arpItems, s.arpAgencies]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          counts.atas = (await tx.delete(s.arps).where(eq(s.arps.tenantId, t)).returning({ id: s.arps.id })).length;
           await tx.delete(s.contractAlerts).where(eq(s.contractAlerts.tenantId, t));
           await tx.delete(s.contractLedger).where(eq(s.contractLedger.tenantId, t));
           await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));

@@ -30,6 +30,8 @@ import { contractTemplateRoutes } from './routes/contractTemplates';
 import { authRecoveryRoutes } from './routes/authRecovery';
 import { approvalRoutes } from './routes/approvals';
 import { negotiationRoutes } from './routes/negotiation';
+import { arpRoutes } from './routes/arps';
+import { arpOpsRoutes } from './routes/arpOps';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -137,6 +139,8 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...authRecoveryRoutes,
     ...approvalRoutes,
     ...negotiationRoutes,
+    ...arpRoutes,
+    ...arpOpsRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

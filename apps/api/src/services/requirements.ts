@@ -10,7 +10,11 @@ type Opp = { id: string; pipelineId: string; planId: string | null; nextAction: 
 export async function checkStageRequirements(db: DbOrTx, tenantId: string, opp: Opp, target: { key: string; requirements: Requirements }, instruction: Instruction, pipelineKey: string) {
   const r = target.requirements ?? {};
   const issues: { path: string; message: string }[] = [];
-  if (r.plano && !opp.planId) issues.push({ path: 'requirements.plano', message: 'Escolha o plano antes de avançar.' });
+  if (r.plano && !opp.planId) {
+    // oportunidade de ata: o produto são os itens da ata reservados
+    const [line] = await db.select({ id: s.arpOpportunityLines.id }).from(s.arpOpportunityLines).where(and(eq(s.arpOpportunityLines.opportunityId, opp.id), eq(s.arpOpportunityLines.tenantId, tenantId))).limit(1);
+    if (!line) issues.push({ path: 'requirements.plano', message: 'Escolha o plano antes de avançar.' });
+  }
   if (r.proximaAcao && (!opp.nextAction || !opp.nextActionAt)) issues.push({ path: 'requirements.proximaAcao', message: 'Defina a próxima ação e quando ela acontece.' });
   if (r.proposta) {
     const [a] = await db

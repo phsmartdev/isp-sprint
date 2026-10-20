@@ -490,6 +490,8 @@ export const opportunities = pgTable(
     /** Contrato por medição de onde sai o consumo quando a venda fecha (e o valor consumido). */
     measurementContractId: uuid('measurement_contract_id'),
     measurementCents: bigint('measurement_cents', { mode: 'number' }),
+    /** Ata de registro de preços de origem (não gera negócio no Sucesso do Cliente). */
+    arpId: uuid('arp_id'),
     /** Pós-venda: 'sucesso_cliente' quando o contrato foi cadastrado e validado. */
     handoffStage: text('handoff_stage'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
@@ -1055,6 +1057,8 @@ export const contracts = pgTable(
     contactId: uuid('contact_id').notNull().references(() => contacts.id),
     customerId: uuid('customer_id').references(() => customers.id),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    /** Contratação decorrente de ata de registro de preços (registro jurídico próprio, vinculado à ARP). */
+    arpId: uuid('arp_id'),
     kind: text('kind').notNull().default('privado'),
     legalRegime: text('legal_regime').notNull().default('privado'),
     /** Recorrente (mensalidade fixa), Frequente (lançamentos por ocorrência) ou Medição (consumo de saldo). */
@@ -1469,4 +1473,304 @@ export const negotiationReads = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.opportunityId] }) }),
 );
+
+// --------------------------------------------------------------- atas de registro de preços (ARP)
+
+/** Regras legais por regime, versionadas (append-only): cada alteração é uma nova versão; decisões guardam a versão usada. */
+export const arpRuleSets = pgTable(
+  'arp_rule_sets',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    regime: text('regime').notNull(),
+    version: integer('version').notNull(),
+    rules: jsonb('rules').$type<Record<string, unknown>>().notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('arp_rule_sets_uq').on(t.tenantId, t.regime, t.version) }),
+);
+
+export const arps = pgTable(
+  'arps',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    number: text('number').notNull(),
+    object: text('object').notNull(),
+    processNumber: text('process_number'),
+    regime: text('regime').notNull().default('federal'),
+    supplierName: text('supplier_name').notNull(),
+    supplierDocument: text('supplier_document'),
+    status: text('status').notNull().default('rascunho'),
+    signedAt: date('signed_at', { mode: 'string' }),
+    startAt: date('start_at', { mode: 'string' }),
+    endAt: date('end_at', { mode: 'string' }),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    uq: uniqueIndex('arps_number_uq').on(t.tenantId, sql`lower(${t.number})`),
+    statusCk: check('arps_status_ck', inList('status', ['rascunho', 'vigente', 'encerrada', 'cancelada'])),
+    regimeCk: check('arps_regime_ck', inList('regime', ['federal', 'estadual', 'municipal', 'distrital', 'estatal'])),
+  }),
+);
+
+export const arpAgencies = pgTable(
+  'arp_agencies',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    kind: text('kind').notNull(),
+    name: text('name').notNull(),
+    document: text('document'),
+    contactId: uuid('contact_id').references(() => contacts.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('arp_agencies_uq').on(t.arpId, sql`lower(${t.name})`),
+    kindCk: check('arp_agencies_kind_ck', inList('kind', ['gerenciador', 'participante', 'nao_participante'])),
+  }),
+);
+
+export const arpItems = pgTable(
+  'arp_items',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    itemNumber: text('item_number').notNull(),
+    lot: text('lot'),
+    code: text('code'),
+    description: text('description').notNull(),
+    specification: text('specification'),
+    unit: text('unit').notNull(),
+    /** quantidade registrada em milésimos (oficial: muda só por operação formal no ledger) */
+    registeredMilli: bigint('registered_milli', { mode: 'number' }).notNull(),
+    unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+    brandModel: text('brand_model'),
+    notes: text('notes'),
+    extra: jsonb('extra').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('arp_items_uq').on(t.arpId, sql`lower(coalesce(${t.lot}, ''))`, sql`lower(${t.itemNumber})`),
+    qtyCk: check('arp_items_qty_ck', sql`registered_milli > 0 and unit_cents > 0`),
+  }),
+);
+
+/** Alterações cadastrais/oficiais de item (append-only), com motivo, origem e documento. */
+export const arpItemChanges = pgTable(
+  'arp_item_changes',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    itemId: uuid('item_id').notNull().references(() => arpItems.id),
+    field: text('field').notNull(),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    reason: text('reason').notNull(),
+    origin: text('origin').notNull(),
+    documentId: uuid('document_id'),
+    operationId: uuid('operation_id'),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('arp_item_changes_idx').on(t.itemId, t.createdAt) }),
+);
+
+/** Distribuição inicial de quantitativos por órgão participante (o restante é do gerenciador). */
+export const arpAllocations = pgTable(
+  'arp_allocations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    itemId: uuid('item_id').notNull().references(() => arpItems.id),
+    agencyId: uuid('agency_id').notNull().references(() => arpAgencies.id),
+    qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('arp_allocations_uq').on(t.itemId, t.agencyId), qtyCk: check('arp_allocations_qty_ck', sql`qty_milli > 0`) }),
+);
+
+/** Livro de movimentações da ata: imutável, idempotente; correções são lançamentos compensatórios. */
+export const arpLedger = pgTable(
+  'arp_ledger',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    itemId: uuid('item_id').notNull().references(() => arpItems.id),
+    agencyId: uuid('agency_id').notNull().references(() => arpAgencies.id),
+    kind: text('kind').notNull(),
+    dir: text('dir'),
+    qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull(),
+    unit: text('unit').notNull(),
+    unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    origin: text('origin').notNull(),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    contractId: uuid('contract_id').references(() => contracts.id),
+    adhesionId: uuid('adhesion_id'),
+    operationId: uuid('operation_id'),
+    documentId: uuid('document_id'),
+    actorId: uuid('actor_id').references(() => users.id),
+    justification: text('justification'),
+    approvalRef: text('approval_ref'),
+    ruleVersion: integer('rule_version').notNull().default(0),
+    reversesId: uuid('reverses_id'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    occurredAt: ts('occurred_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idemUq: uniqueIndex('arp_ledger_idem_uq').on(t.tenantId, t.idempotencyKey),
+    arpIdx: index('arp_ledger_arp_idx').on(t.arpId, t.occurredAt),
+    oppIdx: index('arp_ledger_opp_idx').on(t.opportunityId),
+    kindCk: check('arp_ledger_kind_ck', inList('kind', ['reserva', 'liberacao', 'consumo', 'estorno', 'remanejamento', 'conversao_proposta', 'conversao', 'ajuste', 'cancelamento', 'adesao', 'execucao', 'faturamento'])),
+    dirCk: check('arp_ledger_dir_ck', sql`dir is null or dir in ('saida','entrada')`),
+  }),
+);
+
+/** Itens da ata pedidos numa oportunidade (o saldo vem das reservas e consumos no ledger). */
+export const arpOpportunityLines = pgTable(
+  'arp_opportunity_lines',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    itemId: uuid('item_id').notNull().references(() => arpItems.id),
+    agencyId: uuid('agency_id').notNull().references(() => arpAgencies.id),
+    qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull(),
+    unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+    status: text('status').notNull().default('reservada'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('arp_opp_lines_uq').on(t.opportunityId, t.itemId, t.agencyId),
+    statusCk: check('arp_opp_lines_status_ck', inList('status', ['reservada', 'formalizada', 'liberada'])),
+  }),
+);
+
+export const arpAdhesions = pgTable(
+  'arp_adhesions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    agencyId: uuid('agency_id').notNull().references(() => arpAgencies.id),
+    requestedAt: date('requested_at', { mode: 'string' }).notNull(),
+    justification: text('justification').notNull(),
+    items: jsonb('items').$type<{ itemId: string; qtyMilli: number; unitCents: number }[]>().notNull(),
+    status: text('status').notNull().default('solicitada'),
+    supplierAcceptedAt: ts('supplier_accepted_at'),
+    supplierAcceptedBy: uuid('supplier_accepted_by').references(() => users.id),
+    managerAuthorizedAt: ts('manager_authorized_at'),
+    managerAuthorizationRef: text('manager_authorization_ref'),
+    authorizedBy: uuid('authorized_by').references(() => users.id),
+    deadlineAt: date('deadline_at', { mode: 'string' }),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    contractId: uuid('contract_id').references(() => contracts.id),
+    /** limites calculados na autorização (não mudam se a regra mudar depois) */
+    limitsSnapshot: jsonb('limits_snapshot').$type<Record<string, unknown>>(),
+    ruleVersion: integer('rule_version'),
+    /** exceção legal validada pelo Jurídico (fundamento, documento, quem e quando) */
+    exception: jsonb('exception').$type<Record<string, unknown> | null>(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    idx: index('arp_adhesions_idx').on(t.arpId),
+    statusCk: check('arp_adhesions_status_ck', inList('status', ['solicitada', 'aceita_fornecedor', 'autorizada', 'contratada', 'recusada', 'expirada', 'cancelada'])),
+  }),
+);
+
+/** Operações entre itens: simulação não é gravada; pedido → aprovação → efetivação (gera o ledger). */
+export const arpOperations = pgTable(
+  'arp_operations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    kind: text('kind').notNull(),
+    status: text('status').notNull().default('solicitada'),
+    input: jsonb('input').$type<Record<string, unknown>>().notNull(),
+    simulation: jsonb('simulation').$type<Record<string, unknown>>().notNull(),
+    justification: text('justification').notNull(),
+    documentId: uuid('document_id'),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    decisionNote: text('decision_note'),
+    effectedBy: uuid('effected_by').references(() => users.id),
+    effectedAt: ts('effected_at'),
+    ruleVersion: integer('rule_version').notNull().default(0),
+    exception: jsonb('exception').$type<Record<string, unknown> | null>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    idx: index('arp_operations_idx').on(t.arpId, t.createdAt),
+    kindCk: check('arp_operations_kind_ck', inList('kind', ['conversao', 'remanejamento', 'correcao', 'alteracao_preco', 'cancelamento'])),
+    statusCk: check('arp_operations_status_ck', inList('status', ['solicitada', 'aprovada', 'reprovada', 'efetivada', 'cancelada'])),
+  }),
+);
+
+export const arpDocuments = pgTable(
+  'arp_documents',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    category: text('category').notNull(),
+    name: text('name').notNull(),
+    mime: text('mime').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    data: bytea('data').notNull(),
+    adhesionId: uuid('adhesion_id'),
+    operationId: uuid('operation_id'),
+    opportunityId: uuid('opportunity_id'),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('arp_documents_idx').on(t.arpId, t.createdAt) }),
+);
+
+export const arpEvents = pgTable(
+  'arp_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    arpId: uuid('arp_id').notNull().references(() => arps.id),
+    type: text('type').notNull(),
+    summary: text('summary').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
+    occurredAt: ts('occurred_at').notNull().defaultNow(),
+  },
+  (t) => ({ idx: index('arp_events_idx').on(t.arpId, t.occurredAt) }),
+);
+
+/** Modelos de mapeamento de colunas salvos para importações futuras. */
+export const arpImportMappings = pgTable('arp_import_mappings', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  mapping: jsonb('mapping').$type<Record<string, string>>().notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+});
 

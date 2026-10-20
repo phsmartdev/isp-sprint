@@ -3,6 +3,7 @@
  * nunca desfaz a ação principal; o resultado de cada uma fica em automation_runs.
  * Proteção contra laço: no máximo 3 níveis (ex.: perdida → duplica → criada → move …).
  */
+import { CS_KEY } from './customerSuccess';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { renderTemplate, type Automation, type AutomationAction } from '@isp/shared';
 import type { Config } from '../config';
@@ -129,6 +130,11 @@ async function execute(ctx: Ctx, automationName: string, opportunityId: string, 
   }
 
   if (action.tipo === 'duplicar') {
+    // oportunidade de ata de registro de preços não vira negócio no Sucesso do Cliente
+    if (action.jornada === CS_KEY) {
+      const [src] = await db.select({ arpId: s.opportunities.arpId }).from(s.opportunities).where(eq(s.opportunities.id, opportunityId)).limit(1);
+      if (src?.arpId) return { skipped: 'oportunidade de ata: não gera negócio no Sucesso do Cliente' };
+    }
     const newId = await duplicateOpportunity(db, tenantId, ctx.actorId, opportunityId, action, automationName);
     await runAutomations(db, ctx.config, tenantId, ctx.actorId, newId, { type: 'criada' }, ctx.depth + 1);
     return { opportunityId: newId };

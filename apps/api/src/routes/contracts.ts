@@ -155,14 +155,14 @@ export const contractRoutes = [
     module: 'contratos',
     body: CreateBody,
     handler: async ({ app, auth, body, req, reply }) => {
-      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null;
+      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null, arpFromOpp: string | null = null;
       if (body.opportunityId) {
         const [o] = await app.db.select().from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
         if (!o) throw notFound('Oportunidade não encontrada.');
         if (o.stage !== 'ganha') throw unprocessable('O contrato é cadastrado depois que a oportunidade é concluída (venda fechada).');
         const [dup] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
         if (dup) throw unprocessable('Esta oportunidade já tem contrato cadastrado.', [{ path: 'opportunityId', message: dup.id }]);
-        contactId = o.contactId; customerId = o.customerId; oppTitle = o.title;
+        contactId = o.contactId; customerId = o.customerId; oppTitle = o.title; arpFromOpp = o.arpId;
       }
       if (!contactId) throw unprocessable('Informe a oportunidade ou o cliente.', [{ path: 'contactId', message: 'Obrigatório' }]);
       const [contact] = await app.db.select({ id: s.contacts.id }).from(s.contacts).where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId))).limit(1);
@@ -174,7 +174,7 @@ export const contractRoutes = [
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
-          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
+          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
           commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
@@ -648,7 +648,15 @@ export const contractRoutes = [
         const [signed] = await tx.select({ id: s.contractDocuments.id }).from(s.contractDocuments).where(and(eq(s.contractDocuments.contractId, c.id), eq(s.contractDocuments.category, 'CONTRATO'), eq(s.contractDocuments.signed, true), sql`${s.contractDocuments.deletedAt} is null`)).limit(1);
         if (!signed) await record('documento_pendente', `contrato:${today}`, addDays(today, 7), c.commercialOwnerId, [], [], 'Anexar o contrato assinado.');
         // 5. negociação: histórico e Sucesso do Cliente, preservando a oportunidade
-        if (c.opportunityId) {
+        if (c.opportunityId && c.arpId) {
+          // contratação decorrente de ata: fica no comercial, sem negócio novo no Sucesso do Cliente; acompanhamento por tarefas
+          const ev = (type: string, payload: Record<string, unknown>) => tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: c.opportunityId!, type, actorId: auth.userId, payload: { contractId: c.id, number: cur.number, ...payload } });
+          await ev('contrato_validado', {});
+          await ev('erp_solicitado', { tasks: erpTasks.length });
+          await ev('provisionamento_solicitado', { emails: finMails });
+          await ev('implantacao_notificada', { emails: opsMails });
+          await ev('ata_operacional', { arpId: c.arpId });
+        } else if (c.opportunityId) {
           await tx.update(s.opportunities).set({ handoffStage: 'sucesso_cliente', updatedAt: new Date() }).where(eq(s.opportunities.id, c.opportunityId));
           const ev = (type: string, payload: Record<string, unknown>) => tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: c.opportunityId!, type, actorId: auth.userId, payload: { contractId: c.id, number: cur.number, ...payload } });
           await ev('contrato_validado', {});

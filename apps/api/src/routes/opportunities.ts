@@ -1,5 +1,6 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
 import { ensureCustomerSuccessPipeline, isBaseCustomer } from '../services/customerSuccess';
+import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, OpportunityUpdate } from '@isp/shared';
@@ -325,6 +326,9 @@ export const opportunityRoutes = [
         // contrato por medição: venda fechada dá saída no saldo; reabrir uma venda fechada estorna
         if (target.kind === 'won') await consumeForOpportunity(tx, auth.tenantId, auth.userId, cur);
         if (reopening && from === 'ganha') await reverseForOpportunity(tx, auth.tenantId, auth.userId, cur);
+        // ata de registro de preços: ganho não consome saldo (exige formalização documental); perda libera as reservas
+        if (target.kind === 'won' && cur.arpId) await onArpOpportunityWon(tx, auth, cur.id);
+        if (target.kind === 'lost' && cur.arpId) await releaseOpportunity(tx, auth, cur.id, 'Oportunidade perdida');
         await tx.insert(s.opportunityEvents).values({
           tenantId: auth.tenantId,
           opportunityId: params.id,

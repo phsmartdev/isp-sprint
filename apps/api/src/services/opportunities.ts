@@ -41,7 +41,7 @@ export async function planPrice(db: DbOrTx, auth: AuthContext, planId: string | 
  * Cria a oportunidade e a persiste imediatamente (spec §4): ID, owner, origem, timestamps, versão
  * e evento "created". Contato novo é provisório e entra na carteira do responsável.
  */
-export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: FastifyRequest, input: CreateOpportunityInput) {
+export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: FastifyRequest, input: CreateOpportunityInput, opts: { trustedContact?: boolean; arpId?: string | null } = {}) {
   const ownerId = input.ownerId ?? auth.userId;
   await assertAssignableUser(tx, auth, 'oportunidades', ownerId);
   await assertTenantRefs(tx, auth, { sourceId: input.sourceId, campaignId: input.campaignId });
@@ -73,7 +73,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     const [c] = await tx
       .select({ name: s.contacts.name, segment: s.contacts.segment })
       .from(s.contacts)
-      .where(and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
+      // órgão da ata: o contato é do cadastro da ata, não da carteira de quem cria
+      .where(opts.trustedContact ? and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId)) : and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
       .limit(1);
     if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Contato fora da sua carteira' }]);
     contactName = c.name;
@@ -110,6 +111,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       valueCents: plan?.priceCents ?? null,
       sprintStartedAt: now,
       createdBy: auth.userId,
+      arpId: opts.arpId ?? null,
       ...(await detailsPatch(tx, auth, input, pipeline.id)),
     })
     .returning({ id: s.opportunities.id, code: s.opportunities.code });
@@ -168,6 +170,7 @@ export const opportunitySelect = {
   handoffStage: s.opportunities.handoffStage,
   measurementContractId: s.opportunities.measurementContractId,
   measurementCents: s.opportunities.measurementCents,
+  arpId: s.opportunities.arpId,
   contractId: sql<string | null>`(select c.id from contracts c where c.opportunity_id = "opportunities"."id" limit 1)`,
   approvalStatus: sql<string | null>`(select coalesce(d.decision, 'pendente') from approval_requests r left join approval_decisions d on d.request_id = r.id where r.opportunity_id = "opportunities"."id" order by r.version desc limit 1)`,
   stageName: s.pipelineStages.name,
