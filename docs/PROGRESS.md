@@ -1,6 +1,6 @@
 # Progresso e pendências
 
-Atualizado em 2026-10-18. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
+Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
 
 ## Fase 0 — Auditoria ✅
 - Legado v1.5 auditado (`AUDIT_LEGACY_v1.5.md`): 4 achados críticos (API aberta sem token, contrato confirmado forjável, XSS armazenado via `id`, sobrescrita arbitrária). Decisão: reescrever; portar só conteúdo de playbook e salvaguardas do adaptador IXC; migrar dados como `legacy_v1.5` não verificado (Fase 3).
@@ -85,7 +85,29 @@ Atualizado em 2026-10-18. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
-## Próxima etapa — Fase 2b (Sprint completo)
+## Acesso / login ✅ (2026-10-20)
+- **Entrar com Google** (OAuth/OpenID): só entra em usuário já cadastrado, ativo, com o mesmo e-mail verificado; vincula o `sub` do Google no primeiro acesso; domínios permitidos opcionais. Variáveis: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_ALLOWED_DOMAINS` (opcional). Redirect URI: `https://<domínio>/api/v1/auth/google/callback`.
+- **Esqueci minha senha**: link por e-mail (SMTP da empresa), 1 hora, uso único; encerra as sessões. Página `/redefinir-senha`.
+- **Mostrar senha** e aviso de Caps Lock no login.
+- **Recuperação pelo deploy**: `ADMIN_RESET_EMAIL` + `ADMIN_RESET_PASSWORD` (mín. 10) na Vercel → no próximo deploy de produção a senha é definida, a conta é desbloqueada e reativada (cria Gerência se o e-mail não existir e houver uma empresa só). Remover as variáveis depois.
+- Gerência pode **corrigir o e-mail** do usuário (desfaz o vínculo Google).
+- Testes: API 88/88, E2E 28/28.
+
+## Gestão de Contratos ✅ (2026-10-19)
+- Menu e abas: painel, lista, funil, calendário, renovações, reajustes, encerramentos, notificações, modelos e relatórios.
+- Cadastro a partir da oportunidade fechada; validação dispara tarefa de ERP, provisionamento (Financeiro), implantação e Sucesso do Cliente.
+- Versões por INSERT, processos paralelos com roteiros (renovação pública com ofício e cópia para contratos@bktele.com.br, privada, reajuste, encerramento), documentos com nome padrão e restrição por setor, alertas diários sem duplicidade.
+- **Modelos de contrato no mesmo editor dos modelos de proposta**, com o timbrado da empresa; geração do PDF pela ficha; alternativa em Word (.docx com `{{campos}}`).
+- **Assinatura ZapSign** (token, produção/sandbox, webhook); PDF assinado volta como nova versão.
+- **Tipos**: Recorrente, Frequente e Medição; extrato append-only (`contract_ledger`). Medição: saldo consumido pelas oportunidades ao fechar a venda; reabrir estorna.
+- **Sucesso do Cliente**: oportunidade de cliente da base pergunta se aciona; “sim” duplica no funil Sucesso do Cliente.
+- Painel com faturamento por tipo e estratificações; relatório completo (filtros, tabela, CSV com 45 colunas, impressão/PDF).
+- Pendências externas: ERP/IXC (faturado real), SMTP, setores dos usuários, `CRON_SECRET`, token e webhook da ZapSign.
+
+## Entregas entre 18 e 19/10
+Sprint, viabilidade, portas de CTO, campanhas, integrações (IXC credenciais, Z-API com envio/webhook/teste, Meta, site), Inteligência geral, base de dados, propostas PJ, envio da proposta por WhatsApp e campos personalizados de clientes e negociações.
+
+## Próxima etapa (histórico) — Fase 2b (Sprint completo)
 1. Tabelas `playbooks`, `playbook_versions`, `opportunity_answers`, `recommendations`, `offers`/`plans`/`plan_versions` (catálogo), `coverage_checks`, `proposals`, `objections`.
 2. Motor determinístico versionado em `packages/playbook` com testes por cenário; portar perguntas e objeções do `engine.js` legado.
 3. Ramo “interesse em oferta” completo (perguntas condicionais, comparação “situação atual × proposta” com origem de cada dado, objeções, desfechos).

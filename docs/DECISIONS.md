@@ -92,3 +92,26 @@ Decisão do cliente (“90% da área é condomínio”): hierarquia de dois nív
 ## ADR-028 — E-mail por SMTP da empresa
 Senha cifrada com AES-256-GCM (chave de `APP_ENCRYPTION_KEY` ou `COOKIE_SECRET`), nunca devolvida à tela. Todo envio, inclusive falha, vai para `email_messages` (append-only). Usos: proposta e follow-up ao cliente, alertas ao time (resumo diário, lead atribuído, venda fechada) e acesso de usuários. Textos vêm dos modelos de e-mail da instrução.
 
+## ADR-029 — Gestão de Contratos: cabeçalho + versões só por INSERT (19/10/2026)
+`contracts` guarda identidade, etapa, responsáveis e marcadores; os dados contratuais ficam em `contract_versions`, **append-only** por trigger (cada alteração é um INSERT com motivo e `change_kind`). Linha do tempo em `contract_events`, também append-only. Um contrato por oportunidade.
+
+## ADR-030 — Processos paralelos com roteiro fixo por tipo
+Implantação, renovação (pública/privada), reajuste e encerramento são `contract_processes` independentes, com etapas e exigências em `packages/domain/src/contracts.ts`. Arquivar só ao concluir o encerramento, com validação de Sucesso do Cliente.
+
+## ADR-031 — Alertas contratuais sem duplicidade
+Rotina diária e “Verificar agora” gravam um alerta por contrato + tipo + ciclo (`contract_alerts_uq`). Nada é encerrado por vencimento: o sistema avisa, abre o processo e cria tarefas.
+
+## ADR-032 — Setores dos usuários (independentes do perfil)
+`users.sectors` define quem recebe tarefas/e-mails e quem conclui cada etapa; documentos podem ser restritos a setores.
+
+## ADR-033 — ERP e receita faturada sem simulação
+Nenhum endpoint de ERP inventado: etapas de ERP viram tarefa com código informado por pessoa. Faturado/recebido ficam “Aguardando ERP”. E-mail que não sai aparece como “não enviado”.
+
+## ADR-034 — Tipos de contrato e saldo por medição; modelos no editor de propostas
+Recorrente, Frequente e Medição; movimentos em `contract_ledger` (append-only: crédito, consumo, estorno, faturamento). Consumo da medição acontece ao fechar a oportunidade e é estornado ao reabrir. Modelos de contrato reutilizam `proposal_templates` (`purpose = 'contrato'`) com a arte timbrada; assinatura pela ZapSign.
+
+## ADR-035 — Login com Google, redefinição por e-mail e recuperação pelo deploy (20/10/2026)
+- **Google (OIDC, code flow no servidor):** `state` aleatório em cookie assinado (HMAC, 10 min). Exige `email_verified`; domínios opcionais (`GOOGLE_ALLOWED_DOMAINS`). Não cria usuário: só entra em conta existente e ativa com o mesmo e-mail. O `sub` é vinculado no primeiro acesso, e outro `sub` para o mesmo e-mail é recusado. Trocar o e-mail do usuário desfaz o vínculo. `next` só aceita caminho interno.
+- **Esqueci minha senha:** resposta idêntica exista ou não a conta. Token de 32 bytes guardado só como hash (`password_resets`), 1 h, uso único; um pedido invalida os anteriores. Redefinir desbloqueia e revoga as sessões.
+- **Recuperação pelo deploy:** `ADMIN_RESET_EMAIL`/`ADMIN_RESET_PASSWORD` aplicados pelo `vercel-setup` em produção. A senha nunca vai para o log. As variáveis devem ser removidas após o uso.
+
