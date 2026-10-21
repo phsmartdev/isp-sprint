@@ -78,7 +78,7 @@ test('cliente da base mostra Inteligência do Cliente e classificação', async 
   await page.getByRole('row').nth(1).click();
   await expect(page).toHaveURL(/\/customers\/[0-9a-f-]{36}$/);
   await page.getByRole('button', { name: /^(Classificar|Reclassificar)$/ }).click();
-  await page.getByLabel('Classe estratégica').selectOption('Classe A');
+  await page.getByLabel('Classe estratégica').selectOption('Reputação');
   await page.getByLabel('Perfil pagador').selectOption('Pontual');
   await page.getByRole('button', { name: 'Salvar classificação' }).click();
   await expect(page.getByText(/Classificado em .* por Carlos Silva/)).toBeVisible();
@@ -115,13 +115,13 @@ test('cliente da base: Inteligência do Cliente, contratos e margem antes/depois
   const start = new Date(Date.now() - 500 * 86_400_000).toISOString().slice(0, 10);
   const c = await api('post', '/contracts', { opportunityId: o.id, billingType: 'recorrente', commercialOwnerId: me.user.id, version: { number: 'E2E-BASE-1', object: 'Link dedicado fictício', signedAt: start, startAt: start, termMonths: 24, monthlyCents: 120_000, items: [{ planId: null, description: 'Link 300M', qty: 1, unitCents: 120_000 }] } });
   await api('post', `/contracts/${c.id}/validate`);
-  await api('post', `/contacts/${o.contactId}/classification`, { classKey: 'Classe A', payerProfile: 'Pontual', risk: 'Baixo', potential: 'Alto', notes: 'Conta estratégica fictícia' });
+  await api('post', `/contacts/${o.contactId}/classification`, { classKey: 'Reputação', payerProfile: 'Pontual', risk: 'Baixo', potential: 'Alto', notes: 'Conta estratégica fictícia' });
   const o2 = await api('post', '/opportunities', { contactId: o.contactId, planId: plan.id, cableMeters: 20, saleType: 'ativa', customerSuccess: false });
   await page.goto(`/opportunities/${o2.id}/aprovacao`);
   await expect(page.getByRole('heading', { name: /Inteligência do Cliente/ })).toBeVisible();
   await expect(page.getByText('Cliente da base', { exact: false }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'E2E-BASE-1', exact: true })).toBeVisible();
-  await expect(page.getByText('Classe A').first()).toBeVisible();
+  await expect(page.getByText('Reputação').first()).toBeVisible();
   await page.waitForLoadState('networkidle');
   await shot(page, 'aprov-base-1440');
 });

@@ -69,10 +69,14 @@ export function ActivityRow({ a, showOwner, compact }: { a: Activity; showOwner?
   const patch = useActivityPatch();
   const [resched, setResched] = useState(false);
   const [when, setWhen] = useState(isoToLocalInput(a.dueAt));
+  const [asking, setAsking] = useState(false);
+  const [result, setResult] = useState('');
+  // acompanhamento de Sucesso do Cliente: concluir pede o resultado (sem ele não conta na cobertura)
+  const complete = () => (a.csKind && !a.completedAt ? setAsking(true) : patch.mutate({ a, body: { completed: !a.completedAt } }));
   const today = a.dueAt ? localDayKey(a.dueAt) === localDayKey(new Date()) : false;
   return (
     <li className={clsx('grid items-center gap-3 py-3.5', compact ? 'grid-cols-[24px_auto_24px_minmax(0,1fr)_auto_32px]' : 'grid-cols-[28px_52px_28px_minmax(0,1.3fr)] lg:grid-cols-[28px_52px_28px_minmax(0,1.3fr)_minmax(0,1fr)_110px_96px_32px]')}>
-      <input type="checkbox" className="h-5 w-5" checked={!!a.completedAt} disabled={patch.isPending} onChange={() => patch.mutate({ a, body: { completed: !a.completedAt } })} aria-label={`${a.completedAt ? 'Reabrir' : 'Concluir'}: ${a.title}`} />
+      <input type="checkbox" className="h-5 w-5" checked={!!a.completedAt} disabled={patch.isPending} onChange={complete} aria-label={`${a.completedAt ? 'Reabrir' : 'Concluir'}: ${a.title}`} />
       <span className={clsx('num whitespace-nowrap', compact ? 'text-sm' : 'text-md', a.overdue ? 'font-semibold text-danger' : 'text-muted')}>{a.dueAt ? (compact && !today ? fmtRelativeShort(a.dueAt) : fmtTime(a.dueAt)) : '—'}</span>
       <span aria-hidden>{TYPE_ICON[a.type]}</span>
       <span className="min-w-0">
@@ -86,10 +90,15 @@ export function ActivityRow({ a, showOwner, compact }: { a: Activity; showOwner?
       {!compact && <span className="hidden lg:block"><ActivityTag t={a.type} /></span>}
       <span className={compact ? '' : 'hidden lg:block'}>
         {a.completedAt ? <Chip tone="green">Concluída</Chip> : a.overdue ? <Chip tone="red">Atrasada</Chip> : today ? (
-          <Button size="sm" className="border-primary/10 bg-primary-soft text-primary hover:bg-primary-soft/70" onClick={() => patch.mutate({ a, body: { completed: true } })}>Concluir</Button>
+          <Button size="sm" className="border-primary/10 bg-primary-soft text-primary hover:bg-primary-soft/70" onClick={complete}>Concluir</Button>
         ) : <Chip tone="orange" className="min-w-[78px] justify-center">Pendente</Chip>}
       </span>
       <span className={compact ? '' : 'hidden lg:block'}><RowMenu a={a} onReschedule={() => setResched(true)} /></span>
+      <Modal open={asking} onClose={() => setAsking(false)} title="Resultado do acompanhamento" size="sm" footer={<><Button onClick={() => { setAsking(false); patch.mutate({ a, body: { completed: true } }); }}>Concluir sem resultado</Button><Button variant="primary" disabled={result.trim().length < 5} loading={patch.isPending} onClick={() => patch.mutate({ a, body: { completed: true, csResult: result } }, { onSuccess: () => setAsking(false) })}>Registrar</Button></>}>
+        <label className="text-sm font-semibold text-ink" htmlFor={`res-${a.id}`}>O que aconteceu?</label>
+        <textarea id={`res-${a.id}`} className="field-input mt-1 min-h-[90px]" value={result} onChange={(e) => setResult(e.target.value)} />
+        <p className="mt-1 text-xs text-muted">Sem resultado registrado, o acompanhamento não conta na cobertura da carteira.</p>
+      </Modal>
       <Modal open={resched} onClose={() => setResched(false)} title="Reagendar atividade" size="sm" footer={<><Button onClick={() => setResched(false)}>Cancelar</Button><Button variant="primary" loading={patch.isPending} onClick={() => patch.mutate({ a, body: { dueAt: localInputToIso(when) } }, { onSuccess: () => setResched(false) })}>Reagendar</Button></>}>
         <label className="text-sm font-semibold text-ink" htmlFor={`re-${a.id}`}>Nova data e hora</label>
         <Input id={`re-${a.id}`} type="datetime-local" className="mt-1" value={when} onChange={(e) => setWhen(e.target.value)} />

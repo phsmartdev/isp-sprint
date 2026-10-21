@@ -11,6 +11,7 @@ import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
 import type { DbOrTx } from '../db/client';
+import { handoffContractToCs } from '../services/customerSuccess';
 import { audit } from '../services/audit';
 import { level } from '../services/scope';
 import { oppVisibility } from '../services/opportunities';
@@ -664,6 +665,7 @@ export const contractRoutes = [
           await ev('provisionamento_solicitado', { emails: finMails });
           await ev('implantacao_notificada', { emails: opsMails });
           await ev('sucesso_cliente', {});
+          await handoffContractToCs(tx, auth.tenantId, auth.userId, { id: c.id, opportunityId: c.opportunityId, arpId: c.arpId });
         }
         return { erp: { status: 'pendente_integracao', tasks: erpTasks.length }, provisioning: { emails: finMails, tasks: finTasks.length }, delivery: { emails: opsMails, tasks: opsTasks.length } };
       });

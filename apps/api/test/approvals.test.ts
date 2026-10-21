@@ -105,11 +105,11 @@ describe('cliente da base', () => {
   });
 
   it('classificação: só opções cadastradas; pedido de atualização vira tarefa', async () => {
-    ok(await lucas.post(`/contacts/${contactId}/classification`, { classKey: 'Classe A' }), 403); // vendedor (nível Próprio) não classifica
+    ok(await lucas.post(`/contacts/${contactId}/classification`, { classKey: 'Reputação' }), 403); // vendedor (nível Próprio) não classifica
     ok(await carlos.post(`/contacts/${contactId}/classification`, { classKey: 'Classe Z' }), 422);
-    ok(await carlos.post(`/contacts/${contactId}/classification`, { classKey: 'Classe A', payerProfile: 'Pontual', risk: 'Baixo', notes: 'Conta estratégica' }), 201);
+    ok(await carlos.post(`/contacts/${contactId}/classification`, { classKey: 'Reputação', payerProfile: 'Pontual', risk: 'Baixo', notes: 'Conta estratégica' }), 201);
     const c = ok(await carlos.get(`/contacts/${contactId}/classification`)).json();
-    expect(c.current).toMatchObject({ classKey: 'Classe A', payerProfile: 'Pontual', classifiedBy: 'Carlos Silva' });
+    expect(c.current).toMatchObject({ classKey: 'Reputação', payerProfile: 'Pontual', classifiedBy: 'Carlos Silva' });
     const t = ok(await lucas.post(`/contacts/${contactId}/classification/request-update`, { opportunityId: oppId }), 201).json();
     expect(t.activityId).toBeTruthy();
   });
@@ -120,11 +120,11 @@ describe('cliente da base', () => {
     const a = ok(await carlos.get(`/opportunities/${oppId}/approval`)).json();
     expect(a.margin.incremental.revenueCents).toBe(20_000);
     expect(a.margin.after.revenueCents).toBe(100_000);
-    expect(a.executive.classKey).toBe('Classe A');
-    expect(a.opinion.summary).toContain('Cliente da base classificado como Classe A');
+    expect(a.executive.classKey).toBe('Reputação');
+    expect(a.opinion.summary).toContain('Cliente da base classificado como Reputação');
     expect(a.viewer.isApprover).toBe(true);
     // a classificação muda depois do pedido
-    ok(await carlos.post(`/contacts/${contactId}/classification`, { classKey: 'Classe B', payerProfile: 'Atrasos eventuais' }), 201);
+    ok(await carlos.post(`/contacts/${contactId}/classification`, { classKey: 'Potencial', payerProfile: 'Atrasos eventuais' }), 201);
     const b = ok(await carlos.get(`/opportunities/${oppId}/approval`)).json();
     expect(b.materialChanges).toContain('A classificação estratégica do cliente foi atualizada.');
     expect(ok(await carlos.post(`/approval-requests/${requestId}/decision`, { decision: 'aprovada' }), 422).json().detail).toContain('Os dados mudaram');
@@ -179,13 +179,13 @@ describe('configurações e WhatsApp', () => {
 
     const p = await plan();
     const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Cliente WhatsApp Aprovação Fictício', segment: 'residencial' }, planId: p.id }), 201).json();
-    ok(await carlos.post(`/contacts/${o.contactId}/classification`, { classKey: 'Classe C' }), 201);
+    ok(await carlos.post(`/contacts/${o.contactId}/classification`, { classKey: 'Expansão' }), 201);
     const calls: { url: string; body: { phone: string; message: string } }[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => { calls.push({ url: String(url), body: JSON.parse(String(init!.body)) }); return new Response(JSON.stringify({ messageId: 'w1' }), { status: 200 }); });
     ok(await lucas.post(`/opportunities/${o.id}/approval/requests`, { negotiationType: 'novo_servico', proposedMonthlyCents: p.priceCents, justification: 'Venda padrão sem desconto.' }), 201);
     const toCarlos = calls.find((c) => c.body.phone === '5579999990000')!;
     expect(toCarlos.url).toBe('https://api.z-api.io/instances/INSTAPR/token/TOKAPR/send-text');
-    expect(toCarlos.body.message).toContain('Classe: Classe C');
+    expect(toCarlos.body.message).toContain('Classe: Expansão');
     expect(toCarlos.body.message).toContain(`OP-`);
     const chat = ok(await lucas.get(`/opportunities/${o.id}/chat`)).json().items;
     expect(chat.at(-1).body).toContain('WhatsApp para Carlos Silva.');

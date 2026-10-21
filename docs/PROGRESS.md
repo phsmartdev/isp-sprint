@@ -85,6 +85,28 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Sucesso do Cliente — jornada, inteligência da conta e gestão preditiva ✅ (2026-10-21)
+- **Jornada automática:** contrato validado vai para o funil Sucesso do Cliente; ao entrar em *Planejamento* (configurável), nasce a jornada.
+  - Onboarding, adoção e renovação.
+  - Marcos com datas reais e tarefas.
+  - Linha do tempo visual na ficha do cliente, no contrato e no módulo.
+- **Kickoff web:** 18 slides com dados do CRM e pendências sinalizadas.
+  - Editor (texto, tabela, layout, ordem, ocultar, novo slide) e versões.
+  - Modelos reutilizáveis, apresentação em tela cheia, PDF e link autorizado.
+  - Registro da reunião.
+- **Inteligência da conta:** Tier por ACV consolidado, Score IPC (7 critérios), Classe Estratégica (independente), saúde, criticidade explicada e prioridade manual com revisão.
+- **Cadência e cobertura:** políticas por criticidade, Tier, classe e outros critérios; acompanhamentos gerados sem duplicar.
+  - Cobertura simples e ponderada por CSM, equipe, Tier, classe, criticidade, conta e mês.
+  - Contas sem acompanhamento.
+- **Alertas preventivos** (relacionamento, contrato, comercial, saúde e dados desatualizados) e contas que precisam de atenção, com motivo e ações rápidas.
+- **Visão 360° da conta:** visitas com resumo obrigatório e próximos passos, pesquisas (NPS/CSAT), planos de ação e ocorrências, consumo contratual com projeção de esgotamento.
+- **Minha Carteira** com prioridades de hoje.
+- **Gestão:** carga × capacidade por CSM, scorecard, gamificação e contas críticas sem acompanhamento no prazo.
+- **Configurações → Sucesso do Cliente:** todas as regras, versionadas.
+- **Rotina diária** (cron existente): recálculo, tarefas de marcos, cadência, alertas, escalonamento e revisão do IPC.
+- **Pendências externas:** faturas do IXC (inadimplência e faturado real) e o material de kickoff de referência, para alinhar a terminologia dos slides.
+- **Testes:** domínio 63, API 130, E2E 37.
+
 ## Atas de registro de preços ✅ (2026-10-20)
 - **Gestão de Contratos → aba Atas:** painel (registrado, contratado, reservado, saldo, adesões, consumo mensal, órgãos, limites), lista, nova ata, relatórios e regras legais versionadas.
 - **Ficha da ata:**

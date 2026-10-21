@@ -1,5 +1,6 @@
 /** Ficha individual do contrato. */
 import { useState } from 'react';
+import { ContractJourney } from '../../features/cs/ContractJourney';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSignature, Pencil } from 'lucide-react';
@@ -169,7 +170,7 @@ export function ContractDetailPage() {
                 <Info label="Faturamento">{v.billingDay ? `Dia ${v.billingDay}` : '—'}{v.billingTerms ? <span className="block text-sm text-muted">{v.billingTerms}</span> : null}</Info>
                 <Info label="Reajuste">{v.adjustmentIndex ?? '—'}{v.adjustmentBaseDate ? ` · data-base ${fmtDate(v.adjustmentBaseDate)}` : ''}{v.adjustmentRule ? <span className="block text-sm text-muted">{v.adjustmentRule}</span> : null}</Info>
                 <Info label="Responsável operacional">{c.operationalOwnerName ?? '—'}</Info>
-                <Info label="Sucesso do Cliente">{c.csmName ?? '—'}</Info>
+                <Info label="Sucesso do Cliente">{c.csmName ?? '—'}{c.validatedAt && <span className="block"><ContractJourney contractId={c.id} /></span>}</Info>
                 <Info label="ERP">{c.erpRef ?? <span className="text-[#C2610C]">Cadastro pendente</span>}</Info>
                 {c.kind === 'publico' && <Info label="Órgão / processo">{v.publicTerms?.agency ?? '—'}{v.publicTerms?.processNumber ? ` · ${v.publicTerms.processNumber}` : ''}{v.publicTerms?.modality ? <span className="block text-sm text-muted">{v.publicTerms.modality}{v.publicTerms.commitmentNote ? ` · empenho ${v.publicTerms.commitmentNote}` : ''}</span> : null}</Info>}
                 {c.kind === 'publico' && <Info label="Limite total de vigência">{c.legalLimitAt ? fmtDate(c.legalLimitAt) : 'Não informado'}</Info>}

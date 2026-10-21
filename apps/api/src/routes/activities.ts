@@ -21,6 +21,8 @@ const select = {
   dueAt: s.activities.dueAt,
   priority: s.activities.priority,
   completedAt: s.activities.completedAt,
+  csKind: s.activities.csKind,
+  csResult: s.activities.csResult,
   createdAt: s.activities.createdAt,
   rowVersion: s.activities.rowVersion,
   ownerId: s.activities.ownerId,
@@ -229,7 +231,7 @@ export const activityRoutes = [
         const now = new Date();
         const dueAt = body.dueAt === undefined ? undefined : body.dueAt ? new Date(body.dueAt) : null;
         const events: { type: string; payload: Record<string, unknown> }[] = [];
-        if (body.completed === true && !cur.completedAt) events.push({ type: 'completed', payload: {} });
+        if (body.completed === true && !cur.completedAt) events.push({ type: 'completed', payload: body.csResult ? { csResult: true } : {} });
         if (body.completed === false && cur.completedAt) events.push({ type: 'reopened', payload: {} });
         if (dueAt !== undefined && (dueAt?.getTime() ?? null) !== (cur.dueAt?.getTime() ?? null)) {
           events.push({ type: 'rescheduled', payload: { from: cur.dueAt?.toISOString() ?? null, to: dueAt?.toISOString() ?? null } });
@@ -246,6 +248,7 @@ export const activityRoutes = [
             dueAt,
             completedAt: body.completed === undefined ? undefined : body.completed ? cur.completedAt ?? now : null,
             completedBy: body.completed === undefined ? undefined : body.completed ? auth.userId : null,
+            csResult: body.completed === false ? null : body.csResult ?? undefined,
             updatedAt: now,
             rowVersion: sql`${s.activities.rowVersion} + 1`,
           })

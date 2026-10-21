@@ -13,7 +13,7 @@ it('limpar base: só gerência, com senha e frase; histórico de auditoria conti
   expect((await carlos.post('/admin/clear-base', { password: 'errada', confirm: 'LIMPAR BASE', scopes: ['clientes'] })).statusCode).toBe(422);
   expect((await carlos.post('/admin/clear-base', { password: 'Sprint@2026', confirm: 'limpar', scopes: ['clientes'] })).statusCode).toBe(422);
   const r = await carlos.post('/admin/clear-base', { password: 'Sprint@2026', confirm: 'LIMPAR BASE', scopes: ['clientes', 'comercial'] });
-  expect(r.statusCode).toBe(200);
+  expect(r.statusCode, r.body).toBe(200);
   expect(r.json().counts.clientes).toBeGreaterThan(0);
   expect(r.json().counts.oportunidades).toBeGreaterThan(0);
   expect((await carlos.get('/opportunities?status=todas')).json().items).toHaveLength(0);

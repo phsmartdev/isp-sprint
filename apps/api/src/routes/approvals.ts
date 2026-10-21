@@ -316,6 +316,9 @@ export const approvalRoutes = [
         const v = body[k];
         if (v && !opts[k].includes(v)) throw unprocessable(`Valor fora das opções cadastradas: ${v}.`, [{ path: k, message: 'Escolha uma opção da lista' }]);
       }
+      // Classe Estratégica: definida e revisada pela liderança Comercial e pela Diretoria
+      const [prevCls] = await app.db.select({ classKey: s.contactClassifications.classKey }).from(s.contactClassifications).where(and(eq(s.contactClassifications.tenantId, auth.tenantId), eq(s.contactClassifications.contactId, params.id))).orderBy(desc(s.contactClassifications.createdAt)).limit(1);
+      if ((prevCls?.classKey ?? null) !== (body.classKey ?? null) && !(auth.sectors.includes('diretoria') || auth.sectors.includes('comercial') || auth.access.configuracoes === 'total')) throw forbidden('A Classe Estratégica é definida pela liderança Comercial ou pela Diretoria.');
       const [r] = await app.db.insert(s.contactClassifications).values({ tenantId: auth.tenantId, contactId: params.id, ...body, classifiedBy: auth.userId }).returning({ id: s.contactClassifications.id });
       await audit(app.db, req, { action: 'customer.classify', entityType: 'contact', entityId: params.id, metadata: { ...body } });
       reply.code(201);

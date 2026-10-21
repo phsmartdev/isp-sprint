@@ -152,3 +152,32 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Desatrelar:** libera as reservas; não é permitido se já houve consumo formalizado.
 - **Formalizar** continua na ficha da ata, com documento e perfil de Contratos, Jurídico ou Administração.
 
+## ADR-042 — Sucesso do Cliente integrado (jornada, inteligência da conta, cadência e cobertura) (21/10/2026)
+- **Sem módulo paralelo.** Reaproveita o funil Sucesso do Cliente (ganhou a etapa *Planejamento*), contratos, clientes, oportunidades, atividades e a classificação estratégica existente (classes iniciais: Reputação, Potencial, Expansão, Aposta Estratégica; só Comercial ou Diretoria alteram).
+- **Configuração versionada** (`cs_settings`, append-only, JSON validado no domínio): gatilho (funil, etapa, tipo de cliente e contrato, CSM padrão), modelos de jornada, faixas de Tier, pontos do IPC, pesos de saúde e criticidade, precedência da prioridade manual, cadências, pesos de cobertura, alertas, capacidade e scorecard. Cálculos e apurações guardam a versão usada.
+- **Gatilho idempotente:**
+  - Contrato validado vira negociação no funil Sucesso do Cliente, uma por contrato.
+  - Ao entrar na etapa configurada, nasce a jornada, uma por contrato (chave única `contrato:<id>`), com marcos, tarefas, CSM, kickoff v1, avisos e histórico. Voltar à etapa não duplica.
+  - Contratos de ata ficam fora (ADR-039).
+- **Marcos e kickoff:**
+  - Marcos de renovação ancorados na data real de fim da vigência.
+  - Tarefas dos marcos nascem quando faltam 30 dias.
+  - O kickoff é uma sequência de slides web com dados reais. O que falta entra como *pendente*, nada é inventado.
+  - Cada edição gera uma versão nova (`cs_presentations`, append-only) e não altera o contrato.
+  - Exporta PDF pelo navegador; link autorizado com token aleatório (só o hash é guardado), 30 dias, somente leitura.
+- **Fotografia da conta** (`cs_accounts.snapshot`), recalculada diariamente e após cada ação:
+  - **ACV/Tier:** consolidado por CNPJ raiz e vínculos "mesmo cliente", sem dupla contagem.
+  - **IPC:** 7 critérios, 20 a 100. Tamanho e tempo são calculados; os demais são humanos. Incompleto não tem total.
+  - **Saúde:** média ponderada só dos fatores com dado; inadimplência fica indisponível até o IXC.
+  - **Criticidade:** explicada por motivos; a prioridade manual é separada, com prazo de revisão.
+  - **Histórico:** mudanças de Tier, saúde, criticidade, prioridade manual, IPC e CSM ficam em `cs_assessments` (append-only).
+- **Cadência e cobertura:**
+  - Acompanhamentos são atividades com `cs_kind`, data prevista imutável (`cs_planned_at`), chave idempotente e o peso da criticidade da época.
+  - Só conta o realizado *com resultado registrado* até a data prevista mais a tolerância. Reagendar não conta; extras ficam à parte; o resultado é limitado a 100%.
+  - Recalcular remove só previstos futuros em aberto.
+- **Alertas** (`cs_alerts`): um por chave e conta. Resolvem sozinhos quando o motivo some. E-mail ao CSM nos de nível alto; escalonamento configurável. Nunca usam dado ausente como confirmado.
+- **Gestão:**
+  - A carga de cada CSM considera frequência × esforço por interação, não só o número de contas.
+  - O scorecard separa operacional, comercial, qualidade e risco.
+  - A gamificação pontua só o realizado e comprovado.
+

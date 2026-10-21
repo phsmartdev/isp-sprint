@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_CS_CONFIG as C, cadenceDates, contractAcv, coverage, criticality, effectivePriority, healthScore, ipcScore, policyFor, tierOf, validateCsConfig } from './cs';
+
+describe('Sucesso do Cliente', () => {
+  it('configuração padrão é válida e o IPC vai de 20 a 100', () => {
+    expect(validateCsConfig(C)).toEqual([]);
+    expect(validateCsConfig({ ...C, ipcPoints: { ...C.ipcPoints, potencial: { baixo: 10, medio: 20, alto: 30 } } })[0]).toContain('20 a 100');
+  });
+  it('Tier pelas faixas da especificação (limites inclusivos)', () => {
+    expect(tierOf(12_000_000, C.tierBands)).toBe('small');
+    expect(tierOf(12_000_100, C.tierBands)).toBe('middle');
+    expect(tierOf(50_000_000, C.tierBands)).toBe('middle');
+    expect(tierOf(50_000_100, C.tierBands)).toBe('large');
+    expect(contractAcv({ monthlyCents: 1_000_000, totalCents: null, startAt: null, endAt: null })).toBe(12_000_000);
+    expect(contractAcv({ monthlyCents: null, totalCents: 24_000_000, startAt: '2026-01-01', endAt: '2027-12-31' })).toBeCloseTo(12_000_000, -5);
+  });
+  it('IPC incompleto não tem total; completo soma os sete critérios', () => {
+    const p = ipcScore({ tamanho: 'alto', tempo: 'medio' }, C);
+    expect(p.total).toBeNull();
+    expect(p.pending).toHaveLength(5);
+    const full = ipcScore({ tamanho: 'alto', potencial: 'alto', segmento: 'alto', criticidade: 'alto', tempo: 'alto', relacionamento: 'alto', maturidade: 'alto' }, C);
+    expect(full.total).toBe(100);
+    expect(ipcScore({ tamanho: 'baixo', potencial: 'baixo', segmento: 'baixo', criticidade: 'baixo', tempo: 'baixo', relacionamento: 'baixo', maturidade: 'baixo' }, C).total).toBe(20);
+  });
+  it('saúde usa só os fatores com dado e exige cobertura mínima', () => {
+    expect(healthScore({ satisfacao: 80 }, C).score).toBeNull();
+    const h = healthScore({ satisfacao: 80, inadimplencia: 100, risco: 50 }, C);
+    expect(h.score).toBe(Math.round((80 * 20 + 100 * 20 + 50 * 15) / 55));
+  });
+  it('criticidade explica os motivos e respeita os limites', () => {
+    const c = criticality({ health: 30, tier: 'large', ipc: 90, classKey: 'Reputação', consumptionPct: 95, overdueCents: null, satisfaction: 40, daysToEnd: 20, churnRisk: 'alto', openOccurrences: 3, daysOverdueFollowUp: 40 }, C);
+    expect(c.level).toBe('critica');
+    expect(c.reasons[0]!.key).toBe('saude');
+    expect(criticality({ health: 95, tier: 'small', ipc: 30, classKey: null, consumptionPct: null, overdueCents: null, satisfaction: 90, daysToEnd: 300, churnRisk: 'baixo', openOccurrences: 0, daysOverdueFollowUp: 0 }, C).level).toBe('baixa');
+  });
+  it('prioridade manual separada da calculada, com precedência configurável', () => {
+    expect(effectivePriority('baixa', { level: 'alta', reviewAt: '2026-01-01' }, 'manual_ate_revisao', '2026-02-01')).toEqual({ level: 'baixa', source: 'calculada' });
+    expect(effectivePriority('baixa', { level: 'alta', reviewAt: '2026-03-01' }, 'manual_ate_revisao', '2026-02-01')).toEqual({ level: 'alta', source: 'manual' });
+    expect(effectivePriority('critica', { level: 'alta', reviewAt: null }, 'maior', '2026-02-01').level).toBe('critica');
+  });
+  it('cadência: política mais específica e datas no horizonte', () => {
+    const cfg = { ...C, cadence: [...C.cadence, { key: 'x', name: 'Alta Large', when: { criticality: 'alta' as const, tier: 'large' as const }, contactDays: 7, visitDays: 15, reviewDays: null }] };
+    expect(policyFor({ criticality: 'alta', tier: 'large', classKey: null, billingType: null, segment: null, csmId: null }, cfg)!.key).toBe('x');
+    expect(policyFor({ criticality: 'alta', tier: 'small', classKey: null, billingType: null, segment: null, csmId: null }, cfg)!.key).toBe('alta');
+    expect(cadenceDates('2026-01-01', 30, '2026-01-10', 60)).toEqual(['2026-01-31', '2026-03-02']);
+    expect(cadenceDates(null, null, '2026-01-10', 60)).toEqual([]);
+  });
+  it('cobertura: só realizado e validado no prazo; extras à parte; limitada a 100%', () => {
+    const r = coverage([
+      { plannedAt: '2026-01-10', completedAt: '2026-01-11', validated: true, weight: 4, cadence: true },
+      { plannedAt: '2026-01-10', completedAt: '2026-01-20', validated: true, weight: 1, cadence: true },
+      { plannedAt: '2026-01-10', completedAt: '2026-01-10', validated: false, weight: 1, cadence: true },
+      { plannedAt: '2026-01-10', completedAt: '2026-01-10', validated: true, weight: 1, cadence: false },
+    ], 2);
+    expect(r).toMatchObject({ planned: 3, onTime: 1, extra: 1, simple: 1 / 3, weighted: 4 / 6 });
+    expect(coverage([], 2).simple).toBeNull();
+  });
+});

@@ -580,8 +580,20 @@ export const activities = pgTable(
     updatedAt: updatedAt(),
     deletedAt: ts('deleted_at'),
     rowVersion: rowVersion(),
+    /** Sucesso do Cliente: tipo do acompanhamento (contato, visita, revisão…); a data prevista não muda com reagendamento. */
+    csKind: text('cs_kind'),
+    csPlannedAt: date('cs_planned_at', { mode: 'string' }),
+    /** chave da cadência (idempotência: uma por conta e data) */
+    csCadenceKey: text('cs_cadence_key'),
+    /** peso da criticidade da conta quando o acompanhamento foi previsto (a apuração histórica mantém o peso da época) */
+    csWeight: integer('cs_weight'),
+    /** resultado registrado: sem resultado, a execução não conta na cobertura */
+    csResult: text('cs_result'),
+    csPlanId: uuid('cs_plan_id'),
   },
   (t) => ({
+    csCadenceUq: uniqueIndex('activities_cs_cadence_uq').on(t.tenantId, t.contactId, t.csCadenceKey).where(sql`cs_cadence_key is not null`),
+    csIdx: index('activities_cs_idx').on(t.tenantId, t.contactId, t.csPlannedAt),
     typeCk: check('activities_type_ck', inList('type', ['tarefa', 'ligacao', 'reuniao', 'email', 'whatsapp', 'visita'])),
     priorityCk: check('activities_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
     ownerDueIdx: index('activities_owner_due_idx').on(t.tenantId, t.ownerId, t.dueAt),
@@ -1774,3 +1786,198 @@ export const arpImportMappings = pgTable('arp_import_mappings', {
   createdAt: createdAt(),
 });
 
+
+// ------------------------------------------------------------------ Sucesso do Cliente
+
+/** Configuração versionada (gatilho, modelos, Tier, IPC, saúde, criticidade, cadência, cobertura, alertas). Append-only. */
+export const csSettings = pgTable('cs_settings', {
+  id: id(),
+  tenantId: tenantId(),
+  version: integer('version').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  note: text('note').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('cs_settings_uq').on(t.tenantId, t.version) }));
+
+/** Estado atual da conta no Sucesso do Cliente (CSM, prioridade manual, último cálculo). O histórico fica em cs_assessments. */
+export const csAccounts = pgTable('cs_accounts', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  csmId: uuid('csm_id').references(() => users.id),
+  churnRisk: text('churn_risk'),
+  manualLevel: text('manual_level'),
+  manualReason: text('manual_reason'),
+  manualBy: uuid('manual_by').references(() => users.id),
+  manualAt: ts('manual_at'),
+  manualReviewAt: date('manual_review_at', { mode: 'string' }),
+  snapshot: jsonb('snapshot').$type<Record<string, unknown>>(),
+  computedAt: ts('computed_at'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('cs_accounts_uq').on(t.tenantId, t.contactId), csmIdx: index('cs_accounts_csm_idx').on(t.tenantId, t.csmId) }));
+
+/** Histórico de ACV/Tier, IPC, saúde, criticidade, prioridade manual e troca de CSM. Append-only. */
+export const csAssessments = pgTable('cs_assessments', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  kind: text('kind').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>().notNull(),
+  score: integer('score'),
+  level: text('level'),
+  justification: text('justification'),
+  evidence: text('evidence'),
+  ruleVersion: integer('rule_version').notNull().default(0),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('cs_assessments_idx').on(t.tenantId, t.contactId, t.kind, t.createdAt) }));
+
+export const csJourneys = pgTable('cs_journeys', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  contractId: uuid('contract_id').references(() => contracts.id),
+  opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+  /** idempotência do gatilho: contrato:<id> (ou oportunidade:<id> sem contrato) */
+  triggerKey: text('trigger_key').notNull(),
+  templateKey: text('template_key').notNull(),
+  templateName: text('template_name').notNull(),
+  csmId: uuid('csm_id').references(() => users.id),
+  isNewCustomer: boolean('is_new_customer').notNull().default(true),
+  status: text('status').notNull().default('ativa'),
+  startedAt: date('started_at', { mode: 'string' }).notNull(),
+  ruleVersion: integer('rule_version').notNull().default(0),
+  shareTokenHash: text('share_token_hash'),
+  shareExpiresAt: ts('share_expires_at'),
+  kickoffAt: ts('kickoff_at'),
+  kickoffNotes: text('kickoff_notes'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('cs_journeys_trigger_uq').on(t.tenantId, t.triggerKey), contactIdx: index('cs_journeys_contact_idx').on(t.tenantId, t.contactId) }));
+
+export const csMilestones = pgTable('cs_milestones', {
+  id: id(),
+  tenantId: tenantId(),
+  journeyId: uuid('journey_id').notNull().references(() => csJourneys.id),
+  phase: text('phase').notNull(),
+  key: text('key').notNull(),
+  title: text('title').notNull(),
+  plannedAt: date('planned_at', { mode: 'string' }),
+  doneAt: ts('done_at'),
+  doneBy: uuid('done_by').references(() => users.id),
+  ownerId: uuid('owner_id').references(() => users.id),
+  activityId: uuid('activity_id').references(() => activities.id),
+  notes: text('notes'),
+  position: integer('position').notNull().default(0),
+}, (t) => ({ uq: uniqueIndex('cs_milestones_uq').on(t.journeyId, t.key) }));
+
+/** Versões da apresentação de kickoff (slides web). Append-only: a mais recente vale. */
+export const csPresentations = pgTable('cs_presentations', {
+  id: id(),
+  tenantId: tenantId(),
+  journeyId: uuid('journey_id').notNull().references(() => csJourneys.id),
+  version: integer('version').notNull(),
+  slides: jsonb('slides').$type<Record<string, unknown>[]>().notNull(),
+  note: text('note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('cs_presentations_uq').on(t.journeyId, t.version) }));
+
+export const csSlideTemplates = pgTable('cs_slide_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  slides: jsonb('slides').$type<Record<string, unknown>[]>().notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/** Respostas de pesquisas (NPS, CSAT, experiência…). Append-only. */
+export const csSurveys = pgTable('cs_surveys', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  kind: text('kind').notNull(),
+  score: integer('score').notNull(),
+  scale: integer('scale').notNull(),
+  respondent: text('respondent'),
+  comment: text('comment'),
+  respondedAt: date('responded_at', { mode: 'string' }).notNull(),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('cs_surveys_idx').on(t.tenantId, t.contactId, t.respondedAt) }));
+
+export const csVisits = pgTable('cs_visits', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  contractIds: uuid('contract_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  csmId: uuid('csm_id').notNull().references(() => users.id),
+  type: text('type').notNull(),
+  modality: text('modality').notNull().default('presencial'),
+  participants: text('participants'),
+  objective: text('objective').notNull(),
+  plannedAt: ts('planned_at').notNull(),
+  doneAt: ts('done_at'),
+  summary: text('summary'),
+  demands: text('demands'),
+  risks: text('risks'),
+  opportunities: text('opportunities'),
+  nextSteps: text('next_steps'),
+  status: text('status').notNull().default('agendada'),
+  activityId: uuid('activity_id').references(() => activities.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ idx: index('cs_visits_idx').on(t.tenantId, t.contactId, t.plannedAt), statusCk: check('cs_visits_status_ck', inList('status', ['agendada', 'realizada', 'cancelada'])) }));
+
+export const csFiles = pgTable('cs_files', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  visitId: uuid('visit_id').references(() => csVisits.id),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  data: bytea('data').notNull(),
+  uploadedBy: uuid('uploaded_by').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+/** Planos de ação e ocorrências da conta. Os passos são atividades (activities.cs_plan_id). */
+export const csActionPlans = pgTable('cs_action_plans', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  kind: text('kind').notNull().default('plano'),
+  severity: text('severity'),
+  title: text('title').notNull(),
+  reason: text('reason'),
+  status: text('status').notNull().default('aberto'),
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  dueAt: date('due_at', { mode: 'string' }),
+  alertKey: text('alert_key'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  closedAt: ts('closed_at'),
+  closedNote: text('closed_note'),
+}, (t) => ({ idx: index('cs_action_plans_idx').on(t.tenantId, t.contactId, t.status), kindCk: check('cs_action_plans_kind_ck', inList('kind', ['plano', 'ocorrencia'])) }));
+
+/** Alertas preventivos vigentes por conta (um por chave; resolvido some da lista, reaparece se voltar). */
+export const csAlerts = pgTable('cs_alerts', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  key: text('key').notNull(),
+  category: text('category').notNull(),
+  level: text('level').notNull(),
+  text: text('text').notNull(),
+  firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
+  lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  resolvedAt: ts('resolved_at'),
+  notifiedAt: ts('notified_at'),
+  escalatedAt: ts('escalated_at'),
+}, (t) => ({ uq: uniqueIndex('cs_alerts_uq').on(t.tenantId, t.contactId, t.key) }));

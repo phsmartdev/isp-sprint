@@ -212,6 +212,8 @@ export const ActivityUpdate = z.object({
   ownerId: uuid.optional(),
   notes: optText(2000),
   completed: z.boolean().optional(),
+  /** Sucesso do Cliente: resultado do acompanhamento (sem ele a execução não conta na cobertura) */
+  csResult: optText(2000),
   rowVersion,
 });
 export type ActivityUpdate = z.infer<typeof ActivityUpdate>;

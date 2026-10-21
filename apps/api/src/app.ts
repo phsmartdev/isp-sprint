@@ -33,6 +33,7 @@ import { negotiationRoutes } from './routes/negotiation';
 import { arpRoutes } from './routes/arps';
 import { arpOpsRoutes } from './routes/arpOps';
 import { arpOpportunityRoutes } from './routes/arpOpportunity';
+import { csRoutes } from './routes/cs';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -143,6 +144,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...arpRoutes,
     ...arpOpsRoutes,
     ...arpOpportunityRoutes,
+    ...csRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

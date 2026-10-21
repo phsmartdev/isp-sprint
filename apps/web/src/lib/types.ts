@@ -159,6 +159,9 @@ export type Opportunity = {
 
 export type Activity = {
   id: string;
+  /** Sucesso do Cliente: acompanhamento que exige resultado para contar na cobertura */
+  csKind?: string | null;
+  csResult?: string | null;
   type: ActivityType;
   title: string;
   notes: string | null;

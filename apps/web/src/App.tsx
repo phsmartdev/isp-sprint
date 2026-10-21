@@ -33,6 +33,9 @@ import { ContractsPage } from './pages/contracts/Contracts';
 import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
 import { ArpDetailPage } from './pages/contracts/ArpDetail';
+import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
+import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
+import { AdminCsSettings } from './pages/admin/CsSettings';
 import { AdminContractSettings } from './pages/admin/ContractSettings';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -56,6 +59,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/k/:token" element={<PublicKickoffPage />} />
+      <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
@@ -68,6 +73,8 @@ export function App() {
         <Route path="aprovacoes" element={<ApprovalsPage />} />
         <Route path="customers" element={<Gate module="clientes"><CustomersPage /></Gate>} />
         <Route path="customers/:id" element={<Gate module="clientes"><CustomerDetailPage /></Gate>} />
+        <Route path="sucesso" element={<Gate module="clientes"><CustomerSuccessPage /></Gate>} />
+        <Route path="sucesso/jornadas/:id" element={<Gate module="clientes"><JourneyPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
@@ -92,6 +99,7 @@ export function App() {
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<AdminContractSettings />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
+          <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

@@ -1,5 +1,5 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
-import { ensureCustomerSuccessPipeline, isBaseCustomer } from '../services/customerSuccess';
+import { csOnStage, ensureCustomerSuccessPipeline, isBaseCustomer } from '../services/customerSuccess';
 import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
@@ -346,6 +346,7 @@ export const opportunityRoutes = [
       });
       if (body.toStage === 'ganha') await storeViability(app.db, auth.tenantId, params.id);
       await runAutomations(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage === 'ganha' ? { type: 'ganha' } : body.toStage === 'perdida' ? { type: 'perdida' } : { type: 'entrou_na_etapa', stage: body.toStage });
+      await csOnStage(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage).catch((e) => req.log.error(e, 'jornada CS'));
       const dto = opportunityDto(await loadOpportunity(app.db, auth, params.id));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
       return dto;

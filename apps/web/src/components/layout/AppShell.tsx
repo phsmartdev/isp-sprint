@@ -3,8 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X,
-} from 'lucide-react';
+  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X, HeartHandshake } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -24,6 +23,7 @@ const NAV: NavItem[] = [
   { to: '/opportunities', label: 'Oportunidades', icon: <ClipboardList className={ICON} />, module: 'oportunidades' },
   { to: '/aprovacoes', label: 'Aprovações', icon: <Scale className={ICON} />, module: 'oportunidades', badge: 'approvals' },
   { to: '/customers', label: 'Clientes', icon: <Users className={ICON} />, module: 'clientes' },
+  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
   { to: '/activities', label: 'Atividades', icon: <CalendarCheck className={ICON} />, module: 'atividades', badge: true },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
   { to: '/campaigns', label: 'Campanhas', icon: <Send className={ICON} />, module: 'campanhas' },
@@ -49,6 +49,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
   { to: '/settings/contracts', label: 'Contratos', admin: true },
   { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
+  { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },

@@ -9,6 +9,7 @@ import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
 import { CustomFieldsEditor, type CustomValues } from '../features/DealFields';
 import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
+import { Account360 } from '../features/cs/Account360';
 import { Avatar, Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
@@ -77,7 +78,7 @@ export function CustomerDetailPage() {
   const { id = '' } = useParams();
   const { can } = useAuth();
   const nav = useNavigate();
-  const [tab, setTab] = useState('resumo');
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('t') ?? 'resumo');
   const q = useQuery({ queryKey: ['contact', id], queryFn: () => api<Detail>(`/contacts/${id}`) });
   const acts = useQuery({
     queryKey: ['activities', 'contact', id],
@@ -122,6 +123,7 @@ export function CustomerDetailPage() {
             { key: 'resumo', label: 'Resumo' },
             { key: 'oportunidades', label: 'Oportunidades', count: c.opportunities.length },
             { key: 'atividades', label: 'Interações', count: acts.data?.total },
+            { key: 'sucesso', label: 'Sucesso do Cliente' },
             { key: 'contratos', label: 'Contratos' },
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
@@ -153,6 +155,7 @@ export function CustomerDetailPage() {
               </div>
             </dl>
           )}
+          {tab === 'sucesso' && <Account360 contactId={c.id} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
           {tab === 'oportunidades' && (c.opportunities.length === 0 ? <EmptyState title="Nenhuma oportunidade visível" /> : (

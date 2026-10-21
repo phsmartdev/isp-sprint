@@ -338,7 +338,7 @@ export const CLASSIFICATION_LABELS: Record<ClassificationDimension, string> = {
 export type ClassificationOptions = Record<ClassificationDimension, string[]>;
 /** Opções iniciais (editáveis em Configurações → Aprovações). */
 export const DEFAULT_CLASSIFICATION_OPTIONS: ClassificationOptions = {
-  classKey: ['Classe A', 'Classe B', 'Classe C', 'Classe D'],
+  classKey: ['Reputação', 'Potencial', 'Expansão', 'Aposta Estratégica'],
   category: ['Residencial', 'Pequena empresa', 'Média empresa', 'Grande conta', 'Governo'],
   profile: ['Estratégico', 'Crescimento', 'Manutenção', 'Retenção'],
   payerProfile: ['Pontual', 'Atrasos eventuais', 'Atrasos recorrentes', 'Inadimplente'],
