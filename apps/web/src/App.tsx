@@ -1,3 +1,5 @@
+import { ResultsPage } from './pages/results/Results';
+import { AdminResultsSettings } from './pages/admin/ResultsSettings';
 import { GoalsPage } from './pages/performance/Goals';
 import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
@@ -84,6 +86,7 @@ export function App() {
         <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
         <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
+        <Route path="resultados" element={<Gate module="resultados"><ResultsPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
@@ -110,6 +113,7 @@ export function App() {
           <Route path="approvals" element={<AdminApprovalSettings />} />
           <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
+          <Route path="resultados" element={<AdminResultsSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

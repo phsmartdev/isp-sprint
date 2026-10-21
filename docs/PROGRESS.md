@@ -85,6 +85,14 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## GESTÃO DE RESULTADOS — Fase 2: estrutura, escopos e perspectivas ✅ (2026-10-21)
+- Menu **GESTÃO DE RESULTADOS** (módulo `resultados` na matriz: Próprio/Equipe/Total).
+- **Estrutura organizacional configurável**: diretoria → área → unidade → times; responsável, substituto e alçada (R$) por unidade; líder substituto por time; sem ciclos; histórico append-only.
+- **Perspectiva por responsabilidade explícita, não por cargo**: responsável/substituto de diretoria → Diretoria; de área/unidade → Gestão; líder/substituto de time → Liderança. Nível Total na matriz vê as três. Escopo = unidades sob responsabilidade (com as filhas) + times liderados.
+- Tela com as três perspectivas (pergunta central de cada uma), filtro por unidade/time, semáforo das metas do período e lista com atingimento e ritmo.
+- Administração → **Gestão de Resultados**: árvore da estrutura, vínculo dos times, substitutos e alçadas.
+- Migração 0034. Testes: domínio 90, API 160, E2E 42.
+
 ## Evolução integrada — Etapa 6: Indicadores, objetivos, metas e scorecards ✅ (2026-10-21)
 - **Construtor de indicadores** (Configurações → Gestão de desempenho → Indicadores e semáforo): contagem, soma, média, percentual, taxa, tempo, valor, razão e fórmula. Origem nos eventos de negócio válidos; filtros e campos de lista fechada; crédito ponderado (uma venda dividida 50/50 conta 0,5 para cada e 1 para a equipe). Fórmula com interpretador próprio (números, variáveis declaradas, + − × ÷, parênteses, min/max/abs/round) — nenhum código é executado. Definição versionada; botão "Testar". 12 sugestões prontas.
 - Resultado nunca inventado: sem nenhum evento do tipo → **indisponível**; denominador zero → **sem base**; amostra abaixo do mínimo → **incompleto**. Detalhamento até os eventos com o peso de cada um.

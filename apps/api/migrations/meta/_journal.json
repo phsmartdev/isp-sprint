@@ -239,6 +239,13 @@
       "when": 1792593878490,
       "tag": "0033_indicators_goals_scorecards",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792595404146,
+      "tag": "0034_org_structure",
+      "breakpoints": true
     }
   ]
 }

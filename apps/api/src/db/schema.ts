@@ -90,7 +90,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'inteligencia', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -162,6 +162,9 @@ export const teams = pgTable(
     id: id(),
     tenantId: tenantId(),
     name: text('name').notNull(),
+    /** Gestão de Resultados: unidade organizacional a que o time pertence e líder substituto */
+    orgUnitId: uuid('org_unit_id'),
+    substituteLeadId: uuid('substitute_lead_id'),
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('teams_tenant_name_uq').on(t.tenantId, t.name) }),
@@ -2538,4 +2541,50 @@ export const scorecardAssignments = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.scorecardId] }) }),
+);
+
+// --------------------------------------------------------------- gestão de resultados: estrutura organizacional
+
+/**
+ * Unidades acima dos times (diretoria → área → unidade). O responsável define a perspectiva
+ * (Diretoria ou Gestão) e o escopo; o acesso continua pela matriz de segurança (cargo ≠ permissão).
+ */
+export const orgUnits = pgTable(
+  'org_units',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    parentId: uuid('parent_id').references((): AnyPgColumn => orgUnits.id),
+    responsibleId: uuid('responsible_id').references(() => users.id),
+    substituteId: uuid('substitute_id').references(() => users.id),
+    /** alçada para aprovar investimentos e intervenções (em centavos; null = sem alçada) */
+    approvalLimitCents: bigint('approval_limit_cents', { mode: 'number' }),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    kindCk: check('org_units_kind_ck', inList('kind', ['diretoria', 'area', 'unidade'])),
+    idx: index('org_units_idx').on(t.tenantId, t.parentId),
+  }),
+);
+
+/** Histórico da estrutura (append-only): quem mudou responsável, substituto, vínculo de time… */
+export const orgEvents = pgTable(
+  'org_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    unitId: uuid('unit_id'),
+    teamId: uuid('team_id'),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('org_events_idx').on(t.tenantId, t.createdAt) }),
 );

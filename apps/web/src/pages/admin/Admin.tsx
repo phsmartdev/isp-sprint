@@ -39,6 +39,7 @@ const TABS = [
   { to: '/settings/approvals', label: 'Aprovações e alçadas' },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente' },
   { to: '/settings/desempenho', label: 'Gestão de desempenho' },
+  { to: '/settings/resultados', label: 'Gestão de Resultados' },
   { to: '/settings/data', label: 'Base de dados' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },

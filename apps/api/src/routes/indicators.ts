@@ -74,7 +74,7 @@ function goalVisible(auth: AuthContext): SQL {
   return or(eq(s.goals.scope, 'empresa'), and(eq(s.goals.scope, 'individual'), scope.length ? inArray(s.goals.userId, scope) : sql`false`), and(eq(s.goals.scope, 'equipe'), sql`exists (select 1 from team_memberships tm where tm.team_id = ${s.goals.teamId} and tm.user_id = ${auth.userId})`))!;
 }
 
-async function goalDto(db: DbOrTx, auth: AuthContext, g: typeof s.goals.$inferSelect, bands = DEFAULT_TRAFFIC_BANDS) {
+export async function goalDto(db: DbOrTx, auth: AuthContext, g: typeof s.goals.$inferSelect, bands = DEFAULT_TRAFFIC_BANDS) {
   const p = await goalProgress(db, auth.timezone, todayLocal(auth), g);
   // período aberto: a cor segue o ritmo (realizado × esperado até hoje) e é marcada como parcial; só o fechamento é oficial
   const pace = !p.closed && p.direction === 'maior' && p.value !== null && p.expected ? p.value / p.expected : p.attainment;
