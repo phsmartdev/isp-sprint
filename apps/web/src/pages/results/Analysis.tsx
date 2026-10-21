@@ -28,7 +28,7 @@ export function AnalysisPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['interventions', 'analysis', id], queryFn: () => api<Resp>(`/interventions/${id}/analysis`) });
-  const iv = useQuery({ queryKey: ['interventions', 'one', id], queryFn: () => api<{ goal: { title: string }; competencias: string[]; ownerName: string }>(`/interventions/${id}`) });
+  const iv = useQuery({ queryKey: ['interventions', 'one', id], queryFn: () => api<{ displayTitle: string; competencias: string[]; ownerName: string }>(`/interventions/${id}`) });
   const [step, setStep] = useState<Step>('problema');
   const [c, setC] = useState<AnalysisContent | null>(null);
   const [version, setVersion] = useState<number | null>(null);
@@ -75,8 +75,8 @@ export function AnalysisPage() {
   const countFor = (k: Step) => gaps.filter((g) => g.step === k).length;
   return (
     <div>
-      <Breadcrumb items={[{ label: 'Intervenções', to: '/times/intervencoes' }, { label: iv.data?.goal.title ?? '…', to: `/times/intervencoes?id=${id}` }, { label: 'Análise' }]} />
-      <PageHeader icon={<Search />} title="Análise da intervenção" subtitle={iv.data ? `${iv.data.goal.title} · responsável ${iv.data.ownerName}` : ''}
+      <Breadcrumb items={[{ label: 'Intervenções', to: '/times/intervencoes' }, { label: iv.data?.displayTitle ?? '…', to: `/times/intervencoes?id=${id}` }, { label: 'Análise' }]} />
+      <PageHeader icon={<Search />} title="Análise da intervenção" subtitle={iv.data ? `${iv.data.displayTitle} · responsável ${iv.data.ownerName}` : ''}
         actions={!ro ? <SaveStatus state={dirty && saveState !== 'saving' && saveState !== 'error' ? 'idle' : saveState} onRetry={() => { setSaveState('idle'); save.mutate(c); }} /> : undefined} />
       {concluded && <Notice tone="info">Análise concluída por {d.analysis!.concludedByName} em {fmtDateTime(d.analysis!.concludedAt!)}. Para alterar, reabra com o motivo.</Notice>}
       {!concluded && ro && <Notice tone="info">Você acompanha esta análise; quem conduz é o responsável pela intervenção ou quem está acima dele.</Notice>}

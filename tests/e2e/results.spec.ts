@@ -241,4 +241,8 @@ test('Intervenção manual: escolhe o indicador e abre o roteiro sem meta fora d
   await expect(dr.getByRole('region', { name: `Evolução de ${indName}` })).toBeVisible();
   await expect(dr.getByRole('link', { name: 'Começar análise' })).toBeVisible();
   await shot(page, 'gr-intervencao-manual');
+  // a análise abre normalmente mesmo sem meta ligada
+  await dr.getByRole('link', { name: 'Começar análise' }).click();
+  await expect(page.getByRole('heading', { name: 'Análise da intervenção', level: 1 })).toBeVisible();
+  await expect(page.getByText(`${title} · responsável Carlos Silva`)).toBeVisible();
 });
