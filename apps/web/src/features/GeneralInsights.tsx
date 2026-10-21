@@ -6,6 +6,7 @@ import { fmtBRL, fmtDate, fmtInt } from '../lib/format';
 import { ErrorState, LoadingRows } from '../components/ui/primitives';
 import { BarRows } from '../components/charts/charts';
 import { AracajuZonesMap } from '../components/charts/AracajuZonesMap';
+import { FitText } from '../components/ui/FitText';
 
 const ZONE_LABEL: Record<string, string> = { norte: 'Zona Norte', sul: 'Zona Sul', leste: 'Zona Leste', oeste: 'Zona Oeste', outras: 'Outras regiões' };
 
@@ -34,7 +35,7 @@ function Stat({ label, value, hint, tone, title }: { label: string; value: strin
   return (
     <div className="card min-w-0 p-4" title={title}>
       <p className="truncate text-sm text-muted">{label}</p>
-      <p className={`num truncate whitespace-nowrap text-xl font-extrabold leading-tight sm:text-[26px] ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</p>
+      <FitText className={`num truncate whitespace-nowrap text-xl font-extrabold leading-tight sm:text-[26px] ${tone === 'danger' ? 'text-danger' : tone === 'success' ? 'text-success' : 'text-ink'}`}>{value}</FitText>
       {hint && <p className="text-xs text-muted">{hint}</p>}
     </div>
   );

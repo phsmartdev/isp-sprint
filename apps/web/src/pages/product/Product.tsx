@@ -8,6 +8,7 @@ import { fmtBRL } from '../../lib/format';
 import { useAuth } from '../../auth/AuthProvider';
 import { Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select } from '../../components/ui/primitives';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { FitText } from '../../components/ui/FitText';
 
 type Plan = { id: string; name: string; line: string | null; segment: string; priceCents: number; speedMbps: number | null; products: { name: string; qty: number; unitPriceCents: number }[]; active: boolean; sourceSystem: string };
 const SEG: Record<string, string> = { residencial: 'Residencial', empresarial: 'Empresarial', condominio: 'Condomínio', governo: 'Governo' };
@@ -33,7 +34,7 @@ export function ProductPage() {
             <li key={p.id} className="card flex flex-col p-4">
               <div className="flex items-start justify-between gap-2"><h2 className="font-bold text-ink">{p.name}</h2><Chip tone="blue">{SEG[p.segment] ?? p.segment}</Chip></div>
               {p.line && <p className="text-xs text-muted">{p.line}</p>}
-              <p className="num mt-2 text-2xl font-bold text-ink">{fmtBRL(p.priceCents)}<span className="text-sm font-normal text-muted">/mês</span></p>
+              <FitText className="num mt-2 text-2xl font-bold text-ink">{fmtBRL(p.priceCents)}<span className="text-sm font-normal text-muted">/mês</span></FitText>
               {p.speedMbps !== null && <p className="text-sm">{p.speedMbps >= 1000 ? `${p.speedMbps / 1000} Gbps` : `${p.speedMbps} Mbps`}</p>}
               {!!p.products.length && <ul className="mt-2 space-y-0.5 border-t border-line pt-2 text-sm">{p.products.map((x, i) => <li key={i} className="flex justify-between gap-2"><span>{x.qty > 1 ? `${x.qty}× ` : ''}{x.name}</span><span className="num text-muted">{fmtBRL(x.unitPriceCents)}</span></li>)}</ul>}
               {p.sourceSystem !== 'crm' && <p className="mt-2 text-xs text-muted">Origem: {p.sourceSystem}</p>}

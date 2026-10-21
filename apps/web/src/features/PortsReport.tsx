@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { fmtDate } from '../lib/format';
 import { EmptyState, ErrorState, LoadingRows } from '../components/ui/primitives';
+import { FitText } from '../components/ui/FitText';
 
 type Reservation = { opportunityId: string; code: number; contactName: string; block: string | null; unit: string | null; stage: string; since: string; ownerName: string };
 type Row = { id: string; name: string; regionName: string; ports: number | null; used: number; reserved: number; free: number | null; rate: number | null; commitRate: number | null; reservations: Reservation[]; clients: { opportunityId: string; code: number; contactName: string; block: string | null; unit: string | null; wonAt: string | null; ownerName: string }[] };
@@ -20,11 +21,11 @@ export function PortsReport() {
   return (
     <div className="space-y-4">
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <div className="card p-5"><p className="text-sm text-muted">Portas cadastradas</p><p className="num text-2xl font-extrabold text-ink">{d.total}</p></div>
-        <div className="card p-5"><p className="text-sm text-muted">Ocupadas (vendas)</p><p className="num text-2xl font-extrabold text-ink">{d.used}</p></div>
-        <div className="card p-5"><p className="text-sm text-muted">Reservadas (em negociação)</p><p className="num text-2xl font-extrabold text-[#B45309]">{d.reserved}</p></div>
-        <div className="card p-5"><p className="text-sm text-muted">Livres</p><p className="num text-2xl font-extrabold text-success">{d.free}</p></div>
-        <div className="card p-5"><p className="text-sm text-muted">Taxa de ocupação</p><p className="num text-2xl font-extrabold text-ink">{pct(d.rate)}</p><p className="text-xs text-muted">Só condomínios com total de portas informado</p></div>
+        <div className="card p-5"><p className="text-sm text-muted">Portas cadastradas</p><FitText className="num text-2xl font-extrabold text-ink">{d.total}</FitText></div>
+        <div className="card p-5"><p className="text-sm text-muted">Ocupadas (vendas)</p><FitText className="num text-2xl font-extrabold text-ink">{d.used}</FitText></div>
+        <div className="card p-5"><p className="text-sm text-muted">Reservadas (em negociação)</p><FitText className="num text-2xl font-extrabold text-[#B45309]">{d.reserved}</FitText></div>
+        <div className="card p-5"><p className="text-sm text-muted">Livres</p><FitText className="num text-2xl font-extrabold text-success">{d.free}</FitText></div>
+        <div className="card p-5"><p className="text-sm text-muted">Taxa de ocupação</p><FitText className="num text-2xl font-extrabold text-ink">{pct(d.rate)}</FitText><p className="text-xs text-muted">Só condomínios com total de portas informado</p></div>
       </section>
       <section className="card overflow-hidden">
         <div className="px-5 pb-3 pt-4"><h2 className="text-md font-bold text-ink">Portas da CTO por condomínio</h2><p className="text-sm text-muted">Oportunidade aberta com o condomínio reserva uma porta; venda fechada ocupa; perda, troca de condomínio ou cancelamento liberam. Clique para ver quem ocupa e quem reservou.</p></div>

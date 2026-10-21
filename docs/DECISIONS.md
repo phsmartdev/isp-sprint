@@ -245,3 +245,12 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** ritual é a regra (cadência, escopo, pauta fixa); cada data vira uma reunião materializada sob demanda (as duas próximas, chave única ritual+data) e um compromisso na agenda. A pauta automática é calculada ao vivo enquanto a reunião está aberta e **fotografada** ao encerrar — a ata mostra o que se sabia naquele momento.
 - **Decisões e impedimentos** herdam o escopo da reunião ou da intervenção de origem; visibilidade segue a estrutura (ADR da Fase 2) mais quem registrou e quem responde. Revogar/encerrar sempre com motivo; nada é apagado (`governance_events` append-only).
 - **Escalonar impedimento** usa a mesma cadeia da estrutura das intervenções (líder → unidade → acima → Diretoria).
+
+## ADR-054 — ABM como camada sobre o cadastro único (21/10/2026)
+- **Decisão:** a organização continua sendo o registro de Contas; o ABM guarda só a estratégia (status ABM, prioridade, objetivo, origem, motivo) e aponta para a conta. Nova conta cria o registro de Contas normal (o mesmo que o CRM usa) e já a inclui no ABM.
+- **Deduplicação** antes de criar: CNPJ igual bloqueia; raiz de CNPJ, nome parecido (normalizado, abreviações) e cidade geram aviso; seguir exige justificativa, guardada no histórico. Busca é na empresa toda (não só na carteira), mas dados de contas de outra carteira não são expostos.
+- **Status comercial é derivado** (cliente, contratos ativos/encerrados, oportunidades abertas, última interação, prospecção registrada); o status ABM é independente e pode continuar ativo depois que a conta vira cliente.
+- Fusão de cadastros duplicados fica para fase própria (exige confirmação humana e migração de referências).
+
+## ADR-055 — Valores de indicador se ajustam ao cartão (21/10/2026)
+- **Decisão (pedido do usuário):** número de indicador nunca quebra linha; reduz a fonte até caber (componente `FitText`, com `width:0; min-width:100%` para não alargar a grade). Ajuste por medição real, não por quantidade de caracteres.

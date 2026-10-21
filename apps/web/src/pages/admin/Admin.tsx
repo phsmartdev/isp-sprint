@@ -19,6 +19,7 @@ import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, Loading
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { BrandImage, useBrand } from '../../components/brand';
+import { FitText } from '../../components/ui/FitText';
 
 // =================================================================== layout
 const TABS = [
@@ -100,7 +101,7 @@ export function AdminOverview() {
   const stat = (to: string, icon: ReactNode, tone: string, n: number, label: string) => (
     <Link to={to} className="card flex items-center gap-3 p-4 hover:border-line-strong">
       <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
-      <span className="min-w-0 flex-1"><span className="num block text-xl font-extrabold text-ink">{n}</span><span className="block whitespace-nowrap text-sm text-muted">{label}</span></span>
+      <span className="min-w-0 flex-1"><FitText as="span" className="num text-xl font-extrabold text-ink">{n}</FitText><span className="block whitespace-nowrap text-sm text-muted">{label}</span></span>
       <ChevronRight className="h-5 w-5 text-ink" aria-hidden />
     </Link>
   );

@@ -14,6 +14,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { MoneyToggle } from '../../lib/privacy';
 import { FollowUpDialog, PlanDialog, VisitDialog } from '../../features/cs/Account360';
 import { HealthBadge, LevelChip, TierChip, covText, type Coverage } from '../../features/cs/shared';
+import { FitText } from '../../components/ui/FitText';
 
 type Acc = {
   contactId: string; name: string; csmId: string | null; csmName: string | null; tier: Tier | null; acvCents: number; ipc: number | null; ipcPending: number; classKey: string | null;
@@ -28,7 +29,7 @@ type Portfolio = {
   canManage: boolean;
 };
 const monthStart = () => `${new Date().toISOString().slice(0, 7)}-01`;
-const Kpi = ({ label, value, hint, tone }: { label: string; value: string | number; hint?: string; tone?: 'danger' }) => <li className="card p-4"><p className="text-sm text-muted">{label}</p><p className={clsx('num mt-1 text-xl font-bold', tone === 'danger' ? 'text-danger' : 'text-ink')}>{value}</p>{hint && <p className="text-xs text-muted">{hint}</p>}</li>;
+const Kpi = ({ label, value, hint, tone }: { label: string; value: string | number; hint?: string; tone?: 'danger' }) => <li className="card p-4"><p className="text-sm text-muted">{label}</p><FitText className={clsx('num mt-1 text-xl font-bold', tone === 'danger' ? 'text-danger' : 'text-ink')}>{value}</FitText>{hint && <p className="text-xs text-muted">{hint}</p>}</li>;
 const Dist = ({ title, data, label }: { title: string; data: Record<string, number>; label?: (k: string) => string }) => (
   <div className="card p-4"><p className="mb-2 text-sm font-semibold text-ink">{title}</p><ul className="space-y-1 text-sm">{Object.entries(data).sort().map(([k, v]) => <li key={k} className="flex justify-between gap-3"><span>{label ? label(k) : k === 'sem' ? 'Não definido' : k}</span><span className="num font-semibold">{v}</span></li>)}</ul></div>
 );

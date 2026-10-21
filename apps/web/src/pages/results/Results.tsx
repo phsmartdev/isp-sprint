@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, FormField, LoadingRows, Notice, Select, Tabs } 
 import { PageHeader } from '../../components/layout/PageHeader';
 import { GoalBar, GoalStatusChips, type Goal } from '../performance/Goals';
 import { fmtAtt, fmtIndicator } from '../../features/performance/format';
+import { FitText } from '../../components/ui/FitText';
 
 type Scope = { perspectives: { key: 'diretoria' | 'gestao' | 'lideranca'; label: string }[]; all: boolean; roles: { perspective: string; name: string; substitute: boolean }[]; units: { id: string; name: string; kind: string; parentId: string | null }[]; teams: { id: string; name: string; orgUnitId: string | null }[]; people: number; canConfigure: boolean };
 type Overview = { perspective: string | null; goals: (Goal & { indicatorName: string | null; teamName: string | null; userName: string | null })[]; colors: Record<TrafficColor, number>; scope: { teams: number; people: number } };
@@ -60,7 +61,7 @@ export function ResultsPage() {
         <>
           <ul className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4" aria-label="Semáforo das metas do período">
             {(['verde', 'amarelo', 'vermelho', 'sem_dado'] as TrafficColor[]).map((c) => (
-              <li key={c} className={clsx('rounded-lg border p-4', COLOR_STYLE[c])}><p className="text-sm font-semibold">{TRAFFIC_LABELS[c]}</p><p className="num text-2xl font-bold">{ov.data!.colors[c] ?? 0}</p><p className="text-xs opacity-80">meta(s) no período</p></li>
+              <li key={c} className={clsx('rounded-lg border p-4', COLOR_STYLE[c])}><p className="text-sm font-semibold">{TRAFFIC_LABELS[c]}</p><FitText className="num text-2xl font-bold">{ov.data!.colors[c] ?? 0}</FitText><p className="text-xs opacity-80">meta(s) no período</p></li>
             ))}
           </ul>
           <section className="card overflow-hidden">

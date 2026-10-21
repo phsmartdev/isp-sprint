@@ -11,6 +11,7 @@ import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, 
 import { Modal, useToast } from '../../components/ui/overlay';
 import { ArpReports } from './Reports';
 import { ArpStatusChip, Table, errMsg, type ArpListRow } from './shared';
+import { FitText } from '../../components/ui/FitText';
 
 type Dash = {
   atas: { total: number; vigentes: number; emCadastro: number };
@@ -40,8 +41,8 @@ export function ArpDashboard({ compact, from, to }: { compact?: boolean; from?: 
   ];
   return (
     <div className="space-y-4">
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {stats.map(([l, v, s]) => <li key={l} className="card p-4"><p className="text-sm text-muted">{l}</p><p className="num mt-1 text-xl font-bold text-ink">{v}</p>{s && <p className="mt-0.5 text-xs text-muted">{s}</p>}</li>)}
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+        {stats.map(([l, v, s]) => <li key={l} className="card p-4"><p className="text-sm text-muted">{l}</p><FitText className="num mt-1 text-2xl font-bold text-ink">{v}</FitText>{s && <p className="mt-0.5 text-xs text-muted">{s}</p>}</li>)}
       </ul>
       {!compact && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

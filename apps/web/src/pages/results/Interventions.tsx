@@ -18,6 +18,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { useAuth } from '../../auth/AuthProvider';
 import { errMsg } from '../../features/contracts/shared';
 import { fmtAtt, fmtIndicator } from '../../features/performance/format';
+import { FitText } from '../../components/ui/FitText';
 
 type Item = { id: string; kind: InterventionKind; trigger: InterventionTrigger; status: InterventionStatus; competencias: string[]; goalId: string; goalTitle: string; ownerName: string; subjectName: string | null; teamName: string | null; unitName: string | null; dueOn: string; overdue: boolean; escalationLevel: number; escalatedTo: string | null };
 type Counts = { abertas: number; planos: number; revisoes: number; atrasadas: number; escaladas: number; minhas: number };
@@ -48,7 +49,7 @@ export function InterventionsPage() {
             <li key={k}>
               <button type="button" disabled={!fk} onClick={() => fk && setU({ status: 'abertas', kind: fk === 'kind' ? (u.kind === fv ? '' : fv) : '', mine: fk === 'mine' ? (u.mine ? '' : '1') : '' })}
                 className={clsx('w-full rounded-lg border p-4 text-left', (fk === 'kind' && u.kind === fv) || (fk === 'mine' && u.mine) ? 'border-primary bg-primary/5' : 'border-line bg-surface', (k === 'atrasadas' || k === 'escaladas') && c[k] > 0 && 'border-danger/40 text-danger')}>
-                <span className="block text-sm font-semibold">{label}</span><span className="num text-2xl font-bold">{c[k]}</span>
+                <span className="block text-sm font-semibold">{label}</span><FitText as="span" className="num text-2xl font-bold">{c[k]}</FitText>
               </button>
             </li>
           ))}

@@ -11,6 +11,7 @@ import { useUrlState } from '../../lib/hooks';
 import { ErrorState, LoadingRows } from '../../components/ui/primitives';
 import { DateRange } from '../../components/ui/DateRange';
 import { DaysLeft, MoneyRows, TYPE_COLOR, type ContractRow } from './shared';
+import { FitText } from '../../components/ui/FitText';
 
 type Strat = { key: string; label: string; n: number; monthlyCents: number; billedCents: number };
 type Dash = {
@@ -38,7 +39,7 @@ function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label:
   return (
     <div className="card flex items-center gap-4 p-4">
       <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
-      <div className="min-w-0"><p className="text-sm text-muted">{label}</p><p className="num truncate text-xl font-extrabold text-ink">{value}</p>{sub && <div className="text-xs text-muted">{sub}</div>}</div>
+      <div className="min-w-0"><p className="text-sm text-muted">{label}</p><FitText className="num truncate text-xl font-extrabold text-ink">{value}</FitText>{sub && <div className="text-xs text-muted">{sub}</div>}</div>
     </div>
   );
 }
@@ -82,13 +83,13 @@ export function ContractsDashboard() {
       <section aria-label="Faturamento por tipo de contrato" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="card border-l-4 border-l-ink p-4">
           <p className="text-sm text-muted">Faturamento total no período</p>
-          <p className="num text-2xl font-extrabold text-ink">{fmtBRL(d.billing.totalCents)}</p>
+          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(d.billing.totalCents)}</FitText>
           <Delta cur={d.billing.totalCents} prev={d.billing.prevTotalCents} />
         </div>
         {d.billing.byType.map((t) => (
           <div key={t.type} className="card border-l-4 p-4" style={{ borderLeftColor: TYPE_COLOR[t.type] }}>
             <p className="text-sm text-muted">{t.label} <span className="text-xs">· {t.active} ativo(s)</span></p>
-            <p className="num text-2xl font-extrabold text-ink">{fmtBRL(t.billedCents)}</p>
+            <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(t.billedCents)}</FitText>
             <Delta cur={t.billedCents} prev={t.billedPrevCents} />
             <p className="mt-1 text-xs text-muted">{t.type === 'medicao' && t.balance ? `Saldo disponível ${fmtBRL(t.balance.available)} de ${fmtBRL(t.balance.credited)}` : t.type === 'recorrente' ? `${fmtBRL(t.monthlyCents)}/mês contratado` : BILLING_TYPE_HINTS[t.type]}</p>
           </div>

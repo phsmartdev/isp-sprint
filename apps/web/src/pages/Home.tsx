@@ -14,6 +14,7 @@ import { Hexagons } from '../components/brand';
 import { Progress } from '../components/charts/charts';
 import { StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { useToast } from '../components/ui/overlay';
+import { FitText } from '../components/ui/FitText';
 
 type HomeData = {
   kpis: Kpi[];
@@ -97,7 +98,7 @@ export function HomePage() {
             <div key={k.key} className="card flex items-center gap-4 px-5 py-4" title={k.formula}>
               <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-full', KPI_LOOK[k.key]?.tone)}>{KPI_LOOK[k.key]?.icon}</span>
               <div className="min-w-0 flex-1">
-                <p className="num text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</p>
+                <FitText className="num text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</FitText>
                 <p className="text-md text-text">{k.label}</p>
               </div>
               <span className="self-end"><Delta k={k} compact /></span>

@@ -85,6 +85,19 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Números dos indicadores sempre cabem no cartão ✅ (2026-10-21)
+- Componente `FitText`: o valor começa no tamanho do estilo e diminui até caber na largura do cartão — nunca quebra linha nem passa da borda, em qualquer tela (recalcula ao redimensionar, ao trocar o valor e quando a fonte carrega). Aplicado em todos os cartões de indicadores (Início, Contratos, Atas, Sucesso do Cliente, Projetos, Campanhas, Comissões, Portas, Inteligência, Gestão de Times, Produto, Aprovações, Administração).
+- Atas: cartões em 3 colunas até telas grandes (5 só em telas muito largas), para os valores ficarem maiores.
+
+## ABM — Contas Estratégicas, Fase 2: cadastro único ✅ (2026-10-21)
+- Diagnóstico (Fase 1): organização = registro de Contas (`contacts`), cliente = ficha ligada ao mesmo registro; vínculos "mesmo cliente / CNPJ raiz" e classificação estratégica reaproveitados; não existe cadastro de pessoas (stakeholders) — será criado na Fase 4. ABM fica dentro de Marketing, com as telas como abas (decisão do usuário).
+- **Nova conta para prospectar**: só nome e motivo obrigatórios (CNPJ, natureza, segmento, cidade opcionais). Antes de criar, mostra possíveis duplicidades (mesmo CNPJ bloqueia; mesma raiz de CNPJ, nome parecido — inclusive abreviações — e mesma cidade pedem confirmação com justificativa, registrada no histórico). "Usar esta conta" leva a adicionar a existente.
+- **Adicionar ao ABM** na ficha da conta e na página do ABM, reaproveitando oportunidades, contratos, atividades e histórico (sem novo cadastro).
+- **Status ABM** (Candidata → Selecionada → Em planejamento → Ativa → Em acompanhamento; Pausada/Encerrada com motivo) com transições validadas; **prioridade** Crítica/Alta/Média/Baixa; origem e objetivo principal.
+- **Status comercial derivado dos dados** (identificada, em prospecção, em relacionamento, com oportunidade, cliente ativo, cliente sem contrato ativo, ex-cliente) — nunca digitado.
+- Natureza pública/privada na conta (governamental marcada como pública na migração; o resto fica em branco). Status antigos do ABM convertidos.
+- Migração 0042. Testes: domínio (4), API (ABM), E2E (nova conta, duplicidade, adicionar existente).
+
 ## Gestão de Times — Fase 8: rituais, atas, decisões e impedimentos ✅ (2026-10-21)
 - **Rituais** (Gestão de Times → Rituais): reuniões de gestão recorrentes por perspectiva (Diretoria, Gestão, Liderança), escopo (empresa, unidade ou time), cadência (diária em dias úteis, semanal, quinzenal, mensal), horário, duração, quem conduz, participantes e pauta fixa. Modelos prontos por perspectiva. As duas próximas reuniões entram sozinhas na agenda de quem participa (atividade tipo reunião).
 - **Reunião**: pauta automática do escopo — semáforo e metas fora da faixa, intervenções abertas, ações de plano atrasadas, impedimentos abertos e decisões das reuniões anteriores a acompanhar; presença, anotações por item de pauta e ata, salvando enquanto se escreve. **Encerrar a ata** fotografa a pauta, trava a edição, conclui o compromisso na agenda e avisa os participantes. Cancelar exige motivo.

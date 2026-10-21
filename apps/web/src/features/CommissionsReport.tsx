@@ -5,6 +5,7 @@ import { SALE_TYPE_LABELS, type SaleType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDate } from '../lib/format';
 import { Avatar, Chip, EmptyState, ErrorState, LoadingRows } from '../components/ui/primitives';
+import { FitText } from '../components/ui/FitText';
 
 type Data = {
   scope: 'proprio' | 'equipe' | 'total';
@@ -31,7 +32,7 @@ export function CommissionsReport({ from, to }: { from: string; to: string }) {
         {tiles.map((t) => (
           <div key={t.label} className="card flex items-center gap-4 p-4">
             <span className={`flex h-12 w-12 items-center justify-center rounded-full ${t.tone}`}>{t.icon}</span>
-            <span><span className="num block text-xl font-extrabold text-ink">{t.value}</span><span className="text-sm text-muted">{t.label}</span></span>
+            <span className="min-w-0 flex-1"><FitText as="span" className="num text-xl font-extrabold text-ink">{t.value}</FitText><span className="text-sm text-muted">{t.label}</span></span>
           </div>
         ))}
       </section>

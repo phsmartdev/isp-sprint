@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { ErrorState, LoadingRows, Select } from '../components/ui/primitives';
 import { MoneyRows } from './contracts/shared';
 import { useArea } from './DealFields';
+import { FitText } from '../components/ui/FitText';
 
 type G = { key: string; label: string; n: number; monthlyCents: number };
 type D = {
@@ -24,7 +25,7 @@ type D = {
 };
 
 function Tile({ label, value, sub, tone = 'text-ink' }: { label: string; value: string; sub?: string; tone?: string }) {
-  return <div className="card p-4"><p className="text-sm text-muted">{label}</p><p className={`num mt-1 text-xl font-extrabold ${tone}`}>{value}</p>{sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}</div>;
+  return <div className="card p-4"><p className="text-sm text-muted">{label}</p><FitText className={`num mt-1 text-xl font-extrabold ${tone}`}>{value}</FitText>{sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}</div>;
 }
 function Breakdown({ title, items }: { title: string; items: G[] }) {
   const total = items.reduce((a, x) => a + x.monthlyCents, 0);

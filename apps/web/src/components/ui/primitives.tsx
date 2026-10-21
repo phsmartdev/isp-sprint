@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, CircleHelp, Info, Loader2 } from 'lucide-react';
 import { fmtBRL, fmtInt, fmtPct } from '../../lib/format';
 import type { Kpi } from '../../lib/types';
+import { FitText } from './FitText';
 
 // ------------------------------------------------------------------ Button
 type Variant = 'primary' | 'outline' | 'secondary' | 'ghost' | 'danger';
@@ -167,7 +168,7 @@ export function KpiCard({ k, icon, tone, compare = 'vs. mês anterior', layout =
     <div className="card group relative flex items-center gap-3.5 p-4">
       <span className={clsx('flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full', kpiTone[tone])}>{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="num whitespace-nowrap text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</p>
+        <FitText className="num whitespace-nowrap text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</FitText>
         <p className="text-sm leading-snug text-muted">{k.label}</p>
         {(k.delta !== null || (k.deltaAbs ?? null) !== null) ? (
           <p className={clsx('mt-0.5 flex flex-wrap items-center gap-x-1', layout === 'stack' && 'mt-1')}><Delta k={k} compact /><span className="text-2xs text-faint">{compare}</span></p>

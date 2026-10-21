@@ -11,6 +11,7 @@ import { api } from '../../lib/api';
 import { Button, FormField, Input, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from './shared';
+import { FitText } from '../../components/ui/FitText';
 
 type Cell = string | number | boolean | Date | null;
 type Sheet = { name: string; rows: Cell[][] };
@@ -223,7 +224,7 @@ export function ImportWizard({ arpId, open, onClose, onDone, status }: { arpId: 
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {[['Itens novos', r.created.length], ['Completados', r.completed.length], ['Corrigidos', r.corrected.length], ['Distribuições por órgão', r.allocations], ['Sem mudança', r.unchanged], ['Órgãos novos', r.newAgencies.length], ['Bloqueados', r.blocked.length], ['Linhas com erro', errors.length]].map(([l, n]) => (
               <li key={l as string} className={clsx('rounded-md border px-3 py-2', (l === 'Bloqueados' || l === 'Linhas com erro') && Number(n) > 0 ? 'border-danger/40 bg-danger-soft' : 'border-line')}>
-                <p className="num text-xl font-bold text-ink">{n}</p><p className="text-xs text-muted">{l}</p>
+                <FitText className="num text-xl font-bold text-ink">{n}</FitText><p className="text-xs text-muted">{l}</p>
               </li>
             ))}
           </ul>

@@ -11,6 +11,7 @@ import { Button, Chip, EmptyState, Section, Tabs, type Tone } from '../../compon
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 import type { Analysis, OpinionItem, TimelineItem, ValueKind } from './types';
+import { FitText } from '../../components/ui/FitText';
 
 export const pct = (bp: number | null | undefined) => (bp === null || bp === undefined ? '—' : `${(bp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
 const brl = (c: number | null | undefined) => (c === null || c === undefined ? '—' : fmtBRL(c));
@@ -31,7 +32,7 @@ export function Fact({ label, value, kind, source, hint, strong }: { label: stri
     <div className="min-w-0">
       <dt className="text-xs text-muted">{label}</dt>
       <dd className={clsx('num mt-0.5 flex flex-wrap items-center gap-2 text-ink', strong ? 'text-xl font-extrabold' : 'text-md font-bold')}>
-        <span className={clsx('min-w-0 break-words', kind === 'indisponivel' && 'text-faint')}>{kind === 'indisponivel' ? '—' : value}</span>
+        {strong ? <span className="min-w-0 flex-1"><FitText as="span" className={clsx(kind === 'indisponivel' && 'text-faint')}>{kind === 'indisponivel' ? '—' : value}</FitText></span> : <span className={clsx('min-w-0 break-words', kind === 'indisponivel' && 'text-faint')}>{kind === 'indisponivel' ? '—' : value}</span>}
         {kind && <KindTag kind={kind} source={source} />}
       </dd>
       {hint && <p className="mt-0.5 text-2xs text-muted">{hint}</p>}

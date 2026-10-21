@@ -81,6 +81,7 @@ test('Apuração oficial: fechamento, validação e pedido de revisão', async (
 });
 
 test('Marketing → ABM e Produto no menu agrupado', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, 'carlos@yepnet.test');
   const nav = page.getByRole('navigation', { name: 'Navegação principal' });
@@ -88,28 +89,61 @@ test('Marketing → ABM e Produto no menu agrupado', async ({ page }) => {
   await expect(nav.getByRole('link', { name: 'Contas', exact: true })).toBeVisible();
   await nav.getByRole('button', { name: /^Marketing/ }).click();
   await nav.getByRole('link', { name: 'ABM', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'ABM', level: 1 })).toBeVisible();
-  await page.getByRole('button', { name: 'Adicionar conta-alvo' }).first().click();
-  const d = page.getByRole('dialog', { name: 'Adicionar conta-alvo' });
-  await d.getByLabel(/^Conta/).fill('Mendes');
-  const pickBtn = d.getByRole('listitem').first().getByRole('button');
-  const picked = ((await pickBtn.textContent()) ?? '').replace(/·.*/, '').trim();
-  await pickBtn.click();
-  await d.getByLabel('Tier').selectOption('1_1');
-  await d.getByLabel(/Por que é alvo/).fill('Conta com potencial para link dedicado (E2E)');
-  await d.getByRole('button', { name: 'Adicionar', exact: true }).click();
-  // se a conta já era alvo (execução anterior), a API recusa a duplicata; a linha precisa existir de qualquer forma
-  await expect(page.getByText(/Conta-alvo adicionada|já está na lista de ABM/).first()).toBeVisible();
-  if (await d.isVisible()) await d.getByRole('button', { name: 'Cancelar' }).click();
-  await page.getByLabel('Buscar conta').fill(picked);
-  await page.getByRole('button', { name: picked, exact: true }).click();
-  const dr = page.getByRole('dialog', { name: 'Conta-alvo' });
-  await dr.getByLabel('Situação').selectOption('engajando');
-  await dr.getByRole('button', { name: 'Salvar alterações' }).click();
-  await expect(page.getByText('Conta-alvo atualizada')).toBeVisible();
-  await expect(dr.getByText(/mudou a situação para Engajando|atualizou/).first()).toBeVisible();
-  await shot(page, 'abm');
+  await expect(page.getByRole('heading', { name: 'ABM — Contas Estratégicas', level: 1 })).toBeVisible();
 
+  // nova conta para prospectar: cadastro único, sem exigir o que ainda não se sabe
+  const stamp = Date.now().toString(36);
+  const name = `Hospital Regional Fictício ${stamp}`;
+  await page.getByRole('button', { name: 'Nova conta' }).first().click();
+  let d = page.getByRole('dialog', { name: 'Nova conta para prospectar' });
+  await d.getByLabel(/Nome da organização/).fill(name);
+  await d.getByLabel('Natureza').selectOption('publica');
+  await d.getByLabel('Segmento').selectOption('governamental');
+  await d.getByLabel('Cidade').fill('Aracaju');
+  await d.getByLabel('Prioridade').selectOption('critica');
+  await d.getByLabel(/Motivo da seleção/).fill('Edital de conectividade previsto para o próximo semestre');
+  await d.getByRole('button', { name: 'Cadastrar e incluir no ABM' }).click();
+  await expect(page.getByText('Conta cadastrada e incluída no ABM como candidata')).toBeVisible();
+  const dr = page.getByRole('dialog', { name: 'Conta ABM' });
+  await expect(dr.getByRole('heading', { name })).toBeVisible();
+  await expect(dr.getByText('Candidata', { exact: true }).first()).toBeVisible();
+  await expect(dr.getByText('Conta identificada')).toBeVisible();
+  await dr.getByLabel('Status ABM').selectOption('selecionada');
+  await dr.getByRole('button', { name: 'Salvar alterações' }).click();
+  await expect(page.getByText('Conta atualizada')).toBeVisible();
+  await expect(dr.getByText(/mudou o status para Selecionada/)).toBeVisible();
+  await shot(page, 'abm');
+  await page.keyboard.press('Escape');
+
+  // nome parecido: o sistema mostra a duplicidade e pede confirmação
+  await page.getByRole('button', { name: 'Nova conta' }).first().click();
+  d = page.getByRole('dialog', { name: 'Nova conta para prospectar' });
+  await d.getByLabel(/Nome da organização/).fill(`Hosp. Regional Ficticio ${stamp}`);
+  const dup = d.getByRole('region', { name: 'Possíveis duplicidades' });
+  await expect(dup.getByText(name)).toBeVisible();
+  await d.getByLabel(/Motivo da seleção/).fill('Unidade privada vizinha, outra mantenedora');
+  await expect(d.getByRole('button', { name: 'Cadastrar e incluir no ABM' })).toBeDisabled();
+  await dup.getByLabel('É outra organização').first().check();
+  await d.getByLabel(/Por que não é a mesma organização/).fill('Mantenedora diferente, CNPJ próprio');
+  await d.getByRole('button', { name: 'Cadastrar e incluir no ABM' }).click();
+  await expect(page.getByText('Conta cadastrada e incluída no ABM como candidata')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // conta existente: "Adicionar ao ABM" na própria ficha da conta (sem novo cadastro)
+  await page.goto('/customers');
+  await page.locator('tbody tr').first().click();
+  await expect(page).toHaveURL(/\/customers\/.+/);
+  const add = page.getByRole('button', { name: 'Adicionar ao ABM' });
+  await expect(add.or(page.getByRole('link', { name: /^No ABM:/ }))).toBeVisible();
+  if (await add.isVisible()) {
+    await add.click();
+    const m = page.getByRole('dialog', { name: 'Adicionar ao ABM' });
+    await m.getByLabel(/Motivo da seleção/).fill('Cliente com potencial de expansão para filiais');
+    await m.getByRole('button', { name: 'Adicionar' }).click();
+    await expect(page.getByText('Conta adicionada ao ABM')).toBeVisible();
+  }
+  await expect(page.getByRole('link', { name: /^No ABM:/ })).toBeVisible();
+  await page.goto('/abm');
   await page.keyboard.press('Escape');
   await nav.getByRole('link', { name: 'Produto', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Produto', level: 1 })).toBeVisible();

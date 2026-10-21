@@ -11,6 +11,7 @@ import { useUrlState } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs } from '../../components/ui/primitives';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { HealthChip, LinkChips, NewProjectDialog, ProgressBar, STATUS_TONE, type ProjectRow } from '../../features/projects/shared';
+import { FitText } from '../../components/ui/FitText';
 
 type View = 'ativos' | 'concluido' | 'todos';
 
@@ -73,5 +74,5 @@ export function ProjectsPage() {
 }
 
 const Kpi = ({ label, value, hint, danger }: { label: string; value: number; hint?: string; danger?: boolean }) => (
-  <li className="card p-4"><p className="text-sm text-muted">{label}</p><p className={clsx('num mt-1 text-xl font-bold', danger ? 'text-danger' : 'text-ink')}>{value}</p>{hint && <p className="text-xs text-muted">{hint}</p>}</li>
+  <li className="card p-4"><p className="text-sm text-muted">{label}</p><FitText className={clsx('num mt-1 text-xl font-bold', danger ? 'text-danger' : 'text-ink')}>{value}</FitText>{hint && <p className="text-xs text-muted">{hint}</p>}</li>
 );

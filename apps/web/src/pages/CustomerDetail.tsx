@@ -11,6 +11,7 @@ import { CustomFieldsEditor, type CustomValues } from '../features/DealFields';
 import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
 import { Account360 } from '../features/cs/Account360';
+import { AddToAbmButton } from '../features/abm/shared';
 import { Avatar, Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
@@ -108,7 +109,10 @@ export function CustomerDetailPage() {
             </p>
           </div>
         </div>
-        {can('oportunidades') && <Button variant="primary" size="lg" onClick={() => nav('/opportunities/new')}>+ Nova oportunidade</Button>}
+        <div className="flex flex-wrap items-center gap-3">
+          <AddToAbmButton contactId={id} contactName={c.name} />
+          {can('oportunidades') && <Button variant="primary" size="lg" onClick={() => nav('/opportunities/new')}>+ Nova oportunidade</Button>}
+        </div>
       </div>
       {c.freshness?.stale && (
         <div className="mb-4">

@@ -284,6 +284,8 @@ export const contacts = pgTable(
     ownerId: uuid('owner_id').references(() => users.id),
     segment: text('segment').notNull().default('residencial'),
     city: text('city'),
+    /** natureza da organização (pública/privada); preenchida aos poucos, sem obrigar */
+    nature: text('nature'),
     sourceSystem: text('source_system').notNull().default('crm'),
     externalId: text('external_id'),
     /** Valores dos campos personalizados de cliente (definidos em customer_fields). */
@@ -295,6 +297,7 @@ export const contacts = pgTable(
   },
   (t) => ({
     segmentCk: check('contacts_segment_ck', inList('segment', ['residencial', 'empresarial', 'governamental', 'institucional'])),
+    natureCk: check('contacts_nature_ck', sql`nature is null or nature in ('publica', 'privada')`),
     ownerIdx: index('contacts_tenant_owner_idx').on(t.tenantId, t.ownerId),
     tenantIdx: index('contacts_tenant_name_idx').on(t.tenantId, t.name),
     extUq: uniqueIndex('contacts_ext_uq').on(t.tenantId, t.sourceSystem, t.externalId),
@@ -2664,12 +2667,18 @@ export const abmAccounts = pgTable(
     tenantId: tenantId(),
     contactId: uuid('contact_id').notNull().references(() => contacts.id),
     tier: text('tier').notNull().default('1_muitos'),
-    status: text('status').notNull().default('identificada'),
+    status: text('status').notNull().default('candidata'),
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     priority: text('priority').notNull().default('media'),
     reason: text('reason').notNull(),
     nextStep: text('next_step'),
     nextStepOn: date('next_step_on', { mode: 'string' }),
+    /** de onde veio a conta (indicação, edital, evento…) e o objetivo principal do programa para ela */
+    origin: text('origin'),
+    objective: text('objective'),
+    notes: text('notes'),
+    /** motivo da última pausa/encerramento */
+    statusReason: text('status_reason'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -2678,8 +2687,8 @@ export const abmAccounts = pgTable(
   (t) => ({
     uq: uniqueIndex('abm_accounts_contact_uq').on(t.tenantId, t.contactId),
     tierCk: check('abm_accounts_tier_ck', inList('tier', ['1_1', '1_poucos', '1_muitos'])),
-    statusCk: check('abm_accounts_status_ck', inList('status', ['identificada', 'engajando', 'oportunidade', 'cliente', 'pausada'])),
-    priorityCk: check('abm_accounts_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
+    statusCk: check('abm_accounts_status_ck', inList('status', ['candidata', 'selecionada', 'em_planejamento', 'ativa', 'em_acompanhamento', 'pausada', 'encerrada'])),
+    priorityCk: check('abm_accounts_priority_ck', inList('priority', ['critica', 'alta', 'media', 'baixa'])),
   }),
 );
 

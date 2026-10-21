@@ -13,6 +13,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { PageHeader } from '../components/layout/PageHeader';
 import { Breadcrumb, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs, Textarea } from '../components/ui/primitives';
 import { Drawer, useToast } from '../components/ui/overlay';
+import { FitText } from '../components/ui/FitText';
 
 type Metrics = { leads: number; leadsConverted: number; opportunities: number; open: number; won: number; lost: number; mrrCents: number; ltvCents: number; marginCents: number; commissionCents: number; spentCents: number };
 type Result = { investmentCents: number; basis: 'gastos' | 'orcamento' | null; roi: number | null; cplCents: number | null; cacCents: number | null; paybackMonths: number | null; winRate: number | null; budgetUsed: number | null };
@@ -163,7 +164,7 @@ export function CampaignsPage() {
 // =================================================================== detalhe
 
 function Metric({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  return <div className="card min-w-0 p-4"><p className="text-sm text-muted">{label}</p><p className="num break-words text-lg font-extrabold text-ink sm:text-xl">{value}</p>{hint && <p className="text-xs text-muted">{hint}</p>}</div>;
+  return <div className="card min-w-0 p-4"><p className="text-sm text-muted">{label}</p><FitText className="num break-words text-lg font-extrabold text-ink sm:text-xl">{value}</FitText>{hint && <p className="text-xs text-muted">{hint}</p>}</div>;
 }
 
 export function CampaignDetailPage() {

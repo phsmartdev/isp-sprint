@@ -33,7 +33,7 @@ describe('rituais', () => {
     const ms = l.meetings.filter((m: { ritualId: string }) => m.ritualId === ritualId);
     expect(ms).toHaveLength(2);
     // reunião aparece na agenda (atividade tipo reunião) de quem participa
-    const [{ n }] = (await ctx.db.execute(sql`select count(*)::int as n from activities a join ritual_meetings m on m.activity_id = a.id where m.ritual_id = ${ritualId}::uuid and a.type = 'reuniao' and ${uid('lucas')}::uuid = any(a.participants)`)).rows as { n: number }[];
+    const n = ((await ctx.db.execute(sql`select count(*)::int as n from activities a join ritual_meetings m on m.activity_id = a.id where m.ritual_id = ${ritualId}::uuid and a.type = 'reuniao' and ${uid('lucas')}::uuid = any(a.participants)`)).rows[0] as { n: number }).n;
     expect(n).toBe(2);
     // listar de novo não duplica
     ok(await carlos.get('/rituals'));
