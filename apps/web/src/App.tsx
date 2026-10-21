@@ -8,6 +8,7 @@ import { RitualsPage } from './pages/results/Rituals';
 import { MeetingPage } from './pages/results/Meeting';
 import { DecisionsPage } from './pages/results/Decisions';
 import { AdminResultsSettings } from './pages/admin/ResultsSettings';
+import { AdminAbmSettings } from './pages/admin/AbmSettings';
 import { GoalsPage } from './pages/performance/Goals';
 import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
@@ -131,6 +132,7 @@ export function App() {
           <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
           <Route path="resultados" element={<AdminResultsSettings />} />
+          <Route path="abm" element={<AdminAbmSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

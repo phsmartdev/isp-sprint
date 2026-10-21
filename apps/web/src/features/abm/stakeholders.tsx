@@ -7,6 +7,7 @@ import {
   INFLUENCE_CONTEXT_LABELS, INTEREST_LABELS, PARTICIPATION_LABELS, QUADRANT_LABELS, RELATIONSHIP_LABELS, STAKEHOLDER_ACCESS_LABELS, STAKEHOLDER_ROLE_LABELS, STANCE_LABELS, ABM_PRIORITY_LABELS,
   type InfluenceContext, type InfluenceLevel, type Interest, type Participation, type Quadrant, type RelationshipStrength, type StakeholderAccess, type StakeholderRole, type Stance, type AbmPriority,
 } from '@isp/domain';
+import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useDebounced, useLookups } from '../../lib/hooks';
@@ -410,6 +411,105 @@ function RelationshipNetwork({ data, onOpen }: { data: AccountData; onOpen: (id:
           </g>
         ); })}
       </svg></div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- visão geral (aba Stakeholders do ABM) e aprovações
+/** Abre a ficha de um stakeholder fora da Conta 360 (carrega departamentos e colegas da conta dele). */
+function StakeholderDrawerFor({ id, contactId, onClose }: { id: string | null; contactId: string | null; onClose: () => void }) {
+  const q = useQuery({ queryKey: ['stakeholders', contactId], enabled: !!contactId, queryFn: () => api<AccountData>(`/accounts/${contactId}/stakeholders`) });
+  return <StakeholderDrawer id={q.data ? id : null} contactId={contactId ?? ''} units={q.data?.units ?? []} peers={q.data?.items ?? []} onClose={onClose} />;
+}
+
+type DirRow = StakeholderRow & { abmId: string | null };
+export function StakeholdersDirectory() {
+  const [f, setF] = useState({ q: '', role: '', influence: '', priority: '' });
+  const term = useDebounced(f.q, 300);
+  const [open, setOpen] = useState<{ id: string; contactId: string } | null>(null);
+  const params = new URLSearchParams(Object.entries({ ...f, q: term }).filter(([, v]) => v) as [string, string][]).toString();
+  const q = useQuery({ queryKey: ['stakeholders', 'all', params], queryFn: () => api<{ items: DirRow[]; policy: { labels: Record<InfluenceLevel, string>; view: boolean }; counts: { total: number; decisores: number; naoAvaliados: number | null; criticos: number } }>(`/abm/stakeholders${params ? `?${params}` : ''}`) });
+  const d = q.data;
+  return (
+    <div className="space-y-4">
+      <PendingInfluenceRequests />
+      {d && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[['Stakeholders ativos', d.counts.total], ['Decisores', d.counts.decisores], ['Prioridade crítica', d.counts.criticos], ['Sem influência avaliada', d.counts.naoAvaliados ?? '—']].map(([l, v]) => (
+            <div key={l} className="card p-4"><p className="text-xs text-muted">{l}</p><p className="num text-2xl font-bold text-ink">{v}</p></div>
+          ))}
+        </div>
+      )}
+      <section className="card overflow-hidden" aria-label="Stakeholders das contas ABM">
+        <div className="flex flex-wrap items-end gap-3 p-4">
+          <FormField label="Buscar" htmlFor="sd-q"><Input id="sd-q" placeholder="Nome, cargo ou conta" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} /></FormField>
+          <FormField label="Papel" htmlFor="sd-r"><Select id="sd-r" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="">Todos</option>{(Object.keys(STAKEHOLDER_ROLE_LABELS) as StakeholderRole[]).map((r) => <option key={r} value={r}>{STAKEHOLDER_ROLE_LABELS[r]}</option>)}</Select></FormField>
+          {d?.policy.view !== false && <FormField label="Influência" htmlFor="sd-i"><Select id="sd-i" value={f.influence} onChange={(e) => setF({ ...f, influence: e.target.value })}><option value="">Todas</option>{(Object.keys(d?.policy.labels ?? {}) as InfluenceLevel[]).map((l) => <option key={l} value={l}>{d!.policy.labels[l]}</option>)}</Select></FormField>}
+          <FormField label="Prioridade" htmlFor="sd-p"><Select id="sd-p" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">Todas</option>{(Object.keys(ABM_PRIORITY_LABELS) as AbmPriority[]).map((k) => <option key={k} value={k}>{ABM_PRIORITY_LABELS[k]}</option>)}</Select></FormField>
+        </div>
+        {q.isLoading ? <LoadingRows rows={5} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d!.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum stakeholder encontrado" description="Mapeie as pessoas na Conta 360 de cada conta estratégica, na aba Stakeholders." /></div> : (
+          <div className="scroll-thin overflow-x-auto border-t border-line">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="bg-surface-2 text-xs text-muted"><tr>{['Pessoa', 'Conta', 'Papéis', 'Influência', 'Posicionamento', 'Responsável', 'Próxima interação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
+              <tbody>{d!.items.map((s) => (
+                <tr key={s.id} className={clsx('border-t border-line align-top', !s.active && 'opacity-60')}>
+                  <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setOpen({ id: s.id, contactId: s.contactId })}>{s.name}</button><span className="block text-xs text-muted">{[s.title, s.unitName].filter(Boolean).join(' · ') || '—'}</span></td>
+                  <td className="px-3 py-2.5">{s.abmId ? <Link to={`/abm/contas/${s.abmId}?t=stakeholders`} className="hover:underline">{s.account}</Link> : s.account}</td>
+                  <td className="px-3 py-2.5"><span className="flex flex-wrap gap-1">{s.roles.map((r) => <Chip key={r} tone={r === 'bloqueador' ? 'red' : r === 'decisor' ? 'blue' : 'neutral'}>{STAKEHOLDER_ROLE_LABELS[r]}</Chip>)}</span></td>
+                  <td className="px-3 py-2.5"><InfluenceChip l={s.influence} labels={d!.policy.labels} pending={s.influencePending} /></td>
+                  <td className="px-3 py-2.5"><Chip tone={STANCE_TONE[s.stance]}>{STANCE_LABELS[s.stance]}</Chip></td>
+                  <td className="px-3 py-2.5">{s.relationshipOwnerName ?? '—'}</td>
+                  <td className="num px-3 py-2.5">{s.nextInteractionOn ? fmtDate(s.nextInteractionOn) : '—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <StakeholderDrawerFor id={open?.id ?? null} contactId={open?.contactId ?? null} onClose={() => setOpen(null)} />
+    </div>
+  );
+}
+
+type InfReq = { id: string; name: string; account: string; contactId: string; abmId: string | null; stakeholderId: string; contextType: InfluenceContext; contextLabel: string | null; fromLevel: InfluenceLevel; toLevel: InfluenceLevel; justification: string; evidence: string | null; requestedByName: string; createdAt: string; canDecide: boolean };
+/** Pedidos de mudança de influência aguardando decisão (quando a empresa exige aprovação). */
+function PendingInfluenceRequests() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['influence-requests'], queryFn: () => api<{ items: InfReq[] }>('/influence-requests') });
+  const settings = useQuery({ queryKey: ['abm-settings'], queryFn: () => api<{ influence: { labels: Record<InfluenceLevel, string> } }>('/abm/settings') });
+  const [refusing, setRefusing] = useState<InfReq | null>(null);
+  const [note, setNote] = useState('');
+  const decide = useMutation({
+    mutationFn: (v: { id: string; approve: boolean; note: string }) => api(`/influence-requests/${v.id}/decide`, { method: 'POST', body: { approve: v.approve, note: v.note } }),
+    onSuccess: (_r, v) => { setRefusing(null); setNote(''); void qc.invalidateQueries({ queryKey: ['influence-requests'] }); void qc.invalidateQueries({ queryKey: ['stakeholders'] }); toast({ tone: 'success', message: v.approve ? 'Pedido aprovado: influência atualizada e auditada' : 'Pedido recusado' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const items = q.data?.items ?? [];
+  if (!items.length) return null;
+  const L = settings.data?.influence.labels;
+  const lbl = (l: InfluenceLevel) => L?.[l] ?? l;
+  return (
+    <section className="card overflow-hidden border-warning/50" aria-label="Pedidos de influência pendentes">
+      <div className="p-4"><h3 className="font-bold text-ink">Pedidos de mudança de influência ({items.length})</h3><p className="text-xs text-muted">Quem pediu não pode aprovar o próprio pedido. A aprovação registra quem aprovou na auditoria.</p></div>
+      <ul className="divide-y divide-line border-t border-line">{items.map((r) => (
+        <li key={r.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
+          <div className="min-w-[220px] flex-1 text-sm">
+            <p><b className="text-ink">{r.name}</b> · {r.abmId ? <Link className="hover:underline" to={`/abm/contas/${r.abmId}?t=stakeholders`}>{r.account}</Link> : r.account}</p>
+            <p>{INFLUENCE_CONTEXT_LABELS[r.contextType]}{r.contextLabel && `: ${r.contextLabel}`} — {lbl(r.fromLevel)} → <b>{lbl(r.toLevel)}</b></p>
+            <p className="text-xs text-muted">{r.requestedByName} em {fmtDateTime(r.createdAt)}: “{r.justification}”{r.evidence && ` · evidência: ${r.evidence}`}</p>
+          </div>
+          {r.canDecide ? (
+            <div className="flex gap-2">
+              <Button size="sm" variant="primary" loading={decide.isPending && decide.variables?.id === r.id && decide.variables.approve} onClick={() => decide.mutate({ id: r.id, approve: true, note: '' })}>Aprovar</Button>
+              <Button size="sm" variant="secondary" onClick={() => setRefusing(r)}>Recusar</Button>
+            </div>
+          ) : <span className="text-xs text-muted">Aguardando a liderança</span>}
+        </li>
+      ))}</ul>
+      <Modal open={!!refusing} onClose={() => setRefusing(null)} title="Recusar pedido de influência" footer={<><Button variant="secondary" onClick={() => setRefusing(null)}>Cancelar</Button><Button variant="danger" disabled={note.trim().length < 5} loading={decide.isPending} onClick={() => refusing && decide.mutate({ id: refusing.id, approve: false, note })}>Recusar pedido</Button></>}>
+        <FormField label="Motivo da recusa" htmlFor="rq-n" required><Textarea id="rq-n" rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></FormField>
+      </Modal>
     </section>
   );
 }

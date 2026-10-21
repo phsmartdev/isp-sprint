@@ -246,11 +246,11 @@ export const stakeholderRoutes = [
     handler: async ({ app, auth, query: q }) => {
       const pol = await abmPolicy(app.db, auth.tenantId);
       if (!canViewInfluence(auth, pol.influence)) return { items: [] };
-      const rows = await app.db.select({ r: s.influenceChangeRequests, name: s.people.name, account: s.contacts.name, contactId: s.contacts.id, by: s.users.name })
+      const rows = await app.db.select({ r: s.influenceChangeRequests, name: s.people.name, account: s.contacts.name, contactId: s.contacts.id, abmId: s.abmAccounts.id, by: s.users.name })
         .from(s.influenceChangeRequests).innerJoin(s.accountStakeholders, eq(s.accountStakeholders.id, s.influenceChangeRequests.stakeholderId)).innerJoin(s.people, eq(s.people.id, s.accountStakeholders.personId))
-        .innerJoin(s.contacts, eq(s.contacts.id, s.accountStakeholders.contactId)).innerJoin(s.users, eq(s.users.id, s.influenceChangeRequests.requestedBy))
+        .innerJoin(s.contacts, eq(s.contacts.id, s.accountStakeholders.contactId)).leftJoin(s.abmAccounts, eq(s.abmAccounts.contactId, s.contacts.id)).innerJoin(s.users, eq(s.users.id, s.influenceChangeRequests.requestedBy))
         .where(and(eq(s.influenceChangeRequests.tenantId, auth.tenantId), eq(s.influenceChangeRequests.status, q.status), contactVisible(auth))).orderBy(desc(s.influenceChangeRequests.createdAt)).limit(200);
-      return { items: rows.map((x) => ({ ...x.r, name: x.name, account: x.account, contactId: x.contactId, requestedByName: x.by, canDecide: canEditInfluence(auth, pol.influence) && atLeast(level(auth, 'clientes'), 'equipe') && x.r.requestedBy !== auth.userId })) };
+      return { items: rows.map((x) => ({ ...x.r, name: x.name, account: x.account, contactId: x.contactId, abmId: x.abmId, requestedByName: x.by, canDecide: canEditInfluence(auth, pol.influence) && atLeast(level(auth, 'clientes'), 'equipe') && x.r.requestedBy !== auth.userId })) };
     },
   }),
   defineRoute({
@@ -310,8 +310,9 @@ export const stakeholderRoutes = [
     query: z.object({ role: z.enum(STAKEHOLDER_ROLES).optional(), influence: z.enum(INFLUENCE_LEVELS).optional(), priority: z.enum(STAKEHOLDER_PRIORITIES).optional(), contactId: z.string().uuid().optional(), q: z.string().max(100).optional() }),
     handler: async ({ app, auth, query: q }) => {
       const pol = await abmPolicy(app.db, auth.tenantId);
-      const accounts = await app.db.select({ id: s.contacts.id }).from(s.abmAccounts).innerJoin(s.contacts, eq(s.contacts.id, s.abmAccounts.contactId)).where(and(eq(s.abmAccounts.tenantId, auth.tenantId), contactVisible(auth), q.contactId ? eq(s.contacts.id, q.contactId) : sql`true`));
-      let items = await stakeholderRows(app.db, auth, accounts.map((a) => a.id), pol.influence);
+      const accounts = await app.db.select({ id: s.contacts.id, abmId: s.abmAccounts.id }).from(s.abmAccounts).innerJoin(s.contacts, eq(s.contacts.id, s.abmAccounts.contactId)).where(and(eq(s.abmAccounts.tenantId, auth.tenantId), contactVisible(auth), q.contactId ? eq(s.contacts.id, q.contactId) : sql`true`));
+      const abmOf = new Map(accounts.map((a) => [a.id, a.abmId]));
+      let items = (await stakeholderRows(app.db, auth, accounts.map((a) => a.id), pol.influence)).map((i) => ({ ...i, abmId: abmOf.get(i.contactId) ?? null }));
       if (q.role) items = items.filter((i) => i.roles.includes(q.role!));
       if (q.priority) items = items.filter((i) => i.priority === q.priority);
       if (q.influence) items = items.filter((i) => i.influence === q.influence);

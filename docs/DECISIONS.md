@@ -254,3 +254,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 
 ## ADR-055 — Valores de indicador se ajustam ao cartão (21/10/2026)
 - **Decisão (pedido do usuário):** número de indicador nunca quebra linha; reduz a fonte até caber (componente `FitText`, com `width:0; min-width:100%` para não alargar a grade). Ajuste por medição real, não por quantidade de caracteres.
+
+## ADR-056 — Poder de influência é avaliação humana, nunca calculada (21/10/2026)
+- **Contexto:** o mapa de influência do ABM orienta onde investir relacionamento. Se uma automação, importação ou pesquisa mudasse a influência, a equipe perderia o controle sobre uma avaliação política e subjetiva.
+- **Decisão:** a influência só é gravada por uma função (`applyInfluence`) chamada a partir de uma avaliação manual com justificativa; o domínio recusa qualquer origem que não seja "manual"; a edição comum do stakeholder rejeita o campo. Avaliação por contexto (conta, departamento, processo). Histórico append-only. Quem vê/avalia e se exige aprovação são configuráveis e versionados; quem pede não aprova. O sistema pode recomendar ações, nunca alterar a avaliação.
+- **Consequência:** "Não avaliado" é um estado legítimo e fica fora da matriz; posicionamento e interesse são dimensões independentes da influência.
+
