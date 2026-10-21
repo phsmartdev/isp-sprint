@@ -52,6 +52,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/contracts', label: 'Contratos', admin: true },
   { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
+  { to: '/settings/desempenho', label: 'Gestão de desempenho', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },

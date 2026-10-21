@@ -1,3 +1,4 @@
+import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { Module } from '@isp/domain';
@@ -106,6 +107,7 @@ export function App() {
           <Route path="contracts" element={<AdminContractSettings />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
           <Route path="customer-success" element={<AdminCsSettings />} />
+          <Route path="desempenho" element={<AdminPerformanceSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

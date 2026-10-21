@@ -91,6 +91,10 @@ export const dataAdminRoutes = [
         if (body.scopes.includes('comercial')) {
           const opps = tx.select({ id: s.opportunities.id }).from(s.opportunities).where(eq(s.opportunities.tenantId, t));
           const acts = tx.select({ id: s.activities.id }).from(s.activities).where(eq(s.activities.tenantId, t));
+          // eventos de negócio derivados do que está sendo apagado (o projetor recria o que restar)
+          for (const tbl of [s.businessEventReviews, s.businessEventCredits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          await tx.delete(s.businessEvents).where(eq(s.businessEvents.tenantId, t));
+          await tx.delete(s.businessEventSync).where(eq(s.businessEventSync.tenantId, t));
           for (const tbl of [s.activityDependencies, s.activityComments, s.activityTimeEntries, s.workFiles]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
           await tx.delete(s.activityReads).where(inArray(s.activityReads.activityId, acts));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));

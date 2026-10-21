@@ -85,6 +85,19 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Evolução integrada — Etapa 5: Motor de eventos de negócio ✅ (2026-10-21)
+- Novo módulo **Desempenho** (`desempenho`) na matriz: Próprio vê os eventos em que tem crédito; Equipe, os do time que lidera; Total, todos.
+- 17 eventos derivados das tabelas de origem por um **projetor idempotente** (chave tipo + registro + instante): lead qualificado, oportunidade criada, proposta enviada (1 por oportunidade), negociação ganha/perdida, aprovação concluída, venda validada, contrato assinado, contrato renovado, processo de contrato concluído, movimentação e adesão de ata, tarefa concluída, entrega aprovada, marco atingido, projeto concluído e acompanhamento de cliente com resultado.
+- Cada evento: ID, tipo, módulo, registro de origem, responsável, participantes, time, ocorrência, registro, resultado, valor, validação, contexto (no prazo, criada pela própria pessoa, minutos até concluir…) e histórico de validação.
+- **Origem desfeita invalida o evento** automaticamente (reabrir oportunidade, tarefa, marco ou projeto), com motivo; acontecendo de novo, nasce outro evento.
+- **Atribuição versionada** por tipo: parte do responsável (o restante dividido entre participantes; créditos de resultado somam sempre 100% — sem dupla contagem), reconhecimento de participação e crédito de gestão para líderes; tipos que exigem validação nascem "Aguardando validação".
+- Evento é imutável no banco (só a validação muda); créditos, histórico e configuração são append-only.
+- Validação manual por liderança com motivo; ninguém valida o próprio resultado.
+- Carga histórica = mesmo projetor (botão "Reprocessar histórico"); roda sozinho antes das telas de desempenho e na rotina diária.
+- Fatos sem fonte confiável (cliente reativado, cadastro validado, pendência resolvida) aparecem como **indisponíveis**, nada estimado.
+- Telas: Configurações → **Gestão de desempenho** (catálogo, regras, versões) e **Explorar eventos** (filtros, créditos, origem, validação).
+- Migração 0032. Testes: domínio 80, API 150, E2E 40.
+
 ## Evolução integrada — Etapa 4: Gestão de tarefas ✅ (2026-10-21)
 - **Tarefa independente do CRM**: avulsa ou vinculada a cliente, oportunidade, contrato, ata ou projeto (mesmo registro, sem duplicar). Menu "Tarefas".
 - Campos: situação (A fazer, Em andamento, Aguardando terceiros com "aguardando quem", Em aprovação, Concluída, Cancelada), responsável, criador, participantes, prioridade, início, prazo, estimativa, tempo registrado, categoria, etiquetas, checklist, subtarefas (1 nível), dependências, anexos, comentários e vínculos.

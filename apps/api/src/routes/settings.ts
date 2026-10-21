@@ -7,6 +7,7 @@ import { defineRoute, IdParams } from '../http/route';
 import { notFound, unauthorized, unprocessable, AppError } from '../http/errors';
 import * as s from '../db/schema';
 import { runCsDaily } from '../services/cs';
+import { syncBusinessEvents } from '../services/businessEvents';
 import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipelinesOf } from '../services/instructions';
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
 import { sendActivityDigests } from '../services/alerts';
@@ -278,7 +279,9 @@ export const settingsRoutes = [
       const tenants = await app.db.select({ id: s.tenants.id }).from(s.tenants);
       const cs: Record<string, unknown> = {};
       for (const t of tenants) cs[t.id] = await runCsDaily(app.db, app.config, t.id).catch((e) => ({ error: (e as Error).message }));
-      return { ...digests, ...idle, ...contracts, customerSuccess: cs };
+      const events: Record<string, unknown> = {};
+      for (const t of tenants) events[t.id] = await syncBusinessEvents(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
+      return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events };
     },
   }),
 ];

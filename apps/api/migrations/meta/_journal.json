@@ -225,6 +225,13 @@
       "when": 1792590331813,
       "tag": "0031_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792592601197,
+      "tag": "0032_business_events",
+      "breakpoints": true
     }
   ]
 }

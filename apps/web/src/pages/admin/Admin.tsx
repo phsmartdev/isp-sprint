@@ -37,6 +37,8 @@ const TABS = [
   { to: '/settings/fields', label: 'Campos personalizados' },
   { to: '/settings/contracts', label: 'Contratos' },
   { to: '/settings/approvals', label: 'Aprovações e alçadas' },
+  { to: '/settings/customer-success', label: 'Sucesso do Cliente' },
+  { to: '/settings/desempenho', label: 'Gestão de desempenho' },
   { to: '/settings/data', label: 'Base de dados' },
   { to: '/settings/security', label: 'Segurança' },
   { to: '/settings/branding', label: 'Personalização' },

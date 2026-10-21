@@ -197,3 +197,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Avisos** reaproveitam o ícone de Menções (consulta única que une negociação e tarefas), sem criar um segundo sistema de notificação.
 - **Por quê:** o mesmo registro aparece em várias telas; regra espalhada vira divergência.
 
+## ADR-046 — Eventos de negócio por projeção, não por gancho em cada tela (21/10/2026)
+- **Decisão:** os eventos são derivados das tabelas de origem por um projetor idempotente (`INSERT … ON CONFLICT DO NOTHING` pela chave), executado antes das telas de desempenho (se a última execução tiver mais de 1 minuto), na rotina diária e sob demanda. A mesma rotina faz a carga histórica.
+- **Por quê:** um gancho em cada tela esquece caminhos (automação, importação, agenda, quadro) e duplica fatos; a projeção lê o estado gravado, que é a verdade. Reabrir a origem invalida o evento, em vez de apagar.
+- **Atribuição:** créditos fixados na criação com a versão da regra; "Resultado" soma 100% (o arredondamento fica com o responsável); "Participação" e "Gestão" reconhecem sem somar no individual.
+- **Imutabilidade:** gatilho permite mudar só a validação do evento; créditos, revisões e configuração são append-only.
+

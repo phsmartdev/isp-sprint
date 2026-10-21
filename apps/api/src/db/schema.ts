@@ -90,7 +90,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'inteligencia', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'inteligencia', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -2247,3 +2247,95 @@ export const projectEvents = pgTable(
   },
   (t) => ({ idx: index('project_events_idx').on(t.tenantId, t.projectId, t.occurredAt) }),
 );
+
+// --------------------------------------------------------------- desempenho: motor de eventos de negócio
+
+/** Fato de negócio derivado das tabelas de origem (idempotente pela chave). Imutável, exceto a validação. */
+export const businessEvents = pgTable(
+  'business_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    type: text('type').notNull(),
+    module: text('module').notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    ownerId: uuid('owner_id').references(() => users.id),
+    participants: uuid('participants').array().notNull().default(sql`'{}'::uuid[]`),
+    teamId: uuid('team_id'),
+    occurredAt: ts('occurred_at').notNull(),
+    recordedAt: ts('recorded_at').notNull().defaultNow(),
+    outcome: text('outcome'),
+    valueCents: bigint('value_cents', { mode: 'number' }),
+    quantity: integer('quantity'),
+    validation: text('validation').notNull().default('valido'),
+    validatedAt: ts('validated_at'),
+    validatedBy: uuid('validated_by'),
+    context: jsonb('context').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    idemKey: text('idem_key').notNull(),
+    ruleVersion: integer('rule_version').notNull().default(0),
+  },
+  (t) => ({
+    idemUq: uniqueIndex('business_events_idem_uq').on(t.tenantId, t.idemKey),
+    typeIdx: index('business_events_type_idx').on(t.tenantId, t.type, t.occurredAt),
+    ownerIdx: index('business_events_owner_idx').on(t.tenantId, t.ownerId, t.occurredAt),
+    sourceIdx: index('business_events_source_idx').on(t.tenantId, t.sourceType, t.sourceId),
+    validationCk: check('business_events_validation_ck', inList('validation', ['valido', 'pendente', 'invalidado'])),
+  }),
+);
+
+/** Créditos de reconhecimento por evento (fixados na criação, com a versão da regra). */
+export const businessEventCredits = pgTable(
+  'business_event_credits',
+  {
+    eventId: uuid('event_id').notNull().references(() => businessEvents.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    tenantId: tenantId(),
+    kind: text('kind').notNull(),
+    shareBp: integer('share_bp').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.eventId, t.userId, t.kind] }),
+    userIdx: index('business_event_credits_user_idx').on(t.tenantId, t.userId),
+    kindCk: check('business_event_credits_kind_ck', inList('kind', ['direto', 'participacao', 'gestao'])),
+  }),
+);
+
+/** Histórico de validação dos eventos (append-only). */
+export const businessEventReviews = pgTable(
+  'business_event_reviews',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    eventId: uuid('event_id').notNull().references(() => businessEvents.id),
+    fromValidation: text('from_validation').notNull(),
+    toValidation: text('to_validation').notNull(),
+    reason: text('reason').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    automatic: boolean('automatic').notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('business_event_reviews_idx').on(t.tenantId, t.eventId) }),
+);
+
+/** Configuração de desempenho versionada (append-only): atribuição, validação e, nas próximas etapas, pontos e níveis. */
+export const performanceSettings = pgTable(
+  'performance_settings',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    version: integer('version').notNull(),
+    config: jsonb('config').$type<import('@isp/domain').PerformanceConfig>().notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('performance_settings_uq').on(t.tenantId, t.version) }),
+);
+
+/** Última execução do projetor por empresa. */
+export const businessEventSync = pgTable('business_event_sync', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  lastRunAt: ts('last_run_at').notNull(),
+  stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+});
