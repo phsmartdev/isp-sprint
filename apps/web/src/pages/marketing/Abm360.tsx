@@ -18,6 +18,7 @@ import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { CommercialChip, PriorityChip, StatusChip } from '../../features/abm/shared';
 import { AccountDrawer } from './Abm';
 import { InfluenceMapPanel, StakeholdersPanel } from '../../features/abm/stakeholders';
+import { AccountPlaysPanel } from '../../features/abm/plays';
 
 type Objective = { id: string; kind: AbmObjectiveKind; title: string; ownerName: string; ownerId: string; dueOn: string | null; status: AbmObjectiveStatus; successCriteria: string | null; result: string | null; rowVersion: number };
 type Unit = { id: string; name: string; kind: OrgUnitKind; parentId: string | null; notes: string | null; active: boolean; depth: number; rowVersion: number };
@@ -38,7 +39,7 @@ const OBJ_TONE: Record<AbmObjectiveStatus, Tone> = { planejado: 'neutral', em_an
 const NATURE = { publica: 'Pública', privada: 'Privada' } as const;
 const TABS = [
   { key: 'resumo', label: 'Resumo estratégico' }, { key: 'dados', label: 'Dados da organização' }, { key: 'estrutura', label: 'Estrutura organizacional' },
-  { key: 'stakeholders', label: 'Stakeholders' }, { key: 'mapa', label: 'Mapa de influência' },
+  { key: 'stakeholders', label: 'Stakeholders' }, { key: 'mapa', label: 'Mapa de influência' }, { key: 'plays', label: 'Plays' },
   { key: 'comercial', label: 'Leads e oportunidades' }, { key: 'contratos', label: 'Contratos' }, { key: 'trabalho', label: 'Projetos e tarefas' }, { key: 'historico', label: 'Histórico' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
@@ -60,7 +61,7 @@ export function Abm360Page() {
       <header className="card mb-4 p-5" aria-label="Cabeçalho da conta">
         <div className="flex flex-wrap items-start gap-4">
           <span className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary sm:flex"><Building2 className="h-7 w-7" aria-hidden /></span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-[min(100%,18rem)] flex-1">
             <h1 className="break-words font-display text-xl font-bold text-ink sm:text-2xl">{d.organization.name}</h1>
             <p className="text-sm text-muted">{d.organization.nature ? NATURE[d.organization.nature] : 'Natureza não informada'} · {d.organization.segment}{d.organization.city && ` · ${d.organization.city}`}</p>
             <div className="mt-2 flex flex-wrap items-center gap-2"><StatusChip s={d.abm.status} /><CommercialChip s={d.commercial} /><PriorityChip p={d.abm.priority} />{d.classification?.classKey && <Chip tone="blue">Classificação: {d.classification.classKey}</Chip>}</div>
@@ -83,6 +84,7 @@ export function Abm360Page() {
       {tab === 'estrutura' && <Structure d={d} />}
       {tab === 'stakeholders' && <StakeholdersPanel contactId={d.abm.contactId} />}
       {tab === 'mapa' && <InfluenceMapPanel contactId={d.abm.contactId} />}
+      {tab === 'plays' && <AccountPlaysPanel contactId={d.abm.contactId} />}
       {tab === 'comercial' && (
         <div className="grid gap-4 xl:grid-cols-2">
           <section className="card p-4"><h2 className="mb-2 font-bold text-ink">Oportunidades</h2>{!d.opportunities.length ? <p className="text-sm text-muted">Nenhuma oportunidade com esta conta.</p> : <ul className="divide-y divide-line">{d.opportunities.map((o) => <li key={o.id} className="flex flex-wrap items-center gap-2 py-2 text-sm"><Link to={`/opportunities/${o.id}`} className="min-w-0 flex-1 truncate font-semibold text-primary hover:underline">OP-{o.code} · {o.title}</Link><span className="text-xs text-muted">{o.stage} · {o.ownerName}</span>{o.valueCents !== null && <span className="num text-xs">{fmtBRL(o.valueCents)}/mês</span>}</li>)}</ul>}<Button variant="secondary" size="sm" className="mt-2" onClick={() => nav('/opportunities/new')}>Nova oportunidade</Button></section>
@@ -227,7 +229,7 @@ function Structure({ d }: { d: D360 }) {
   );
 }
 
-const HIST_TEXT: Record<string, string> = { criada: 'incluiu a conta no ABM', situacao: 'mudou o status ABM', alterada: 'atualizou a estratégia', organizacao: 'atualizou os dados da organização', objetivo_criado: 'criou um objetivo', objetivo_situacao: 'mudou a situação de um objetivo', objetivo_alterado: 'alterou um objetivo', estrutura: 'alterou a estrutura organizacional', created: 'criou a oportunidade', stage_changed: 'moveu a oportunidade' };
+const HIST_TEXT: Record<string, string> = { criada: 'incluiu a conta no ABM', situacao: 'mudou o status ABM', alterada: 'atualizou a estratégia', organizacao: 'atualizou os dados da organização', objetivo_criado: 'criou um objetivo', objetivo_situacao: 'mudou a situação de um objetivo', objetivo_alterado: 'alterou um objetivo', estrutura: 'alterou a estrutura organizacional', play_iniciado: 'iniciou o play', play_concluido: 'encerrou o play', play_cancelado: 'cancelou o play', created: 'criou a oportunidade', stage_changed: 'moveu a oportunidade' };
 function History({ d }: { d: D360 }) {
   const [src, setSrc] = useState('');
   const items = d.history.filter((h) => !src || h.source === src);
@@ -236,7 +238,7 @@ function History({ d }: { d: D360 }) {
       <FormField label="Origem" htmlFor="hi-s" className="mb-3 w-52"><Select id="hi-s" value={src} onChange={(e) => setSrc(e.target.value)}><option value="">Tudo</option><option value="abm">Estratégia (ABM)</option><option value="atividade">Interações</option><option value="oportunidade">Oportunidades</option></Select></FormField>
       {!items.length ? <p className="text-sm text-muted">Nada registrado ainda.</p> : (
         <ol className="space-y-2">{items.map((h) => (
-          <li key={h.id} className="text-sm"><span className="num text-xs text-muted">{fmtDateTime(h.at)}</span> · <b>{h.actor ?? 'Sistema'}</b> {h.source === 'atividade' ? `concluiu: ${h.text}` : `${HIST_TEXT[h.type] ?? h.type}${h.text ? `: ${h.text}` : ''}${typeof h.payload.title === 'string' ? ` — ${h.payload.title}` : ''}${h.source === 'oportunidade' && h.payload.to ? ` (${String(h.payload.to)})` : ''}`}</li>
+          <li key={h.id} className="text-sm"><span className="num text-xs text-muted">{fmtDateTime(h.at)}</span> · <b>{h.actor ?? 'Sistema'}</b> {h.source === 'atividade' ? `concluiu: ${h.text}` : `${HIST_TEXT[h.type] ?? h.type}${h.text ? `: ${h.text}` : ''}${typeof h.payload.title === 'string' ? ` — ${h.payload.title}` : ''}${typeof h.payload.play === 'string' ? ` ${h.payload.play}${typeof h.payload.stakeholder === 'string' ? ` para ${h.payload.stakeholder}` : ''}` : ''}${h.source === 'oportunidade' && h.payload.to ? ` (${String(h.payload.to)})` : ''}`}</li>
         ))}</ol>
       )}
     </section>

@@ -260,3 +260,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** a influência só é gravada por uma função (`applyInfluence`) chamada a partir de uma avaliação manual com justificativa; o domínio recusa qualquer origem que não seja "manual"; a edição comum do stakeholder rejeita o campo. Avaliação por contexto (conta, departamento, processo). Histórico append-only. Quem vê/avalia e se exige aprovação são configuráveis e versionados; quem pede não aprova. O sistema pode recomendar ações, nunca alterar a avaliação.
 - **Consequência:** "Não avaliado" é um estado legítimo e fica fora da matriz; posicionamento e interesse são dimensões independentes da influência.
 
+## ADR-057 — Plays do ABM são roteiros que geram tarefas, sugeridos sem alterar avaliações (21/10/2026)
+- **Contexto:** plays precisam virar trabalho real e acompanhável, e as recomendações não podem mexer em avaliações humanas (ADR-056). Já existe "Plays/Campanhas" para campanhas de marketing em massa.
+- **Decisão:** plays do ABM ficam no ABM (por conta e por pessoa), separados das campanhas. Cada etapa vira uma tarefa do módulo de Tarefas (fonte única de situação, prazo e responsável). Definição versionada (append-only); execução guarda a versão. Sugestões são calculadas na hora a partir de critérios explícitos e mostram os motivos; leem influência/posicionamento só como entrada e nunca os gravam. Modelos copiados por empresa na primeira consulta (idempotente).
+- **Consequência:** o resultado de um play é declarado por quem encerra (atingiu ou não o critério); métricas de efetividade por play saem dessas execuções (Fase 7).
+

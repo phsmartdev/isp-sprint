@@ -21,6 +21,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { StakeholdersDirectory } from '../../features/abm/stakeholders';
+import { PlaysLibrary } from '../../features/abm/plays';
 import { AbmFields, CommercialChip, PriorityChip, StatusChip, abmFormBody, blankAbmForm } from '../../features/abm/shared';
 
 type Account = {
@@ -35,8 +36,8 @@ export function AbmPage() {
   return (
     <div>
       <PageHeader icon={<Crosshair />} title="ABM — Contas Estratégicas" subtitle="Prospecção e desenvolvimento de contas escolhidas, novas ou já cadastradas, sobre o mesmo cadastro do CRM." />
-      <Tabs label="ABM" value={(u.tab === 'stakeholders' ? 'stakeholders' : 'contas') as 'contas' | 'stakeholders'} onChange={(k) => setU({ tab: k })} tabs={[{ key: 'contas', label: 'Contas' }, { key: 'stakeholders', label: 'Stakeholders' }]} className="mb-4" />
-      {u.tab === 'stakeholders' ? <StakeholdersDirectory /> : <AccountsTab u={u} setU={setU} />}
+      <Tabs label="ABM" value={(['stakeholders', 'plays'].includes(u.tab) ? u.tab : 'contas') as 'contas' | 'stakeholders' | 'plays'} onChange={(k) => setU({ tab: k })} tabs={[{ key: 'contas', label: 'Contas' }, { key: 'stakeholders', label: 'Stakeholders' }, { key: 'plays', label: 'Plays' }]} className="mb-4" />
+      {u.tab === 'stakeholders' ? <StakeholdersDirectory /> : u.tab === 'plays' ? <PlaysLibrary /> : <AccountsTab u={u} setU={setU} />}
       <AccountDrawer id={u.id || null} onClose={() => setU({ id: '' }, { resetPage: false })} />
     </div>
   );

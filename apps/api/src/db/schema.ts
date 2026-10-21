@@ -3212,3 +3212,90 @@ export const abmSettings = pgTable(
   },
   (t) => ({ uq: uniqueIndex('abm_settings_uq').on(t.tenantId, t.version) }),
 );
+
+// ---------------------------------------------------------------- ABM — Fase 5: plays
+/** Play da empresa (cópia editável de um modelo ou criado do zero). A definição (etapas, público, critério) é versionada. */
+export const abmPlays = pgTable(
+  'abm_plays',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    /** modelo de origem (abertura_conta…), nulo quando criado do zero */
+    templateKey: text('template_key'),
+    name: text('name').notNull(),
+    category: text('category').notNull(),
+    objective: text('objective').notNull().default(''),
+    target: text('target').notNull(),
+    active: boolean('active').notNull().default(true),
+    currentVersion: integer('current_version').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('abm_plays_name_uq').on(t.tenantId, t.name),
+    tplUq: uniqueIndex('abm_plays_template_uq').on(t.tenantId, t.templateKey).where(sql`template_key is not null`),
+    catCk: check('abm_plays_category_ck', inList('category', ['abertura', 'mapeamento', 'aproximacao', 'conversao', 'defensores', 'expansao', 'renovacao', 'reativacao', 'institucional', 'outro'])),
+    targetCk: check('abm_plays_target_ck', inList('target', ['conta', 'stakeholder'])),
+  }),
+);
+/** Versões da definição (append-only): o que estava valendo quando cada execução começou. */
+export const abmPlayVersions = pgTable(
+  'abm_play_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    playId: uuid('play_id').notNull().references(() => abmPlays.id),
+    version: integer('version').notNull(),
+    definition: jsonb('definition').$type<import('@isp/domain').PlayDefinition>().notNull(),
+    note: text('note').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('abm_play_versions_uq').on(t.playId, t.version) }),
+);
+/** Execução de um play numa conta (e, se for o caso, para uma pessoa). As etapas são tarefas reais. */
+export const abmPlayRuns = pgTable(
+  'abm_play_runs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    playId: uuid('play_id').notNull().references(() => abmPlays.id),
+    playVersion: integer('play_version').notNull(),
+    abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    status: text('status').notNull().default('em_andamento'),
+    startOn: date('start_on', { mode: 'string' }).notNull(),
+    /** por que foi aplicado (motivos da sugestão ou justificativa de quem aplicou) */
+    reason: text('reason').notNull(),
+    fromSuggestion: boolean('from_suggestion').notNull().default(false),
+    outcome: text('outcome'),
+    successAchieved: boolean('success_achieved'),
+    closedAt: ts('closed_at'),
+    closedBy: uuid('closed_by').references(() => users.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('abm_play_runs_idx').on(t.tenantId, t.contactId),
+    openUq: uniqueIndex('abm_play_runs_open_uq').on(t.playId, t.contactId, sql`coalesce(stakeholder_id, '00000000-0000-0000-0000-000000000000'::uuid)`).where(sql`status = 'em_andamento'`),
+    statusCk: check('abm_play_runs_status_ck', inList('status', ['em_andamento', 'concluido', 'cancelado'])),
+  }),
+);
+export const abmPlayRunSteps = pgTable(
+  'abm_play_run_steps',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    runId: uuid('run_id').notNull().references(() => abmPlayRuns.id),
+    stepKey: text('step_key').notNull(),
+    position: integer('position').notNull(),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+  },
+  (t) => ({ uq: uniqueIndex('abm_play_run_steps_uq').on(t.runId, t.stepKey), act: index('abm_play_run_steps_act_idx').on(t.activityId) }),
+);
