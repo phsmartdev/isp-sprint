@@ -7,3 +7,4 @@ export * from './approvals';
 export * from './arp';
 export * from './cs';
 export * from './projects';
+export * from './tasks';

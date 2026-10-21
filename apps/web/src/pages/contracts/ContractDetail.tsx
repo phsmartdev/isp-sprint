@@ -1,5 +1,5 @@
 /** Ficha individual do contrato. */
-import { LinkedProjects } from '../../features/projects/shared';
+import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { useState } from 'react';
 import { ContractJourney } from '../../features/cs/ContractJourney';
 import { Link, useParams } from 'react-router-dom';
@@ -154,7 +154,7 @@ export function ContractDetailPage() {
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
-            { key: 'projetos', label: 'Projetos' },
+            { key: 'projetos', label: 'Tarefas e projetos' },
             { key: 'historico', label: 'Linha do tempo' },
           ]} />
         </div>
@@ -203,7 +203,7 @@ export function ContractDetailPage() {
           {tab === 'versoes' && <VersionsPanel c={c} />}
           {tab === 'notificacoes' && <AlertsPanel c={c} />}
           {tab === 'historico' && <TimelinePanel c={c} />}
-          {tab === 'projetos' && <LinkedProjects prefill={{ contractId: c.id, contactId: c.contactId, label: `CT-${c.code} · ${c.contact.name}`, kind: 'implantacao', name: `Implantação ${c.contact.name}` }} />}
+          {tab === 'projetos' && <WorkLinks prefill={{ contractId: c.id, contactId: c.contactId, label: `CT-${c.code} · ${c.contact.name}`, kind: 'implantacao', name: `Implantação ${c.contact.name}` }} />}
         </div>
       </div>
       {edit && <EditDrawer c={c} onClose={() => setEdit(false)} />}

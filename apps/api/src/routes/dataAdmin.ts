@@ -91,6 +91,8 @@ export const dataAdminRoutes = [
         if (body.scopes.includes('comercial')) {
           const opps = tx.select({ id: s.opportunities.id }).from(s.opportunities).where(eq(s.opportunities.tenantId, t));
           const acts = tx.select({ id: s.activities.id }).from(s.activities).where(eq(s.activities.tenantId, t));
+          for (const tbl of [s.activityDependencies, s.activityComments, s.activityTimeEntries, s.workFiles]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          await tx.delete(s.activityReads).where(inArray(s.activityReads.activityId, acts));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto

@@ -85,6 +85,19 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Evolução integrada — Etapa 4: Gestão de tarefas ✅ (2026-10-21)
+- **Tarefa independente do CRM**: avulsa ou vinculada a cliente, oportunidade, contrato, ata ou projeto (mesmo registro, sem duplicar). Menu "Tarefas".
+- Campos: situação (A fazer, Em andamento, Aguardando terceiros com "aguardando quem", Em aprovação, Concluída, Cancelada), responsável, criador, participantes, prioridade, início, prazo, estimativa, tempo registrado, categoria, etiquetas, checklist, subtarefas (1 nível), dependências, anexos, comentários e vínculos.
+- Regras: concluir exige dependências e subtarefas concluídas (vale também pela agenda e pelo quadro do projeto); ciclo de dependência recusado; entrega com aprovação vai para o aprovador (não pode ser o responsável), que aprova ou devolve com motivo; recorrência diária (opção só dias úteis), semanal (dias da semana) ou mensal, com fim opcional — concluir cria a próxima, idempotente; tempo append-only com estorno; checklist item a item sem conflito entre pessoas.
+- Situação e conclusão sempre coerentes no banco (gatilho), qualquer que seja o caminho de gravação.
+- Visões: **Minhas tarefas** (Hoje, Próximas, Atrasadas, Sem prazo, Aguardando terceiros, Delegadas, Concluídas, com tarefa rápida), **Equipe** (agrupar por responsável, projeto, prazo, prioridade ou situação), **Quadro** (colunas por situação, prioridade ou responsável; arrastar muda o campo), **Calendário** (dia, semana, mês) e **Lista** (ordenação, agrupamento e filtros).
+- Detalhe em painel lateral com tudo; delegar, reagendar e editar com histórico.
+- Avisos no ícone de Menções (sem fluxo paralelo): menção em comentário, tarefa pedida a você, entrega para aprovar e entrega devolvida. Mencionado passa a acompanhar.
+- Integração com o CRM: aba **Tarefas e projetos** em cliente, oportunidade, contrato e ata — criar, vincular existente, pendências e responsáveis.
+- Pendências da Etapa 3 entregues: projeto com objetivo, categoria, etiquetas, vínculo com campanha, documentos e visão **Por responsável**; cartões do projeto abrem o mesmo detalhe de tarefa.
+- Modelos de tarefa (checklist, estimativa, etiquetas, categoria, aprovação).
+- Migração 0031. Testes: domínio 76, API 145, E2E 39.
+
 ## Evolução integrada — Etapa 3: Projetos ✅ (2026-10-21)
 - Novo módulo **Projetos e tarefas** (`projetos`) na matriz de segurança: Vendedor próprio, Supervisor equipe, Gerência total. Menu "Projetos".
 - Projeto com tipo, situação (transições válidas; cancelar/reabrir com motivo), prioridade, responsável, início/prazo, descrição e vínculos com cliente, oportunidade, contrato e ata.

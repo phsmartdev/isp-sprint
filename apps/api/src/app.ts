@@ -35,6 +35,7 @@ import { arpOpsRoutes } from './routes/arpOps';
 import { arpOpportunityRoutes } from './routes/arpOpportunity';
 import { csRoutes } from './routes/cs';
 import { projectRoutes } from './routes/projects';
+import { taskRoutes } from './routes/tasks';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -147,6 +148,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...arpOpportunityRoutes,
     ...csRoutes,
     ...projectRoutes,
+    ...taskRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

@@ -39,8 +39,9 @@ export function assertCan(ok: boolean, msg = 'Você só pode consultar este proj
 }
 
 /** Valida vínculos opcionais (sempre da mesma empresa). */
-export async function assertProjectLinks(db: DbOrTx, auth: AuthContext, l: { contactId?: string | null; opportunityId?: string | null; contractId?: string | null; arpId?: string | null }) {
+export async function assertProjectLinks(db: DbOrTx, auth: AuthContext, l: { contactId?: string | null; opportunityId?: string | null; contractId?: string | null; arpId?: string | null; campaignId?: string | null }) {
   const checks = [
+    ['campaignId', s.campaigns, l.campaignId],
     ['contactId', s.contacts, l.contactId],
     ['opportunityId', s.opportunities, l.opportunityId],
     ['contractId', s.contracts, l.contractId],
@@ -81,11 +82,15 @@ export async function projectTasks(db: DbOrTx, auth: AuthContext, projectIds: st
       dueOn: dueOnSql(auth),
       position: s.activities.position,
       completedAt: s.activities.completedAt,
+      status: s.activities.status,
+      parentId: s.activities.parentId,
+      tags: s.activities.tags,
+      checklist: s.activities.checklist,
       rowVersion: s.activities.rowVersion,
     })
     .from(s.activities)
     .innerJoin(s.users, eq(s.users.id, s.activities.ownerId))
-    .where(and(eq(s.activities.tenantId, auth.tenantId), inArray(s.activities.projectId, projectIds), isNull(s.activities.deletedAt)))
+    .where(and(eq(s.activities.tenantId, auth.tenantId), inArray(s.activities.projectId, projectIds), isNull(s.activities.deletedAt), isNull(s.activities.parentId)))
     .orderBy(asc(s.activities.position), asc(s.activities.createdAt));
 }
 

@@ -131,7 +131,36 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
       left join negotiation_reads r on r.user_id = ${auth.userId} and r.opportunity_id = m.opportunity_id
      order by m.at desc
      limit 30`);
-  const items = rows.rows.map((r) => ({ opportunityId: r.opportunity_id, code: r.code, contactName: r.contact_name, source: r.source as 'chat' | 'comentario', body: r.body, author: r.author, at: r.at, unread: r.unread }));
+  const opp = rows.rows.map((r) => ({ kind: 'oportunidade' as const, opportunityId: r.opportunity_id, taskId: null, code: r.code, contactName: r.contact_name, title: null as string | null, source: r.source as 'chat' | 'comentario' | 'tarefa_comentario' | 'tarefa_atribuida' | 'tarefa_aprovacao' | 'tarefa_devolvida', body: r.body, author: r.author, at: r.at, unread: r.unread }));
+  // tarefas: menções em comentários, tarefas pedidas por outra pessoa, entregas para eu aprovar e entregas devolvidas
+  const tasks = await db.execute<{ activity_id: string; title: string; source: string; body: string; author: string | null; at: Date; unread: boolean }>(sql`
+    with m as (
+      select c.activity_id, 'tarefa_comentario' as source, c.body, c.author_id, c.created_at as at
+        from activity_comments c where c.tenant_id = ${auth.tenantId} and ${auth.userId}::uuid = any(c.mentions)
+      union all
+      select e.activity_id, 'tarefa_atribuida', '', e.actor_id, e.occurred_at
+        from activity_events e join activities a on a.id = e.activity_id
+       where e.tenant_id = ${auth.tenantId} and a.owner_id = ${auth.userId} and e.actor_id <> ${auth.userId}
+         and (e.type = 'assigned' and e.payload->>'to' = ${auth.userId} or e.type = 'created' and e.payload->>'delegatedTo' = ${auth.userId})
+      union all
+      select e.activity_id, 'tarefa_aprovacao', coalesce(e.payload->>'note', ''), e.actor_id, e.occurred_at
+        from activity_events e join activities a on a.id = e.activity_id
+       where e.tenant_id = ${auth.tenantId} and e.type = 'submitted' and a.approver_id = ${auth.userId} and a.status = 'em_aprovacao'
+      union all
+      select e.activity_id, 'tarefa_devolvida', coalesce(e.payload->>'note', ''), e.actor_id, e.occurred_at
+        from activity_events e join activities a on a.id = e.activity_id
+       where e.tenant_id = ${auth.tenantId} and e.type = 'rejected' and a.owner_id = ${auth.userId}
+    )
+    select m.activity_id, a.title, m.source, m.body, u.name as author, m.at,
+           (r.last_read_at is null or m.at > r.last_read_at) as unread
+      from m
+      join activities a on a.id = m.activity_id and a.deleted_at is null
+      left join users u on u.id = m.author_id
+      left join activity_reads r on r.user_id = ${auth.userId} and r.activity_id = m.activity_id
+     order by m.at desc
+     limit 30`);
+  const tk = tasks.rows.map((r) => ({ kind: 'tarefa' as const, opportunityId: null as string | null, taskId: r.activity_id, code: null as number | null, contactName: null as string | null, title: r.title, source: r.source as (typeof opp)[number]['source'], body: r.body, author: r.author, at: r.at, unread: r.unread }));
+  const items = [...opp, ...tk].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };
 }
 

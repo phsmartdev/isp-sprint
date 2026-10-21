@@ -17,16 +17,17 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 
 export type Progress = { total: number; done: number; pct: number; lateTasks: number; lateMilestones: number; health: ProjectHealth; reasons: string[] };
-export type ProjectLinks = { contact: { id: string; name: string } | null; opportunity: { id: string; name: string; code: number } | null; contract: { id: string; name: string } | null; arp: { id: string; name: string } | null };
+export type ProjectLinks = { contact: { id: string; name: string } | null; opportunity: { id: string; name: string; code: number } | null; contract: { id: string; name: string } | null; arp: { id: string; name: string } | null; campaign?: { id: string; name: string } | null };
 export type ProjectRow = {
   id: string; code: number; name: string; description: string | null; kind: ProjectKind; status: ProjectStatus; statusLabel: string; priority: 'baixa' | 'media' | 'alta';
   ownerId: string; ownerName: string | null; startOn: string; dueOn: string | null; completedAt: string | null; rowVersion: number;
-  contactId: string | null; opportunityId: string | null; contractId: string | null; arpId: string | null; progress: Progress; links: ProjectLinks;
+  contactId: string | null; opportunityId: string | null; contractId: string | null; arpId: string | null; campaignId: string | null; progress: Progress; links: ProjectLinks;
+  objective: string | null; category: string | null; tags: string[];
 };
 export type Stage = { id: string; name: string; position: number; done: boolean; wipLimit: number | null };
 export type Milestone = { id: string; name: string; dueOn: string | null; completedAt: string | null; notes: string | null; position: number };
 export type Member = { userId: string; role: ProjectMemberRole; name: string; email: string };
-export type Task = { id: string; title: string; notes: string | null; priority: 'baixa' | 'media' | 'alta'; ownerId: string; ownerName: string; stageId: string | null; milestoneId: string | null; startOn: string | null; dueOn: string | null; position: number; completedAt: string | null; rowVersion: number };
+export type Task = { id: string; status: string; title: string; notes: string | null; priority: 'baixa' | 'media' | 'alta'; ownerId: string; ownerName: string; stageId: string | null; milestoneId: string | null; startOn: string | null; dueOn: string | null; position: number; completedAt: string | null; rowVersion: number };
 export type ProjectDetail = ProjectRow & { stages: Stage[]; milestones: Milestone[]; members: Member[]; tasks: Task[]; can: { manage: boolean; work: boolean; view: boolean } };
 export type Template = { id: string | null; key: string | null; name: string; kind: ProjectKind; description: string | null; def: ProjectTemplateDef; builtin: boolean };
 
@@ -55,6 +56,7 @@ export function LinkChips({ links }: { links: ProjectLinks }) {
     links.opportunity && { to: `/opportunities/${links.opportunity.id}`, label: `OP-${links.opportunity.code}` },
     links.contract && { to: `/contracts/${links.contract.id}`, label: links.contract.name },
     links.arp && { to: `/contracts/atas/${links.arp.id}`, label: links.arp.name },
+    links.campaign && { to: '/campaigns', label: `Campanha: ${links.campaign.name}` },
   ].filter(Boolean) as { to: string; label: string }[];
   if (!items.length) return null;
   return <span className="flex flex-wrap gap-1.5">{items.map((i) => <Link key={i.to} to={i.to} className="rounded-sm bg-surface-2 px-2 py-0.5 text-xs font-semibold text-primary hover:underline">{i.label}</Link>)}</span>;
@@ -73,7 +75,7 @@ export function NewProjectDialog({ open, onClose, prefill }: { open: boolean; on
   const { me } = useAuth();
   const users = useLookups().data?.users ?? [];
   const tpl = useTemplates(open);
-  const [f, setF] = useState({ name: '', description: '', kind: 'interno' as ProjectKind, template: '', startOn: today(), dueOn: '', priority: 'media' as 'baixa' | 'media' | 'alta' });
+  const [f, setF] = useState({ name: '', description: '', objective: '', category: '', tags: '', kind: 'interno' as ProjectKind, template: '', startOn: today(), dueOn: '', priority: 'media' as 'baixa' | 'media' | 'alta' });
   const [members, setMembers] = useState<{ userId: string; role: ProjectMemberRole }[]>([]);
   const [add, setAdd] = useState('');
   useEffect(() => {
@@ -84,7 +86,7 @@ export function NewProjectDialog({ open, onClose, prefill }: { open: boolean; on
     mutationFn: () => api<{ id: string }>('/projects', {
       method: 'POST',
       body: {
-        name: f.name, description: f.description || null, kind: f.kind, priority: f.priority, startOn: f.startOn, dueOn: f.dueOn || null,
+        name: f.name, description: f.description || null, objective: f.objective || null, category: f.category || null, tags: f.tags.split(/[,\s]+/).map((x) => x.replace(/^#/, '')).filter(Boolean), kind: f.kind, priority: f.priority, startOn: f.startOn, dueOn: f.dueOn || null,
         templateKey: f.template.startsWith('b:') ? f.template.slice(2) : null, templateId: f.template.startsWith('c:') ? f.template.slice(2) : null,
         members, contactId: prefill?.contactId ?? null, opportunityId: prefill?.opportunityId ?? null, contractId: prefill?.contractId ?? null, arpId: prefill?.arpId ?? null,
       },
@@ -112,6 +114,11 @@ export function NewProjectDialog({ open, onClose, prefill }: { open: boolean; on
           <FormField label="Prioridade" htmlFor="pj-prio"><Select id="pj-prio" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value as typeof f.priority })}>{Object.entries(PRIORITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</Select></FormField>
         </div>
         {chosen && <p className="text-sm text-muted">{chosen.description}</p>}
+        <FormField label="Objetivo" htmlFor="pj-obj" hint="O resultado esperado, em uma frase"><Input id="pj-obj" value={f.objective} onChange={(e) => setF({ ...f, objective: e.target.value })} /></FormField>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FormField label="Categoria" htmlFor="pj-cat"><Input id="pj-cat" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} /></FormField>
+          <FormField label="Etiquetas" htmlFor="pj-tags" hint="Separe por vírgula"><Input id="pj-tags" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} /></FormField>
+        </div>
         <FormField label="Descrição" htmlFor="pj-desc"><Textarea id="pj-desc" rows={2} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></FormField>
         <fieldset className="space-y-2">
           <legend className="text-sm font-semibold text-ink">Equipe</legend>

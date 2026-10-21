@@ -17,6 +17,7 @@ import { CustomersPage } from './pages/Customers';
 import { CustomerDetailPage } from './pages/CustomerDetail';
 import { ActivitiesPage } from './pages/Activities';
 import { ProjectsPage } from './pages/projects/Projects';
+import { TasksPage } from './pages/tasks/Tasks';
 import { ProjectDetailPage } from './pages/projects/ProjectDetail';
 import { ReportsPage } from './pages/Reports';
 import { IntelligencePage } from './pages/Intelligence';
@@ -78,6 +79,7 @@ export function App() {
         <Route path="sucesso" element={<Gate module="clientes"><CustomerSuccessPage /></Gate>} />
         <Route path="sucesso/jornadas/:id" element={<Gate module="clientes"><JourneyPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
+        <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />

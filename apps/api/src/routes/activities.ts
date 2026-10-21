@@ -8,9 +8,9 @@ import { conflict, forbidden, notFound } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
+import { assertAssignableUser, assertTenantRefs, level } from '../services/scope';
 import { loadOpportunity } from '../services/opportunities';
-import { syncTaskStage } from '../services/projects';
+import { activityScope, applyStatus } from '../services/tasks';
 
 const owner = alias(s.users, 'act_owner');
 
@@ -46,7 +46,7 @@ function query(db: DbOrTx) {
     .leftJoin(s.contacts, eq(s.contacts.id, s.activities.contactId));
 }
 
-const vis = (auth: AuthContext) => ownerScope(auth, 'atividades', { tenantId: s.activities.tenantId, ownerId: s.activities.ownerId, deletedAt: s.activities.deletedAt });
+const vis = (auth: AuthContext) => activityScope(auth);
 
 async function load(db: DbOrTx, auth: AuthContext, id: string) {
   const [row] = await query(db).where(and(eq(s.activities.id, id), vis(auth))).limit(1);
@@ -232,8 +232,6 @@ export const activityRoutes = [
         const now = new Date();
         const dueAt = body.dueAt === undefined ? undefined : body.dueAt ? new Date(body.dueAt) : null;
         const events: { type: string; payload: Record<string, unknown> }[] = [];
-        if (body.completed === true && !cur.completedAt) events.push({ type: 'completed', payload: body.csResult ? { csResult: true } : {} });
-        if (body.completed === false && cur.completedAt) events.push({ type: 'reopened', payload: {} });
         if (dueAt !== undefined && (dueAt?.getTime() ?? null) !== (cur.dueAt?.getTime() ?? null)) {
           events.push({ type: 'rescheduled', payload: { from: cur.dueAt?.toISOString() ?? null, to: dueAt?.toISOString() ?? null } });
         }
@@ -247,8 +245,6 @@ export const activityRoutes = [
             notes: body.notes,
             ownerId: body.ownerId,
             dueAt,
-            completedAt: body.completed === undefined ? undefined : body.completed ? cur.completedAt ?? now : null,
-            completedBy: body.completed === undefined ? undefined : body.completed ? auth.userId : null,
             csResult: body.completed === false ? null : body.csResult ?? undefined,
             updatedAt: now,
             rowVersion: sql`${s.activities.rowVersion} + 1`,
@@ -257,7 +253,10 @@ export const activityRoutes = [
           .returning({ id: s.activities.id });
         if (!updated.length) throw conflict(cur.rowVersion);
         for (const e of events) await tx.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: params.id, type: e.type, actorId: auth.userId, payload: e.payload });
-        if (body.completed !== undefined) await syncTaskStage(tx, params.id, body.completed, auth);
+        if (body.completed !== undefined && body.completed !== !!cur.completedAt) {
+          const [fresh] = await tx.select().from(s.activities).where(eq(s.activities.id, params.id)).limit(1);
+          await applyStatus(tx, auth, fresh!, body.completed ? 'concluida' : 'a_fazer');
+        }
       });
       return dto(await load(app.db, auth, params.id));
     },

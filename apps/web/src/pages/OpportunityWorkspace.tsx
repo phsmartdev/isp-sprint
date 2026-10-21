@@ -1,3 +1,4 @@
+import { WorkLinks } from '../features/tasks/WorkLinks';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -531,7 +532,7 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
   const [search] = useSearchParams();
-  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' ? t : 'atividades'; });
+  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat' | 'trabalho'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' || t === 'trabalho' ? t : 'atividades'; });
   const unread = useUnread(id!);
   const move = useMutation({
     mutationFn: (pipelineId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { pipelineId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
@@ -661,6 +662,7 @@ export function OpportunityWorkspacePage() {
         <div className="px-5 pt-2">
           <Tabs label="Detalhes" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'atividades', label: 'Atividades', count: acts.data?.items.filter((x) => !x.completedAt).length },
+            { key: 'trabalho', label: 'Tarefas e projetos' },
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount },
             { key: 'historico', label: unread.data?.comments ? `Comentários e histórico • ${unread.data.comments} novo(s)` : 'Comentários e histórico' },
             { key: 'chat', label: unread.data?.chat ? `Chat • ${unread.data.chat} nova(s)${unread.data.mentions ? ' @' : ''}` : 'Chat' },
@@ -670,6 +672,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'atividades' && (!can('atividades') ? <p className="text-sm text-muted">Seu perfil não tem acesso ao módulo Atividades.</p>
             : acts.isLoading ? <LoadingRows rows={3} /> : acts.data?.items.length ? <ul className="divide-y divide-line">{acts.data.items.map((x) => <ActivityRow key={x.id} a={x} showOwner compact />)}</ul>
             : <EmptyState title="Nenhuma atividade" description="Agende um retorno para não perder o fio da conversa." action={<Button variant="primary" onClick={() => setScheduling(true)}>Agendar retorno</Button>} />)}
+          {centerTab === 'trabalho' && <WorkLinks prefill={{ opportunityId: opp.id, contactId: opp.contactId, label: `OP-${opp.code} · ${opp.contactName}`, kind: 'implantacao', name: `Implantação ${opp.contactName}` }} />}
           {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'chat' && <div className="-m-5"><NegotiationChat oppId={opp.id} title={false} className="max-h-[620px]" /></div>}

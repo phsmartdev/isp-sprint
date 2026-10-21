@@ -9,12 +9,14 @@ import { conflict, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { assertCan, assertProjectLinks, autoStartProject, dueAtOf, loadProject, progressFor, projectEvent, projectScope, projectTasks, syncTaskStage } from '../services/projects';
+import { applyStatus } from '../services/tasks';
+import { assertCan, assertProjectLinks, dueAtOf, loadProject, progressFor, projectEvent, projectScope, projectTasks, syncTaskStage } from '../services/projects';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
 const prio = z.enum(['baixa', 'media', 'alta']);
 const uuidN = z.string().uuid().nullable().optional();
-const Links = { contactId: uuidN, opportunityId: uuidN, contractId: uuidN, arpId: uuidN };
+const Links = { contactId: uuidN, opportunityId: uuidN, contractId: uuidN, arpId: uuidN, campaignId: uuidN };
+const Extra = { objective: z.string().trim().max(2000).nullable().optional(), category: z.string().trim().max(40).nullable().optional(), tags: z.array(z.string().trim().toLowerCase().min(1).max(30)).max(10).optional() };
 const TemplateDef = z.object({
   stages: z.array(z.object({ name: z.string().trim().min(1).max(60), done: z.boolean().optional() })).min(1).max(12),
   milestones: z.array(z.object({ name: z.string().trim().min(1).max(120), offsetDays: z.number().int().min(0).max(3650), stage: z.string().optional() })).max(60),
@@ -35,19 +37,21 @@ async function assertTaskOwner(db: DbOrTx, projectId: string, projectOwner: stri
   if (!m || m.role === 'observador') throw unprocessable('Responsável fora da equipe do projeto.', [{ path: 'ownerId', message: 'Inclua a pessoa na equipe do projeto (como membro) antes de atribuir' }]);
 }
 
-async function linkNames(db: DbOrTx, auth: AuthContext, rows: { contactId: string | null; opportunityId: string | null; contractId: string | null; arpId: string | null }[]) {
+async function linkNames(db: DbOrTx, auth: AuthContext, rows: { contactId: string | null; opportunityId: string | null; contractId: string | null; arpId: string | null; campaignId: string | null }[]) {
   const ids = (k: keyof (typeof rows)[number]) => [...new Set(rows.map((r) => r[k]).filter(Boolean) as string[])];
-  const [c, o, k, a] = await Promise.all([
+  const [c, o, k, a, cp] = await Promise.all([
     ids('contactId').length ? db.select({ id: s.contacts.id, name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.tenantId, auth.tenantId), inArray(s.contacts.id, ids('contactId')))) : [],
     ids('opportunityId').length ? db.select({ id: s.opportunities.id, name: s.opportunities.title, code: s.opportunities.code }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, auth.tenantId), inArray(s.opportunities.id, ids('opportunityId')))) : [],
     ids('contractId').length ? db.select({ id: s.contracts.id, code: s.contracts.code }).from(s.contracts).where(and(eq(s.contracts.tenantId, auth.tenantId), inArray(s.contracts.id, ids('contractId')))) : [],
     ids('arpId').length ? db.select({ id: s.arps.id, number: s.arps.number }).from(s.arps).where(and(eq(s.arps.tenantId, auth.tenantId), inArray(s.arps.id, ids('arpId')))) : [],
+    ids('campaignId').length ? db.select({ id: s.campaigns.id, name: s.campaigns.name }).from(s.campaigns).where(and(eq(s.campaigns.tenantId, auth.tenantId), inArray(s.campaigns.id, ids('campaignId')))) : [],
   ]);
   return (r: (typeof rows)[number]) => ({
     contact: c.find((x) => x.id === r.contactId) ?? null,
     opportunity: (() => { const x = o.find((y) => y.id === r.opportunityId); return x ? { id: x.id, name: x.name, code: x.code } : null; })(),
     contract: (() => { const x = k.find((y) => y.id === r.contractId); return x ? { id: x.id, name: `Contrato CT-${x.code}` } : null; })(),
     arp: (() => { const x = a.find((y) => y.id === r.arpId); return x ? { id: x.id, name: `Ata ${x.number}` } : null; })(),
+    campaign: cp.find((y) => y.id === r.campaignId) ?? null,
   });
 }
 
@@ -77,6 +81,7 @@ const ProjectCreate = z.object({
   templateId: uuidN,
   members: z.array(z.object({ userId: z.string().uuid(), role: z.enum(PROJECT_MEMBER_ROLES) })).max(50).default([]),
   ...Links,
+  ...Extra,
 });
 
 const TaskBody = z.object({
@@ -102,6 +107,7 @@ export const projectRoutes = [
       kind: z.enum(PROJECT_KINDS).optional(),
       q: z.string().max(100).optional(),
       mine: z.coerce.boolean().optional(),
+      tag: z.string().max(30).optional(),
       ...Links,
     }),
     handler: async ({ app, auth, query: q }) => {
@@ -111,7 +117,8 @@ export const projectRoutes = [
       if (q.kind) w.push(eq(s.projects.kind, q.kind));
       if (q.q) w.push(ilike(s.projects.name, `%${q.q.replace(/[%_\\]/g, '\\$&')}%`));
       if (q.mine) w.push(sql`(${s.projects.ownerId} = ${auth.userId} or exists (select 1 from project_members pm where pm.project_id = ${s.projects.id} and pm.user_id = ${auth.userId}))`);
-      for (const k of ['contactId', 'opportunityId', 'contractId', 'arpId'] as const) if (q[k]) w.push(eq(s.projects[k], q[k]!));
+      for (const k of ['contactId', 'opportunityId', 'contractId', 'arpId', 'campaignId'] as const) if (q[k]) w.push(eq(s.projects[k], q[k]!));
+      if (q.tag) w.push(sql`${q.tag.toLowerCase()} = any(${s.projects.tags})`);
       const rows = await app.db.select({ p: s.projects, ownerName: s.users.name }).from(s.projects).innerJoin(s.users, eq(s.users.id, s.projects.ownerId)).where(and(...w)).orderBy(sql`${s.projects.dueOn} asc nulls last`, desc(s.projects.createdAt)).limit(500);
       const prog = await progressFor(app.db, auth, rows.map((r) => r.p));
       const names = await linkNames(app.db, auth, rows.map((r) => r.p));
@@ -137,7 +144,7 @@ export const projectRoutes = [
         const [p] = await tx.insert(s.projects).values({
           tenantId: auth.tenantId, name: body.name, description: body.description ?? null, kind: body.kind, priority: body.priority, ownerId,
           startOn: body.startOn, dueOn: body.dueOn ?? inst.dueOn, contactId: body.contactId ?? null, opportunityId: body.opportunityId ?? null,
-          contractId: body.contractId ?? null, arpId: body.arpId ?? null, templateKey: tpl.key, createdBy: auth.userId,
+          contractId: body.contractId ?? null, arpId: body.arpId ?? null, campaignId: body.campaignId ?? null, objective: body.objective ?? null, category: body.category ?? null, tags: [...new Set(body.tags ?? [])], templateKey: tpl.key, createdBy: auth.userId,
         }).returning({ id: s.projects.id });
         const pid = p!.id;
         const members = new Map(body.members.map((m) => [m.userId, m.role]));
@@ -203,6 +210,7 @@ export const projectRoutes = [
       status: z.enum(PROJECT_STATUSES).optional(),
       reason: z.string().trim().max(1000).optional(),
       ...Links,
+      ...Extra,
     }),
     handler: async ({ app, auth, params, body }) => {
       await app.db.transaction(async (tx) => {
@@ -226,13 +234,14 @@ export const projectRoutes = [
         const start = body.startOn ?? p.startOn;
         const due = body.dueOn === undefined ? p.dueOn : body.dueOn;
         if (due && due < start) throw unprocessable('O prazo não pode ser antes do início.', [{ path: 'dueOn', message: 'Antes do início' }]);
-        for (const k of ['name', 'description', 'kind', 'priority', 'startOn', 'dueOn', 'contactId', 'opportunityId', 'contractId', 'arpId'] as const) {
+        for (const k of ['name', 'description', 'kind', 'priority', 'startOn', 'dueOn', 'contactId', 'opportunityId', 'contractId', 'arpId', 'campaignId', 'objective', 'category'] as const) {
           if (body[k] !== undefined && body[k] !== p[k]) changes.push(k);
         }
         const status = body.status ?? p.status;
         await tx.update(s.projects).set({
           name: body.name, description: body.description, kind: body.kind, priority: body.priority, ownerId: body.ownerId, startOn: body.startOn, dueOn: body.dueOn,
-          contactId: body.contactId, opportunityId: body.opportunityId, contractId: body.contractId, arpId: body.arpId,
+          contactId: body.contactId, opportunityId: body.opportunityId, contractId: body.contractId, arpId: body.arpId, campaignId: body.campaignId,
+          objective: body.objective, category: body.category, tags: body.tags ? [...new Set(body.tags)] : undefined,
           status, completedAt: status === 'concluido' ? p.completedAt ?? new Date() : null, updatedAt: new Date(), rowVersion: sql`${s.projects.rowVersion} + 1`,
         }).where(eq(s.projects.id, p.id));
         if (changes.length) await projectEvent(tx, auth, p.id, body.status && body.status !== p.status ? 'status' : 'updated', `Projeto alterado: ${changes.join(', ')}${body.reason ? ` — ${body.reason}` : ''}`, { before: p, after: body });
@@ -392,7 +401,7 @@ export const projectRoutes = [
           tenantId: auth.tenantId, type: 'tarefa', title: body.title, notes: body.notes ?? null, priority: body.priority, ownerId,
           dueAt: dueAtOf(auth, body.dueOn) as unknown as Date, startOn: body.startOn ?? null, projectId: p.id, projectStageId: stage.id, milestoneId: body.milestoneId ?? null,
           position: pos, contactId: p.contactId, opportunityId: p.opportunityId, contractId: p.contractId, createdBy: auth.userId,
-          completedAt: stage.done ? new Date() : null, completedBy: stage.done ? auth.userId : null,
+          completedAt: stage.done ? new Date() : null, completedBy: stage.done ? auth.userId : null, status: stage.done ? 'concluida' : 'a_fazer',
         }).returning({ id: s.activities.id });
         await tx.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: a!.id, type: 'created', actorId: auth.userId, payload: { projectId: p.id } });
         return a!;
@@ -426,7 +435,7 @@ export const projectRoutes = [
           return;
         }
         if (body.ownerId && body.ownerId !== t.ownerId) { await assertTaskOwner(tx, p.id, p.ownerId, body.ownerId); events.push({ type: 'assigned', payload: { from: t.ownerId, to: body.ownerId } }); }
-        let completedAt: Date | null | undefined;
+        let complete: boolean | undefined;
         if (body.stageId && body.stageId !== t.projectStageId) {
           const [st] = await tx.select().from(s.projectStages).where(and(eq(s.projectStages.id, body.stageId), eq(s.projectStages.projectId, p.id), isNull(s.projectStages.archivedAt))).limit(1);
           if (!st) throw unprocessable('Etapa inválida.', [{ path: 'stageId', message: 'Etapa de outro projeto' }]);
@@ -435,8 +444,8 @@ export const projectRoutes = [
             if (n >= st.wipLimit) throw unprocessable(`A etapa "${st.name}" está no limite de ${st.wipLimit} tarefa(s).`);
           }
           events.push({ type: 'moved', payload: { from: t.projectStageId, to: st.id } });
-          if (st.done && !t.completedAt) { completedAt = new Date(); events.push({ type: 'completed', payload: {} }); }
-          if (!st.done && t.completedAt) { completedAt = null; events.push({ type: 'reopened', payload: {} }); }
+          if (st.done && !t.completedAt && t.status !== 'em_aprovacao') complete = true;
+          if (!st.done && (t.completedAt || t.status === 'em_aprovacao')) complete = false;
         }
         if (body.milestoneId) {
           const [m] = await tx.select({ id: s.projectMilestones.id }).from(s.projectMilestones).where(and(eq(s.projectMilestones.id, body.milestoneId), eq(s.projectMilestones.projectId, p.id), isNull(s.projectMilestones.deletedAt))).limit(1);
@@ -447,7 +456,6 @@ export const projectRoutes = [
         await tx.update(s.activities).set({
           title: body.title, notes: body.notes, priority: body.priority, ownerId: body.ownerId, projectStageId: body.stageId, milestoneId: body.milestoneId,
           startOn: body.startOn, dueAt: body.dueOn === undefined ? undefined : (dueAtOf(auth, body.dueOn) as unknown as Date), position: body.position,
-          completedAt, completedBy: completedAt === undefined ? undefined : completedAt ? auth.userId : null,
           updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1`,
         }).where(eq(s.activities.id, t.id));
         if (body.position !== undefined) {
@@ -459,7 +467,12 @@ export const projectRoutes = [
           for (const [i, id] of ordered.entries()) await tx.update(s.activities).set({ position: i }).where(eq(s.activities.id, id));
         }
         for (const e of events) await tx.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: t.id, type: e.type, actorId: auth.userId, payload: { ...e.payload, projectId: p.id } });
-        if (completedAt) await autoStartProject(tx, auth, p.id);
+        if (complete !== undefined) {
+          // a conclusão segue as regras da tarefa (dependências, subtarefas, aprovação, recorrência); a coluna escolhida prevalece
+          const [fresh] = await tx.select().from(s.activities).where(eq(s.activities.id, t.id)).limit(1);
+          await applyStatus(tx, auth, fresh!, complete ? 'concluida' : 'em_andamento');
+          await tx.update(s.activities).set({ projectStageId: body.stageId }).where(eq(s.activities.id, t.id));
+        }
       });
       return { ok: true };
     },
@@ -476,6 +489,62 @@ export const projectRoutes = [
       await loadProject(app.db, auth, params.id);
       const rows = await app.db.select({ e: s.projectEvents, who: s.users.name }).from(s.projectEvents).leftJoin(s.users, eq(s.users.id, s.projectEvents.actorId)).where(and(eq(s.projectEvents.projectId, params.id), eq(s.projectEvents.tenantId, auth.tenantId))).orderBy(desc(s.projectEvents.occurredAt)).limit(300);
       return { items: rows.map(({ e, who }) => ({ id: e.id, type: e.type, summary: e.summary, occurredAt: e.occurredAt, actorName: who })) };
+    },
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/projects/:id/files',
+    summary: 'Documentos do projeto e dos arquivos anexados às tarefas dele',
+    tag: 'Projetos',
+    module: 'projetos',
+    params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const { p } = await loadProject(app.db, auth, params.id);
+      const rows = await app.db
+        .select({ id: s.workFiles.id, name: s.workFiles.name, mime: s.workFiles.mime, sizeBytes: s.workFiles.sizeBytes, createdAt: s.workFiles.createdAt, uploadedBy: s.users.name, activityId: s.workFiles.activityId, taskTitle: s.activities.title })
+        .from(s.workFiles).leftJoin(s.users, eq(s.users.id, s.workFiles.uploadedBy)).leftJoin(s.activities, eq(s.activities.id, s.workFiles.activityId))
+        .where(and(eq(s.workFiles.tenantId, auth.tenantId), isNull(s.workFiles.deletedAt), sql`(${s.workFiles.projectId} = ${p.id} or ${s.activities.projectId} = ${p.id})`))
+        .orderBy(desc(s.workFiles.createdAt));
+      return { items: rows };
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/projects/:id/files',
+    summary: 'Anexa documento ao projeto (até 3 MB)',
+    tag: 'Projetos',
+    module: 'projetos',
+    params: IdParams,
+    bodyLimit: 5_000_000,
+    body: z.object({ name: z.string().trim().min(1).max(200), mime: z.string().max(120), data: z.string().min(1) }),
+    handler: async ({ app, auth, params, body, reply }) => {
+      const { p, can } = await loadProject(app.db, auth, params.id);
+      assertCan(can.work, 'Observadores não anexam documentos.');
+      const buf = Buffer.from(body.data, 'base64');
+      if (buf.length > 3 * 1024 * 1024) throw unprocessable('Arquivo maior que 3 MB.');
+      const [f] = await app.db.insert(s.workFiles).values({ tenantId: auth.tenantId, projectId: p.id, name: body.name, mime: body.mime || 'application/octet-stream', sizeBytes: buf.length, data: buf, uploadedBy: auth.userId }).returning({ id: s.workFiles.id });
+      await projectEvent(app.db, auth, p.id, 'file', `Documento anexado: ${body.name}`);
+      reply.code(201);
+      return f!;
+    },
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/projects/:id/files/:fileId',
+    summary: 'Baixa documento do projeto',
+    tag: 'Projetos',
+    module: 'projetos',
+    params: z.object({ id: z.string().uuid(), fileId: z.string().uuid() }),
+    handler: async ({ app, auth, params, reply }) => {
+      const { p } = await loadProject(app.db, auth, params.id);
+      const [f] = await app.db.select({ f: s.workFiles }).from(s.workFiles).leftJoin(s.activities, eq(s.activities.id, s.workFiles.activityId))
+        .where(and(eq(s.workFiles.id, params.fileId), isNull(s.workFiles.deletedAt), sql`(${s.workFiles.projectId} = ${p.id} or ${s.activities.projectId} = ${p.id})`)).limit(1);
+      if (!f) throw notFound('Arquivo não encontrado.');
+      reply.header('content-type', f.f.mime).header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.f.name)}`);
+      return reply.send(f.f.data);
     },
   }),
 

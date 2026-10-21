@@ -596,6 +596,24 @@ export const activities = pgTable(
     milestoneId: uuid('milestone_id'),
     startOn: date('start_on', { mode: 'string' }),
     position: integer('position').notNull().default(0),
+    /** Tarefas (Etapa 4): situação de trabalho; concluída ⇔ completed_at preenchido */
+    status: text('status').notNull().default('a_fazer'),
+    parentId: uuid('parent_id').references((): AnyPgColumn => activities.id),
+    checklist: jsonb('checklist').$type<import('@isp/domain').ChecklistItem[]>().notNull().default(sql`'[]'::jsonb`),
+    estimateMinutes: integer('estimate_minutes'),
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+    category: text('category'),
+    participants: uuid('participants').array().notNull().default(sql`'{}'::uuid[]`),
+    waitingOn: text('waiting_on'),
+    recurrence: jsonb('recurrence').$type<import('@isp/domain').Recurrence>(),
+    seriesId: uuid('series_id'),
+    /** idempotência da recorrência: uma ocorrência por série e data */
+    recurrenceKey: text('recurrence_key'),
+    requiresApproval: boolean('requires_approval').notNull().default(false),
+    approverId: uuid('approver_id').references(() => users.id),
+    approvedAt: ts('approved_at'),
+    approvedBy: uuid('approved_by').references(() => users.id),
+    arpId: uuid('arp_id'),
   },
   (t) => ({
     csCadenceUq: uniqueIndex('activities_cs_cadence_uq').on(t.tenantId, t.contactId, t.csCadenceKey).where(sql`cs_cadence_key is not null`),
@@ -605,6 +623,10 @@ export const activities = pgTable(
     ownerDueIdx: index('activities_owner_due_idx').on(t.tenantId, t.ownerId, t.dueAt),
     oppIdx: index('activities_opp_idx').on(t.tenantId, t.opportunityId),
     projectIdx: index('activities_project_idx').on(t.tenantId, t.projectId, t.projectStageId, t.position),
+    statusCk: check('activities_status_ck', inList('status', ['a_fazer', 'em_andamento', 'aguardando', 'em_aprovacao', 'concluida', 'cancelada'])),
+    parentIdx: index('activities_parent_idx').on(t.tenantId, t.parentId),
+    recurrenceUq: uniqueIndex('activities_recurrence_uq').on(t.tenantId, t.recurrenceKey).where(sql`recurrence_key is not null`),
+    linksIdx: index('activities_links_idx').on(t.tenantId, t.contractId, t.arpId),
   }),
 );
 
@@ -2005,6 +2027,104 @@ export const csAlerts = pgTable('cs_alerts', {
   escalatedAt: ts('escalated_at'),
 }, (t) => ({ uq: uniqueIndex('cs_alerts_uq').on(t.tenantId, t.contactId, t.key) }));
 
+// --------------------------------------------------------------- tarefas: colaboração
+
+export const activityDependencies = pgTable(
+  'activity_dependencies',
+  {
+    tenantId: tenantId(),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    dependsOnId: uuid('depends_on_id').notNull().references(() => activities.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.activityId, t.dependsOnId] }), revIdx: index('activity_deps_rev_idx').on(t.dependsOnId) }),
+);
+
+/** Comentários de tarefa (append-only), com menções. */
+export const activityComments = pgTable(
+  'activity_comments',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    authorId: uuid('author_id').references(() => users.id),
+    body: text('body').notNull(),
+    mentions: uuid('mentions').array().notNull().default(sql`'{}'::uuid[]`),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('activity_comments_idx').on(t.tenantId, t.activityId, t.createdAt) }),
+);
+
+/** Tempo registrado (append-only; estorno por lançamento negativo que aponta o original). */
+export const activityTimeEntries = pgTable(
+  'activity_time_entries',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    minutes: integer('minutes').notNull(),
+    workedOn: date('worked_on', { mode: 'string' }).notNull(),
+    note: text('note'),
+    reversesId: uuid('reverses_id'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('activity_time_idx').on(t.tenantId, t.activityId), userIdx: index('activity_time_user_idx').on(t.tenantId, t.userId, t.workedOn) }),
+);
+
+/** Arquivos de tarefa ou de projeto (até 3 MB cada). */
+export const workFiles = pgTable(
+  'work_files',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    activityId: uuid('activity_id').references(() => activities.id),
+    projectId: uuid('project_id'),
+    name: text('name').notNull(),
+    mime: text('mime').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    data: bytea('data').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => users.id),
+    createdAt: createdAt(),
+    deletedAt: ts('deleted_at'),
+    deletedBy: uuid('deleted_by'),
+  },
+  (t) => ({ actIdx: index('work_files_act_idx').on(t.tenantId, t.activityId), projIdx: index('work_files_proj_idx').on(t.tenantId, t.projectId) }),
+);
+
+/** Última leitura de uma tarefa (comentários e avisos não lidos). */
+export const activityReads = pgTable(
+  'activity_reads',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    lastReadAt: ts('last_read_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.activityId] }) }),
+);
+
+export const taskTemplates = pgTable(
+  'task_templates',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    title: text('title').notNull(),
+    notes: text('notes'),
+    priority: text('priority').notNull().default('media'),
+    checklist: jsonb('checklist').$type<{ text: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    estimateMinutes: integer('estimate_minutes'),
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+    category: text('category'),
+    requiresApproval: boolean('requires_approval').notNull().default(false),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('task_templates_idx').on(t.tenantId, t.active) }),
+);
+
 // --------------------------------------------------------------- projetos
 
 export const projects = pgTable(
@@ -2028,6 +2148,10 @@ export const projects = pgTable(
     opportunityId: uuid('opportunity_id'),
     contractId: uuid('contract_id'),
     arpId: uuid('arp_id'),
+    campaignId: uuid('campaign_id'),
+    objective: text('objective'),
+    category: text('category'),
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
     templateKey: text('template_key'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),

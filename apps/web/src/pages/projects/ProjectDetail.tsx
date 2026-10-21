@@ -1,23 +1,25 @@
 /** Projeto: quadro, lista, calendário, linha do tempo, marcos, equipe e histórico. */
-import { useMemo, useState, type DragEvent } from 'react';
+import { useMemo, useRef, useState, type DragEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ArrowDown, ArrowUp, CalendarDays, ChevronLeft, ChevronRight, Diamond, FolderKanban, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CalendarDays, ChevronLeft, ChevronRight, Diamond, Download, FolderKanban, Paperclip, Plus, Trash2 } from 'lucide-react';
 import {
   PROJECT_KINDS, PROJECT_KIND_LABELS, PROJECT_MEMBER_ROLES, PROJECT_MEMBER_ROLE_LABELS, PROJECT_STATUS_LABELS, PROJECT_TRANSITIONS, addDaysIso,
   type ProjectKind, type ProjectMemberRole, type ProjectStatus,
 } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
+import { fileToBase64, fmtBytes, MAX_UPLOAD_BYTES } from '../../lib/files';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { useAuth } from '../../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
+import { TaskDrawer } from '../../features/tasks/TaskDrawer';
 import { HealthChip, LinkChips, PRIORITY_LABELS, ProgressBar, STATUS_TONE, type Milestone, type ProjectDetail, type Stage, type Task } from '../../features/projects/shared';
 
-type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'marcos' | 'equipe' | 'historico';
+type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'equipe' | 'documentos' | 'historico';
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 const PRIO_TONE = { baixa: 'neutral', media: 'sky', alta: 'red' } as const;
 
@@ -34,6 +36,8 @@ export function ProjectDetailPage() {
   const q = useProject(id);
   const [u, setU] = useUrlState({ t: 'quadro' });
   const [task, setTask] = useState<Task | 'new' | null>(null);
+  const [drawer, setDrawer] = useState<string | null>(null);
+  const openTask = (t: Task | 'new') => (t === 'new' ? setTask('new') : setDrawer(t.id));
   const [dialog, setDialog] = useState<'edit' | 'status' | 'stages' | 'template' | null>(null);
   const { can: canLevel } = useAuth();
   if (q.isLoading) return <LoadingRows rows={6} />;
@@ -55,7 +59,9 @@ export function ProjectDetailPage() {
               <Chip tone={PRIO_TONE[p.priority]}>Prioridade {PRIORITY_LABELS[p.priority].toLowerCase()}</Chip>
               <LinkChips links={p.links} />
             </div>
-            {p.description && <p className="mt-3 max-w-3xl whitespace-pre-line text-sm">{p.description}</p>}
+            {p.objective && <p className="mt-3 max-w-3xl text-sm"><span className="font-semibold text-ink">Objetivo:</span> {p.objective}</p>}
+            {p.description && <p className="mt-2 max-w-3xl whitespace-pre-line text-sm">{p.description}</p>}
+            {(p.category || p.tags.length > 0) && <p className="mt-2 flex flex-wrap gap-1.5 text-xs">{p.category && <span className="rounded-sm bg-surface-2 px-2 py-0.5 font-semibold">{p.category}</span>}{p.tags.map((t) => <span key={t} className="rounded-sm bg-primary-soft px-2 py-0.5 text-primary">#{t}</span>)}</p>}
           </div>
           {p.can.manage && (
             <div className="flex flex-wrap gap-2">
@@ -76,25 +82,28 @@ export function ProjectDetailPage() {
       </header>
 
       <Tabs label="Visões do projeto" value={u.t as TabKey} onChange={(t) => setU({ t }, { resetPage: false })} tabs={[
-        { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' },
-        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'historico', label: 'Histórico' },
+        { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' }, { key: 'responsavel', label: 'Por responsável' },
+        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'historico', label: 'Histórico' },
       ]} />
 
-      {['quadro', 'lista', 'calendario', 'linha'].includes(u.t) && p.can.work && (
+      {['quadro', 'lista', 'calendario', 'linha', 'responsavel'].includes(u.t) && p.can.work && (
         <div className="flex flex-wrap justify-end gap-2">
           {u.t === 'quadro' && p.can.manage && <Button variant="secondary" onClick={() => setDialog('stages')}>Etapas do quadro</Button>}
           <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setTask('new')}>Nova tarefa</Button>
         </div>
       )}
-      {u.t === 'quadro' && <Board p={p} onOpen={setTask} />}
-      {u.t === 'lista' && <TaskList p={p} onOpen={setTask} />}
-      {u.t === 'calendario' && <Calendar p={p} onOpen={setTask} />}
-      {u.t === 'linha' && <Timeline p={p} onOpen={setTask} />}
+      {u.t === 'quadro' && <Board p={p} onOpen={openTask} />}
+      {u.t === 'lista' && <TaskList p={p} onOpen={openTask} />}
+      {u.t === 'calendario' && <Calendar p={p} onOpen={openTask} />}
+      {u.t === 'linha' && <Timeline p={p} onOpen={openTask} />}
+      {u.t === 'responsavel' && <ByOwner p={p} onOpen={openTask} />}
+      {u.t === 'documentos' && <ProjectFiles p={p} />}
       {u.t === 'marcos' && <Milestones p={p} />}
       {u.t === 'equipe' && <Team p={p} />}
       {u.t === 'historico' && <History id={p.id} />}
 
       <TaskDialog p={p} task={task} onClose={() => setTask(null)} />
+      <TaskDrawer id={drawer} onClose={() => setDrawer(null)} onOpen={setDrawer} />
       <EditProject p={p} open={dialog === 'edit'} onClose={() => setDialog(null)} />
       <StatusDialog p={p} open={dialog === 'status'} onClose={() => setDialog(null)} />
       <StagesDialog p={p} open={dialog === 'stages'} onClose={() => setDialog(null)} />
@@ -127,6 +136,8 @@ function TaskCard({ t, p, onOpen, draggable }: { t: Task; p: ProjectDetail; onOp
       <button type="button" className="block w-full text-left" onClick={() => onOpen(t)}>
         <span className={clsx('block text-sm font-semibold', t.completedAt ? 'text-muted line-through' : 'text-ink')}>{t.title}</span>
         {ms && <span className="mt-1 flex items-center gap-1 text-xs text-muted"><Diamond className="h-3 w-3" aria-hidden />{ms.name}</span>}
+        {t.status === 'em_aprovacao' && <span className="mt-1 inline-block"><Chip tone="purple">Em aprovação</Chip></span>}
+        {t.status === 'aguardando' && <span className="mt-1 inline-block"><Chip tone="orange">Aguardando terceiros</Chip></span>}
         <span className="mt-2 flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 text-xs text-muted"><Avatar name={t.ownerName} size={22} />{t.ownerName.split(' ')[0]}</span>
           <span className={clsx('num text-xs', isLate(t) ? 'font-semibold text-danger' : 'text-muted')}>{t.dueOn ? fmtDate(t.dueOn) : 'sem prazo'}</span>
@@ -456,12 +467,12 @@ function EditProject({ p, open, onClose }: { p: ProjectDetail; open: boolean; on
   const toast = useToast();
   const refresh = useRefresh(p.id);
   const users = useLookups().data?.users ?? [];
-  const init = () => ({ name: p.name, description: p.description ?? '', kind: p.kind, priority: p.priority, startOn: p.startOn, dueOn: p.dueOn ?? '', ownerId: p.ownerId });
+  const init = () => ({ name: p.name, description: p.description ?? '', objective: p.objective ?? '', category: p.category ?? '', tags: p.tags.join(', '), kind: p.kind, priority: p.priority, startOn: p.startOn, dueOn: p.dueOn ?? '', ownerId: p.ownerId });
   const [f, setF] = useState(init);
   const [was, setWas] = useState(false);
   if (open !== was) { setWas(open); if (open) setF(init()); }
   const m = useMutation({
-    mutationFn: () => api(`/projects/${p.id}`, { method: 'PATCH', body: { rowVersion: p.rowVersion, ...f, description: f.description || null, dueOn: f.dueOn || null } }),
+    mutationFn: () => api(`/projects/${p.id}`, { method: 'PATCH', body: { rowVersion: p.rowVersion, ...f, description: f.description || null, objective: f.objective || null, category: f.category || null, tags: f.tags.split(/[,\s]+/).map((x) => x.replace(/^#/, '')).filter(Boolean), dueOn: f.dueOn || null } }),
     onSuccess: () => { refresh(); onClose(); toast({ tone: 'success', message: 'Projeto salvo' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -475,6 +486,11 @@ function EditProject({ p, open, onClose }: { p: ProjectDetail; open: boolean; on
           <FormField label="Início" htmlFor="ep-start"><Input id="ep-start" type="date" value={f.startOn} onChange={(e) => setF({ ...f, startOn: e.target.value })} /></FormField>
           <FormField label="Prazo final" htmlFor="ep-due"><Input id="ep-due" type="date" value={f.dueOn} onChange={(e) => setF({ ...f, dueOn: e.target.value })} /></FormField>
           <FormField label="Responsável" htmlFor="ep-owner" hint="Entra na equipe como gerente"><Select id="ep-owner" value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+        </div>
+        <FormField label="Objetivo" htmlFor="ep-obj"><Input id="ep-obj" value={f.objective} onChange={(e) => setF({ ...f, objective: e.target.value })} /></FormField>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <FormField label="Categoria" htmlFor="ep-cat"><Input id="ep-cat" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} /></FormField>
+          <FormField label="Etiquetas" htmlFor="ep-tags" hint="Separe por vírgula"><Input id="ep-tags" value={f.tags} onChange={(e) => setF({ ...f, tags: e.target.value })} /></FormField>
         </div>
         <FormField label="Descrição" htmlFor="ep-desc"><Textarea id="ep-desc" rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></FormField>
       </div>
@@ -566,5 +582,66 @@ function TemplateDialog({ p, open, onClose }: { p: ProjectDetail; open: boolean;
         <FormField label="Nome do modelo" htmlFor="tp-name" required><Input id="tp-name" value={name} onChange={(e) => setName(e.target.value)} /></FormField>
       </div>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------------------ por responsável e documentos
+function ByOwner({ p, onOpen }: { p: ProjectDetail; onOpen: (t: Task) => void }) {
+  const owners = [...new Set(p.tasks.map((t) => t.ownerId))].map((id) => ({ id, name: p.tasks.find((t) => t.ownerId === id)!.ownerName, tasks: p.tasks.filter((t) => t.ownerId === id) }))
+    .sort((a, b) => b.tasks.filter((t) => !t.completedAt).length - a.tasks.filter((t) => !t.completedAt).length);
+  if (!owners.length) return <section className="card"><EmptyState title="Nenhuma tarefa" /></section>;
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {owners.map((o) => {
+        const open = o.tasks.filter((t) => !t.completedAt);
+        const late = open.filter(isLate).length;
+        return (
+          <section key={o.id} className="card p-4" aria-label={`Tarefas de ${o.name}`}>
+            <h2 className="mb-2 flex items-center gap-2 font-bold text-ink"><Avatar name={o.name} size={28} />{o.name}<span className="num text-sm font-normal text-muted">{open.length} em aberto{late ? ` · ${late} atrasada(s)` : ''} · {o.tasks.length - open.length} concluída(s)</span></h2>
+            <ul className="divide-y divide-line">
+              {[...open, ...o.tasks.filter((t) => t.completedAt)].map((t) => (
+                <li key={t.id} className="flex items-center gap-2 py-2">
+                  <button type="button" onClick={() => onOpen(t)} className={clsx('min-w-0 flex-1 truncate text-left text-sm hover:underline', t.completedAt ? 'text-muted line-through' : 'text-ink')}>{t.title}</button>
+                  <span className="text-xs text-muted">{p.stages.find((s) => s.id === t.stageId)?.name}</span>
+                  <span className={clsx('num w-20 text-right text-xs', isLate(t) ? 'font-semibold text-danger' : 'text-muted')}>{t.dueOn ? fmtDate(t.dueOn) : '—'}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProjectFiles({ p }: { p: ProjectDetail }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['project', p.id, 'files'], queryFn: () => api<{ items: { id: string; name: string; sizeBytes: number; createdAt: string; uploadedBy: string | null; activityId: string | null; taskTitle: string | null }[] }>(`/projects/${p.id}/files`) });
+  const input = useRef<HTMLInputElement>(null);
+  const up = useMutation({
+    mutationFn: async (file: File) => { if (file.size > MAX_UPLOAD_BYTES) throw new Error('Arquivo maior que 3 MB.'); return api(`/projects/${p.id}/files`, { method: 'POST', body: { name: file.name, mime: file.type, data: await fileToBase64(file) } }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['project', p.id] }); toast({ tone: 'success', message: 'Documento anexado' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  return (
+    <section className="card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <div><h2 className="text-lg font-bold text-ink">Documentos</h2><p className="text-sm text-muted">Arquivos do projeto e os anexados às tarefas dele. Até 3 MB cada.</p></div>
+        {p.can.work && <Button variant="primary" icon={<Paperclip className="h-4 w-4" />} loading={up.isPending} onClick={() => input.current?.click()}>Anexar documento</Button>}
+        <input ref={input} type="file" className="sr-only" aria-label="Arquivo do projeto" onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate(f); e.target.value = ''; }} />
+      </div>
+      {q.isLoading ? <LoadingRows rows={3} /> : !q.data?.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum documento" /></div> : (
+        <ul className="divide-y divide-line border-t border-line">
+          {q.data.items.map((f) => (
+            <li key={f.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
+              <a className="min-w-0 flex-1 truncate font-semibold text-primary hover:underline" href={`/api/v1/projects/${p.id}/files/${f.id}`} download><Download className="mr-1 inline h-4 w-4" aria-hidden />{f.name}</a>
+              {f.taskTitle && <span className="text-xs text-muted">da tarefa: {f.taskTitle}</span>}
+              <span className="num text-xs text-muted">{fmtBytes(f.sizeBytes)} · {f.uploadedBy} · {fmtDate(f.createdAt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

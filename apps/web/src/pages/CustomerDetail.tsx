@@ -1,4 +1,4 @@
-import { LinkedProjects } from '../features/projects/shared';
+import { WorkLinks } from '../features/tasks/WorkLinks';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -126,7 +126,7 @@ export function CustomerDetailPage() {
             { key: 'atividades', label: 'Interações', count: acts.data?.total },
             { key: 'sucesso', label: 'Sucesso do Cliente' },
             { key: 'contratos', label: 'Contratos' },
-            ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : []),
+            ...(can('projetos') || can('atividades') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
           ]} />
@@ -158,7 +158,7 @@ export function CustomerDetailPage() {
             </dl>
           )}
           {tab === 'sucesso' && <Account360 contactId={c.id} />}
-          {tab === 'projetos' && <LinkedProjects prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
+          {tab === 'projetos' && <WorkLinks prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
           {tab === 'oportunidades' && (c.opportunities.length === 0 ? <EmptyState title="Nenhuma oportunidade visível" /> : (

@@ -191,3 +191,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Por quê:** a pessoa tem uma agenda só; indicadores e o motor de eventos (Etapa 5) leem um lugar só. Vínculos sem FK não travam a limpeza da base.
 - **Consequência:** concluir pela agenda move a tarefa no quadro (e o contrário). Responsável de tarefa precisa estar na equipe (observador não). Etapa 4 estende a mesma tabela (subtarefas, checklist, dependências, recorrência, tempo).
 
+## ADR-045 — Regras de conclusão da tarefa num ponto só (21/10/2026)
+- **Decisão:** toda conclusão passa por `applyStatus` (agenda, tela de tarefas, quadro do projeto): confere dependências e subtarefas, desvia para aprovação quando exigida, cria a próxima ocorrência da recorrência (chave `série:data`, idempotente) e move a tarefa no quadro do projeto. Um gatilho no banco mantém `status = 'concluida'` ⇔ `completed_at` preenchido.
+- **Checklist** tem endpoint por item (incluir, marcar, renomear, retirar) com bloqueio de linha, sem `rowVersion`, para várias pessoas marcarem ao mesmo tempo sem conflito.
+- **Avisos** reaproveitam o ícone de Menções (consulta única que une negociação e tarefas), sem criar um segundo sistema de notificação.
+- **Por quê:** o mesmo registro aparece em várias telas; regra espalhada vira divergência.
+

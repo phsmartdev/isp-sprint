@@ -9,11 +9,13 @@ import { api } from '../lib/api';
 import { Avatar } from '../components/ui/primitives';
 
 export type Participant = { id: string; name: string; jobTitle: string | null; hasAvatar: boolean };
-export const useParticipants = (oppId: string) => useQuery({ queryKey: ['participants', oppId], queryFn: () => api<{ items: Participant[] }>(`/opportunities/${oppId}/participants`), staleTime: 120_000 });
+export const useParticipants = (oppId: string | undefined) => useQuery({ queryKey: ['participants', oppId], enabled: !!oppId, queryFn: () => api<{ items: Participant[] }>(`/opportunities/${oppId}/participants`), staleTime: 120_000 });
 
 export type MentionHandle = { clear: () => void; focus: () => void };
 type Props = {
-  oppId: string;
+  /** Negociação: só quem tem acesso a ela. Fora dela (tarefas), passe `people`. */
+  oppId?: string;
+  people?: Participant[];
   value: string;
   onChange: (v: string) => void;
   onSubmit?: () => void;
@@ -33,12 +35,13 @@ export function mentionsIn(text: string, picked: Participant[]) {
 }
 
 export const MentionInput = forwardRef<MentionHandle, Props & { picked: Participant[]; onPick: (p: Participant) => void }>(function MentionInput(
-  { oppId, value, onChange, onSubmit, enterSends, placeholder, label, rows = 2, className, onPick },
+  { oppId, people: given, value, onChange, onSubmit, enterSends, placeholder, label, rows = 2, className, onPick },
   ref,
 ) {
   const id = useId();
   const ta = useRef<HTMLTextAreaElement>(null);
-  const people = useParticipants(oppId).data?.items ?? [];
+  const fetched = useParticipants(given ? undefined : oppId).data?.items;
+  const people = given ?? fetched ?? [];
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   useImperativeHandle(ref, () => ({ clear: () => onChange(''), focus: () => ta.current?.focus() }));
