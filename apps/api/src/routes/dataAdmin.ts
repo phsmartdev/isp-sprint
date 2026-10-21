@@ -101,6 +101,9 @@ export const dataAdminRoutes = [
           await tx.delete(s.activityReads).where(inArray(s.activityReads.activityId, acts));
           // ações 5W2H das intervenções são as próprias tarefas: saem junto (a intervenção e o histórico dela ficam)
           await tx.delete(s.interventionActions).where(eq(s.interventionActions.tenantId, t));
+          // reuniões dos rituais e decisões só apontam para a atividade: perdem o vínculo, o registro de gestão fica
+          await tx.update(s.ritualMeetings).set({ activityId: null }).where(eq(s.ritualMeetings.tenantId, t));
+          await tx.update(s.decisions).set({ followUpTaskId: null }).where(eq(s.decisions.tenantId, t));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto
