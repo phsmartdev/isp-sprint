@@ -99,6 +99,8 @@ export const dataAdminRoutes = [
           await tx.delete(s.businessEventSync).where(eq(s.businessEventSync.tenantId, t));
           for (const tbl of [s.activityDependencies, s.activityComments, s.activityTimeEntries, s.workFiles]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
           await tx.delete(s.activityReads).where(inArray(s.activityReads.activityId, acts));
+          // ações 5W2H das intervenções são as próprias tarefas: saem junto (a intervenção e o histórico dela ficam)
+          await tx.delete(s.interventionActions).where(eq(s.interventionActions.tenantId, t));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto
