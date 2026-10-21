@@ -232,6 +232,13 @@
       "when": 1792592601197,
       "tag": "0032_business_events",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792593878490,
+      "tag": "0033_indicators_goals_scorecards",
+      "breakpoints": true
     }
   ]
 }

@@ -9,3 +9,4 @@ export * from './cs';
 export * from './projects';
 export * from './tasks';
 export * from './performance';
+export * from './indicators';

@@ -203,3 +203,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Atribuição:** créditos fixados na criação com a versão da regra; "Resultado" soma 100% (o arredondamento fica com o responsável); "Participação" e "Gestão" reconhecem sem somar no individual.
 - **Imutabilidade:** gatilho permite mudar só a validação do evento; créditos, revisões e configuração são append-only.
 
+## ADR-047 — Indicadores sobre eventos, fórmula interpretada e base para a Gestão de Resultados (21/10/2026)
+- **Decisão:** indicadores leem só `business_events` válidos e créditos; campos e filtros vêm de listas fechadas no domínio e todo valor é parametrizado. Fórmulas usam um analisador próprio (sem `eval`/`Function`).
+- **Metas** guardam alvo original, versão e consolidação; mudanças após o início exigem motivo e autorização. Resultado do período é fechado em `goal_results` (append-only) — é a "apuração oficial" que a Gestão de Resultados usará para as intervenções (vermelho; dois amarelos seguidos).
+- **Objetivos** em três níveis, encadeados (substituíram o desenho inicial de OKR simples: OKR = objetivo + metas como resultados-chave).
+- **Ordem combinada com o usuário:** Etapa 6 → fases da Gestão de Resultados → Etapas 7–10.
+

@@ -7,7 +7,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, type AnyPgColumn,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, doublePrecision, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -2339,3 +2339,203 @@ export const businessEventSync = pgTable('business_event_sync', {
   lastRunAt: ts('last_run_at').notNull(),
   stats: jsonb('stats').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
 });
+
+// --------------------------------------------------------------- desempenho: indicadores, metas/OKRs e scorecards
+
+export const indicators = pgTable(
+  'indicators',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    key: text('key').notNull(),
+    active: boolean('active').notNull().default(true),
+    currentVersion: integer('current_version').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('indicators_key_uq').on(t.tenantId, t.key) }),
+);
+
+/** Definição do indicador por versão (append-only): mudar a fórmula não reescreve resultados já fechados. */
+export const indicatorVersions = pgTable(
+  'indicator_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    indicatorId: uuid('indicator_id').notNull().references(() => indicators.id),
+    version: integer('version').notNull(),
+    def: jsonb('def').$type<import('@isp/domain').IndicatorDef>().notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('indicator_versions_uq').on(t.indicatorId, t.version) }),
+);
+
+/** Objetivos estratégicos, táticos e operacionais, encadeados (OKR = objetivo + metas como resultados-chave). */
+export const objectives = pgTable(
+  'objectives',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    title: text('title').notNull(),
+    description: text('description'),
+    level: text('level').notNull().default('estrategico'),
+    parentId: uuid('parent_id').references((): AnyPgColumn => objectives.id),
+    area: text('area'),
+    teamId: uuid('team_id'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    sponsorId: uuid('sponsor_id').references(() => users.id),
+    priority: text('priority').notNull().default('media'),
+    periodStart: date('period_start', { mode: 'string' }).notNull(),
+    periodEnd: date('period_end', { mode: 'string' }).notNull(),
+    status: text('status').notNull().default('ativo'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    levelCk: check('objectives_level_ck', inList('level', ['estrategico', 'tatico', 'operacional'])),
+    statusCk: check('objectives_status_ck', inList('status', ['ativo', 'encerrado', 'cancelado'])),
+    priorityCk: check('objectives_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
+    idx: index('objectives_idx').on(t.tenantId, t.periodEnd),
+  }),
+);
+
+export const goals = pgTable(
+  'goals',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    title: text('title').notNull(),
+    scope: text('scope').notNull(),
+    category: text('category').notNull().default('comercial'),
+    indicatorId: uuid('indicator_id').references(() => indicators.id),
+    /** meta manual (sem indicador): progresso por apontamentos; unidade livre */
+    manualUnit: text('manual_unit'),
+    userId: uuid('user_id').references(() => users.id),
+    teamId: uuid('team_id'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    periodType: text('period_type').notNull(),
+    periodStart: date('period_start', { mode: 'string' }).notNull(),
+    periodEnd: date('period_end', { mode: 'string' }).notNull(),
+    target: doublePrecision('target').notNull(),
+    objectiveId: uuid('objective_id').references(() => objectives.id),
+    /** desdobramento em cascata: meta superior (Diretoria → Gestão → Liderança → pessoa) */
+    parentGoalId: uuid('parent_goal_id').references((): AnyPgColumn => goals.id),
+    weight: integer('weight').notNull().default(1),
+    /** como as metas filhas consolidam nesta (nem tudo se soma) */
+    consolidation: text('consolidation').notNull().default('indicador'),
+    /** alvo original: alterações depois do início exigem motivo e autorização e não apagam o original */
+    originalTarget: doublePrecision('original_target').notNull(),
+    version: integer('version').notNull().default(1),
+    notes: text('notes'),
+    status: text('status').notNull().default('ativa'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    scopeCk: check('goals_scope_ck', inList('scope', ['individual', 'equipe', 'empresa'])),
+    statusCk: check('goals_status_ck', inList('status', ['ativa', 'cancelada'])),
+    periodCk: check('goals_period_ck', inList('period_type', ['semana', 'mes', 'trimestre', 'ano', 'personalizado'])),
+    consolidationCk: check('goals_consolidation_ck', inList('consolidation', ['indicador', 'soma', 'media_ponderada', 'media_simples', 'nao_agregavel'])),
+    parentIdx: index('goals_parent_idx').on(t.tenantId, t.parentGoalId),
+    idx: index('goals_idx').on(t.tenantId, t.periodEnd, t.userId),
+  }),
+);
+
+/** Histórico da meta (append-only): criação, alterações de alvo, cancelamento. */
+export const goalEvents = pgTable(
+  'goal_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('goal_events_idx').on(t.tenantId, t.goalId) }),
+);
+
+/** Apontamentos de metas manuais (append-only). */
+export const goalCheckins = pgTable(
+  'goal_checkins',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    value: doublePrecision('value').notNull(),
+    note: text('note'),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('goal_checkins_idx').on(t.tenantId, t.goalId) }),
+);
+
+/** Resultado fechado da meta ao fim do período (append-only; uma por meta). */
+export const goalResults = pgTable(
+  'goal_results',
+  {
+    goalId: uuid('goal_id').primaryKey().references(() => goals.id),
+    tenantId: tenantId(),
+    value: doublePrecision('value'),
+    target: doublePrecision('target').notNull(),
+    attainment: doublePrecision('attainment'),
+    status: text('status').notNull(),
+    indicatorVersion: integer('indicator_version'),
+    computedAt: createdAt(),
+  },
+);
+
+export const scorecards = pgTable(
+  'scorecards',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    description: text('description'),
+    appliesProfiles: text('applies_profiles').array().notNull().default(sql`'{}'::text[]`),
+    appliesJobTitles: text('applies_job_titles').array().notNull().default(sql`'{}'::text[]`),
+    appliesTeamIds: uuid('applies_team_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    periodicity: text('periodicity').notNull().default('mes'),
+    active: boolean('active').notNull().default(true),
+    currentVersion: integer('current_version').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('scorecards_idx').on(t.tenantId, t.active) }),
+);
+
+export const scorecardVersions = pgTable(
+  'scorecard_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    scorecardId: uuid('scorecard_id').notNull().references(() => scorecards.id),
+    version: integer('version').notNull(),
+    def: jsonb('def').$type<import('@isp/domain').ScorecardDef>().notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('scorecard_versions_uq').on(t.scorecardId, t.version) }),
+);
+
+/** Composição explícita para quem tem mais de uma função (pesos normalizados). */
+export const scorecardAssignments = pgTable(
+  'scorecard_assignments',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id),
+    scorecardId: uuid('scorecard_id').notNull().references(() => scorecards.id),
+    tenantId: tenantId(),
+    weight: integer('weight').notNull().default(100),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.scorecardId] }) }),
+);

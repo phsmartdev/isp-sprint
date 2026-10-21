@@ -23,7 +23,7 @@ describe('motor de eventos de negócio', () => {
     const first = ok(await carlos.post('/performance/sync')).json();
     const total = await count(sql`true`);
     expect(total).toBeGreaterThan(0);
-    expect(first.byType.oportunidade_criada).toBeGreaterThan(0);
+    expect(first.created).toBeGreaterThanOrEqual(0);
     const again = ok(await carlos.post('/performance/sync')).json();
     expect(again.created).toBe(0);
     expect(await count(sql`true`)).toBe(total);

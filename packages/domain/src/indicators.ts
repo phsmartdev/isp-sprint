@@ -1,0 +1,394 @@
+/**
+ * Indicadores, metas/OKRs e scorecards (Etapa 6, 21/10/2026).
+ *
+ * Indicadores são calculados sobre os eventos de negócio válidos (Etapa 5), com o crédito de cada pessoa.
+ * Fórmulas administrativas usam um interpretador próprio e restrito (números, variáveis declaradas,
+ * + − × ÷, parênteses, min/max/abs/round): nenhum código é executado.
+ */
+import { EVENT_TYPE_KEYS } from './performance';
+
+// ------------------------------------------------------------------ definição
+export const INDICATOR_CALCS = ['contagem', 'soma', 'media', 'percentual', 'taxa', 'tempo', 'valor', 'razao', 'formula'] as const;
+export type IndicatorCalc = (typeof INDICATOR_CALCS)[number];
+export const INDICATOR_CALC_LABELS: Record<IndicatorCalc, string> = {
+  contagem: 'Contagem', soma: 'Soma', media: 'Média', percentual: 'Percentual (parte ÷ total × 100)', taxa: 'Taxa (por 100)', tempo: 'Tempo médio', valor: 'Valor monetário', razao: 'Razão (A ÷ B)', formula: 'Fórmula',
+};
+export const INDICATOR_UNITS = ['quantidade', 'reais', 'percentual', 'horas', 'dias', 'minutos', 'indice'] as const;
+export type IndicatorUnit = (typeof INDICATOR_UNITS)[number];
+export const INDICATOR_UNIT_LABELS: Record<IndicatorUnit, string> = { quantidade: 'Quantidade', reais: 'R$', percentual: '%', horas: 'Horas', dias: 'Dias', minutos: 'Minutos', indice: 'Índice' };
+export const PERIOD_TYPES = ['semana', 'mes', 'trimestre', 'ano', 'personalizado'] as const;
+export type PeriodType = (typeof PERIOD_TYPES)[number];
+export const PERIOD_LABELS: Record<PeriodType, string> = { semana: 'Semanal', mes: 'Mensal', trimestre: 'Trimestral', ano: 'Anual', personalizado: 'Personalizado' };
+export const INDICATOR_CATEGORIES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'qualidade', 'prazos', 'colaboracao'] as const;
+export const INDICATOR_CATEGORY_LABELS: Record<(typeof INDICATOR_CATEGORIES)[number], string> = {
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', qualidade: 'Qualidade', prazos: 'Prazos', colaboracao: 'Colaboração',
+};
+
+/** Medidas sobre os eventos. `peso` = crédito de resultado da pessoa (1 venda dividida meio a meio conta 0,5 para cada). */
+export const MEASURES = ['contagem', 'soma_valor', 'media_valor', 'media_campo'] as const;
+export type Measure = (typeof MEASURES)[number];
+/** Campos numéricos do contexto que podem ser medidos (lista fechada). */
+export const NUMERIC_FIELDS = { minutesToComplete: 'Minutos entre criar e concluir', hoursToDecide: 'Horas para decidir', cycleDays: 'Dias do ciclo (criação → evento)', checklist: 'Itens de checklist' } as const;
+export type NumericField = keyof typeof NUMERIC_FIELDS;
+/** Filtros permitidos (lista fechada; valor sempre parametrizado). */
+export const FILTER_FIELDS = {
+  onTime: { label: 'No prazo', type: 'bool' }, selfCreated: { label: 'Criada pela própria pessoa', type: 'bool' }, approved: { label: 'Entrega aprovada', type: 'bool' }, hadDue: { label: 'Tinha prazo', type: 'bool' },
+  saleType: { label: 'Tipo de venda', type: 'text' }, priority: { label: 'Prioridade', type: 'text' }, kind: { label: 'Tipo', type: 'text' }, outcome: { label: 'Resultado', type: 'text' }, level: { label: 'Alçada', type: 'text' },
+} as const;
+export type FilterField = keyof typeof FILTER_FIELDS;
+export type SourceFilter = { field: FilterField; op: 'eq' | 'ne'; value: string | boolean };
+export type CreditScope = 'direto' | 'participacao' | 'gestao' | 'qualquer';
+export type Source = { event: string; measure: Measure; field?: NumericField; filters?: SourceFilter[]; credit?: CreditScope };
+
+export type IndicatorDef = {
+  name: string;
+  description?: string;
+  category: (typeof INDICATOR_CATEGORIES)[number];
+  calc: IndicatorCalc;
+  unit: IndicatorUnit;
+  direction: 'maior' | 'menor';
+  period: Exclude<PeriodType, 'personalizado'>;
+  /** contagem/soma/media/tempo/valor usam `base`; percentual/taxa/razao usam `numerator` e `denominator`; fórmula usa `vars` + `expr`. */
+  base?: Source;
+  numerator?: Source;
+  denominator?: Source;
+  vars?: Record<string, Source>;
+  expr?: string;
+  /** perfis a que se aplica (vazio = todos) */
+  profiles?: string[];
+  /** meta e peso padrão (usados quando a meta ou o scorecard não informam) */
+  target?: number | null;
+  weight?: number;
+  /** abaixo desta amostra o resultado aparece como incompleto */
+  minSample?: number;
+};
+
+export function validateSource(s: Source | undefined, path: string): string[] {
+  if (!s) return [`${path}: informe a origem dos dados.`];
+  const e: string[] = [];
+  if (!(EVENT_TYPE_KEYS as string[]).includes(s.event)) e.push(`${path}: evento desconhecido.`);
+  if (!MEASURES.includes(s.measure)) e.push(`${path}: medida inválida.`);
+  if (s.measure === 'media_campo' && (!s.field || !(s.field in NUMERIC_FIELDS))) e.push(`${path}: escolha o campo da média.`);
+  for (const f of s.filters ?? []) {
+    if (!(f.field in FILTER_FIELDS)) e.push(`${path}: filtro desconhecido.`);
+    else if (FILTER_FIELDS[f.field].type === 'bool' && typeof f.value !== 'boolean') e.push(`${path}: o filtro "${FILTER_FIELDS[f.field].label}" aceita só sim/não.`);
+    if (!['eq', 'ne'].includes(f.op)) e.push(`${path}: operador inválido.`);
+  }
+  if (s.credit && !['direto', 'participacao', 'gestao', 'qualquer'].includes(s.credit)) e.push(`${path}: crédito inválido.`);
+  return e;
+}
+
+export function validateIndicator(d: IndicatorDef): string[] {
+  const e: string[] = [];
+  if (!d.name || d.name.trim().length < 3) e.push('Dê um nome ao indicador (mínimo 3 caracteres).');
+  if (!INDICATOR_CALCS.includes(d.calc)) e.push('Tipo de cálculo inválido.');
+  if (!INDICATOR_UNITS.includes(d.unit)) e.push('Unidade inválida.');
+  if (!['maior', 'menor'].includes(d.direction)) e.push('Direção inválida.');
+  if (['contagem', 'soma', 'media', 'tempo', 'valor'].includes(d.calc)) e.push(...validateSource(d.base, 'Origem'));
+  if (['percentual', 'taxa', 'razao'].includes(d.calc)) e.push(...validateSource(d.numerator, 'Parte (numerador)'), ...validateSource(d.denominator, 'Total (denominador)'));
+  if (d.calc === 'formula') {
+    const names = Object.keys(d.vars ?? {});
+    if (!names.length) e.push('A fórmula precisa de pelo menos uma variável.');
+    for (const n of names) {
+      if (!/^[a-z][a-z0-9_]{0,19}$/.test(n)) e.push(`Variável "${n}": use letras minúsculas, números e _ (começando por letra).`);
+      e.push(...validateSource(d.vars![n], `Variável ${n}`));
+    }
+    const p = parseFormula(d.expr ?? '', names);
+    if (!p.ok) e.push(`Fórmula: ${p.error}`);
+  }
+  if (d.weight !== undefined && (!(d.weight >= 0) || d.weight > 100)) e.push('Peso entre 0 e 100.');
+  if (d.minSample !== undefined && (!Number.isInteger(d.minSample) || d.minSample < 0)) e.push('Amostra mínima deve ser inteira ≥ 0.');
+  return e;
+}
+
+// ------------------------------------------------------------------ fórmula segura
+type Tok = { t: 'num'; v: number } | { t: 'id'; v: string } | { t: 'op'; v: string };
+export type Ast = { k: 'num'; v: number } | { k: 'var'; v: string } | { k: 'neg'; a: Ast } | { k: 'bin'; op: '+' | '-' | '*' | '/'; a: Ast; b: Ast } | { k: 'fn'; f: 'min' | 'max' | 'abs' | 'round'; args: Ast[] };
+const FUNCS = { min: [2, 2], max: [2, 2], abs: [1, 1], round: [1, 2] } as const;
+
+function tokenize(src: string): Tok[] | string {
+  const out: Tok[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i]!;
+    if (/\s/.test(c)) { i++; continue; }
+    if (/[0-9.]/.test(c)) {
+      let j = i;
+      // vírgula só é decimal entre dígitos ("1,5"); com espaço ou ";" separa argumentos
+      while (j < src.length && (/[0-9.]/.test(src[j]!) || (src[j] === ',' && /[0-9]/.test(src[j - 1] ?? '') && /[0-9]/.test(src[j + 1] ?? '')))) j++;
+      const raw = src.slice(i, j).replace(',', '.');
+      if (!/^\d+(\.\d+)?$|^\.\d+$/.test(raw)) return `número inválido "${src.slice(i, j)}"`;
+      out.push({ t: 'num', v: Number(raw) });
+      i = j;
+      continue;
+    }
+    if (/[a-z_]/i.test(c)) {
+      let j = i;
+      while (j < src.length && /[a-z0-9_]/i.test(src[j]!)) j++;
+      out.push({ t: 'id', v: src.slice(i, j).toLowerCase() });
+      i = j;
+      continue;
+    }
+    if ('+-*/()×÷;'.includes(c)) { out.push({ t: 'op', v: c === '×' ? '*' : c === '÷' ? '/' : c === ';' ? ',' : c }); i++; continue; }
+    if (c === ',') { out.push({ t: 'op', v: ',' }); i++; continue; }
+    return `caractere não permitido "${c}"`;
+  }
+  return out;
+}
+
+/** Analisa a fórmula. Só aceita as variáveis declaradas. Nunca executa código. */
+export function parseFormula(src: string, vars: string[]): { ok: true; ast: Ast } | { ok: false; error: string } {
+  if (!src.trim()) return { ok: false, error: 'escreva a fórmula' };
+  if (src.length > 300) return { ok: false, error: 'fórmula longa demais (máximo 300 caracteres)' };
+  const toks = tokenize(src);
+  if (typeof toks === 'string') return { ok: false, error: toks };
+  let p = 0;
+  let depth = 0;
+  const peek = () => toks[p];
+  const take = (v?: string) => { const t = toks[p]; if (v && !(t?.t === 'op' && t.v === v)) throw new Error(`esperava "${v}"`); p++; return t; };
+  const expr = (): Ast => {
+    let a = term();
+    while (peek()?.t === 'op' && ['+', '-'].includes(peek()!.v as string)) { const op = take()!.v as '+' | '-'; a = { k: 'bin', op, a, b: term() }; }
+    return a;
+  };
+  const term = (): Ast => {
+    let a = unary();
+    while (peek()?.t === 'op' && ['*', '/'].includes(peek()!.v as string)) { const op = take()!.v as '*' | '/'; a = { k: 'bin', op, a, b: unary() }; }
+    return a;
+  };
+  const unary = (): Ast => {
+    if (peek()?.t === 'op' && peek()!.v === '-') { take(); return { k: 'neg', a: unary() }; }
+    if (peek()?.t === 'op' && peek()!.v === '+') { take(); return unary(); }
+    return atom();
+  };
+  const atom = (): Ast => {
+    const t = peek();
+    if (!t) throw new Error('fórmula incompleta');
+    if (t.t === 'num') { p++; return { k: 'num', v: t.v }; }
+    if (t.t === 'id') {
+      p++;
+      if (t.v in FUNCS) {
+        if (++depth > 20) throw new Error('aninhamento demais');
+        take('(');
+        const args = [expr()];
+        while (peek()?.t === 'op' && peek()!.v === ',') { take(); args.push(expr()); }
+        take(')');
+        depth--;
+        const [lo, hi] = FUNCS[t.v as keyof typeof FUNCS];
+        if (args.length < lo || args.length > hi) throw new Error(`${t.v} recebe ${lo === hi ? lo : `${lo} ou ${hi}`} valor(es) — separe com "; " (a vírgula entre dígitos é decimal)`);
+        return { k: 'fn', f: t.v as keyof typeof FUNCS, args };
+      }
+      if (!vars.includes(t.v)) throw new Error(`variável "${t.v}" não declarada`);
+      return { k: 'var', v: t.v };
+    }
+    if (t.v === '(') {
+      if (++depth > 20) throw new Error('aninhamento demais');
+      take();
+      const a = expr();
+      take(')');
+      depth--;
+      return a;
+    }
+    throw new Error(`símbolo inesperado "${t.v}"`);
+  };
+  try {
+    const ast = expr();
+    if (p < toks.length) return { ok: false, error: `símbolo inesperado "${(toks[p] as { v: unknown }).v}"` };
+    return { ok: true, ast };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+/** Avalia; divisão por zero ou variável sem dado → null (o indicador fica "sem base", nunca inventado). */
+export function evalFormula(ast: Ast, vars: Record<string, number | null>): number | null {
+  const ev = (n: Ast): number | null => {
+    switch (n.k) {
+      case 'num': return n.v;
+      case 'var': return vars[n.v] ?? null;
+      case 'neg': { const a = ev(n.a); return a === null ? null : -a; }
+      case 'bin': {
+        const a = ev(n.a); const b = ev(n.b);
+        if (a === null || b === null) return null;
+        if (n.op === '+') return a + b;
+        if (n.op === '-') return a - b;
+        if (n.op === '*') return a * b;
+        return b === 0 ? null : a / b;
+      }
+      case 'fn': {
+        const xs = n.args.map(ev);
+        if (xs.some((x) => x === null)) return null;
+        const v = xs as number[];
+        if (n.f === 'min') return Math.min(v[0]!, v[1]!);
+        if (n.f === 'max') return Math.max(v[0]!, v[1]!);
+        if (n.f === 'abs') return Math.abs(v[0]!);
+        const d = Math.max(0, Math.min(6, Math.trunc(v[1] ?? 0)));
+        return Math.round(v[0]! * 10 ** d) / 10 ** d;
+      }
+    }
+  };
+  const r = ev(ast);
+  return r === null || !Number.isFinite(r) ? null : r;
+}
+
+/** Combina as partes já apuradas no valor final do indicador. */
+export function combine(d: Pick<IndicatorDef, 'calc' | 'expr' | 'vars'>, parts: { base?: number | null; num?: number | null; den?: number | null; vars?: Record<string, number | null> }): number | null {
+  switch (d.calc) {
+    case 'percentual': return parts.den ? ((parts.num ?? 0) / parts.den) * 100 : null;
+    case 'taxa': return parts.den ? ((parts.num ?? 0) / parts.den) * 100 : null;
+    case 'razao': return parts.den ? (parts.num ?? 0) / parts.den : null;
+    case 'formula': { const p = parseFormula(d.expr ?? '', Object.keys(d.vars ?? {})); return p.ok ? evalFormula(p.ast, parts.vars ?? {}) : null; }
+    default: return parts.base ?? null;
+  }
+}
+
+// ------------------------------------------------------------------ períodos
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const utc = (s: string) => new Date(`${s}T12:00:00Z`);
+export function periodRange(type: Exclude<PeriodType, 'personalizado'>, ref: string): { from: string; to: string } {
+  const d = utc(ref);
+  if (type === 'semana') {
+    const wd = (d.getUTCDay() + 6) % 7;
+    const from = new Date(d); from.setUTCDate(d.getUTCDate() - wd);
+    const to = new Date(from); to.setUTCDate(from.getUTCDate() + 6);
+    return { from: iso(from), to: iso(to) };
+  }
+  if (type === 'mes') return { from: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 12))), to: iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0, 12))) };
+  if (type === 'trimestre') { const q = Math.floor(d.getUTCMonth() / 3) * 3; return { from: iso(new Date(Date.UTC(d.getUTCFullYear(), q, 1, 12))), to: iso(new Date(Date.UTC(d.getUTCFullYear(), q + 3, 0, 12))) }; }
+  return { from: `${d.getUTCFullYear()}-01-01`, to: `${d.getUTCFullYear()}-12-31` };
+}
+/** Período imediatamente anterior, de mesmo tamanho (para "atual × anterior"). */
+export function previousRange(r: { from: string; to: string }, type?: PeriodType): { from: string; to: string } {
+  if (type && type !== 'personalizado') { const before = utc(r.from); before.setUTCDate(before.getUTCDate() - 1); return periodRange(type, iso(before)); }
+  const days = Math.round((utc(r.to).getTime() - utc(r.from).getTime()) / 86_400_000) + 1;
+  const to = utc(r.from); to.setUTCDate(to.getUTCDate() - 1);
+  const from = new Date(to); from.setUTCDate(to.getUTCDate() - days + 1);
+  return { from: iso(from), to: iso(to) };
+}
+
+// ------------------------------------------------------------------ metas
+export const GOAL_SCOPES = ['individual', 'equipe', 'empresa'] as const;
+export type GoalScope = (typeof GOAL_SCOPES)[number];
+export const GOAL_SCOPE_LABELS: Record<GoalScope, string> = { individual: 'Individual', equipe: 'Equipe', empresa: 'Empresa' };
+export const GOAL_CATEGORIES = ['comercial', 'projetos', 'operacional', 'qualidade', 'okr'] as const;
+export const GOAL_CATEGORY_LABELS: Record<(typeof GOAL_CATEGORIES)[number], string> = { comercial: 'Comercial', projetos: 'Projetos', operacional: 'Operacional', qualidade: 'Qualidade', okr: 'Resultado-chave (OKR)' };
+export type GoalStatus = 'atingida' | 'no_ritmo' | 'em_risco' | 'abaixo' | 'nao_atingida' | 'indisponivel' | 'nao_iniciada';
+export const GOAL_STATUS_LABELS: Record<GoalStatus, string> = { atingida: 'Atingida', no_ritmo: 'No ritmo', em_risco: 'Em risco', abaixo: 'Abaixo do ritmo', nao_atingida: 'Não atingida', indisponivel: 'Sem dados', nao_iniciada: 'Não iniciada' };
+
+/** Quanto do alvo foi cumprido (0–∞). Para "menor é melhor", estar abaixo do alvo é 100%+. */
+export function attainment(value: number | null, target: number | null, direction: 'maior' | 'menor'): number | null {
+  if (value === null || target === null) return null;
+  if (direction === 'maior') return target === 0 ? (value >= 0 ? 1 : 0) : value / target;
+  if (value <= 0) return value <= target ? 1.2 : 0;
+  return target / value;
+}
+
+/**
+ * Situação da meta pelo ritmo: compara o cumprido com a fração do período já decorrida.
+ * Para "menor é melhor" (tempo, retrabalho) vale o valor atual contra o alvo, sem ritmo.
+ */
+export function goalStatus(value: number | null, target: number, direction: 'maior' | 'menor', range: { from: string; to: string }, today: string): { status: GoalStatus; attainment: number | null; expected: number | null } {
+  if (today < range.from) return { status: 'nao_iniciada', attainment: null, expected: null };
+  if (value === null) return { status: 'indisponivel', attainment: null, expected: null };
+  const att = attainment(value, target, direction);
+  const total = (utc(range.to).getTime() - utc(range.from).getTime()) / 86_400_000 + 1;
+  const elapsed = Math.min(total, (utc(today).getTime() - utc(range.from).getTime()) / 86_400_000 + 1);
+  const frac = Math.max(0, Math.min(1, elapsed / total));
+  const ended = today > range.to;
+  if (att !== null && att >= 1 && (direction === 'maior' || ended)) return { status: 'atingida', attainment: att, expected: direction === 'maior' ? target * frac : target };
+  if (ended) return { status: att !== null && att >= 1 ? 'atingida' : 'nao_atingida', attainment: att, expected: target };
+  if (direction === 'menor') return { status: att !== null && att >= 1 ? 'no_ritmo' : att !== null && att >= 0.85 ? 'em_risco' : 'abaixo', attainment: att, expected: target };
+  const expected = target * frac;
+  const pace = expected > 0 ? value / expected : 1;
+  return { status: pace >= 0.95 ? 'no_ritmo' : pace >= 0.75 ? 'em_risco' : 'abaixo', attainment: att, expected };
+}
+
+// ------------------------------------------------------------------ scorecards
+export type ScorecardItem = { indicatorId: string; weight: number; target?: number | null; cap?: number };
+export type ScorecardDef = { items: ScorecardItem[]; cap: number };
+export const DEFAULT_CAP = 1.2;
+
+export function validateScorecard(d: ScorecardDef): string[] {
+  const e: string[] = [];
+  if (!d.items.length) e.push('Inclua pelo menos um indicador.');
+  if (new Set(d.items.map((i) => i.indicatorId)).size !== d.items.length) e.push('Indicador repetido no scorecard.');
+  if (d.items.some((i) => !(i.weight > 0) || i.weight > 100)) e.push('Cada peso deve ser maior que 0 e no máximo 100.');
+  if (!(d.cap >= 1 && d.cap <= 2)) e.push('O teto de cumprimento deve ficar entre 100% e 200%.');
+  return e;
+}
+
+/** Pesos normalizados: somam 1, qualquer que seja a escala digitada. */
+export function normalizeWeights<T extends { weight: number }>(items: T[]): (T & { norm: number })[] {
+  const sum = items.reduce((a, i) => a + Math.max(0, i.weight), 0);
+  return items.map((i) => ({ ...i, norm: sum ? Math.max(0, i.weight) / sum : 0 }));
+}
+
+/**
+ * Nota do scorecard (0–100 × teto). Indicadores sem dado ficam de fora e os pesos dos demais são renormalizados;
+ * a nota é marcada como incompleta quando isso acontece.
+ */
+export function scorecardScore(items: { weight: number; attainment: number | null; cap?: number }[], cap = DEFAULT_CAP) {
+  const usable = items.filter((i) => i.attainment !== null);
+  const norm = normalizeWeights(usable);
+  const score = usable.length ? norm.reduce((a, i) => a + Math.min(i.cap ?? cap, Math.max(0, i.attainment!)) * i.norm, 0) * 100 : null;
+  return { score: score === null ? null : Math.round(score * 10) / 10, incomplete: usable.length < items.length, used: usable.length, total: items.length };
+}
+
+/** Pessoa com mais de uma função: nota composta pelos pesos explícitos de cada scorecard (normalizados). */
+export function compositeScore(parts: { score: number | null; weight: number }[]) {
+  const usable = parts.filter((p) => p.score !== null);
+  const norm = normalizeWeights(usable);
+  return usable.length ? Math.round(norm.reduce((a, p) => a + p.score! * p.norm, 0) * 10) / 10 : null;
+}
+
+// ------------------------------------------------------------------ sugestões
+export const SUGGESTED_INDICATORS: (IndicatorDef & { key: string })[] = [
+  { key: 'vendas_ganhas', name: 'Vendas ganhas', category: 'comercial', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'negociacao_ganha', measure: 'contagem' }, target: 10, weight: 30 },
+  { key: 'receita_contratada', name: 'Receita mensal contratada', description: 'Soma do valor mensal dos contratos validados (crédito de resultado).', category: 'comercial', calc: 'valor', unit: 'reais', direction: 'maior', period: 'mes', base: { event: 'venda_validada', measure: 'soma_valor' }, weight: 30 },
+  { key: 'conversao', name: 'Taxa de conversão', description: 'Ganhas ÷ (ganhas + perdidas) no período.', category: 'comercial', calc: 'formula', unit: 'percentual', direction: 'maior', period: 'mes', vars: { ganhas: { event: 'negociacao_ganha', measure: 'contagem' }, perdidas: { event: 'negociacao_perdida', measure: 'contagem' } }, expr: 'ganhas / (ganhas + perdidas) * 100', target: 30, weight: 20, minSample: 5 },
+  { key: 'ciclo_venda', name: 'Ciclo médio de venda', description: 'Dias entre criar a oportunidade e ganhar.', category: 'comercial', calc: 'tempo', unit: 'dias', direction: 'menor', period: 'mes', base: { event: 'negociacao_ganha', measure: 'media_campo', field: 'cycleDays' }, target: 30, weight: 10, minSample: 3 },
+  { key: 'propostas_enviadas', name: 'Propostas enviadas', category: 'comercial', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'proposta_enviada', measure: 'contagem' }, target: 20, weight: 10 },
+  { key: 'tarefas_no_prazo', name: 'Tarefas concluídas no prazo', description: 'Só tarefas com prazo; as criadas e concluídas pela própria pessoa sem prazo não contam.', category: 'prazos', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'tarefa_concluida', measure: 'contagem', filters: [{ field: 'hadDue', op: 'eq', value: true }, { field: 'onTime', op: 'eq', value: true }] }, denominator: { event: 'tarefa_concluida', measure: 'contagem', filters: [{ field: 'hadDue', op: 'eq', value: true }] }, target: 90, weight: 20, minSample: 5 },
+  { key: 'entregas_aprovadas', name: 'Entregas aprovadas', category: 'qualidade', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'entrega_validada', measure: 'contagem' }, weight: 20 },
+  { key: 'marcos_no_prazo', name: 'Marcos de projeto no prazo', category: 'projetos', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'trimestre', numerator: { event: 'marco_concluido', measure: 'contagem', filters: [{ field: 'onTime', op: 'eq', value: true }] }, denominator: { event: 'marco_concluido', measure: 'contagem' }, target: 85, weight: 30, minSample: 2 },
+  { key: 'tempo_aprovacao', name: 'Tempo médio para decidir aprovações', category: 'aprovacoes', calc: 'tempo', unit: 'horas', direction: 'menor', period: 'mes', base: { event: 'aprovacao_concluida', measure: 'media_campo', field: 'hoursToDecide' }, target: 24, weight: 20, minSample: 3 },
+  { key: 'processos_contrato', name: 'Processos de contrato concluídos no prazo', category: 'contratos', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'processo_contrato_concluido', measure: 'contagem', filters: [{ field: 'onTime', op: 'eq', value: true }] }, denominator: { event: 'processo_contrato_concluido', measure: 'contagem' }, target: 90, weight: 30, minSample: 2 },
+  { key: 'acompanhamentos', name: 'Acompanhamentos de clientes com resultado', category: 'sucesso_cliente', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'acompanhamento_registrado', measure: 'contagem' }, target: 20, weight: 30 },
+  { key: 'movimentacoes_ata', name: 'Movimentações de ata efetivadas', description: 'Mede o processo concluído com documento, não o volume movimentado.', category: 'atas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'movimentacao_ata_autorizada', measure: 'contagem' }, weight: 20 },
+];
+
+// ------------------------------------------------------------------ objetivos, cascata e semáforo
+export const OBJECTIVE_LEVELS = ['estrategico', 'tatico', 'operacional'] as const;
+export type ObjectiveLevel = (typeof OBJECTIVE_LEVELS)[number];
+export const OBJECTIVE_LEVEL_LABELS: Record<ObjectiveLevel, string> = { estrategico: 'Estratégico', tatico: 'Tático', operacional: 'Operacional' };
+/** Um objetivo só se vincula a um superior de nível acima (estratégico → tático → operacional). */
+export const canLinkObjective = (child: ObjectiveLevel, parent: ObjectiveLevel) => OBJECTIVE_LEVELS.indexOf(parent) < OBJECTIVE_LEVELS.indexOf(child);
+
+export const CONSOLIDATIONS = ['indicador', 'soma', 'media_ponderada', 'media_simples', 'nao_agregavel'] as const;
+export type Consolidation = (typeof CONSOLIDATIONS)[number];
+export const CONSOLIDATION_LABELS: Record<Consolidation, string> = {
+  indicador: 'Recalcular o indicador no conjunto (correto para taxas: numerador e denominador somados)',
+  soma: 'Soma das metas filhas', media_ponderada: 'Média ponderada pelos pesos', media_simples: 'Média simples', nao_agregavel: 'Não agregável (cada meta vale por si)',
+};
+/** Consolida o realizado das filhas quando a meta superior não é recalculada pelo indicador. */
+export function consolidate(method: Consolidation, children: { value: number | null; weight: number }[]): number | null {
+  const v = children.filter((c) => c.value !== null) as { value: number; weight: number }[];
+  if (!v.length || method === 'nao_agregavel' || method === 'indicador') return null;
+  if (method === 'soma') return v.reduce((a, c) => a + c.value, 0);
+  if (method === 'media_simples') return v.reduce((a, c) => a + c.value, 0) / v.length;
+  const w = v.reduce((a, c) => a + Math.max(0, c.weight), 0);
+  return w ? v.reduce((a, c) => a + c.value * Math.max(0, c.weight), 0) / w : null;
+}
+
+export type TrafficBands = { green: number; yellow: number };
+export const DEFAULT_TRAFFIC_BANDS: TrafficBands = { green: 0.9, yellow: 0.85 };
+export type TrafficColor = 'verde' | 'amarelo' | 'vermelho' | 'sem_dado';
+export const TRAFFIC_LABELS: Record<TrafficColor, string> = { verde: 'Verde', amarelo: 'Amarelo', vermelho: 'Vermelho', sem_dado: 'Sem dado' };
+/** Semáforo pelo atingimento (≥ verde; ≥ amarelo; abaixo, vermelho). Sem dado nunca vira cor. */
+export function trafficLight(att: number | null, bands: TrafficBands = DEFAULT_TRAFFIC_BANDS): TrafficColor {
+  if (att === null || !Number.isFinite(att)) return 'sem_dado';
+  return att >= bands.green ? 'verde' : att >= bands.yellow ? 'amarelo' : 'vermelho';
+}
+export function validateBands(b: TrafficBands): string[] {
+  return b.green > 0 && b.yellow > 0 && b.yellow <= b.green && b.green <= 2 ? [] : ['As faixas precisam de amarelo ≤ verde, ambos entre 0% e 200%.'];
+}

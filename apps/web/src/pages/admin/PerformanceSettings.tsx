@@ -9,6 +9,8 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Tabs }
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { EventsExplorer } from '../../features/performance/EventsExplorer';
+import { IndicatorsAdmin } from '../../features/performance/IndicatorBuilder';
+import { ScorecardsAdmin } from '../../features/performance/ScorecardsAdmin';
 import { useUrlState } from '../../lib/hooks';
 
 type Catalog = {
@@ -24,8 +26,11 @@ export function AdminPerformanceSettings() {
   return (
     <div className="space-y-4">
       <div><h1 className="text-xl font-bold text-ink">Gestão de desempenho</h1><p className="text-sm text-muted">Os resultados são medidos por fatos já registrados no sistema, nunca por cliques ou tempo conectado.</p></div>
-      <Tabs label="Gestão de desempenho" value={u.t as 'eventos' | 'explorar'} onChange={(t) => setU({ t })} tabs={[{ key: 'eventos', label: 'Eventos de negócio' }, { key: 'explorar', label: 'Explorar eventos' }]} />
-      {u.t === 'eventos' ? <EventsConfig /> : <EventsExplorer />}
+      <Tabs label="Gestão de desempenho" value={u.t as 'eventos' | 'explorar' | 'indicadores' | 'scorecards'} onChange={(t) => setU({ t })} tabs={[{ key: 'eventos', label: 'Eventos de negócio' }, { key: 'explorar', label: 'Explorar eventos' }, { key: 'indicadores', label: 'Indicadores e semáforo' }, { key: 'scorecards', label: 'Scorecards' }]} />
+      {u.t === 'eventos' && <EventsConfig />}
+      {u.t === 'explorar' && <EventsExplorer />}
+      {u.t === 'indicadores' && <><TrafficBands /><IndicatorsAdmin /></>}
+      {u.t === 'scorecards' && <ScorecardsAdmin />}
     </div>
   );
 }
@@ -105,5 +110,32 @@ function EventsConfig() {
         </section>
       )}
     </div>
+  );
+}
+
+function TrafficBands() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const st = useQuery({ queryKey: ['performance', 'settings'], queryFn: () => api<Settings>('/performance/settings') });
+  const cur = st.data?.config.traffic ?? { green: 0.9, yellow: 0.85 };
+  const [g, setG] = useState<string | null>(null);
+  const [y, setY] = useState<string | null>(null);
+  const green = Number((g ?? String(cur.green * 100)).replace(',', '.')) / 100;
+  const yellow = Number((y ?? String(cur.yellow * 100)).replace(',', '.')) / 100;
+  const valid = green > 0 && yellow > 0 && yellow <= green && green <= 2;
+  const save = useMutation({
+    mutationFn: () => api('/performance/settings', { method: 'PUT', body: { config: { ...st.data!.config, traffic: { green, yellow } }, note: `Semáforo: verde ≥ ${Math.round(green * 100)}%, amarelo ≥ ${Math.round(yellow * 100)}%` } }),
+    onSuccess: () => { setG(null); setY(null); void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: 'Faixas do semáforo atualizadas' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (!st.data) return null;
+  return (
+    <section className="card mb-4 flex flex-wrap items-end gap-3 p-4">
+      <div className="min-w-[240px] flex-1"><h2 className="text-lg font-bold text-ink">Semáforo</h2><p className="text-sm text-muted">Atingimento = realizado ÷ meta (para "menor é melhor", meta ÷ realizado). Sem dado não recebe cor.</p></div>
+      <FormField label="Verde a partir de (%)" htmlFor="tb-g"><Input id="tb-g" className="w-24" inputMode="decimal" value={g ?? String(cur.green * 100)} onChange={(e) => setG(e.target.value)} /></FormField>
+      <FormField label="Amarelo a partir de (%)" htmlFor="tb-y"><Input id="tb-y" className="w-24" inputMode="decimal" value={y ?? String(cur.yellow * 100)} onChange={(e) => setY(e.target.value)} /></FormField>
+      <span className="pb-2 text-sm text-muted">abaixo: vermelho</span>
+      {(g !== null || y !== null) && <Button variant="primary" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>Salvar faixas</Button>}
+    </section>
   );
 }

@@ -1,3 +1,4 @@
+import { GoalsPage } from './pages/performance/Goals';
 import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -82,6 +83,7 @@ export function App() {
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
         <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
+        <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />

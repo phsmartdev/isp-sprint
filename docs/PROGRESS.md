@@ -85,6 +85,17 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Evolução integrada — Etapa 6: Indicadores, objetivos, metas e scorecards ✅ (2026-10-21)
+- **Construtor de indicadores** (Configurações → Gestão de desempenho → Indicadores e semáforo): contagem, soma, média, percentual, taxa, tempo, valor, razão e fórmula. Origem nos eventos de negócio válidos; filtros e campos de lista fechada; crédito ponderado (uma venda dividida 50/50 conta 0,5 para cada e 1 para a equipe). Fórmula com interpretador próprio (números, variáveis declaradas, + − × ÷, parênteses, min/max/abs/round) — nenhum código é executado. Definição versionada; botão "Testar". 12 sugestões prontas.
+- Resultado nunca inventado: sem nenhum evento do tipo → **indisponível**; denominador zero → **sem base**; amostra abaixo do mínimo → **incompleto**. Detalhamento até os eventos com o peso de cada um.
+- **Semáforo configurável** (padrão verde ≥ 90%, amarelo ≥ 85%); "menor é melhor" com cálculo próprio; período aberto colorido pelo ritmo e marcado como parcial — só o fechamento é oficial.
+- **Objetivos** estratégicos, táticos e operacionais encadeados (estratégico só com visão total), com patrocinador e prioridade.
+- **Metas** individuais, de equipe e da empresa; semanal, mensal, trimestral, anual ou personalizada; por indicador (automática) ou manual com apontamentos; **desdobramento em cascata** com peso e consolidação (recalcular pelo indicador, soma, média ponderada, média simples, não agregável); ritmo (esperado até hoje); fechamento do período gravado e imutável.
+- **Governança**: depois do início, mudar o alvo exige motivo, não pode ser feito pela própria pessoa, gera nova versão e preserva o alvo original; histórico append-only.
+- **Scorecards por função** (perfil, cargo ou equipe): indicadores, pesos normalizados, meta (da pessoa → do scorecard → padrão), teto por indicador; indicador sem dado sai da nota com pesos redistribuídos; composição explícita para quem tem mais de uma função; versionado.
+- Tela **Objetivos e metas** (menu) com árvore de metas, desdobrar, revisão e objetivos.
+- Migração 0033. Testes: domínio 90, API 158, E2E 41.
+
 ## Evolução integrada — Etapa 5: Motor de eventos de negócio ✅ (2026-10-21)
 - Novo módulo **Desempenho** (`desempenho`) na matriz: Próprio vê os eventos em que tem crédito; Equipe, os do time que lidera; Total, todos.
 - 17 eventos derivados das tabelas de origem por um **projetor idempotente** (chave tipo + registro + instante): lead qualificado, oportunidade criada, proposta enviada (1 por oportunidade), negociação ganha/perdida, aprovação concluída, venda validada, contrato assinado, contrato renovado, processo de contrato concluído, movimentação e adesão de ata, tarefa concluída, entrega aprovada, marco atingido, projeto concluído e acompanhamento de cliente com resultado.

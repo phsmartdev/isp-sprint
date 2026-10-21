@@ -75,11 +75,14 @@ export type PerformanceConfig = {
   attribution: Record<string, AttributionRule>;
   /** tipos que nascem "Aguardando validação" e só contam depois que um gestor valida */
   validationRequired: string[];
+  /** faixas do semáforo pelo atingimento (padrão: verde ≥ 90%, amarelo ≥ 85%) */
+  traffic?: { green: number; yellow: number };
 };
 export const DEFAULT_ATTRIBUTION: AttributionRule = { ownerShareBp: 10_000, participants: true, managers: true };
 export const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
   attribution: Object.fromEntries(EVENT_TYPE_KEYS.map((k) => [k, { ...DEFAULT_ATTRIBUTION }])),
   validationRequired: [],
+  traffic: { green: 0.9, yellow: 0.85 },
 };
 
 export function validatePerformanceConfig(c: PerformanceConfig): string[] {
@@ -89,6 +92,7 @@ export function validatePerformanceConfig(c: PerformanceConfig): string[] {
     if (!Number.isInteger(r.ownerShareBp) || r.ownerShareBp < 0 || r.ownerShareBp > 10_000) e.push(`${eventTypeDef(k)?.label ?? k}: parte do responsável deve ficar entre 0% e 100%.`);
   }
   for (const k of c.validationRequired) if (!eventTypeDef(k)) e.push(`Tipo de evento desconhecido: ${k}.`);
+  if (c.traffic && !(c.traffic.green > 0 && c.traffic.yellow > 0 && c.traffic.yellow <= c.traffic.green && c.traffic.green <= 2)) e.push('Semáforo: o amarelo deve ser menor ou igual ao verde, ambos entre 0% e 200%.');
   return e;
 }
 
