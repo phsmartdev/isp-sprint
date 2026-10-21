@@ -383,3 +383,84 @@ test('ABM Conta 360: cabeçalho estratégico, objetivo, estrutura organizacional
   await page.getByRole('tab', { name: 'Resumo estratégico' }).click();
   await shot(page, 'abm-360');
 });
+
+test('ABM Fase 4: stakeholders, influência avaliada manualmente, mapa interativo e pedido de aprovação', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const name = `Hospital Fictício Stakeholders ${Date.now().toString(36)}`;
+  const r = await page.request.post('/api/v1/abm/new-account', { headers: H, data: { name, nature: 'privada', segment: 'empresarial', city: 'Aracaju', reason: 'Expansão da rede hospitalar' } });
+  expect(r.status(), await r.text()).toBe(201);
+  const abm = (await r.json()) as { id: string };
+  await page.goto(`/abm/contas/${abm.id}?t=stakeholders`);
+
+  const add = async (person: string, interest: string, decisor: boolean) => {
+    await page.getByRole('button', { name: 'Adicionar stakeholder' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Adicionar stakeholder' });
+    await dlg.getByLabel('Nome (pessoa nova)').fill(person);
+    await dlg.getByLabel('Interesse').selectOption(interest);
+    if (decisor) await dlg.getByLabel('Decisor').check();
+    await dlg.getByRole('button', { name: 'Adicionar', exact: true }).click();
+    await expect(page.getByText(/Stakeholder incluído/).last()).toBeVisible();
+  };
+  await add('Beatriz Diretora Teste', 'alto', true);
+  const drawer = page.getByRole('dialog', { name: 'Stakeholder' });
+  await expect(drawer.getByRole('heading', { name: 'Beatriz Diretora Teste' })).toBeVisible();
+  await expect(drawer.getByText('Não avaliado').first()).toBeVisible();
+  // influência: só manual, com justificativa
+  await drawer.getByLabel(/^Nova avaliação/).selectOption('alto');
+  await expect(drawer.getByRole('button', { name: 'Registrar avaliação' })).toBeDisabled();
+  await drawer.getByLabel(/^Justificativa/).fill('Assina os contratos de tecnologia do hospital');
+  await drawer.getByRole('button', { name: 'Registrar avaliação' }).click();
+  await expect(page.getByText('Influência avaliada e registrada na auditoria', { exact: true })).toBeVisible();
+  await drawer.getByText(/Auditoria da influência/).click();
+  await expect(drawer.getByText('Assina os contratos de tecnologia do hospital')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await add('Caio Analista Teste', 'medio', false);
+  await drawer.getByLabel('Esta pessoa…').selectOption('reporta_a');
+  await drawer.getByLabel('…quem').selectOption({ label: 'Beatriz Diretora Teste' });
+  await drawer.getByRole('button', { name: 'Registrar relação' }).click();
+  await expect(page.getByText('Relação registrada', { exact: true })).toBeVisible();
+  await expect(drawer.getByRole('region', { name: 'Relações registradas' })).toContainText('reporta a');
+  await page.keyboard.press('Escape');
+
+  // mapa: ponto clicável no quadrante certo; quem não foi avaliado fica fora da matriz
+  await page.getByRole('tab', { name: 'Mapa de influência' }).click();
+  const map = page.getByRole('region', { name: 'Mapa de influência' });
+  await expect(map.getByRole('button', { name: /Gerenciar de perto/ })).toContainText('1');
+  await expect(page.getByRole('region', { name: 'Fora da matriz' }).getByText(/Caio Analista Teste/)).toBeVisible();
+  const dot = map.getByRole('button', { name: /^Beatriz Diretora Teste: influência Alto/ });
+  await dot.hover();
+  await expect(map.getByRole('tooltip')).toContainText('Clique para abrir a ficha');
+  await map.getByRole('button', { name: /Gerenciar de perto/ }).click();
+  await expect(map.getByRole('button', { name: /Gerenciar de perto/ })).toHaveAttribute('aria-pressed', 'true');
+  await dot.click();
+  await expect(drawer.getByRole('heading', { name: 'Beatriz Diretora Teste' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('region', { name: 'Rede de relacionamentos' })).toBeVisible();
+  await shot(page, 'abm-mapa');
+
+  // configuração: exigir aprovação → a avaliação vira pedido; quem pediu não aprova
+  await page.goto('/settings/abm');
+  await page.getByLabel('Exigir aprovação da liderança').check();
+  await page.getByLabel(/^Motivo da alteração/).fill('Teste E2E de aprovação');
+  await page.getByRole('button', { name: 'Salvar configuração' }).click();
+  await expect(page.getByText('Configuração do ABM salva')).toBeVisible();
+  try {
+    await page.goto(`/abm/contas/${abm.id}?t=stakeholders`);
+    await page.getByRole('button', { name: 'Beatriz Diretora Teste' }).click();
+    await drawer.getByLabel(/^Nova avaliação/).selectOption('muito_alto');
+    await drawer.getByLabel(/^Justificativa/).fill('Passou a presidir o comitê de compras');
+    await drawer.getByRole('button', { name: 'Enviar para aprovação' }).click();
+    await expect(page.getByText('Pedido enviado para aprovação')).toBeVisible();
+    await page.goto('/abm?tab=stakeholders');
+    const reqs = page.getByRole('region', { name: 'Pedidos de influência pendentes' });
+    await expect(reqs.getByText('Passou a presidir o comitê de compras', { exact: false })).toBeVisible();
+    await expect(reqs.getByText('Aguardando a liderança').first()).toBeVisible();
+  } finally {
+    const s0 = await (await page.request.get('/api/v1/abm/settings')).json();
+    await page.request.put('/api/v1/abm/settings', { headers: H, data: { influence: { ...s0.influence, requireApproval: false }, note: 'Volta ao padrão após o teste' } });
+  }
+});

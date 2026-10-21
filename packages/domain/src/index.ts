@@ -14,3 +14,4 @@ export * from './interventions';
 export * from './analysis';
 export * from './rituals';
 export * from './abm';
+export * from './stakeholders';

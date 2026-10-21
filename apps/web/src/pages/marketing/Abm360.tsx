@@ -17,6 +17,7 @@ import { errMsg, StageChip } from '../../features/contracts/shared';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { CommercialChip, PriorityChip, StatusChip } from '../../features/abm/shared';
 import { AccountDrawer } from './Abm';
+import { InfluenceMapPanel, StakeholdersPanel } from '../../features/abm/stakeholders';
 
 type Objective = { id: string; kind: AbmObjectiveKind; title: string; ownerName: string; ownerId: string; dueOn: string | null; status: AbmObjectiveStatus; successCriteria: string | null; result: string | null; rowVersion: number };
 type Unit = { id: string; name: string; kind: OrgUnitKind; parentId: string | null; notes: string | null; active: boolean; depth: number; rowVersion: number };
@@ -37,6 +38,7 @@ const OBJ_TONE: Record<AbmObjectiveStatus, Tone> = { planejado: 'neutral', em_an
 const NATURE = { publica: 'Pública', privada: 'Privada' } as const;
 const TABS = [
   { key: 'resumo', label: 'Resumo estratégico' }, { key: 'dados', label: 'Dados da organização' }, { key: 'estrutura', label: 'Estrutura organizacional' },
+  { key: 'stakeholders', label: 'Stakeholders' }, { key: 'mapa', label: 'Mapa de influência' },
   { key: 'comercial', label: 'Leads e oportunidades' }, { key: 'contratos', label: 'Contratos' }, { key: 'trabalho', label: 'Projetos e tarefas' }, { key: 'historico', label: 'Histórico' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
@@ -79,6 +81,8 @@ export function Abm360Page() {
       {tab === 'resumo' && <Summary d={d} />}
       {tab === 'dados' && <Organization d={d} />}
       {tab === 'estrutura' && <Structure d={d} />}
+      {tab === 'stakeholders' && <StakeholdersPanel contactId={d.abm.contactId} />}
+      {tab === 'mapa' && <InfluenceMapPanel contactId={d.abm.contactId} />}
       {tab === 'comercial' && (
         <div className="grid gap-4 xl:grid-cols-2">
           <section className="card p-4"><h2 className="mb-2 font-bold text-ink">Oportunidades</h2>{!d.opportunities.length ? <p className="text-sm text-muted">Nenhuma oportunidade com esta conta.</p> : <ul className="divide-y divide-line">{d.opportunities.map((o) => <li key={o.id} className="flex flex-wrap items-center gap-2 py-2 text-sm"><Link to={`/opportunities/${o.id}`} className="min-w-0 flex-1 truncate font-semibold text-primary hover:underline">OP-{o.code} · {o.title}</Link><span className="text-xs text-muted">{o.stage} · {o.ownerName}</span>{o.valueCents !== null && <span className="num text-xs">{fmtBRL(o.valueCents)}/mês</span>}</li>)}</ul>}<Button variant="secondary" size="sm" className="mt-2" onClick={() => nav('/opportunities/new')}>Nova oportunidade</Button></section>

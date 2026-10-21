@@ -3028,3 +3028,187 @@ export const accountOrgUnits = pgTable(
     kindCk: check('account_org_units_kind_ck', inList('kind', ['unidade', 'filial', 'diretoria', 'secretaria', 'departamento', 'setor', 'equipe', 'orgao_relacionado'])),
   }),
 );
+
+// ---------------------------------------------------------------- ABM Fase 4: stakeholders (pessoas), influência manual e relações
+/** Pessoa única: a mesma pessoa pode estar ligada a várias organizações. */
+export const people = pgTable(
+  'people',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    email: text('email'),
+    phone: text('phone'),
+    notes: text('notes'),
+    sourceSystem: text('source_system').notNull().default('crm'),
+    externalId: text('external_id'),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({ nameIdx: index('people_name_idx').on(t.tenantId, t.name), emailIdx: index('people_email_idx').on(t.tenantId, t.email) }),
+);
+
+/** Vínculo da pessoa com a conta: cargo, departamento, papéis e classificações independentes. A influência fica em stakeholder_influence. */
+export const accountStakeholders = pgTable(
+  'account_stakeholders',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    personId: uuid('person_id').notNull().references(() => people.id),
+    title: text('title'),
+    unitId: uuid('unit_id').references(() => accountOrgUnits.id),
+    roles: text('roles').array().notNull().default(sql`'{}'::text[]`),
+    customRoles: text('custom_roles').array().notNull().default(sql`'{}'::text[]`),
+    interest: text('interest').notNull().default('desconhecido'),
+    stance: text('stance').notNull().default('desconhecido'),
+    relationshipStrength: text('relationship_strength').notNull().default('nao_avaliado'),
+    access: text('access').notNull().default('nao_avaliado'),
+    participation: text('participation').notNull().default('nao_avaliado'),
+    priority: text('priority').notNull().default('media'),
+    relationshipOwnerId: uuid('relationship_owner_id').references(() => users.id),
+    nextInteractionOn: date('next_interaction_on', { mode: 'string' }),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('account_stakeholders_uq').on(t.contactId, t.personId),
+    idx: index('account_stakeholders_idx').on(t.tenantId, t.contactId),
+    interestCk: check('account_stakeholders_interest_ck', inList('interest', ['alto', 'medio', 'baixo', 'desconhecido'])),
+    stanceCk: check('account_stakeholders_stance_ck', inList('stance', ['defensor', 'favoravel', 'neutro', 'resistente', 'opositor', 'desconhecido'])),
+    relCk: check('account_stakeholders_rel_ck', inList('relationship_strength', ['forte', 'moderado', 'fraco', 'inexistente', 'nao_avaliado'])),
+    accessCk: check('account_stakeholders_access_ck', inList('access', ['direto', 'indireto', 'sem_acesso', 'nao_avaliado'])),
+    partCk: check('account_stakeholders_part_ck', inList('participation', ['ativo', 'ocasional', 'inativo', 'nao_avaliado'])),
+    prioCk: check('account_stakeholders_prio_ck', inList('priority', ['critica', 'alta', 'media', 'baixa'])),
+  }),
+);
+
+/** Influência atual por contexto (conta, unidade, oportunidade, projeto, processo). Ausência = não avaliado. Só muda por ação manual. */
+export const stakeholderInfluence = pgTable(
+  'stakeholder_influence',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    stakeholderId: uuid('stakeholder_id').notNull().references(() => accountStakeholders.id),
+    contextType: text('context_type').notNull(),
+    /** id do contexto; '' para a conta */
+    contextKey: text('context_key').notNull().default(''),
+    contextLabel: text('context_label'),
+    level: text('level').notNull(),
+    updatedBy: uuid('updated_by').notNull().references(() => users.id),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    rowVersion: integer('row_version').notNull().default(1),
+  },
+  (t) => ({
+    uq: uniqueIndex('stakeholder_influence_uq').on(t.stakeholderId, t.contextType, t.contextKey),
+    levelCk: check('stakeholder_influence_level_ck', inList('level', ['muito_alto', 'alto', 'medio', 'baixo', 'muito_baixo', 'nao_avaliado'])),
+    ctxCk: check('stakeholder_influence_ctx_ck', inList('context_type', ['conta', 'unidade', 'oportunidade', 'projeto', 'processo'])),
+  }),
+);
+
+/** Auditoria append-only das avaliações de influência (aplicadas). */
+export const stakeholderInfluenceHistory = pgTable(
+  'stakeholder_influence_history',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    stakeholderId: uuid('stakeholder_id').notNull().references(() => accountStakeholders.id),
+    contextType: text('context_type').notNull(),
+    contextKey: text('context_key').notNull().default(''),
+    contextLabel: text('context_label'),
+    fromLevel: text('from_level').notNull(),
+    toLevel: text('to_level').notNull(),
+    justification: text('justification').notNull(),
+    evidence: text('evidence'),
+    actorId: uuid('actor_id').notNull().references(() => users.id),
+    approvedBy: uuid('approved_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('stakeholder_influence_history_idx').on(t.tenantId, t.stakeholderId) }),
+);
+
+/** Pedidos de mudança de influência quando a empresa exige aprovação. */
+export const influenceChangeRequests = pgTable(
+  'influence_change_requests',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    stakeholderId: uuid('stakeholder_id').notNull().references(() => accountStakeholders.id),
+    contextType: text('context_type').notNull(),
+    contextKey: text('context_key').notNull().default(''),
+    contextLabel: text('context_label'),
+    fromLevel: text('from_level').notNull(),
+    toLevel: text('to_level').notNull(),
+    justification: text('justification').notNull(),
+    evidence: text('evidence'),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    status: text('status').notNull().default('pendente'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    decisionNote: text('decision_note'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('influence_change_requests_idx').on(t.tenantId, t.status),
+    openUq: uniqueIndex('influence_change_requests_open_uq').on(t.stakeholderId, t.contextType, t.contextKey).where(sql`status = 'pendente'`),
+    statusCk: check('influence_change_requests_status_ck', inList('status', ['pendente', 'aprovada', 'recusada'])),
+  }),
+);
+
+/** Histórico append-only das demais mudanças do stakeholder (cargo, papéis, classificações…). */
+export const stakeholderEvents = pgTable(
+  'stakeholder_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    stakeholderId: uuid('stakeholder_id').notNull().references(() => accountStakeholders.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('stakeholder_events_idx').on(t.tenantId, t.stakeholderId) }),
+);
+
+/** Relações profissionais registradas entre stakeholders da conta (nada é inferido). */
+export const stakeholderRelations = pgTable(
+  'stakeholder_relations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    fromId: uuid('from_id').notNull().references(() => accountStakeholders.id),
+    toId: uuid('to_id').notNull().references(() => accountStakeholders.id),
+    kind: text('kind').notNull(),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('stakeholder_relations_idx').on(t.tenantId, t.contactId),
+    kindCk: check('stakeholder_relations_kind_ck', inList('kind', ['reporta_a', 'influencia', 'aliado', 'conflito', 'indicou', 'outro'])),
+    selfCk: check('stakeholder_relations_self_ck', sql`from_id <> to_id`),
+  }),
+);
+
+/** Configurações do ABM (versionadas, append-only): política de influência e rótulos. */
+export const abmSettings = pgTable(
+  'abm_settings',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    version: integer('version').notNull(),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+    note: text('note'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('abm_settings_uq').on(t.tenantId, t.version) }),
+);

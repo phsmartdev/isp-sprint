@@ -73,6 +73,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
   { to: '/settings/desempenho', label: 'Gestão de desempenho', admin: true },
   { to: '/settings/resultados', label: 'Gestão de Times', admin: true },
+  { to: '/settings/abm', label: 'ABM', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
