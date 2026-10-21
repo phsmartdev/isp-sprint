@@ -240,3 +240,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão (pedido do usuário):** além das intervenções disparadas pela apuração, qualquer pessoa com acesso à Gestão de Times abre uma intervenção por iniciativa própria (gatilho `manual`), escolhendo o indicador acompanhado e o escopo. Meta e série ficam opcionais; restrições no banco garantem título e motivo na manual e meta/série nas automáticas.
 - Escopo limitado ao alcance de quem abre (pessoa/time/unidade); empresa toda só pela Diretoria. A cadeia de escalonamento vem da estrutura do escopo (ou do time de quem abre).
 - A projeção das intervenções automáticas não dispensa a manual (ela não cobre competências).
+
+## ADR-053 — Rituais com pauta automática e ata fotografada (21/10/2026)
+- **Decisão:** ritual é a regra (cadência, escopo, pauta fixa); cada data vira uma reunião materializada sob demanda (as duas próximas, chave única ritual+data) e um compromisso na agenda. A pauta automática é calculada ao vivo enquanto a reunião está aberta e **fotografada** ao encerrar — a ata mostra o que se sabia naquele momento.
+- **Decisões e impedimentos** herdam o escopo da reunião ou da intervenção de origem; visibilidade segue a estrutura (ADR da Fase 2) mais quem registrou e quem responde. Revogar/encerrar sempre com motivo; nada é apagado (`governance_events` append-only).
+- **Escalonar impedimento** usa a mesma cadeia da estrutura das intervenções (líder → unidade → acima → Diretoria).

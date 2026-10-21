@@ -246,3 +246,58 @@ test('Intervenção manual: escolhe o indicador e abre o roteiro sem meta fora d
   await expect(page.getByRole('heading', { name: 'Análise da intervenção', level: 1 })).toBeVisible();
   await expect(page.getByText(`${title} · responsável Carlos Silva`)).toBeVisible();
 });
+
+test('Rituais: cria ritual, conduz a reunião com pauta automática, registra decisão e impedimento e encerra a ata', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const nav = page.getByRole('navigation', { name: 'Navegação principal' });
+  await nav.getByRole('button', { name: /^Gestão de Times/ }).click();
+  await nav.getByRole('link', { name: 'Rituais', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Rituais', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: /Novo ritual|Criar ritual/ }).first().click();
+  const dlg = page.getByRole('dialog', { name: 'Novo ritual' });
+  await dlg.getByLabel('Começar de um modelo').selectOption({ label: 'Gestão: Reunião semanal de gestão' });
+  const name = `Semanal comercial ${Date.now().toString(36)}`;
+  await dlg.getByLabel(/^Nome/).fill(name);
+  await dlg.getByLabel('Escopo').selectOption('empresa');
+  await dlg.getByLabel('Dia da semana').selectOption(String(new Date().getDay()));
+  await dlg.getByLabel(/^Participantes/).selectOption({ label: 'Ana Souza' });
+  await dlg.getByRole('button', { name: 'Criar ritual' }).click();
+  await expect(page.getByText('Ritual criado; as próximas reuniões já estão na agenda')).toBeVisible();
+  const card = page.getByRole('listitem').filter({ hasText: name });
+  await card.getByRole('link', { name: /^Próxima:/ }).click();
+
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Resultados do escopo' })).toBeVisible();
+  await page.getByRole('region', { name: 'Presença' }).getByLabel('Carlos Silva').check();
+  await page.getByRole('region', { name: 'Presença' }).getByLabel('Ana Souza').check();
+  await page.getByLabel('Metas da semana').fill('Residencial acima do ritmo; empresarial abaixo');
+  const rec = page.getByRole('region', { name: 'Decisões e impedimentos da reunião' });
+  await rec.getByRole('button', { name: 'Registrar decisão' }).click();
+  await rec.getByLabel(/^Decisão/).fill('Priorizar condomínios com rede pronta');
+  await rec.getByRole('button', { name: 'Registrar', exact: true }).click();
+  await expect(page.getByText('Decisão registrada', { exact: true })).toBeVisible();
+  await rec.getByRole('button', { name: 'Registrar impedimento' }).click();
+  await rec.getByLabel(/O que está travando/).fill('Mapa de cobertura desatualizado');
+  await rec.getByLabel(/Quem remove/).selectOption({ label: 'Ana Souza' });
+  await rec.getByRole('button', { name: 'Registrar', exact: true }).click();
+  await expect(page.getByText('Impedimento registrado e responsável avisado', { exact: true })).toBeVisible();
+  await expect(page.getByText('Salvo').first()).toBeVisible({ timeout: 10_000 });
+  await shot(page, 'gr-reuniao');
+  await page.getByRole('button', { name: 'Encerrar ata' }).click();
+  await expect(page.getByText('Ata encerrada e enviada aos participantes')).toBeVisible();
+  await expect(page.getByText(/Ata encerrada por Carlos Silva/)).toBeVisible();
+  await expect(page.getByLabel('Metas da semana')).toHaveAttribute('readonly', '');
+
+  await page.goto('/times/decisoes');
+  await expect(page.getByText('Priorizar condomínios com rede pronta')).toBeVisible();
+  await page.getByRole('tab', { name: 'Impedimentos' }).click();
+  await page.getByRole('button', { name: 'Mapa de cobertura desatualizado' }).click();
+  const dr = page.getByRole('dialog', { name: 'Impedimento' });
+  await dr.getByLabel('Situação').selectOption('removido');
+  await dr.getByLabel(/Como foi removido/).fill('Engenharia publicou o mapa atualizado');
+  await dr.getByRole('button', { name: 'Salvar' }).click();
+  await expect(page.getByText('Impedimento atualizado', { exact: true })).toBeVisible();
+  await expect(dr.getByText(/removeu: Engenharia publicou o mapa atualizado/)).toBeVisible();
+});
