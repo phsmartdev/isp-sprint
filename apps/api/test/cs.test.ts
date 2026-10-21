@@ -52,7 +52,7 @@ describe('jornada automática e kickoff', () => {
     expect(ren.plannedAt).toBe(addDays(j.contract.endAt, -30)); // ancorado no fim real da vigência
     expect(j.milestones.find((m: { key: string }) => m.key === 'kickoff').activityId).toBeTruthy();
     const slides = j.presentation.slides as { key: string; body: string; pending: string[] }[];
-    expect(slides[0].body).toContain('Hospital Fictício CS');
+    expect(slides[0]!.body).toContain('Hospital Fictício CS');
     expect(slides.find((x) => x.key === 'sla')!.pending.length).toBeGreaterThan(0); // SLA não cadastrado: pendente, não inventado
     ok(await mariana.post(`/cs/journeys/${journeyId}/presentation`, { slides: slides.map((x) => (x.key === 'sla' ? { ...x, body: 'Disponibilidade 99,7% (revisado pelo CSM)', pending: [] } : x)), note: 'SLA revisado' }), 201);
     const after = ok(await mariana.get(`/cs/journeys/${journeyId}`)).json();

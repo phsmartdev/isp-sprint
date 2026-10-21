@@ -81,9 +81,10 @@ function NewArp({ open, onClose }: { open: boolean; onClose: () => void }) {
   const empty = { number: '', object: '', processNumber: '', regime: 'federal' as ArpRegime, supplierName: '', supplierDocument: '', signedAt: '', startAt: '', endAt: '', managerName: '', managerDocument: '', notes: '' };
   const [f, setF] = useState(empty);
   const [errs, setErrs] = useState<Record<string, string>>({});
+  const [parts, setParts] = useState<{ name: string; document: string; joinedOn: string; effectiveOn: string }[]>([]);
   const m = useMutation({
-    mutationFn: () => api<{ id: string }>('/arps', { method: 'POST', body: { ...f, processNumber: f.processNumber || null, supplierDocument: f.supplierDocument || null, managerDocument: f.managerDocument || null, signedAt: f.signedAt || null, startAt: f.startAt || null, endAt: f.endAt || null, notes: f.notes || null } }),
-    onSuccess: (a) => { void qc.invalidateQueries({ queryKey: ['arps'] }); setF(empty); onClose(); toast({ tone: 'success', message: 'Ata cadastrada. Agora importe ou cadastre os itens.' }); nav(`/contracts/atas/${a.id}?t=itens&importar=1`); },
+    mutationFn: () => api<{ id: string }>('/arps', { method: 'POST', body: { ...f, participants: parts.filter((p) => p.name.trim().length >= 2).map((p) => ({ name: p.name, document: p.document || null, joinedOn: p.joinedOn || null, effectiveOn: p.effectiveOn || null })), processNumber: f.processNumber || null, supplierDocument: f.supplierDocument || null, managerDocument: f.managerDocument || null, signedAt: f.signedAt || null, startAt: f.startAt || null, endAt: f.endAt || null, notes: f.notes || null } }),
+    onSuccess: (a) => { void qc.invalidateQueries({ queryKey: ['arps'] }); setF(empty); setParts([]); onClose(); toast({ tone: 'success', message: 'Ata cadastrada. Agora importe ou cadastre os itens.' }); nav(`/contracts/atas/${a.id}?t=itens&importar=1`); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const submit = () => {
@@ -114,6 +115,23 @@ function NewArp({ open, onClose }: { open: boolean; onClose: () => void }) {
           <FormField label="Fim da vigência" htmlFor="na-end" error={errs.endAt}><Input id="na-end" type="date" value={f.endAt} invalid={!!errs.endAt} onChange={(e) => set({ endAt: e.target.value })} /></FormField>
         </div>
       </div>
+      <fieldset className="mt-5 space-y-2">
+        <legend className="text-sm font-semibold text-ink">Participantes originários</legend>
+        <p className="text-xs text-muted">Órgãos que entram com o gerenciador na formalização. Quem chegar depois entra como adesão (não participante). Sem data, vale a data de assinatura da ata.</p>
+        {parts.map((p, i) => {
+          const up = (x: Partial<typeof p>) => setParts(parts.map((y, k) => (k === i ? { ...y, ...x } : y)));
+          return (
+            <div key={i} className="grid grid-cols-1 gap-2 rounded-md border border-line p-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_140px_140px_32px]">
+              <Input aria-label={`Participante ${i + 1}`} placeholder="Nome do órgão" value={p.name} onChange={(e) => up({ name: e.target.value })} />
+              <Input aria-label={`CNPJ do participante ${i + 1}`} placeholder="CNPJ" value={p.document} onChange={(e) => up({ document: e.target.value })} />
+              <Input aria-label={`Data de participação ${i + 1}`} type="date" title="Data de participação" value={p.joinedOn} onChange={(e) => up({ joinedOn: e.target.value })} />
+              <Input aria-label={`Início da eficácia ${i + 1}`} type="date" title="Início da eficácia (se diferente)" value={p.effectiveOn} onChange={(e) => up({ effectiveOn: e.target.value })} />
+              <button type="button" className="text-sm text-muted hover:text-danger" aria-label={`Remover participante ${i + 1}`} onClick={() => setParts(parts.filter((_, k) => k !== i))}>✕</button>
+            </div>
+          );
+        })}
+        <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setParts([...parts, { name: '', document: '', joinedOn: '', effectiveOn: '' }])}>Adicionar participante</button>
+      </fieldset>
     </Modal>
   );
 }

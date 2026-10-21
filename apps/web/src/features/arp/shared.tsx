@@ -18,9 +18,9 @@ export const qty = (m: number | null | undefined) => (m === null || m === undefi
 export const parseQty = (v: string) => { const n = parseNumberBR(v); return n === null || n < 0 ? null : toMilli(n); };
 export const parseMoney = (v: string) => { const n = parseNumberBR(v); return n === null || n <= 0 ? null : Math.round(n * 100); };
 
-export type Agency = { id: string; kind: AgencyKind; name: string; document: string | null; contactId: string | null };
+export type Agency = { id: string; kind: AgencyKind; name: string; document: string | null; contactId: string | null; joinedOn: string | null; effectiveOn: string | null; notes: string | null; documentId: string | null; createdAt: string };
 export type ItemView = {
-  id: string; itemNumber: string; lot: string | null; code: string | null; description: string; specification: string | null; unit: string; unitCents: number; brandModel: string | null; notes: string | null;
+  id: string; itemNumber: string; lot: string | null; code: string | null; classification: string | null; version: number; moved: boolean; description: string; specification: string | null; unit: string; unitCents: number; brandModel: string | null; notes: string | null;
   originalMilli: number; registeredMilli: number; reservedMilli: number; contractedMilli: number; executedMilli: number; billedMilli: number; availableMilli: number;
   adhesionAuthorizedMilli: number; adhesionAvailableMilli: number; registeredValueCents: number; availableValueCents: number; contractedValueCents: number;
   byAgency: ({ agencyId: string } & Bucket)[];
@@ -48,7 +48,7 @@ export type Simulation = {
 export type Operation = {
   id: string; kind: OperationKind; label: string; status: 'solicitada' | 'aprovada' | 'reprovada' | 'efetivada'; justification: string; createdAt: string; decidedAt: string | null; effectedAt: string | null; decisionNote: string | null;
   simulation: Simulation; requestedByName: string | null; decidedByName: string | null; effectedByName: string | null; canDecide: boolean; canEffect: boolean; exception: Record<string, unknown> | null;
-  input: { kind: OperationKind; sources: { itemId: string; agencyId: string; qtyMilli: number }[]; targets: { itemId: string; agencyId: string; qtyMilli: number }[]; newUnitCents: number | null };
+  input: { kind: OperationKind; sources: { itemId: string; agencyId: string; qtyMilli: number }[]; targets: { itemId: string; agencyId: string; qtyMilli: number }[]; newUnitCents: number | null; itemPatch?: Record<string, string | null> | null; criteria?: string | null; effectiveOn?: string | null };
 };
 
 export const DOC_CATEGORIES = ['ata', 'edital', 'publicacao', 'adesao', 'aceite_fornecedor', 'autorizacao_gerenciador', 'empenho', 'contrato', 'ordem_servico', 'parecer_juridico', 'outro'] as const;

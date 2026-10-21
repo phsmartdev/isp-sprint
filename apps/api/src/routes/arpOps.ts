@@ -2,7 +2,7 @@
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  ARP_LEDGER_KINDS, ARP_LEDGER_LABELS, OPERATION_KINDS, OPERATION_LABELS, checkAdhesion, fmtQty, lineValue, simulateOperation,
+  ARP_LEDGER_KINDS, ARP_LEDGER_LABELS, ITEM_PATCH_FIELDS, ITEM_PATCH_LABELS, OPERATION_KINDS, OPERATION_LABELS, checkAdhesion, fmtQty, lineValue, simulateOperation,
   type AgencyKind, type ArpRegime, type ArpStatus, type OperationInput,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -24,6 +24,10 @@ const OpInput = z.object({
   newUnitCents: z.number().int().positive().nullable().default(null),
   correctsEntryId: z.string().uuid().nullable().default(null),
   correctedQtyMilli: z.number().int().min(0).nullable().default(null),
+  itemPatch: z.object(Object.fromEntries(ITEM_PATCH_FIELDS.map((k) => [k, z.string().trim().max(k === 'specification' ? 4000 : 2000).nullable().optional()])) as Record<(typeof ITEM_PATCH_FIELDS)[number], z.ZodOptional<z.ZodNullable<z.ZodString>>>).nullable().default(null),
+  criteria: z.string().trim().max(2000).nullable().default(null),
+  /** data de eficácia (retroativa só por quem efetiva; o lançamento guarda a data real do registro) */
+  effectiveOn: z.string().date().nullable().default(null),
 });
 const Exception = z.object({ basis: z.string().trim().min(10, 'Informe o fundamento legal').max(2000), documentId: z.string().uuid() }).nullable().default(null);
 const FORMAL_DOCS = ['empenho', 'contrato', 'ordem_servico'];
@@ -389,7 +393,7 @@ export const arpOpsRoutes = [
     tag: 'Atas',
     module: 'contratos',
     params: IdParams,
-    body: z.object({ managerAuthorizationRef: z.string().trim().min(2).max(200), documentId: z.string().uuid(), exception: Exception }),
+    body: z.object({ managerAuthorizationRef: z.string().trim().min(2).max(200), documentId: z.string().uuid(), exception: Exception, authorizedOn: z.string().date().nullable().default(null), startOn: z.string().date().nullable().default(null) }),
     handler: async ({ app, auth, params, body, req }) => {
       requireArp(auth, 'effect');
       const r0 = await adhesionOr404(app.db, auth, params.id);
@@ -411,9 +415,13 @@ export const arpOpsRoutes = [
           await docOf(tx, a.id, body.exception.documentId, ['parecer_juridico']);
           exception = { ...body.exception, validatedBy: auth.userId, validatedByName: auth.name, at: new Date().toISOString(), violations: check.lines.flatMap((l) => l.violations) };
         }
-        const deadline = addDaysIso(todayIso(), rule.rules.contractDeadlineDays);
-        await writeLedger(tx, auth, a.id, st, r!.items.map((i) => ({ kind: 'adesao' as const, itemId: i.itemId, agencyId: r!.agencyId, qtyMilli: i.qtyMilli })), { origin: 'adesao', adhesionId: r!.id, documentId: body.documentId, justification: r!.justification, approvalRef: body.managerAuthorizationRef, ruleVersion: rule.version, idem: `adesao:${r!.id}` });
-        await tx.update(s.arpAdhesions).set({ status: 'autorizada', managerAuthorizedAt: new Date(), managerAuthorizationRef: body.managerAuthorizationRef, authorizedBy: auth.userId, deadlineAt: deadline, limitsSnapshot: { rules: rule.rules, check } as unknown as Record<string, unknown>, ruleVersion: rule.version, exception, updatedAt: new Date(), rowVersion: sql`${s.arpAdhesions.rowVersion} + 1` }).where(eq(s.arpAdhesions.id, r!.id));
+        const authorizedOn = body.authorizedOn ?? todayIso();
+        if (authorizedOn > todayIso()) throw unprocessable('A data da autorização não pode estar no futuro.');
+        const startOn = body.startOn ?? authorizedOn;
+        if (startOn < authorizedOn) throw unprocessable('O início da participação não pode ser anterior à autorização.');
+        const deadline = addDaysIso(authorizedOn, rule.rules.contractDeadlineDays);
+        await writeLedger(tx, auth, a.id, st, r!.items.map((i) => ({ kind: 'adesao' as const, itemId: i.itemId, agencyId: r!.agencyId, qtyMilli: i.qtyMilli })), { origin: 'adesao', adhesionId: r!.id, documentId: body.documentId, justification: r!.justification, approvalRef: body.managerAuthorizationRef, ruleVersion: rule.version, effectiveOn: startOn, idem: `adesao:${r!.id}` });
+        await tx.update(s.arpAdhesions).set({ status: 'autorizada', managerAuthorizedAt: new Date(), authorizedOn, startOn, managerAuthorizationRef: body.managerAuthorizationRef, authorizedBy: auth.userId, deadlineAt: deadline, limitsSnapshot: { rules: rule.rules, check } as unknown as Record<string, unknown>, ruleVersion: rule.version, exception, updatedAt: new Date(), rowVersion: sql`${s.arpAdhesions.rowVersion} + 1` }).where(eq(s.arpAdhesions.id, r!.id));
         if (r!.opportunityId) await reserveAdhesionForOpportunity(tx, auth, a.id, r!.id);
         await arpEvent(tx, auth, auth.tenantId, a.id, 'adesao_autorizada', `Adesão autorizada (${body.managerAuthorizationRef}). Prazo para contratar: ${deadline.split('-').reverse().join('/')}.${exception ? ' Com exceção validada pelo Jurídico.' : ''}`, { adhesionId: r!.id, ruleVersion: rule.version });
         return { deadlineAt: deadline, exception: !!exception };
@@ -537,7 +545,7 @@ export const arpOpsRoutes = [
     tag: 'Atas',
     module: 'contratos',
     params: IdParams,
-    body: z.object({ documentId: z.string().uuid(), exception: Exception }),
+    body: z.object({ documentId: z.string().uuid(), exception: Exception, legalOpinionDocumentId: z.string().uuid().nullable().default(null) }),
     handler: async ({ app, auth, params, body, req }) => {
       requireArp(auth, 'effect');
       const op0 = await opOr404(app.db, auth, params.id);
@@ -553,21 +561,36 @@ export const arpOpsRoutes = [
         if (!sim.ok) throw unprocessable(`O saldo mudou desde a aprovação e a operação deixou de ser admissível: ${sim.errors.join(' ')}`);
         const rule = await rulesFor(tx, auth.tenantId, a.regime as ArpRegime);
         let exception: Record<string, unknown> | null = null;
+        if (input.kind === 'conversao' && rule.rules.conversionNeedsLegalOpinion !== false) {
+          if (!body.legalOpinionDocumentId) throw unprocessable('Conversão entre itens exige parecer jurídico anexado (regra da ata). O sistema registra a análise, mas não substitui a validação jurídica.', [{ path: 'legalOpinionDocumentId', message: 'Parecer obrigatório' }]);
+          await docOf(tx, a.id, body.legalOpinionDocumentId, ['parecer_juridico']);
+        }
         if (input.kind === 'conversao' && !rule.rules.allowConversion) {
           if (!body.exception) throw unprocessable('O regulamento aplicado não prevê conversão entre itens: só com exceção validada pelo Jurídico.', [{ path: 'exception', message: 'Exceção legal' }]);
           if (!isJuridico(auth)) throw forbidden('Exceção legal só pode ser validada por alguém do setor Jurídico.');
           await docOf(tx, a.id, body.exception.documentId, ['parecer_juridico']);
           exception = { ...body.exception, validatedBy: auth.userId, validatedByName: auth.name, at: new Date().toISOString() };
         }
-        const meta = { origin: 'operacao' as const, operationId: op!.id, documentId: body.documentId, justification: op!.justification, approvalRef: `operação aprovada por ${op!.decidedBy}`, ruleVersion: rule.version, idem: `op:${op!.id}:efetiva` };
+        const meta = { origin: 'operacao' as const, operationId: op!.id, documentId: body.documentId, justification: op!.justification, approvalRef: `operação aprovada por ${op!.decidedBy}`, ruleVersion: rule.version, effectiveOn: input.effectiveOn ?? null, idem: `op:${op!.id}:efetiva` };
         await writeLedger(tx, auth, a.id, st, sim.entries, meta);
+        if (input.kind === 'alteracao_item') {
+          const itemId = (input.sources[0] ?? input.targets[0])!.itemId;
+          const it = st.items.find((i) => i.id === itemId)!;
+          const patch = Object.fromEntries(Object.entries(input.itemPatch ?? {}).filter(([k, v]) => v !== undefined && v !== (it as Record<string, unknown>)[k])) as Record<string, string | null>;
+          if (patch.itemNumber) {
+            const [dup] = await tx.select({ id: s.arpItems.id }).from(s.arpItems).where(and(eq(s.arpItems.arpId, a.id), sql`lower(coalesce(${s.arpItems.lot}, '')) = lower(${it.lot ?? ''})`, sql`lower(${s.arpItems.itemNumber}) = lower(${patch.itemNumber})`, sql`${s.arpItems.id} <> ${it.id}`)).limit(1);
+            if (dup) throw unprocessable('Já existe item com este número (e lote).');
+          }
+          await tx.update(s.arpItems).set({ ...patch, version: it.version + 1, updatedAt: new Date() }).where(eq(s.arpItems.id, itemId));
+          for (const [k, v] of Object.entries(patch)) await tx.insert(s.arpItemChanges).values({ tenantId: auth.tenantId, itemId, field: k, fromValue: String((it as Record<string, unknown>)[k] ?? ''), toValue: String(v ?? ''), reason: op!.justification, origin: 'operacao', documentId: body.documentId, operationId: op!.id, actorId: auth.userId, version: it.version + 1 });
+        }
         if (input.kind === 'alteracao_preco') {
           const itemId = (input.sources[0] ?? input.targets[0])!.itemId;
           const it = st.items.find((i) => i.id === itemId)!;
-          await tx.update(s.arpItems).set({ unitCents: input.newUnitCents!, updatedAt: new Date() }).where(eq(s.arpItems.id, itemId));
-          await tx.insert(s.arpItemChanges).values({ tenantId: auth.tenantId, itemId, field: 'unitCents', fromValue: String(it.unitCents), toValue: String(input.newUnitCents), reason: op!.justification, origin: 'operacao', documentId: body.documentId, operationId: op!.id, actorId: auth.userId });
+          await tx.update(s.arpItems).set({ unitCents: input.newUnitCents!, version: it.version + 1, updatedAt: new Date() }).where(eq(s.arpItems.id, itemId));
+          await tx.insert(s.arpItemChanges).values({ tenantId: auth.tenantId, itemId, field: 'unitCents', fromValue: String(it.unitCents), toValue: String(input.newUnitCents), reason: op!.justification, origin: 'operacao', documentId: body.documentId, operationId: op!.id, actorId: auth.userId, version: it.version + 1 });
         }
-        await tx.update(s.arpOperations).set({ status: 'efetivada', effectedBy: auth.userId, effectedAt: new Date(), documentId: body.documentId, exception, simulation: sim as unknown as Record<string, unknown>, updatedAt: new Date(), rowVersion: sql`${s.arpOperations.rowVersion} + 1` }).where(eq(s.arpOperations.id, op!.id));
+        await tx.update(s.arpOperations).set({ status: 'efetivada', effectedBy: auth.userId, effectedAt: new Date(), effectiveOn: input.effectiveOn ?? null, documentId: body.documentId, exception, simulation: sim as unknown as Record<string, unknown>, updatedAt: new Date(), rowVersion: sql`${s.arpOperations.rowVersion} + 1` }).where(eq(s.arpOperations.id, op!.id));
         await arpEvent(tx, auth, auth.tenantId, a.id, 'operacao_efetivada', `${OPERATION_LABELS[input.kind]} efetivada (${sim.entries.length} lançamento(s)).`, { operationId: op!.id });
         return { entries: sim.entries.length };
       });
@@ -649,8 +672,8 @@ async function simulate(db: DbOrTx, auth: AuthContext, a: typeof s.arps.$inferSe
     if (!e) throw unprocessable('Lançamento não encontrado nesta ata.');
     corrects = { id: e.id, kind: e.kind as never, itemId: e.itemId, agencyId: e.agencyId, qtyMilli: e.qtyMilli, reversed: st.ledger.some((l) => l.reversesId === e.id) };
   }
-  const sim = simulateOperation({ kind: input.kind, sources: input.sources, targets: input.targets, newUnitCents: input.newUnitCents, correctsEntry: corrects, correctedQtyMilli: input.correctedQtyMilli }, {
-    items: new Map(st.items.map((i) => [i.id, { id: i.id, registeredMilli: i.registeredMilli, unitCents: i.unitCents, label: `item ${i.itemNumber}` }])),
+  const sim = simulateOperation({ kind: input.kind, sources: input.sources, targets: input.targets, newUnitCents: input.newUnitCents, correctsEntry: corrects, correctedQtyMilli: input.correctedQtyMilli, itemPatch: input.itemPatch, criteria: input.criteria }, {
+    items: new Map(st.items.map((i) => [i.id, { id: i.id, registeredMilli: i.registeredMilli, unitCents: i.unitCents, label: `item ${i.itemNumber}`, unit: i.unit, moved: st.ledger.some((l) => l.itemId === i.id) }])),
     agencies: new Map(st.agencies.map((g) => [g.id, { id: g.id, kind: g.kind as AgencyKind, name: g.name }])),
     balances: st.balances,
     rules: rule.rules,

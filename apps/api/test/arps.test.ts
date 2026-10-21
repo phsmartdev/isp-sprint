@@ -117,7 +117,7 @@ describe('estorno e operações', () => {
 
   it('conversão simulada não altera saldo; efetivada exige autorização e admissibilidade', async () => {
     const before = await ata();
-    const input = { kind: 'conversao', sources: [{ itemId: item1, agencyId: manager, qtyMilli: 4_000 }], targets: [{ itemId: item2, agencyId: manager, qtyMilli: 1_000 }] };
+    const input = { kind: 'conversao', criteria: '4 meses de link equivalem a 1 roteador (parecer fictício)', sources: [{ itemId: item1, agencyId: manager, qtyMilli: 4_000 }], targets: [{ itemId: item2, agencyId: manager, qtyMilli: 1_000 }] };
     const sim = ok(await carlos.post(`/arps/${arpId}/operations/simulate`, input)).json();
     expect(sim.ok).toBe(true);
     expect(sim.warnings.join(' ')).toContain('não prevê conversão');
@@ -129,9 +129,13 @@ describe('estorno e operações', () => {
     ok(await mariana.post(`/arp-operations/${op.id}/effect`, { documentId: await doc(mariana, 'autorizacao_gerenciador') }), 422); // sem aprovação
     ok(await mariana.post(`/arp-operations/${op.id}/decide`, { approve: true }));
     const auth = await doc(mariana, 'autorizacao_gerenciador', 'Autorização conversão.pdf');
-    ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: auth }), 422); // regra não prevê conversão: exige exceção
-    ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: auth, exception: { basis: 'Parecer jurídico fictício admitindo a conversão.', documentId: await doc(carlos, 'parecer_juridico') } }), 403); // não é Jurídico
-    ok(await mariana.post(`/arp-operations/${op.id}/effect`, { documentId: auth, exception: { basis: 'Parecer jurídico fictício admitindo a conversão.', documentId: await doc(mariana, 'parecer_juridico') } }));
+    expect(ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: auth }), 422).json().detail).toContain('parecer jurídico'); // sem parecer
+    const parecer = await doc(carlos, 'parecer_juridico');
+    ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: auth, legalOpinionDocumentId: parecer }), 422); // regra não prevê conversão: exige exceção
+    ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: auth, legalOpinionDocumentId: parecer, exception: { basis: 'Parecer jurídico fictício admitindo a conversão.', documentId: parecer } }), 403); // não é Jurídico
+    ok(await mariana.post(`/arp-operations/${op.id}/effect`, { documentId: auth, legalOpinionDocumentId: parecer, exception: { basis: 'Parecer jurídico fictício admitindo a conversão.', documentId: parecer } }));
+    const [eff] = (await ctx.db.execute(sql`select count(*)::int n from arp_ledger where operation_id = ${op.id} and kind = 'conversao'`)).rows as { n: number }[];
+    expect(eff!.n).toBe(2); // débito e crédito vinculados
     const i2 = await itemOf(item2);
     expect(i2.registeredMilli).toBe(6_000);
   });
@@ -252,5 +256,49 @@ describe('ata a partir da oportunidade', () => {
     expect(cur.linked.lines).toEqual([expect.objectContaining({ status: 'reservada', qtyMilli: 5_000, agencyName: 'Instituto Fictício de Pesquisa' })]);
     const ev = await ctx.db.execute(sql`select type from opportunity_events where opportunity_id = ${opp} order by occurred_at`);
     expect(ev.rows.map((x) => (x as { type: string }).type)).toEqual(expect.arrayContaining(['ata_adesao_pedida', 'ata_adesao_autorizada']));
+  });
+});
+
+describe('participação, datas e alteração de item', () => {
+  let ata2: string, part: string, it1: string;
+  it('cadastro com gerenciador e participantes originários (datas próprias) e distribuição por item', async () => {
+    ata2 = ok(await carlos.post('/arps', { number: 'ARP 02/2026', object: 'Ata fictícia com participantes', supplierName: 'Fornecedor fictício', signedAt: '2026-02-10', startAt: '2026-02-15', endAt: '2027-02-14', managerName: 'Gerenciador Fictício', participants: [{ name: 'Participante Fictício A', joinedOn: '2026-02-10', effectiveOn: '2026-03-01' }, { name: 'Participante Fictício B' }] }), 201).json().id;
+    ok(await carlos.post(`/arps/${ata2}/items`, { itemNumber: '1', description: 'Link fictício', unit: 'mês', registeredMilli: 100_000, unitCents: 50_000 }), 201);
+    const a = ok(await carlos.get(`/arps/${ata2}`)).json();
+    part = a.agencies.find((g: { name: string }) => g.name === 'Participante Fictício A').id;
+    it1 = a.items[0].id;
+    expect(a.agencies.find((g: { id: string }) => g.id === part)).toMatchObject({ kind: 'participante', joinedOn: '2026-02-10', effectiveOn: '2026-03-01' });
+    expect(a.agencies.find((g: { name: string }) => g.name === 'Participante Fictício B').joinedOn).toBe('2026-02-10'); // herda a formalização
+    ok(await carlos.put(`/arps/${ata2}/agencies/${part}/allocations`, { lines: [{ itemId: it1, qtyMilli: 120_000 }] }), 422); // passa do registrado
+    ok(await carlos.put(`/arps/${ata2}/agencies/${part}/allocations`, { lines: [{ itemId: it1, qtyMilli: 30_000 }] }));
+    ok(await carlos.patch(`/arps/${ata2}/agencies/${part}`, { effectiveOn: '2026-03-05', reason: 'Data corrigida conforme publicação' }));
+    ok(await carlos.patch(`/arps/${ata2}`, { status: 'vigente', rowVersion: (await carlos.get(`/arps/${ata2}`)).json().rowVersion }));
+    ok(await carlos.put(`/arps/${ata2}/agencies/${part}/allocations`, { lines: [{ itemId: it1, qtyMilli: 10_000 }] }), 422); // vigente: só remanejamento
+  });
+  it('item com movimentação só muda por Alterar item, com aprovação e documento; versão anterior preservada', async () => {
+    ok(await carlos.post(`/arps/${ata2}/opportunities`, { agencyId: part, lines: [{ itemId: it1, qtyMilli: 1_000 }] }), 201);
+    expect(ok(await carlos.patch(`/arps/${ata2}/items/${it1}`, { description: 'Link fictício 200M', reason: 'Correção' }), 422).json().detail).toContain('Alterar item');
+    const op = ok(await carlos.post(`/arps/${ata2}/operations`, { input: { kind: 'alteracao_item', sources: [{ itemId: it1, agencyId: part, qtyMilli: 0 }], itemPatch: { description: 'Link fictício 200 Mbps', classification: 'Serviço contínuo' } }, justification: 'Ajuste da descrição conforme termo de referência.' }), 201).json();
+    ok(await mariana.post(`/arp-operations/${op.id}/decide`, { approve: true }));
+    const before = ok(await carlos.get(`/arps/${ata2}/ledger`)).json().items.length;
+    ok(await carlos.post(`/arp-operations/${op.id}/effect`, { documentId: ok(await carlos.post(`/arps/${ata2}/documents`, { category: 'outro', name: 'TR.pdf', mime: 'application/pdf', data: pdf }), 201).json().id }));
+    const it = (ok(await carlos.get(`/arps/${ata2}`)).json().items as { id: string; description: string; version: number; classification: string }[]).find((x) => x.id === it1)!;
+    expect(it).toMatchObject({ description: 'Link fictício 200 Mbps', version: 2, classification: 'Serviço contínuo' });
+    expect(ok(await carlos.get(`/arps/${ata2}/ledger`)).json().items.length).toBe(before); // alteração não mexe em saldo
+    const ch = ok(await carlos.get(`/arps/${ata2}/item-changes`)).json().items;
+    expect(ch.find((c: { field: string }) => c.field === 'description')).toMatchObject({ fromValue: 'Link fictício', version: 2, origin: 'operacao' });
+  });
+  it('adesão posterior com autorização retroativa: datas reais, eficácia no livro, lançamento com data do registro', async () => {
+    const r = ok(await carlos.post(`/arps/${ata2}/adhesions`, { newAgency: { name: 'Município Fictício C' }, requestedAt: '2026-04-01', justification: 'Necessidade fictícia de conectividade.', items: [{ itemId: it1, qtyMilli: 5_000 }] }), 201).json();
+    ok(await carlos.post(`/arp-adhesions/${r.id}/supplier-accept`, {}));
+    const auth = ok(await carlos.post(`/arps/${ata2}/documents`, { category: 'autorizacao_gerenciador', name: 'Ofício.pdf', mime: 'application/pdf', data: pdf }), 201).json().id;
+    ok(await carlos.post(`/arp-adhesions/${r.id}/authorize`, { managerAuthorizationRef: 'Ofício 3/2026', documentId: auth, authorizedOn: '2099-01-01' }), 422);
+    const out = ok(await carlos.post(`/arp-adhesions/${r.id}/authorize`, { managerAuthorizationRef: 'Ofício 3/2026', documentId: auth, authorizedOn: '2026-04-10', startOn: '2026-04-15' })).json();
+    expect(out.deadlineAt).toBe('2026-06-09'); // prazo da regra vigente (60 dias) contado da autorização
+    const [l] = (await ctx.db.execute(sql`select effective_on::text e, occurred_at::date::text o from arp_ledger where adhesion_id = ${r.id}`)).rows as { e: string; o: string }[];
+    expect(l!.e).toBe('2026-04-15');
+    expect(l!.o).toBe(new Date().toISOString().slice(0, 10));
+    const ag = (ok(await carlos.get(`/arps/${ata2}`)).json().agencies as { name: string; kind: string }[]).find((g) => g.name === 'Município Fictício C')!;
+    expect(ag.kind).toBe('nao_participante'); // adesão nunca vira participação originária
   });
 });

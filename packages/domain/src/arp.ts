@@ -116,6 +116,8 @@ export type ArpRules = {
   remanejamentoNeedsManager: boolean;
   /** conversão entre itens admitida pelo regulamento (sempre sem aumentar valor nem criar objeto) */
   allowConversion: boolean;
+  /** conversão entre itens só é efetivada com parecer jurídico anexado */
+  conversionNeedsLegalOpinion?: boolean;
   legalBasis: string;
 };
 
@@ -129,11 +131,11 @@ export const LEGAL_CAPS: Record<ArpRegime, Pick<ArpRules, 'adhesionPerAgencyBp' 
 };
 
 export const DEFAULT_RULES: Record<ArpRegime, ArpRules> = {
-  federal: { ...LEGAL_CAPS.federal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; Decreto 11.462/2023, arts. 30 a 32.' },
-  estadual: { ...LEGAL_CAPS.estadual, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento estadual.' },
-  municipal: { ...LEGAL_CAPS.municipal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento municipal.' },
-  distrital: { ...LEGAL_CAPS.distrital, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento distrital.' },
-  estatal: { ...LEGAL_CAPS.estatal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, legalBasis: 'Lei 13.303/2016 e regulamento de licitações da estatal.' },
+  federal: { ...LEGAL_CAPS.federal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, conversionNeedsLegalOpinion: true, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; Decreto 11.462/2023, arts. 30 a 32.' },
+  estadual: { ...LEGAL_CAPS.estadual, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, conversionNeedsLegalOpinion: true, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento estadual.' },
+  municipal: { ...LEGAL_CAPS.municipal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, conversionNeedsLegalOpinion: true, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento municipal.' },
+  distrital: { ...LEGAL_CAPS.distrital, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, conversionNeedsLegalOpinion: true, legalBasis: 'Lei 14.133/2021, art. 86, §§ 2º a 5º; regulamento distrital.' },
+  estatal: { ...LEGAL_CAPS.estatal, contractDeadlineDays: 90, allowAdhesion: true, remanejamentoNeedsManager: true, allowConversion: false, conversionNeedsLegalOpinion: true, legalBasis: 'Lei 13.303/2016 e regulamento de licitações da estatal.' },
 };
 
 /** Valida uma configuração: nunca acima do teto legal. */
@@ -172,7 +174,7 @@ export function checkAdhesion(rules: ArpRules, req: { itemId: string; qtyMilli: 
 
 // ------------------------------------------------------------------ motor de operações
 
-export const OPERATION_KINDS = ['conversao', 'remanejamento', 'correcao', 'alteracao_preco', 'cancelamento'] as const;
+export const OPERATION_KINDS = ['conversao', 'remanejamento', 'correcao', 'alteracao_preco', 'cancelamento', 'alteracao_item'] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 export const OPERATION_LABELS: Record<OperationKind, string> = {
   conversao: 'Conversão entre itens',
@@ -180,6 +182,7 @@ export const OPERATION_LABELS: Record<OperationKind, string> = {
   correcao: 'Correção de lançamento',
   alteracao_preco: 'Alteração de preço',
   cancelamento: 'Cancelamento de quantitativo',
+  alteracao_item: 'Alteração de item',
 };
 export const OPERATION_HINTS: Record<OperationKind, string> = {
   conversao: 'Troca saldo de um item por outro item já registrado, sem aumentar o valor total nem criar objeto novo.',
@@ -187,6 +190,7 @@ export const OPERATION_HINTS: Record<OperationKind, string> = {
   correcao: 'Desfaz um lançamento errado com estorno e registra o lançamento correto. O original continua no histórico.',
   alteracao_preco: 'Revisão de preço registrado (ex.: reequilíbrio). Vale para consumos futuros; os já registrados mantêm o preço da época.',
   cancelamento: 'Retira quantitativo do saldo registrado de um órgão (ex.: cancelamento parcial do registro).',
+  alteracao_item: 'Muda dados do item que já tem movimentação (número, descrição, unidade, especificação, classificação). Não mexe em saldo: lançamentos antigos mantêm os dados da época.',
 };
 
 export type OpLine = { itemId: string; agencyId: string; qtyMilli: number };
@@ -199,7 +203,14 @@ export type OperationInput = {
   /** correção: lançamento corrigido */
   correctsEntry?: { id: string; kind: ArpLedgerKind; itemId: string; agencyId: string; qtyMilli: number; reversed: boolean } | null;
   correctedQtyMilli?: number | null;
-};
+  /** alteração de item: campos novos (só cadastrais; quantidade e preço têm operações próprias) */
+  itemPatch?: Partial<Record<ItemPatchField, string | null>> | null;
+  /** conversão: fator ou critério de equivalência (nunca presumido pelo sistema) */
+  criteria?: string | null;
+}
+export const ITEM_PATCH_FIELDS = ['itemNumber', 'description', 'unit', 'specification', 'code', 'classification', 'brandModel', 'notes'] as const;
+export type ItemPatchField = (typeof ITEM_PATCH_FIELDS)[number];
+export const ITEM_PATCH_LABELS: Record<ItemPatchField, string> = { itemNumber: 'Número do item', description: 'Descrição', unit: 'Unidade de medida', specification: 'Especificação', code: 'Código', classification: 'Classificação', brandModel: 'Marca/modelo', notes: 'Observações' };
 
 export type Simulation = {
   ok: boolean;
@@ -214,7 +225,7 @@ export type Simulation = {
 };
 
 /** Simula a operação contra os saldos atuais. Não grava nada: a efetivação usa exatamente estes lançamentos. */
-export function simulateOperation(op: OperationInput, ctx: { items: Map<string, ItemBase & { label: string }>; agencies: Map<string, AgencyBase & { name: string }>; balances: Balances; rules: ArpRules; status: ArpStatus }): Simulation {
+export function simulateOperation(op: OperationInput, ctx: { items: Map<string, ItemBase & { label: string; unit?: string; moved?: boolean }>; agencies: Map<string, AgencyBase & { name: string }>; balances: Balances; rules: ArpRules; status: ArpStatus }): Simulation {
   const errors: string[] = [];
   const warnings: string[] = [];
   const entries: ArpLedgerEntry[] = [];
@@ -226,7 +237,7 @@ export function simulateOperation(op: OperationInput, ctx: { items: Map<string, 
   for (const l of all) {
     if (!ctx.items.has(l.itemId)) errors.push('Item fora da ata: conversão não cria objeto novo.');
     if (!ctx.agencies.has(l.agencyId)) errors.push('Órgão não cadastrado na ata.');
-    if (!(l.qtyMilli > 0) && op.kind !== 'alteracao_preco' && op.kind !== 'correcao') errors.push('Quantidades devem ser maiores que zero.');
+    if (!(l.qtyMilli > 0) && op.kind !== 'alteracao_preco' && op.kind !== 'correcao' && op.kind !== 'alteracao_item') errors.push('Quantidades devem ser maiores que zero.');
   }
   // saída nunca maior que o disponível (somando linhas repetidas)
   const out = new Map<string, number>();
@@ -243,6 +254,9 @@ export function simulateOperation(op: OperationInput, ctx: { items: Map<string, 
 
   switch (op.kind) {
     case 'conversao': {
+      if (!op.criteria || op.criteria.trim().length < 5) errors.push('Informe o fator ou critério de conversão (a equivalência entre itens não é presumida).');
+      const units = new Set(all.map((l) => ctx.items.get(l.itemId)?.unit).filter(Boolean));
+      if (units.size > 1) warnings.push(`Unidades diferentes (${[...units].join(' → ')}): quantidades de destino seguem o critério informado, sem equivalência automática.`);
       if (!ctx.rules.allowConversion) warnings.push('O regulamento configurado não prevê conversão: a efetivação exige exceção validada pelo Jurídico.');
       if (!op.sources.length || !op.targets.length) errors.push('Escolha itens de origem e de destino.');
       if (op.sources.some((s) => op.targets.some((t) => t.itemId === s.itemId))) errors.push('Origem e destino devem ser itens diferentes.');
@@ -290,6 +304,16 @@ export function simulateOperation(op: OperationInput, ctx: { items: Map<string, 
         dstValue = lineValue(remaining, op.newUnitCents);
         if (op.newUnitCents > price(it)) warnings.push('Aumento de preço registrado: confirme o fundamento (reequilíbrio econômico-financeiro) no documento anexado.');
       }
+      break;
+    }
+    case 'alteracao_item': {
+      const ids = new Set(all.map((l) => l.itemId));
+      if (ids.size !== 1) errors.push('Escolha um item para alterar.');
+      const patch = Object.entries(op.itemPatch ?? {}).filter(([, v]) => v !== undefined);
+      if (!patch.length) errors.push('Nenhum dado do item foi alterado.');
+      if (patch.some(([k, v]) => ['itemNumber', 'description', 'unit'].includes(k) && !String(v ?? '').trim())) errors.push('Número, descrição e unidade não podem ficar vazios.');
+      if (patch.some(([k]) => k === 'unit')) warnings.push('Mudança de unidade: lançamentos já feitos continuam na unidade da época; confira se o quantitativo registrado continua coerente.');
+      srcValue = 0; dstValue = 0;
       break;
     }
     case 'correcao': {

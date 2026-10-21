@@ -85,6 +85,13 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Evolução integrada — Etapa 2: Atas (participação, datas, alteração e conversão) ✅ (2026-10-21)
+- Ata nasce com gerenciador e participantes originários (CNPJ, data de ingresso, início de eficácia); órgãos editáveis com motivo e evento antes/depois; distribuição dos quantitativos por participante enquanto a ata está em rascunho.
+- Adesões posteriores com data de autorização (pode ser retroativa, nunca futura) e início da execução; prazo de execução conta da autorização.
+- **Alterar item**: sem movimentação, edição direta; com movimentação, vira operação `alteracao_item` (simulada, aprovada por outra pessoa, efetivada com documento). Item ganha versão e classificação; histórico de alterações por versão.
+- **Conversão de saldo entre itens**: exige critério de equivalência, alerta de unidades diferentes, data de eficácia e parecer jurídico na efetivação (regra `conversionNeedsLegalOpinion`, padrão sim).
+- Livro com coluna de eficácia (`effective_on`) separada da data de registro. Migração 0029. Testes: domínio 65, API 133, E2E 37.
+
 ## Sucesso do Cliente — jornada, inteligência da conta e gestão preditiva ✅ (2026-10-21)
 - **Jornada automática:** contrato validado vai para o funil Sucesso do Cliente; ao entrar em *Planejamento* (configurável), nasce a jornada.
   - Onboarding, adoção e renovação.

@@ -181,3 +181,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - O scorecard separa operacional, comercial, qualidade e risco.
   - A gamificação pontua só o realizado e comprovado.
 
+## ADR-043 — Datas de eficácia, versão de item e conversão com parecer (21/10/2026)
+- **Decisão:** toda movimentação guarda duas datas: `occurred_at` (sistema, imutável) e `effective_on` (quando vale juridicamente). Item de ata tem `version`; qualquer mudança em item já movimentado passa pela operação `alteracao_item` com aprovação de outra pessoa. Conversão entre itens exige critério escrito e, por regra versionada, parecer jurídico anexado na efetivação.
+- **Por quê:** adesões e aditivos chegam com data anterior ao registro; auditoria precisa distinguir quando foi lançado de quando passou a valer. Alterar item movimentado sem trilha muda retroativamente o significado do saldo.
+- **Consequência:** relatórios por período podem filtrar por qualquer das duas datas; a consolidação das atas lê o livro, não o item.
+

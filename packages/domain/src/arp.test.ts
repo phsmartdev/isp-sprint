@@ -54,12 +54,12 @@ describe('motor de operações', () => {
     status: 'vigente' as const,
   });
   it('conversão não aumenta valor nem cria item', () => {
-    const ok = simulateOperation({ kind: 'conversao', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: toMilli(20) }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: toMilli(10) }] }, ctx());
+    const ok = simulateOperation({ kind: 'conversao', criteria: 'Critério fictício de teste', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: toMilli(20) }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: toMilli(10) }] }, ctx());
     expect(ok.ok).toBe(true);
     expect(ok.entries.map((e) => `${e.kind}:${e.dir}`)).toEqual(['conversao:saida', 'conversao:entrada']);
-    const up = simulateOperation({ kind: 'conversao', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: toMilli(10) }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: toMilli(10) }] }, ctx());
+    const up = simulateOperation({ kind: 'conversao', criteria: 'Critério fictício de teste', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: toMilli(10) }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: toMilli(10) }] }, ctx());
     expect(up.errors.join(' ')).toContain('não pode aumentar o valor');
-    const ghost = simulateOperation({ kind: 'conversao', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 1 }], targets: [{ itemId: 'novo', agencyId: 'g', qtyMilli: 1 }] }, ctx());
+    const ghost = simulateOperation({ kind: 'conversao', criteria: 'Critério fictício de teste', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 1 }], targets: [{ itemId: 'novo', agencyId: 'g', qtyMilli: 1 }] }, ctx());
     expect(ghost.errors.join(' ')).toContain('não cria objeto novo');
   });
   it('remanejamento: mesmo item, origem e destino, sem passar do disponível', () => {
@@ -90,5 +90,21 @@ describe('importação', () => {
     expect(r.items).toHaveLength(2);
     expect(r.issues).toEqual([expect.objectContaining({ row: 3, field: 'totalPrice', level: 'erro' })]);
     expect(r.items[1]).toMatchObject({ agency: 'Prefeitura X', agencyMilli: 4000 });
+  });
+});
+
+describe('alteração de item e critério de conversão', () => {
+  const base = { items: new Map([['i1', { id: 'i1', registeredMilli: 10_000, unitCents: 100, label: 'item 1', unit: 'mês' }], ['i2', { id: 'i2', registeredMilli: 10_000, unitCents: 100, label: 'item 2', unit: 'un' }]]), agencies: new Map([['g', { id: 'g', kind: 'gerenciador' as const, name: 'G' }]]), balances: computeBalances([{ id: 'i1', registeredMilli: 10_000, unitCents: 100 }, { id: 'i2', registeredMilli: 10_000, unitCents: 100 }], [{ id: 'g', kind: 'gerenciador' }], [], []), rules: DEFAULT_RULES.federal, status: 'vigente' as const };
+  it('conversão exige critério e avisa unidades diferentes, sem presumir equivalência', () => {
+    const no = simulateOperation({ kind: 'conversao', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 1000 }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: 1000 }] }, base);
+    expect(no.errors.join(' ')).toContain('critério');
+    const yes = simulateOperation({ kind: 'conversao', criteria: '1 mês = 1 un (parecer 12/2026)', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 1000 }], targets: [{ itemId: 'i2', agencyId: 'g', qtyMilli: 1000 }] }, base);
+    expect(yes.warnings.join(' ')).toContain('Unidades diferentes');
+  });
+  it('alteração de item não gera lançamento de saldo e não aceita descrição vazia', () => {
+    const r = simulateOperation({ kind: 'alteracao_item', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 0 }], targets: [], itemPatch: { description: 'Nova descrição' } }, base);
+    expect(r.ok).toBe(true);
+    expect(r.entries).toHaveLength(0);
+    expect(simulateOperation({ kind: 'alteracao_item', sources: [{ itemId: 'i1', agencyId: 'g', qtyMilli: 0 }], targets: [], itemPatch: { description: '' } }, base).ok).toBe(false);
   });
 });

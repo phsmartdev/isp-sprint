@@ -77,6 +77,8 @@ export type LedgerMeta = {
   justification?: string | null;
   approvalRef?: string | null;
   ruleVersion: number;
+  /** data de eficácia (retroativa quando autorizada); a data de lançamento é sempre agora */
+  effectiveOn?: string | null;
   /** prefixo da chave de idempotência; cada linha recebe um sufixo estável */
   idem: string;
 };
@@ -96,7 +98,7 @@ export async function writeLedger(tx: DbOrTx, auth: AuthContext, arpId: string, 
       tenantId: auth.tenantId, arpId, itemId: e.itemId, agencyId: e.agencyId, kind: e.kind, dir: e.dir ?? null, qtyMilli: e.qtyMilli, unit: it.unit, unitCents: it.unitCents, amountCents: amount,
       origin: meta.origin, opportunityId: meta.opportunityId ?? null, contractId: meta.contractId ?? null, adhesionId: meta.adhesionId ?? null, operationId: meta.operationId ?? null,
       documentId: meta.documentId ?? null, actorId: auth.userId, justification: meta.justification ?? null, approvalRef: meta.approvalRef ?? null, ruleVersion: meta.ruleVersion,
-      reversesId: e.reversesId ?? null, idempotencyKey: `${meta.idem}:${i}:${e.kind}:${e.itemId}:${e.agencyId}`,
+      reversesId: e.reversesId ?? null, effectiveOn: meta.effectiveOn ?? null, idempotencyKey: `${meta.idem}:${i}:${e.kind}:${e.itemId}:${e.agencyId}`,
     }).onConflictDoNothing({ target: [s.arpLedger.tenantId, s.arpLedger.idempotencyKey] }).returning({ id: s.arpLedger.id });
     written += r.length;
   }

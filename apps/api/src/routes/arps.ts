@@ -25,7 +25,10 @@ const ArpBody = z.object({
   notes: z.string().trim().max(4000).nullable().default(null),
   managerName: z.string().trim().min(2).max(200),
   managerDocument: z.string().trim().max(30).nullable().default(null),
+  /** participantes originários, que entram junto com o gerenciador */
+  participants: z.array(z.object({ name: z.string().trim().min(2).max(200), document: z.string().trim().max(30).nullable().default(null), joinedOn: z.string().date().nullable().default(null), effectiveOn: z.string().date().nullable().default(null), notes: z.string().trim().max(1000).nullable().default(null) })).max(100).default([]),
 });
+const AgencyDates = { joinedOn: z.string().date().nullable().default(null), effectiveOn: z.string().date().nullable().default(null), notes: z.string().trim().max(1000).nullable().default(null), documentId: z.string().uuid().nullable().default(null) };
 const DOC_CATEGORIES = ['ata', 'edital', 'publicacao', 'adesao', 'aceite_fornecedor', 'autorizacao_gerenciador', 'empenho', 'contrato', 'ordem_servico', 'parecer_juridico', 'outro'] as const;
 const ItemParams = z.object({ id: z.string().uuid(), itemId: z.string().uuid() });
 
@@ -39,7 +42,7 @@ export function itemsView(st: ArpState) {
   return st.items.map((i) => {
     const b = st.balances.byItem.get(i.id)!;
     return {
-      id: i.id, itemNumber: i.itemNumber, lot: i.lot, code: i.code, description: i.description, specification: i.specification, unit: i.unit, unitCents: i.unitCents, brandModel: i.brandModel, notes: i.notes, extra: i.extra,
+      id: i.id, itemNumber: i.itemNumber, lot: i.lot, code: i.code, classification: i.classification, version: i.version, moved: st.ledger.some((l) => l.itemId === i.id), description: i.description, specification: i.specification, unit: i.unit, unitCents: i.unitCents, brandModel: i.brandModel, notes: i.notes, extra: i.extra,
       originalMilli: i.registeredMilli, registeredMilli: b.registered, reservedMilli: b.reserved, contractedMilli: b.contracted, executedMilli: b.executed, billedMilli: b.billed, availableMilli: b.available,
       adhesionAuthorizedMilli: b.adhesionAuthorized, adhesionAvailableMilli: b.adhesionAvailable,
       registeredValueCents: lineValue(b.registered, i.unitCents), availableValueCents: lineValue(b.available, i.unitCents), contractedValueCents: contractedValue.get(i.id) ?? 0,
@@ -111,9 +114,13 @@ export const arpRoutes = [
       const [dup] = await app.db.select({ id: s.arps.id }).from(s.arps).where(and(eq(s.arps.tenantId, auth.tenantId), sql`lower(${s.arps.number}) = lower(${body.number})`)).limit(1);
       if (dup) throw unprocessable('Já existe ata com este número.', [{ path: 'number', message: 'Número já cadastrado' }]);
       const a = await app.db.transaction(async (tx) => {
-        const { managerName, managerDocument, ...rest } = body;
+        const { managerName, managerDocument, participants, ...rest } = body;
+        const names = [managerName, ...participants.map((p) => p.name)].map((n) => n.trim().toLowerCase());
+        if (new Set(names).size !== names.length) throw unprocessable('Órgão repetido entre gerenciador e participantes.');
         const [a] = await tx.insert(s.arps).values({ ...rest, tenantId: auth.tenantId, ownerId: auth.userId, createdBy: auth.userId }).returning();
-        await tx.insert(s.arpAgencies).values({ tenantId: auth.tenantId, arpId: a!.id, kind: 'gerenciador', name: managerName, document: managerDocument });
+        await tx.insert(s.arpAgencies).values({ tenantId: auth.tenantId, arpId: a!.id, kind: 'gerenciador', name: managerName, document: managerDocument, joinedOn: rest.signedAt });
+        for (const p of participants) await tx.insert(s.arpAgencies).values({ tenantId: auth.tenantId, arpId: a!.id, kind: 'participante', name: p.name, document: p.document, joinedOn: p.joinedOn ?? rest.signedAt, effectiveOn: p.effectiveOn, notes: p.notes });
+        if (participants.length) await arpEvent(tx, auth, auth.tenantId, a!.id, 'orgao', `Participantes originários: ${participants.map((p) => p.name).join(', ')}.`);
         await arpEvent(tx, auth, auth.tenantId, a!.id, 'cadastro', `Ata ${a!.number} cadastrada (gerenciador: ${managerName}).`);
         return a!;
       });
@@ -196,17 +203,71 @@ export const arpRoutes = [
     tag: 'Atas',
     module: 'contratos',
     params: IdParams,
-    body: z.object({ kind: z.enum(AGENCY_KINDS).exclude(['gerenciador']), name: z.string().trim().min(2).max(200), document: z.string().trim().max(30).nullable().default(null) }),
+    body: z.object({ kind: z.enum(AGENCY_KINDS).exclude(['gerenciador']), name: z.string().trim().min(2).max(200), document: z.string().trim().max(30).nullable().default(null), ...AgencyDates }),
     handler: async ({ app, auth, params, body, reply }) => {
       requireArp(auth, 'manage');
       const a = await loadArp(app.db, auth, params.id);
       if (body.kind === 'participante' && a.status !== 'rascunho') throw unprocessable('Participantes são definidos no registro; depois da vigência, novos órgãos entram como não participantes (adesão).');
       const [dup] = await app.db.select({ id: s.arpAgencies.id }).from(s.arpAgencies).where(and(eq(s.arpAgencies.arpId, a.id), sql`lower(${s.arpAgencies.name}) = lower(${body.name})`)).limit(1);
       if (dup) throw unprocessable('Órgão já cadastrado nesta ata.');
+      if (body.documentId) { const [d] = await app.db.select({ id: s.arpDocuments.id }).from(s.arpDocuments).where(and(eq(s.arpDocuments.id, body.documentId), eq(s.arpDocuments.arpId, a.id))).limit(1); if (!d) throw unprocessable('Documento não pertence a esta ata.'); }
       const [g] = await app.db.insert(s.arpAgencies).values({ tenantId: auth.tenantId, arpId: a.id, ...body }).returning();
-      await arpEvent(app.db, auth, auth.tenantId, a.id, 'orgao', `Órgão ${body.name} (${body.kind === 'participante' ? 'participante' : 'não participante'}) cadastrado.`);
+      await arpEvent(app.db, auth, auth.tenantId, a.id, 'orgao', `Órgão ${body.name} (${body.kind === 'participante' ? 'participante originário' : 'não participante — adesão posterior'}) cadastrado${body.joinedOn ? `, ingresso em ${body.joinedOn.split('-').reverse().join('/')}` : ''}.`);
       reply.code(201);
       return g;
+    },
+  }),
+
+  defineRoute({
+    method: 'PATCH',
+    url: '/arps/:id/agencies/:agencyId',
+    summary: 'Corrige datas, documento e observações do órgão (com motivo; o tipo de participação não muda)',
+    tag: 'Atas',
+    module: 'contratos',
+    params: z.object({ id: z.string().uuid(), agencyId: z.string().uuid() }),
+    body: z.object({ document: z.string().trim().max(30).nullable().optional(), joinedOn: z.string().date().nullable().optional(), effectiveOn: z.string().date().nullable().optional(), notes: z.string().trim().max(1000).nullable().optional(), documentId: z.string().uuid().nullable().optional(), reason: z.string().trim().min(5, 'Explique a correção').max(500) }),
+    handler: async ({ app, auth, params, body }) => {
+      requireArp(auth, 'manage');
+      const a = await loadArp(app.db, auth, params.id);
+      const [g] = await app.db.select().from(s.arpAgencies).where(and(eq(s.arpAgencies.id, params.agencyId), eq(s.arpAgencies.arpId, a.id))).limit(1);
+      if (!g) throw notFound('Órgão não encontrado.');
+      const { reason, ...patch } = body;
+      const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== undefined && patch[k] !== g[k]);
+      if (!changed.length) return { ok: true };
+      await app.db.update(s.arpAgencies).set(patch).where(eq(s.arpAgencies.id, g.id));
+      await arpEvent(app.db, auth, auth.tenantId, a.id, 'orgao_correcao', `${g.name}: ${changed.map((k) => `${k} ${String(g[k] ?? '—')} → ${String(patch[k] ?? '—')}`).join('; ')}. Motivo: ${reason}`, { agencyId: g.id, before: Object.fromEntries(changed.map((k) => [k, g[k]])), after: Object.fromEntries(changed.map((k) => [k, patch[k]])) });
+      return { ok: true };
+    },
+  }),
+
+  defineRoute({
+    method: 'PUT',
+    url: '/arps/:id/agencies/:agencyId/allocations',
+    summary: 'Distribuição do participante originário por item (com a ata em cadastro; depois, só por remanejamento)',
+    tag: 'Atas',
+    module: 'contratos',
+    params: z.object({ id: z.string().uuid(), agencyId: z.string().uuid() }),
+    body: z.object({ lines: z.array(z.object({ itemId: z.string().uuid(), qtyMilli: z.number().int().min(0) })).max(500) }),
+    handler: async ({ app, auth, params, body }) => {
+      requireArp(auth, 'manage');
+      const a = await loadArp(app.db, auth, params.id);
+      if (a.status !== 'rascunho') throw unprocessable('Com a ata vigente, a distribuição muda só por remanejamento (com autorização do gerenciador).');
+      await app.db.transaction(async (tx) => {
+        await lockArp(tx, a.id);
+        const st = await arpState(tx, a.id);
+        const g = st.agencies.find((x) => x.id === params.agencyId);
+        if (g?.kind !== 'participante') throw unprocessable('Distribuição é só para participantes originários.');
+        for (const l of body.lines) {
+          const it = st.items.find((i) => i.id === l.itemId);
+          if (!it) throw unprocessable('Item fora da ata.');
+          const others = st.allocations.filter((x) => x.itemId === it.id && x.agencyId !== g.id).reduce((t, x) => t + x.qtyMilli, 0);
+          if (others + l.qtyMilli > it.registeredMilli) throw unprocessable(`Item ${it.itemNumber}: a soma das distribuições (${fmtQty(others + l.qtyMilli)}) passa do registrado (${fmtQty(it.registeredMilli)}).`);
+          if (l.qtyMilli === 0) await tx.delete(s.arpAllocations).where(and(eq(s.arpAllocations.itemId, it.id), eq(s.arpAllocations.agencyId, g.id)));
+          else await tx.insert(s.arpAllocations).values({ tenantId: auth.tenantId, arpId: a.id, itemId: it.id, agencyId: g.id, qtyMilli: l.qtyMilli }).onConflictDoUpdate({ target: [s.arpAllocations.itemId, s.arpAllocations.agencyId], set: { qtyMilli: l.qtyMilli } });
+        }
+        await arpEvent(tx, auth, auth.tenantId, a.id, 'distribuicao', `Distribuição de ${g.name} atualizada (${body.lines.filter((l) => l.qtyMilli > 0).length} item(ns)).`, { agencyId: g.id, lines: body.lines });
+      });
+      return { ok: true };
     },
   }),
 
@@ -255,6 +316,7 @@ export const arpRoutes = [
     module: 'contratos',
     params: ItemParams,
     body: z.object({
+      itemNumber: z.string().trim().min(1).max(30).optional(), classification: z.string().trim().max(120).nullable().optional(),
       code: z.string().trim().max(60).nullable().optional(), description: z.string().trim().min(2).max(2000).optional(), specification: z.string().trim().max(4000).nullable().optional(),
       unit: z.string().trim().min(1).max(30).optional(), brandModel: z.string().trim().max(200).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(),
       registeredMilli: z.number().int().positive().optional(), unitCents: z.number().int().positive().optional(),
@@ -268,15 +330,19 @@ export const arpRoutes = [
         const [it] = await tx.select().from(s.arpItems).where(and(eq(s.arpItems.id, params.itemId), eq(s.arpItems.arpId, a.id))).limit(1);
         if (!it) throw notFound('Item não encontrado.');
         const { reason, ...patch } = body;
-        const official = (['registeredMilli', 'unitCents'] as const).filter((k) => patch[k] !== undefined && patch[k] !== it[k]);
-        if (official.length) {
-          const [mov] = await tx.select({ n: sql<number>`count(*)::int` }).from(s.arpLedger).where(eq(s.arpLedger.itemId, it.id));
-          if (a.status !== 'rascunho' || mov?.n) throw unprocessable('Quantidade e preço registrados não mudam por edição: use Conversões e remanejamentos (alteração de preço, cancelamento) com documento e aprovação.');
-        }
         const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== undefined && patch[k] !== it[k]);
         if (!changed.length) return;
-        await tx.update(s.arpItems).set({ ...patch, updatedAt: new Date() }).where(eq(s.arpItems.id, it.id));
-        for (const k of changed) await tx.insert(s.arpItemChanges).values({ tenantId: auth.tenantId, itemId: it.id, field: k, fromValue: String(it[k] ?? ''), toValue: String(patch[k] ?? ''), reason, origin: 'cadastro', actorId: auth.userId });
+        const [mov] = await tx.select({ n: sql<number>`count(*)::int` }).from(s.arpLedger).where(eq(s.arpLedger.itemId, it.id));
+        // item com movimentação: nada muda por edição direta (rastreabilidade); vai por operação com documento e aprovação
+        if (mov?.n) throw unprocessable('Item com movimentação: use "Alterar item" (com justificativa, documento e aprovação). Preço e quantidade têm operações próprias.');
+        const official = (['registeredMilli', 'unitCents'] as const).filter((k) => changed.includes(k));
+        if (official.length && a.status !== 'rascunho') throw unprocessable('Quantidade e preço registrados não mudam por edição com a ata vigente: use alteração de preço ou cancelamento, com documento e aprovação.');
+        if (patch.itemNumber && patch.itemNumber !== it.itemNumber) {
+          const [dup] = await tx.select({ id: s.arpItems.id }).from(s.arpItems).where(and(eq(s.arpItems.arpId, a.id), sql`lower(coalesce(${s.arpItems.lot}, '')) = lower(${it.lot ?? ''})`, sql`lower(${s.arpItems.itemNumber}) = lower(${patch.itemNumber})`, sql`${s.arpItems.id} <> ${it.id}`)).limit(1);
+          if (dup) throw unprocessable('Já existe item com este número (e lote).');
+        }
+        await tx.update(s.arpItems).set({ ...patch, version: it.version + 1, updatedAt: new Date() }).where(eq(s.arpItems.id, it.id));
+        for (const k of changed) await tx.insert(s.arpItemChanges).values({ tenantId: auth.tenantId, itemId: it.id, field: k, fromValue: String(it[k] ?? ''), toValue: String(patch[k] ?? ''), reason, origin: 'cadastro', actorId: auth.userId, version: it.version + 1 });
         await arpEvent(tx, auth, auth.tenantId, a.id, 'item_correcao', `Item ${it.itemNumber}: ${changed.join(', ')} corrigido(s). Motivo: ${reason}`);
       });
       return { ok: true };
@@ -293,6 +359,20 @@ export const arpRoutes = [
     handler: async ({ app, auth, params }) => {
       await loadArp(app.db, auth, params.id);
       return { items: await app.db.select({ c: s.arpItemChanges, who: s.users.name }).from(s.arpItemChanges).leftJoin(s.users, eq(s.users.id, s.arpItemChanges.actorId)).where(eq(s.arpItemChanges.itemId, params.itemId)).orderBy(desc(s.arpItemChanges.createdAt)).then((r) => r.map(({ c, who }) => ({ ...c, actorName: who }))) };
+    },
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/arps/:id/item-changes',
+    summary: 'Alterações de todos os itens da ata (versão, de → para, motivo, origem, documento)',
+    tag: 'Atas',
+    module: 'contratos',
+    params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const a = await loadArp(app.db, auth, params.id);
+      const rows = await app.db.select({ c: s.arpItemChanges, who: s.users.name, item: s.arpItems.itemNumber, lot: s.arpItems.lot, doc: s.arpDocuments.name }).from(s.arpItemChanges).innerJoin(s.arpItems, eq(s.arpItems.id, s.arpItemChanges.itemId)).leftJoin(s.users, eq(s.users.id, s.arpItemChanges.actorId)).leftJoin(s.arpDocuments, eq(s.arpDocuments.id, s.arpItemChanges.documentId)).where(eq(s.arpItems.arpId, a.id)).orderBy(desc(s.arpItemChanges.createdAt)).limit(1000);
+      return { items: rows.map(({ c, who, item, lot, doc }) => ({ ...c, actorName: who, itemNumber: item, lot, documentName: doc })) };
     },
   }),
 
@@ -524,7 +604,7 @@ export const arpRoutes = [
     module: 'contratos',
     body: z.object({
       regime: z.enum(ARP_REGIMES),
-      rules: z.object({ adhesionPerAgencyBp: z.number().int().min(0).max(10_000), adhesionTotalBp: z.number().int().min(0).max(40_000), contractDeadlineDays: z.number().int().min(1).max(365), allowAdhesion: z.boolean(), remanejamentoNeedsManager: z.boolean(), allowConversion: z.boolean(), legalBasis: z.string().trim().min(5).max(2000) }),
+      rules: z.object({ adhesionPerAgencyBp: z.number().int().min(0).max(10_000), adhesionTotalBp: z.number().int().min(0).max(40_000), contractDeadlineDays: z.number().int().min(1).max(365), allowAdhesion: z.boolean(), remanejamentoNeedsManager: z.boolean(), allowConversion: z.boolean(), conversionNeedsLegalOpinion: z.boolean().default(true), legalBasis: z.string().trim().min(5).max(2000) }),
       note: z.string().trim().min(5, 'Explique a mudança').max(1000),
     }),
     handler: async ({ app, auth, body, req, reply }) => {

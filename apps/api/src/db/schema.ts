@@ -1543,6 +1543,11 @@ export const arpAgencies = pgTable(
     name: text('name').notNull(),
     document: text('document'),
     contactId: uuid('contact_id').references(() => contacts.id),
+    /** data de ingresso (participação/formalização) e de início da eficácia, quando distinta */
+    joinedOn: date('joined_on', { mode: 'string' }),
+    effectiveOn: date('effective_on', { mode: 'string' }),
+    notes: text('notes'),
+    documentId: uuid('document_id'),
     createdAt: createdAt(),
   },
   (t) => ({
@@ -1568,6 +1573,9 @@ export const arpItems = pgTable(
     unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
     brandModel: text('brand_model'),
     notes: text('notes'),
+    classification: text('classification'),
+    /** versão do cadastro do item (sobe a cada alteração autorizada) */
+    version: integer('version').notNull().default(1),
     extra: jsonb('extra').$type<Record<string, unknown>>().notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1592,6 +1600,7 @@ export const arpItemChanges = pgTable(
     origin: text('origin').notNull(),
     documentId: uuid('document_id'),
     operationId: uuid('operation_id'),
+    version: integer('version'),
     actorId: uuid('actor_id').references(() => users.id),
     createdAt: createdAt(),
   },
@@ -1640,7 +1649,10 @@ export const arpLedger = pgTable(
     ruleVersion: integer('rule_version').notNull().default(0),
     reversesId: uuid('reverses_id'),
     idempotencyKey: text('idempotency_key').notNull(),
+    /** data do lançamento no sistema (sempre agora) */
     occurredAt: ts('occurred_at').notNull().defaultNow(),
+    /** data de eficácia (pode ser retroativa, autorizada) */
+    effectiveOn: date('effective_on', { mode: 'string' }),
   },
   (t) => ({
     idemUq: uniqueIndex('arp_ledger_idem_uq').on(t.tenantId, t.idempotencyKey),
@@ -1687,6 +1699,9 @@ export const arpAdhesions = pgTable(
     supplierAcceptedAt: ts('supplier_accepted_at'),
     supplierAcceptedBy: uuid('supplier_accepted_by').references(() => users.id),
     managerAuthorizedAt: ts('manager_authorized_at'),
+    /** data real da autorização do gerenciador e de início da participação (podem ser retroativas) */
+    authorizedOn: date('authorized_on', { mode: 'string' }),
+    startOn: date('start_on', { mode: 'string' }),
     managerAuthorizationRef: text('manager_authorization_ref'),
     authorizedBy: uuid('authorized_by').references(() => users.id),
     deadlineAt: date('deadline_at', { mode: 'string' }),
@@ -1727,6 +1742,7 @@ export const arpOperations = pgTable(
     decisionNote: text('decision_note'),
     effectedBy: uuid('effected_by').references(() => users.id),
     effectedAt: ts('effected_at'),
+    effectiveOn: date('effective_on', { mode: 'string' }),
     ruleVersion: integer('rule_version').notNull().default(0),
     exception: jsonb('exception').$type<Record<string, unknown> | null>(),
     createdAt: createdAt(),
@@ -1735,7 +1751,7 @@ export const arpOperations = pgTable(
   },
   (t) => ({
     idx: index('arp_operations_idx').on(t.arpId, t.createdAt),
-    kindCk: check('arp_operations_kind_ck', inList('kind', ['conversao', 'remanejamento', 'correcao', 'alteracao_preco', 'cancelamento'])),
+    kindCk: check('arp_operations_kind_ck', inList('kind', ['conversao', 'remanejamento', 'correcao', 'alteracao_preco', 'cancelamento', 'alteracao_item'])),
     statusCk: check('arp_operations_status_ck', inList('status', ['solicitada', 'aprovada', 'reprovada', 'efetivada', 'cancelada'])),
   }),
 );

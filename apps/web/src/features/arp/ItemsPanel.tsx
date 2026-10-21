@@ -6,7 +6,7 @@ import { api } from '../../lib/api';
 import { fmtBRL, fmtDateTime } from '../../lib/format';
 import { Button, EmptyState, FormField, Input, LoadingRows, Notice, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
-import { AgencyChip, BalanceBar, QtyInput, Table, errMsg, itemLabel, parseMoney, parseQty, qty, useArpRefresh, type ArpDetail, type ItemView } from './shared';
+import { AgencyChip, BalanceBar, DocPicker, QtyInput, Table, errMsg, itemLabel, parseMoney, parseQty, qty, useArpRefresh, type ArpDetail, type ItemView } from './shared';
 
 function NewItem({ arp, open, onClose }: { arp: ArpDetail; open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -50,37 +50,68 @@ function NewItem({ arp, open, onClose }: { arp: ArpDetail; open: boolean; onClos
   );
 }
 
+/**
+ * Alterar item. Sem movimentação: correção direta (com a ata em cadastro, também quantidade e preço).
+ * Com movimentação: vira pedido de "Alteração de item" com justificativa, documento e aprovação; os lançamentos antigos guardam os dados da época.
+ */
 function EditItem({ arp, item, onClose }: { arp: ArpDetail; item: ItemView | null; onClose: () => void }) {
   const toast = useToast();
   const refresh = useArpRefresh(arp.id);
-  const [f, setF] = useState<{ code: string; description: string; specification: string; unit: string; brandModel: string; notes: string; reason: string } | null>(null);
-  const cur = f ?? (item ? { code: item.code ?? '', description: item.description, specification: item.specification ?? '', unit: item.unit, brandModel: item.brandModel ?? '', notes: item.notes ?? '', reason: '' } : null);
+  type F = { itemNumber: string; classification: string; code: string; description: string; specification: string; unit: string; brandModel: string; notes: string; qty: string; price: string; reason: string; doc: string };
+  const [f, setF] = useState<F | null>(null);
+  const init = (i: ItemView): F => ({ itemNumber: i.itemNumber, classification: i.classification ?? '', code: i.code ?? '', description: i.description, specification: i.specification ?? '', unit: i.unit, brandModel: i.brandModel ?? '', notes: i.notes ?? '', qty: String(i.registeredMilli / 1000).replace('.', ','), price: (i.unitCents / 100).toFixed(2).replace('.', ','), reason: '', doc: '' });
+  const cur = f ?? (item ? init(item) : null);
+  const moved = !!item?.moved;
+  const draft = arp.status === 'rascunho' && !moved;
+  const manager = arp.agencies.find((g) => g.kind === 'gerenciador');
+  const close = () => { setF(null); onClose(); };
+  const changes = () => {
+    if (!item || !cur) return {} as Record<string, string | null>;
+    const base = init(item);
+    const out: Record<string, string | null> = {};
+    for (const k of ['itemNumber', 'classification', 'code', 'description', 'specification', 'unit', 'brandModel', 'notes'] as const) if (cur[k] !== base[k]) out[k] = cur[k] || null;
+    return out;
+  };
   const m = useMutation({
-    mutationFn: () => api(`/arps/${arp.id}/items/${item!.id}`, { method: 'PATCH', body: { code: cur!.code || null, description: cur!.description, specification: cur!.specification || null, unit: cur!.unit, brandModel: cur!.brandModel || null, notes: cur!.notes || null, reason: cur!.reason } }),
-    onSuccess: () => { refresh(); setF(null); onClose(); toast({ tone: 'success', message: 'Item corrigido' }); },
+    mutationFn: async () => {
+      const ch = changes();
+      if (moved) return api(`/arps/${arp.id}/operations`, { method: 'POST', body: { input: { kind: 'alteracao_item', sources: [{ itemId: item!.id, agencyId: manager!.id, qtyMilli: 0 }], targets: [], itemPatch: ch }, justification: cur!.reason, documentId: cur!.doc || null } });
+      const extra = draft ? { registeredMilli: parseQty(cur!.qty) ?? undefined, unitCents: parseMoney(cur!.price) ?? undefined } : {};
+      return api(`/arps/${arp.id}/items/${item!.id}`, { method: 'PATCH', body: { ...ch, ...extra, reason: cur!.reason } });
+    },
+    onSuccess: () => { refresh(); close(); toast({ tone: 'success', message: moved ? 'Alteração pedida: segue para aprovação em Conversões e remanejamentos' : 'Item alterado' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
-  const set = (p: Partial<NonNullable<typeof cur>>) => setF({ ...cur!, ...p });
+  const set = (p: Partial<F>) => setF({ ...cur!, ...p });
+  const minReason = moved ? 10 : 5;
   return (
-    <Modal open={!!item} onClose={() => { setF(null); onClose(); }} title={item ? `Corrigir ${itemLabel(item)}` : ''} size="lg" footer={<><Button variant="secondary" onClick={() => { setF(null); onClose(); }}>Cancelar</Button><Button variant="primary" disabled={(cur?.reason.trim().length ?? 0) < 5} loading={m.isPending} onClick={() => m.mutate()}>Salvar correção</Button></>}>
+    <Modal open={!!item} onClose={close} title={item ? `Alterar ${itemLabel(item)} (versão ${item.version})` : ''} size="lg" footer={<><Button variant="secondary" onClick={close}>Cancelar</Button><Button variant="primary" disabled={(cur?.reason.trim().length ?? 0) < minReason} loading={m.isPending} onClick={() => m.mutate()}>{moved ? 'Pedir alteração' : 'Salvar alteração'}</Button></>}>
       {cur && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Notice>Quantidade e preço registrados não mudam por edição. Use Conversões e remanejamentos (alteração de preço ou cancelamento), com documento e aprovação.</Notice>
-          <span />
+          <div className="sm:col-span-2">{moved
+            ? <Notice tone="warning">Este item já tem movimentação. A alteração vira um pedido com justificativa e documento, aprovado por outra pessoa e efetivado com autorização. Os lançamentos anteriores mantêm os dados da versão usada. Preço e quantidade mudam por <strong>Alteração de preço</strong> ou <strong>Cancelamento</strong>; saldo entre itens, por <strong>Conversão</strong>.</Notice>
+            : <Notice>Item sem movimentação: correção direta, registrada no histórico com o valor anterior.{arp.status !== 'rascunho' ? ' Com a ata vigente, quantidade e preço só mudam por operação formal.' : ''}</Notice>}</div>
+          <FormField label="Número do item" htmlFor="ei-num"><Input id="ei-num" value={cur.itemNumber} onChange={(e) => set({ itemNumber: e.target.value })} /></FormField>
+          <FormField label="Classificação" htmlFor="ei-cls"><Input id="ei-cls" value={cur.classification} onChange={(e) => set({ classification: e.target.value })} /></FormField>
           <FormField label="Descrição" htmlFor="ei-desc" className="sm:col-span-2"><Input id="ei-desc" value={cur.description} onChange={(e) => set({ description: e.target.value })} /></FormField>
           <FormField label="Especificação" htmlFor="ei-spec" className="sm:col-span-2"><Textarea id="ei-spec" rows={2} value={cur.specification} onChange={(e) => set({ specification: e.target.value })} /></FormField>
           <FormField label="Código" htmlFor="ei-code"><Input id="ei-code" value={cur.code} onChange={(e) => set({ code: e.target.value })} /></FormField>
-          <FormField label="Unidade" htmlFor="ei-unit"><Input id="ei-unit" value={cur.unit} onChange={(e) => set({ unit: e.target.value })} /></FormField>
+          <FormField label="Unidade de medida" htmlFor="ei-unit"><Input id="ei-unit" value={cur.unit} onChange={(e) => set({ unit: e.target.value })} /></FormField>
+          {draft && <>
+            <FormField label="Quantidade registrada" htmlFor="ei-qty"><Input id="ei-qty" inputMode="decimal" value={cur.qty} onChange={(e) => set({ qty: e.target.value })} /></FormField>
+            <FormField label="Valor unitário (R$)" htmlFor="ei-price"><Input id="ei-price" inputMode="decimal" value={cur.price} onChange={(e) => set({ price: e.target.value })} /></FormField>
+          </>}
           <FormField label="Marca/modelo" htmlFor="ei-brand"><Input id="ei-brand" value={cur.brandModel} onChange={(e) => set({ brandModel: e.target.value })} /></FormField>
           <FormField label="Observações" htmlFor="ei-notes"><Input id="ei-notes" value={cur.notes} onChange={(e) => set({ notes: e.target.value })} /></FormField>
-          <FormField label="Motivo da correção" htmlFor="ei-reason" required className="sm:col-span-2"><Textarea id="ei-reason" rows={2} value={cur.reason} onChange={(e) => set({ reason: e.target.value })} /></FormField>
+          {moved && <div className="sm:col-span-2"><DocPicker arpId={arp.id} id="ei-doc" label="Documento que fundamenta a alteração" categories={['autorizacao_gerenciador', 'parecer_juridico', 'publicacao', 'outro']} value={cur.doc} onChange={(d) => set({ doc: d })} optional /></div>}
+          <FormField label={moved ? 'Justificativa' : 'Motivo da correção'} htmlFor="ei-reason" required className="sm:col-span-2" hint={moved ? 'Mínimo 10 caracteres' : undefined}><Textarea id="ei-reason" rows={2} value={cur.reason} onChange={(e) => set({ reason: e.target.value })} /></FormField>
         </div>
       )}
     </Modal>
   );
 }
 
-const FIELD_LABEL: Record<string, string> = { code: 'Código', description: 'Descrição', specification: 'Especificação', unit: 'Unidade', brandModel: 'Marca/modelo', notes: 'Observações', registeredMilli: 'Quantidade', unitCents: 'Preço unitário' };
+const FIELD_LABEL: Record<string, string> = { itemNumber: 'Número do item', classification: 'Classificação', code: 'Código', description: 'Descrição', specification: 'Especificação', unit: 'Unidade', brandModel: 'Marca/modelo', notes: 'Observações', registeredMilli: 'Quantidade', unitCents: 'Preço unitário' };
 function ItemHistory({ arpId, item, onClose }: { arpId: string; item: ItemView | null; onClose: () => void }) {
   const q = useQuery({ queryKey: ['arp', arpId, 'item-changes', item?.id], enabled: !!item, queryFn: () => api<{ items: { id: string; field: string; fromValue: string; toValue: string; reason: string; origin: string; createdAt: string; actorName: string | null }[] }>(`/arps/${arpId}/items/${item!.id}/changes`) });
   const show = (f: string, v: string) => (f === 'unitCents' ? fmtBRL(Number(v)) : f === 'registeredMilli' ? qty(Number(v)) : v || '(vazio)');
@@ -129,7 +160,7 @@ export function ItemsPanel({ arp, onImport }: { arp: ArpDetail; onImport: () => 
               <Fragment key={i.id}>
                 <tr className="border-t border-line">
                   <td className="w-8 px-2 py-3">{!!i.byAgency.length && <button type="button" aria-expanded={open.has(i.id)} aria-label={`Saldos por órgão do ${itemLabel(i)}`} className="rounded p-1 hover:bg-surface-2" onClick={() => toggle(i.id)}>{open.has(i.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}</td>
-                  <td className="whitespace-nowrap px-3 py-3 font-semibold text-ink">{i.lot ? `${i.lot}/` : ''}{i.itemNumber}{i.code && <span className="block text-xs font-normal text-muted">{i.code}</span>}</td>
+                  <td className="whitespace-nowrap px-3 py-3 font-semibold text-ink">{i.lot ? `${i.lot}/` : ''}{i.itemNumber}{i.code && <span className="block text-xs font-normal text-muted">{i.code}</span>}{i.version > 1 && <span className="block text-xs font-normal text-muted">versão {i.version}</span>}</td>
                   <td className="max-w-[300px] px-3 py-3"><span className="line-clamp-2">{i.description}</span>{i.brandModel && <span className="block text-xs text-muted">{i.brandModel}</span>}</td>
                   <td className="px-3 py-3">{i.unit}</td>
                   <td className="num px-3 py-3">{fmtBRL(i.unitCents)}</td>
@@ -141,7 +172,7 @@ export function ItemsPanel({ arp, onImport }: { arp: ArpDetail; onImport: () => 
                   <td className="px-3 py-3"><BalanceBar registered={i.registeredMilli} contracted={i.contractedMilli} reserved={i.reservedMilli} label={`${itemLabel(i)}: ${qty(i.contractedMilli)} contratado, ${qty(i.reservedMilli)} reservado de ${qty(i.registeredMilli)}`} /></td>
                   <td className="whitespace-nowrap px-3 py-3">
                     <button type="button" className="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-ink" aria-label={`Histórico do ${itemLabel(i)}`} onClick={() => setHist(i)}><History className="h-4 w-4" /></button>
-                    {arp.can.manage && <button type="button" className="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-ink" aria-label={`Corrigir ${itemLabel(i)}`} onClick={() => setEditing(i)}><Pencil className="h-4 w-4" /></button>}
+                    {arp.can.manage && <button type="button" className="rounded p-1.5 text-muted hover:bg-surface-2 hover:text-ink" aria-label={`Alterar ${itemLabel(i)}`} onClick={() => setEditing(i)}><Pencil className="h-4 w-4" /></button>}
                   </td>
                 </tr>
                 {open.has(i.id) && i.byAgency.map((b) => { const g = agency.get(b.agencyId); return (
