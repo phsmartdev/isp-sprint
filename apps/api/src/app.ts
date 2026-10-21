@@ -41,6 +41,7 @@ import { indicatorRoutes } from './routes/indicators';
 import { resultsRoutes } from './routes/results';
 import { abmRoutes } from './routes/abm';
 import { abm360Routes } from './routes/abm360';
+import { abmPlayRoutes } from './routes/abmPlays';
 import { stakeholderRoutes } from './routes/stakeholders';
 import { interventionRoutes } from './routes/interventions';
 import { ritualRoutes } from './routes/rituals';
@@ -162,6 +163,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...resultsRoutes,
     ...abmRoutes,
     ...abm360Routes,
+    ...abmPlayRoutes,
     ...stakeholderRoutes,
     ...interventionRoutes,
     ...ritualRoutes,

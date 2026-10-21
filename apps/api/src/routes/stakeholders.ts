@@ -25,10 +25,10 @@ export async function abmPolicy(db: DbOrTx, tenantId: string): Promise<{ version
   const inf = (r?.config as { influence?: Partial<InfluencePolicy> } | undefined)?.influence;
   return { version: r?.version ?? 0, influence: { ...DEFAULT_INFLUENCE_POLICY, ...(inf ?? {}), labels: { ...DEFAULT_INFLUENCE_POLICY.labels, ...(inf?.labels ?? {}) } } };
 }
-const canViewInfluence = (auth: AuthContext, p: InfluencePolicy) => atLeast(level(auth, 'clientes'), p.view);
+export const canViewInfluence = (auth: AuthContext, p: InfluencePolicy) => atLeast(level(auth, 'clientes'), p.view);
 const canEditInfluence = (auth: AuthContext, p: InfluencePolicy) => atLeast(level(auth, 'clientes'), p.edit);
 
-async function assertAccount(db: DbOrTx, auth: AuthContext, contactId: string) {
+export async function assertAccount(db: DbOrTx, auth: AuthContext, contactId: string) {
   const [c] = await db.select({ id: s.contacts.id, name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.id, contactId), contactVisible(auth))).limit(1);
   if (!c) throw notFound('Conta não encontrada na sua carteira.');
   return c;
@@ -65,7 +65,7 @@ async function assertUnit(db: DbOrTx, contactId: string, unitId: string | null |
 }
 
 /** Linhas de stakeholders de um conjunto de contas, com pessoa, departamento e influência por contexto. */
-async function stakeholderRows(db: DbOrTx, auth: AuthContext, contactIds: string[], policy: InfluencePolicy) {
+export async function stakeholderRows(db: DbOrTx, auth: AuthContext, contactIds: string[], policy: InfluencePolicy) {
   if (!contactIds.length) return [];
   const rows = await db.select({ st: s.accountStakeholders, person: s.people, unitName: s.accountOrgUnits.name, account: s.contacts.name, ownerName: s.users.name })
     .from(s.accountStakeholders).innerJoin(s.people, eq(s.people.id, s.accountStakeholders.personId)).innerJoin(s.contacts, eq(s.contacts.id, s.accountStakeholders.contactId))

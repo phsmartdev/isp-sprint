@@ -464,3 +464,60 @@ test('ABM Fase 4: stakeholders, influência avaliada manualmente, mapa interativ
     await page.request.put('/api/v1/abm/settings', { headers: H, data: { influence: { ...s0.influence, requireApproval: false }, note: 'Volta ao padrão após o teste' } });
   }
 });
+
+test('ABM Fase 5: plays sugeridos com motivo, aplicados como tarefas, cancelados; construtor na biblioteca', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const name = `Prefeitura Fictícia Plays ${Date.now().toString(36)}`;
+  const r = await page.request.post('/api/v1/abm/new-account', { headers: H, data: { name, nature: 'publica', segment: 'governamental', city: 'Aracaju', reason: 'Programa de cidades conectadas' } });
+  expect(r.status(), await r.text()).toBe(201);
+  const abm = (await r.json()) as { id: string };
+  await page.goto(`/abm/contas/${abm.id}?t=plays`);
+
+  const sug = page.getByRole('region', { name: 'Plays sugeridos' });
+  const card = sug.getByRole('listitem').filter({ hasText: 'Abertura de conta' });
+  await expect(card.getByText('Status comercial: Conta identificada')).toBeVisible();
+  await expect(sug.getByRole('listitem').filter({ hasText: 'Relacionamento institucional' }).getByText('Organização pública')).toBeVisible();
+  await card.getByRole('button', { name: 'Aplicar' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Aplicar play' });
+  await expect(dlg.getByText('Tarefas que serão criadas')).toBeVisible();
+  await expect(dlg.getByLabel(/^Por que aplicar/)).toHaveValue(/Sugerido: Status comercial/);
+  await dlg.getByRole('button', { name: 'Aplicar e criar tarefas' }).click();
+  await expect(page.getByText('Play aplicado: 5 tarefa(s) criada(s)')).toBeVisible();
+  const run = page.getByRole('article', { name: 'Play Abertura de conta' });
+  await expect(run.getByLabel('0 de 5 etapas concluídas')).toBeVisible();
+  await expect(run.getByRole('button', { name: 'Encerrar com resultado' })).toBeDisabled();
+  await expect(sug.getByRole('listitem').filter({ hasText: 'Abertura de conta' })).toHaveCount(0);
+  // a etapa é uma tarefa de verdade
+  await run.getByRole('button', { name: 'Primeiro contato', exact: true }).click();
+  await expect(page.getByRole('dialog').getByText(/Play: Abertura de conta/)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await run.getByRole('button', { name: 'Cancelar play' }).click();
+  await page.getByLabel(/^Motivo do cancelamento/).fill('Conta saiu do programa nesta etapa');
+  await page.getByRole('dialog', { name: 'Cancelar play' }).getByRole('button', { name: 'Cancelar play' }).click();
+  await expect(page.getByText('Play cancelado e tarefas em aberto canceladas')).toBeVisible();
+  await page.getByText(/^Encerrados \(1\)/).click();
+  await expect(page.getByRole('article', { name: 'Play Abertura de conta' }).getByText('Cancelado', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Histórico' }).click();
+  await expect(page.getByText(/cancelou o play Abertura de conta/)).toBeVisible();
+
+  // biblioteca e construtor
+  await page.goto('/abm?tab=plays');
+  const lib = page.getByRole('region', { name: 'Biblioteca de plays' });
+  await expect(lib.getByRole('button', { name: 'Preparação de renovação' })).toBeVisible();
+  await lib.getByRole('button', { name: 'Novo play' }).click();
+  const ed = page.getByRole('dialog', { name: 'Novo play' });
+  const playName = `Visita técnica ${Date.now().toString(36)}`;
+  await ed.getByLabel('Nome').fill(playName);
+  await ed.getByLabel(/^Critério de sucesso/).fill('Visita feita e laudo enviado');
+  await ed.getByLabel('Etapa 1: o que fazer').fill('Agendar visita técnica');
+  await ed.getByRole('button', { name: 'Incluir etapa' }).click();
+  await ed.getByLabel('Etapa 2: o que fazer').fill('Enviar laudo');
+  await ed.getByRole('button', { name: 'Criar play' }).click();
+  await expect(page.getByText('Play criado')).toBeVisible();
+  await expect(lib.getByRole('button', { name: playName })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'abm-plays');
+});
