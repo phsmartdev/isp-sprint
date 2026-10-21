@@ -16,7 +16,7 @@ import { performanceConfig } from './businessEvents';
 type Org = Awaited<ReturnType<typeof orgData>>;
 type Goal = typeof s.goals.$inferSelect;
 
-function ancestorsResponsibles(org: Org, unitId: string | null) {
+export function ancestorsResponsibles(org: Org, unitId: string | null) {
   const out: string[] = [];
   let cur = unitId ? org.units.find((u) => u.id === unitId) : undefined;
   const seen = new Set<string>();
@@ -27,7 +27,7 @@ function ancestorsResponsibles(org: Org, unitId: string | null) {
   }
   return out;
 }
-const teamLead = (org: Org, teamId: string) => org.members.find((m) => m.teamId === teamId && m.isLead)?.userId ?? org.teams.find((t) => t.id === teamId)?.substituteLeadId ?? null;
+export const teamLead = (org: Org, teamId: string) => org.members.find((m) => m.teamId === teamId && m.isLead)?.userId ?? org.teams.find((t) => t.id === teamId)?.substituteLeadId ?? null;
 
 /**
  * Quem responde pela intervenção e a cadeia acima dele (escalonamento), pela estrutura — não pelo cargo.
@@ -100,7 +100,7 @@ export async function syncInterventions(db: DbOrTx, tenantId: string, today: str
     const colorOf = (c: string) => hist.find((h) => h.competencia === c)?.color;
 
     // retificação: se nenhuma competência coberta pede mais intervenção, a aberta é dispensada automaticamente
-    if (open && open.competencias.every((c) => { const col = colorOf(c); return col !== undefined && !BAD.includes(col); })) {
+    if (open && open.trigger !== 'manual' && open.competencias.every((c) => { const col = colorOf(c); return col !== undefined && !BAD.includes(col); })) {
       await db.update(s.interventions).set({ status: 'dispensada', conclusion: 'Apuração retificada: as competências cobertas deixaram de pedir intervenção.', resolvedAt: new Date(), updatedAt: new Date(), rowVersion: sql`${s.interventions.rowVersion} + 1` }).where(eq(s.interventions.id, open.id));
       await logIntervention(db, tenantId, open.id, 'dispensada_retificacao', { competencias: open.competencias }, [open.ownerId], null);
       out.dismissed++;

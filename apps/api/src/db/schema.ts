@@ -2705,8 +2705,15 @@ export const interventions = pgTable(
     id: id(),
     tenantId: tenantId(),
     /** série da meta (mensal recorrente) ou a própria meta; uma intervenção aberta por série */
-    seriesId: uuid('series_id').notNull(),
-    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    seriesId: uuid('series_id'),
+    /** meta ligada (opcional na intervenção manual) */
+    goalId: uuid('goal_id').references(() => goals.id),
+    /** indicador acompanhado (intervenção manual escolhe o indicador; a ficha mostra a evolução no escopo) */
+    indicatorId: uuid('indicator_id').references(() => indicators.id),
+    /** intervenção manual: o problema/oportunidade e por que foi aberta */
+    title: text('title'),
+    reason: text('reason'),
+    createdBy: uuid('created_by').references(() => users.id),
     closingId: uuid('closing_id').references(() => resultClosings.id),
     kind: text('kind').notNull(),
     trigger: text('trigger').notNull(),
@@ -2739,7 +2746,9 @@ export const interventions = pgTable(
     openUq: uniqueIndex('interventions_open_uq').on(t.tenantId, t.seriesId).where(sql`status in ('aberta', 'em_andamento')`),
     idx: index('interventions_idx').on(t.tenantId, t.status, t.ownerId),
     kindCk: check('interventions_kind_ck', inList('kind', ['plano', 'revisao'])),
-    triggerCk: check('interventions_trigger_ck', inList('trigger', ['vermelho', 'amarelos_consecutivos', 'primeiro_amarelo'])),
+    triggerCk: check('interventions_trigger_ck', inList('trigger', ['vermelho', 'amarelos_consecutivos', 'primeiro_amarelo', 'manual'])),
+    manualCk: check('interventions_manual_ck', sql`trigger <> 'manual' or (title is not null and reason is not null)`),
+    autoCk: check('interventions_auto_ck', sql`trigger = 'manual' or (series_id is not null and goal_id is not null)`),
     statusCk: check('interventions_status_ck', inList('status', ['aberta', 'em_andamento', 'concluida', 'dispensada'])),
     decisionCk: check('interventions_decision_ck', sql`review_decision is null or review_decision in ('manter', 'plano')`),
   }),
@@ -2813,4 +2822,151 @@ export const interventionActions = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ idx: index('intervention_actions_idx').on(t.tenantId, t.interventionId), actUq: uniqueIndex('intervention_actions_activity_uq').on(t.activityId) }),
+);
+
+// ---------------------------------------------------------------- Gestão de Times — Fase 8: rituais, reuniões, decisões e impedimentos
+export const rituals = pgTable(
+  'rituals',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    perspective: text('perspective').notNull(),
+    /** escopo: time, unidade (com as filhas) ou empresa (ambos nulos) */
+    teamId: uuid('team_id'),
+    orgUnitId: uuid('org_unit_id'),
+    cadence: text('cadence').notNull(),
+    weekday: integer('weekday').notNull().default(1),
+    monthDay: integer('month_day').notNull().default(1),
+    time: text('time').notNull(),
+    durationMin: integer('duration_min').notNull(),
+    anchorOn: date('anchor_on', { mode: 'string' }).notNull(),
+    facilitatorId: uuid('facilitator_id').notNull().references(() => users.id),
+    participants: uuid('participants').array().notNull().default(sql`'{}'::uuid[]`),
+    agenda: text('agenda').array().notNull().default(sql`'{}'::text[]`),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('rituals_idx').on(t.tenantId, t.active),
+    cadenceCk: check('rituals_cadence_ck', inList('cadence', ['diaria', 'semanal', 'quinzenal', 'mensal'])),
+    perspectiveCk: check('rituals_perspective_ck', inList('perspective', ['diretoria', 'gestao', 'lideranca'])),
+  }),
+);
+
+export const ritualMeetings = pgTable(
+  'ritual_meetings',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    ritualId: uuid('ritual_id').notNull().references(() => rituals.id),
+    date: date('date', { mode: 'string' }).notNull(),
+    status: text('status').notNull().default('agendada'),
+    attendees: uuid('attendees').array().notNull().default(sql`'{}'::uuid[]`),
+    /** anotações por item de pauta (chave = item) */
+    notes: jsonb('notes').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    minutes: text('minutes'),
+    /** fotografia da pauta automática no momento da finalização */
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>(),
+    activityId: uuid('activity_id').references(() => activities.id),
+    cancelReason: text('cancel_reason'),
+    finalizedBy: uuid('finalized_by').references(() => users.id),
+    finalizedAt: ts('finalized_at'),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('ritual_meetings_uq').on(t.ritualId, t.date),
+    idx: index('ritual_meetings_idx').on(t.tenantId, t.date),
+    statusCk: check('ritual_meetings_status_ck', inList('status', ['agendada', 'realizada', 'cancelada'])),
+  }),
+);
+
+export const decisions = pgTable(
+  'decisions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    text: text('text').notNull(),
+    rationale: text('rationale'),
+    meetingId: uuid('meeting_id').references(() => ritualMeetings.id),
+    interventionId: uuid('intervention_id').references(() => interventions.id),
+    teamId: uuid('team_id'),
+    orgUnitId: uuid('org_unit_id'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    effectiveOn: date('effective_on', { mode: 'string' }).notNull(),
+    followUpTaskId: uuid('follow_up_task_id').references(() => activities.id),
+    status: text('status').notNull().default('vigente'),
+    revokedReason: text('revoked_reason'),
+    revokedBy: uuid('revoked_by').references(() => users.id),
+    revokedAt: ts('revoked_at'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('decisions_idx').on(t.tenantId, t.status),
+    statusCk: check('decisions_status_ck', inList('status', ['vigente', 'revogada'])),
+  }),
+);
+
+export const impediments = pgTable(
+  'impediments',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    title: text('title').notNull(),
+    description: text('description'),
+    severity: text('severity').notNull().default('media'),
+    status: text('status').notNull().default('aberto'),
+    raisedBy: uuid('raised_by').notNull().references(() => users.id),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    teamId: uuid('team_id'),
+    orgUnitId: uuid('org_unit_id'),
+    meetingId: uuid('meeting_id').references(() => ritualMeetings.id),
+    interventionId: uuid('intervention_id').references(() => interventions.id),
+    dueOn: date('due_on', { mode: 'string' }),
+    resolution: text('resolution'),
+    resolvedBy: uuid('resolved_by').references(() => users.id),
+    resolvedAt: ts('resolved_at'),
+    escalations: integer('escalations').notNull().default(0),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('impediments_idx').on(t.tenantId, t.status, t.ownerId),
+    statusCk: check('impediments_status_ck', inList('status', ['aberto', 'em_tratamento', 'removido', 'aceito'])),
+    sevCk: check('impediments_severity_ck', inList('severity', ['alta', 'media', 'baixa'])),
+  }),
+);
+
+/** histórico append-only de rituais, reuniões, decisões e impedimentos; notify alimenta o sino de Menções */
+export const governanceEvents = pgTable(
+  'governance_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    entity: text('entity').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    notify: uuid('notify').array().notNull().default(sql`'{}'::uuid[]`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('governance_events_idx').on(t.tenantId, t.entity, t.entityId) }),
+);
+
+export const governanceReads = pgTable(
+  'governance_reads',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id),
+    entityId: uuid('entity_id').notNull(),
+    lastReadAt: ts('last_read_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.entityId] }) }),
 );

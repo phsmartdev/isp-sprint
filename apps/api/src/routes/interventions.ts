@@ -1,7 +1,7 @@
 /** Gestão de Times — Fase 5: intervenções (vermelho, dois amarelos seguidos, revisão do primeiro amarelo), prazos e escalonamento. */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG, EMPTY_ANALYSIS, ISHIKAWA_CATEGORIES, actionTaskNotes, planConclusionBlockers, planProgress, validateW2H, type TaskStatus, LOSS_REASON_LABELS, analysisGaps, diagnosisFrom, paretoRows, type AnalysisContent } from '@isp/domain';
+import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG, EMPTY_ANALYSIS, ISHIKAWA_CATEGORIES, periodRange, actionTaskNotes, planConclusionBlockers, planProgress, validateW2H, type TaskStatus, LOSS_REASON_LABELS, analysisGaps, diagnosisFrom, paretoRows, type AnalysisContent } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -9,18 +9,18 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { dueAtOf, loadProject, todayLocal } from '../services/projects';
 import { applyStatus, assertAssignee, taskEvent } from '../services/tasks';
-import { orgData, resultsScope, type ResultsScope } from '../services/results';
+import { orgData, resultsScope, unitPeople, type ResultsScope } from '../services/results';
 import { performanceConfig } from '../services/businessEvents';
-import { ensureFreshInterventions, logIntervention, syncInterventions } from '../services/interventions';
-import { goalWho } from '../services/indicators';
+import { ancestorsResponsibles, ensureFreshInterventions, logIntervention, syncInterventions, teamLead } from '../services/interventions';
+import { allIndicators, computeIndicator, goalWho, indicatorDef } from '../services/indicators';
 
 type Row = typeof s.interventions.$inferSelect;
 const canSee = (sc: ResultsScope, auth: AuthContext, i: Row) =>
-  sc.all || i.ownerId === auth.userId || i.subjectUserId === auth.userId || i.escalationChain.includes(auth.userId)
+  sc.all || i.ownerId === auth.userId || i.subjectUserId === auth.userId || i.createdBy === auth.userId || i.escalationChain.includes(auth.userId)
   || (!!i.teamId && sc.teamIds.includes(i.teamId)) || (!!i.orgUnitId && sc.unitIds.includes(i.orgUnitId))
   || (!!i.subjectUserId && sc.userIds.includes(i.subjectUserId) && sc.perspectives.length > 0)
   || (!i.teamId && !i.orgUnitId && !i.subjectUserId && sc.perspectives.includes('diretoria'));
-const canAct = (sc: ResultsScope, auth: AuthContext, i: Row) => sc.all || i.ownerId === auth.userId || i.escalationChain.includes(auth.userId);
+const canAct = (sc: ResultsScope, auth: AuthContext, i: Row) => sc.all || i.ownerId === auth.userId || (i.trigger === 'manual' && i.createdBy === auth.userId) || i.escalationChain.includes(auth.userId);
 const canDismiss = (sc: ResultsScope, auth: AuthContext, i: Row) => (sc.all || i.escalationChain.includes(auth.userId)) && i.ownerId !== auth.userId && i.subjectUserId !== auth.userId;
 
 async function load(db: DbOrTx, auth: AuthContext, id: string, forUpdate = false) {
@@ -65,8 +65,8 @@ export const interventionRoutes = [
       const today = todayLocal(auth);
       await ensureFreshInterventions(app.db, auth.tenantId, today);
       const sc = await resultsScope(app.db, auth);
-      const rows = await app.db.select({ i: s.interventions, goalTitle: s.goals.title, goalScope: s.goals.scope, ownerName: s.users.name })
-        .from(s.interventions).innerJoin(s.goals, eq(s.goals.id, s.interventions.goalId)).innerJoin(s.users, eq(s.users.id, s.interventions.ownerId))
+      const rows = await app.db.select({ i: s.interventions, goalTitle: sql<string>`coalesce(${s.interventions.title}, ${s.goals.title})`, goalScope: s.goals.scope, ownerName: s.users.name })
+        .from(s.interventions).leftJoin(s.goals, eq(s.goals.id, s.interventions.goalId)).innerJoin(s.users, eq(s.users.id, s.interventions.ownerId))
         .where(eq(s.interventions.tenantId, auth.tenantId)).orderBy(desc(s.interventions.createdAt)).limit(1000);
       const vis = rows.filter((r) => canSee(sc, auth, r.i));
       const due = (i: Row) => (i.status === 'aberta' ? i.dueOn : i.planDueOn ?? i.dueOn);
@@ -97,16 +97,73 @@ export const interventionRoutes = [
       return { today, counts, items };
     },
   }),
+
+  defineRoute({
+    method: 'GET', url: '/interventions/new-options', summary: 'Opções para abrir intervenção manual: indicadores, times, unidades e pessoas do seu escopo', tag: 'Gestão de Times', module: 'resultados',
+    handler: async ({ app, auth }) => {
+      const sc = await resultsScope(app.db, auth);
+      const org = await orgData(app.db, auth.tenantId);
+      const inds = await allIndicators(app.db, auth.tenantId);
+      const users = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(s.users.name);
+      return {
+        indicators: inds.filter((i) => i.active !== false).map((i) => ({ id: i.id, name: i.def.name, unit: i.def.unit, category: i.def.category, direction: i.def.direction })),
+        teams: org.teams.filter((x) => sc.all || sc.teamIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name })),
+        units: org.units.filter((x) => x.active && (sc.all || sc.unitIds.includes(x.id))).map((x) => ({ id: x.id, name: x.name })),
+        people: users.filter((u) => sc.all || sc.userIds.includes(u.id)),
+        owners: users, canCompany: sc.all || sc.perspectives.includes('diretoria'),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/interventions', summary: 'Abre intervenção manual sobre um indicador (sem depender de meta fora da faixa): mesmo roteiro de análise, plano 5W2H e escalonamento', tag: 'Gestão de Times', module: 'resultados',
+    body: z.object({
+      title: z.string().trim().min(5).max(200), reason: z.string().trim().min(10).max(2000), indicatorId: z.string().uuid().nullable().default(null),
+      subjectUserId: z.string().uuid().nullable().default(null), teamId: z.string().uuid().nullable().default(null), orgUnitId: z.string().uuid().nullable().default(null),
+      ownerId: z.string().uuid().optional(), dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }),
+    handler: async ({ app, auth, body, reply }) => {
+      const id = await app.db.transaction(async (tx) => {
+        const sc = await resultsScope(tx, auth);
+        if ([body.subjectUserId, body.teamId, body.orgUnitId].filter(Boolean).length > 1) throw unprocessable('Escolha um escopo só: uma pessoa, um time ou uma unidade.');
+        if (body.teamId && !(sc.all || sc.teamIds.includes(body.teamId))) throw forbidden('Time fora do seu escopo.');
+        if (body.orgUnitId && !(sc.all || sc.unitIds.includes(body.orgUnitId))) throw forbidden('Unidade fora do seu escopo.');
+        if (body.subjectUserId && !(sc.all || sc.userIds.includes(body.subjectUserId))) throw forbidden('Pessoa fora do seu escopo.');
+        if (!body.subjectUserId && !body.teamId && !body.orgUnitId && !(sc.all || sc.perspectives.includes('diretoria'))) throw forbidden('Intervenção da empresa toda só pela Diretoria. Escolha uma pessoa, time ou unidade.');
+        if (body.indicatorId && !(await indicatorDef(tx, auth.tenantId, body.indicatorId))) throw unprocessable('Indicador inválido.', [{ path: 'indicatorId', message: 'Não encontrado' }]);
+        const ownerId = body.ownerId ?? auth.userId;
+        const [ow] = await tx.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.id, ownerId), eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).limit(1);
+        if (!ow) throw unprocessable('Responsável inválido.', [{ path: 'ownerId', message: 'Usuário inativo ou de outra empresa' }]);
+        const today = todayLocal(auth);
+        const { config } = await performanceConfig(tx, auth.tenantId);
+        const dueOn = body.dueOn ?? addDaysIso(today, config.interventions?.planDays ?? DEFAULT_INTERVENTION_CONFIG.planDays);
+        if (dueOn < today) throw unprocessable('O prazo não pode estar no passado.', [{ path: 'dueOn', message: 'Data passada' }]);
+        // cadeia de escalonamento pela estrutura do escopo (sem escopo: o time de quem abre)
+        const org = await orgData(tx, auth.tenantId);
+        const teamId = body.teamId ?? (body.subjectUserId ? org.members.find((m) => m.userId === body.subjectUserId && !m.isLead)?.teamId ?? org.members.find((m) => m.userId === body.subjectUserId)?.teamId ?? null : !body.orgUnitId ? org.members.find((m) => m.userId === auth.userId)?.teamId ?? null : null);
+        const unit = body.orgUnitId ?? (teamId ? org.teams.find((x) => x.id === teamId)?.orgUnitId ?? null : null);
+        const roots = org.units.filter((u) => u.active && u.kind === 'diretoria' && !u.parentId).map((u) => u.responsibleId).filter(Boolean) as string[];
+        const chain = [...new Set([teamId && !body.orgUnitId ? teamLead(org, teamId) : null, ...ancestorsResponsibles(org, unit), ...roots].filter((p): p is string => !!p && p !== ownerId && p !== body.subjectUserId))];
+        const [row] = await tx.insert(s.interventions).values({
+          tenantId: auth.tenantId, seriesId: null, goalId: null, indicatorId: body.indicatorId, title: body.title, reason: body.reason, kind: 'plano', trigger: 'manual', competencias: [],
+          ownerId, subjectUserId: body.subjectUserId, teamId: body.teamId ?? (body.subjectUserId ? teamId : null), orgUnitId: body.orgUnitId, escalationChain: chain, dueOn, createdBy: auth.userId,
+        }).returning({ id: s.interventions.id });
+        await logIntervention(tx, auth.tenantId, row!.id, 'aberta', { kind: 'plano', trigger: 'manual', reason: body.reason }, [ownerId], auth.userId);
+        return row!.id;
+      });
+      reply.code(201);
+      return { id };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/interventions/:id', summary: 'Detalhe da intervenção: meta, histórico de apurações da série, cadeia de responsáveis e histórico de ações', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
     handler: async ({ app, auth, params }) => {
       const { i, sc } = await load(app.db, auth, params.id);
-      const [g] = await app.db.select().from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1);
+      const [g] = i.goalId ? await app.db.select().from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1) : [];
       const closings = await app.db.execute<{ competencia: string; color: string; attainment: number | null; value: number | null; target: number; status: string; version: number }>(sql`
         select distinct on (competencia) competencia, color, attainment, value, target, status, version from result_closings
-         where tenant_id = ${auth.tenantId} and series_id = ${i.seriesId} order by competencia desc, version desc limit 6`);
+         where tenant_id = ${auth.tenantId} and series_id = ${i.seriesId ?? g?.seriesId ?? g?.id ?? null} order by competencia desc, version desc limit 6`);
       const events = await app.db.select({ e: s.interventionEvents, actorName: s.users.name }).from(s.interventionEvents).leftJoin(s.users, eq(s.users.id, s.interventionEvents.actorId)).where(eq(s.interventionEvents.interventionId, i.id)).orderBy(desc(s.interventionEvents.createdAt));
-      const ids = [i.ownerId, i.subjectUserId, i.resolvedBy, ...i.escalationChain].filter(Boolean) as string[];
+      const ids = [i.ownerId, i.subjectUserId, i.resolvedBy, i.createdBy, ...i.escalationChain].filter(Boolean) as string[];
       const people = ids.length ? await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(inArray(s.users.id, ids)) : [];
       const name = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
       const org = await orgData(app.db, auth.tenantId);
@@ -114,11 +171,29 @@ export const interventionRoutes = [
       const { config } = await performanceConfig(app.db, auth.tenantId);
       const [an] = await app.db.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
       const actions = await actionsOf(app.db, auth, i.id);
+      // indicador acompanhado: evolução mensal (últimos 6 meses, incluindo o atual parcial) no escopo da intervenção
+      let indicator: { id: string; name: string; unit: string; direction: string; months: { competencia: string; value: number | null; partial: boolean }[] } | null = null;
+      if (i.indicatorId) {
+        const d = await indicatorDef(app.db, auth.tenantId, i.indicatorId);
+        if (d) {
+          const who: { users: string[] | 'all' } = i.subjectUserId ? { users: [i.subjectUserId] } : i.teamId ? { users: org.members.filter((m) => m.teamId === i.teamId).map((m) => m.userId) } : i.orgUnitId ? { users: unitPeople(org, i.orgUnitId).userIds } : { users: 'all' };
+          const today = todayLocal(auth);
+          const months: { competencia: string; value: number | null; partial: boolean }[] = [];
+          let ref = today;
+          for (let k = 0; k < 6; k++) {
+            const r = periodRange('mes', ref);
+            const v = await computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, r);
+            months.unshift({ competencia: r.from.slice(0, 7), value: v.value ?? null, partial: k === 0 });
+            ref = addDaysIso(r.from, -1);
+          }
+          indicator = { id: i.indicatorId, name: d.def.name, unit: d.def.unit, direction: d.def.direction, months };
+        }
+      }
       const [proj] = i.projectId ? await app.db.select({ id: s.projects.id, name: s.projects.name, code: s.projects.code }).from(s.projects).where(eq(s.projects.id, i.projectId)).limit(1) : [];
       return {
-        ...i, analysisStatus: an?.status ?? null, actions, progress: planProgress(actions, todayLocal(auth)), project: proj ?? null,
-        planCostCents: actions.filter((a) => a.status !== 'cancelada').reduce((x, a) => x + (a.howMuchCents ?? 0), 0), goal: { id: g!.id, title: g!.title, scope: g!.scope, periodStart: g!.periodStart, periodEnd: g!.periodEnd, target: g!.target },
-        ownerName: name(i.ownerId), subjectName: name(i.subjectUserId), resolvedByName: name(i.resolvedBy),
+        ...i, analysisStatus: an?.status ?? null, indicator, actions, progress: planProgress(actions, todayLocal(auth)), project: proj ?? null,
+        planCostCents: actions.filter((a) => a.status !== 'cancelada').reduce((x, a) => x + (a.howMuchCents ?? 0), 0), goal: g ? { id: g.id, title: g.title, scope: g.scope, periodStart: g.periodStart, periodEnd: g.periodEnd, target: g.target } : null, displayTitle: i.title ?? g?.title ?? 'Intervenção',
+        ownerName: name(i.ownerId), subjectName: name(i.subjectUserId), createdByName: name(i.createdBy), resolvedByName: name(i.resolvedBy),
         teamName: org.teams.find((t) => t.id === i.teamId)?.name ?? null, unitName: org.units.find((u) => u.id === i.orgUnitId)?.name ?? null,
         chain: i.escalationChain.map((id, k) => ({ id, name: name(id), level: k + 1, called: k < i.escalationLevel })),
         closings: [...closings.rows].reverse(),
@@ -274,19 +349,26 @@ export const interventionRoutes = [
     query: z.object({ source: z.enum(['motivos_perda', 'motivos_perda_valor']) }),
     handler: async ({ app, auth, params, query: q }) => {
       const { i } = await load(app.db, auth, params.id);
-      const [g] = await app.db.select().from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1);
-      const who = await goalWho(app.db, g!);
-      if (Array.isArray(who.users) && !who.users.length) return { items: [], sample: 0, period: { from: g!.periodStart, to: g!.periodEnd } };
+      const [g] = i.goalId ? await app.db.select().from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1) : [];
+      // sem meta (intervenção manual): pessoas do escopo da intervenção, nos últimos 90 dias até a abertura
+      const today = todayLocal(auth);
+      const period = g ? { from: g.periodStart, to: g.periodEnd } : { from: addDaysIso(i.createdAt.toISOString().slice(0, 10), -90), to: today };
+      const org = await orgData(app.db, auth.tenantId);
+      const who: { users: string[] | 'all' } = g ? await goalWho(app.db, g)
+        : i.subjectUserId ? { users: [i.subjectUserId] }
+        : i.teamId ? { users: org.members.filter((m) => m.teamId === i.teamId).map((m) => m.userId) }
+        : i.orgUnitId ? { users: unitPeople(org, i.orgUnitId).userIds } : { users: 'all' };
+      if (Array.isArray(who.users) && !who.users.length) return { items: [], sample: 0, period };
       const rows = await app.db.execute<{ reason: string | null; n: number; value: string | number }>(sql`
         select o.loss_reason as reason, count(*)::int as n, coalesce(sum(be.value_cents), 0) as value
           from business_events be join opportunities o on o.id = be.source_id
          where be.tenant_id = ${auth.tenantId} and be.type = 'negociacao_perdida' and be.validation = 'valido'
-           and (be.occurred_at at time zone ${auth.timezone})::date between ${g!.periodStart}::date and ${g!.periodEnd}::date
+           and (be.occurred_at at time zone ${auth.timezone})::date between ${period.from}::date and ${period.to}::date
            ${who.users === 'all' ? sql`` : sql`and be.owner_id in (${sql.join(who.users.map((u) => sql`${u}::uuid`), sql`, `)})`}
          group by o.loss_reason`);
       const labels = LOSS_REASON_LABELS as Record<string, string>;
       const items = rows.rows.map((r) => ({ label: r.reason ? labels[r.reason] ?? r.reason : 'Sem motivo informado', value: q.source === 'motivos_perda' ? r.n : Math.round(Number(r.value)) / 100 }));
-      return { items, sample: rows.rows.reduce((a, r) => a + r.n, 0), period: { from: g!.periodStart, to: g!.periodEnd } };
+      return { items, sample: rows.rows.reduce((a, r) => a + r.n, 0), period };
     },
   }),
 
@@ -307,14 +389,14 @@ export const interventionRoutes = [
         if (errs.length) throw unprocessable(errs[0]!.message, errs);
         await assertAssignee(tx, auth, body.whoId!, i.projectId);
         const [who] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, body.whoId!)).limit(1);
-        const [g] = await tx.select({ title: s.goals.title }).from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1);
+        const [g] = i.goalId ? await tx.select({ title: s.goals.title }).from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1) : [];
         let stageId: string | null = null;
         if (i.projectId) {
           const [st] = await tx.select({ id: s.projectStages.id }).from(s.projectStages).where(and(eq(s.projectStages.projectId, i.projectId), sql`${s.projectStages.archivedAt} is null`, eq(s.projectStages.done, false))).orderBy(s.projectStages.position).limit(1);
           stageId = st?.id ?? null;
         }
         const [a] = await tx.insert(s.activities).values({
-          tenantId: auth.tenantId, type: 'tarefa', title: `Plano: ${body.what}`, notes: actionTaskNotes({ ...body, whoName: who!.name }, g!.title), priority: 'alta',
+          tenantId: auth.tenantId, type: 'tarefa', title: `Plano: ${body.what}`, notes: actionTaskNotes({ ...body, whoName: who!.name }, i.title ?? g?.title ?? 'Intervenção'), priority: 'alta',
           ownerId: body.whoId!, createdBy: auth.userId, dueAt: dueAtOf(auth, body.whenDue) as unknown as Date, status: 'a_fazer', category: 'Plano de ação', tags: ['intervenção'],
           participants: [...new Set([i.ownerId, auth.userId].filter((u) => u !== body.whoId))], projectId: i.projectId, projectStageId: stageId,
           position: stageId ? sql`coalesce((select max(position) + 1 from activities where project_stage_id = ${stageId}), 0)` as unknown as number : 0,

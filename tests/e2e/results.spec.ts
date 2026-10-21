@@ -211,3 +211,34 @@ test('Intervenções: vermelho na apuração exige plano de ação; o avaliado s
     await expect(lu.getByRole('dialog', { name: 'Intervenção' }).getByRole('button', { name: /Concluir|Atualizar plano/ })).toHaveCount(0);
   }
 });
+
+test('Intervenção manual: escolhe o indicador e abre o roteiro sem meta fora da faixa', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  // garante ao menos um indicador cadastrado
+  const H = { origin: new URL(page.url()).origin };
+  const inds = await (await page.request.get('/api/v1/performance/indicators', { headers: H })).json();
+  if (!inds.items.length) await page.request.post('/api/v1/performance/indicators', { headers: H, data: { def: { name: 'Tarefas concluídas', category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' } } } });
+  await page.goto('/times/intervencoes');
+  await page.getByRole('button', { name: 'Nova intervenção' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Nova intervenção' });
+  const opt = dlg.getByLabel('Indicador').locator('option');
+  await expect(opt.nth(1)).toBeAttached();
+  const indName = (await opt.nth(1).textContent())!.trim();
+  await dlg.getByLabel('Indicador').selectOption({ index: 1 });
+  const title = `Prospecção desacelerando ${Date.now().toString(36)}`;
+  await dlg.getByLabel(/Problema ou oportunidade/).fill(title);
+  await dlg.getByLabel(/Por que abrir agora/).fill('Queda nas últimas três semanas, ainda dentro da faixa');
+  await dlg.getByLabel('Sobre').selectOption('pessoa');
+  await dlg.getByLabel(/^Pessoa/).selectOption({ label: 'Lucas Lima' });
+  await dlg.getByRole('button', { name: 'Abrir intervenção' }).click();
+  await expect(page.getByText('Intervenção aberta. Comece pela análise de causa.')).toBeVisible();
+  const dr = page.getByRole('dialog', { name: 'Intervenção' });
+  await expect(dr.getByRole('heading', { name: title })).toBeVisible();
+  await expect(dr.getByText('Plano de ação obrigatório · Aberta manualmente')).toBeVisible();
+  await expect(dr.getByText(/Motivo: Queda nas últimas três semanas/)).toBeVisible();
+  await expect(dr.getByRole('region', { name: `Evolução de ${indName}` })).toBeVisible();
+  await expect(dr.getByRole('link', { name: 'Começar análise' })).toBeVisible();
+  await shot(page, 'gr-intervencao-manual');
+});

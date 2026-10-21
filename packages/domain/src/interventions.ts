@@ -12,10 +12,11 @@ import type { TrafficColor } from './indicators';
 const nextComp = (c: string) => { const [y, m] = c.split('-').map(Number) as [number, number]; return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; };
 
 export type InterventionKind = 'plano' | 'revisao';
-export type InterventionTrigger = 'vermelho' | 'amarelos_consecutivos' | 'primeiro_amarelo';
+/** manual: aberta por iniciativa de alguém (problema, oportunidade ou meta ainda verde), sem depender da apuração */
+export type InterventionTrigger = 'vermelho' | 'amarelos_consecutivos' | 'primeiro_amarelo' | 'manual';
 export type InterventionStatus = 'aberta' | 'em_andamento' | 'concluida' | 'dispensada';
 export const INTERVENTION_KIND_LABELS: Record<InterventionKind, string> = { plano: 'Plano de ação obrigatório', revisao: 'Revisão simplificada' };
-export const INTERVENTION_TRIGGER_LABELS: Record<InterventionTrigger, string> = { vermelho: 'Resultado vermelho', amarelos_consecutivos: 'Dois amarelos seguidos', primeiro_amarelo: 'Primeiro amarelo' };
+export const INTERVENTION_TRIGGER_LABELS: Record<InterventionTrigger, string> = { vermelho: 'Resultado vermelho', amarelos_consecutivos: 'Dois amarelos seguidos', primeiro_amarelo: 'Primeiro amarelo', manual: 'Aberta manualmente' };
 export const INTERVENTION_STATUS_LABELS: Record<InterventionStatus, string> = { aberta: 'Aguardando ação', em_andamento: 'Plano em execução', concluida: 'Concluída', dispensada: 'Dispensada' };
 export const OPEN_INTERVENTION: InterventionStatus[] = ['aberta', 'em_andamento'];
 

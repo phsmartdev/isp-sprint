@@ -13,10 +13,11 @@ import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { NewProjectDialog } from '../../features/projects/shared';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
-import { Drawer, useToast } from '../../components/ui/overlay';
+import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { useAuth } from '../../auth/AuthProvider';
 import { errMsg } from '../../features/contracts/shared';
-import { fmtAtt } from '../../features/performance/format';
+import { fmtAtt, fmtIndicator } from '../../features/performance/format';
 
 type Item = { id: string; kind: InterventionKind; trigger: InterventionTrigger; status: InterventionStatus; competencias: string[]; goalId: string; goalTitle: string; ownerName: string; subjectName: string | null; teamName: string | null; unitName: string | null; dueOn: string; overdue: boolean; escalationLevel: number; escalatedTo: string | null };
 type Counts = { abertas: number; planos: number; revisoes: number; atrasadas: number; escaladas: number; minhas: number };
@@ -37,9 +38,10 @@ export function InterventionsPage() {
     queryFn: () => api<{ today: string; counts: Counts; items: Item[] }>(`/interventions${qs({ status: u.status, kind: u.kind || undefined, mine: u.mine ? 'true' : undefined })}`),
   });
   const c = q.data?.counts;
+  const [creating, setCreating] = useState(false);
   return (
     <div>
-      <PageHeader icon={<Siren />} title="Intervenções" subtitle="Metas que a apuração oficial pôs fora da faixa: o que precisa de plano, o que pede revisão e o que está atrasado." />
+      <PageHeader icon={<Siren />} title="Intervenções" subtitle="O que precisa de análise e plano: metas que a apuração pôs fora da faixa e intervenções abertas por iniciativa do time." actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Nova intervenção</Button>} />
       {c && (
         <ul className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5" aria-label="Resumo das intervenções abertas">
           {([['planos', 'Planos obrigatórios', 'kind', 'plano'], ['revisoes', 'Revisões de amarelo', 'kind', 'revisao'], ['atrasadas', 'Com prazo vencido', null, null], ['escaladas', 'Escalonadas', null, null], ['minhas', 'Comigo', 'mine', '1']] as const).map(([k, label, fk, fv]) => (
@@ -62,13 +64,13 @@ export function InterventionsPage() {
         ) : (
           <div className="scroll-thin overflow-x-auto">
             <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-surface-2 text-xs text-muted"><tr>{['Meta', 'Motivo', 'Competências', 'De quem', 'Responsável', 'Prazo', 'Situação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
+              <thead className="bg-surface-2 text-xs text-muted"><tr>{['Meta ou problema', 'Motivo', 'Competências', 'De quem', 'Responsável', 'Prazo', 'Situação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
               <tbody>
                 {q.data!.items.map((i) => (
                   <tr key={i.id} className="border-t border-line align-top">
                     <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setU({ id: i.id }, { resetPage: false })}>{i.goalTitle}</button><span className="block text-xs text-muted">{INTERVENTION_KIND_LABELS[i.kind]}</span></td>
-                    <td className="px-3 py-2.5"><Chip tone={i.trigger === 'primeiro_amarelo' ? 'orange' : 'red'}>{INTERVENTION_TRIGGER_LABELS[i.trigger]}</Chip></td>
-                    <td className="num px-3 py-2.5">{i.competencias.map(comp).join(', ')}</td>
+                    <td className="px-3 py-2.5"><Chip tone={i.trigger === 'manual' ? 'blue' : i.trigger === 'primeiro_amarelo' ? 'orange' : 'red'}>{INTERVENTION_TRIGGER_LABELS[i.trigger]}</Chip></td>
+                    <td className="num px-3 py-2.5">{i.competencias.length ? i.competencias.map(comp).join(', ') : '—'}</td>
                     <td className="px-3 py-2.5">{i.subjectName ?? i.teamName ?? i.unitName ?? 'Empresa'}</td>
                     <td className="px-3 py-2.5">{i.ownerName}{i.escalatedTo && <span className="block text-xs font-semibold text-danger">escalonada para {i.escalatedTo}</span>}</td>
                     <td className={clsx('num px-3 py-2.5', i.overdue && 'font-semibold text-danger')}>{fmtDate(i.dueOn)}{i.overdue && <span className="block text-xs">vencido</span>}</td>
@@ -81,12 +83,14 @@ export function InterventionsPage() {
         )}
       </section>
       <InterventionDrawer id={u.id || null} onClose={() => setU({ id: '' }, { resetPage: false })} />
+      <NewIntervention open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setU({ id, status: 'abertas', kind: '', mine: '' }, { resetPage: false }); }} />
     </div>
   );
 }
 
 type Detail = Item & {
-  rowVersion: number; goal: { id: string; title: string; target: number }; diagnosis: string | null; actionPlan: string | null; planDueOn: string | null; reviewCause: string | null; reviewDecision: string | null; conclusion: string | null; resolvedByName: string | null; resolvedAt: string | null;
+  rowVersion: number; goal: { id: string; title: string; target: number } | null; displayTitle: string; reason: string | null; createdByName: string | null;
+  indicator: { id: string; name: string; unit: string; direction: string; months: { competencia: string; value: number | null; partial: boolean }[] } | null; diagnosis: string | null; actionPlan: string | null; planDueOn: string | null; reviewCause: string | null; reviewDecision: string | null; conclusion: string | null; resolvedByName: string | null; resolvedAt: string | null;
   chain: { id: string; name: string | null; level: number; called: boolean }[];
   closings: { competencia: string; color: TrafficColor; attainment: number | null; value: number | null; target: number; status: string }[];
   events: { id: string; type: string; createdAt: string; actorName: string | null; payload: Record<string, unknown> }[];
@@ -117,11 +121,14 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
         <div className="space-y-5">
           <div>
             <p className="text-sm text-muted">{INTERVENTION_KIND_LABELS[d.kind]} · {INTERVENTION_TRIGGER_LABELS[d.trigger]}</p>
-            <h3 className="text-lg font-bold text-ink"><Link to={`/desempenho/metas?goal=${d.goal.id}`} className="hover:underline">{d.goal.title}</Link></h3>
+            <h3 className="text-lg font-bold text-ink">{d.goal ? <Link to={`/desempenho/metas?goal=${d.goal.id}`} className="hover:underline">{d.goal.title}</Link> : d.displayTitle}</h3>
+            {d.reason && <p className="mt-1 text-sm"><b>Motivo:</b> {d.reason}{d.createdByName && <span className="text-muted"> — aberta por {d.createdByName}</span>}</p>}
             <div className="mt-1 flex flex-wrap gap-2"><Chip tone={STATUS_TONE[d.status]}>{INTERVENTION_STATUS_LABELS[d.status]}</Chip><span className="text-sm">Responsável: <b>{d.ownerName}</b>{d.subjectName && <> · Avaliado: {d.subjectName}</>}</span></div>
           </div>
 
-          <section aria-label="Apurações da série">
+          {d.indicator && <IndicatorTrend ind={d.indicator} />}
+
+          {!!d.closings.length && <section aria-label="Apurações da série">
             <h4 className="mb-1 font-bold text-ink">Apurações</h4>
             <ol className="flex flex-wrap gap-2">
               {d.closings.map((c) => (
@@ -131,7 +138,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
                 </li>
               ))}
             </ol>
-          </section>
+          </section>}
 
           {open && (
             <section className="rounded-lg border border-line p-3">
@@ -307,7 +314,74 @@ function PlanSection({ d, canEdit, analysisOk, onChanged }: { d: Detail; canEdit
           </>
         ) : <span className="text-muted">nenhum (ações como tarefas avulsas)</span>}
       </div>
-      <NewProjectDialog open={newProject} onClose={() => setNewProject(false)} prefill={{ name: `Plano de ação — ${d.goal.title}` }} onCreated={(id) => link.mutate(id)} />
+      <NewProjectDialog open={newProject} onClose={() => setNewProject(false)} prefill={{ name: `Plano de ação — ${d.displayTitle}` }} onCreated={(id) => link.mutate(id)} />
     </section>
+  );
+}
+
+/** Evolução do indicador acompanhado (6 meses; o atual é parcial). */
+function IndicatorTrend({ ind }: { ind: NonNullable<Detail['indicator']> }) {
+  const vals = ind.months.map((m) => m.value ?? 0);
+  const max = Math.max(1, ...vals);
+  return (
+    <section aria-label={`Evolução de ${ind.name}`}>
+      <h4 className="mb-1 font-bold text-ink">{ind.name}</h4>
+      <p className="mb-2 text-xs text-muted">Últimos 6 meses no escopo da intervenção ({ind.direction === 'menor' ? 'menor é melhor' : 'maior é melhor'}).</p>
+      <ol className="flex items-end gap-2">
+        {ind.months.map((m) => (
+          <li key={m.competencia} className="flex flex-1 flex-col items-center gap-1">
+            <span className="num text-xs font-semibold">{m.value === null ? '—' : fmtIndicator(m.value, ind.unit)}</span>
+            <span className={clsx('w-full rounded-t', m.partial ? 'bg-primary/30' : 'bg-primary')} style={{ height: `${Math.max(4, ((m.value ?? 0) / max) * 64)}px` }} aria-hidden />
+            <span className="num text-xs text-muted">{comp(m.competencia)}{m.partial && '*'}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-1 text-xs text-muted">* mês em andamento</p>
+    </section>
+  );
+}
+
+type NewOptions = { indicators: { id: string; name: string; category: string }[]; teams: { id: string; name: string }[]; units: { id: string; name: string }[]; people: { id: string; name: string }[]; owners: { id: string; name: string }[]; canCompany: boolean };
+/** Abrir intervenção por iniciativa própria: escolher o indicador, o escopo e o motivo. */
+function NewIntervention({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { me } = useAuth();
+  const o = useQuery({ queryKey: ['interventions', 'new-options'], enabled: open, queryFn: () => api<NewOptions>('/interventions/new-options') });
+  const blank = { title: '', reason: '', indicatorId: '', scope: 'pessoa' as 'pessoa' | 'time' | 'unidade' | 'empresa', target: '', ownerId: '', dueOn: '' };
+  const [f, setF] = useState(blank);
+  const m = useMutation({
+    mutationFn: () => api<{ id: string }>('/interventions', { method: 'POST', body: {
+      title: f.title, reason: f.reason, indicatorId: f.indicatorId || null,
+      subjectUserId: f.scope === 'pessoa' ? f.target || null : null, teamId: f.scope === 'time' ? f.target || null : null, orgUnitId: f.scope === 'unidade' ? f.target || null : null,
+      ownerId: f.ownerId || undefined, dueOn: f.dueOn || undefined,
+    } }),
+    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['interventions'] }); setF(blank); toast({ tone: 'success', message: 'Intervenção aberta. Comece pela análise de causa.' }); onCreated(r.id); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const d = o.data;
+  const targets = f.scope === 'pessoa' ? d?.people : f.scope === 'time' ? d?.teams : f.scope === 'unidade' ? d?.units : [];
+  const valid = f.title.trim().length >= 5 && f.reason.trim().length >= 10 && (f.scope === 'empresa' || !!f.target);
+  return (
+    <Modal open={open} onClose={onClose} title="Nova intervenção" size="lg" footer={<><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!valid} loading={m.isPending} onClick={() => m.mutate()}>Abrir intervenção</Button></>}>
+      {!d ? <LoadingRows rows={4} /> : (
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Para agir antes de a meta ficar vermelha, ou sobre um problema ou oportunidade. O roteiro é o mesmo: análise de causa, plano 5W2H com tarefas e conclusão.</p>
+          <FormField label="Indicador" htmlFor="ni-ind" hint="O que você quer melhorar; a ficha mostra a evolução dele no escopo escolhido">
+            <Select id="ni-ind" value={f.indicatorId} onChange={(e) => setF({ ...f, indicatorId: e.target.value, title: f.title || (d.indicators.find((x) => x.id === e.target.value)?.name ?? '') })}>
+              <option value="">Sem indicador</option>{d.indicators.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </Select>
+          </FormField>
+          <FormField label="Problema ou oportunidade" htmlFor="ni-title" required><Input id="ni-title" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></FormField>
+          <FormField label="Por que abrir agora" htmlFor="ni-reason" required hint="O sinal que você viu: tendência, reclamação, risco, oportunidade"><Textarea id="ni-reason" rows={3} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} /></FormField>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Sobre" htmlFor="ni-scope"><Select id="ni-scope" value={f.scope} onChange={(e) => setF({ ...f, scope: e.target.value as typeof f.scope, target: '' })}><option value="pessoa">Uma pessoa</option><option value="time">Um time</option><option value="unidade">Uma unidade</option>{d.canCompany && <option value="empresa">A empresa toda</option>}</Select></FormField>
+            {f.scope !== 'empresa' && <FormField label={f.scope === 'pessoa' ? 'Pessoa' : f.scope === 'time' ? 'Time' : 'Unidade'} htmlFor="ni-target" required><Select id="ni-target" value={f.target} onChange={(e) => setF({ ...f, target: e.target.value })}><option value="">Escolha</option>{(targets ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>}
+            <FormField label="Responsável" htmlFor="ni-owner"><Select id="ni-owner" value={f.ownerId || me?.user.id || ''} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>{d.owners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>
+            <FormField label="Prazo para o plano" htmlFor="ni-due" hint="Em branco: o padrão da empresa"><Input id="ni-due" type="date" value={f.dueOn} onChange={(e) => setF({ ...f, dueOn: e.target.value })} /></FormField>
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

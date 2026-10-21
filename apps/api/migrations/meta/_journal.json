@@ -281,6 +281,20 @@
       "when": 1792607506697,
       "tag": "0039_plan_5w2h",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792609452478,
+      "tag": "0040_rituals",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792609803789,
+      "tag": "0041_manual_interventions",
+      "breakpoints": true
     }
   ]
 }

@@ -85,6 +85,13 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Gestão de Times — intervenção aberta manualmente ✅ (2026-10-21)
+- Botão **"Nova intervenção"** em Gestão de Times → Intervenções: escolhe o **indicador** (opcional), descreve o problema ou oportunidade e o motivo, define sobre quem (pessoa, time, unidade ou empresa — esta só pela Diretoria), o responsável e o prazo do plano.
+- Mesmo roteiro das automáticas: análise de causa obrigatória, plano 5W2H com tarefas, conclusão, escalonamento por atraso e avisos. A ficha mostra a evolução do indicador nos últimos 6 meses no escopo escolhido.
+- Não depende de meta fora da faixa nem é dispensada pela sincronização; quem abriu também pode conduzir.
+- Migração 0041 (meta e série passam a ser opcionais; `title`, `reason`, `indicator_id`, `created_by`). Testes: API (2) e E2E.
+- Fase 8 em andamento: tabelas de rituais, reuniões, decisões e impedimentos já criadas (migração 0040), telas e rotas ainda não publicadas.
+
 ## Gestão de Times — Fase 7: plano 5W2H integrado a tarefas e projetos ✅ (2026-10-21)
 - O plano de ação passa a ser uma lista de **ações 5W2H** (o quê, por quê — com as causas raiz da análise como sugestão —, onde, quando, quem, como, quanto custa).
 - **Cada ação nasce como tarefa** para quem executa (prioridade alta, categoria "Plano de ação", com as sete respostas na descrição; o responsável pela intervenção entra como participante). Quem executa recebe o aviso de tarefa no sino. Quem/quando/situação vêm da tarefa — fonte única.

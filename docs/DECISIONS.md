@@ -235,3 +235,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Por quê:** a execução acontece onde o time já trabalha (Tarefas, quadro do projeto, avisos, recorrência, aprovação); a intervenção só acompanha.
 - **Conclusão** da intervenção depende das tarefas (`planConclusionBlockers`). Cancelar uma ação cancela a tarefa pelo mesmo caminho de status das tarefas (ADR-045).
 - **Projeto** é opcional e ligado à intervenção; novas ações entram nele, respeitando a regra de equipe do projeto.
+
+## ADR-052 — Intervenção manual sobre um indicador (21/10/2026)
+- **Decisão (pedido do usuário):** além das intervenções disparadas pela apuração, qualquer pessoa com acesso à Gestão de Times abre uma intervenção por iniciativa própria (gatilho `manual`), escolhendo o indicador acompanhado e o escopo. Meta e série ficam opcionais; restrições no banco garantem título e motivo na manual e meta/série nas automáticas.
+- Escopo limitado ao alcance de quem abre (pessoa/time/unidade); empresa toda só pela Diretoria. A cadeia de escalonamento vem da estrutura do escopo (ou do time de quem abre).
+- A projeção das intervenções automáticas não dispensa a manual (ela não cobre competências).
