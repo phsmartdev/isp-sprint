@@ -13,6 +13,7 @@ import { todayLocal } from '../services/projects';
 import { allIndicators, computeIndicator, goalWho, indicatorDef } from '../services/indicators';
 import { PERSPECTIVE_LABELS, createsUnitCycle, orgData, resultsScope, unitPeople, type Perspective } from '../services/results';
 import { goalDto } from './indicators';
+import { syncInterventions } from '../services/interventions';
 
 const canConfigure = (auth: AuthContext) => atLeast(level(auth, 'configuracoes'), 'total') || level(auth, 'resultados') === 'total';
 const orgEvent = (db: DbOrTx, auth: AuthContext, v: { unitId?: string | null; teamId?: string | null; type: string; payload: Record<string, unknown> }) =>
@@ -192,6 +193,7 @@ export const resultsRoutes = [
       const { g, cur } = await closingTarget(tx, auth, params.id, true);
       if (cur.status === 'validado') throw unprocessable('A apuração vigente já está validada.');
       await insertClosing(tx, auth, g, cur, { status: 'validado', value: cur.value, reason: body.note || null });
+      await syncInterventions(tx, auth.tenantId, todayLocal(auth), [cur.seriesId ?? g.id]);
       return { ok: true };
     }),
   }),
@@ -211,6 +213,7 @@ export const resultsRoutes = [
         value = body.value ?? null;
       }
       await insertClosing(tx, auth, g, cur, { status: 'retificado', value, reason: body.reason, indicatorVersion });
+      await syncInterventions(tx, auth.tenantId, todayLocal(auth), [cur.seriesId ?? g.id]);
       return { ok: true, value };
     }),
   }),

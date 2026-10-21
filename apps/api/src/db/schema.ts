@@ -2697,3 +2697,74 @@ export const abmEvents = pgTable(
   },
   (t) => ({ idx: index('abm_events_idx').on(t.tenantId, t.abmId) }),
 );
+
+// ---------------------------------------------------------------- Gestão de Times — Fase 5: intervenções
+export const interventions = pgTable(
+  'interventions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    /** série da meta (mensal recorrente) ou a própria meta; uma intervenção aberta por série */
+    seriesId: uuid('series_id').notNull(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    closingId: uuid('closing_id').references(() => resultClosings.id),
+    kind: text('kind').notNull(),
+    trigger: text('trigger').notNull(),
+    status: text('status').notNull().default('aberta'),
+    /** competências ruins que esta intervenção cobre (a primeira e as reincidências) */
+    competencias: text('competencias').array().notNull(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    subjectUserId: uuid('subject_user_id').references(() => users.id),
+    teamId: uuid('team_id'),
+    orgUnitId: uuid('org_unit_id'),
+    dueOn: date('due_on', { mode: 'string' }).notNull(),
+    escalationLevel: integer('escalation_level').notNull().default(0),
+    /** cadeia de responsáveis acima do dono (calculada na abertura) e quem já foi acionado */
+    escalationChain: uuid('escalation_chain').array().notNull().default(sql`'{}'::uuid[]`),
+    diagnosis: text('diagnosis'),
+    actionPlan: text('action_plan'),
+    planDueOn: date('plan_due_on', { mode: 'string' }),
+    reviewCause: text('review_cause'),
+    reviewDecision: text('review_decision'),
+    conclusion: text('conclusion'),
+    resolvedBy: uuid('resolved_by').references(() => users.id),
+    resolvedAt: ts('resolved_at'),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    openUq: uniqueIndex('interventions_open_uq').on(t.tenantId, t.seriesId).where(sql`status in ('aberta', 'em_andamento')`),
+    idx: index('interventions_idx').on(t.tenantId, t.status, t.ownerId),
+    kindCk: check('interventions_kind_ck', inList('kind', ['plano', 'revisao'])),
+    triggerCk: check('interventions_trigger_ck', inList('trigger', ['vermelho', 'amarelos_consecutivos', 'primeiro_amarelo'])),
+    statusCk: check('interventions_status_ck', inList('status', ['aberta', 'em_andamento', 'concluida', 'dispensada'])),
+    decisionCk: check('interventions_decision_ck', sql`review_decision is null or review_decision in ('manter', 'plano')`),
+  }),
+);
+
+export const interventionEvents = pgTable(
+  'intervention_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    interventionId: uuid('intervention_id').notNull().references(() => interventions.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    /** quem deve ser avisado (aparece no sino de Menções) */
+    notify: uuid('notify').array().notNull().default(sql`'{}'::uuid[]`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('intervention_events_idx').on(t.tenantId, t.interventionId) }),
+);
+
+export const interventionReads = pgTable(
+  'intervention_reads',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id),
+    interventionId: uuid('intervention_id').notNull().references(() => interventions.id),
+    lastReadAt: ts('last_read_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.interventionId] }) }),
+);

@@ -160,7 +160,20 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
      order by m.at desc
      limit 30`);
   const tk = tasks.rows.map((r) => ({ kind: 'tarefa' as const, opportunityId: null as string | null, taskId: r.activity_id, code: null as number | null, contactName: null as string | null, title: r.title, source: r.source as (typeof opp)[number]['source'], body: r.body, author: r.author, at: r.at, unread: r.unread }));
-  const items = [...opp, ...tk].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
+  // intervenções da Gestão de Times: aberturas, reincidências, escalonamentos e decisões que pedem atenção desta pessoa
+  const ivs = await db.execute<{ intervention_id: string; title: string; type: string; author: string | null; at: Date; unread: boolean }>(sql`
+    select e.intervention_id, g.title, e.type, u.name as author, e.created_at as at,
+           (r.last_read_at is null or e.created_at > r.last_read_at) as unread
+      from intervention_events e
+      join interventions i on i.id = e.intervention_id
+      join goals g on g.id = i.goal_id
+      left join users u on u.id = e.actor_id
+      left join intervention_reads r on r.user_id = ${auth.userId} and r.intervention_id = e.intervention_id
+     where e.tenant_id = ${auth.tenantId} and ${auth.userId}::uuid = any(e.notify)
+     order by e.created_at desc
+     limit 30`);
+  const iv = ivs.rows.map((r) => ({ kind: 'intervencao' as const, opportunityId: null as string | null, taskId: r.intervention_id, code: null as number | null, contactName: null as string | null, title: r.title, source: `intervencao_${r.type}` as (typeof opp)[number]['source'], body: '', author: r.author, at: r.at, unread: r.unread }));
+  const items = [...opp, ...tk, ...iv].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };
 }
 

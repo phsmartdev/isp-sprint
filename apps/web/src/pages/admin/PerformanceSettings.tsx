@@ -29,7 +29,7 @@ export function AdminPerformanceSettings() {
       <Tabs label="Gestão de desempenho" value={u.t as 'eventos' | 'explorar' | 'indicadores' | 'scorecards'} onChange={(t) => setU({ t })} tabs={[{ key: 'eventos', label: 'Eventos de negócio' }, { key: 'explorar', label: 'Explorar eventos' }, { key: 'indicadores', label: 'Indicadores e semáforo' }, { key: 'scorecards', label: 'Scorecards' }]} />
       {u.t === 'eventos' && <EventsConfig />}
       {u.t === 'explorar' && <EventsExplorer />}
-      {u.t === 'indicadores' && <><TrafficBands /><IndicatorsAdmin /></>}
+      {u.t === 'indicadores' && <><TrafficBands /><InterventionDeadlines /><IndicatorsAdmin /></>}
       {u.t === 'scorecards' && <ScorecardsAdmin />}
     </div>
   );
@@ -136,6 +136,34 @@ function TrafficBands() {
       <FormField label="Amarelo a partir de (%)" htmlFor="tb-y"><Input id="tb-y" className="w-24" inputMode="decimal" value={y ?? String(cur.yellow * 100)} onChange={(e) => setY(e.target.value)} /></FormField>
       <span className="pb-2 text-sm text-muted">abaixo: vermelho</span>
       {(g !== null || y !== null) && <Button variant="primary" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>Salvar faixas</Button>}
+    </section>
+  );
+}
+
+/** Prazos das intervenções da Gestão de Times (plano obrigatório, revisão do primeiro amarelo e escalonamento). */
+function InterventionDeadlines() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const st = useQuery({ queryKey: ['performance', 'settings'], queryFn: () => api<Settings>('/performance/settings') });
+  const cur = (st.data?.config as { interventions?: { planDays: number; reviewDays: number; escalateAfterDays: number } } | undefined)?.interventions ?? { planDays: 7, reviewDays: 3, escalateAfterDays: 2 };
+  const [f, setF] = useState<Record<'planDays' | 'reviewDays' | 'escalateAfterDays', string> | null>(null);
+  const v = f ?? { planDays: String(cur.planDays), reviewDays: String(cur.reviewDays), escalateAfterDays: String(cur.escalateAfterDays) };
+  const n = { planDays: Number(v.planDays), reviewDays: Number(v.reviewDays), escalateAfterDays: Number(v.escalateAfterDays) };
+  const valid = Object.values(n).every((x) => Number.isInteger(x) && x >= 0 && x <= 60) && n.planDays >= 1 && n.reviewDays >= 1;
+  const save = useMutation({
+    mutationFn: () => api('/performance/settings', { method: 'PUT', body: { config: { ...st.data!.config, interventions: n }, note: `Intervenções: plano em ${n.planDays} dias, revisão em ${n.reviewDays}, escalona a cada ${n.escalateAfterDays} de atraso` } }),
+    onSuccess: () => { setF(null); void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: 'Prazos das intervenções atualizados' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (!st.data) return null;
+  const field = (k: keyof typeof v, label: string) => <FormField label={label} htmlFor={`iv-${k}`}><Input id={`iv-${k}`} className="w-24" inputMode="numeric" value={v[k]} onChange={(e) => setF({ ...v, [k]: e.target.value })} /></FormField>;
+  return (
+    <section className="card mb-4 flex flex-wrap items-end gap-3 p-4">
+      <div className="min-w-[240px] flex-1"><h2 className="text-lg font-bold text-ink">Prazos das intervenções</h2><p className="text-sm text-muted">Vermelho e dois amarelos seguidos pedem plano de ação; o primeiro amarelo pede uma revisão rápida. Atrasou, sobe um nível na estrutura.</p></div>
+      {field('planDays', 'Plano de ação (dias)')}
+      {field('reviewDays', 'Revisão do amarelo (dias)')}
+      {field('escalateAfterDays', 'Escalonar a cada (dias de atraso)')}
+      {f !== null && <Button variant="primary" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>Salvar prazos</Button>}
     </section>
   );
 }

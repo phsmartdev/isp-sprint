@@ -1,3 +1,4 @@
+import { DEFAULT_INTERVENTION_CONFIG, validateInterventionConfig, type InterventionConfig } from './interventions';
 /**
  * Motor de eventos de negócio (Etapa 5, 21/10/2026).
  *
@@ -77,12 +78,15 @@ export type PerformanceConfig = {
   validationRequired: string[];
   /** faixas do semáforo pelo atingimento (padrão: verde ≥ 90%, amarelo ≥ 85%) */
   traffic?: { green: number; yellow: number };
+  /** prazos das intervenções da Gestão de Times (dias) */
+  interventions?: InterventionConfig;
 };
 export const DEFAULT_ATTRIBUTION: AttributionRule = { ownerShareBp: 10_000, participants: true, managers: true };
 export const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
   attribution: Object.fromEntries(EVENT_TYPE_KEYS.map((k) => [k, { ...DEFAULT_ATTRIBUTION }])),
   validationRequired: [],
   traffic: { green: 0.9, yellow: 0.85 },
+  interventions: { ...DEFAULT_INTERVENTION_CONFIG },
 };
 
 export function validatePerformanceConfig(c: PerformanceConfig): string[] {
@@ -93,6 +97,7 @@ export function validatePerformanceConfig(c: PerformanceConfig): string[] {
   }
   for (const k of c.validationRequired) if (!eventTypeDef(k)) e.push(`Tipo de evento desconhecido: ${k}.`);
   if (c.traffic && !(c.traffic.green > 0 && c.traffic.yellow > 0 && c.traffic.yellow <= c.traffic.green && c.traffic.green <= 2)) e.push('Semáforo: o amarelo deve ser menor ou igual ao verde, ambos entre 0% e 200%.');
+  if (c.interventions) e.push(...validateInterventionConfig(c.interventions).map((m) => `Intervenções: ${m}`));
   return e;
 }
 

@@ -7,9 +7,11 @@ import { AtSign } from 'lucide-react';
 import { api } from '../lib/api';
 import { fmtRelative } from '../lib/format';
 
-type Source = 'chat' | 'comentario' | 'tarefa_comentario' | 'tarefa_atribuida' | 'tarefa_aprovacao' | 'tarefa_devolvida';
-type Mention = { kind: 'oportunidade' | 'tarefa'; opportunityId: string | null; taskId: string | null; code: number | null; contactName: string | null; title: string | null; source: Source; body: string; author: string | null; at: string; unread: boolean };
-const TASK_TEXT: Record<string, string> = { tarefa_comentario: 'mencionou você na tarefa', tarefa_atribuida: 'pediu uma tarefa para você', tarefa_aprovacao: 'enviou uma entrega para você aprovar', tarefa_devolvida: 'devolveu sua entrega' };
+type Source = 'chat' | 'comentario' | 'tarefa_comentario' | 'tarefa_atribuida' | 'tarefa_aprovacao' | 'tarefa_devolvida' | `intervencao_${string}`;
+type Mention = { kind: 'oportunidade' | 'tarefa' | 'intervencao'; opportunityId: string | null; taskId: string | null; code: number | null; contactName: string | null; title: string | null; source: Source; body: string; author: string | null; at: string; unread: boolean };
+const TASK_TEXT: Record<string, string> = {
+  intervencao_aberta: 'Nova intervenção para você', intervencao_promovida: 'Intervenção virou plano de ação obrigatório', intervencao_reincidencia: 'Meta fora da faixa de novo (reincidência)', intervencao_escalada: 'Intervenção com prazo vencido foi escalonada',
+  intervencao_revisada: 'registrou a revisão da intervenção', intervencao_plano_registrado: 'registrou o plano de ação', intervencao_plano_atualizado: 'atualizou o plano de ação', intervencao_concluida: 'concluiu a intervenção', intervencao_dispensada: 'dispensou a intervenção', intervencao_dispensada_retificacao: 'Intervenção dispensada após retificação', tarefa_comentario: 'mencionou você na tarefa', tarefa_atribuida: 'pediu uma tarefa para você', tarefa_aprovacao: 'enviou uma entrega para você aprovar', tarefa_devolvida: 'devolveu sua entrega' };
 
 export function MentionsMenu() {
   const q = useQuery({ queryKey: ['mentions'], queryFn: () => api<{ items: Mention[]; unread: number }>('/me/mentions'), refetchInterval: 60_000 });
@@ -32,18 +34,20 @@ export function MentionsMenu() {
       {open && (
         <div role="dialog" aria-label="Menções" className="absolute right-0 top-full z-40 mt-2 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
           <p className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Menções</p>
-          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações e tarefas, tarefas pedidas a você e entregas para aprovar aparecem aqui.</p> : (
+          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações e tarefas, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui.</p> : (
             <ul className="max-h-[420px] divide-y divide-line overflow-y-auto">
               {q.data.items.map((m, i) => (
                 <li key={i}>
-                  <Link to={m.kind === 'tarefa' ? `/tarefas?task=${m.taskId}` : `/opportunities/${m.opportunityId}?aba=${m.source === 'chat' ? 'chat' : 'historico'}`} onClick={() => setOpen(false)} className={clsx('block px-4 py-2.5 hover:bg-surface-2', m.unread && 'bg-[#FFF9E6]')}>
+                  <Link to={m.kind === 'intervencao' ? `/times/intervencoes?id=${m.taskId}` : m.kind === 'tarefa' ? `/tarefas?task=${m.taskId}` : `/opportunities/${m.opportunityId}?aba=${m.source === 'chat' ? 'chat' : 'historico'}`} onClick={() => setOpen(false)} className={clsx('block px-4 py-2.5 hover:bg-surface-2', m.unread && 'bg-[#FFF9E6]')}>
                     <p className="flex items-center gap-2 text-xs text-muted">
                       {m.unread && <span className="h-2 w-2 rounded-full bg-[#F5B400]" aria-label="não lida" />}
-                      {m.kind === 'tarefa'
+                      {m.kind === 'intervencao'
+                        ? <span>{m.author && <span className="font-semibold text-ink">{m.author} </span>}{TASK_TEXT[m.source] ?? 'Atualização de intervenção'} · {fmtRelative(m.at)}</span>
+                        : m.kind === 'tarefa'
                         ? <span><span className="font-semibold text-ink">{m.author ?? 'Alguém'}</span> {TASK_TEXT[m.source]} · {fmtRelative(m.at)}</span>
                         : <span><span className="font-semibold text-ink">{m.author ?? 'Alguém'}</span> no {m.source === 'chat' ? 'chat' : 'comentário'} · OP-{m.code} · {fmtRelative(m.at)}</span>}
                     </p>
-                    <p className="text-xs text-muted">{m.kind === 'tarefa' ? m.title : m.contactName}</p>
+                    <p className="text-xs text-muted">{m.kind === 'oportunidade' ? m.contactName : m.title}</p>
                     {m.body && <p className="mt-0.5 line-clamp-2 text-sm text-text">{m.body}</p>}
                   </Link>
                 </li>

@@ -30,6 +30,7 @@ export function ResultsPage() {
     enabled: !!sc.data,
     queryFn: () => api<Overview>(`/results/overview${qs({ perspective: p || undefined, unitId: u.unit || undefined, teamId: u.team || undefined })}`),
   });
+  const iv = useQuery({ queryKey: ['interventions', 'abertas', '', ''], enabled: !!sc.data, queryFn: () => api<{ counts: { abertas: number; planos: number; revisoes: number; atrasadas: number; escaladas: number } }>('/interventions') });
   if (sc.isLoading) return <LoadingRows rows={6} />;
   if (sc.isError) return <ErrorState error={sc.error} onRetry={() => sc.refetch()} />;
   const s = sc.data!;
@@ -42,6 +43,14 @@ export function ResultsPage() {
         <Tabs label="Perspectiva" value={p as 'diretoria'} onChange={(x) => setU({ p: x, unit: '', team: '' })} tabs={s.perspectives.map((x) => ({ key: x.key, label: x.label }))} className="mb-4" />
       )}
       {p && <p className="mb-4 font-display text-lg font-bold text-ink">{QUESTIONS[p]}</p>}
+      {!!iv.data?.counts.abertas && (
+        <Link to="/times/intervencoes" className={clsx('mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-4 py-3 text-sm hover:bg-surface-2', iv.data.counts.atrasadas ? 'border-danger/40 bg-danger-soft/40' : 'border-warning/40 bg-warning-soft/40')}>
+          <span className="font-bold text-ink">Intervenções necessárias: <span className="num">{iv.data.counts.abertas}</span></span>
+          <span><span className="num">{iv.data.counts.planos}</span> plano(s) de ação · <span className="num">{iv.data.counts.revisoes}</span> revisão(ões)</span>
+          {iv.data.counts.atrasadas > 0 && <span className="font-semibold text-danger"><span className="num">{iv.data.counts.atrasadas}</span> com prazo vencido</span>}
+          <span className="ml-auto font-semibold text-primary">Ver intervenções</span>
+        </Link>
+      )}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         {s.units.length > 0 && p !== 'lideranca' && <FormField label="Unidade" htmlFor="rs-unit"><Select id="rs-unit" value={u.unit} onChange={(e) => setU({ unit: e.target.value, team: '' })}><option value="">Todo o meu escopo</option>{s.units.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>}
         {s.teams.length > 0 && <FormField label="Time" htmlFor="rs-team"><Select id="rs-team" value={u.team} onChange={(e) => setU({ team: e.target.value })}><option value="">Todos</option>{s.teams.filter((t) => !u.unit || t.orgUnitId === u.unit).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>}

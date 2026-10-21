@@ -85,6 +85,16 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Gestão de Times — Fase 5: intervenções ✅ (2026-10-21)
+- Regras pela **apuração oficial** (versão vigente de cada competência): vermelho → plano de ação obrigatório; dois amarelos em competências seguidas → plano obrigatório; primeiro amarelo → revisão simplificada (causa provável + decisão de manter ou abrir plano).
+- **Sem duplicidade:** uma intervenção aberta por série de meta; nova competência ruim entra como reincidência; revisão que piora é promovida a plano; competência já tratada não reabre; retificação que tira a meta da faixa dispensa a intervenção automaticamente.
+- **Responsável e escalonamento pela estrutura** (não pelo cargo): individual → líder do time; time → líder; unidade/empresa → responsável da unidade acima. Prazo vencido sobe um nível a cada N dias de atraso, até a Diretoria. Prazos configuráveis em Configuração → Desempenho → Indicadores.
+- Quem é avaliado acompanha, mas não registra nem dispensa; dispensar exige alguém acima do responsável, com justificativa.
+- **Avisos no sino de Menções** (abertura, promoção, reincidência, escalonamento, plano, conclusão); faixa "Intervenções necessárias" na Visão geral; página Gestão de Times → Intervenções com resumo, filtros e ficha (apurações da série, cadeia, plano, histórico).
+- Rotina diária recalcula; validação/retificação recalcula a série na hora; telas recalculam se a última execução tiver mais de 1 minuto.
+- Migração 0037 (`interventions`, `intervention_events` append-only, `intervention_reads`). Testes: domínio (5), API (4), E2E (1).
+- Próximas fases ligam a intervenção à jornada de análise (Fase 6) e ao 5W2H com tarefas e projetos (Fase 7); por ora o plano é texto com prazo.
+
 ## Menu reorganizado, Gestão de Times, ABM e Produto ✅ (2026-10-21)
 - Menu lateral em grupos (sem números): Início · Comercial (Oportunidades, Contas, Aprovações, Atividades) · Gestão de Contratos · Sucesso do Cliente · Marketing (Leads, ABM, Plays/Campanhas) · Produto · Gestão de Times (Visão geral, Objetivos e metas) · Projetos (Projetos, Tarefas) · Relatórios · Inteligência · Configuração. Grupo recolhido mostra a soma dos contadores; abre sozinho quando a página atual está dentro dele; o estado fica no navegador.
 - "Gestão de Resultados" passa a se chamar **Gestão de Times** (rota `/times`; `/resultados` redireciona). "Clientes" passa a **Contas** nas telas.

@@ -1,6 +1,7 @@
 import { AbmPage } from './pages/marketing/Abm';
 import { ProductPage } from './pages/product/Product';
 import { ResultsPage } from './pages/results/Results';
+import { InterventionsPage } from './pages/results/Interventions';
 import { AdminResultsSettings } from './pages/admin/ResultsSettings';
 import { GoalsPage } from './pages/performance/Goals';
 import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
@@ -89,6 +90,7 @@ export function App() {
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
         <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
         <Route path="times" element={<Gate module="resultados"><ResultsPage /></Gate>} />
+        <Route path="times/intervencoes" element={<Gate module="resultados"><InterventionsPage /></Gate>} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />
         <Route path="abm" element={<Gate module="clientes"><AbmPage /></Gate>} />
         <Route path="produto" element={<ProductPage />} />

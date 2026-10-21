@@ -117,3 +117,49 @@ test('Marketing → ABM e Produto no menu agrupado', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Editar catálogo' })).toBeVisible();
   await shot(page, 'produto');
 });
+
+test('Intervenções: vermelho na apuração exige plano de ação; o avaliado só acompanha', async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const api = async (p: Page, method: 'get' | 'post', url: string, data?: object) => { const r = await p.request[method](`/api/v1${url}`, { headers: H, ...(data ? { data } : {}) }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const users = (await api(page, 'get', '/admin/users')).users as { id: string; email: string }[];
+  const lucas = users.find((u) => u.email === 'lucas@yepnet.test')!.id;
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+  const from = d.toLocaleDateString('en-CA'); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); const to = e.toLocaleDateString('en-CA');
+  const title = `Visitas do Lucas E2E ${Date.now().toString(36)}`;
+  const goal = (await api(page, 'post', '/performance/goals', { title, scope: 'individual', userId: lucas, manualUnit: 'visitas', periodType: 'personalizado', periodStart: from, periodEnd: to, target: 10 })).id;
+  await api(page, 'get', `/performance/goals/${goal}`); // fecha o período
+  // quem não é o dono da meta retifica com o valor real: 3 de 10 → vermelho
+  const ana = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await login(ana, 'ana@yepnet.test');
+  await api(ana, 'post', `/results/closings/${goal}/rectify`, { reason: 'Valor conferido no relatório de visitas', value: 3, recompute: false });
+
+  await page.goto('/times');
+  await page.getByRole('link', { name: /Intervenções necessárias/ }).click();
+  await expect(page.getByRole('heading', { name: 'Intervenções', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: title }).click();
+  const dr = page.getByRole('dialog', { name: 'Intervenção' });
+  await expect(dr.getByText('Plano de ação obrigatório · Resultado vermelho')).toBeVisible();
+  await expect(dr.getByText(/Registrar o diagnóstico e o plano de ação até/)).toBeVisible();
+  await dr.getByRole('button', { name: 'Registrar plano de ação' }).click();
+  await dr.getByLabel(/Diagnóstico/).fill('Agenda tomada por suporte, sem tempo para visitas');
+  await dr.getByLabel(/Ações/).fill('Reservar duas manhãs por semana para visitas; liderança acompanha às sextas');
+  await dr.getByLabel(/Concluir até/).fill(new Date(Date.now() + 14 * 86_400_000).toLocaleDateString('en-CA'));
+  await dr.getByRole('button', { name: 'Salvar plano' }).click();
+  await expect(page.getByText('Plano de ação registrado')).toBeVisible();
+  await expect(dr.getByText('Plano em execução').first()).toBeVisible();
+  await expect(dr.getByText(/registrou o plano de ação/)).toBeVisible();
+  await shot(page, 'gr-intervencao');
+
+  // o avaliado acompanha, mas não age
+  const lu = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  await login(lu, 'lucas@yepnet.test');
+  const mine = await api(lu, 'get', '/interventions?status=todas');
+  const iv = mine.items.find((x: { goalTitle: string }) => x.goalTitle === title);
+  if (iv) {
+    await lu.goto(`/times/intervencoes?id=${iv.id}`);
+    await expect(lu.getByRole('dialog', { name: 'Intervenção' }).getByRole('button', { name: /Concluir|Atualizar plano/ })).toHaveCount(0);
+  }
+});

@@ -215,3 +215,10 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Renome:** "Gestão de Resultados" → **Gestão de Times** (rota `/times`, antiga redireciona); "Clientes" → **Contas**. Identificadores internos (`resultados`, `clientes`) ficam como estão para não quebrar perfis, auditoria e integrações.
 - **ABM** reaproveita contas, oportunidades, tarefas e projetos existentes; só acrescenta a camada de "conta-alvo" (tier, situação, motivo, próximo passo) com histórico append-only. Uma conta só pode estar uma vez na lista.
 - **Projetos** e **Gestão de Times** viraram grupos (Projetos/Tarefas; Visão geral/Objetivos e metas), conforme escolhido pelo usuário.
+
+## ADR-049 — Intervenções por projeção da apuração oficial (21/10/2026)
+- **Decisão:** intervenções são derivadas de `result_closings` (versão vigente por competência) por uma projeção idempotente, como os eventos de negócio (ADR-046). Avalia só as duas últimas competências de cada série — suficiente para "dois amarelos seguidos" e para retificação do mês anterior, sem reabrir histórico antigo.
+- **Unicidade:** índice único parcial (uma intervenção aberta por série). Reincidência acrescenta competência; revisão que piora vira plano.
+- **Responsabilidade:** dono e cadeia de escalonamento vêm da estrutura organizacional (líder → responsável da unidade → acima → Diretoria), fixados na abertura. Escalonar só aumenta o nível; todos os acionados continuam vendo.
+- **Separação de papéis:** o avaliado não registra nem dispensa; dispensar exige alguém acima do responsável, com justificativa. Tudo fica em `intervention_events` (append-only).
+- **Avisos** reaproveitam o sino de Menções (mesmo padrão de ADR-045), com leitura por intervenção.

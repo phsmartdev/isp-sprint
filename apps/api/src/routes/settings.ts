@@ -9,6 +9,7 @@ import * as s from '../db/schema';
 import { runCsDaily } from '../services/cs';
 import { performanceConfig, syncBusinessEvents } from '../services/businessEvents';
 import { closeDueGoals, rollRecurringGoals } from '../services/indicators';
+import { syncInterventions } from '../services/interventions';
 import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipelinesOf } from '../services/instructions';
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
 import { sendActivityDigests } from '../services/alerts';
@@ -290,7 +291,7 @@ export const settingsRoutes = [
           const zone = tz?.tz ?? 'America/Sao_Paulo';
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
           const { config } = await performanceConfig(app.db, t.id);
-          results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today) };
+          results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today), interventions: await syncInterventions(app.db, t.id, today) };
         } catch (e) { results[t.id] = { error: (e as Error).message }; }
       }
       return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events, results };

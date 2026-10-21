@@ -39,6 +39,7 @@ const NAV: NavEntry[] = [
   { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
     { to: '/times', label: 'Visão geral', module: 'resultados' },
+    { to: '/times/intervencoes', label: 'Intervenções', module: 'resultados' },
     { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
