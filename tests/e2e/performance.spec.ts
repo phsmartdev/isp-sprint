@@ -77,6 +77,7 @@ test('Indicadores, semáforo, scorecard e metas em cascata', async ({ page }) =>
   await page.getByRole('button', { name: 'Desdobrar' }).first().click();
   const dd = page.getByRole('dialog', { name: /Desdobrar/ });
   await dd.getByLabel('Título').fill('Vendas do Residencial');
+  await dd.getByLabel('Nível').selectOption('equipe');
   await dd.getByLabel('Equipe').selectOption({ label: 'Residencial' });
   await dd.getByLabel('Valor-alvo').fill('18');
   await dd.getByRole('button', { name: 'Criar meta' }).click();

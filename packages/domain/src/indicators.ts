@@ -267,9 +267,11 @@ export function previousRange(r: { from: string; to: string }, type?: PeriodType
 }
 
 // ------------------------------------------------------------------ metas
-export const GOAL_SCOPES = ['individual', 'equipe', 'empresa'] as const;
+export const GOAL_SCOPES = ['individual', 'equipe', 'unidade', 'empresa'] as const;
 export type GoalScope = (typeof GOAL_SCOPES)[number];
-export const GOAL_SCOPE_LABELS: Record<GoalScope, string> = { individual: 'Individual', equipe: 'Equipe', empresa: 'Empresa' };
+export const GOAL_SCOPE_LABELS: Record<GoalScope, string> = { individual: 'Individual', equipe: 'Equipe', unidade: 'Área / unidade', empresa: 'Empresa' };
+/** ordem do desdobramento: empresa → área/unidade → equipe → pessoa */
+export const GOAL_SCOPE_ORDER: GoalScope[] = ['empresa', 'unidade', 'equipe', 'individual'];
 export const GOAL_CATEGORIES = ['comercial', 'projetos', 'operacional', 'qualidade', 'okr'] as const;
 export const GOAL_CATEGORY_LABELS: Record<(typeof GOAL_CATEGORIES)[number], string> = { comercial: 'Comercial', projetos: 'Projetos', operacional: 'Operacional', qualidade: 'Qualidade', okr: 'Resultado-chave (OKR)' };
 export type GoalStatus = 'atingida' | 'no_ritmo' | 'em_risco' | 'abaixo' | 'nao_atingida' | 'indisponivel' | 'nao_iniciada';
@@ -392,3 +394,25 @@ export function trafficLight(att: number | null, bands: TrafficBands = DEFAULT_T
 export function validateBands(b: TrafficBands): string[] {
   return b.green > 0 && b.yellow > 0 && b.yellow <= b.green && b.green <= 2 ? [] : ['As faixas precisam de amarelo ≤ verde, ambos entre 0% e 200%.'];
 }
+
+// ------------------------------------------------------------------ apuração mensal e tendência
+export const competenciaOf = (iso: string) => iso.slice(0, 7);
+export function nextCompetencia(c: string) { const [y, m] = c.split('-').map(Number) as [number, number]; return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; }
+export const isConsecutive = (a: string, b: string) => nextCompetencia(a) === b;
+export const CLOSING_STATUS_LABELS = { consolidado: 'Consolidado', validado: 'Validado', retificado: 'Retificado' } as const;
+
+/** Tendência pelos últimos fechamentos (mais antigo → mais recente): compara a média da metade recente com a da metade anterior. */
+export function trendOf(values: (number | null)[], direction: 'maior' | 'menor'): 'melhorando' | 'piorando' | 'estavel' | 'sem_historico' {
+  const v = values.filter((x): x is number => x !== null);
+  if (v.length < 2) return 'sem_historico';
+  const half = Math.floor(v.length / 2);
+  const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+  const old = avg(v.slice(0, half)); const recent = avg(v.slice(half));
+  const base = Math.abs(old) || 1;
+  const delta = (recent - old) / base;
+  if (Math.abs(delta) < 0.03) return 'estavel';
+  return (delta > 0) === (direction === 'maior') ? 'melhorando' : 'piorando';
+}
+export const TREND_LABELS = { melhorando: 'Melhorando', piorando: 'Piorando', estavel: 'Estável', sem_historico: 'Sem histórico' } as const;
+/** Variação percentual entre dois valores (null se não dá para calcular). */
+export const variation = (prev: number | null, cur: number | null) => (prev === null || cur === null || prev === 0 ? null : (cur - prev) / Math.abs(prev));

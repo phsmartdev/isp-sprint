@@ -2419,8 +2419,17 @@ export const goals = pgTable(
     manualUnit: text('manual_unit'),
     userId: uuid('user_id').references(() => users.id),
     teamId: uuid('team_id'),
+    /** meta de área/unidade (Gestão de Resultados) */
+    orgUnitId: uuid('org_unit_id'),
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     periodType: text('period_type').notNull(),
+    /** meta mensal que se repete: cada mês é uma meta da mesma série (competências consecutivas) */
+    recurring: boolean('recurring').notNull().default(false),
+    seriesId: uuid('series_id'),
+    /** metas da empresa/unidade nascem como proposta até a Diretoria aprovar */
+    approvalStatus: text('approval_status').notNull().default('aprovada'),
+    approvedBy: uuid('approved_by'),
+    approvedAt: ts('approved_at'),
     periodStart: date('period_start', { mode: 'string' }).notNull(),
     periodEnd: date('period_end', { mode: 'string' }).notNull(),
     target: doublePrecision('target').notNull(),
@@ -2441,7 +2450,9 @@ export const goals = pgTable(
     rowVersion: rowVersion(),
   },
   (t) => ({
-    scopeCk: check('goals_scope_ck', inList('scope', ['individual', 'equipe', 'empresa'])),
+    scopeCk: check('goals_scope_ck', inList('scope', ['individual', 'equipe', 'unidade', 'empresa'])),
+    approvalCk: check('goals_approval_ck', inList('approval_status', ['proposta', 'aprovada', 'rejeitada'])),
+    seriesUq: uniqueIndex('goals_series_uq').on(t.tenantId, t.seriesId, t.periodStart).where(sql`series_id is not null`),
     statusCk: check('goals_status_ck', inList('status', ['ativa', 'cancelada'])),
     periodCk: check('goals_period_ck', inList('period_type', ['semana', 'mes', 'trimestre', 'ano', 'personalizado'])),
     consolidationCk: check('goals_consolidation_ck', inList('consolidation', ['indicador', 'soma', 'media_ponderada', 'media_simples', 'nao_agregavel'])),
@@ -2587,4 +2598,58 @@ export const orgEvents = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ idx: index('org_events_idx').on(t.tenantId, t.createdAt) }),
+);
+
+/** Pedido de revisão de meta feito por quem não tem alçada; o superior decide. */
+export const goalRevisionRequests = pgTable(
+  'goal_revision_requests',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    fromTarget: doublePrecision('from_target').notNull(),
+    toTarget: doublePrecision('to_target').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('pendente'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    decisionNote: text('decision_note'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ statusCk: check('goal_revision_requests_status_ck', inList('status', ['pendente', 'aprovada', 'recusada'])), idx: index('goal_revision_requests_idx').on(t.tenantId, t.status) }),
+);
+
+/**
+ * Apuração oficial por meta e competência (YYYY-MM), versionada e imutável:
+ * v1 consolidado (fechamento do período) → validado (gestor confirma) → retificado (valor corrigido, com motivo).
+ * A versão mais alta é a vigente; parciais nunca entram aqui.
+ */
+export const resultClosings = pgTable(
+  'result_closings',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    goalId: uuid('goal_id').notNull().references(() => goals.id),
+    seriesId: uuid('series_id'),
+    competencia: text('competencia').notNull(),
+    version: integer('version').notNull(),
+    status: text('status').notNull(),
+    value: doublePrecision('value'),
+    target: doublePrecision('target').notNull(),
+    attainment: doublePrecision('attainment'),
+    color: text('color').notNull(),
+    indicatorVersion: integer('indicator_version'),
+    sample: integer('sample'),
+    quality: text('quality').notNull().default('ok'),
+    reason: text('reason'),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('result_closings_uq').on(t.goalId, t.version),
+    seriesIdx: index('result_closings_series_idx').on(t.tenantId, t.seriesId, t.competencia),
+    statusCk: check('result_closings_status_ck', inList('status', ['consolidado', 'validado', 'retificado'])),
+    colorCk: check('result_closings_color_ck', inList('color', ['verde', 'amarelo', 'vermelho', 'sem_dado'])),
+  }),
 );

@@ -1,7 +1,7 @@
 /** GESTÃO DE RESULTADOS — Fase 2: estrutura organizacional, escopo e perspectivas (Diretoria, Gestão, Liderança). */
 import { and, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
-import { atLeast } from '@isp/domain';
+import { atLeast, attainment, competenciaOf, trafficLight, trendOf, variation, type GoalStatus } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -10,7 +10,7 @@ import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { ensureFreshEvents, performanceConfig } from '../services/businessEvents';
 import { todayLocal } from '../services/projects';
-import { allIndicators } from '../services/indicators';
+import { allIndicators, computeIndicator, goalWho, indicatorDef } from '../services/indicators';
 import { PERSPECTIVE_LABELS, createsUnitCycle, orgData, resultsScope, unitPeople, type Perspective } from '../services/results';
 import { goalDto } from './indicators';
 
@@ -152,4 +152,98 @@ export const resultsRoutes = [
       return { perspective, today, goals, colors, scope: { teams: teamIds.length, people: userIds.length } };
     },
   }),
+
+  // ------------------------------------------------------------ apuração oficial (Fase 4)
+  defineRoute({
+    method: 'GET', url: '/results/closings/:id', summary: 'Histórico de apurações da série da meta (competências, versões, tendência, variação e qualidade)', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const [g] = await app.db.select().from(s.goals).where(and(eq(s.goals.id, params.id), eq(s.goals.tenantId, auth.tenantId))).limit(1);
+      if (!g) throw notFound('Meta não encontrada.');
+      await assertGoalInScope(app.db, auth, g);
+      const rows = await app.db.select({ c: s.resultClosings, by: s.users.name }).from(s.resultClosings).leftJoin(s.users, eq(s.users.id, s.resultClosings.actorId)).where(and(eq(s.resultClosings.tenantId, auth.tenantId), eq(s.resultClosings.seriesId, g.seriesId ?? g.id))).orderBy(s.resultClosings.competencia, s.resultClosings.version);
+      const byComp = new Map<string, typeof rows>();
+      for (const r of rows) byComp.set(r.c.competencia, [...(byComp.get(r.c.competencia) ?? []), r]);
+      const comps = [...byComp.entries()].map(([competencia, vs]) => { const cur = vs[vs.length - 1]!.c; return { competencia, current: cur, versions: vs.map((v) => ({ ...v.c, actorName: v.by })) }; });
+      const ind = g.indicatorId ? await indicatorDef(app.db, auth.tenantId, g.indicatorId) : null;
+      const direction = ind?.def.direction ?? 'maior';
+      const last = comps.slice(-12);
+      return {
+        goalId: g.id, seriesId: g.seriesId ?? g.id, unit: ind?.def.unit ?? g.manualUnit ?? 'quantidade', direction,
+        competencias: last.map((c, i) => ({ ...c, variation: i ? variation(last[i - 1]!.current.value, c.current.value) : null })),
+        trend: trendOf(last.map((c) => c.current.value), direction),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/results/closings/:id/drift', summary: 'Confere se os dados de origem mudaram depois do fechamento (sugere retificação, não altera nada)', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const { g, cur } = await closingTarget(app.db, auth, params.id);
+      if (!g.indicatorId) return { changed: false, closedValue: cur.value, currentValue: cur.value, manual: true };
+      const d = await indicatorDef(app.db, auth.tenantId, g.indicatorId);
+      const r = await computeIndicator(app.db, auth.tenantId, auth.timezone, d!.def, await goalWho(app.db, g), { from: g.periodStart, to: g.periodEnd });
+      const changed = (r.value ?? null) !== (cur.value ?? null) && !(r.value !== null && cur.value !== null && Math.abs(r.value - cur.value) < 1e-6);
+      return { changed, closedValue: cur.value, currentValue: r.value, indicatorVersion: d!.version, closedIndicatorVersion: cur.indicatorVersion };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/results/closings/:id/validate', summary: 'Valida a apuração (nova versão "validado", mesmo valor). Quem é avaliado não valida o próprio resultado.', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
+    body: z.object({ note: z.string().trim().max(1000).default('') }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { g, cur } = await closingTarget(tx, auth, params.id, true);
+      if (cur.status === 'validado') throw unprocessable('A apuração vigente já está validada.');
+      await insertClosing(tx, auth, g, cur, { status: 'validado', value: cur.value, reason: body.note || null });
+      return { ok: true };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/results/closings/:id/rectify', summary: 'Retifica a apuração: recalcula pela origem atual ou informa o valor (meta manual); exige motivo e gera nova versão', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
+    body: z.object({ reason: z.string().trim().min(10).max(1000), value: z.number().nullable().optional(), recompute: z.boolean().default(true) }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { g, cur } = await closingTarget(tx, auth, params.id, true);
+      let value: number | null;
+      let indicatorVersion = cur.indicatorVersion;
+      if (g.indicatorId && body.recompute) {
+        const d = await indicatorDef(tx, auth.tenantId, g.indicatorId);
+        const r = await computeIndicator(tx, auth.tenantId, auth.timezone, d!.def, await goalWho(tx, g), { from: g.periodStart, to: g.periodEnd });
+        value = r.value; indicatorVersion = d!.version;
+      } else {
+        if (body.value === undefined) throw unprocessable('Informe o valor correto.', [{ path: 'value', message: 'Obrigatório sem recálculo' }]);
+        value = body.value ?? null;
+      }
+      await insertClosing(tx, auth, g, cur, { status: 'retificado', value, reason: body.reason, indicatorVersion });
+      return { ok: true, value };
+    }),
+  }),
 ];
+
+async function assertGoalInScope(db: DbOrTx, auth: AuthContext, g: typeof s.goals.$inferSelect) {
+  const sc = await resultsScope(db, auth);
+  if (sc.all || level(auth, 'desempenho') === 'total') return sc;
+  const ok = g.scope === 'empresa' ? sc.perspectives.includes('diretoria') : g.scope === 'unidade' ? !!g.orgUnitId && sc.unitIds.includes(g.orgUnitId) : g.scope === 'equipe' ? !!g.teamId && sc.teamIds.includes(g.teamId) : !!g.userId && sc.userIds.includes(g.userId);
+  if (!ok) throw forbidden('Meta fora do seu escopo.');
+  return sc;
+}
+
+/** Apuração vigente da meta; para alterar, exige escopo de gestão e que a pessoa não seja a avaliada. */
+async function closingTarget(db: DbOrTx, auth: AuthContext, goalId: string, forChange = false) {
+  const [g] = await db.select().from(s.goals).where(and(eq(s.goals.id, goalId), eq(s.goals.tenantId, auth.tenantId))).limit(1);
+  if (!g) throw notFound('Meta não encontrada.');
+  await assertGoalInScope(db, auth, g);
+  const [cur] = await db.select().from(s.resultClosings).where(eq(s.resultClosings.goalId, g.id)).orderBy(desc(s.resultClosings.version)).limit(1);
+  if (!cur) throw unprocessable('A meta ainda não tem apuração oficial (o período não terminou).');
+  if (forChange) {
+    if (g.userId === auth.userId || g.ownerId === auth.userId) throw forbidden('Quem é avaliado pela meta não valida nem retifica o próprio resultado.');
+    if (level(auth, 'resultados') === 'proprio' && level(auth, 'desempenho') !== 'total') throw forbidden('Só a gestão valida ou retifica apurações.');
+  }
+  return { g, cur };
+}
+
+async function insertClosing(db: DbOrTx, auth: AuthContext, g: typeof s.goals.$inferSelect, cur: typeof s.resultClosings.$inferSelect, v: { status: 'validado' | 'retificado'; value: number | null; reason: string | null; indicatorVersion?: number | null }) {
+  const ind = g.indicatorId ? await indicatorDef(db, auth.tenantId, g.indicatorId) : null;
+  const att = attainment(v.value, cur.target, ind?.def.direction ?? 'maior');
+  const { config } = await performanceConfig(db, auth.tenantId);
+  const color = trafficLight(att, config.traffic);
+  await db.insert(s.resultClosings).values({ tenantId: auth.tenantId, goalId: g.id, seriesId: cur.seriesId, competencia: cur.competencia, version: cur.version + 1, status: v.status, value: v.value, target: cur.target, attainment: att, color, indicatorVersion: v.indicatorVersion ?? cur.indicatorVersion, sample: cur.sample, quality: cur.quality, reason: v.reason, actorId: auth.userId });
+  await db.insert(s.goalEvents).values({ tenantId: auth.tenantId, goalId: g.id, type: v.status === 'validado' ? 'apuracao_validada' : 'apuracao_retificada', payload: { competencia: cur.competencia, from: cur.value, to: v.value, color, previousColor: cur.color, reason: v.reason }, actorId: auth.userId });
+  return { color, attainment: att };
+}

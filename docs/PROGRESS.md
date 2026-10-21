@@ -85,6 +85,17 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Gestão de Times (ex-Gestão de Resultados) — Fases 3–4: planejamento e apuração oficial ✅ (2026-10-21)
+- Metas também por **área/unidade**; desdobramento empresa → área → equipe → pessoa.
+- Metas da empresa e de área nascem **propostas** e são aprovadas pela instância acima (Diretoria / unidade superior); quem propõe não aprova; proposta não é apurada nem gera intervenção.
+- **Pedido de revisão** para quem não tem alçada (justificativa ≥ 10 caracteres); a liderança acima decide; aprovado vira nova versão e o alvo original fica guardado. Um pedido pendente por meta.
+- **Metas mensais recorrentes** formam uma série (competências consecutivas): a rotina diária cria a meta do mês, sem duplicar.
+- **Apuração oficial versionada e imutável** por competência: v1 consolidado (fechamento automático), validado (gestor confirma) e retificado (recalcula pela origem ou valor informado, com motivo). Quem é avaliado não valida nem retifica o próprio resultado. Parcial nunca vira fechamento; sem dado de origem não recebe cor.
+- **Qualidade dos dados** no fechamento (ok, amostra pequena, sem dado, manual) e botão "Conferir dados de origem" (avisa se mudaram depois do fechamento, sem alterar nada).
+- Histórico da série com **tendência** (melhorando/piorando/estável), **variação** contra o mês anterior e todas as versões.
+- Aba **Aprovações e revisões** em Objetivos e metas.
+- Migração 0035. Testes: domínio 92, API 165, E2E 43.
+
 ## GESTÃO DE RESULTADOS — Fase 2: estrutura, escopos e perspectivas ✅ (2026-10-21)
 - Menu **GESTÃO DE RESULTADOS** (módulo `resultados` na matriz: Próprio/Equipe/Total).
 - **Estrutura organizacional configurável**: diretoria → área → unidade → times; responsável, substituto e alçada (R$) por unidade; líder substituto por time; sem ciclos; histórico append-only.

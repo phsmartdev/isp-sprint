@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canLinkObjective, consolidate, trafficLight, SUGGESTED_INDICATORS, attainment, combine, compositeScore, evalFormula, goalStatus, normalizeWeights, parseFormula, periodRange, previousRange, scorecardScore, validateIndicator, validateScorecard } from './indicators';
+import { isConsecutive, nextCompetencia, trendOf, variation, canLinkObjective, consolidate, trafficLight, SUGGESTED_INDICATORS, attainment, combine, compositeScore, evalFormula, goalStatus, normalizeWeights, parseFormula, periodRange, previousRange, scorecardScore, validateIndicator, validateScorecard } from './indicators';
 
 describe('fórmula segura', () => {
   it('calcula com precedência, parênteses, funções e vírgula decimal', () => {
@@ -75,5 +75,21 @@ describe('cascata e semáforo', () => {
     expect(consolidate('nao_agregavel', k)).toBeNull();
     expect(canLinkObjective('tatico', 'estrategico')).toBe(true);
     expect(canLinkObjective('estrategico', 'tatico')).toBe(false);
+  });
+});
+
+describe('apuração e tendência', () => {
+  it('competências consecutivas e virada de ano', () => {
+    expect(nextCompetencia('2026-12')).toBe('2027-01');
+    expect(isConsecutive('2026-08', '2026-09')).toBe(true);
+    expect(isConsecutive('2026-07', '2026-09')).toBe(false);
+  });
+  it('tendência respeita a direção e variação trata zero', () => {
+    expect(trendOf([10, 11, 14, 15], 'maior')).toBe('melhorando');
+    expect(trendOf([10, 11, 14, 15], 'menor')).toBe('piorando');
+    expect(trendOf([10, 10.1], 'maior')).toBe('estavel');
+    expect(trendOf([10], 'maior')).toBe('sem_historico');
+    expect(variation(10, 12)).toBeCloseTo(0.2);
+    expect(variation(0, 12)).toBeNull();
   });
 });

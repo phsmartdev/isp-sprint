@@ -7,7 +7,8 @@ import { defineRoute, IdParams } from '../http/route';
 import { notFound, unauthorized, unprocessable, AppError } from '../http/errors';
 import * as s from '../db/schema';
 import { runCsDaily } from '../services/cs';
-import { syncBusinessEvents } from '../services/businessEvents';
+import { performanceConfig, syncBusinessEvents } from '../services/businessEvents';
+import { closeDueGoals, rollRecurringGoals } from '../services/indicators';
 import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipelinesOf } from '../services/instructions';
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
 import { sendActivityDigests } from '../services/alerts';
@@ -281,7 +282,18 @@ export const settingsRoutes = [
       for (const t of tenants) cs[t.id] = await runCsDaily(app.db, app.config, t.id).catch((e) => ({ error: (e as Error).message }));
       const events: Record<string, unknown> = {};
       for (const t of tenants) events[t.id] = await syncBusinessEvents(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
-      return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events };
+      // Gestão de Resultados: apuração oficial das metas vencidas e metas mensais recorrentes do mês
+      const results: Record<string, unknown> = {};
+      for (const t of tenants) {
+        try {
+          const [tz] = await app.db.select({ tz: s.tenants.timezone }).from(s.tenants).where(eq(s.tenants.id, t.id)).limit(1);
+          const zone = tz?.tz ?? 'America/Sao_Paulo';
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
+          const { config } = await performanceConfig(app.db, t.id);
+          results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today) };
+        } catch (e) { results[t.id] = { error: (e as Error).message }; }
+      }
+      return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events, results };
     },
   }),
 ];

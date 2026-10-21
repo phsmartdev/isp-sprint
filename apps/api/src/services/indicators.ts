@@ -5,11 +5,12 @@
  */
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import {
-  attainment, combine, compositeScore, goalStatus, normalizeWeights, periodRange, scorecardScore, DEFAULT_CAP,
-  type IndicatorDef, type NumericField, type Source, type SourceFilter, type PeriodType, type GoalStatus,
+  attainment, combine, compositeScore, goalStatus, normalizeWeights, periodRange, scorecardScore, trafficLight, DEFAULT_CAP, DEFAULT_TRAFFIC_BANDS, competenciaOf,
+  type IndicatorDef, type NumericField, type Source, type SourceFilter, type PeriodType, type GoalStatus, type TrafficBands,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { orgData, unitPeople } from './results';
 
 export type Who = { users: string[] | 'all' };
 export type Range = { from: string; to: string };
@@ -127,15 +128,16 @@ export async function allIndicators(db: DbOrTx, tenantId: string) {
 
 // ------------------------------------------------------------------ metas
 export type GoalRow = typeof s.goals.$inferSelect;
-export async function goalWho(db: DbOrTx, g: Pick<GoalRow, 'scope' | 'userId' | 'teamId' | 'tenantId'>): Promise<Who> {
+export async function goalWho(db: DbOrTx, g: Pick<GoalRow, 'scope' | 'userId' | 'teamId' | 'tenantId' | 'orgUnitId'>): Promise<Who> {
   if (g.scope === 'empresa') return { users: 'all' };
+  if (g.scope === 'unidade' && g.orgUnitId) return { users: unitPeople(await orgData(db, g.tenantId), g.orgUnitId).userIds };
   if (g.scope === 'equipe' && g.teamId) return { users: await teamUsers(db, g.tenantId, g.teamId) };
   return { users: g.userId ? [g.userId] : [] };
 }
 
-export type GoalProgress = { value: number | null; status: GoalStatus; attainment: number | null; expected: number | null; indicatorStatus: IndicatorStatus | 'manual'; closed: boolean; direction: 'maior' | 'menor'; unit: string };
+export type GoalProgress = { value: number | null; status: GoalStatus; attainment: number | null; expected: number | null; indicatorStatus: IndicatorStatus | 'manual'; closed: boolean; direction: 'maior' | 'menor'; unit: string; closing?: { version: number; status: string; color: string; competencia: string } | null };
 
-export async function goalProgress(db: DbOrTx, tz: string, today: string, g: GoalRow): Promise<GoalProgress> {
+export async function goalProgress(db: DbOrTx, tz: string, today: string, g: GoalRow, bands: TrafficBands = DEFAULT_TRAFFIC_BANDS): Promise<GoalProgress> {
   const range = { from: g.periodStart, to: g.periodEnd };
   const [closed] = await db.select().from(s.goalResults).where(eq(s.goalResults.goalId, g.id)).limit(1);
   let def: IndicatorDef | null = null;
@@ -143,7 +145,13 @@ export async function goalProgress(db: DbOrTx, tz: string, today: string, g: Goa
   if (g.indicatorId) { const d = await indicatorDef(db, g.tenantId, g.indicatorId); def = d?.def ?? null; version = d?.version ?? null; }
   const direction = def?.direction ?? 'maior';
   const unit = def?.unit ?? g.manualUnit ?? 'quantidade';
-  if (closed) return { value: closed.value, status: closed.status as GoalStatus, attainment: closed.attainment, expected: g.target, indicatorStatus: g.indicatorId ? 'ok' : 'manual', closed: true, direction, unit };
+  if (closed) {
+    const [cl] = await db.select().from(s.resultClosings).where(eq(s.resultClosings.goalId, g.id)).orderBy(desc(s.resultClosings.version)).limit(1);
+    const value = cl ? cl.value : closed.value;
+    const att = cl ? cl.attainment : closed.attainment;
+    const st = cl && cl.version > 1 ? goalStatus(value, cl.target, direction, range, today).status : (closed.status as GoalStatus);
+    return { value, status: st, attainment: att, expected: g.target, indicatorStatus: g.indicatorId ? 'ok' : 'manual', closed: true, direction, unit, closing: cl ? { version: cl.version, status: cl.status, color: cl.color, competencia: cl.competencia } : null };
+  }
   let value: number | null;
   let indicatorStatus: IndicatorStatus | 'manual';
   if (def) {
@@ -156,11 +164,16 @@ export async function goalProgress(db: DbOrTx, tz: string, today: string, g: Goa
     indicatorStatus = 'manual';
   }
   const st = goalStatus(value, g.target, direction, range, today);
-  // período encerrado: fecha o resultado (imutável) uma vez só
-  if (today > g.periodEnd && g.status === 'ativa') {
-    await db.insert(s.goalResults).values({ goalId: g.id, tenantId: g.tenantId, value, target: g.target, attainment: st.attainment, status: st.status, indicatorVersion: version }).onConflictDoNothing();
-    await db.insert(s.goalEvents).values({ tenantId: g.tenantId, goalId: g.id, type: 'resultado', payload: { value, target: g.target, status: st.status } });
-    return { ...st, value, indicatorStatus, closed: true, direction, unit };
+  // período encerrado (e meta aprovada): fecha o resultado oficial — imutável, versão 1 "consolidado"
+  if (today > g.periodEnd && g.status === 'ativa' && g.approvalStatus === 'aprovada') {
+    const ins = await db.insert(s.goalResults).values({ goalId: g.id, tenantId: g.tenantId, value, target: g.target, attainment: st.attainment, status: st.status, indicatorVersion: version }).onConflictDoNothing().returning({ id: s.goalResults.goalId });
+    if (ins.length) {
+      const color = trafficLight(st.attainment, bands);
+      const quality = indicatorStatus === 'manual' ? 'manual' : indicatorStatus === 'incompleto' ? 'amostra_pequena' : value === null ? 'sem_dado' : 'ok';
+      await db.insert(s.resultClosings).values({ tenantId: g.tenantId, goalId: g.id, seriesId: g.seriesId ?? g.id, competencia: competenciaOf(g.periodEnd), version: 1, status: 'consolidado', value, target: g.target, attainment: st.attainment, color, indicatorVersion: version, quality }).onConflictDoNothing();
+      await db.insert(s.goalEvents).values({ tenantId: g.tenantId, goalId: g.id, type: 'resultado', payload: { value, target: g.target, status: st.status, color } });
+    }
+    return { ...st, value, indicatorStatus, closed: true, direction, unit, closing: { version: 1, status: 'consolidado', color: trafficLight(st.attainment, bands), competencia: competenciaOf(g.periodEnd) } };
   }
   return { ...st, value, indicatorStatus, closed: false, direction, unit };
 }
@@ -201,3 +214,37 @@ export async function scorecardsFor(db: DbOrTx, tenantId: string, tz: string, us
   return { cards: out, composite: compositeScore(out.map((c) => ({ score: c.score, weight: c.weight }))) };
 }
 
+
+/** Fecha todas as metas vencidas da empresa (rotina diária); idempotente. */
+export async function closeDueGoals(db: DbOrTx, tenantId: string, tz: string, today: string, bands: TrafficBands) {
+  const due = await db.select().from(s.goals).where(and(eq(s.goals.tenantId, tenantId), eq(s.goals.status, 'ativa'), eq(s.goals.approvalStatus, 'aprovada'), sql`${s.goals.periodEnd} < ${today}::date`, sql`not exists (select 1 from goal_results r where r.goal_id = ${s.goals.id})`));
+  for (const g of due) await goalProgress(db, tz, today, g, bands);
+  return due.length;
+}
+
+/** Metas mensais recorrentes: cria a do mês corrente quando a série ainda não tem (idempotente pela série + início). */
+export async function rollRecurringGoals(db: DbOrTx, tenantId: string, today: string) {
+  const month = periodRange('mes', today);
+  const latest = await db.execute(sql`
+    select distinct on (g.series_id) g.* from goals g
+     where g.tenant_id = ${tenantId} and g.recurring and g.status = 'ativa' and g.approval_status = 'aprovada' and g.period_type = 'mes'
+     order by g.series_id, g.period_start desc`);
+  let created = 0;
+  for (const row of latest.rows as Record<string, unknown>[]) {
+    if (String(row.period_start) >= month.from) continue;
+    let parentGoalId: string | null = null;
+    if (row.parent_goal_id) {
+      const [p] = await db.select({ seriesId: s.goals.seriesId, recurring: s.goals.recurring }).from(s.goals).where(eq(s.goals.id, String(row.parent_goal_id))).limit(1);
+      if (p?.recurring && p.seriesId) { const [np] = await db.select({ id: s.goals.id }).from(s.goals).where(and(eq(s.goals.seriesId, p.seriesId), eq(s.goals.periodStart, month.from))).limit(1); parentGoalId = np?.id ?? null; }
+      else parentGoalId = String(row.parent_goal_id);
+    }
+    const [g] = await db.insert(s.goals).values({
+      tenantId, title: String(row.title), scope: String(row.scope), category: String(row.category), indicatorId: (row.indicator_id as string) ?? null, manualUnit: (row.manual_unit as string) ?? null,
+      userId: (row.user_id as string) ?? null, teamId: (row.team_id as string) ?? null, orgUnitId: (row.org_unit_id as string) ?? null, ownerId: String(row.owner_id),
+      periodType: 'mes', periodStart: month.from, periodEnd: month.to, target: Number(row.target), originalTarget: Number(row.target), objectiveId: (row.objective_id as string) ?? null,
+      parentGoalId, weight: Number(row.weight), consolidation: String(row.consolidation), notes: (row.notes as string) ?? null, recurring: true, seriesId: String(row.series_id), approvalStatus: 'aprovada', createdBy: (row.created_by as string) ?? null,
+    }).onConflictDoNothing().returning({ id: s.goals.id });
+    if (g) { created++; await db.insert(s.goalEvents).values({ tenantId, goalId: g.id, type: 'criada', payload: { recurrenceOf: row.id, target: Number(row.target) } }); }
+  }
+  return created;
+}
