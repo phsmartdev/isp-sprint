@@ -146,13 +146,15 @@ function InterventionDeadlines() {
   const qc = useQueryClient();
   const st = useQuery({ queryKey: ['performance', 'settings'], queryFn: () => api<Settings>('/performance/settings') });
   const cur = (st.data?.config as { interventions?: { planDays: number; reviewDays: number; escalateAfterDays: number } } | undefined)?.interventions ?? { planDays: 7, reviewDays: 3, escalateAfterDays: 2 };
+  const [req, setReq] = useState<boolean | null>(null);
+  const requireAnalysis = req ?? ((cur as { requireAnalysis?: boolean }).requireAnalysis !== false);
   const [f, setF] = useState<Record<'planDays' | 'reviewDays' | 'escalateAfterDays', string> | null>(null);
   const v = f ?? { planDays: String(cur.planDays), reviewDays: String(cur.reviewDays), escalateAfterDays: String(cur.escalateAfterDays) };
   const n = { planDays: Number(v.planDays), reviewDays: Number(v.reviewDays), escalateAfterDays: Number(v.escalateAfterDays) };
   const valid = Object.values(n).every((x) => Number.isInteger(x) && x >= 0 && x <= 60) && n.planDays >= 1 && n.reviewDays >= 1;
   const save = useMutation({
-    mutationFn: () => api('/performance/settings', { method: 'PUT', body: { config: { ...st.data!.config, interventions: n }, note: `Intervenções: plano em ${n.planDays} dias, revisão em ${n.reviewDays}, escalona a cada ${n.escalateAfterDays} de atraso` } }),
-    onSuccess: () => { setF(null); void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: 'Prazos das intervenções atualizados' }); },
+    mutationFn: () => api('/performance/settings', { method: 'PUT', body: { config: { ...st.data!.config, interventions: { ...n, requireAnalysis } }, note: `Intervenções: plano em ${n.planDays} dias, revisão em ${n.reviewDays}, escalona a cada ${n.escalateAfterDays} de atraso${requireAnalysis ? ', análise obrigatória' : ''}` } }),
+    onSuccess: () => { setF(null); setReq(null); void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: 'Prazos das intervenções atualizados' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (!st.data) return null;
@@ -163,7 +165,8 @@ function InterventionDeadlines() {
       {field('planDays', 'Plano de ação (dias)')}
       {field('reviewDays', 'Revisão do amarelo (dias)')}
       {field('escalateAfterDays', 'Escalonar a cada (dias de atraso)')}
-      {f !== null && <Button variant="primary" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>Salvar prazos</Button>}
+      <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={requireAnalysis} onChange={(e) => setReq(e.target.checked)} /> Exigir análise de causa antes do plano</label>
+      {(f !== null || req !== null) && <Button variant="primary" disabled={!valid} loading={save.isPending} onClick={() => save.mutate()}>Salvar prazos</Button>}
     </section>
   );
 }

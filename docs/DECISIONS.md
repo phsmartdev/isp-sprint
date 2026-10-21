@@ -222,3 +222,10 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Responsabilidade:** dono e cadeia de escalonamento vêm da estrutura organizacional (líder → responsável da unidade → acima → Diretoria), fixados na abertura. Escalonar só aumenta o nível; todos os acionados continuam vendo.
 - **Separação de papéis:** o avaliado não registra nem dispensa; dispensar exige alguém acima do responsável, com justificativa. Tudo fica em `intervention_events` (append-only).
 - **Avisos** reaproveitam o sino de Menções (mesmo padrão de ADR-045), com leitura por intervenção.
+
+## ADR-050 — Análise de causa como etapa obrigatória antes do plano (21/10/2026)
+- **Decisão:** a análise (problema, Pareto, Ishikawa, 5 Porquês) é um documento por intervenção (`intervention_analyses`, conteúdo JSON validado no domínio e na API). Ações relevantes (iniciar, concluir, reabrir) ficam em `intervention_events`.
+- **Regra de completude no domínio** (`analysisGaps`): problema descrito e dimensionado; Pareto com ≥2 itens; Ishikawa com ≥3 causas e ≥1 escolhida; ≥3 porquês e causa raiz por causa escolhida; ≥1 causa raiz confirmada com evidência.
+- **Plano bloqueado sem análise concluída** por padrão (`interventions.requireAnalysis`), para evitar plano que trata sintoma. A empresa pode desligar.
+- **Pareto com dado real** só onde o dado existe hoje: negociações perdidas (evento válido) por motivo no período da meta, das pessoas da meta. Outros recortes ficam manuais até haver fonte confiável.
+- **Categorias do Ishikawa** são os 6M renomeados para o contexto comercial (Pessoas, Ferramentas, Oferta, Mercado…), fixas no domínio.

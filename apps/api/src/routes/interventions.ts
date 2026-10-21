@@ -1,7 +1,7 @@
 /** Gestão de Times — Fase 5: intervenções (vermelho, dois amarelos seguidos, revisão do primeiro amarelo), prazos e escalonamento. */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG } from '@isp/domain';
+import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG, EMPTY_ANALYSIS, ISHIKAWA_CATEGORIES, LOSS_REASON_LABELS, analysisGaps, diagnosisFrom, paretoRows, type AnalysisContent } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -11,6 +11,7 @@ import { todayLocal } from '../services/projects';
 import { orgData, resultsScope, type ResultsScope } from '../services/results';
 import { performanceConfig } from '../services/businessEvents';
 import { ensureFreshInterventions, logIntervention, syncInterventions } from '../services/interventions';
+import { goalWho } from '../services/indicators';
 
 type Row = typeof s.interventions.$inferSelect;
 const canSee = (sc: ResultsScope, auth: AuthContext, i: Row) =>
@@ -31,6 +32,14 @@ async function load(db: DbOrTx, auth: AuthContext, id: string, forUpdate = false
 }
 const bump = { updatedAt: new Date(), rowVersion: sql`${s.interventions.rowVersion} + 1` };
 const checkVersion = (i: Row, v: number) => { if (i.rowVersion !== v) throw conflict(i.rowVersion); };
+
+const txt = (max: number) => z.string().max(max).default('');
+const AnalysisBody = z.object({
+  problem: z.object({ what: txt(1000), where: txt(300), when: txt(300), howMuch: txt(300) }),
+  pareto: z.object({ title: z.string().trim().max(120), source: z.enum(['manual', 'motivos_perda', 'motivos_perda_valor']), items: z.array(z.object({ label: z.string().trim().max(120), value: z.number().finite().min(0).max(1e12) })).max(30) }).nullable(),
+  causes: z.array(z.object({ id: z.string().min(1).max(40), category: z.enum(ISHIKAWA_CATEGORIES.map((c) => c.key) as [string, ...string[]]), text: z.string().trim().max(300), selected: z.boolean() })).max(60),
+  whys: z.array(z.object({ causeId: z.string().min(1).max(40), whys: z.array(z.string().max(500)).max(5), rootCause: txt(500), evidence: txt(1000), confirmed: z.boolean() })).max(60),
+});
 
 export const interventionRoutes = [
   defineRoute({
@@ -87,8 +96,9 @@ export const interventionRoutes = [
       const org = await orgData(app.db, auth.tenantId);
       await app.db.insert(s.interventionReads).values({ userId: auth.userId, interventionId: i.id }).onConflictDoUpdate({ target: [s.interventionReads.userId, s.interventionReads.interventionId], set: { lastReadAt: new Date() } });
       const { config } = await performanceConfig(app.db, auth.tenantId);
+      const [an] = await app.db.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
       return {
-        ...i, goal: { id: g!.id, title: g!.title, scope: g!.scope, periodStart: g!.periodStart, periodEnd: g!.periodEnd, target: g!.target },
+        ...i, analysisStatus: an?.status ?? null, goal: { id: g!.id, title: g!.title, scope: g!.scope, periodStart: g!.periodStart, periodEnd: g!.periodEnd, target: g!.target },
         ownerName: name(i.ownerId), subjectName: name(i.subjectUserId), resolvedByName: name(i.resolvedBy),
         teamName: org.teams.find((t) => t.id === i.teamId)?.name ?? null, unitName: org.units.find((u) => u.id === i.orgUnitId)?.name ?? null,
         chain: i.escalationChain.map((id, k) => ({ id, name: name(id), level: k + 1, called: k < i.escalationLevel })),
@@ -128,6 +138,11 @@ export const interventionRoutes = [
       if (i.kind !== 'plano' || !OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('Esta intervenção não aceita plano de ação.');
       checkVersion(i, body.rowVersion);
       if (body.planDueOn < todayLocal(auth)) throw unprocessable('O prazo do plano não pode estar no passado.', [{ path: 'planDueOn', message: 'Data passada' }]);
+      const { config: pc } = await performanceConfig(tx, auth.tenantId);
+      if ((pc.interventions?.requireAnalysis ?? DEFAULT_INTERVENTION_CONFIG.requireAnalysis) !== false) {
+        const [an] = await tx.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
+        if (an?.status !== 'concluida') throw unprocessable('Conclua a análise (problema, Pareto, Ishikawa e 5 Porquês) antes de registrar o plano de ação.');
+      }
       const first = i.status === 'aberta';
       await tx.update(s.interventions).set({ ...bump, diagnosis: body.diagnosis, actionPlan: body.actionPlan, planDueOn: body.planDueOn, status: 'em_andamento' }).where(eq(s.interventions.id, i.id));
       await logIntervention(tx, auth.tenantId, i.id, first ? 'plano_registrado' : 'plano_atualizado', { planDueOn: body.planDueOn, ...(first ? {} : { previousDueOn: i.planDueOn }) }, [i.ownerId, i.subjectUserId, ...i.escalationChain.slice(0, Math.max(1, i.escalationLevel))], auth.userId);
@@ -159,6 +174,99 @@ export const interventionRoutes = [
       await logIntervention(tx, auth.tenantId, i.id, 'dispensada', { reason: body.reason }, [i.ownerId, i.subjectUserId], auth.userId);
       return { ok: true };
     }),
+  }),
+
+  // ------------------------------------------------------------ Fase 6: jornada de análise
+  defineRoute({
+    method: 'GET', url: '/interventions/:id/analysis', summary: 'Jornada de análise da intervenção (problema, Pareto, Ishikawa, 5 Porquês) com as pendências de cada etapa', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const { i, sc } = await load(app.db, auth, params.id);
+      const [a] = await app.db.select({ a: s.interventionAnalyses, by: s.users.name }).from(s.interventionAnalyses).leftJoin(s.users, eq(s.users.id, s.interventionAnalyses.concludedBy)).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
+      const content = a?.a.content ?? EMPTY_ANALYSIS;
+      const open = OPEN_INTERVENTION.includes(i.status as 'aberta');
+      return {
+        analysis: a ? { ...a.a, concludedByName: a.by } : null, content, gaps: analysisGaps(content), pareto: content.pareto ? paretoRows(content.pareto.items) : null,
+        categories: ISHIKAWA_CATEGORIES, canEdit: open && canAct(sc, auth, i) && a?.a.status !== 'concluida', canReopen: open && canAct(sc, auth, i) && a?.a.status === 'concluida',
+      };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/interventions/:id/analysis', summary: 'Salva o rascunho da análise (versão otimista: 0 para criar)', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    body: z.object({ rowVersion: z.number().int().min(0), content: AnalysisBody }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { i, sc } = await load(tx, auth, params.id, true);
+      if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele na estrutura conduz a análise.');
+      if (!OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('A intervenção já foi encerrada.');
+      const ids = new Set(body.content.causes.map((c) => c.id));
+      if (ids.size !== body.content.causes.length) throw unprocessable('Causas com identificador repetido.');
+      const content = { ...body.content, whys: body.content.whys.filter((w) => ids.has(w.causeId)) } as AnalysisContent;
+      const [cur] = await tx.select().from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
+      if (!cur) {
+        if (body.rowVersion !== 0) throw conflict(0);
+        const [r] = await tx.insert(s.interventionAnalyses).values({ tenantId: auth.tenantId, interventionId: i.id, content, createdBy: auth.userId }).onConflictDoNothing().returning({ rowVersion: s.interventionAnalyses.rowVersion });
+        if (!r) throw conflict(1);
+        await logIntervention(tx, auth.tenantId, i.id, 'analise_iniciada', {}, [], auth.userId);
+        return { rowVersion: r.rowVersion, gaps: analysisGaps(content) };
+      }
+      if (cur.status === 'concluida') throw unprocessable('A análise está concluída. Reabra para alterar.');
+      if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+      const [r] = await tx.update(s.interventionAnalyses).set({ content, updatedAt: new Date(), rowVersion: sql`${s.interventionAnalyses.rowVersion} + 1` }).where(eq(s.interventionAnalyses.id, cur.id)).returning({ rowVersion: s.interventionAnalyses.rowVersion });
+      return { rowVersion: r!.rowVersion, gaps: analysisGaps(content) };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/interventions/:id/analysis/conclude', summary: 'Conclui a análise (todas as etapas completas); o diagnóstico vai para o plano de ação', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    body: z.object({ rowVersion: z.number().int(), conclusion: z.string().trim().max(4000).optional() }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { i, sc } = await load(tx, auth, params.id, true);
+      if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele conclui a análise.');
+      const [cur] = await tx.select().from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1).for('update');
+      if (!cur) throw unprocessable('Comece a análise antes de concluir.');
+      if (cur.status === 'concluida') throw unprocessable('A análise já está concluída.');
+      if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+      const gaps = analysisGaps(cur.content);
+      if (gaps.length) throw unprocessable(gaps[0]!.message, gaps.map((g) => ({ path: g.step, message: g.message })));
+      const diagnosis = body.conclusion?.trim() || diagnosisFrom(cur.content);
+      await tx.update(s.interventionAnalyses).set({ status: 'concluida', conclusion: diagnosis, concludedBy: auth.userId, concludedAt: new Date(), updatedAt: new Date(), rowVersion: sql`${s.interventionAnalyses.rowVersion} + 1` }).where(eq(s.interventionAnalyses.id, cur.id));
+      // o diagnóstico da análise vira o ponto de partida do plano (sem sobrescrever plano já registrado)
+      if (!i.diagnosis) await tx.update(s.interventions).set({ ...bump, diagnosis }).where(eq(s.interventions.id, i.id));
+      await logIntervention(tx, auth.tenantId, i.id, 'analise_concluida', { roots: cur.content.whys.filter((w) => w.confirmed).map((w) => w.rootCause) }, [i.ownerId, ...i.escalationChain.slice(0, i.escalationLevel)], auth.userId);
+      return { ok: true, diagnosis };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/interventions/:id/analysis/reopen', summary: 'Reabre a análise concluída para revisão (com motivo, fica no histórico)', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    body: z.object({ rowVersion: z.number().int(), reason: z.string().trim().min(10).max(1000) }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { i, sc } = await load(tx, auth, params.id, true);
+      if (!canAct(sc, auth, i) || !OPEN_INTERVENTION.includes(i.status as 'aberta')) throw forbidden('A análise só pode ser reaberta por quem conduz uma intervenção aberta.');
+      const [cur] = await tx.select().from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1).for('update');
+      if (cur?.status !== 'concluida') throw unprocessable('A análise não está concluída.');
+      if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+      await tx.update(s.interventionAnalyses).set({ status: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.interventionAnalyses.rowVersion} + 1` }).where(eq(s.interventionAnalyses.id, cur.id));
+      await logIntervention(tx, auth.tenantId, i.id, 'analise_reaberta', { reason: body.reason }, [i.ownerId], auth.userId);
+      return { ok: true };
+    }),
+  }),
+  defineRoute({
+    method: 'GET', url: '/interventions/:id/analysis/pareto-data', summary: 'Dados reais para o Pareto: negociações perdidas no período da meta, por motivo (quantidade ou valor mensal)', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    query: z.object({ source: z.enum(['motivos_perda', 'motivos_perda_valor']) }),
+    handler: async ({ app, auth, params, query: q }) => {
+      const { i } = await load(app.db, auth, params.id);
+      const [g] = await app.db.select().from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1);
+      const who = await goalWho(app.db, g!);
+      if (Array.isArray(who.users) && !who.users.length) return { items: [], sample: 0, period: { from: g!.periodStart, to: g!.periodEnd } };
+      const rows = await app.db.execute<{ reason: string | null; n: number; value: string | number }>(sql`
+        select o.loss_reason as reason, count(*)::int as n, coalesce(sum(be.value_cents), 0) as value
+          from business_events be join opportunities o on o.id = be.source_id
+         where be.tenant_id = ${auth.tenantId} and be.type = 'negociacao_perdida' and be.validation = 'valido'
+           and (be.occurred_at at time zone ${auth.timezone})::date between ${g!.periodStart}::date and ${g!.periodEnd}::date
+           ${who.users === 'all' ? sql`` : sql`and be.owner_id in (${sql.join(who.users.map((u) => sql`${u}::uuid`), sql`, `)})`}
+         group by o.loss_reason`);
+      const labels = LOSS_REASON_LABELS as Record<string, string>;
+      const items = rows.rows.map((r) => ({ label: r.reason ? labels[r.reason] ?? r.reason : 'Sem motivo informado', value: q.source === 'motivos_perda' ? r.n : Math.round(Number(r.value)) / 100 }));
+      return { items, sample: rows.rows.reduce((a, r) => a + r.n, 0), period: { from: g!.periodStart, to: g!.periodEnd } };
+    },
   }),
   defineRoute({
     method: 'POST', url: '/interventions/sync', summary: 'Recalcula as intervenções pelas apurações vigentes (idempotente)', tag: 'Gestão de Times', module: 'resultados', min: 'total',

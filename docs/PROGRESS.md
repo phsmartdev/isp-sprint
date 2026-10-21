@@ -85,6 +85,13 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Gestão de Times — Fase 6: jornada de análise ✅ (2026-10-21)
+- Cada intervenção tem uma **análise de causa** em cinco etapas, numa página própria (Intervenções → ficha → Análise): **Problema** (o quê, onde, quando, quanto) → **Pareto** (gráfico com acumulado e corte de 80%; à mão ou com as negociações perdidas do período da meta por motivo, em quantidade ou valor) → **Ishikawa** (espinha com 6 categorias adaptadas ao comercial: Método, Pessoas, Ferramentas, Oferta, Medição, Mercado; marca as causas a investigar) → **5 Porquês** (mínimo de 3 por causa escolhida, causa raiz e evidência) → **Conclusão** (diagnóstico montado das etapas, editável).
+- Pendências por etapa aparecem nas abas; só conclui com tudo resolvido. Salva sozinho enquanto a pessoa escreve (com controle de versão contra edição simultânea).
+- **Plano de ação só depois da análise concluída** (configurável em Configuração → Desempenho → Indicadores); o diagnóstico da análise já entra no plano. Análise concluída fica travada; reabrir exige motivo e fica no histórico.
+- Quem conduz: o responsável pela intervenção ou quem está acima dele; o avaliado acompanha em modo leitura.
+- Migração 0038 (`intervention_analyses`). Testes: domínio (5), API (3 + ajuste da Fase 5), E2E percorrendo a jornada inteira.
+
 ## Gestão de Times — Fase 5: intervenções ✅ (2026-10-21)
 - Regras pela **apuração oficial** (versão vigente de cada competência): vermelho → plano de ação obrigatório; dois amarelos em competências seguidas → plano obrigatório; primeiro amarelo → revisão simplificada (causa provável + decisão de manter ou abrir plano).
 - **Sem duplicidade:** uma intervenção aberta por série de meta; nova competência ruim entra como reincidência; revisão que piora é promovida a plano; competência já tratada não reabre; retificação que tira a meta da faixa dispensa a intervenção automaticamente.

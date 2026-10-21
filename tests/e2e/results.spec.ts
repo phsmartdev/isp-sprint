@@ -143,8 +143,47 @@ test('Intervenções: vermelho na apuração exige plano de ação; o avaliado s
   const dr = page.getByRole('dialog', { name: 'Intervenção' });
   await expect(dr.getByText('Plano de ação obrigatório · Resultado vermelho')).toBeVisible();
   await expect(dr.getByText(/Registrar o diagnóstico e o plano de ação até/)).toBeVisible();
+  await expect(dr.getByRole('button', { name: 'Registrar plano de ação' })).toBeDisabled();
+  await dr.getByRole('link', { name: 'Começar análise' }).click();
+  // jornada: problema → Pareto → Ishikawa → 5 Porquês → conclusão
+  await expect(page.getByRole('heading', { name: 'Análise da intervenção', level: 1 })).toBeVisible();
+  await page.getByLabel(/^O quê/).fill('Visitas realizadas muito abaixo da meta');
+  await page.getByLabel(/^Quanto/).fill('3 de 10 (30%)');
+  await page.getByRole('tab', { name: /Pareto/ }).click();
+  await page.getByLabel('Categoria 1', { exact: true }).fill('Agenda de suporte');
+  await page.getByLabel('Valor 1', { exact: true }).fill('9');
+  await page.getByRole('button', { name: 'Adicionar categoria' }).click();
+  await page.getByLabel('Categoria 2', { exact: true }).fill('Cliente remarcou');
+  await page.getByLabel('Valor 2', { exact: true }).fill('3');
+  await page.getByRole('button', { name: 'Adicionar categoria' }).click();
+  await page.getByLabel('Categoria 3', { exact: true }).fill('Deslocamento');
+  await page.getByLabel('Valor 3', { exact: true }).fill('1');
+  await expect(page.getByText(/Foco:.*Agenda de suporte/)).toBeVisible();
+  await shot(page, 'gr-pareto');
+  await page.getByRole('tab', { name: /Ishikawa/ }).click();
+  for (const [cat, txt] of [['Método', 'Sem bloco fixo de visitas'], ['Pessoas', 'Suporte puxando o consultor'], ['Mercado', 'Chuvas no período']] as const) {
+    await page.getByLabel(`Nova causa em ${cat}`).fill(txt);
+    await page.getByRole('button', { name: `Adicionar causa em ${cat}` }).click();
+  }
+  await page.getByLabel('Investigar: Sem bloco fixo de visitas').check();
+  await shot(page, 'gr-ishikawa');
+  await page.getByRole('tab', { name: /5 Porquês/ }).click();
+  const w = page.getByRole('region', { name: '5 Porquês: Sem bloco fixo de visitas' });
+  await w.getByLabel(/^1º por quê/).fill('Agenda ocupada');
+  await w.getByLabel(/^2º por quê/).fill('Chamados de suporte sem triagem');
+  await w.getByLabel(/^3º por quê/).fill('Não há plantão de suporte para a carteira');
+  await w.getByLabel('Causa raiz encontrada').fill('Falta de triagem de suporte da carteira');
+  await w.getByLabel(/Evidência/).fill('9 de 13 visitas canceladas por chamado');
+  await w.getByLabel('Causa raiz confirmada pela evidência').check();
+  await page.getByRole('tab', { name: /Conclusão/ }).click();
+  await expect(page.getByLabel('Diagnóstico')).toHaveValue(/Falta de triagem de suporte da carteira/);
+  await expect(page.getByText('Salvo', { exact: false }).first()).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Concluir análise' }).click();
+  await expect(page.getByText(/Análise concluída\. O diagnóstico/)).toBeVisible();
+  await shot(page, 'gr-analise');
+  await page.getByRole('link', { name: 'Voltar à intervenção' }).click();
   await dr.getByRole('button', { name: 'Registrar plano de ação' }).click();
-  await dr.getByLabel(/Diagnóstico/).fill('Agenda tomada por suporte, sem tempo para visitas');
+  await expect(dr.getByLabel(/Diagnóstico/)).toHaveValue(/Falta de triagem/);
   await dr.getByLabel(/Ações/).fill('Reservar duas manhãs por semana para visitas; liderança acompanha às sextas');
   await dr.getByLabel(/Concluir até/).fill(new Date(Date.now() + 14 * 86_400_000).toLocaleDateString('en-CA'));
   await dr.getByRole('button', { name: 'Salvar plano' }).click();

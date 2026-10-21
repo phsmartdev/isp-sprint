@@ -19,8 +19,9 @@ export const INTERVENTION_TRIGGER_LABELS: Record<InterventionTrigger, string> = 
 export const INTERVENTION_STATUS_LABELS: Record<InterventionStatus, string> = { aberta: 'Aguardando ação', em_andamento: 'Plano em execução', concluida: 'Concluída', dispensada: 'Dispensada' };
 export const OPEN_INTERVENTION: InterventionStatus[] = ['aberta', 'em_andamento'];
 
-export type InterventionConfig = { planDays: number; reviewDays: number; escalateAfterDays: number };
-export const DEFAULT_INTERVENTION_CONFIG: InterventionConfig = { planDays: 7, reviewDays: 3, escalateAfterDays: 2 };
+/** requireAnalysis: plano de ação só depois da jornada de análise concluída (Fase 6) */
+export type InterventionConfig = { planDays: number; reviewDays: number; escalateAfterDays: number; requireAnalysis?: boolean };
+export const DEFAULT_INTERVENTION_CONFIG: InterventionConfig = { planDays: 7, reviewDays: 3, escalateAfterDays: 2, requireAnalysis: true };
 export function validateInterventionConfig(c: InterventionConfig): string[] {
   const e: string[] = [];
   for (const [k, l] of [['planDays', 'Prazo do plano'], ['reviewDays', 'Prazo da revisão'], ['escalateAfterDays', 'Tolerância antes de escalonar']] as const) {

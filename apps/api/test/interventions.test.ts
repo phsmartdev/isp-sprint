@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
+import { completeAnalysis } from './analysisContent';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client;
@@ -68,6 +69,11 @@ describe('intervenções', () => {
     expect((await lucas.post(`/interventions/${it0.id}/plan`, body)).statusCode).toBe(403);
     expect((await lucas.post(`/interventions/${it0.id}/dismiss`, { rowVersion: d.rowVersion, reason: 'Não concordo com a meta' })).statusCode).toBe(403);
     expect((await carlos.post(`/interventions/${it0.id}/conclude`, { rowVersion: d.rowVersion, conclusion: 'Sem plano ainda registrado' })).statusCode).toBe(422);
+    expect((await carlos.post(`/interventions/${it0.id}/plan`, body)).statusCode).toBe(422); // sem análise concluída
+    await completeAnalysis(carlos, it0.id);
+    d = ok(await carlos.get(`/interventions/${it0.id}`)).json();
+    body.rowVersion = d.rowVersion;
+    expect(d.diagnosis).toContain('Falta de triagem de suporte da carteira');
     expect((await carlos.post(`/interventions/${it0.id}/plan`, { ...body, rowVersion: d.rowVersion + 5 })).statusCode).toBe(409);
     ok(await carlos.post(`/interventions/${it0.id}/plan`, body));
     d = ok(await carlos.get(`/interventions/${it0.id}`)).json();

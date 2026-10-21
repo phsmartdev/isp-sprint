@@ -24,7 +24,7 @@ const COLOR_DOT: Record<string, string> = { verde: 'bg-success', amarelo: 'bg-wa
 const comp = (c: string) => { const [y, m] = c.split('-'); return `${m}/${y}`; };
 const EVENT_TEXT: Record<string, string> = {
   aberta: 'abriu a intervenção', promovida: 'virou plano de ação obrigatório', reincidencia: 'nova competência fora da meta (reincidência)', escalada: 'prazo vencido: escalonada',
-  revisada: 'registrou a revisão', plano_registrado: 'registrou o plano de ação', plano_atualizado: 'atualizou o plano de ação', concluida: 'concluiu', dispensada: 'dispensou',
+  revisada: 'registrou a revisão', analise_iniciada: 'começou a análise de causa', analise_concluida: 'concluiu a análise de causa', analise_reaberta: 'reabriu a análise de causa', plano_registrado: 'registrou o plano de ação', plano_atualizado: 'atualizou o plano de ação', concluida: 'concluiu', dispensada: 'dispensou',
   dispensada_retificacao: 'dispensada automaticamente após retificação da apuração',
 };
 
@@ -89,6 +89,7 @@ type Detail = Item & {
   closings: { competencia: string; color: TrafficColor; attainment: number | null; value: number | null; target: number; status: string }[];
   events: { id: string; type: string; createdAt: string; actorName: string | null; payload: Record<string, unknown> }[];
   can: { act: boolean; dismiss: boolean };
+  analysisStatus: 'rascunho' | 'concluida' | null; config: { requireAnalysis?: boolean };
 };
 
 function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
@@ -136,6 +137,16 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
             </section>
           )}
 
+          {(d.kind === 'plano' || d.analysisStatus) && (
+            <section className="flex flex-wrap items-center gap-3 rounded-lg border border-line p-3">
+              <div className="min-w-[200px] flex-1">
+                <h4 className="font-bold text-ink">Análise de causa</h4>
+                <p className="text-sm text-muted">{d.analysisStatus === 'concluida' ? 'Concluída: problema, Pareto, Ishikawa e 5 Porquês.' : d.analysisStatus === 'rascunho' ? 'Em andamento.' : d.config.requireAnalysis !== false ? 'Obrigatória antes do plano de ação.' : 'Recomendada antes do plano de ação.'}</p>
+              </div>
+              <Link to={`/times/intervencoes/${d.id}/analise`} className="text-sm font-semibold text-primary hover:underline">{d.analysisStatus ? 'Abrir análise' : open && d.can.act ? 'Começar análise' : 'Ver análise'}</Link>
+            </section>
+          )}
+
           {d.reviewCause && <section><h4 className="font-bold text-ink">Revisão</h4><p className="whitespace-pre-line text-sm">{d.reviewCause}</p><p className="text-xs text-muted">Decisão: {d.reviewDecision === 'plano' ? 'abrir plano de ação' : 'manter acompanhamento'}</p></section>}
           {d.diagnosis && <section><h4 className="font-bold text-ink">Diagnóstico</h4><p className="whitespace-pre-line text-sm">{d.diagnosis}</p></section>}
           {d.actionPlan && <section><h4 className="font-bold text-ink">Plano de ação</h4><p className="whitespace-pre-line text-sm">{d.actionPlan}</p>{d.planDueOn && <p className="num text-xs text-muted">Prazo: {fmtDate(d.planDueOn)}</p>}</section>}
@@ -167,7 +178,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
             </section>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" onClick={startPlan}>{d.status === 'aberta' ? 'Registrar plano de ação' : 'Atualizar plano'}</Button>
+              <Button variant="primary" disabled={d.status === 'aberta' && d.config.requireAnalysis !== false && d.analysisStatus !== 'concluida'} title={d.status === 'aberta' && d.config.requireAnalysis !== false && d.analysisStatus !== 'concluida' ? 'Conclua a análise de causa primeiro' : undefined} onClick={startPlan}>{d.status === 'aberta' ? 'Registrar plano de ação' : 'Atualizar plano'}</Button>
               {d.status === 'em_andamento' && <Button variant="secondary" onClick={() => setMode('conclude')}>Concluir</Button>}
             </div>
           ))}

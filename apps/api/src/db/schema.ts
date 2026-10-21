@@ -2768,3 +2768,26 @@ export const interventionReads = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.interventionId] }) }),
 );
+
+/** Fase 6: jornada de análise da intervenção (problema, Pareto, Ishikawa, 5 Porquês, conclusão). Ações ficam em intervention_events. */
+export const interventionAnalyses = pgTable(
+  'intervention_analyses',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    interventionId: uuid('intervention_id').notNull().references(() => interventions.id),
+    status: text('status').notNull().default('rascunho'),
+    content: jsonb('content').$type<import('@isp/domain').AnalysisContent>().notNull(),
+    conclusion: text('conclusion'),
+    concludedBy: uuid('concluded_by').references(() => users.id),
+    concludedAt: ts('concluded_at'),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('intervention_analyses_uq').on(t.interventionId),
+    statusCk: check('intervention_analyses_status_ck', inList('status', ['rascunho', 'concluida'])),
+  }),
+);

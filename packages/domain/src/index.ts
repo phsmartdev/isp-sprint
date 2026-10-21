@@ -11,3 +11,4 @@ export * from './tasks';
 export * from './performance';
 export * from './indicators';
 export * from './interventions';
+export * from './analysis';

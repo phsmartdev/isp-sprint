@@ -123,7 +123,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     <ul className="mb-1 mt-0.5 space-y-0.5 pl-9">
                       {kids.map((c) => (
                         <li key={c.to}>
-                          <NavLink to={c.to} onClick={onNavigate} className={({ isActive }) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5')}>
+                          <NavLink to={c.to} end={kids.some((o) => o !== c && o.to.startsWith(`${c.to}/`))} onClick={onNavigate} className={({ isActive }) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5')}>
                             <span className="min-w-0 flex-1">{c.label}</span>
                             {c.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{badge}</span>}
                             {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
