@@ -309,6 +309,13 @@
       "when": 1792622129826,
       "tag": "0043_abm_conta360",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792623406363,
+      "tag": "0044_stakeholders",
+      "breakpoints": true
     }
   ]
 }
