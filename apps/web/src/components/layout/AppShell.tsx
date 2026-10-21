@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X, HeartHandshake, FolderKanban, ListTodo, Target, Gauge } from 'lucide-react';
+  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -15,25 +15,39 @@ import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
-type NavItem = { to: string; label: string; icon: ReactNode; module: Module; badge?: boolean | 'approvals' };
+type NavLeaf = { to: string; label: string; icon?: ReactNode; module: Module; badge?: boolean | 'approvals'; also?: string[] };
+type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
+type NavEntry = NavLeaf | NavGroup;
 const ICON = 'h-[22px] w-[22px] shrink-0';
-const NAV: NavItem[] = [
+const isGroup = (n: NavEntry): n is NavGroup => 'children' in n;
+/** Menu na ordem combinada com o Paulo (21/10/2026). Grupos abrem e fecham; abrem sozinhos quando a página atual está dentro. */
+const NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: <Home className={ICON} />, module: 'inicio' },
-  { to: '/leads', label: 'Leads', icon: <UsersRound className={ICON} />, module: 'leads' },
-  { to: '/opportunities', label: 'Oportunidades', icon: <ClipboardList className={ICON} />, module: 'oportunidades' },
-  { to: '/aprovacoes', label: 'Aprovações', icon: <Scale className={ICON} />, module: 'oportunidades', badge: 'approvals' },
-  { to: '/customers', label: 'Clientes', icon: <Users className={ICON} />, module: 'clientes' },
-  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
-  { to: '/activities', label: 'Atividades', icon: <CalendarCheck className={ICON} />, module: 'atividades', badge: true },
-  { to: '/tarefas', label: 'Tarefas', icon: <ListTodo className={ICON} />, module: 'atividades' },
-  { to: '/resultados', label: 'GESTÃO DE RESULTADOS', icon: <Gauge className={ICON} />, module: 'resultados' },
-  { to: '/desempenho/metas', label: 'Objetivos e metas', icon: <Target className={ICON} />, module: 'desempenho' },
-  { to: '/projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, module: 'projetos' },
-  { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
-  { to: '/campaigns', label: 'Campanhas', icon: <Send className={ICON} />, module: 'campanhas' },
+  { key: 'comercial', label: 'Comercial', icon: <Briefcase className={ICON} />, children: [
+    { to: '/opportunities', label: 'Oportunidades', module: 'oportunidades' },
+    { to: '/customers', label: 'Contas', module: 'clientes' },
+    { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
+    { to: '/activities', label: 'Atividades', module: 'atividades', badge: true },
+  ] },
   { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
+  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
+  { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
+    { to: '/leads', label: 'Leads', module: 'leads' },
+    { to: '/abm', label: 'ABM', module: 'clientes' },
+    { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
+  ] },
+  { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio' },
+  { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
+    { to: '/times', label: 'Visão geral', module: 'resultados' },
+    { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
+  ] },
+  { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
+    { to: '/projetos', label: 'Projetos', module: 'projetos' },
+    { to: '/tarefas', label: 'Tarefas', module: 'atividades' },
+  ] },
+  { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
   { to: '/intelligence', label: 'Inteligência', icon: <Lightbulb className={ICON} />, module: 'inteligencia' },
-  { to: '/settings', label: 'Configurações', icon: <Settings className={ICON} />, module: 'configuracoes' },
+  { to: '/settings', label: 'Configuração', icon: <Settings className={ICON} />, module: 'configuracoes' },
 ];
 
 export const SETTINGS_NAV = [
@@ -55,7 +69,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
   { to: '/settings/desempenho', label: 'Gestão de desempenho', admin: true },
-  { to: '/settings/resultados', label: 'Gestão de Resultados', admin: true },
+  { to: '/settings/resultados', label: 'Gestão de Times', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
@@ -79,6 +93,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const badge = counts ? counts.today + counts.overdue : 0;
   const approvals = useApprovalCount().data?.toDecide ?? 0;
   const inSettings = loc.pathname.startsWith('/settings');
+  // grupos abertos/fechados lembrados neste navegador (conveniência; sem armazenamento, segue a página atual)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('isp:nav-groups') ?? '{}') as Record<string, boolean>; } catch { return {}; } });
+  const toggle = (k: string, v: boolean) => setOpenGroups((g) => { const n = { ...g, [k]: v }; try { localStorage.setItem('isp:nav-groups', JSON.stringify(n)); } catch { /* sem armazenamento */ } return n; });
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-navy to-navy-2 text-white">
       <Link to="/" onClick={onNavigate} className="flex h-[84px] items-center px-7" aria-label="Início">
@@ -86,42 +103,73 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </Link>
       <nav aria-label="Navegação principal" className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
         <ul className="space-y-1">
-          {NAV.filter((n) => can(n.module) || (n.module === 'configuracoes' && inSettings)).map((n) => (
-            <li key={n.to}>
-              <NavLink
-                to={n.to}
-                end={n.to === '/'}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  clsx(
-                    'relative flex h-12 items-center gap-3.5 rounded-md px-4 text-md transition-colors',
-                    isActive || (n.to === '/settings' && inSettings) ? 'bg-navy-active font-semibold text-lime before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-lime' : 'text-white/95 hover:bg-white/5',
-                  )
-                }
-              >
-                {n.icon}
-                <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                {n.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2.5 py-0.5 text-xs font-bold text-navy">{badge}</span>}
-                {n.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2.5 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
-              </NavLink>
-              {n.to === '/settings' && inSettings && (
-                <ul className="mb-2 mt-1 space-y-0.5 pl-9">
-                  {SETTINGS_NAV.filter((s) => !s.admin || can('configuracoes', 'total')).map((s) => (
-                    <li key={s.to}>
-                      <NavLink
-                        to={s.to}
-                        end
-                        onClick={onNavigate}
-                        className={({ isActive }) => clsx('block rounded-sm px-3 py-1.5 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/85 hover:bg-white/5')}
-                      >
-                        {s.label}
-                      </NavLink>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
+          {NAV.map((n) => {
+            if (isGroup(n)) {
+              const kids = n.children.filter((c) => can(c.module));
+              if (!kids.length) return null;
+              const active = kids.some((c) => loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`));
+              const open = openGroups[n.key] ?? active;
+              const total = kids.reduce((a, c) => a + (c.badge === true ? badge : c.badge === 'approvals' ? approvals : 0), 0);
+              return (
+                <li key={n.key}>
+                  <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx('relative flex h-12 w-full items-center gap-3.5 rounded-md px-4 text-left text-md transition-colors', active && !open ? 'bg-navy-active font-semibold text-lime' : 'text-white/95 hover:bg-white/5')}>
+                    {n.icon}
+                    <span className="min-w-0 flex-1 leading-[1.15]">{n.label}</span>
+                    {!open && total > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{total}</span>}
+                    <ChevronDown className={clsx('h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} aria-hidden />
+                  </button>
+                  {open && (
+                    <ul className="mb-1 mt-0.5 space-y-0.5 pl-9">
+                      {kids.map((c) => (
+                        <li key={c.to}>
+                          <NavLink to={c.to} onClick={onNavigate} className={({ isActive }) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5')}>
+                            <span className="min-w-0 flex-1">{c.label}</span>
+                            {c.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{badge}</span>}
+                            {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
+                          </NavLink>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            }
+            if (!(can(n.module) || (n.module === 'configuracoes' && inSettings))) return null;
+            return (
+              <li key={n.to}>
+                <NavLink
+                  to={n.to}
+                  end={n.to === '/'}
+                  onClick={onNavigate}
+                  className={({ isActive }) =>
+                    clsx(
+                      'relative flex h-12 items-center gap-3.5 rounded-md px-4 text-md transition-colors',
+                      isActive || (n.to === '/settings' && inSettings) ? 'bg-navy-active font-semibold text-lime before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-lime' : 'text-white/95 hover:bg-white/5',
+                    )
+                  }
+                >
+                  {n.icon}
+                  <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
+                </NavLink>
+                {n.to === '/settings' && inSettings && (
+                  <ul className="mb-2 mt-1 space-y-0.5 pl-9">
+                    {SETTINGS_NAV.filter((x) => !x.admin || can('configuracoes', 'total')).map((x) => (
+                      <li key={x.to}>
+                        <NavLink
+                          to={x.to}
+                          end
+                          onClick={onNavigate}
+                          className={({ isActive }) => clsx('block rounded-sm px-3 py-1.5 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/85 hover:bg-white/5')}
+                        >
+                          {x.label}
+                        </NavLink>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </nav>
       <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[140px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[200px] min-h-[140px] shrink-0 [@media(max-height:720px)]:hidden')} aria-hidden>

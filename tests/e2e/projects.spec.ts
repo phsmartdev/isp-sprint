@@ -15,7 +15,8 @@ test('Projetos: criar por modelo, quadro com arrastar, lista, calendário, linha
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, 'carlos@yepnet.test');
-  await page.getByRole('link', { name: 'Projetos' }).first().click();
+  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name: /^Projetos/ }).click();
+  await page.getByRole('link', { name: 'Projetos', exact: true }).first().click();
   await expect(page.getByRole('heading', { name: 'Projetos', level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Novo projeto' }).first().click();
   const dlg = page.getByRole('dialog', { name: 'Novo projeto' });

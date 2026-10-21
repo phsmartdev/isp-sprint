@@ -54,7 +54,7 @@ export function AdminCustomFields() {
     <section className="card p-5">
       <h2 className="text-lg font-bold text-ink">Campos personalizados</h2>
       <p className="mb-3 text-sm text-muted">Crie os campos que sua operação precisa registrar, além dos campos padrão do CRM.</p>
-      <Tabs label="Onde o campo aparece" value={tab} onChange={setTab} className="mb-4" tabs={[{ key: 'clientes', label: 'Clientes' }, { key: 'negociacoes', label: 'Negociações' }]} />
+      <Tabs label="Onde o campo aparece" value={tab} onChange={setTab} className="mb-4" tabs={[{ key: 'clientes', label: 'Contas' }, { key: 'negociacoes', label: 'Negociações' }]} />
       {tab === 'clientes' ? <CustomerFields /> : <DealFields />}
     </section>
   );

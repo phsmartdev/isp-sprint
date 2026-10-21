@@ -65,9 +65,10 @@ test('menu segue o nível de acesso: vendedor, supervisão e gerência', async (
   const v = await (await browser.newContext()).newPage();
   await login(v, 'lucas@yepnet.test');
   const nav = v.getByRole('navigation', { name: 'Navegação principal' });
+  await nav.getByRole('button', { name: /^Marketing/ }).click();
   await expect(nav.getByRole('link', { name: /Leads/ })).toBeVisible();
   await expect(nav.getByRole('link', { name: /Inteligência/ })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: /Configurações/ })).toHaveCount(0);
+  await expect(nav.getByRole('link', { name: /Configuração/ })).toHaveCount(0);
   await v.goto('/settings/security');
   await expect(v.getByText('Sem acesso a este módulo')).toBeVisible();
   await v.goto('/reports');
@@ -76,7 +77,7 @@ test('menu segue o nível de acesso: vendedor, supervisão e gerência', async (
   const s = await (await browser.newContext()).newPage();
   await login(s, 'ana@yepnet.test');
   await expect(s.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Inteligência/ })).toBeVisible();
-  await expect(s.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Configurações/ })).toHaveCount(0);
+  await expect(s.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Configuração/ })).toHaveCount(0);
 
   const g = await (await browser.newContext()).newPage();
   await login(g, 'carlos@yepnet.test');

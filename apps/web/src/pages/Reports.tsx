@@ -58,7 +58,7 @@ export function ReportsPage() {
   const show = (s: string) => f.tab === 'geral' || f.tab === s;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TABS = [{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Clientes' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }];
+  const TABS = [{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Contas' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }];
   const TV_TABS = TABS.filter((t) => ['geral', 'vendas', 'leads', 'oportunidades', 'atividades'].includes(t.key) || (t.key === 'clientes' && can('clientes')));
 
   return (

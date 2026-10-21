@@ -1,4 +1,4 @@
-/** GESTÃO DE RESULTADOS — perspectivas Diretoria, Gestão e Liderança sobre a mesma base, no escopo de cada um. */
+/** Gestão de Times — perspectivas Diretoria, Gestão e Liderança sobre a mesma base, no escopo de cada um. */
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
@@ -35,9 +35,9 @@ export function ResultsPage() {
   const s = sc.data!;
   return (
     <div>
-      <PageHeader icon={<Gauge />} title="GESTÃO DE RESULTADOS" subtitle="Estratégia, metas, indicadores e execução no escopo de quem responde por eles." />
+      <PageHeader icon={<Gauge />} title="Gestão de Times" subtitle="Estratégia, metas, indicadores e execução no escopo de quem responde por eles." />
       {!s.perspectives.length ? (
-        <Notice tone="info">Você ainda não responde por uma diretoria, área ou time na estrutura de gestão. Aqui aparecem as suas metas; quem administra define responsáveis em Administração → Gestão de Resultados.</Notice>
+        <Notice tone="info">Você ainda não responde por uma diretoria, área ou time na estrutura de gestão. Aqui aparecem as suas metas; quem administra define responsáveis em Configuração → Gestão de Times.</Notice>
       ) : (
         <Tabs label="Perspectiva" value={p as 'diretoria'} onChange={(x) => setU({ p: x, unit: '', team: '' })} tabs={s.perspectives.map((x) => ({ key: x.key, label: x.label }))} className="mb-4" />
       )}

@@ -1,4 +1,4 @@
-/** Administração → Gestão de Resultados: estrutura organizacional (diretoria → área → unidade → times), responsáveis, substitutos e alçadas. */
+/** Administração → Gestão de Times: estrutura organizacional (diretoria → área → unidade → times), responsáveis, substitutos e alçadas. */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
@@ -36,7 +36,7 @@ export function AdminResultsSettings() {
   const loose = o.teams.filter((t) => !t.orgUnitId || !o.units.some((u) => u.id === t.orgUnitId));
   return (
     <div className="space-y-4">
-      <div><h1 className="text-xl font-bold text-ink">Gestão de Resultados</h1><p className="text-sm text-muted">A estrutura define quem responde por quê: responsável por diretoria vê a perspectiva Diretoria; por área ou unidade, Gestão; líderes de time, Liderança. O cargo não dá acesso por si — o nível de acesso continua em Segurança.</p></div>
+      <div><h1 className="text-xl font-bold text-ink">Gestão de Times</h1><p className="text-sm text-muted">A estrutura define quem responde por quê: responsável por diretoria vê a perspectiva Diretoria; por área ou unidade, Gestão; líderes de time, Liderança. O cargo não dá acesso por si — o nível de acesso continua em Segurança.</p></div>
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between p-4"><h2 className="text-lg font-bold text-ink">Estrutura organizacional</h2><Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>Nova unidade</Button></div>
         {!o.units.length ? <div className="border-t border-line"><EmptyState title="Nenhuma unidade" description="Comece pela diretoria e crie as áreas abaixo dela; depois vincule os times." /></div> : o.units.filter((u) => !u.parentId).map((u) => node(u, 0))}

@@ -2653,3 +2653,47 @@ export const resultClosings = pgTable(
     colorCk: check('result_closings_color_ck', inList('color', ['verde', 'amarelo', 'vermelho', 'sem_dado'])),
   }),
 );
+
+// --------------------------------------------------------------- marketing: ABM (contas-alvo)
+
+/** Conta-alvo do ABM: um contato/cliente existente marcado como alvo, com tier, situação, responsável e motivo. */
+export const abmAccounts = pgTable(
+  'abm_accounts',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    tier: text('tier').notNull().default('1_muitos'),
+    status: text('status').notNull().default('identificada'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    priority: text('priority').notNull().default('media'),
+    reason: text('reason').notNull(),
+    nextStep: text('next_step'),
+    nextStepOn: date('next_step_on', { mode: 'string' }),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    uq: uniqueIndex('abm_accounts_contact_uq').on(t.tenantId, t.contactId),
+    tierCk: check('abm_accounts_tier_ck', inList('tier', ['1_1', '1_poucos', '1_muitos'])),
+    statusCk: check('abm_accounts_status_ck', inList('status', ['identificada', 'engajando', 'oportunidade', 'cliente', 'pausada'])),
+    priorityCk: check('abm_accounts_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
+  }),
+);
+
+/** Histórico da conta-alvo (append-only). */
+export const abmEvents = pgTable(
+  'abm_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('abm_events_idx').on(t.tenantId, t.abmId) }),
+);

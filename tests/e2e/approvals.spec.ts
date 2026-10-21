@@ -43,6 +43,8 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
 
   const mgr = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   await login(mgr, 'carlos@yepnet.test');
+  await expect(mgr.getByRole('button', { name: /^Comercial/ })).toContainText(/\d/);
+  await mgr.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name: /^Comercial/ }).click();
   await expect(mgr.getByRole('link', { name: /Aprovações/ })).toContainText(/\d/);
   await mgr.getByRole('link', { name: /Aprovações/ }).first().click();
   await mgr.getByRole('row', { name: /Cliente Aprovação E2E/ }).click();

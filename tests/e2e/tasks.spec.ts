@@ -19,6 +19,7 @@ test('Tarefas: rápida, delegada, detalhe com checklist, comentário, tempo e co
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, 'lucas@yepnet.test');
+  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name: /^Projetos/ }).click();
   await page.getByRole('link', { name: 'Tarefas' }).first().click();
   await expect(page.getByRole('heading', { name: 'Tarefas', level: 1 })).toBeVisible();
 

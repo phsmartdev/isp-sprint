@@ -10,7 +10,7 @@ async function login(page: Page, email: string) {
 }
 const shot = async (page: Page, name: string) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true }); };
 
-test('GESTÃO DE RESULTADOS: estrutura organizacional e perspectivas por responsabilidade', async ({ page }) => {
+test('Gestão de Times: estrutura organizacional e perspectivas por responsabilidade', async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page, 'carlos@yepnet.test');
@@ -34,8 +34,10 @@ test('GESTÃO DE RESULTADOS: estrutura organizacional e perspectivas por respons
   await expect(page.getByText('Time atualizado')).toBeVisible();
   await shot(page, 'gr-estrutura');
 
-  await page.getByRole('link', { name: 'GESTÃO DE RESULTADOS', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'GESTÃO DE RESULTADOS' })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name: /^Gestão de Times/ }).click();
+  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: 'Visão geral', exact: true }).click();
+  await expect(page).toHaveURL(/\/times/);
+  await expect(page.getByRole('heading', { name: 'Gestão de Times', level: 1 })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Diretoria' })).toBeVisible();
   await expect(page.getByText('Estamos alcançando os objetivos do negócio?')).toBeVisible();
   await page.getByRole('tab', { name: 'Gestão' }).click();
@@ -76,4 +78,42 @@ test('Apuração oficial: fechamento, validação e pedido de revisão', async (
   await d2.getByLabel('Justificativa').fill('Uma semana de treinamento obrigatório');
   await d2.getByRole('button', { name: 'Enviar pedido' }).click();
   await expect(page.getByText('Pedido de revisão enviado à liderança')).toBeVisible();
+});
+
+test('Marketing → ABM e Produto no menu agrupado', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const nav = page.getByRole('navigation', { name: 'Navegação principal' });
+  await nav.getByRole('button', { name: /^Comercial/ }).click();
+  await expect(nav.getByRole('link', { name: 'Contas', exact: true })).toBeVisible();
+  await nav.getByRole('button', { name: /^Marketing/ }).click();
+  await nav.getByRole('link', { name: 'ABM', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'ABM', level: 1 })).toBeVisible();
+  await page.getByRole('button', { name: 'Adicionar conta-alvo' }).first().click();
+  const d = page.getByRole('dialog', { name: 'Adicionar conta-alvo' });
+  await d.getByLabel(/^Conta/).fill('Mendes');
+  const pickBtn = d.getByRole('listitem').first().getByRole('button');
+  const picked = ((await pickBtn.textContent()) ?? '').replace(/·.*/, '').trim();
+  await pickBtn.click();
+  await d.getByLabel('Tier').selectOption('1_1');
+  await d.getByLabel(/Por que é alvo/).fill('Conta com potencial para link dedicado (E2E)');
+  await d.getByRole('button', { name: 'Adicionar', exact: true }).click();
+  // se a conta já era alvo (execução anterior), a API recusa a duplicata; a linha precisa existir de qualquer forma
+  await expect(page.getByText(/Conta-alvo adicionada|já está na lista de ABM/).first()).toBeVisible();
+  if (await d.isVisible()) await d.getByRole('button', { name: 'Cancelar' }).click();
+  await page.getByLabel('Buscar conta').fill(picked);
+  await page.getByRole('button', { name: picked, exact: true }).click();
+  const dr = page.getByRole('dialog', { name: 'Conta-alvo' });
+  await dr.getByLabel('Situação').selectOption('engajando');
+  await dr.getByRole('button', { name: 'Salvar alterações' }).click();
+  await expect(page.getByText('Conta-alvo atualizada')).toBeVisible();
+  await expect(dr.getByText(/mudou a situação para Engajando|atualizou/).first()).toBeVisible();
+  await shot(page, 'abm');
+
+  await page.keyboard.press('Escape');
+  await nav.getByRole('link', { name: 'Produto', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Produto', level: 1 })).toBeVisible();
+  await expect(page.getByText('800 Mega').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Editar catálogo' })).toBeVisible();
+  await shot(page, 'produto');
 });

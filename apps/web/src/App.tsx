@@ -1,3 +1,5 @@
+import { AbmPage } from './pages/marketing/Abm';
+import { ProductPage } from './pages/product/Product';
 import { ResultsPage } from './pages/results/Results';
 import { AdminResultsSettings } from './pages/admin/ResultsSettings';
 import { GoalsPage } from './pages/performance/Goals';
@@ -86,7 +88,10 @@ export function App() {
         <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
         <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
-        <Route path="resultados" element={<Gate module="resultados"><ResultsPage /></Gate>} />
+        <Route path="times" element={<Gate module="resultados"><ResultsPage /></Gate>} />
+        <Route path="resultados" element={<Navigate to="/times" replace />} />
+        <Route path="abm" element={<Gate module="clientes"><AbmPage /></Gate>} />
+        <Route path="produto" element={<ProductPage />} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />

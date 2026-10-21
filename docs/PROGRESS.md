@@ -85,6 +85,13 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Menu reorganizado, Gestão de Times, ABM e Produto ✅ (2026-10-21)
+- Menu lateral em grupos (sem números): Início · Comercial (Oportunidades, Contas, Aprovações, Atividades) · Gestão de Contratos · Sucesso do Cliente · Marketing (Leads, ABM, Plays/Campanhas) · Produto · Gestão de Times (Visão geral, Objetivos e metas) · Projetos (Projetos, Tarefas) · Relatórios · Inteligência · Configuração. Grupo recolhido mostra a soma dos contadores; abre sozinho quando a página atual está dentro dele; o estado fica no navegador.
+- "Gestão de Resultados" passa a se chamar **Gestão de Times** (rota `/times`; `/resultados` redireciona). "Clientes" passa a **Contas** nas telas.
+- **ABM** (Marketing): contas-alvo escolhidas entre as contas existentes (clientes e prospects) com tier 1:1 / 1:poucos / 1:muitos, situação, prioridade, responsável, motivo, próximo passo e prazo; mostra oportunidades abertas, pendências e último contato; ficha com oportunidades, tarefas/projetos ligados e histórico (`abm_accounts`, `abm_events` append-only). Escopo segue o nível do módulo Contas.
+- **Produto**: catálogo de planos e produtos para consulta de toda a equipe (`GET /catalog/plans`, sem custos de parceiro nem comissão); quem administra tem atalho para editar o catálogo.
+- Migração 0036. Testes: API `abm.test.ts`; E2E do menu agrupado, ABM e Produto.
+
 ## Gestão de Times (ex-Gestão de Resultados) — Fases 3–4: planejamento e apuração oficial ✅ (2026-10-21)
 - Metas também por **área/unidade**; desdobramento empresa → área → equipe → pessoa.
 - Metas da empresa e de área nascem **propostas** e são aprovadas pela instância acima (Diretoria / unidade superior); quem propõe não aprova; proposta não é apurada nem gera intervenção.
@@ -96,12 +103,12 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - Aba **Aprovações e revisões** em Objetivos e metas.
 - Migração 0035. Testes: domínio 92, API 165, E2E 43.
 
-## GESTÃO DE RESULTADOS — Fase 2: estrutura, escopos e perspectivas ✅ (2026-10-21)
+## Gestão de Times (ex-Gestão de Resultados) — Fase 2: estrutura, escopos e perspectivas ✅ (2026-10-21)
 - Menu **GESTÃO DE RESULTADOS** (módulo `resultados` na matriz: Próprio/Equipe/Total).
 - **Estrutura organizacional configurável**: diretoria → área → unidade → times; responsável, substituto e alçada (R$) por unidade; líder substituto por time; sem ciclos; histórico append-only.
 - **Perspectiva por responsabilidade explícita, não por cargo**: responsável/substituto de diretoria → Diretoria; de área/unidade → Gestão; líder/substituto de time → Liderança. Nível Total na matriz vê as três. Escopo = unidades sob responsabilidade (com as filhas) + times liderados.
 - Tela com as três perspectivas (pergunta central de cada uma), filtro por unidade/time, semáforo das metas do período e lista com atingimento e ritmo.
-- Administração → **Gestão de Resultados**: árvore da estrutura, vínculo dos times, substitutos e alçadas.
+- Configuração → **Gestão de Times**: árvore da estrutura, vínculo dos times, substitutos e alçadas.
 - Migração 0034. Testes: domínio 90, API 160, E2E 42.
 
 ## Evolução integrada — Etapa 6: Indicadores, objetivos, metas e scorecards ✅ (2026-10-21)

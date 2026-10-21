@@ -209,3 +209,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Objetivos** em três níveis, encadeados (substituíram o desenho inicial de OKR simples: OKR = objetivo + metas como resultados-chave).
 - **Ordem combinada com o usuário:** Etapa 6 → fases da Gestão de Resultados → Etapas 7–10.
 
+
+## ADR-048 — Menu em grupos, Gestão de Times, ABM e Produto (21/10/2026)
+- **Decisão:** o menu segue a hierarquia definida pelo usuário, em grupos recolhíveis; módulos de permissão não mudaram — só rótulos e posição (ABM usa o nível de Contas; Produto é consulta para qualquer usuário autenticado e a edição continua em Configuração).
+- **Renome:** "Gestão de Resultados" → **Gestão de Times** (rota `/times`, antiga redireciona); "Clientes" → **Contas**. Identificadores internos (`resultados`, `clientes`) ficam como estão para não quebrar perfis, auditoria e integrações.
+- **ABM** reaproveita contas, oportunidades, tarefas e projetos existentes; só acrescenta a camada de "conta-alvo" (tier, situação, motivo, próximo passo) com histórico append-only. Uma conta só pode estar uma vez na lista.
+- **Projetos** e **Gestão de Times** viraram grupos (Projetos/Tarefas; Visão geral/Objetivos e metas), conforme escolhido pelo usuário.
