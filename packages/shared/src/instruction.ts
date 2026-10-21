@@ -247,7 +247,7 @@ export function parseInstruction(raw: unknown): { ok: true; value: Instruction }
 }
 
 export const INSTRUCTION_README = [
-  'Modelo de instrução do ISP Sprint. Edite e envie em Configurações → Modelo de instrução.',
+  'Modelo de instrução do RevOps. Edite e envie em Configurações → Modelo de instrução.',
   'Nada muda até você revisar a prévia e clicar em Ativar. As versões anteriores ficam guardadas.',
   'jornadas: cada jornada é um pipeline. "padrao": true em exatamente uma. "segmentos" escolhe a jornada automaticamente pelo segmento do cliente.',
   'etapas: na ordem do funil. tipo "aberta", e no fim uma etapa tipo "ganha" (chave "ganha") e uma tipo "perdida" (chave "perdida").',
@@ -273,7 +273,7 @@ export function defaultInstruction(): Instruction {
   return {
     schema: INSTRUCTION_SCHEMA_ID,
     _leia_me: INSTRUCTION_README,
-    descricao: 'Modelo inicial do ISP Sprint',
+    descricao: 'Modelo inicial do RevOps',
     jornadas: [
       {
         chave: 'residencial',
@@ -371,7 +371,7 @@ export function defaultInstruction(): Instruction {
       modelos: {
         proposta: t('Sua proposta {{empresa.nome}} — {{plano.nome}}', 'Olá, {{cliente.nome}}!\n\nConforme conversamos, segue em anexo a proposta do plano {{plano.nome}} por {{plano.valor}} por mês.\n\nQualquer dúvida, é só responder este e-mail.\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
         followup: t('{{cliente.nome}}, conseguiu ver a proposta?', 'Olá, {{cliente.nome}}!\n\nPassando para saber se ficou alguma dúvida sobre o plano {{plano.nome}}. Posso ajudar com algo?\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
-        convite_usuario: t('Seu acesso ao ISP Sprint — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
         nova_senha: t('Nova senha temporária — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.'),
         alerta_atividades: t('Você tem {{quantidade}} atividade(s) para hoje ou vencida(s)', 'Olá, {{usuario.nome}}!\n\n{{lista}}\n\nVeja em {{link}}'),
         alerta_lead_atribuido: t('Novo lead para você: {{lead.nome}}', 'Olá, {{usuario.nome}}!\n\n{{atribuido_por}} atribuiu o lead {{lead.nome}} ({{lead.telefone}}) para você.\n\nAbra em {{link}}'),

@@ -31,9 +31,9 @@ export function AuthFrame({ children }: { children: ReactNode }) {
       </div>
       <div className="relative ml-auto flex min-h-screen w-full items-center justify-center px-4 py-10 lg:w-[520px] lg:bg-surface lg:px-12 lg:shadow-overlay">
         <div className="w-full max-w-sm space-y-5 rounded-lg bg-surface p-7 shadow-overlay lg:p-0 lg:shadow-none">
-          <div className="flex flex-col items-center gap-3 pb-2">
+          <div className="flex items-center justify-center gap-3 pb-2">
             <img src="/brand/bkt-logo.png" alt="BKT" className="h-14 w-auto object-contain" draggable={false} />
-            <p className="font-display text-sm font-bold tracking-[0.18em] text-muted">ISP SPRINT</p>
+            <span className="border-l border-line pl-3 font-display text-base font-semibold text-muted">RevOps</span>
           </div>
           {children}
         </div>

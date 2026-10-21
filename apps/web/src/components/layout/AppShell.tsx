@@ -99,8 +99,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const toggle = (k: string, v: boolean) => setOpenGroups((g) => { const n = { ...g, [k]: v }; try { localStorage.setItem('isp:nav-groups', JSON.stringify(n)); } catch { /* sem armazenamento */ } return n; });
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-navy to-navy-2 text-white">
-      <Link to="/" onClick={onNavigate} className="flex h-[84px] items-center px-7" aria-label="Início">
+      <Link to="/" onClick={onNavigate} className="flex h-[84px] items-center gap-3 px-7" aria-label="RevOps — início">
         <Logo />
+        <span className="border-l border-white/25 pl-3 font-display text-sm font-semibold text-white/70">RevOps</span>
       </Link>
       <nav aria-label="Navegação principal" className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
         <ul className="space-y-1">

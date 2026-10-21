@@ -41,7 +41,7 @@ export function buildOpenApi(routes: RouteDef[]) {
   }
   return {
     openapi: '3.1.0',
-    info: { title: 'ISP Sprint API', version: '1.0.0-fase1', description: 'API interna do CRM ISP Sprint. Erros em application/problem+json com requestId.' },
+    info: { title: 'RevOps API', version: '1.0.0-fase1', description: 'API interna do CRM RevOps. Erros em application/problem+json com requestId.' },
     servers: [{ url: '/' }],
     components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'isp_session' } } },
     paths,

@@ -145,7 +145,7 @@ export async function contractSummary(db: DbOrTx, c: ContractRow, config: Config
     v.items.length ? `Itens:\n${v.items.map((i) => `- ${i.qty} × ${i.description}: ${brl(i.unitCents)} (total ${brl(i.qty * i.unitCents)})`).join('\n')}` : null,
     `Responsável comercial: ${owner?.name ?? '—'}`,
     c.erpRef ? `Referência no ERP: ${c.erpRef}` : 'ERP: cadastro pendente',
-    `Abrir no ISP Sprint: ${publicLink(config, `/contracts/${c.id}`)}`,
+    `Abrir no RevOps: ${publicLink(config, `/contracts/${c.id}`)}`,
   ].filter(Boolean);
   return { v, contact, owner, text: lines.join('\n') };
 }

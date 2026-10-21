@@ -205,7 +205,7 @@ export const settingsRoutes = [
     rateLimit: () => ({ max: 10, timeWindow: '1 minute' }),
     handler: async ({ app, auth, body }) => {
       if (!(await smtpConfig(app.db, auth.tenantId))) throw unprocessable('Salve a configuração do SMTP antes de testar.');
-      const r = await sendEmail(app.db, { tenantId: auth.tenantId, kind: 'teste', to: body.to, subject: 'Teste de e-mail do ISP Sprint', text: `Olá!\n\nSe você recebeu esta mensagem, o envio de e-mail está funcionando.\n\nEnviado por ${auth.name}.`, createdBy: auth.userId });
+      const r = await sendEmail(app.db, { tenantId: auth.tenantId, kind: 'teste', to: body.to, subject: 'Teste de e-mail do RevOps', text: `Olá!\n\nSe você recebeu esta mensagem, o envio de e-mail está funcionando.\n\nEnviado por ${auth.name}.`, createdBy: auth.userId });
       await app.db.update(s.smtpSettings).set({ lastTestAt: new Date(), lastTestOk: r.ok, lastTestError: r.ok ? null : r.error }).where(eq(s.smtpSettings.tenantId, auth.tenantId));
       return r.ok ? { ok: true } : { ok: false, error: r.error };
     },

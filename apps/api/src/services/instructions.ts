@@ -108,7 +108,7 @@ async function bootstrapInstruction(db: DbOrTx, tenantId: string): Promise<Activ
       .limit(1);
     if (!again) {
       await applyJourneys(tx, tenantId, content.jornadas);
-      await tx.insert(s.businessInstructions).values({ tenantId, version: 1, status: 'ativa', content, changes: ['Modelo inicial do ISP Sprint.'], activatedAt: new Date() });
+      await tx.insert(s.businessInstructions).values({ tenantId, version: 1, status: 'ativa', content, changes: ['Modelo inicial do RevOps.'], activatedAt: new Date() });
     }
     const [row] = await tx
       .select({ id: s.businessInstructions.id, version: s.businessInstructions.version })
