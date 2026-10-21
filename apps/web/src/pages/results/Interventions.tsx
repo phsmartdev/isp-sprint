@@ -3,14 +3,15 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Siren } from 'lucide-react';
+import { Plus, Siren } from 'lucide-react';
 import {
   INTERVENTION_KIND_LABELS, INTERVENTION_STATUS_LABELS, INTERVENTION_TRIGGER_LABELS, TRAFFIC_LABELS,
-  type InterventionKind, type InterventionStatus, type InterventionTrigger, type TrafficColor,
+  toCents, type InterventionKind, type InterventionStatus, type InterventionTrigger, type TrafficColor,
 } from '@isp/domain';
 import { api, qs } from '../../lib/api';
-import { fmtDate, fmtDateTime } from '../../lib/format';
-import { useUrlState } from '../../lib/hooks';
+import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
+import { NewProjectDialog } from '../../features/projects/shared';
+import { useLookups, useUrlState } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
 import { Drawer, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
@@ -24,6 +25,7 @@ const COLOR_DOT: Record<string, string> = { verde: 'bg-success', amarelo: 'bg-wa
 const comp = (c: string) => { const [y, m] = c.split('-'); return `${m}/${y}`; };
 const EVENT_TEXT: Record<string, string> = {
   aberta: 'abriu a intervenção', promovida: 'virou plano de ação obrigatório', reincidencia: 'nova competência fora da meta (reincidência)', escalada: 'prazo vencido: escalonada',
+  acao_incluida: 'incluiu uma ação no plano', acao_cancelada: 'cancelou uma ação do plano', projeto_ligado: 'ligou o projeto do plano', projeto_desligado: 'desligou o projeto do plano',
   revisada: 'registrou a revisão', analise_iniciada: 'começou a análise de causa', analise_concluida: 'concluiu a análise de causa', analise_reaberta: 'reabriu a análise de causa', plano_registrado: 'registrou o plano de ação', plano_atualizado: 'atualizou o plano de ação', concluida: 'concluiu', dispensada: 'dispensou',
   dispensada_retificacao: 'dispensada automaticamente após retificação da apuração',
 };
@@ -90,6 +92,7 @@ type Detail = Item & {
   events: { id: string; type: string; createdAt: string; actorName: string | null; payload: Record<string, unknown> }[];
   can: { act: boolean; dismiss: boolean };
   analysisStatus: 'rascunho' | 'concluida' | null; config: { requireAnalysis?: boolean };
+  actions: Action[]; progress: { total: number; done: number; cancelled: number; open: number; overdue: number; pct: number }; project: { id: string; name: string; code: number } | null; planCostCents: number;
 };
 
 function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
@@ -102,7 +105,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
   const done = (msg: string) => { void qc.invalidateQueries({ queryKey: ['interventions'] }); void qc.invalidateQueries({ queryKey: ['mentions'] }); setMode(null); toast({ tone: 'success', message: msg }); };
   const post = (path: string, body: Record<string, unknown>, msg: string) => ({ mutationFn: () => api(`/interventions/${id}/${path}`, { method: 'POST', body: { rowVersion: d!.rowVersion, ...body } }), onSuccess: () => done(msg), onError: (e: unknown) => toast({ tone: 'error', message: errMsg(e) }) });
   const review = useMutation(post('review', { cause: f.cause, decision: f.decision }, 'Revisão registrada'));
-  const plan = useMutation(post('plan', { diagnosis: f.diagnosis, actionPlan: f.actionPlan, planDueOn: f.planDueOn }, 'Plano de ação registrado'));
+  const plan = useMutation(post('plan', { diagnosis: f.diagnosis, actionPlan: f.actionPlan, planDueOn: f.planDueOn || undefined }, 'Plano de ação registrado'));
   const conclude = useMutation(post('conclude', { conclusion: f.conclusion }, 'Intervenção concluída'));
   const dismiss = useMutation(post('dismiss', { reason: f.reason }, 'Intervenção dispensada'));
   const close = () => { setMode(null); setF({ cause: '', decision: 'manter', diagnosis: '', actionPlan: '', planDueOn: '', conclusion: '', reason: '' }); onClose(); };
@@ -149,7 +152,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
 
           {d.reviewCause && <section><h4 className="font-bold text-ink">Revisão</h4><p className="whitespace-pre-line text-sm">{d.reviewCause}</p><p className="text-xs text-muted">Decisão: {d.reviewDecision === 'plano' ? 'abrir plano de ação' : 'manter acompanhamento'}</p></section>}
           {d.diagnosis && <section><h4 className="font-bold text-ink">Diagnóstico</h4><p className="whitespace-pre-line text-sm">{d.diagnosis}</p></section>}
-          {d.actionPlan && <section><h4 className="font-bold text-ink">Plano de ação</h4><p className="whitespace-pre-line text-sm">{d.actionPlan}</p>{d.planDueOn && <p className="num text-xs text-muted">Prazo: {fmtDate(d.planDueOn)}</p>}</section>}
+          {(d.actionPlan || d.planDueOn) && <section><h4 className="font-bold text-ink">Plano registrado</h4>{d.actionPlan && <p className="whitespace-pre-line text-sm">{d.actionPlan}</p>}{d.planDueOn && <p className="num text-xs text-muted">Concluir até {fmtDate(d.planDueOn)}</p>}</section>}
           {d.conclusion && <section><h4 className="font-bold text-ink">{d.status === 'dispensada' ? 'Motivo da dispensa' : 'Conclusão'}</h4><p className="whitespace-pre-line text-sm">{d.conclusion}</p>{d.resolvedByName && <p className="text-xs text-muted">{d.resolvedByName} · {d.resolvedAt && fmtDateTime(d.resolvedAt)}</p>}</section>}
 
           {open && !d.can.act && !d.can.dismiss && <Notice tone="info">Você acompanha esta intervenção. Quem registra a revisão ou o plano é {d.ownerName} ou quem está acima na estrutura.</Notice>}
@@ -163,13 +166,17 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
             </section>
           )}
 
+          {d.kind === 'plano' && (d.actions.length > 0 || (open && d.can.act)) && (
+            <PlanSection d={d} canEdit={!!open && d.can.act} analysisOk={d.config.requireAnalysis === false || d.analysisStatus === 'concluida'} onChanged={() => void qc.invalidateQueries({ queryKey: ['interventions'] })} />
+          )}
+
           {open && d.can.act && d.kind === 'plano' && (mode === 'plan' ? (
             <section className="space-y-3 rounded-lg border border-line p-3">
-              <h4 className="font-bold text-ink">Plano de ação</h4>
-              <FormField label="Diagnóstico" htmlFor="iv-diag" required hint="O que explica o resultado?"><Textarea id="iv-diag" rows={3} value={f.diagnosis} onChange={(e) => setF({ ...f, diagnosis: e.target.value })} /></FormField>
-              <FormField label="Ações" htmlFor="iv-plan" required hint="O que será feito, por quem e quando"><Textarea id="iv-plan" rows={4} value={f.actionPlan} onChange={(e) => setF({ ...f, actionPlan: e.target.value })} /></FormField>
-              <FormField label="Concluir até" htmlFor="iv-due" required><Input id="iv-due" type="date" value={f.planDueOn} onChange={(e) => setF({ ...f, planDueOn: e.target.value })} /></FormField>
-              <div className="flex gap-2"><Button variant="secondary" onClick={() => setMode(null)}>Cancelar</Button><Button variant="primary" disabled={f.diagnosis.trim().length < 10 || f.actionPlan.trim().length < 10 || !f.planDueOn} loading={plan.isPending} onClick={() => plan.mutate()}>Salvar plano</Button></div>
+              <h4 className="font-bold text-ink">{d.status === 'aberta' ? 'Registrar o plano' : 'Atualizar o plano'}</h4>
+              <FormField label="Diagnóstico" htmlFor="iv-diag" required hint="Vem da análise de causa; ajuste se precisar"><Textarea id="iv-diag" rows={4} value={f.diagnosis} onChange={(e) => setF({ ...f, diagnosis: e.target.value })} /></FormField>
+              <FormField label="Resumo do plano" htmlFor="iv-plan" hint="Opcional: a estratégia em uma frase"><Textarea id="iv-plan" rows={2} value={f.actionPlan} onChange={(e) => setF({ ...f, actionPlan: e.target.value })} /></FormField>
+              <FormField label="Concluir o plano até" htmlFor="iv-due" hint="Em branco: o prazo da última ação"><Input id="iv-due" type="date" value={f.planDueOn} onChange={(e) => setF({ ...f, planDueOn: e.target.value })} /></FormField>
+              <div className="flex gap-2"><Button variant="secondary" onClick={() => setMode(null)}>Cancelar</Button><Button variant="primary" disabled={f.diagnosis.trim().length < 10} loading={plan.isPending} onClick={() => plan.mutate()}>Salvar plano</Button></div>
             </section>
           ) : mode === 'conclude' ? (
             <section className="space-y-3 rounded-lg border border-line p-3">
@@ -178,8 +185,8 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
             </section>
           ) : (
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" disabled={d.status === 'aberta' && d.config.requireAnalysis !== false && d.analysisStatus !== 'concluida'} title={d.status === 'aberta' && d.config.requireAnalysis !== false && d.analysisStatus !== 'concluida' ? 'Conclua a análise de causa primeiro' : undefined} onClick={startPlan}>{d.status === 'aberta' ? 'Registrar plano de ação' : 'Atualizar plano'}</Button>
-              {d.status === 'em_andamento' && <Button variant="secondary" onClick={() => setMode('conclude')}>Concluir</Button>}
+              <Button variant="primary" disabled={!d.actions.some((a) => a.status !== 'cancelada')} title={!d.actions.some((a) => a.status !== 'cancelada') ? 'Inclua pelo menos uma ação 5W2H' : undefined} onClick={startPlan}>{d.status === 'aberta' ? 'Registrar plano de ação' : 'Atualizar plano'}</Button>
+              {d.status === 'em_andamento' && <Button variant="secondary" disabled={d.progress.open > 0 || d.progress.done === 0} title={d.progress.open > 0 ? 'Há ações em aberto' : undefined} onClick={() => setMode('conclude')}>Concluir intervenção</Button>}
             </div>
           ))}
 
@@ -197,5 +204,110 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
         </div>
       )}
     </Drawer>
+  );
+}
+
+type Action = { id: string; activityId: string; what: string; why: string; where: string; how: string; howMuchCents: number | null; cancelReason: string | null; status: string; ownerName: string; dueOn: string | null; projectId: string | null };
+const TASK_STATUS_LABELS: Record<string, string> = { a_fazer: 'A fazer', em_andamento: 'Em andamento', aguardando: 'Aguardando', em_aprovacao: 'Em aprovação', concluida: 'Concluída', cancelada: 'Cancelada' };
+const TASK_TONE: Record<string, Tone> = { a_fazer: 'neutral', em_andamento: 'blue', aguardando: 'orange', em_aprovacao: 'sky', concluida: 'green', cancelada: 'neutral' };
+
+/** Plano 5W2H: cada ação é uma tarefa real (quem, quando e situação vêm dela); projeto opcional recebe as novas ações. */
+function PlanSection({ d, canEdit, analysisOk, onChanged }: { d: Detail; canEdit: boolean; analysisOk: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const users = useLookups().data?.users ?? [];
+  const an = useQuery({ queryKey: ['interventions', 'analysis', d.id], enabled: canEdit, queryFn: () => api<{ content: { whys: { rootCause: string; confirmed: boolean }[] } }>(`/interventions/${d.id}/analysis`) });
+  const roots = (an.data?.content.whys ?? []).filter((w) => w.confirmed && w.rootCause.trim()).map((w) => w.rootCause.trim());
+  const today = new Date().toLocaleDateString('en-CA');
+  const blank = { what: '', why: '', where: '', whenDue: '', whoId: '', how: '', howMuch: '' };
+  const [f, setF] = useState(blank);
+  const [adding, setAdding] = useState(false);
+  const [cancelling, setCancelling] = useState<{ id: string; reason: string } | null>(null);
+  const [newProject, setNewProject] = useState(false);
+  const projects = useQuery({ queryKey: ['projects', 'mine-open'], enabled: canEdit && !d.project, queryFn: () => api<{ items: { id: string; code: number; name: string }[] }>('/projects') });
+  const fail = (e: unknown) => toast({ tone: 'error', message: errMsg(e) });
+  const add = useMutation({
+    mutationFn: () => api(`/interventions/${d.id}/actions`, { method: 'POST', body: { what: f.what, why: f.why, where: f.where, whenDue: f.whenDue, whoId: f.whoId || null, how: f.how, howMuchCents: f.howMuch.trim() ? toCents(f.howMuch) : null, rootCause: roots.includes(f.why) ? f.why : null } }),
+    onSuccess: () => { setF(blank); setAdding(false); onChanged(); toast({ tone: 'success', message: 'Ação incluída e tarefa criada para quem executa' }); },
+    onError: fail,
+  });
+  const cancel = useMutation({
+    mutationFn: () => api(`/interventions/${d.id}/actions/${cancelling!.id}/cancel`, { method: 'POST', body: { reason: cancelling!.reason } }),
+    onSuccess: () => { setCancelling(null); onChanged(); toast({ tone: 'success', message: 'Ação cancelada' }); },
+    onError: fail,
+  });
+  const link = useMutation({
+    mutationFn: (projectId: string | null) => api(`/interventions/${d.id}/project`, { method: 'POST', body: { projectId } }),
+    onSuccess: () => { onChanged(); toast({ tone: 'success', message: 'Projeto do plano atualizado' }); },
+    onError: fail,
+  });
+  const p = d.progress;
+  const valid = f.what.trim().length >= 5 && f.why.trim().length >= 5 && f.how.trim().length >= 5 && !!f.whoId && !!f.whenDue && f.whenDue >= today;
+  return (
+    <section className="space-y-3 rounded-lg border border-line p-3" aria-label="Plano de ação 5W2H">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="font-bold text-ink">Plano de ação (5W2H)</h4>
+        {p.total > 0 && <span className="text-sm"><span className="num font-semibold">{p.done}</span> de <span className="num">{p.total - p.cancelled}</span> ações concluídas{p.overdue > 0 && <span className="font-semibold text-danger"> · <span className="num">{p.overdue}</span> atrasada(s)</span>}{d.planCostCents > 0 && <> · custo previsto <span className="num">{fmtBRL(d.planCostCents)}</span></>}</span>}
+      </div>
+      {p.total > 0 && <div className="h-2 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-label="Andamento do plano" aria-valuenow={Math.round(p.pct * 100)} aria-valuemin={0} aria-valuemax={100}><div className="h-full bg-success" style={{ width: `${Math.round(p.pct * 100)}%` }} /></div>}
+      {!analysisOk && canEdit && <Notice tone="info">Conclua a análise de causa para montar o plano.</Notice>}
+
+      {!!d.actions.length && (
+        <ul className="divide-y divide-line">
+          {d.actions.map((a) => (
+            <li key={a.id} className="py-2.5 text-sm">
+              <div className="flex flex-wrap items-start gap-2">
+                <Link to={`/tarefas?task=${a.activityId}`} className={clsx('min-w-0 flex-1 font-semibold hover:underline', a.status === 'cancelada' ? 'text-muted line-through' : 'text-primary')}>{a.what}</Link>
+                <Chip tone={TASK_TONE[a.status] ?? 'neutral'}>{TASK_STATUS_LABELS[a.status] ?? a.status}</Chip>
+              </div>
+              <p className="text-xs text-muted">{a.ownerName} · até <span className={clsx('num', a.dueOn && a.dueOn < today && a.status !== 'concluida' && a.status !== 'cancelada' && 'font-semibold text-danger')}>{a.dueOn ? fmtDate(a.dueOn) : '—'}</span>{a.where && <> · {a.where}</>}{a.howMuchCents ? <> · <span className="num">{fmtBRL(a.howMuchCents)}</span></> : null}</p>
+              <p className="mt-0.5 text-xs"><b>Por quê:</b> {a.why} · <b>Como:</b> {a.how}</p>
+              {a.cancelReason && <p className="text-xs text-muted">Cancelada: {a.cancelReason}</p>}
+              {canEdit && a.status !== 'concluida' && a.status !== 'cancelada' && (cancelling?.id === a.id ? (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <FormField label="Motivo do cancelamento" htmlFor={`cx-${a.id}`} className="min-w-[220px] flex-1"><Input id={`cx-${a.id}`} value={cancelling.reason} onChange={(e) => setCancelling({ id: a.id, reason: e.target.value })} /></FormField>
+                  <Button variant="secondary" size="sm" onClick={() => setCancelling(null)}>Voltar</Button>
+                  <Button variant="danger" size="sm" disabled={cancelling.reason.trim().length < 10} loading={cancel.isPending} onClick={() => cancel.mutate()}>Cancelar ação</Button>
+                </div>
+              ) : <button type="button" className="mt-1 text-xs font-semibold text-muted hover:text-ink hover:underline" onClick={() => setCancelling({ id: a.id, reason: '' })}>Cancelar ação</button>)}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canEdit && analysisOk && (adding ? (
+        <div className="space-y-3 rounded-md bg-surface-2 p-3">
+          <FormField label="O quê" htmlFor="w-what" required><Input id="w-what" value={f.what} onChange={(e) => setF({ ...f, what: e.target.value })} /></FormField>
+          <FormField label="Por quê" htmlFor="w-why" required hint={roots.length ? 'Escolha a causa raiz que a ação ataca ou escreva' : 'Qual causa a ação ataca'}>
+            <Input id="w-why" list="w-roots" value={f.why} onChange={(e) => setF({ ...f, why: e.target.value })} />
+          </FormField>
+          <datalist id="w-roots">{roots.map((r) => <option key={r} value={r} />)}</datalist>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Quem" htmlFor="w-who" required><Select id="w-who" value={f.whoId} onChange={(e) => setF({ ...f, whoId: e.target.value })}><option value="">Escolha</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+            <FormField label="Quando (prazo)" htmlFor="w-when" required><Input id="w-when" type="date" min={today} value={f.whenDue} onChange={(e) => setF({ ...f, whenDue: e.target.value })} /></FormField>
+            <FormField label="Onde" htmlFor="w-where"><Input id="w-where" value={f.where} onChange={(e) => setF({ ...f, where: e.target.value })} /></FormField>
+            <FormField label="Quanto custa (R$)" htmlFor="w-much" hint="Em branco: sem custo"><Input id="w-much" inputMode="decimal" value={f.howMuch} onChange={(e) => setF({ ...f, howMuch: e.target.value })} /></FormField>
+          </div>
+          <FormField label="Como" htmlFor="w-how" required><Textarea id="w-how" rows={2} value={f.how} onChange={(e) => setF({ ...f, how: e.target.value })} /></FormField>
+          {d.project && <p className="text-xs text-muted">A tarefa entra no projeto {d.project.name}; quem executa precisa estar na equipe dele.</p>}
+          <div className="flex gap-2"><Button variant="secondary" onClick={() => { setAdding(false); setF(blank); }}>Cancelar</Button><Button variant="primary" disabled={!valid} loading={add.isPending} onClick={() => add.mutate()}>Incluir ação</Button></div>
+        </div>
+      ) : <Button variant="secondary" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>Nova ação 5W2H</Button>)}
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3 text-sm">
+        <span className="font-semibold text-ink">Projeto:</span>
+        {d.project ? (
+          <>
+            <Link to={`/projetos/${d.project.id}`} className="font-semibold text-primary hover:underline">{d.project.name}</Link>
+            {canEdit && <button type="button" className="text-xs font-semibold text-muted hover:underline" onClick={() => link.mutate(null)}>desligar</button>}
+          </>
+        ) : canEdit ? (
+          <>
+            <Select aria-label="Ligar projeto existente" className="h-8 w-56 text-sm" value="" onChange={(e) => e.target.value && link.mutate(e.target.value)}><option value="">Ligar projeto existente…</option>{(projects.data?.items ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
+            <Button variant="ghost" size="sm" onClick={() => setNewProject(true)}>Criar projeto do plano</Button>
+          </>
+        ) : <span className="text-muted">nenhum (ações como tarefas avulsas)</span>}
+      </div>
+      <NewProjectDialog open={newProject} onClose={() => setNewProject(false)} prefill={{ name: `Plano de ação — ${d.goal.title}` }} onCreated={(id) => link.mutate(id)} />
+    </section>
   );
 }

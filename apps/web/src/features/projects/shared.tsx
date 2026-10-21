@@ -68,7 +68,7 @@ export type LinkPrefill = { contactId?: string | null; opportunityId?: string | 
 
 const today = () => new Date().toLocaleDateString('en-CA');
 
-export function NewProjectDialog({ open, onClose, prefill }: { open: boolean; onClose: () => void; prefill?: LinkPrefill }) {
+export function NewProjectDialog({ open, onClose, prefill, onCreated }: { open: boolean; onClose: () => void; prefill?: LinkPrefill; onCreated?: (id: string) => void }) {
   const toast = useToast();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -91,7 +91,7 @@ export function NewProjectDialog({ open, onClose, prefill }: { open: boolean; on
         members, contactId: prefill?.contactId ?? null, opportunityId: prefill?.opportunityId ?? null, contractId: prefill?.contractId ?? null, arpId: prefill?.arpId ?? null,
       },
     }),
-    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['projects'] }); onClose(); toast({ tone: 'success', message: 'Projeto criado' }); nav(`/projetos/${r.id}`); },
+    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['projects'] }); onClose(); toast({ tone: 'success', message: 'Projeto criado' }); if (onCreated) onCreated(r.id); else nav(`/projetos/${r.id}`); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const others = users.filter((u) => u.id !== me?.user.id && !members.some((x) => x.userId === u.id));

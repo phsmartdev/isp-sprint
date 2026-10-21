@@ -1,7 +1,7 @@
 /** Gestão de Times — Fase 6: jornada de análise (problema, Pareto, Ishikawa, 5 Porquês) ligada à intervenção. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { login, makeApp, type Client } from './helpers';
-import { FULL_ANALYSIS } from './analysisContent';
+import { FULL_ANALYSIS, addAction } from './analysisContent';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client;
@@ -53,6 +53,8 @@ describe('jornada de análise', () => {
     d = ok(await carlos.get(`/interventions/${iv}`)).json();
     expect(d.analysisStatus).toBe('concluida');
     expect(d.diagnosis).toContain('Falta de triagem de suporte da carteira');
+    await addAction(carlos, iv, (await carlos.get('/admin/users')).json().users.find((u: { email: string }) => u.email === 'ana@yepnet.test').id);
+    d = ok(await carlos.get(`/interventions/${iv}`)).json();
     ok(await carlos.post(`/interventions/${iv}/plan`, { rowVersion: d.rowVersion, diagnosis: d.diagnosis, actionPlan: 'Plantão de suporte para a carteira e duas manhãs de visita', planDueOn: new Date(Date.now() + 86_400_000 * 10).toISOString().slice(0, 10) }));
     expect((await carlos.post(`/interventions/${iv}/analysis/reopen`, { rowVersion: a.analysis.rowVersion, reason: 'curto' })).statusCode).toBe(422);
     ok(await carlos.post(`/interventions/${iv}/analysis/reopen`, { rowVersion: a.analysis.rowVersion, reason: 'Nova evidência trazida pelo time' }));

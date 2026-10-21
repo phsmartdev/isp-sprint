@@ -1,13 +1,14 @@
 /** Gestão de Times — Fase 5: intervenções (vermelho, dois amarelos seguidos, revisão do primeiro amarelo), prazos e escalonamento. */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG, EMPTY_ANALYSIS, ISHIKAWA_CATEGORIES, LOSS_REASON_LABELS, analysisGaps, diagnosisFrom, paretoRows, type AnalysisContent } from '@isp/domain';
+import { OPEN_INTERVENTION, addDaysIso, DEFAULT_INTERVENTION_CONFIG, EMPTY_ANALYSIS, ISHIKAWA_CATEGORIES, actionTaskNotes, planConclusionBlockers, planProgress, validateW2H, type TaskStatus, LOSS_REASON_LABELS, analysisGaps, diagnosisFrom, paretoRows, type AnalysisContent } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { todayLocal } from '../services/projects';
+import { dueAtOf, loadProject, todayLocal } from '../services/projects';
+import { applyStatus, assertAssignee, taskEvent } from '../services/tasks';
 import { orgData, resultsScope, type ResultsScope } from '../services/results';
 import { performanceConfig } from '../services/businessEvents';
 import { ensureFreshInterventions, logIntervention, syncInterventions } from '../services/interventions';
@@ -30,6 +31,21 @@ async function load(db: DbOrTx, auth: AuthContext, id: string, forUpdate = false
   if (!canSee(sc, auth, i)) throw notFound('Intervenção não encontrada.');
   return { i, sc };
 }
+async function actionsOf(db: DbOrTx, auth: AuthContext, interventionId: string) {
+  const rows = await db.select({
+    a: s.interventionActions, title: s.activities.title, status: s.activities.status, ownerId: s.activities.ownerId, ownerName: s.users.name, projectId: s.activities.projectId,
+    dueOn: sql<string | null>`to_char(${s.activities.dueAt} at time zone ${auth.timezone}, 'YYYY-MM-DD')`,
+  }).from(s.interventionActions).innerJoin(s.activities, eq(s.activities.id, s.interventionActions.activityId)).innerJoin(s.users, eq(s.users.id, s.activities.ownerId))
+    .where(eq(s.interventionActions.interventionId, interventionId)).orderBy(s.interventionActions.createdAt);
+  return rows.map((r) => ({ ...r.a, taskTitle: r.title, status: r.status as TaskStatus, ownerId: r.ownerId, ownerName: r.ownerName, dueOn: r.dueOn, projectId: r.projectId }));
+}
+async function requireAnalysisDone(db: DbOrTx, auth: AuthContext, interventionId: string) {
+  const { config: pc } = await performanceConfig(db, auth.tenantId);
+  if ((pc.interventions?.requireAnalysis ?? DEFAULT_INTERVENTION_CONFIG.requireAnalysis) === false) return;
+  const [an] = await db.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, interventionId)).limit(1);
+  if (an?.status !== 'concluida') throw unprocessable('Conclua a análise (problema, Pareto, Ishikawa e 5 Porquês) antes de montar o plano de ação.');
+}
+
 const bump = { updatedAt: new Date(), rowVersion: sql`${s.interventions.rowVersion} + 1` };
 const checkVersion = (i: Row, v: number) => { if (i.rowVersion !== v) throw conflict(i.rowVersion); };
 
@@ -97,8 +113,11 @@ export const interventionRoutes = [
       await app.db.insert(s.interventionReads).values({ userId: auth.userId, interventionId: i.id }).onConflictDoUpdate({ target: [s.interventionReads.userId, s.interventionReads.interventionId], set: { lastReadAt: new Date() } });
       const { config } = await performanceConfig(app.db, auth.tenantId);
       const [an] = await app.db.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
+      const actions = await actionsOf(app.db, auth, i.id);
+      const [proj] = i.projectId ? await app.db.select({ id: s.projects.id, name: s.projects.name, code: s.projects.code }).from(s.projects).where(eq(s.projects.id, i.projectId)).limit(1) : [];
       return {
-        ...i, analysisStatus: an?.status ?? null, goal: { id: g!.id, title: g!.title, scope: g!.scope, periodStart: g!.periodStart, periodEnd: g!.periodEnd, target: g!.target },
+        ...i, analysisStatus: an?.status ?? null, actions, progress: planProgress(actions, todayLocal(auth)), project: proj ?? null,
+        planCostCents: actions.filter((a) => a.status !== 'cancelada').reduce((x, a) => x + (a.howMuchCents ?? 0), 0), goal: { id: g!.id, title: g!.title, scope: g!.scope, periodStart: g!.periodStart, periodEnd: g!.periodEnd, target: g!.target },
         ownerName: name(i.ownerId), subjectName: name(i.subjectUserId), resolvedByName: name(i.resolvedBy),
         teamName: org.teams.find((t) => t.id === i.teamId)?.name ?? null, unitName: org.units.find((u) => u.id === i.orgUnitId)?.name ?? null,
         chain: i.escalationChain.map((id, k) => ({ id, name: name(id), level: k + 1, called: k < i.escalationLevel })),
@@ -131,21 +150,21 @@ export const interventionRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/interventions/:id/plan', summary: 'Registra (ou atualiza) o diagnóstico e o plano de ação com prazo; a intervenção passa a "em execução"', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
-    body: z.object({ rowVersion: z.number().int(), diagnosis: z.string().trim().min(10).max(4000), actionPlan: z.string().trim().min(10).max(8000), planDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+    body: z.object({ rowVersion: z.number().int(), diagnosis: z.string().trim().min(10).max(4000), actionPlan: z.string().trim().max(8000).default(''), planDueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
     handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
       const { i, sc } = await load(tx, auth, params.id, true);
       if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele na estrutura registra o plano.');
       if (i.kind !== 'plano' || !OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('Esta intervenção não aceita plano de ação.');
       checkVersion(i, body.rowVersion);
-      if (body.planDueOn < todayLocal(auth)) throw unprocessable('O prazo do plano não pode estar no passado.', [{ path: 'planDueOn', message: 'Data passada' }]);
-      const { config: pc } = await performanceConfig(tx, auth.tenantId);
-      if ((pc.interventions?.requireAnalysis ?? DEFAULT_INTERVENTION_CONFIG.requireAnalysis) !== false) {
-        const [an] = await tx.select({ status: s.interventionAnalyses.status }).from(s.interventionAnalyses).where(eq(s.interventionAnalyses.interventionId, i.id)).limit(1);
-        if (an?.status !== 'concluida') throw unprocessable('Conclua a análise (problema, Pareto, Ishikawa e 5 Porquês) antes de registrar o plano de ação.');
-      }
+      await requireAnalysisDone(tx, auth, i.id);
+      const acts = (await actionsOf(tx, auth, i.id)).filter((a) => a.status !== 'cancelada');
+      if (!acts.length) throw unprocessable('Inclua pelo menos uma ação 5W2H no plano.');
+      // prazo do plano: o informado ou o da última ação
+      const planDueOn = body.planDueOn ?? acts.map((a) => a.dueOn ?? '').sort().at(-1)!;
+      if (planDueOn < todayLocal(auth)) throw unprocessable('O prazo do plano não pode estar no passado.', [{ path: 'planDueOn', message: 'Data passada' }]);
       const first = i.status === 'aberta';
-      await tx.update(s.interventions).set({ ...bump, diagnosis: body.diagnosis, actionPlan: body.actionPlan, planDueOn: body.planDueOn, status: 'em_andamento' }).where(eq(s.interventions.id, i.id));
-      await logIntervention(tx, auth.tenantId, i.id, first ? 'plano_registrado' : 'plano_atualizado', { planDueOn: body.planDueOn, ...(first ? {} : { previousDueOn: i.planDueOn }) }, [i.ownerId, i.subjectUserId, ...i.escalationChain.slice(0, Math.max(1, i.escalationLevel))], auth.userId);
+      await tx.update(s.interventions).set({ ...bump, diagnosis: body.diagnosis, actionPlan: body.actionPlan || null, planDueOn, status: 'em_andamento' }).where(eq(s.interventions.id, i.id));
+      await logIntervention(tx, auth.tenantId, i.id, first ? 'plano_registrado' : 'plano_atualizado', { planDueOn, actions: acts.length, ...(first ? {} : { previousDueOn: i.planDueOn }) }, [i.ownerId, i.subjectUserId, ...i.escalationChain.slice(0, Math.max(1, i.escalationLevel))], auth.userId);
       return { ok: true };
     }),
   }),
@@ -157,6 +176,8 @@ export const interventionRoutes = [
       if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele conclui o plano.');
       if (i.status !== 'em_andamento') throw unprocessable('Registre o plano de ação antes de concluir.');
       checkVersion(i, body.rowVersion);
+      const blockers = planConclusionBlockers(await actionsOf(tx, auth, i.id));
+      if (blockers.length) throw unprocessable(blockers[0]!);
       await tx.update(s.interventions).set({ ...bump, status: 'concluida', conclusion: body.conclusion, resolvedBy: auth.userId, resolvedAt: new Date() }).where(eq(s.interventions.id, i.id));
       await logIntervention(tx, auth.tenantId, i.id, 'concluida', { conclusion: body.conclusion }, [i.ownerId, i.subjectUserId, ...i.escalationChain.slice(0, Math.max(1, i.escalationLevel))], auth.userId);
       return { ok: true };
@@ -267,6 +288,81 @@ export const interventionRoutes = [
       const items = rows.rows.map((r) => ({ label: r.reason ? labels[r.reason] ?? r.reason : 'Sem motivo informado', value: q.source === 'motivos_perda' ? r.n : Math.round(Number(r.value)) / 100 }));
       return { items, sample: rows.rows.reduce((a, r) => a + r.n, 0), period: { from: g!.periodStart, to: g!.periodEnd } };
     },
+  }),
+
+  // ------------------------------------------------------------ Fase 7: plano 5W2H integrado a tarefas e projetos
+  defineRoute({
+    method: 'POST', url: '/interventions/:id/actions', summary: 'Inclui ação 5W2H no plano: nasce como tarefa para quem executa (no projeto do plano, se houver)', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    body: z.object({
+      what: z.string().trim().max(200), why: z.string().trim().max(1000), rootCause: z.string().trim().max(500).nullable().optional(), where: z.string().trim().max(200).default(''),
+      whenDue: z.string(), whoId: z.string().uuid().nullable(), how: z.string().trim().max(2000), howMuchCents: z.number().int().nullable().default(null),
+    }),
+    handler: async ({ app, auth, params, body, reply }) => {
+      const id = await app.db.transaction(async (tx) => {
+        const { i, sc } = await load(tx, auth, params.id, true);
+        if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele monta o plano.');
+        if (i.kind !== 'plano' || !OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('Esta intervenção não aceita plano de ação.');
+        await requireAnalysisDone(tx, auth, i.id);
+        const errs = validateW2H(body, todayLocal(auth));
+        if (errs.length) throw unprocessable(errs[0]!.message, errs);
+        await assertAssignee(tx, auth, body.whoId!, i.projectId);
+        const [who] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, body.whoId!)).limit(1);
+        const [g] = await tx.select({ title: s.goals.title }).from(s.goals).where(eq(s.goals.id, i.goalId)).limit(1);
+        let stageId: string | null = null;
+        if (i.projectId) {
+          const [st] = await tx.select({ id: s.projectStages.id }).from(s.projectStages).where(and(eq(s.projectStages.projectId, i.projectId), sql`${s.projectStages.archivedAt} is null`, eq(s.projectStages.done, false))).orderBy(s.projectStages.position).limit(1);
+          stageId = st?.id ?? null;
+        }
+        const [a] = await tx.insert(s.activities).values({
+          tenantId: auth.tenantId, type: 'tarefa', title: `Plano: ${body.what}`, notes: actionTaskNotes({ ...body, whoName: who!.name }, g!.title), priority: 'alta',
+          ownerId: body.whoId!, createdBy: auth.userId, dueAt: dueAtOf(auth, body.whenDue) as unknown as Date, status: 'a_fazer', category: 'Plano de ação', tags: ['intervenção'],
+          participants: [...new Set([i.ownerId, auth.userId].filter((u) => u !== body.whoId))], projectId: i.projectId, projectStageId: stageId,
+          position: stageId ? sql`coalesce((select max(position) + 1 from activities where project_stage_id = ${stageId}), 0)` as unknown as number : 0,
+        }).returning({ id: s.activities.id });
+        await taskEvent(tx, auth, a!.id, 'created', { delegatedTo: body.whoId !== auth.userId ? body.whoId : null, interventionId: i.id });
+        const [act] = await tx.insert(s.interventionActions).values({ tenantId: auth.tenantId, interventionId: i.id, activityId: a!.id, what: body.what, why: body.why, rootCause: body.rootCause ?? null, where: body.where, how: body.how, howMuchCents: body.howMuchCents, createdBy: auth.userId }).returning({ id: s.interventionActions.id });
+        await tx.update(s.interventions).set(bump).where(eq(s.interventions.id, i.id));
+        await logIntervention(tx, auth.tenantId, i.id, 'acao_incluida', { what: body.what, whoId: body.whoId, whenDue: body.whenDue, taskId: a!.id }, [], auth.userId);
+        return act!.id;
+      });
+      reply.code(201);
+      return { id };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/interventions/:id/actions/:actionId/cancel', summary: 'Cancela uma ação do plano (com motivo); a tarefa é cancelada junto', tag: 'Gestão de Times', module: 'resultados',
+    params: z.object({ id: z.string().uuid(), actionId: z.string().uuid() }), body: z.object({ reason: z.string().trim().min(10).max(1000) }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { i, sc } = await load(tx, auth, params.id, true);
+      if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele altera o plano.');
+      if (!OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('A intervenção já foi encerrada.');
+      const [a] = await tx.select().from(s.interventionActions).where(and(eq(s.interventionActions.id, params.actionId), eq(s.interventionActions.interventionId, i.id))).limit(1);
+      if (!a) throw notFound('Ação não encontrada.');
+      const [task] = await tx.select().from(s.activities).where(eq(s.activities.id, a.activityId)).limit(1).for('update');
+      if (task!.status === 'concluida') throw unprocessable('A ação já foi executada; não dá para cancelar.');
+      if (task!.status !== 'cancelada') await applyStatus(tx, auth, task!, 'cancelada', { note: body.reason });
+      await tx.update(s.interventionActions).set({ cancelReason: body.reason }).where(eq(s.interventionActions.id, a.id));
+      await logIntervention(tx, auth.tenantId, i.id, 'acao_cancelada', { what: a.what, reason: body.reason }, [task!.ownerId], auth.userId);
+      return { ok: true };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/interventions/:id/project', summary: 'Liga (ou desliga) o projeto que executa o plano; novas ações nascem como tarefas dele', tag: 'Gestão de Times', module: 'resultados', params: IdParams,
+    body: z.object({ projectId: z.string().uuid().nullable() }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { i, sc } = await load(tx, auth, params.id, true);
+      if (!canAct(sc, auth, i)) throw forbidden('Só o responsável pela intervenção ou quem está acima dele liga o projeto.');
+      if (!OPEN_INTERVENTION.includes(i.status as 'aberta')) throw unprocessable('A intervenção já foi encerrada.');
+      let name: string | null = null;
+      if (body.projectId) {
+        const { p, can } = await loadProject(tx, auth, body.projectId);
+        if (!can.work) throw forbidden('Você precisa fazer parte da equipe do projeto para ligá-lo ao plano.');
+        name = p.name;
+      }
+      await tx.update(s.interventions).set({ ...bump, projectId: body.projectId }).where(eq(s.interventions.id, i.id));
+      await logIntervention(tx, auth.tenantId, i.id, body.projectId ? 'projeto_ligado' : 'projeto_desligado', { projectId: body.projectId, name }, [], auth.userId);
+      return { ok: true };
+    }),
   }),
   defineRoute({
     method: 'POST', url: '/interventions/sync', summary: 'Recalcula as intervenções pelas apurações vigentes (idempotente)', tag: 'Gestão de Times', module: 'resultados', min: 'total',

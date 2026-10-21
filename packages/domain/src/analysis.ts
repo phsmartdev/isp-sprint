@@ -81,5 +81,5 @@ export function diagnosisFrom(a: AnalysisContent) {
   const cats = Object.fromEntries(ISHIKAWA_CATEGORIES.map((c) => [c.key, c.label]));
   const roots = confirmedRoots(a).map((r) => `- ${r.rootCause}${r.category ? ` (${cats[r.category]})` : ''} — evidência: ${r.evidence}`);
   const top = a.pareto ? paretoRows(a.pareto.items).rows.filter((r) => r.vital).map((r) => r.label) : [];
-  return [`Problema: ${a.problem.what.trim()}${a.problem.howMuch ? ` (${a.problem.howMuch.trim()})` : ''}.`, top.length ? `Concentração (Pareto): ${top.join(', ')}.` : '', 'Causas raiz:', ...roots].filter(Boolean).join('\n');
+  return [`Problema: ${a.problem.what.trim().replace(/\.$/, '')}${a.problem.howMuch ? ` — tamanho do desvio: ${a.problem.howMuch.trim()}` : ''}.`, top.length ? `Concentração (Pareto): ${top.join(', ')}.` : '', 'Causas raiz:', ...roots].filter(Boolean).join('\n');
 }

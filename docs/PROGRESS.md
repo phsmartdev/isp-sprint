@@ -85,6 +85,14 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Gestão de Times — Fase 7: plano 5W2H integrado a tarefas e projetos ✅ (2026-10-21)
+- O plano de ação passa a ser uma lista de **ações 5W2H** (o quê, por quê — com as causas raiz da análise como sugestão —, onde, quando, quem, como, quanto custa).
+- **Cada ação nasce como tarefa** para quem executa (prioridade alta, categoria "Plano de ação", com as sete respostas na descrição; o responsável pela intervenção entra como participante). Quem executa recebe o aviso de tarefa no sino. Quem/quando/situação vêm da tarefa — fonte única.
+- **Projeto opcional:** ligar um projeto existente ou criar um a partir do plano; as novas ações entram como tarefas do projeto (na primeira etapa aberta do quadro).
+- Registrar o plano exige ≥1 ação; o prazo do plano é o informado ou o da última ação. **Concluir a intervenção exige todas as ações concluídas ou canceladas** (cancelar exige motivo e cancela a tarefa; ação já executada não cancela) e pelo menos uma executada.
+- Ficha mostra andamento (barra), ações atrasadas e custo previsto total.
+- Migração 0039 (`intervention_actions`, `interventions.project_id`). Testes: domínio (3), API (3 novos + ajustes das Fases 5 e 6), E2E com ação 5W2H.
+
 ## Gestão de Times — Fase 6: jornada de análise ✅ (2026-10-21)
 - Cada intervenção tem uma **análise de causa** em cinco etapas, numa página própria (Intervenções → ficha → Análise): **Problema** (o quê, onde, quando, quanto) → **Pareto** (gráfico com acumulado e corte de 80%; à mão ou com as negociações perdidas do período da meta por motivo, em quantidade ou valor) → **Ishikawa** (espinha com 6 categorias adaptadas ao comercial: Método, Pessoas, Ferramentas, Oferta, Medição, Mercado; marca as causas a investigar) → **5 Porquês** (mínimo de 3 por causa escolhida, causa raiz e evidência) → **Conclusão** (diagnóstico montado das etapas, editável).
 - Pendências por etapa aparecem nas abas; só conclui com tudo resolvido. Salva sozinho enquanto a pessoa escreve (com controle de versão contra edição simultânea).

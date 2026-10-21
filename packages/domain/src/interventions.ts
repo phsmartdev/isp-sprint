@@ -66,3 +66,50 @@ export function escalationLevel(dueOn: string, today: string, escalateAfterDays:
   if (late <= 0) return 0;
   return Math.min(chainLength, 1 + Math.floor((late - 1) / Math.max(1, escalateAfterDays)));
 }
+
+// ---------------------------------------------------------------- Fase 7: plano 5W2H (cada ação vira tarefa)
+export type W2HAction = { what: string; why: string; where: string; whenDue: string; whoName: string; how: string; howMuchCents: number | null };
+export type ActionState = { status: 'a_fazer' | 'em_andamento' | 'aguardando' | 'em_aprovacao' | 'concluida' | 'cancelada'; dueOn: string | null };
+
+/** Texto da tarefa criada a partir da ação: as sete respostas, para quem executa não precisar abrir a intervenção. */
+export function actionTaskNotes(a: W2HAction, goalTitle: string) {
+  const money = a.howMuchCents === null ? 'sem custo previsto' : (a.howMuchCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return [
+    `Ação do plano da intervenção "${goalTitle}" (Gestão de Times).`,
+    `O quê: ${a.what}`, `Por quê: ${a.why}`, `Onde: ${a.where || '—'}`, `Quando: até ${a.whenDue.split('-').reverse().join('/')}`,
+    `Quem: ${a.whoName}`, `Como: ${a.how}`, `Quanto: ${money}`,
+  ].join('\n');
+}
+
+/** Andamento do plano pelas tarefas: concluídas, canceladas, abertas e atrasadas (prazo antes de hoje). */
+export function planProgress(actions: ActionState[], today: string) {
+  const done = actions.filter((a) => a.status === 'concluida').length;
+  const cancelled = actions.filter((a) => a.status === 'cancelada').length;
+  const open = actions.length - done - cancelled;
+  const overdue = actions.filter((a) => a.status !== 'concluida' && a.status !== 'cancelada' && !!a.dueOn && a.dueOn < today).length;
+  const valid = actions.length - cancelled;
+  return { total: actions.length, done, cancelled, open, overdue, pct: valid ? done / valid : 0 };
+}
+
+/** Conclusão do plano: nenhuma ação em aberto e pelo menos uma executada. */
+export function planConclusionBlockers(actions: ActionState[]) {
+  const p = planProgress(actions, '9999-12-31');
+  const out: string[] = [];
+  if (!actions.length) out.push('O plano não tem ações.');
+  else if (p.open) out.push(`Há ${p.open} ação(ões) em aberto: conclua ou cancele com motivo.`);
+  else if (!p.done) out.push('Nenhuma ação foi executada; todas estão canceladas.');
+  return out;
+}
+
+/** Validação da ação 5W2H. */
+export function validateW2H(a: Omit<W2HAction, 'whoName'> & { whoId: string | null }, today: string) {
+  const e: { path: string; message: string }[] = [];
+  if (a.what.trim().length < 5) e.push({ path: 'what', message: 'Descreva o que será feito.' });
+  if (a.why.trim().length < 5) e.push({ path: 'why', message: 'Diga por que (qual causa a ação ataca).' });
+  if (a.how.trim().length < 5) e.push({ path: 'how', message: 'Diga como será feito.' });
+  if (!a.whoId) e.push({ path: 'whoId', message: 'Escolha quem executa.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a.whenDue)) e.push({ path: 'whenDue', message: 'Informe o prazo.' });
+  else if (a.whenDue < today) e.push({ path: 'whenDue', message: 'O prazo não pode estar no passado.' });
+  if (a.howMuchCents !== null && (!Number.isInteger(a.howMuchCents) || a.howMuchCents < 0)) e.push({ path: 'howMuchCents', message: 'Custo inválido.' });
+  return e;
+}

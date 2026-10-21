@@ -2727,6 +2727,8 @@ export const interventions = pgTable(
     reviewCause: text('review_cause'),
     reviewDecision: text('review_decision'),
     conclusion: text('conclusion'),
+    /** Fase 7: projeto que executa o plano (opcional) */
+    projectId: uuid('project_id'),
     resolvedBy: uuid('resolved_by').references(() => users.id),
     resolvedAt: ts('resolved_at'),
     rowVersion: integer('row_version').notNull().default(1),
@@ -2790,4 +2792,25 @@ export const interventionAnalyses = pgTable(
     uq: uniqueIndex('intervention_analyses_uq').on(t.interventionId),
     statusCk: check('intervention_analyses_status_ck', inList('status', ['rascunho', 'concluida'])),
   }),
+);
+
+/** Fase 7: ações 5W2H do plano. Cada ação nasce como tarefa (fonte da verdade de quem, quando e situação). */
+export const interventionActions = pgTable(
+  'intervention_actions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    interventionId: uuid('intervention_id').notNull().references(() => interventions.id),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    what: text('what').notNull(),
+    why: text('why').notNull(),
+    rootCause: text('root_cause'),
+    where: text('where_at').notNull().default(''),
+    how: text('how').notNull(),
+    howMuchCents: bigint('how_much_cents', { mode: 'number' }),
+    cancelReason: text('cancel_reason'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('intervention_actions_idx').on(t.tenantId, t.interventionId), actUq: uniqueIndex('intervention_actions_activity_uq').on(t.activityId) }),
 );

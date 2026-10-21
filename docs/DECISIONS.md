@@ -229,3 +229,9 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Plano bloqueado sem análise concluída** por padrão (`interventions.requireAnalysis`), para evitar plano que trata sintoma. A empresa pode desligar.
 - **Pareto com dado real** só onde o dado existe hoje: negociações perdidas (evento válido) por motivo no período da meta, das pessoas da meta. Outros recortes ficam manuais até haver fonte confiável.
 - **Categorias do Ishikawa** são os 6M renomeados para o contexto comercial (Pessoas, Ferramentas, Oferta, Mercado…), fixas no domínio.
+
+## ADR-051 — Ação do plano é tarefa (5W2H) (21/10/2026)
+- **Decisão:** cada ação 5W2H cria uma tarefa em `activities`; `intervention_actions` guarda só o que a tarefa não tem (por quê, causa raiz, onde, como, custo, motivo de cancelamento) e aponta para ela. Responsável, prazo e situação são lidos da tarefa — sem cópia que diverge.
+- **Por quê:** a execução acontece onde o time já trabalha (Tarefas, quadro do projeto, avisos, recorrência, aprovação); a intervenção só acompanha.
+- **Conclusão** da intervenção depende das tarefas (`planConclusionBlockers`). Cancelar uma ação cancela a tarefa pelo mesmo caminho de status das tarefas (ADR-045).
+- **Projeto** é opcional e ligado à intervenção; novas ações entram nele, respeitando a regra de equipe do projeto.

@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
-import { completeAnalysis } from './analysisContent';
+import { addAction, completeAnalysis, finishTask } from './analysisContent';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client;
@@ -74,6 +74,10 @@ describe('intervenções', () => {
     d = ok(await carlos.get(`/interventions/${it0.id}`)).json();
     body.rowVersion = d.rowVersion;
     expect(d.diagnosis).toContain('Falta de triagem de suporte da carteira');
+    expect((await carlos.post(`/interventions/${it0.id}/plan`, body)).statusCode).toBe(422); // sem ações 5W2H
+    const act = await addAction(carlos, it0.id, uid('ana'));
+    d = ok(await carlos.get(`/interventions/${it0.id}`)).json();
+    body.rowVersion = d.rowVersion;
     expect((await carlos.post(`/interventions/${it0.id}/plan`, { ...body, rowVersion: d.rowVersion + 5 })).statusCode).toBe(409);
     ok(await carlos.post(`/interventions/${it0.id}/plan`, body));
     d = ok(await carlos.get(`/interventions/${it0.id}`)).json();
@@ -90,6 +94,10 @@ describe('intervenções', () => {
       const m = ok(await topC.get('/me/mentions')).json().items;
       expect(m.some((x: { kind: string; taskId: string; source: string }) => x.kind === 'intervencao' && x.taskId === it0.id && x.source === 'intervencao_escalada')).toBe(true);
     }
+    expect((await carlos.post(`/interventions/${it0.id}/conclude`, { rowVersion: d.rowVersion, conclusion: 'Retomou o ritmo com o bloco diário' })).statusCode).toBe(422); // ação em aberto
+    await finishTask(ana, act.activityId);
+    d = ok(await carlos.get(`/interventions/${it0.id}`)).json();
+    expect(d.progress).toMatchObject({ total: 1, done: 1, pct: 1 });
     ok(await carlos.post(`/interventions/${it0.id}/conclude`, { rowVersion: d.rowVersion, conclusion: 'Retomou o ritmo com o bloco diário' }));
     d = ok(await lucas.get(`/interventions/${it0.id}`)).json();
     expect(d).toMatchObject({ status: 'concluida' });

@@ -182,10 +182,19 @@ test('Intervenções: vermelho na apuração exige plano de ação; o avaliado s
   await expect(page.getByText(/Análise concluída\. O diagnóstico/)).toBeVisible();
   await shot(page, 'gr-analise');
   await page.getByRole('link', { name: 'Voltar à intervenção' }).click();
+  // plano 5W2H: cada ação vira tarefa para quem executa
+  await expect(dr.getByRole('button', { name: 'Registrar plano de ação' })).toBeDisabled();
+  await dr.getByRole('button', { name: 'Nova ação 5W2H' }).click();
+  await dr.getByLabel(/^O quê/).fill('Plantão de suporte para a carteira');
+  await dr.getByLabel(/^Por quê/).fill('Falta de triagem de suporte da carteira');
+  await dr.getByLabel(/^Quem/).selectOption({ label: 'Ana Souza' });
+  await dr.getByLabel(/^Quando/).fill(new Date(Date.now() + 14 * 86_400_000).toLocaleDateString('en-CA'));
+  await dr.getByLabel(/^Como/).fill('Escala semanal com dois consultores no suporte');
+  await dr.getByRole('button', { name: 'Incluir ação' }).click();
+  await expect(page.getByText('Ação incluída e tarefa criada para quem executa')).toBeVisible();
+  await expect(dr.getByRole('link', { name: 'Plantão de suporte para a carteira' })).toBeVisible();
   await dr.getByRole('button', { name: 'Registrar plano de ação' }).click();
-  await expect(dr.getByLabel(/Diagnóstico/)).toHaveValue(/Falta de triagem/);
-  await dr.getByLabel(/Ações/).fill('Reservar duas manhãs por semana para visitas; liderança acompanha às sextas');
-  await dr.getByLabel(/Concluir até/).fill(new Date(Date.now() + 14 * 86_400_000).toLocaleDateString('en-CA'));
+  await expect(dr.getByLabel(/^Diagnóstico/)).toHaveValue(/Falta de triagem/);
   await dr.getByRole('button', { name: 'Salvar plano' }).click();
   await expect(page.getByText('Plano de ação registrado')).toBeVisible();
   await expect(dr.getByText('Plano em execução').first()).toBeVisible();
