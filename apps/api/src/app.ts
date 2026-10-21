@@ -41,6 +41,7 @@ import { indicatorRoutes } from './routes/indicators';
 import { resultsRoutes } from './routes/results';
 import { abmRoutes } from './routes/abm';
 import { interventionRoutes } from './routes/interventions';
+import { ritualRoutes } from './routes/rituals';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -159,6 +160,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...resultsRoutes,
     ...abmRoutes,
     ...interventionRoutes,
+    ...ritualRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

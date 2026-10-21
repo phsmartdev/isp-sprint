@@ -173,7 +173,18 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
      order by e.created_at desc
      limit 30`);
   const iv = ivs.rows.map((r) => ({ kind: 'intervencao' as const, opportunityId: null as string | null, taskId: r.intervention_id, code: null as number | null, contactName: null as string | null, title: r.title, source: `intervencao_${r.type}` as (typeof opp)[number]['source'], body: '', author: r.author, at: r.at, unread: r.unread }));
-  const items = [...opp, ...tk, ...iv].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
+  // rituais, reuniões, decisões e impedimentos (Fase 8)
+  const gv = await db.execute<{ entity: string; entity_id: string; type: string; title: string | null; author: string | null; at: Date; unread: boolean }>(sql`
+    select e.entity, e.entity_id, e.type, coalesce(e.payload->>'title', e.payload->>'text', e.payload->>'ritual', e.payload->>'name') as title, u.name as author, e.created_at as at,
+           (r.last_read_at is null or e.created_at > r.last_read_at) as unread
+      from governance_events e
+      left join users u on u.id = e.actor_id
+      left join governance_reads r on r.user_id = ${auth.userId} and r.entity_id = e.entity_id
+     where e.tenant_id = ${auth.tenantId} and ${auth.userId}::uuid = any(e.notify)
+     order by e.created_at desc
+     limit 30`);
+  const gvItems = gv.rows.map((r) => ({ kind: 'gestao' as const, opportunityId: null as string | null, taskId: r.entity_id, code: null as number | null, contactName: r.entity as string | null, title: r.title, source: `${r.entity}_${r.type}` as (typeof opp)[number]['source'], body: '', author: r.author, at: r.at, unread: r.unread }));
+  const items = [...opp, ...tk, ...iv, ...gvItems].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };
 }
 
