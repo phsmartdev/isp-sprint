@@ -1,4 +1,5 @@
 /** Ficha da ata de registro de preços (dentro de Gestão de Contratos). */
+import { LinkedProjects } from '../../features/projects/shared';
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
@@ -20,10 +21,10 @@ import { AdhesionsPanel } from '../../features/arp/AdhesionsPanel';
 import { DocsPanel, HistoryPanel, LedgerPanel, OperationsPanel } from '../../features/arp/LedgerPanels';
 import { ArpReports } from '../../features/arp/Reports';
 
-type Tab = 'itens' | 'oportunidades' | 'orgaos' | 'movimentacoes' | 'operacoes' | 'documentos' | 'relatorios' | 'historico';
+type Tab = 'itens' | 'oportunidades' | 'orgaos' | 'movimentacoes' | 'operacoes' | 'documentos' | 'relatorios' | 'projetos' | 'historico';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'itens', label: 'Itens e saldos' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'orgaos', label: 'Órgãos e adesões' }, { key: 'movimentacoes', label: 'Movimentações' },
-  { key: 'operacoes', label: 'Conversões e remanejamentos' }, { key: 'documentos', label: 'Documentos' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'historico', label: 'Histórico' },
+  { key: 'operacoes', label: 'Conversões e remanejamentos' }, { key: 'documentos', label: 'Documentos' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'projetos', label: 'Projetos' }, { key: 'historico', label: 'Histórico' },
 ];
 
 function EditArp({ arp, open, onClose }: { arp: ArpDetail; open: boolean; onClose: () => void }) {
@@ -131,6 +132,7 @@ export function ArpDetailPage() {
         {tab === 'documentos' && <DocsPanel arp={a} />}
         {tab === 'relatorios' && <ArpReports arpId={a.id} items={a.items} agencies={a.agencies} />}
         {tab === 'historico' && <HistoryPanel arp={a} />}
+        {tab === 'projetos' && <LinkedProjects prefill={{ arpId: a.id, label: `Ata ${a.number}`, kind: 'contrato_publico', name: `Execução da ata ${a.number}` }} />}
       </TvArea>
       {a.can.manage && <ImportWizard arpId={a.id} status={a.status} open={f.importar === '1'} onClose={() => setF({ importar: '' })} onDone={refresh} />}
       {editing && <EditArp arp={a} open onClose={() => setEditing(false)} />}

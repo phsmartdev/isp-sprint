@@ -7,7 +7,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -90,7 +90,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'inteligencia', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'inteligencia', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -590,6 +590,12 @@ export const activities = pgTable(
     /** resultado registrado: sem resultado, a execução não conta na cobertura */
     csResult: text('cs_result'),
     csPlanId: uuid('cs_plan_id'),
+    /** Projetos: tarefa pertence a um projeto, numa etapa do quadro, opcionalmente ligada a um marco */
+    projectId: uuid('project_id').references((): AnyPgColumn => projects.id),
+    projectStageId: uuid('project_stage_id'),
+    milestoneId: uuid('milestone_id'),
+    startOn: date('start_on', { mode: 'string' }),
+    position: integer('position').notNull().default(0),
   },
   (t) => ({
     csCadenceUq: uniqueIndex('activities_cs_cadence_uq').on(t.tenantId, t.contactId, t.csCadenceKey).where(sql`cs_cadence_key is not null`),
@@ -598,6 +604,7 @@ export const activities = pgTable(
     priorityCk: check('activities_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
     ownerDueIdx: index('activities_owner_due_idx').on(t.tenantId, t.ownerId, t.dueAt),
     oppIdx: index('activities_opp_idx').on(t.tenantId, t.opportunityId),
+    projectIdx: index('activities_project_idx').on(t.tenantId, t.projectId, t.projectStageId, t.position),
   }),
 );
 
@@ -1997,3 +2004,122 @@ export const csAlerts = pgTable('cs_alerts', {
   notifiedAt: ts('notified_at'),
   escalatedAt: ts('escalated_at'),
 }, (t) => ({ uq: uniqueIndex('cs_alerts_uq').on(t.tenantId, t.contactId, t.key) }));
+
+// --------------------------------------------------------------- projetos
+
+export const projects = pgTable(
+  'projects',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    code: serial('code').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    kind: text('kind').notNull().default('interno'),
+    status: text('status').notNull().default('planejamento'),
+    priority: text('priority').notNull().default('media'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    teamId: uuid('team_id'),
+    startOn: date('start_on', { mode: 'string' }).notNull(),
+    dueOn: date('due_on', { mode: 'string' }),
+    completedAt: ts('completed_at'),
+    /** vínculos (validados por empresa na API; sem FK para não travar a limpeza da base) */
+    contactId: uuid('contact_id'),
+    opportunityId: uuid('opportunity_id'),
+    contractId: uuid('contract_id'),
+    arpId: uuid('arp_id'),
+    templateKey: text('template_key'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deletedAt: ts('deleted_at'),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    statusCk: check('projects_status_ck', inList('status', ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'])),
+    kindCk: check('projects_kind_ck', inList('kind', ['implantacao', 'comercial', 'sucesso_cliente', 'interno', 'contrato_publico', 'outro'])),
+    priorityCk: check('projects_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
+    tenantIdx: index('projects_tenant_idx').on(t.tenantId, t.status),
+    linkIdx: index('projects_links_idx').on(t.tenantId, t.contactId, t.opportunityId, t.contractId, t.arpId),
+  }),
+);
+
+export const projectStages = pgTable(
+  'project_stages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    name: text('name').notNull(),
+    position: integer('position').notNull(),
+    done: boolean('done').notNull().default(false),
+    wipLimit: integer('wip_limit'),
+    archivedAt: ts('archived_at'),
+  },
+  (t) => ({ idx: index('project_stages_idx').on(t.projectId, t.position) }),
+);
+
+export const projectMilestones = pgTable(
+  'project_milestones',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    name: text('name').notNull(),
+    dueOn: date('due_on', { mode: 'string' }),
+    completedAt: ts('completed_at'),
+    completedBy: uuid('completed_by').references(() => users.id),
+    notes: text('notes'),
+    position: integer('position').notNull().default(0),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => ({ idx: index('project_milestones_idx').on(t.projectId, t.dueOn) }),
+);
+
+export const projectMembers = pgTable(
+  'project_members',
+  {
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    tenantId: tenantId(),
+    role: text('role').notNull().default('membro'),
+    addedAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.userId] }),
+    roleCk: check('project_members_role_ck', inList('role', ['gerente', 'membro', 'observador'])),
+    userIdx: index('project_members_user_idx').on(t.tenantId, t.userId),
+  }),
+);
+
+export const projectTemplates = pgTable(
+  'project_templates',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    description: text('description'),
+    kind: text('kind').notNull().default('interno'),
+    def: jsonb('def').$type<import('@isp/domain').ProjectTemplateDef>().notNull(),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('project_templates_idx').on(t.tenantId, t.active) }),
+);
+
+/** Histórico do projeto (append-only). */
+export const projectEvents = pgTable(
+  'project_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    type: text('type').notNull(),
+    summary: text('summary').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    payload: jsonb('payload').$type<Record<string, unknown>>(),
+    occurredAt: ts('occurred_at').notNull().defaultNow(),
+  },
+  (t) => ({ idx: index('project_events_idx').on(t.tenantId, t.projectId, t.occurredAt) }),
+);

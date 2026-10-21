@@ -10,6 +10,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { loadOpportunity } from '../services/opportunities';
+import { syncTaskStage } from '../services/projects';
 
 const owner = alias(s.users, 'act_owner');
 
@@ -256,6 +257,7 @@ export const activityRoutes = [
           .returning({ id: s.activities.id });
         if (!updated.length) throw conflict(cur.rowVersion);
         for (const e of events) await tx.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: params.id, type: e.type, actorId: auth.userId, payload: e.payload });
+        if (body.completed !== undefined) await syncTaskStage(tx, params.id, body.completed, auth);
       });
       return dto(await load(app.db, auth, params.id));
     },

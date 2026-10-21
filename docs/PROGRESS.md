@@ -85,6 +85,17 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## Evolução integrada — Etapa 3: Projetos ✅ (2026-10-21)
+- Novo módulo **Projetos e tarefas** (`projetos`) na matriz de segurança: Vendedor próprio, Supervisor equipe, Gerência total. Menu "Projetos".
+- Projeto com tipo, situação (transições válidas; cancelar/reabrir com motivo), prioridade, responsável, início/prazo, descrição e vínculos com cliente, oportunidade, contrato e ata.
+- Etapas do quadro configuráveis (ordem, concluída, limite por coluna; remover etapa com tarefas pede destino), marcos com data (só atingidos com as tarefas ligadas concluídas), equipe com papéis (gerente, membro, observador).
+- Tarefas do projeto são **as mesmas atividades do CRM**: aparecem na agenda do responsável; concluir lá move para a etapa concluída e vice-versa. Primeira tarefa concluída tira o projeto de Planejamento.
+- Visões: Quadro (arrastar e soltar, com reordenação), Lista (ordenável, concluir com um clique), Calendário mensal (tarefas e marcos), Linha do tempo (barras início→prazo, marcos e hoje), Marcos, Equipe e Histórico append-only.
+- Modelos: 3 padrões (implantação corporativa, execução de ata, projeto interno) e modelos da empresa salvos a partir de um projeto (datas viram dias relativos ao início).
+- Saúde do projeto (em dia, atenção, atrasado, concluído) com o motivo; progresso por tarefas.
+- Aba "Projetos" na ficha do cliente, no contrato e na ata, com criação já vinculada.
+- Migração 0030. Testes: domínio 71, API 138, E2E 38.
+
 ## Evolução integrada — Etapa 2: Atas (participação, datas, alteração e conversão) ✅ (2026-10-21)
 - Ata nasce com gerenciador e participantes originários (CNPJ, data de ingresso, início de eficácia); órgãos editáveis com motivo e evento antes/depois; distribuição dos quantitativos por participante enquanto a ata está em rascunho.
 - Adesões posteriores com data de autorização (pode ser retroativa, nunca futura) e início da execução; prazo de execução conta da autorização.

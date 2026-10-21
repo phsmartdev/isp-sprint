@@ -16,6 +16,8 @@ import { NewOpportunityPage, OpportunityWorkspacePage } from './pages/Opportunit
 import { CustomersPage } from './pages/Customers';
 import { CustomerDetailPage } from './pages/CustomerDetail';
 import { ActivitiesPage } from './pages/Activities';
+import { ProjectsPage } from './pages/projects/Projects';
+import { ProjectDetailPage } from './pages/projects/ProjectDetail';
 import { ReportsPage } from './pages/Reports';
 import { IntelligencePage } from './pages/Intelligence';
 import { CampaignDetailPage, CampaignsPage } from './pages/Campaigns';
@@ -76,6 +78,8 @@ export function App() {
         <Route path="sucesso" element={<Gate module="clientes"><CustomerSuccessPage /></Gate>} />
         <Route path="sucesso/jornadas/:id" element={<Gate module="clientes"><JourneyPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
+        <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
+        <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />

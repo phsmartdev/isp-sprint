@@ -1,4 +1,5 @@
 /** Ficha individual do contrato. */
+import { LinkedProjects } from '../../features/projects/shared';
 import { useState } from 'react';
 import { ContractJourney } from '../../features/cs/ContractJourney';
 import { Link, useParams } from 'react-router-dom';
@@ -16,7 +17,7 @@ import { GenerateModal, SignModal } from '../../features/contracts/SignaturePane
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'historico';
+type Tab = 'resumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -153,6 +154,7 @@ export function ContractDetailPage() {
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
+            { key: 'projetos', label: 'Projetos' },
             { key: 'historico', label: 'Linha do tempo' },
           ]} />
         </div>
@@ -201,6 +203,7 @@ export function ContractDetailPage() {
           {tab === 'versoes' && <VersionsPanel c={c} />}
           {tab === 'notificacoes' && <AlertsPanel c={c} />}
           {tab === 'historico' && <TimelinePanel c={c} />}
+          {tab === 'projetos' && <LinkedProjects prefill={{ contractId: c.id, contactId: c.contactId, label: `CT-${c.code} · ${c.contact.name}`, kind: 'implantacao', name: `Implantação ${c.contact.name}` }} />}
         </div>
       </div>
       {edit && <EditDrawer c={c} onClose={() => setEdit(false)} />}

@@ -186,3 +186,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Por quê:** adesões e aditivos chegam com data anterior ao registro; auditoria precisa distinguir quando foi lançado de quando passou a valer. Alterar item movimentado sem trilha muda retroativamente o significado do saldo.
 - **Consequência:** relatórios por período podem filtrar por qualquer das duas datas; a consolidação das atas lê o livro, não o item.
 
+## ADR-044 — Tarefas de projeto são atividades do CRM (21/10/2026)
+- **Decisão:** não existe tabela de tarefas separada. `activities` ganhou `project_id`, `project_stage_id`, `milestone_id`, `start_on` e `position`. Projeto, etapas, marcos, equipe, modelos e histórico têm tabelas próprias; vínculos com cliente/oportunidade/contrato/ata são colunas sem FK, validadas por empresa na API.
+- **Por quê:** a pessoa tem uma agenda só; indicadores e o motor de eventos (Etapa 5) leem um lugar só. Vínculos sem FK não travam a limpeza da base.
+- **Consequência:** concluir pela agenda move a tarefa no quadro (e o contrário). Responsável de tarefa precisa estar na equipe (observador não). Etapa 4 estende a mesma tabela (subtarefas, checklist, dependências, recorrência, tempo).
+

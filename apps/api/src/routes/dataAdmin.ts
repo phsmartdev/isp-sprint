@@ -93,6 +93,9 @@ export const dataAdminRoutes = [
           const acts = tx.select({ id: s.activities.id }).from(s.activities).where(eq(s.activities.tenantId, t));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
+          // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto
+          for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          counts.projetos = (await tx.delete(s.projects).where(eq(s.projects.tenantId, t)).returning({ id: s.projects.id })).length;
           await tx.delete(s.automationRuns).where(eq(s.automationRuns.tenantId, t));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(eq(s.negotiationReads.tenantId, t));

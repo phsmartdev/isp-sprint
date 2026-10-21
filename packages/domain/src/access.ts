@@ -10,7 +10,7 @@
  * em Configurações → Segurança. O servidor é a única autoridade.
  */
 
-export const MODULES = ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'inteligencia', 'configuracoes'] as const;
+export const MODULES = ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'inteligencia', 'configuracoes'] as const;
 export type Module = (typeof MODULES)[number];
 
 export const MODULE_LABELS: Record<Module, string> = {
@@ -22,6 +22,7 @@ export const MODULE_LABELS: Record<Module, string> = {
   relatorios: 'Relatórios',
   campanhas: 'Campanhas',
   contratos: 'Gestão de Contratos',
+  projetos: 'Projetos e tarefas',
   inteligencia: 'Inteligência',
   configuracoes: 'Configurações',
 };
@@ -41,9 +42,9 @@ export type ProfileKey = (typeof PROFILE_KEYS)[number];
 export const PROFILE_LABELS: Record<ProfileKey, string> = { vendedor: 'Vendedor', supervisor: 'Supervisor', gerencia: 'Gerência' };
 
 export const DEFAULT_ACCESS: Record<ProfileKey, Record<Module, AccessLevel>> = {
-  vendedor: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', inteligencia: 'nenhum', configuracoes: 'nenhum' },
-  supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', inteligencia: 'equipe', configuracoes: 'nenhum' },
-  gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', inteligencia: 'total', configuracoes: 'total' },
+  vendedor: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', projetos: 'proprio', inteligencia: 'nenhum', configuracoes: 'nenhum' },
+  supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', projetos: 'equipe', inteligencia: 'equipe', configuracoes: 'nenhum' },
+  gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', inteligencia: 'total', configuracoes: 'total' },
 };
 
 export function atLeast(level: AccessLevel | undefined, min: AccessLevel) {

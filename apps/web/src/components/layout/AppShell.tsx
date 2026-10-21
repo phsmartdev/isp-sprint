@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X, HeartHandshake } from 'lucide-react';
+  BarChart3, Bell, CalendarCheck, FileSignature, ChevronDown, CircleHelp, ClipboardList, Home, Lightbulb, LogOut, Menu, Scale, Send, Settings, UserRound, Users, UsersRound, X, HeartHandshake, FolderKanban } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { to: '/customers', label: 'Clientes', icon: <Users className={ICON} />, module: 'clientes' },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
   { to: '/activities', label: 'Atividades', icon: <CalendarCheck className={ICON} />, module: 'atividades', badge: true },
+  { to: '/projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, module: 'projetos' },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
   { to: '/campaigns', label: 'Campanhas', icon: <Send className={ICON} />, module: 'campanhas' },
   { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
