@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { abmTransition, cnpjRoot, commercialStatus, dedupMatches, dedupSearchTerms, orgNameSimilarity, orgNameTokens } from './abm';
+import { objectiveTransition, orgUnitCycle, orgUnitTree, abmTransition, cnpjRoot, commercialStatus, dedupMatches, dedupSearchTerms, orgNameSimilarity, orgNameTokens } from './abm';
 
 const base = { customerLifecycle: null, activeContracts: 0, endedContracts: 0, openOpportunities: 0, daysSinceInteraction: null, prospecting: false };
 
@@ -49,5 +49,22 @@ describe('deduplicação', () => {
     expect(m[0]!.reasons).toContain('mesmo CNPJ/CPF');
     expect(m[2]!.reasons[0]).toMatch(/raiz de CNPJ/);
     expect(dedupMatches({ name: 'Nada a ver' }, rows)).toEqual([]);
+  });
+});
+
+describe('Conta 360: objetivos e estrutura', () => {
+  it('encerrar objetivo exige resultado; encerrado só reabre', () => {
+    expect(objectiveTransition('planejado', 'em_andamento')).toBeNull();
+    expect(objectiveTransition('em_andamento', 'atingido', 'ok')).toMatch(/resultado/);
+    expect(objectiveTransition('em_andamento', 'atingido', 'Reunião com o secretário realizada')).toBeNull();
+    expect(objectiveTransition('atingido', 'planejado')).toMatch(/reaberto/);
+    expect(objectiveTransition('cancelado', 'em_andamento')).toBeNull();
+  });
+  it('estrutura: sem ciclos e em ordem de árvore', () => {
+    const u = [{ id: 'a', parentId: null, name: 'Prefeitura' }, { id: 'b', parentId: 'a', name: 'Secretaria de Saúde' }, { id: 'c', parentId: 'b', name: 'Setor de TI' }, { id: 'd', parentId: 'a', name: 'Secretaria de Educação' }];
+    expect(orgUnitCycle(u, 'a', 'c')).toBe(true);
+    expect(orgUnitCycle(u, 'c', 'c')).toBe(true);
+    expect(orgUnitCycle(u, 'c', 'd')).toBe(false);
+    expect(orgUnitTree(u).map((x) => `${x.depth}:${x.id}`)).toEqual(['0:a', '1:d', '1:b', '2:c']);
   });
 });

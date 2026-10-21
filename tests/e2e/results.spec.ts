@@ -335,3 +335,51 @@ test('Rituais: cria ritual, conduz a reunião com pauta automática, registra de
   await expect(page.getByText('Impedimento atualizado', { exact: true })).toBeVisible();
   await expect(dr.getByText(/removeu: Engenharia publicou o mapa atualizado/)).toBeVisible();
 });
+
+test('ABM Conta 360: cabeçalho estratégico, objetivo, estrutura organizacional e histórico', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const name = `Prefeitura Fictícia de Teste ${Date.now().toString(36)}`;
+  const r = await page.request.post('/api/v1/abm/new-account', { headers: H, data: { name, nature: 'publica', segment: 'governamental', city: 'Aracaju', reason: 'Programa de cidades conectadas', objective: 'Abrir relacionamento com a Secretaria de Saúde' } });
+  expect(r.status(), await r.text()).toBe(201);
+  await page.goto('/abm');
+  await page.getByLabel('Buscar conta').fill(name);
+  await page.getByRole('link', { name }).click();
+  await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  const head = page.getByRole('banner', { name: 'Cabeçalho da conta' }).or(page.locator('header[aria-label="Cabeçalho da conta"]'));
+  await expect(head.getByText('Abrir relacionamento com a Secretaria de Saúde')).toBeVisible();
+  await expect(head.getByText('Conta identificada')).toBeVisible();
+
+  const obj = page.getByRole('region', { name: 'Objetivos da conta' });
+  await obj.getByRole('button', { name: 'Novo objetivo' }).click();
+  await obj.getByLabel('Tipo').selectOption('identificar_decisores');
+  await obj.getByLabel(/^Objetivo/).fill('Identificar quem decide a conectividade das UBS');
+  await obj.getByRole('button', { name: 'Incluir objetivo' }).click();
+  await expect(page.getByText('Objetivo incluído')).toBeVisible();
+  await obj.getByRole('button', { name: 'Iniciar' }).click();
+  await expect(obj.getByText('Em andamento')).toBeVisible();
+  await obj.getByRole('button', { name: 'Marcar como atingido' }).click();
+  await obj.getByLabel(/^Resultado/).fill('Secretário e coordenador de TI identificados em reunião');
+  await obj.getByRole('button', { name: 'Confirmar' }).click();
+  await expect(obj.getByText('Atingido', { exact: true })).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Estrutura organizacional' }).click();
+  await page.getByLabel(/^Nome/).fill('Secretaria de Saúde');
+  await page.getByLabel('Tipo').selectOption('secretaria');
+  await page.getByRole('button', { name: 'Incluir', exact: true }).click();
+  await expect(page.getByText('Unidade incluída na estrutura')).toBeVisible();
+  await page.getByLabel(/^Nome/).fill('Coordenação de TI');
+  await page.getByLabel('Tipo').selectOption('departamento');
+  await page.getByLabel('Fica abaixo de').selectOption({ label: 'Secretaria de Saúde' });
+  await page.getByRole('button', { name: 'Incluir', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Estrutura organizacional' }).getByText('Coordenação de TI')).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Histórico' }).click();
+  await expect(page.getByText(/criou um objetivo/).first()).toBeVisible();
+  await expect(page.getByText(/alterou a estrutura organizacional/).first()).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: 'Resumo estratégico' }).click();
+  await shot(page, 'abm-360');
+});

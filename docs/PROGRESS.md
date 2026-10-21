@@ -85,6 +85,15 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
+## ABM — Fase 3: Conta 360 ✅ (2026-10-21)
+- Nova página **Conta 360** (ABM → nome da conta), sobre os registros do CRM, sem cópias. Cabeçalho com natureza, segmento, status ABM, status comercial, prioridade, classificação estratégica (a existente), responsáveis (ABM e carteira), última interação, próxima ação (tarefa pendente mais próxima ou próximo passo) e objetivo principal.
+- **Objetivos por conta** (abrir relacionamento, identificar decisores, criar oportunidade, expandir contratos, preparar renovação…) com responsável, prazo, critério de sucesso e situação; encerrar exige o resultado; histórico.
+- **Dados da organização** completados aos poucos no mesmo cadastro do CRM (nome, CNPJ, natureza, segmento, cidade, telefone e e-mail institucionais); CNPJ de outra conta é recusado; contas vindas de integração mantêm nome/CNPJ da origem; auditoria.
+- **Estrutura organizacional** (unidades, filiais, diretorias, secretarias, departamentos, setores, equipes, órgãos relacionados) com vínculo explícito ao superior, sem ciclos, desativar sem apagar. Pertence à organização (continua valendo fora do ABM) e não se confunde com influência.
+- Abas de leads e oportunidades, contratos (versão vigente), projetos e tarefas (mesmos módulos) e **histórico unificado** (estratégia ABM, interações concluídas e movimentos das oportunidades, cada fato uma vez).
+- Abas de stakeholders, mapa, plays, monitoramento, relacionamentos e indicadores entram nas próximas fases.
+- Migração 0043. Testes: domínio (2), API (4), E2E (1, incluindo celular).
+
 ## Números dos indicadores sempre cabem no cartão ✅ (2026-10-21)
 - Componente `FitText`: o valor começa no tamanho do estilo e diminui até caber na largura do cartão — nunca quebra linha nem passa da borda, em qualquer tela (recalcula ao redimensionar, ao trocar o valor e quando a fonte carrega). Aplicado em todos os cartões de indicadores (Início, Contratos, Atas, Sucesso do Cliente, Projetos, Campanhas, Comissões, Portas, Inteligência, Gestão de Times, Produto, Aprovações, Administração).
 - Atas: cartões em 3 colunas até telas grandes (5 só em telas muito largas), para os valores ficarem maiores.

@@ -63,7 +63,7 @@ export function AddToAbmButton({ contactId, contactName }: { contactId: string; 
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (!can('clientes') || q.isLoading) return null;
-  if (q.data?.abm) return <Link to={`/abm?id=${q.data.abm.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"><Crosshair className="h-4 w-4" aria-hidden />No ABM: {ABM_STATUS_LABELS[q.data.abm.status]}</Link>;
+  if (q.data?.abm) return <Link to={`/abm/contas/${q.data.abm.id}`} className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"><Crosshair className="h-4 w-4" aria-hidden />No ABM: {ABM_STATUS_LABELS[q.data.abm.status]}</Link>;
   return (
     <>
       <Button variant="secondary" icon={<Crosshair className="h-4 w-4" />} onClick={() => setOpen(true)}>Adicionar ao ABM</Button>

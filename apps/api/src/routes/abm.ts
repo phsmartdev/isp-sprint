@@ -19,7 +19,7 @@ const ACTIVE_CONTRACT = ['implantacao', 'vigente', 'renovacao', 'reajuste'];
 const ENDED_CONTRACT = ['encerramento', 'arquivado'];
 
 /** Fatos reais de cada conta para o status comercial derivado e os números da lista. */
-async function factsOf(db: DbOrTx, auth: AuthContext, contactIds: string[]) {
+export async function factsOf(db: DbOrTx, auth: AuthContext, contactIds: string[]) {
   if (!contactIds.length) return new Map<string, ReturnType<typeof emptyFacts>>();
   const ids = sql.join(contactIds.map((x) => sql`${x}::uuid`), sql`, `);
   const rows = await db.execute<{ id: string; lifecycle: string | null; active_ct: number; ended_ct: number; open_opps: number; open_value: string | number; pending: number; last_at: string | null; leads: number }>(sql`
@@ -42,7 +42,7 @@ async function factsOf(db: DbOrTx, auth: AuthContext, contactIds: string[]) {
   }
   return out;
 }
-const emptyFacts = () => ({ customerLifecycle: null as string | null, activeContracts: 0, endedContracts: 0, openOpportunities: 0, daysSinceInteraction: null as number | null, prospecting: false, commercial: 'identificada' as CommercialStatus, openValueCents: 0, pendingActivities: 0, lastContactOn: null as string | null });
+export const emptyFacts = () => ({ customerLifecycle: null as string | null, activeContracts: 0, endedContracts: 0, openOpportunities: 0, daysSinceInteraction: null as number | null, prospecting: false, commercial: 'identificada' as CommercialStatus, openValueCents: 0, pendingActivities: 0, lastContactOn: null as string | null });
 
 const event = (db: DbOrTx, auth: AuthContext, abmId: string, type: string, payload: Record<string, unknown>) => db.insert(s.abmEvents).values({ tenantId: auth.tenantId, abmId, type, payload, actorId: auth.userId });
 

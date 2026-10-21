@@ -1,4 +1,5 @@
 import { AbmPage } from './pages/marketing/Abm';
+import { Abm360Page } from './pages/marketing/Abm360';
 import { ProductPage } from './pages/product/Product';
 import { ResultsPage } from './pages/results/Results';
 import { InterventionsPage } from './pages/results/Interventions';
@@ -101,6 +102,7 @@ export function App() {
         <Route path="times/decisoes" element={<Gate module="resultados"><DecisionsPage /></Gate>} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />
         <Route path="abm" element={<Gate module="clientes"><AbmPage /></Gate>} />
+        <Route path="abm/contas/:id" element={<Gate module="clientes"><Abm360Page /></Gate>} />
         <Route path="produto" element={<ProductPage />} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />

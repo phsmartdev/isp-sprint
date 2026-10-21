@@ -2979,3 +2979,52 @@ export const governanceReads = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.entityId] }) }),
 );
+
+// ---------------------------------------------------------------- ABM Fase 3: Conta 360 — objetivos por conta e estrutura organizacional
+export const abmObjectives = pgTable(
+  'abm_objectives',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    dueOn: date('due_on', { mode: 'string' }),
+    status: text('status').notNull().default('planejado'),
+    /** como saber que foi atingido (indicador/critério) */
+    successCriteria: text('success_criteria'),
+    result: text('result'),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('abm_objectives_idx').on(t.tenantId, t.abmId),
+    statusCk: check('abm_objectives_status_ck', inList('status', ['planejado', 'em_andamento', 'atingido', 'nao_atingido', 'cancelado'])),
+  }),
+);
+
+/** Estrutura interna da organização (unidades, secretarias, departamentos…). Pertence à conta, não ao programa ABM. */
+export const accountOrgUnits = pgTable(
+  'account_org_units',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    parentId: uuid('parent_id'),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('account_org_units_idx').on(t.tenantId, t.contactId),
+    kindCk: check('account_org_units_kind_ck', inList('kind', ['unidade', 'filial', 'diretoria', 'secretaria', 'departamento', 'setor', 'equipe', 'orgao_relacionado'])),
+  }),
+);

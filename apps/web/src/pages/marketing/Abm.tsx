@@ -78,7 +78,7 @@ function AccountsTab({ u, setU }: { u: Record<string, string>; setU: (p: Record<
                 {q.data!.items.map((a) => (
                   <tr key={a.id} className="border-t border-line align-top">
                     <td className="px-3 py-2.5">
-                      <button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setU({ id: a.id }, { resetPage: false })}>{a.name}</button>
+                      <Link to={`/abm/contas/${a.id}`} className="text-left font-semibold text-primary hover:underline">{a.name}</Link>
                       <span className="mt-0.5 flex flex-wrap items-center gap-1.5"><PriorityChip p={a.priority} />{a.nature && <span className="text-xs text-muted">{NATURE[a.nature]}</span>}{a.city && <span className="text-xs text-muted">· {a.city}</span>}</span>
                     </td>
                     <td className="px-3 py-2.5"><StatusChip s={a.status} /><span className="block text-xs text-muted">{ABM_TIER_LABELS[a.tier]}</span></td>
@@ -187,7 +187,7 @@ function AddExisting({ open, onClose }: { open: boolean; onClose: () => void }) 
 }
 
 type Detail = Account & { document: string | null; facts: { activeContracts: number; endedContracts: number; openOpportunities: number; daysSinceInteraction: number | null }; opportunities: { id: string; code: number; title: string; stage: string; valueCents: number | null; ownerName: string }[]; events: { id: string; type: string; createdAt: string; actorName: string | null; payload: Record<string, unknown> }[] };
-function AccountDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+export function AccountDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const users = useLookups().data?.users ?? [];
@@ -211,7 +211,7 @@ function AccountDrawer({ id, onClose }: { id: string | null; onClose: () => void
             <div className="mt-1 flex flex-wrap items-center gap-2"><StatusChip s={a.status} /><CommercialChip s={a.commercial} /><PriorityChip p={a.priority} /></div>
             <p className="mt-1 text-xs text-muted">{a.nature ? NATURE[a.nature] : 'Natureza não informada'} · {a.segment}{a.city && ` · ${a.city}`}{a.document && ` · ${a.document}`}{a.origin && ` · origem: ${ABM_ORIGIN_LABELS[a.origin]}`}</p>
             <p className="mt-1 text-xs text-muted">Status comercial calculado pelos dados: <span className="num">{a.facts.activeContracts}</span> contrato(s) ativo(s), <span className="num">{a.facts.openOpportunities}</span> oportunidade(s) aberta(s), último contato {a.facts.daysSinceInteraction === null ? 'nunca' : `há ${a.facts.daysSinceInteraction} dia(s)`}.</p>
-            <Link to={`/customers/${a.contactId}`} className="text-sm font-semibold text-primary hover:underline">Abrir a conta no CRM</Link>
+            <span className="flex flex-wrap gap-3"><Link to={`/abm/contas/${a.id}`} className="text-sm font-semibold text-primary hover:underline">Abrir Conta 360</Link><Link to={`/customers/${a.contactId}`} className="text-sm font-semibold text-primary hover:underline">Abrir a conta no CRM</Link></span>
           </div>
           {a.statusReason && (a.status === 'pausada' || a.status === 'encerrada') && <Notice tone="info">{a.status === 'pausada' ? 'Pausada' : 'Encerrada'}: {a.statusReason}</Notice>}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

@@ -110,3 +110,44 @@ export function dedupMatches(input: { name: string; document?: string | null; ci
 }
 /** Termos para buscar candidatos no banco (os mais distintivos primeiro). */
 export const dedupSearchTerms = (name: string) => orgNameTokens(name).filter((t) => t.length >= 3).sort((a, b) => b.length - a.length).slice(0, 3);
+
+// ---------------------------------------------------------------- Fase 3: Conta 360 — objetivos e estrutura organizacional
+export const ABM_OBJECTIVE_KINDS = ['abrir_relacionamento', 'conhecer_estrutura', 'identificar_decisores', 'desenvolver_acesso', 'apresentar_solucoes', 'criar_oportunidade', 'expandir_contratos', 'recuperar_relacionamento', 'preparar_renovacao', 'outro'] as const;
+export type AbmObjectiveKind = (typeof ABM_OBJECTIVE_KINDS)[number];
+export const ABM_OBJECTIVE_KIND_LABELS: Record<AbmObjectiveKind, string> = {
+  abrir_relacionamento: 'Abrir relacionamento', conhecer_estrutura: 'Conhecer a estrutura da organização', identificar_decisores: 'Identificar decisores', desenvolver_acesso: 'Desenvolver acesso',
+  apresentar_solucoes: 'Apresentar soluções', criar_oportunidade: 'Criar oportunidade', expandir_contratos: 'Expandir contratos', recuperar_relacionamento: 'Recuperar relacionamento', preparar_renovacao: 'Preparar renovação', outro: 'Outro',
+};
+export const ABM_OBJECTIVE_STATUSES = ['planejado', 'em_andamento', 'atingido', 'nao_atingido', 'cancelado'] as const;
+export type AbmObjectiveStatus = (typeof ABM_OBJECTIVE_STATUSES)[number];
+export const ABM_OBJECTIVE_STATUS_LABELS: Record<AbmObjectiveStatus, string> = { planejado: 'Planejado', em_andamento: 'Em andamento', atingido: 'Atingido', nao_atingido: 'Não atingido', cancelado: 'Cancelado' };
+/** Encerrar um objetivo (atingido, não atingido, cancelado) exige registrar o resultado. */
+export function objectiveTransition(from: AbmObjectiveStatus, to: AbmObjectiveStatus, result?: string | null) {
+  if (from === to) return null;
+  const closed = (s: AbmObjectiveStatus) => s === 'atingido' || s === 'nao_atingido' || s === 'cancelado';
+  if (closed(from) && to !== 'em_andamento') return 'Objetivo encerrado só pode ser reaberto (em andamento).';
+  if (closed(to) && (result ?? '').trim().length < 10) return 'Registre o resultado (o que aconteceu) para encerrar o objetivo.';
+  return null;
+}
+
+export const ORG_UNIT_KINDS = ['unidade', 'filial', 'diretoria', 'secretaria', 'departamento', 'setor', 'equipe', 'orgao_relacionado'] as const;
+export type OrgUnitKind = (typeof ORG_UNIT_KINDS)[number];
+export const ORG_UNIT_KIND_LABELS: Record<OrgUnitKind, string> = { unidade: 'Unidade', filial: 'Filial', diretoria: 'Diretoria', secretaria: 'Secretaria', departamento: 'Departamento', setor: 'Setor', equipe: 'Equipe', orgao_relacionado: 'Órgão relacionado' };
+/** O novo pai não pode estar abaixo da própria unidade (evita ciclo na hierarquia). */
+export function orgUnitCycle(units: { id: string; parentId: string | null }[], id: string, parentId: string | null) {
+  if (!parentId) return false;
+  if (parentId === id) return true;
+  let cur: string | null = parentId;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur)) { if (cur === id) return true; seen.add(cur); cur = units.find((u) => u.id === cur)?.parentId ?? null; }
+  return false;
+}
+/** Árvore em ordem de exibição (pai antes dos filhos), com profundidade. Unidades com pai inexistente aparecem na raiz. */
+export function orgUnitTree<T extends { id: string; parentId: string | null; name: string }>(units: T[]) {
+  const ids = new Set(units.map((u) => u.id));
+  const kids = (p: string | null) => units.filter((u) => (p === null ? !u.parentId || !ids.has(u.parentId) : u.parentId === p)).sort((a, b) => a.name.localeCompare(b.name));
+  const out: (T & { depth: number })[] = [];
+  const walk = (p: string | null, d: number) => { for (const u of kids(p)) { out.push({ ...u, depth: d }); if (d < 12) walk(u.id, d + 1); } };
+  walk(null, 0);
+  return out;
+}
