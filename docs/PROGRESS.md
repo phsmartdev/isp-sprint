@@ -92,6 +92,43 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Histórico único de interações** (Conta 360 → Acompanhamento): atividades concluídas, e-mails enviados (oportunidades e contratos da conta), pesquisas respondidas e visitas, com filtro por pessoa; "Registrar interação" (tipo, quando, com quem, o que foi conversado). Atividades passam a guardar com quais pessoas da conta foram (tarefas de plays, cadências e sinais também).
 - Migração 0049 (`abm_signals`, `abm_signal_events` append-only, `abm_cadences`, `abm_cadence_tasks`, `activities.stakeholder_ids`). Testes: domínio (4), API (4), E2E (1). Regressão completa: domínio 140, API 210, E2E 55/55.
 
+## Funcionalidade 03 — E-mail corporativo (Gmail) ✅ construída · ⏳ validação real com o Google pendente (2026-10-22)
+- **Situação honesta:** tudo foi construído sobre a Gmail API v1 e o OAuth do Google (endereços oficiais) e testado contra um **servidor do Google simulado** (`apps/api/test/fakeGoogle.ts`). Nada foi validado ainda com o Google de verdade. A API só aceita o simulado fora de produção (`GOOGLE_FAKE_BASE`); em produção usa sempre os endereços reais.
+- **Para validar de verdade:**
+  1. No Google Cloud (mesmo projeto do login com Google), ativar a Gmail API.
+  2. Na tela de consentimento, incluir os escopos `gmail.modify` e `gmail.send` (com `openid email`) e marcar o app como Interno do Workspace.
+  3. Cadastrar o retorno `https://<domínio>/api/v1/mail/oauth/callback`.
+  4. Em Configuração → E-mail corporativo, informar os domínios.
+  5. Conectar uma caixa de teste e conferir leitura, resposta e renovação do acesso.
+- **Caixas:**
+  - Pessoal: só a dona vê; nem a gerência.
+  - Compartilhada: cadastrada e conectada por quem tem Configurações total; vista por quem está nas filas dela, por quem tem acesso total ao E-mail, e pela liderança para as pessoas dos times que lidera.
+  - Só caixas dos domínios da empresa. A conta Google autorizada precisa ser a da caixa.
+  - Os tokens ficam cifrados (AES-256-GCM) e nunca vão para o navegador. Desconectar revoga o acesso no Google e apaga os tokens; as conversas ficam.
+- **Sincronização:**
+  - Primeira busca da janela configurada (1 a 90 dias), depois incremental pelo histórico do Gmail. Se o histórico expirar, refaz a janela sem duplicar.
+  - Roda ao abrir o e-mail (a cada 2 min), em "Sincronizar agora" e na rotina diária.
+  - Cada execução fica registrada (append-only). Acesso revogado no Google deixa a caixa "com erro", pedindo nova conexão.
+  - Aviso instantâneo do Gmail (Pub/Sub) fica para depois da validação.
+- **Conversas:**
+  - Agrupadas pela conversa do Gmail. Mensagens imutáveis, com texto, remetente, destinatários e indicação de anexo (anexo se abre no Gmail).
+  - Ligadas sozinhas à conta do CRM quando todos os endereços externos apontam para a mesma conta (e-mail da conta ou de pessoa da conta). Se houver mais de uma, a conversa fica "Conta a confirmar", com sugestões. Vínculo manual com conta e oportunidade da mesma conta.
+- **Regras de entrada:** condições sobre remetente, domínio, destinatário, assunto e texto. Ações possíveis: fila, prioridade, etiqueta ou arquivar. Ordem editável, teste sem gravar; a primeira que casa vale.
+- **Filas:**
+  - Direcionamento manual, rodízio (quem tem menos conversas abertas) ou dono da conta.
+  - Prazo de primeira resposta em horas, com barra do prazo na lista e "Prazo vencido".
+  - Situações: nova, em atendimento, aguardando cliente, resolvida, arquivada. Responder pelo CRM sai pelo próprio Gmail da caixa, na mesma conversa.
+- **Integrações com o resto do CRM:**
+  - Mensagens das caixas compartilhadas entram no histórico de interações da conta (Conta 360), contam como contato para o sinal "sem contato" do ABM e geram eventos `email_respondido` (minutos até responder, no prazo ou fora) e `email_resolvido`.
+  - 3 indicadores sugeridos: tempo de 1ª resposta, % respondidas no prazo e conversas resolvidas.
+- **Permissões:** novo módulo **E-mail** na matriz de segurança (Vendedor: próprio, Supervisor: equipe, Gerência: total). Filas, regras e caixas compartilhadas exigem Configurações total. Auditoria de configuração, conexão, desconexão e respostas.
+- **Telas:**
+  - E-mail (menu): visões Minhas, Sem responsável, Aguardando 1ª resposta e Todas; filtros por fila, caixa e situação; busca. No celular, lista e conversa aparecem uma de cada vez.
+  - E-mail → Caixas e conexão.
+  - Configuração → E-mail corporativo (Gmail), com a lista do que falta para validar.
+- Migração 0050: `mail_settings`, `mailboxes`, `mail_queues`, `mail_rules`, `mail_threads`, `mail_messages`, `mail_thread_events` e `mail_sync_runs`. As três últimas são append-only. Também cria o módulo `email` na matriz.
+- Testes: domínio (6), API (8, contra o Google simulado), E2E (2). Regressão completa: domínio 146, API 221, E2E 58/58.
+
 ## ABM — Fase 9: indicadores do ABM nas metas ✅ (2026-10-22)
 - **Mesmo motor da Gestão de Times**: os fatos do ABM viram eventos de negócio (módulo ABM) e entram em indicadores, metas, semáforo, scorecards e intervenções sem nada paralelo. Eventos: conta ativada no ABM, stakeholder mapeado (decisor ou outro), influência avaliada (conta o ato de avaliar, nunca o nível), interação concluída com a conta (com ou sem pessoas da conta), play encerrado (com ou sem sucesso), sinal tratado (com horas até tratar e severidade) e oportunidade criada em conta do ABM (valor mensal).
 - Só conta o que aconteceu depois da entrada da conta no ABM (interações e oportunidades). Atividade reaberta ou removida e oportunidade removida invalidam o evento; nada é apagado.

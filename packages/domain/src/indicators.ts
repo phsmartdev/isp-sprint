@@ -19,16 +19,16 @@ export const INDICATOR_UNIT_LABELS: Record<IndicatorUnit, string> = { quantidade
 export const PERIOD_TYPES = ['semana', 'mes', 'trimestre', 'ano', 'personalizado'] as const;
 export type PeriodType = (typeof PERIOD_TYPES)[number];
 export const PERIOD_LABELS: Record<PeriodType, string> = { semana: 'Semanal', mes: 'Mensal', trimestre: 'Trimestral', ano: 'Anual', personalizado: 'Personalizado' };
-export const INDICATOR_CATEGORIES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'qualidade', 'prazos', 'colaboracao'] as const;
+export const INDICATOR_CATEGORIES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'email', 'qualidade', 'prazos', 'colaboracao'] as const;
 export const INDICATOR_CATEGORY_LABELS: Record<(typeof INDICATOR_CATEGORIES)[number], string> = {
-  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', qualidade: 'Qualidade', prazos: 'Prazos', colaboracao: 'Colaboração',
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', email: 'E-mail', qualidade: 'Qualidade', prazos: 'Prazos', colaboracao: 'Colaboração',
 };
 
 /** Medidas sobre os eventos. `peso` = crédito de resultado da pessoa (1 venda dividida meio a meio conta 0,5 para cada). */
 export const MEASURES = ['contagem', 'soma_valor', 'media_valor', 'media_campo'] as const;
 export type Measure = (typeof MEASURES)[number];
 /** Campos numéricos do contexto que podem ser medidos (lista fechada). */
-export const NUMERIC_FIELDS = { minutesToComplete: 'Minutos entre criar e concluir', hoursToDecide: 'Horas para decidir', cycleDays: 'Dias do ciclo (criação → evento)', checklist: 'Itens de checklist', hoursToResolve: 'Horas até tratar' } as const;
+export const NUMERIC_FIELDS = { minutesToComplete: 'Minutos entre criar e concluir', hoursToDecide: 'Horas para decidir', cycleDays: 'Dias do ciclo (criação → evento)', checklist: 'Itens de checklist', hoursToResolve: 'Horas até tratar', minutesToReply: 'Minutos até a primeira resposta' } as const;
 export type NumericField = keyof typeof NUMERIC_FIELDS;
 /** Filtros permitidos (lista fechada; valor sempre parametrizado). */
 export const FILTER_FIELDS = {
@@ -364,6 +364,9 @@ export const SUGGESTED_INDICATORS: (IndicatorDef & { key: string })[] = [
   { key: 'abm_plays_sucesso', name: 'Plays encerrados com sucesso', description: 'Plays que atingiram o critério ÷ plays encerrados.', category: 'abm', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'trimestre', numerator: { event: 'abm_play_concluido', measure: 'contagem', filters: [{ field: 'outcome', op: 'eq', value: 'sucesso' }] }, denominator: { event: 'abm_play_concluido', measure: 'contagem' }, target: 60, weight: 15, minSample: 3 },
   { key: 'abm_tempo_sinal', name: 'Tempo médio para tratar sinais', category: 'abm', calc: 'tempo', unit: 'horas', direction: 'menor', period: 'mes', base: { event: 'abm_sinal_tratado', measure: 'media_campo', field: 'hoursToResolve' }, target: 72, weight: 10, minSample: 3 },
   { key: 'abm_pipeline', name: 'Pipeline gerado em contas do ABM', description: 'Valor mensal das oportunidades criadas em contas do ABM.', category: 'abm', calc: 'valor', unit: 'reais', direction: 'maior', period: 'mes', base: { event: 'abm_oportunidade_gerada', measure: 'soma_valor' }, weight: 10 },
+  { key: 'email_primeira_resposta', name: 'Tempo de primeira resposta no e-mail', description: 'Média, em minutos, entre a chegada e a primeira resposta nas caixas compartilhadas.', category: 'email', calc: 'tempo', unit: 'minutos', direction: 'menor', period: 'mes', base: { event: 'email_respondido', measure: 'media_campo', field: 'minutesToReply' }, target: 240, weight: 15, minSample: 5 },
+  { key: 'email_no_prazo', name: 'E-mails respondidos no prazo', description: 'Primeiras respostas dentro do prazo da fila ÷ primeiras respostas.', category: 'email', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'email_respondido', measure: 'contagem', filters: [{ field: 'outcome', op: 'eq', value: 'no_prazo' }] }, denominator: { event: 'email_respondido', measure: 'contagem' }, target: 90, weight: 15, minSample: 5 },
+  { key: 'email_resolvidas', name: 'Conversas de e-mail resolvidas', category: 'email', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'email_resolvido', measure: 'contagem' }, weight: 10 },
 ];
 
 // ------------------------------------------------------------------ objetivos, cascata e semáforo

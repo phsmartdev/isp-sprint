@@ -289,3 +289,19 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Contexto:** a Fase 9 pede indicadores do ABM em metas, semáforo e intervenções; um painel de metas próprio do ABM duplicaria a Gestão de Times.
 - **Decisão:** o projetor de eventos de negócio ganhou 7 tipos do módulo ABM, derivados de tabelas existentes (eventos do ABM, stakeholders, histórico de influência, atividades, execuções de play, sinais e oportunidades), com chave idempotente e invalidação quando a origem some. A influência entra só como "avaliação feita" — o nível avaliado não vira meta, para não incentivar avaliações infladas. Interações e oportunidades só contam após a entrada da conta no ABM. Indicadores sugeridos usam a mesma definição versionada dos demais.
 - **Consequência:** metas, semáforo, scorecards e intervenções já funcionam para o ABM; os painéis por nível (Fase 10) podem ler desse motor.
+
+## ADR-063 — E-mail corporativo pela Gmail API, com Google simulado até a validação real (22/10/2026)
+- **Contexto:** a Funcionalidade 03 pede o Gmail dentro do CRM, mas o projeto no Google Cloud ainda não tem a Gmail API aprovada. Não podemos declarar funcionando o que não foi executado contra o Google.
+- **Decisão:**
+  - Integração direta com a Gmail API v1 e o OAuth oficiais: acesso offline, escopos `gmail.modify` e `gmail.send`, sincronização incremental por `history.list` e envio por `messages.send` na mesma conversa.
+  - Usa o mesmo cliente OAuth do login com Google, com outro endereço de retorno.
+  - Tokens cifrados no banco. A conta autorizada tem que ser a da caixa, e só domínios da empresa são aceitos.
+  - Para testar, um servidor simulado com o mesmo formato da API, aceito só fora de produção.
+  - Caixa pessoal é privada da dona, inclusive para a gerência.
+  - Mensagens e execuções são append-only.
+  - Vínculo automático com a conta só quando não há dúvida.
+- **Consequência:**
+  - A funcionalidade fica marcada como "validação real pendente" na tela e nos documentos, até conectar uma caixa real.
+  - Sem Pub/Sub, a atualização depende de abrir a tela, do botão e da rotina diária.
+  - Anexos são apenas indicados (abrir no Gmail).
+

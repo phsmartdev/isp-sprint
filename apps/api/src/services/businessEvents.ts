@@ -147,6 +147,18 @@ async function candidates(db: DbOrTx, t: string): Promise<Candidate[]> {
            jsonb_build_object('contactId', o.contact_id, 'priority', a.priority) as context
       from opportunities o join abm_accounts a on a.contact_id = o.contact_id
      where o.tenant_id = ${t} and o.deleted_at is null and o.duplicated_from_id is null and o.created_at >= a.created_at and ${notExists(sql`'abm_oportunidade_gerada:' || o.id`)}`);
+  // E-mail: primeira resposta em caixa compartilhada (com prazo da fila) e conversa resolvida (cada resolução é um fato)
+  await add('email_respondido', 'mail_thread', sql`
+    select 'email_respondido:' || mt.id as key, mt.id as source_id, mt.first_reply_by as owner_id, null::uuid[] as participants, mt.first_reply_at as occurred_at, null::bigint as value_cents, null::int as quantity,
+           case when q.id is null then null when mt.first_reply_at <= mt.first_inbound_at + make_interval(hours => q.sla_hours) then 'no_prazo' else 'fora_prazo' end as outcome,
+           jsonb_build_object('minutesToReply', round(extract(epoch from (mt.first_reply_at - mt.first_inbound_at)) / 60.0), 'priority', mt.priority, 'contactId', mt.contact_id, 'queueId', mt.queue_id) as context
+      from mail_threads mt join mailboxes mb on mb.id = mt.mailbox_id and mb.kind = 'compartilhada' left join mail_queues q on q.id = mt.queue_id
+     where mt.tenant_id = ${t} and mt.first_reply_at is not null and mt.first_inbound_at is not null and mt.first_reply_by is not null and ${notExists(sql`'email_respondido:' || mt.id`)}`);
+  await add('email_resolvido', 'mail_thread', sql`
+    select 'email_resolvido:' || e.id as key, e.thread_id as source_id, e.actor_id as owner_id, null::uuid[] as participants, e.created_at as occurred_at, null::bigint as value_cents, null::int as quantity, mt.priority as outcome,
+           jsonb_build_object('priority', mt.priority, 'contactId', mt.contact_id, 'queueId', mt.queue_id) as context
+      from mail_thread_events e join mail_threads mt on mt.id = e.thread_id join mailboxes mb on mb.id = mt.mailbox_id and mb.kind = 'compartilhada'
+     where e.tenant_id = ${t} and e.type = 'situacao' and e.payload->>'to' = 'resolvida' and e.actor_id is not null and ${notExists(sql`'email_resolvido:' || e.id`)}`);
   // projetos
   const msKey = sql`'marco_concluido:' || m.id || ':' || (extract(epoch from m.completed_at) * 1000)::bigint`;
   await add('marco_concluido', 'project_milestone', sql`

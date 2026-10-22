@@ -175,6 +175,12 @@ export const abmFollowupRoutes = [
       const emails = sid ? { rows: [] } : await app.db.execute<{ id: string; subject: string; to_address: string; at: string; kind: string; by: string | null }>(sql`
         select e.id, e.subject, e.to_address, e.created_at as at, e.kind, u.name as by from email_messages e left join users u on u.id = e.created_by
         where e.status = 'enviado' and (e.opportunity_id in (select id from opportunities where contact_id = ${params.id}) or e.contract_id in (select id from contracts where contact_id = ${params.id})) order by e.created_at desc limit 100`);
+      // e-mails do Gmail ligados à conta: caixas compartilhadas e a caixa pessoal de quem está vendo
+      const gmail = await app.db.execute<{ id: string; at: string; subject: string; direction: string; from_addr: string; from_name: string | null; snippet: string | null; by: string | null }>(sql`
+        select m.id, m.sent_at as at, m.subject, m.direction, m.from_addr, m.from_name, m.snippet, u.name as by from mail_messages m join mail_threads t on t.id = m.thread_id join mailboxes b on b.id = m.mailbox_id left join users u on u.id = m.sent_by
+        where t.contact_id = ${params.id} and (b.kind = 'compartilhada' or b.owner_id = ${auth.userId})
+        ${sid ? sql`and exists (select 1 from account_stakeholders st join people p on p.id = st.person_id where st.id = ${sid} and p.email is not null and (lower(p.email) = m.from_addr or lower(p.email) = any(m.to_addrs) or lower(p.email) = any(m.cc_addrs)))` : sql``}
+        order by m.sent_at desc limit 100`);
       const surveys = await app.db.execute<{ id: string; at: string; survey: string; nps: number | null; person: string | null }>(sql`
         select r.id, r.created_at as at, sv.name as survey, r.nps_score as nps, p.name as person from survey_responses r join surveys sv on sv.id = r.survey_id left join account_stakeholders st on st.id = r.stakeholder_id left join people p on p.id = st.person_id
         where r.contact_id = ${params.id} ${sid ? sql`and r.stakeholder_id = ${sid}` : sql``} order by r.created_at desc limit 50`);
@@ -185,6 +191,7 @@ export const abmFollowupRoutes = [
       const items = [
         ...acts.rows.map((a) => ({ id: `a:${a.id}`, source: 'atividade' as const, kind: a.type, title: a.title, text: a.result ?? (a.category === 'Interação registrada' ? a.notes : null), at: a.at, by: a.owner, people: (a.stakeholder_ids ?? []).map((x) => names.get(x)).filter(Boolean), activityId: a.id, category: a.category })),
         ...emails.rows.map((e) => ({ id: `e:${e.id}`, source: 'email' as const, kind: 'email', title: e.subject, text: `Para ${e.to_address}`, at: e.at, by: e.by, people: [], activityId: null, category: e.kind })),
+        ...gmail.rows.map((m) => ({ id: `g:${m.id}`, source: 'gmail' as const, kind: 'email', title: m.subject || '(sem assunto)', text: m.direction === 'entrada' ? `De ${m.from_name ?? m.from_addr}: ${m.snippet ?? ''}` : `Enviado: ${m.snippet ?? ''}`, at: m.at, by: m.by, people: [], activityId: null, category: m.direction })),
         ...surveys.rows.map((r) => ({ id: `p:${r.id}`, source: 'pesquisa' as const, kind: 'pesquisa', title: `Respondeu "${r.survey}"`, text: r.nps !== null ? `NPS ${r.nps}` : null, at: r.at, by: null, people: r.person ? [r.person] : [], activityId: null, category: null })),
         ...visits.rows.map((v) => ({ id: `v:${v.id}`, source: 'visita' as const, kind: 'visita', title: `Visita: ${v.type}`, text: v.summary, at: v.at, by: v.by, people: [], activityId: null, category: null })),
       ].sort((x, y) => String(y.at).localeCompare(String(x.at)));

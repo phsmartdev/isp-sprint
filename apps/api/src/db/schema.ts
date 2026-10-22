@@ -90,7 +90,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -3563,4 +3563,187 @@ export const abmCadenceTasks = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('abm_cadence_tasks_uq').on(t.cadenceId, t.dueOn) }),
+);
+
+// --------------------------------------------------------------- e-mail corporativo (Gmail / Google Workspace)
+
+/** Configuração do e-mail por empresa: domínios que podem ser conectados e quanto buscar na primeira sincronização. */
+export const mailSettings = pgTable('mail_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  allowedDomains: text('allowed_domains').array().notNull().default(sql`'{}'::text[]`),
+  syncDays: integer('sync_days').notNull().default(30),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});
+
+/** Caixa do Gmail. Pessoal = só a dona vê. Compartilhada = vista por quem está nas filas dela (ou com acesso total). Tokens cifrados. */
+export const mailboxes = pgTable(
+  'mailboxes',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    kind: text('kind').notNull(),
+    address: text('address').notNull(),
+    displayName: text('display_name'),
+    ownerId: uuid('owner_id').references(() => users.id),
+    status: text('status').notNull().default('desconectada'),
+    refreshTokenEnc: text('refresh_token_enc'),
+    accessTokenEnc: text('access_token_enc'),
+    accessExpiresAt: ts('access_expires_at'),
+    grantedScopes: text('granted_scopes'),
+    historyId: text('history_id'),
+    lastSyncAt: ts('last_sync_at'),
+    lastError: text('last_error'),
+    connectedBy: uuid('connected_by').references(() => users.id),
+    connectedAt: ts('connected_at'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    addrUq: uniqueIndex('mailboxes_addr_uq').on(t.tenantId, t.address),
+    kindCk: check('mailboxes_kind_ck', inList('kind', ['pessoal', 'compartilhada'])),
+    statusCk: check('mailboxes_status_ck', inList('status', ['desconectada', 'conectada', 'erro', 'pausada'])),
+  }),
+);
+
+export const mailQueues = pgTable(
+  'mail_queues',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    mailboxId: uuid('mailbox_id').references(() => mailboxes.id),
+    routing: text('routing').notNull().default('rodizio'),
+    slaHours: integer('sla_hours').notNull().default(8),
+    members: uuid('members').array().notNull().default(sql`'{}'::uuid[]`),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    idx: index('mail_queues_idx').on(t.tenantId),
+    routingCk: check('mail_queues_routing_ck', inList('routing', ['manual', 'rodizio', 'carteira'])),
+  }),
+);
+
+export const mailRules = pgTable(
+  'mail_rules',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    mailboxId: uuid('mailbox_id').references(() => mailboxes.id),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    def: jsonb('def').$type<Record<string, unknown>>().notNull(),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({ idx: index('mail_rules_idx').on(t.tenantId, t.position) }),
+);
+
+export const mailThreads = pgTable(
+  'mail_threads',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    mailboxId: uuid('mailbox_id').notNull().references(() => mailboxes.id),
+    gmailThreadId: text('gmail_thread_id').notNull(),
+    subject: text('subject').notNull().default(''),
+    snippet: text('snippet'),
+    participants: text('participants').array().notNull().default(sql`'{}'::text[]`),
+    lastMessageAt: ts('last_message_at').notNull(),
+    firstInboundAt: ts('first_inbound_at'),
+    firstReplyAt: ts('first_reply_at'),
+    firstReplyBy: uuid('first_reply_by').references(() => users.id),
+    status: text('status').notNull().default('nova'),
+    queueId: uuid('queue_id').references(() => mailQueues.id),
+    assigneeId: uuid('assignee_id').references(() => users.id),
+    assignedAt: ts('assigned_at'),
+    priority: text('priority').notNull().default('normal'),
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+    ruleId: uuid('rule_id').references(() => mailRules.id),
+    contactId: uuid('contact_id').references(() => contacts.id),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    contractId: uuid('contract_id'),
+    linkSource: text('link_source'),
+    linkAmbiguous: boolean('link_ambiguous').notNull().default(false),
+    unread: boolean('unread').notNull().default(true),
+    resolvedAt: ts('resolved_at'),
+    resolvedBy: uuid('resolved_by').references(() => users.id),
+    createdAt: createdAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    gUq: uniqueIndex('mail_threads_gmail_uq').on(t.mailboxId, t.gmailThreadId),
+    listIdx: index('mail_threads_list_idx').on(t.tenantId, t.status, t.lastMessageAt),
+    contactIdx: index('mail_threads_contact_idx').on(t.tenantId, t.contactId),
+    statusCk: check('mail_threads_status_ck', inList('status', ['nova', 'em_atendimento', 'aguardando_cliente', 'resolvida', 'arquivada'])),
+    prioCk: check('mail_threads_prio_ck', inList('priority', ['alta', 'normal', 'baixa'])),
+  }),
+);
+
+/** Cada mensagem sincronizada (ou enviada pelo CRM). Imutável. */
+export const mailMessages = pgTable(
+  'mail_messages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    threadId: uuid('thread_id').notNull().references(() => mailThreads.id),
+    mailboxId: uuid('mailbox_id').notNull().references(() => mailboxes.id),
+    gmailId: text('gmail_id').notNull(),
+    rfcMessageId: text('rfc_message_id'),
+    direction: text('direction').notNull(),
+    fromAddr: text('from_addr').notNull(),
+    fromName: text('from_name'),
+    toAddrs: text('to_addrs').array().notNull().default(sql`'{}'::text[]`),
+    ccAddrs: text('cc_addrs').array().notNull().default(sql`'{}'::text[]`),
+    subject: text('subject').notNull().default(''),
+    sentAt: ts('sent_at').notNull(),
+    snippet: text('snippet'),
+    bodyText: text('body_text'),
+    hasAttachments: boolean('has_attachments').notNull().default(false),
+    sentBy: uuid('sent_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    gUq: uniqueIndex('mail_messages_gmail_uq').on(t.mailboxId, t.gmailId),
+    threadIdx: index('mail_messages_thread_idx').on(t.threadId, t.sentAt),
+    dirCk: check('mail_messages_dir_ck', inList('direction', ['entrada', 'saida'])),
+  }),
+);
+
+export const mailThreadEvents = pgTable(
+  'mail_thread_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    threadId: uuid('thread_id').notNull().references(() => mailThreads.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('mail_thread_events_idx').on(t.threadId, t.createdAt) }),
+);
+
+/** Registro de cada sincronização e conexão (auditoria técnica). */
+export const mailSyncRuns = pgTable(
+  'mail_sync_runs',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    mailboxId: uuid('mailbox_id').notNull().references(() => mailboxes.id),
+    kind: text('kind').notNull(),
+    ok: boolean('ok').notNull(),
+    fetched: integer('fetched').notNull().default(0),
+    stored: integer('stored').notNull().default(0),
+    error: text('error'),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('mail_sync_runs_idx').on(t.mailboxId, t.createdAt) }),
 );

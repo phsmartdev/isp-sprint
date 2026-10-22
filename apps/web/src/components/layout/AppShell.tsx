@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge } from 'lucide-react';
+  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail } from 'lucide-react';
 import type { Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -31,6 +31,7 @@ const NAV: NavEntry[] = [
   ] },
   { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
+  { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
     { to: '/leads', label: 'Leads', module: 'leads' },
     { to: '/abm', label: 'ABM', module: 'clientes' },
@@ -66,6 +67,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/contract-templates', label: 'Modelos de contrato', admin: true },
   { to: '/settings/instructions', label: 'Modelo de instrução', admin: true },
   { to: '/settings/email', label: 'E-mail e alertas', admin: true },
+  { to: '/settings/gmail', label: 'E-mail corporativo (Gmail)', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
   { to: '/settings/contracts', label: 'Contratos', admin: true },

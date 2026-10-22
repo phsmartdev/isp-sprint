@@ -351,6 +351,13 @@
       "when": 1792682882664,
       "tag": "0049_abm_acompanhamento",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792692951468,
+      "tag": "0050_gmail",
+      "breakpoints": true
     }
   ]
 }

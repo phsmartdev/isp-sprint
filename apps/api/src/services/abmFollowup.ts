@@ -16,7 +16,7 @@ export async function syncAbmSignals(db: DbOrTx, tenantId: string, today: string
   if (!accs.length) return { opened: 0, resolved: 0 };
   const cids = accs.map((a) => a.contactId);
   const [inter, people, infl, units, runs, ctrs, opps, objs, nps] = await Promise.all([
-    db.execute<{ contact_id: string; d: string }>(sql`select contact_id, max(completed_at)::date::text as d from activities where contact_id in (${ids(cids)}) and deleted_at is null and status = 'concluida' group by contact_id`),
+    db.execute<{ contact_id: string; d: string }>(sql`select contact_id, max(d)::date::text as d from (select contact_id, completed_at as d from activities where contact_id in (${ids(cids)}) and deleted_at is null and status = 'concluida' union all select t.contact_id, t.last_message_at from mail_threads t join mailboxes b on b.id = t.mailbox_id and b.kind = 'compartilhada' where t.contact_id in (${ids(cids)})) x group by contact_id`),
     db.select({ id: s.accountStakeholders.id, contactId: s.accountStakeholders.contactId, name: s.people.name, next: s.accountStakeholders.nextInteractionOn, roles: s.accountStakeholders.roles, rel: s.accountStakeholders.relationshipStrength, stance: s.accountStakeholders.stance, unitId: s.accountStakeholders.unitId })
       .from(s.accountStakeholders).innerJoin(s.people, eq(s.people.id, s.accountStakeholders.personId)).where(and(inArray(s.accountStakeholders.contactId, cids), eq(s.accountStakeholders.active, true))),
     db.select({ st: s.stakeholderInfluence.stakeholderId, level: s.stakeholderInfluence.level }).from(s.stakeholderInfluence).where(and(eq(s.stakeholderInfluence.tenantId, tenantId), eq(s.stakeholderInfluence.contextType, 'conta'))),

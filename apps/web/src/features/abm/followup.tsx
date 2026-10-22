@@ -115,7 +115,7 @@ export function SignalsCenter() {
 
 // ---------------------------------------------------------------- Conta 360 → Acompanhamento
 type Cadence = { id: string; title: string; type: CadenceType; everyDays: number; active: boolean; startOn: string; ownerName: string; personName: string | null; lastDoneOn: string | null; openTaskId: string | null; openDueOn: string | null; nextDueOn: string; doneCount: number; rowVersion: number };
-type Interaction = { id: string; source: 'atividade' | 'email' | 'pesquisa' | 'visita'; kind: string; title: string; text: string | null; at: string; by: string | null; people: string[]; activityId: string | null };
+type Interaction = { id: string; source: 'atividade' | 'email' | 'gmail' | 'pesquisa' | 'visita'; kind: string; title: string; text: string | null; at: string; by: string | null; people: string[]; activityId: string | null };
 const KIND_ICON: Record<string, typeof Phone> = { ligacao: Phone, email: Mail, whatsapp: MessageSquare, reuniao: Users, visita: Users };
 
 export function AccountFollowup({ contactId }: { contactId: string }) {
@@ -176,7 +176,7 @@ export function AccountFollowup({ contactId }: { contactId: string }) {
               <span className="absolute -left-[31px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-soft text-primary"><Icon className="h-3 w-3" aria-hidden /></span>
               <p><b className="text-ink">{i.title}</b>{!!i.people.length && <span className="text-muted"> · com {i.people.join(', ')}</span>}</p>
               {i.text && <p className="whitespace-pre-line text-text">{i.text}</p>}
-              <p className="text-xs text-muted">{fmtDateTime(i.at)}{i.by && ` · ${i.by}`} · {i.source === 'atividade' ? 'atividade' : i.source}{i.activityId && <> · <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setTask(i.activityId)}>abrir</button></>}</p>
+              <p className="text-xs text-muted">{fmtDateTime(i.at)}{i.by && ` · ${i.by}`} · {i.source === 'gmail' ? 'Gmail' : i.source}{i.activityId && <> · <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setTask(i.activityId)}>abrir</button></>}</p>
             </li>
           ); })}</ol>
         )}

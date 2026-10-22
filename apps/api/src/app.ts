@@ -45,6 +45,7 @@ import { abmPlayRoutes } from './routes/abmPlays';
 import { journeyTrailRoutes } from './routes/journeyTrail';
 import { abmLinkRoutes } from './routes/abmLinks';
 import { surveyRoutes } from './routes/surveys';
+import { mailRoutes } from './routes/mail';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -172,6 +173,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...journeyTrailRoutes,
     ...abmLinkRoutes,
     ...surveyRoutes,
+    ...mailRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,

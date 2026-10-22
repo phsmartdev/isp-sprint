@@ -1,3 +1,5 @@
+import { EmailPage, MailboxesPage } from './pages/email/Email';
+import { AdminGmailSettings } from './pages/admin/GmailSettings';
 import { AbmPage } from './pages/marketing/Abm';
 import { Abm360Page } from './pages/marketing/Abm360';
 import { ProductPage } from './pages/product/Product';
@@ -107,6 +109,8 @@ export function App() {
         <Route path="times/rituais/reunioes/:id" element={<Gate module="resultados"><MeetingPage /></Gate>} />
         <Route path="times/decisoes" element={<Gate module="resultados"><DecisionsPage /></Gate>} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />
+        <Route path="email" element={<Gate module="email"><EmailPage /></Gate>} />
+        <Route path="email/caixas" element={<Gate module="email"><MailboxesPage /></Gate>} />
         <Route path="abm" element={<Gate module="clientes"><AbmPage /></Gate>} />
         <Route path="abm/contas/:id" element={<Gate module="clientes"><Abm360Page /></Gate>} />
         <Route path="produto" element={<ProductPage />} />
@@ -138,6 +142,7 @@ export function App() {
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
           <Route path="resultados" element={<AdminResultsSettings />} />
           <Route path="abm" element={<AdminAbmSettings />} />
+          <Route path="gmail" element={<AdminGmailSettings />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

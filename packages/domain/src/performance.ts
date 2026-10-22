@@ -8,10 +8,10 @@ import { DEFAULT_INTERVENTION_CONFIG, validateInterventionConfig, type Intervent
  * calculados por regras versionadas, sem dupla contagem (créditos diretos somam 100%).
  */
 
-export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm'] as const;
+export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'email'] as const;
 export type EventModule = (typeof EVENT_MODULES)[number];
 export const EVENT_MODULE_LABELS: Record<EventModule, string> = {
-  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM',
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', email: 'E-mail',
 };
 
 export type EventTypeDef = {
@@ -29,6 +29,8 @@ export type EventTypeDef = {
 export const BUSINESS_EVENT_TYPES = [
   { key: 'lead_qualificado', label: 'Lead qualificado (virou oportunidade)', module: 'comercial', source: 'Lead convertido em oportunidade', owner: 'Responsável pelo lead' },
   { key: 'oportunidade_criada', label: 'Oportunidade criada', module: 'comercial', value: 'mensal_cents', source: 'Cadastro da oportunidade', owner: 'Responsável pela oportunidade' },
+  { key: 'email_respondido', label: 'Conversa de e-mail respondida', module: 'email', source: 'Primeira resposta da empresa a uma conversa de caixa compartilhada (minutos até responder; prioridade; resultado = no prazo ou fora)', owner: 'Quem respondeu' },
+  { key: 'email_resolvido', label: 'Conversa de e-mail resolvida', module: 'email', source: 'Conversa marcada como resolvida', owner: 'Quem resolveu' },
   { key: 'proposta_enviada', label: 'Proposta enviada', module: 'comercial', source: 'Primeiro envio da proposta por e-mail ou WhatsApp (uma vez por oportunidade)', owner: 'Responsável pela oportunidade' },
   { key: 'negociacao_ganha', label: 'Negociação ganha', module: 'comercial', value: 'mensal_cents', source: 'Oportunidade movida para Ganha (reabrir invalida)', owner: 'Responsável pela oportunidade' },
   { key: 'negociacao_perdida', label: 'Negociação perdida', module: 'comercial', value: 'mensal_cents', source: 'Oportunidade movida para Perdida (reabrir invalida)', owner: 'Responsável pela oportunidade' },

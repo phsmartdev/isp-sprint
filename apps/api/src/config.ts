@@ -36,7 +36,26 @@ export type Config = {
   loginRateLimitPerMinute: number;
   /** Login com Google (OAuth). Sem as duas variáveis, o botão não aparece. */
   google: { clientId: string; clientSecret: string; allowedDomains: string[] } | null;
+  /**
+   * E-mail corporativo (Gmail API). Usa o mesmo cliente OAuth do login com Google, com os escopos do Gmail.
+   * Os endereços do Google só podem ser trocados fora de produção (servidor simulado nos testes).
+   */
+  gmail: { clientId: string; clientSecret: string; simulated: boolean; endpoints: GoogleEndpoints } | null;
 };
+export type GoogleEndpoints = { auth: string; token: string; userinfo: string; revoke: string; gmail: string };
+export const REAL_GOOGLE: GoogleEndpoints = {
+  auth: 'https://accounts.google.com/o/oauth2/v2/auth',
+  token: 'https://oauth2.googleapis.com/token',
+  userinfo: 'https://openidconnect.googleapis.com/v1/userinfo',
+  revoke: 'https://oauth2.googleapis.com/revoke',
+  gmail: 'https://gmail.googleapis.com/gmail/v1',
+};
+function gmailConfig(env: NodeJS.ProcessEnv, isProd: boolean): Config['gmail'] {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return null;
+  const fake = !isProd && env.GOOGLE_FAKE_BASE ? env.GOOGLE_FAKE_BASE.replace(/\/$/, '') : null;
+  const endpoints = fake ? { auth: `${fake}/o/oauth2/v2/auth`, token: `${fake}/token`, userinfo: `${fake}/v1/userinfo`, revoke: `${fake}/revoke`, gmail: `${fake}/gmail/v1` } : REAL_GOOGLE;
+  return { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, simulated: !!fake, endpoints };
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const e = Env.parse(vercelDefaults(env));
@@ -59,5 +78,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     google: env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
       ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, allowedDomains: (env.GOOGLE_ALLOWED_DOMAINS ?? '').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean) }
       : null,
+    gmail: gmailConfig(env, isProd),
   };
 }

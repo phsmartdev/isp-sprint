@@ -72,6 +72,8 @@ export const dataAdminRoutes = [
         if (body.scopes.includes('comercial') || body.scopes.includes('clientes')) {
           // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
+          // e-mails ficam (são correspondência real); só perdem o vínculo com contas e oportunidades apagadas
+          await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(eq(s.mailThreads.tenantId, t));
           // ABM (depende de contatos)
           for (const tbl of [s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
           // Sucesso do Cliente (depende de contatos, contratos, oportunidades e atividades)
