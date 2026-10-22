@@ -365,6 +365,13 @@
       "when": 1792708415258,
       "tag": "0051_modulos",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792710920410,
+      "tag": "0052_projetos_governanca",
+      "breakpoints": true
     }
   ]
 }

@@ -12,14 +12,16 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Se
 import { PageHeader } from '../../components/layout/PageHeader';
 import { HealthChip, LinkChips, NewProjectDialog, ProgressBar, STATUS_TONE, type ProjectRow } from '../../features/projects/shared';
 import { FitText } from '../../components/ui/FitText';
+import { FrontsPanel } from '../../features/projects/fronts';
 
-type View = 'ativos' | 'concluido' | 'todos';
+type View = 'painel' | 'ativos' | 'concluido' | 'todos';
 
 export function ProjectsPage() {
-  const [u, setU] = useUrlState({ v: 'ativos', mine: '', kind: '', q: '' });
+  const [u, setU] = useUrlState({ v: 'ativos', mine: '', kind: '', q: '', tag: '' });
   const [creating, setCreating] = useState(false);
   const q = useQuery({
     queryKey: ['projects', u],
+    enabled: u.v !== 'painel',
     placeholderData: keepPreviousData,
     queryFn: () => api<{ items: ProjectRow[] }>(`/projects${qs({ status: u.v === 'todos' ? undefined : u.v, mine: u.mine ? 'true' : undefined, kind: u.kind || undefined, q: u.q || undefined })}`),
   });
@@ -30,7 +32,8 @@ export function ProjectsPage() {
   return (
     <div>
       <PageHeader icon={<FolderKanban />} title="Projetos" subtitle="Implantações, execuções de ata e iniciativas internas, com etapas, marcos e equipe." actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Novo projeto</Button>} />
-      <Tabs label="Situação" value={u.v as View} onChange={(v) => setU({ v })} tabs={[{ key: 'ativos', label: 'Ativos' }, { key: 'concluido', label: 'Concluídos' }, { key: 'todos', label: 'Todos' }]} className="mb-4" />
+      <Tabs label="Situação" value={u.v as View} onChange={(v) => setU({ v })} tabs={[{ key: 'painel', label: 'Painel das frentes' }, { key: 'ativos', label: 'Ativos' }, { key: 'concluido', label: 'Concluídos' }, { key: 'todos', label: 'Todos' }]} className="mb-4" />
+      {u.v === 'painel' ? <FrontsPanel tag={u.tag} onTag={(tag) => setU({ tag })} /> : <>
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <FormField label="Buscar" htmlFor="pj-q"><Input id="pj-q" className="w-64" value={u.q} onChange={(e) => setU({ q: e.target.value })} placeholder="Nome do projeto" /></FormField>
         <FormField label="Tipo" htmlFor="pj-k"><Select id="pj-k" value={u.kind} onChange={(e) => setU({ kind: e.target.value })}><option value="">Todos</option>{PROJECT_KINDS.map((k) => <option key={k} value={k}>{PROJECT_KIND_LABELS[k]}</option>)}</Select></FormField>
@@ -68,6 +71,7 @@ export function ProjectsPage() {
           </div>
         )}
       </section>
+      </>}
       <NewProjectDialog open={creating} onClose={() => setCreating(false)} />
     </div>
   );
