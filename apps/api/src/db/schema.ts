@@ -2203,6 +2203,10 @@ export const projectMilestones = pgTable(
     completedBy: uuid('completed_by').references(() => users.id),
     notes: text('notes'),
     position: integer('position').notNull().default(0),
+    acceptanceCriteria: text('acceptance_criteria'),
+    requiresHomologation: boolean('requires_homologation').notNull().default(false),
+    homologatedAt: ts('homologated_at'),
+    homologatedBy: uuid('homologated_by').references(() => users.id),
     deletedAt: ts('deleted_at'),
   },
   (t) => ({ idx: index('project_milestones_idx').on(t.projectId, t.dueOn) }),
@@ -2939,6 +2943,9 @@ export const impediments = pgTable(
     orgUnitId: uuid('org_unit_id'),
     meetingId: uuid('meeting_id').references(() => ritualMeetings.id),
     interventionId: uuid('intervention_id').references(() => interventions.id),
+    projectId: uuid('project_id').references(() => projects.id),
+    milestoneId: uuid('milestone_id').references(() => projectMilestones.id),
+    taskId: uuid('task_id').references(() => activities.id),
     dueOn: date('due_on', { mode: 'string' }),
     resolution: text('resolution'),
     resolvedBy: uuid('resolved_by').references(() => users.id),
@@ -2950,6 +2957,7 @@ export const impediments = pgTable(
   },
   (t) => ({
     idx: index('impediments_idx').on(t.tenantId, t.status, t.ownerId),
+    projectIdx: index('impediments_project_idx').on(t.projectId),
     statusCk: check('impediments_status_ck', inList('status', ['aberto', 'em_tratamento', 'removido', 'aceito'])),
     sevCk: check('impediments_severity_ck', inList('severity', ['alta', 'media', 'baixa'])),
   }),
@@ -3802,4 +3810,53 @@ export const actionPolicies = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.roleId, t.action] }) }),
+);
+
+// --------------------------------------------------------------- Etapa 1 · Fase 2: homologação de marcos e riscos de projeto
+
+/** Cada decisão de homologação (homologado ou reprovado), com quem e a evidência. Append-only. */
+export const milestoneHomologations = pgTable(
+  'milestone_homologations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    milestoneId: uuid('milestone_id').notNull().references(() => projectMilestones.id),
+    decision: text('decision').notNull(),
+    note: text('note').notNull(),
+    actorId: uuid('actor_id').notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('milestone_homologations_idx').on(t.milestoneId, t.createdAt),
+    decCk: check('milestone_homologations_decision_ck', inList('decision', ['homologado', 'reprovado'])),
+  }),
+);
+
+export const projectRisks = pgTable(
+  'project_risks',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    projectId: uuid('project_id').notNull().references(() => projects.id),
+    title: text('title').notNull(),
+    description: text('description'),
+    probability: text('probability').notNull(),
+    impact: text('impact').notNull(),
+    mitigation: text('mitigation'),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    status: text('status').notNull().default('aberto'),
+    reviewOn: date('review_on', { mode: 'string' }),
+    closedAt: ts('closed_at'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    idx: index('project_risks_idx').on(t.projectId, t.status),
+    probCk: check('project_risks_prob_ck', inList('probability', ['baixa', 'media', 'alta'])),
+    impCk: check('project_risks_impact_ck', inList('impact', ['baixo', 'medio', 'alto'])),
+    statusCk: check('project_risks_status_ck', inList('status', ['aberto', 'em_mitigacao', 'ocorrido', 'encerrado'])),
+  }),
 );

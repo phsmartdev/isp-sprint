@@ -17,9 +17,10 @@ import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, Loading
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { TaskDrawer } from '../../features/tasks/TaskDrawer';
+import { HomologationDialog, RisksAndImpediments } from '../../features/projects/governance';
 import { HealthChip, LinkChips, PRIORITY_LABELS, ProgressBar, STATUS_TONE, type Milestone, type ProjectDetail, type Stage, type Task } from '../../features/projects/shared';
 
-type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'equipe' | 'documentos' | 'historico';
+type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'riscos' | 'equipe' | 'documentos' | 'historico';
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 const PRIO_TONE = { baixa: 'neutral', media: 'sky', alta: 'red' } as const;
 
@@ -71,19 +72,20 @@ export function ProjectDetailPage() {
             </div>
           )}
         </div>
-        <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 text-sm md:grid-cols-5">
+        <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 text-sm md:grid-cols-6">
           <div><dt className="text-xs text-muted">Responsável</dt><dd className="font-semibold text-ink">{p.ownerName}</dd></div>
           <div><dt className="text-xs text-muted">Início</dt><dd className="num font-semibold text-ink">{fmtDate(p.startOn)}</dd></div>
           <div><dt className="text-xs text-muted">Prazo final</dt><dd className={clsx('num font-semibold', p.dueOn && p.dueOn < todayIso() && p.status !== 'concluido' ? 'text-danger' : 'text-ink')}>{p.dueOn ? fmtDate(p.dueOn) : '—'}</dd></div>
           <div><dt className="text-xs text-muted">Tarefas</dt><dd className="num font-semibold text-ink">{open} em aberto · {p.progress.lateTasks} atrasada(s)</dd></div>
           <div><dt className="text-xs text-muted">Progresso</dt><dd><ProgressBar p={p.progress} /></dd></div>
+          {p.milestones.some((m) => m.requiresHomologation) && <div><dt className="text-xs text-muted">Marcos homologados</dt><dd className="num font-semibold text-ink">{p.milestones.filter((m) => m.homologatedAt).length} de {p.milestones.filter((m) => m.requiresHomologation).length}</dd></div>}
         </dl>
         {!!p.progress.reasons.length && p.progress.health !== 'em_dia' && <p className="mt-3 text-sm text-muted">Por que: {p.progress.reasons.join('; ')}.</p>}
       </header>
 
       <Tabs label="Visões do projeto" value={u.t as TabKey} onChange={(t) => setU({ t }, { resetPage: false })} tabs={[
         { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' }, { key: 'responsavel', label: 'Por responsável' },
-        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'historico', label: 'Histórico' },
+        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'riscos', label: 'Riscos e impedimentos' }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'historico', label: 'Histórico' },
       ]} />
 
       {['quadro', 'lista', 'calendario', 'linha', 'responsavel'].includes(u.t) && p.can.work && (
@@ -99,6 +101,7 @@ export function ProjectDetailPage() {
       {u.t === 'responsavel' && <ByOwner p={p} onOpen={openTask} />}
       {u.t === 'documentos' && <ProjectFiles p={p} />}
       {u.t === 'marcos' && <Milestones p={p} />}
+      {u.t === 'riscos' && <RisksAndImpediments projectId={p.id} />}
       {u.t === 'equipe' && <Team p={p} />}
       {u.t === 'historico' && <History id={p.id} />}
 
@@ -350,8 +353,11 @@ function Milestones({ p }: { p: ProjectDetail }) {
   const toast = useToast();
   const refresh = useRefresh(p.id);
   const [edit, setEdit] = useState<Milestone | 'new' | null>(null);
-  const [f, setF] = useState({ name: '', dueOn: '', notes: '' });
-  const openEdit = (m: Milestone | 'new') => { setEdit(m); setF(m === 'new' ? { name: '', dueOn: '', notes: '' } : { name: m.name, dueOn: m.dueOn ?? '', notes: m.notes ?? '' }); };
+  const [f, setF] = useState({ name: '', dueOn: '', notes: '', acceptanceCriteria: '', requiresHomologation: false });
+  const [hom, setHom] = useState<Milestone | null>(null);
+  const { can: canLevel } = useAuth();
+  const canHomologate = p.can.manage || canLevel('projetos', 'total');
+  const openEdit = (m: Milestone | 'new') => { setEdit(m); setF(m === 'new' ? { name: '', dueOn: '', notes: '', acceptanceCriteria: '', requiresHomologation: false } : { name: m.name, dueOn: m.dueOn ?? '', notes: m.notes ?? '', acceptanceCriteria: m.acceptanceCriteria ?? '', requiresHomologation: m.requiresHomologation }); };
   const mut = useMutation({
     mutationFn: ({ m, body }: { m: Milestone | 'new'; body: Record<string, unknown> }) => (m === 'new' ? api(`/projects/${p.id}/milestones`, { method: 'POST', body }) : api(`/projects/${p.id}/milestones/${m.id}`, { method: 'PATCH', body })),
     onSuccess: () => { refresh(); setEdit(null); },
@@ -361,7 +367,7 @@ function Milestones({ p }: { p: ProjectDetail }) {
   return (
     <section className="card overflow-hidden">
       <div className="flex items-center justify-between gap-3 p-4">
-        <div><h2 className="text-lg font-bold text-ink">Marcos</h2><p className="text-sm text-muted">Entregas que marcam o avanço. Um marco só é atingido quando as tarefas ligadas a ele estão concluídas.</p></div>
+        <div><h2 className="text-lg font-bold text-ink">Marcos</h2><p className="text-sm text-muted">Entregas que marcam o avanço. Um marco só é atingido quando as tarefas ligadas a ele estão concluídas. Marcos com homologação só contam no progresso depois do aceite de quem não executou.</p></div>
         {p.can.manage && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => openEdit('new')}>Novo marco</Button>}
       </div>
       {!p.milestones.length ? <div className="border-t border-line"><EmptyState title="Nenhum marco" /></div> : (
@@ -373,9 +379,10 @@ function Milestones({ p }: { p: ProjectDetail }) {
             return (
               <li key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <Diamond className={clsx('h-5 w-5 shrink-0 fill-current', m.completedAt ? 'text-success' : late ? 'text-danger' : 'text-purple')} aria-hidden />
-                <div className="min-w-0 flex-1"><p className="font-semibold text-ink">{m.name}</p><p className="text-xs text-muted">{done} de {tasks.length} tarefa(s) concluída(s){m.notes ? ` · ${m.notes}` : ''}</p></div>
+                <div className="min-w-0 flex-1"><p className="font-semibold text-ink">{m.name}</p><p className="text-xs text-muted">{done} de {tasks.length} tarefa(s) concluída(s){m.notes ? ` · ${m.notes}` : ''}</p>{m.acceptanceCriteria && <p className="mt-1 max-w-3xl text-xs"><span className="font-semibold text-ink">Critério de aceite:</span> {m.acceptanceCriteria}</p>}</div>
                 <span className={clsx('num text-sm', late ? 'font-semibold text-danger' : 'text-ink')}><CalendarDays className="mr-1 inline h-4 w-4" aria-hidden />{m.dueOn ? fmtDate(m.dueOn) : 'sem data'}</span>
-                {m.completedAt ? <Chip tone="green">Atingido em {fmtDate(m.completedAt)}</Chip> : late ? <Chip tone="red">Vencido</Chip> : <Chip tone="neutral">Em aberto</Chip>}
+                {m.homologatedAt ? <Chip tone="green">Homologado em {fmtDate(m.homologatedAt)}</Chip> : m.completedAt ? <Chip tone={m.requiresHomologation ? 'yellow' : 'green'}>{m.requiresHomologation ? 'Aguardando homologação' : `Atingido em ${fmtDate(m.completedAt)}`}</Chip> : late ? <Chip tone="red">Vencido</Chip> : <Chip tone="neutral">Em aberto</Chip>}
+                {canHomologate && m.completedAt && m.requiresHomologation && !m.homologatedAt && <Button size="sm" variant="primary" onClick={() => setHom(m)}>Homologar</Button>}
                 {p.can.manage && (
                   <span className="flex gap-1.5">
                     <Button size="sm" variant={m.completedAt ? 'secondary' : 'primary'} loading={mut.isPending && mut.variables?.m === m} onClick={() => mut.mutate({ m, body: { completed: !m.completedAt } })}>{m.completedAt ? 'Reabrir' : 'Marcar atingido'}</Button>
@@ -391,15 +398,18 @@ function Milestones({ p }: { p: ProjectDetail }) {
         footer={<>
           {edit && edit !== 'new' && <Button variant="danger" className="mr-auto" onClick={() => mut.mutate({ m: edit, body: { remove: true } })}>Remover</Button>}
           <Button variant="secondary" onClick={() => setEdit(null)}>Cancelar</Button>
-          <Button variant="primary" disabled={f.name.trim().length < 2} loading={mut.isPending} onClick={() => edit && mut.mutate({ m: edit, body: { name: f.name, dueOn: f.dueOn || null, notes: f.notes || null } })}>Salvar</Button>
+          <Button variant="primary" disabled={f.name.trim().length < 2} loading={mut.isPending} onClick={() => edit && mut.mutate({ m: edit, body: { name: f.name, dueOn: f.dueOn || null, notes: f.notes || null, acceptanceCriteria: f.acceptanceCriteria || null, requiresHomologation: f.requiresHomologation } })}>Salvar</Button>
         </>}>
         <div className="space-y-4">
           <FormField label="Nome" htmlFor="ms-name" required><Input id="ms-name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></FormField>
           <FormField label="Data prevista" htmlFor="ms-due"><Input id="ms-due" type="date" value={f.dueOn} onChange={(e) => setF({ ...f, dueOn: e.target.value })} /></FormField>
           <FormField label="Observação" htmlFor="ms-notes"><Textarea id="ms-notes" rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></FormField>
+          <FormField label="Critério de aceite" htmlFor="ms-crit" hint="O que precisa estar verdadeiro para o marco ser aceito"><Textarea id="ms-crit" rows={2} value={f.acceptanceCriteria} onChange={(e) => setF({ ...f, acceptanceCriteria: e.target.value })} /></FormField>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.requiresHomologation} onChange={(e) => setF({ ...f, requiresHomologation: e.target.checked })} />Exige homologação de quem não executou</label>
           {edit && edit !== 'new' && <p className="text-xs text-muted">Remover o marco mantém as tarefas, só desfaz a ligação.</p>}
         </div>
       </Modal>
+      <HomologationDialog projectId={p.id} milestone={hom} criteria={hom?.acceptanceCriteria ?? null} onClose={() => setHom(null)} />
     </section>
   );
 }

@@ -47,6 +47,7 @@ import { abmLinkRoutes } from './routes/abmLinks';
 import { surveyRoutes } from './routes/surveys';
 import { mailRoutes } from './routes/mail';
 import { moduleRoutes } from './routes/modules';
+import { projectGovernanceRoutes } from './routes/projectGovernance';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -176,6 +177,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...surveyRoutes,
     ...mailRoutes,
     ...moduleRoutes,
+    ...projectGovernanceRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,

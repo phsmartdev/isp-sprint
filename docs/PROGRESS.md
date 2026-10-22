@@ -92,6 +92,26 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Histórico único de interações** (Conta 360 → Acompanhamento): atividades concluídas, e-mails enviados (oportunidades e contratos da conta), pesquisas respondidas e visitas, com filtro por pessoa; "Registrar interação" (tipo, quando, com quem, o que foi conversado). Atividades passam a guardar com quais pessoas da conta foram (tarefas de plays, cadências e sinais também).
 - Migração 0049 (`abm_signals`, `abm_signal_events` append-only, `abm_cadences`, `abm_cadence_tasks`, `activities.stakeholder_ids`). Testes: domínio (4), API (4), E2E (1). Regressão completa: domínio 140, API 210, E2E 55/55.
 
+## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
+- **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
+  - Um projeto por frente (padrão: Contratos, CRM, Projetos — ajustes e homologação, Relatórios), cada uma com responsável próprio e a etiqueta da iniciativa.
+  - Todas nascem do novo modelo "Implantação de módulo do ISP Sprint": 4 etapas, 6 marcos e 7 tarefas. Os marcos são diagnóstico e configuração, ajustes, testes, homologação com usuários, entrada em produção e 30 dias de acompanhamento.
+  - Não é um projeto paralelo: são projetos comuns, com quadro, lista, calendário, equipe e histórico.
+- **Marcos com critério de aceite e homologação:**
+  - Qualquer marco pode ter critério de aceite e exigir homologação; no modelo de implantação, todos exigem.
+  - Homologam o gerente do projeto ou quem tem Projetos total. Quem executou tarefas do marco não pode homologá-lo, e a nota do que foi conferido é obrigatória.
+  - Reprovar reabre o marco. O histórico de homologação é append-only.
+- **Progresso real = marcos homologados ÷ marcos que exigem homologação.** Marco concluído e não homologado não conta. O painel mostra, por frente:
+  - progresso real e marco atual (com atraso);
+  - próxima ação: homologação pendente primeiro, depois a tarefa mais urgente do marco atual;
+  - impedimentos e riscos abertos.
+- **Riscos** (aba "Riscos e impedimentos"): probabilidade × impacto define o nível (baixo, moderado, alto, crítico). Risco alto ou crítico exige plano de mitigação, e encerrar exige o motivo.
+- **Impedimentos:** usam o mesmo registro de Gestão de Times (aparecem nos rituais), agora com vínculo opcional ao projeto, ao marco e à tarefa. Resolver exige registrar como foi resolvido.
+- **Relatórios:** Inteligência ganhou a aba "Projetos", com o mesmo painel (somente leitura) para quem tem acesso a Projetos.
+- "Limpar base" apaga riscos e homologações com os projetos; os impedimentos ficam (são registro dos rituais), só perdem o vínculo.
+- Migração 0052 (`milestone_homologations` append-only, `project_risks`, colunas de critério e homologação em marcos, vínculo de projeto em impedimentos).
+- Testes: domínio (3), API (4), E2E (1). Regressão completa: domínio 153, API 232, E2E 60/60.
+
 ## Etapa 1 — Fase 1: ativação modular e permissões finas ✅ (2026-10-22)
 - **Sete módulos de negócio** (CRM, Marketing, Produto, Gestão de Time, Contratos, Projetos, Relatórios) sobre os 14 módulos técnicos de acesso. Cada módulo técnico tem um dono de negócio. Contas, pessoas, agenda de atividades, catálogo, Início e Configurações são da fundação e nunca são desligados.
   - Leads ficam no Marketing (decidido em 22/10). Sucesso do Cliente e e-mail ficam no CRM.

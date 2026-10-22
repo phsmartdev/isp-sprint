@@ -25,7 +25,7 @@ export type ProjectRow = {
   objective: string | null; category: string | null; tags: string[];
 };
 export type Stage = { id: string; name: string; position: number; done: boolean; wipLimit: number | null };
-export type Milestone = { id: string; name: string; dueOn: string | null; completedAt: string | null; notes: string | null; position: number };
+export type Milestone = { id: string; name: string; dueOn: string | null; completedAt: string | null; notes: string | null; position: number; acceptanceCriteria: string | null; requiresHomologation: boolean; homologatedAt: string | null; homologatedBy: string | null };
 export type Member = { userId: string; role: ProjectMemberRole; name: string; email: string };
 export type Task = { id: string; status: string; title: string; notes: string | null; priority: 'baixa' | 'media' | 'alta'; ownerId: string; ownerName: string; stageId: string | null; milestoneId: string | null; startOn: string | null; dueOn: string | null; position: number; completedAt: string | null; rowVersion: number };
 export type ProjectDetail = ProjectRow & { stages: Stage[]; milestones: Milestone[]; members: Member[]; tasks: Task[]; can: { manage: boolean; work: boolean; view: boolean } };

@@ -37,3 +37,45 @@ describe('projetos', () => {
     expect(canTransitionProject('concluido', 'em_andamento')).toBe(true);
   });
 });
+
+describe('Fase 2: riscos, homologação e frentes', () => {
+  it('nível do risco pela matriz; alto ou crítico exige mitigação', async () => {
+    const { riskLevel, riskErrors } = await import('./projects');
+    expect(riskLevel('baixa', 'baixo')).toBe('baixo');
+    expect(riskLevel('media', 'medio')).toBe('moderado');
+    expect(riskLevel('alta', 'medio')).toBe('alto');
+    expect(riskLevel('alta', 'alto')).toBe('critico');
+    expect(riskErrors({ title: 'Atraso no ERP', mitigation: null, status: 'aberto', probability: 'alta', impact: 'alto' })[0]).toMatch(/mitigação/);
+    expect(riskErrors({ title: 'Atraso no ERP', mitigation: null, status: 'aberto', probability: 'baixa', impact: 'alto' })).toEqual([]);
+  });
+  it('homologação: só concluído, exige homologação, não pelo autor, com evidência', async () => {
+    const { homologationError } = await import('./projects');
+    const m = { completedAt: '2026-10-20T10:00:00Z', completedBy: 'u1', requiresHomologation: true, homologatedAt: null };
+    expect(homologationError(m, 'u1', 'ok, conferido', 'homologado')).toMatch(/próprio trabalho/);
+    expect(homologationError({ ...m, completedAt: null }, 'u2', 'ok, conferido', 'homologado')).toMatch(/Conclua/);
+    expect(homologationError(m, 'u2', 'curto', 'reprovado')).toMatch(/o que falta/);
+    expect(homologationError(m, 'u2', 'Termo assinado', 'homologado')).toBeNull();
+    expect(homologationError({ ...m, requiresHomologation: false }, 'u2', 'Termo assinado', 'homologado')).toMatch(/não exige/);
+  });
+  it('resumo da frente: progresso por homologados, homologação pendente vem antes, depois a tarefa mais urgente', async () => {
+    const { frontSummary, instantiateTemplate, BUILTIN_PROJECT_TEMPLATES } = await import('./projects');
+    const ms = [
+      { id: 'm1', name: 'Configuração', dueOn: '2026-10-10', position: 0, completedAt: '2026-10-09', requiresHomologation: true, homologatedAt: '2026-10-10' },
+      { id: 'm2', name: 'Ajustes', dueOn: '2026-10-20', position: 1, completedAt: null, requiresHomologation: true, homologatedAt: null },
+      { id: 'm3', name: 'Testes', dueOn: '2026-10-30', position: 2, completedAt: null, requiresHomologation: true, homologatedAt: null },
+    ];
+    const tasks = [{ id: 't1', title: 'Ajuste B', milestoneId: 'm2', done: false, dueOn: '2026-10-25' }, { id: 't2', title: 'Ajuste A', milestoneId: 'm2', done: false, dueOn: '2026-10-18' }];
+    const s = frontSummary(ms, tasks, [{ severity: 'alta', open: true }, { severity: 'media', open: false }], [{ level: 'critico', open: true }], '2026-10-22');
+    expect(s.progress).toEqual({ done: 1, total: 3, pct: 33, basis: 'homologados' });
+    expect(s.current).toEqual({ id: 'm2', name: 'Ajustes', dueOn: '2026-10-20', late: true });
+    expect(s.nextAction).toMatchObject({ kind: 'tarefa', text: 'Ajuste A' });
+    expect(s.impediments).toEqual({ open: 1, high: 1 });
+    expect(s.risks).toEqual({ open: 1, high: 1 });
+    const pend = frontSummary([{ ...ms[0]!, homologatedAt: null }, ms[1]!], tasks, [], [], '2026-10-22');
+    expect(pend.nextAction).toEqual({ kind: 'homologar', text: 'Homologar "Configuração"' });
+    expect(pend.progress.done).toBe(0);
+    const inst = instantiateTemplate(BUILTIN_PROJECT_TEMPLATES.find((t) => t.key === 'implantacao_modulo')!.def, '2026-11-02');
+    expect(inst.milestones).toHaveLength(6);
+    expect(inst.milestones.every((m) => m.homologation && m.acceptanceCriteria)).toBe(true);
+  });
+});

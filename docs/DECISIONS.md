@@ -318,3 +318,15 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Um teste percorre o registro de rotas e garante que nenhuma rota protegida fica sem política.
   - Novas telas de módulos futuros entram declarando dono e funcionalidade, sem mexer no resto.
 
+## ADR-065 — Frentes da implantação como projetos comuns, com progresso por homologação (22/10/2026)
+- **Contexto:** a Etapa 1 pede acompanhar a implantação dos módulos no próprio ISP Sprint, com marcos, homologação, riscos e impedimentos, sem criar módulo paralelo.
+- **Decisão:**
+  - Cada frente é um projeto comum, criado a partir de um modelo nativo e agrupado por etiqueta. O painel é uma leitura agregada, não uma entidade nova.
+  - O progresso real conta marcos homologados, não tarefas concluídas. Quem executou o marco não o homologa.
+  - A decisão de homologação fica num registro append-only. Reprovar reabre o marco.
+  - Impedimentos reaproveitam a tabela dos rituais (Gestão de Times), com vínculo opcional ao projeto. Riscos ganham tabela própria, porque não existia registro equivalente.
+- **Consequência:**
+  - As frentes têm todos os recursos de projeto: quadro, prazos, equipe, documentos e histórico.
+  - Um impedimento registrado no projeto aparece também nos rituais.
+  - O mesmo painel serve à Inteligência sem duplicar consulta.
+

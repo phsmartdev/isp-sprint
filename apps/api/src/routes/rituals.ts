@@ -32,7 +32,7 @@ const inScope = (sc: ResultsScope, x: Scoped) => sc.all || (x.teamId ? sc.teamId
 /** Gerir (criar/alterar ritual, revogar decisão): responder pela estrutura daquele escopo. */
 const manages = (sc: ResultsScope, x: Scoped) => sc.all || (sc.perspectives.length > 0 && inScope(sc, x));
 
-async function gov(db: DbOrTx, auth: AuthContext, entity: 'ritual' | 'reuniao' | 'decisao' | 'impedimento', entityId: string, type: string, payload: Record<string, unknown>, notify: (string | null | undefined)[] = []) {
+export async function gov(db: DbOrTx, auth: AuthContext, entity: 'ritual' | 'reuniao' | 'decisao' | 'impedimento', entityId: string, type: string, payload: Record<string, unknown>, notify: (string | null | undefined)[] = []) {
   await db.insert(s.governanceEvents).values({ tenantId: auth.tenantId, entity, entityId, type, payload, actorId: auth.userId, notify: [...new Set(notify.filter((x): x is string => !!x && x !== auth.userId))] });
 }
 async function assertActiveUsers(db: DbOrTx, auth: AuthContext, ids: string[], path: string) {

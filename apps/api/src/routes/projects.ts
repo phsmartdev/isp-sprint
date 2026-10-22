@@ -152,7 +152,7 @@ export const projectRoutes = [
         if (ownerId !== auth.userId && !members.has(auth.userId)) members.set(auth.userId, 'membro');
         await tx.insert(s.projectMembers).values([...members].map(([userId, role]) => ({ projectId: pid, userId, tenantId: auth.tenantId, role })));
         const stages = await tx.insert(s.projectStages).values(inst.stages.map((st) => ({ tenantId: auth.tenantId, projectId: pid, name: st.name, position: st.position, done: st.done }))).returning();
-        const ms = inst.milestones.length ? await tx.insert(s.projectMilestones).values(inst.milestones.map((m) => ({ tenantId: auth.tenantId, projectId: pid, name: m.name, dueOn: m.dueOn, position: m.position }))).returning() : [];
+        const ms = inst.milestones.length ? await tx.insert(s.projectMilestones).values(inst.milestones.map((m) => ({ tenantId: auth.tenantId, projectId: pid, name: m.name, dueOn: m.dueOn, position: m.position, acceptanceCriteria: m.acceptanceCriteria, requiresHomologation: m.homologation }))).returning() : [];
         for (const t of inst.tasks) {
           await tx.insert(s.activities).values({
             tenantId: auth.tenantId, type: 'tarefa', title: t.title, notes: t.notes, priority: t.priority, ownerId,
@@ -296,12 +296,12 @@ export const projectRoutes = [
     tag: 'Projetos',
     module: 'projetos',
     params: IdParams,
-    body: z.object({ name: z.string().trim().min(2).max(120), dueOn: isoDate.nullable().optional(), notes: z.string().max(2000).nullable().optional() }),
+    body: z.object({ name: z.string().trim().min(2).max(120), dueOn: isoDate.nullable().optional(), notes: z.string().max(2000).nullable().optional(), acceptanceCriteria: z.string().trim().max(2000).nullable().optional(), requiresHomologation: z.boolean().optional() }),
     handler: async ({ app, auth, params, body, reply }) => {
       const r = await app.db.transaction(async (tx) => {
         const { p, can } = await loadProject(tx, auth, params.id);
         assertCan(can.manage, 'Só o gerente do projeto pode criar marcos.');
-        const [m] = await tx.insert(s.projectMilestones).values({ tenantId: auth.tenantId, projectId: p.id, name: body.name, dueOn: body.dueOn ?? null, notes: body.notes ?? null }).returning({ id: s.projectMilestones.id });
+        const [m] = await tx.insert(s.projectMilestones).values({ tenantId: auth.tenantId, projectId: p.id, name: body.name, dueOn: body.dueOn ?? null, notes: body.notes ?? null, acceptanceCriteria: body.acceptanceCriteria ?? null, requiresHomologation: body.requiresHomologation ?? false }).returning({ id: s.projectMilestones.id });
         await projectEvent(tx, auth, p.id, 'milestone', `Marco criado: ${body.name}`);
         return m!;
       });
@@ -317,7 +317,7 @@ export const projectRoutes = [
     tag: 'Projetos',
     module: 'projetos',
     params: z.object({ id: z.string().uuid(), milestoneId: z.string().uuid() }),
-    body: z.object({ name: z.string().trim().min(2).max(120).optional(), dueOn: isoDate.nullable().optional(), notes: z.string().max(2000).nullable().optional(), completed: z.boolean().optional(), remove: z.boolean().optional() }),
+    body: z.object({ name: z.string().trim().min(2).max(120).optional(), dueOn: isoDate.nullable().optional(), notes: z.string().max(2000).nullable().optional(), completed: z.boolean().optional(), remove: z.boolean().optional(), acceptanceCriteria: z.string().trim().max(2000).nullable().optional(), requiresHomologation: z.boolean().optional() }),
     handler: async ({ app, auth, params, body }) => {
       await app.db.transaction(async (tx) => {
         const { p, can } = await loadProject(tx, auth, params.id);
@@ -335,7 +335,9 @@ export const projectRoutes = [
           if (open) throw unprocessable(`O marco tem ${open} tarefa(s) em aberto. Conclua ou desvincule antes.`);
         }
         await tx.update(s.projectMilestones).set({
-          name: body.name, dueOn: body.dueOn, notes: body.notes,
+          name: body.name, dueOn: body.dueOn, notes: body.notes, acceptanceCriteria: body.acceptanceCriteria, requiresHomologation: body.requiresHomologation,
+          // reabrir desfaz a homologação (a decisão anterior fica no histórico)
+          ...(body.completed === false && m.homologatedAt ? { homologatedAt: null, homologatedBy: null } : {}),
           completedAt: body.completed === undefined ? undefined : body.completed ? m.completedAt ?? new Date() : null,
           completedBy: body.completed === undefined ? undefined : body.completed ? auth.userId : null,
         }).where(eq(s.projectMilestones.id, m.id));
