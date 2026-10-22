@@ -330,6 +330,13 @@
       "when": 1792627243435,
       "tag": "0046_journey_trail",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792629335889,
+      "tag": "0047_abm_integracoes",
+      "breakpoints": true
     }
   ]
 }

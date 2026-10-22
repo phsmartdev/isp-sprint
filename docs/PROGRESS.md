@@ -85,12 +85,21 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
-## Funcionalidade 01 — Trilha Visual da Jornada ✅ (2026-10-21) — aguardando aprovação
+## ABM — Fase 8: integrações dentro do CRM ✅ (2026-10-21)
+- **Pessoas da conta em oportunidades, contratos e leads**: aba "Pessoas e ABM" na oportunidade e no contrato, e seção no lead. Liga stakeholders já mapeados (sem novo cadastro) com o papel naquele registro — oportunidade: decisor, influenciador, avaliador técnico, aprovador financeiro, patrocinador, usuário, bloqueador, contato principal; contrato: gestor, fiscal, aprovador financeiro, patrocinador, usuário, contato principal; lead: contato de origem, indicou, contato principal. Só pessoas da mesma conta; mudar o papel e desfazer (com motivo) ficam no histórico da pessoa; a ficha da pessoa lista os vínculos.
+- **Influência por oportunidade**: "Avaliar aqui" abre a ficha da pessoa já no contexto daquela oportunidade — mesma avaliação manual, com justificativa e auditoria (ADR-056). O painel mostra a influência "nesta oportunidade" quando avaliada; senão, a da conta.
+- **Contexto ABM** no topo do painel: status ABM, status comercial, prioridade, responsável e atalho para a Conta 360; conta fora do ABM mostra "Adicionar ao ABM".
+- **Plays na oportunidade**: ao aplicar um play, dá para escolher uma oportunidade em aberto da conta; as tarefas do play aparecem nas atividades da oportunidade e o painel lista os plays dela.
+- **IDs externos preservados**: Conta 360 → Dados mostra os códigos da conta em outros sistemas (origem do cadastro e códigos do cliente, ex.: IXC), somente leitura; a ficha da pessoa mostra a origem quando veio de integração. Nenhuma tela do ABM altera esses códigos (testado). Nenhuma integração nova com o IXC foi criada: a sincronização continua a já existente.
+- Migração 0047 (`stakeholder_links`, `abm_play_runs.opportunity_id`). Testes: domínio (2), API (3), E2E (1). Regressão completa: domínio 129, API 201, E2E 52/52.
+
+## Funcionalidade 01 — Trilha Visual da Jornada ✅ (2026-10-21) — aprovada
 - **Trilha** (Sucesso do Cliente → jornada → aba Trilha, a nova aba padrão): caminho em serpentina com os marcos reais da jornada como paradas, agrupados por fase (Onboarding, Adoção, Renovação). O trecho percorrido se desenha até "Estamos aqui"; concluídos (com a data), atrasados (em vermelho, com a data prevista), o atual e os próximos ficam distintos. Clicar numa parada mostra detalhes e o histórico do marco. Desenhada na largura real da tela (legível no celular) e sem animação para quem pede "reduzir movimento".
 - **Apresentar jornada**: tela cheia, visão geral (% concluído, marcos, atrasados, próximo passo) e depois marco a marco pelo teclado ou pelos botões; a trilha acompanha. Observações internas só aparecem se quem apresenta marcar.
 - **Links externos** (aba Links externos): vários por jornada, cada um com destinatário, prazo (7 a 90 dias), código de acesso de 6 dígitos opcional (mostrado uma única vez; 5 erros bloqueiam por 15 min) e opção de mostrar as observações (desligada por padrão; responsáveis internos nunca aparecem). Revogar exige motivo e corta o acesso na hora. Cada uso fica registrado (criado, acesso, código incorreto, bloqueio, revogação) e é auditado. Página pública `/j/:token` com a trilha e o modo Apresentar.
 - **Histórico dos marcos** (append-only): conclusão (inclusive pelo kickoff e por acompanhamento registrado), reabertura, mudança de data, de responsável e de observações, com antes e depois e quem fez. Marcos já concluídos ganharam o evento de conclusão reconstituído a partir da data registrada (sinalizado).
 - O link antigo da apresentação de kickoff continua como estava.
+- Modo Apresentar jornada com fundo azul BKT (pedido do usuário).
 - Também: o cabeçalho das páginas não espreme mais o título no celular (botões vão para a linha de baixo).
 - Migração 0046 (`cs_journey_links`, `cs_journey_link_events` e `cs_milestone_events` append-only, com reconstituição). Testes: domínio (3), API (2), E2E (1; o E2E de Sucesso do Cliente foi ajustado à nova aba padrão). Regressão completa: domínio 127, API 198, E2E 51/51.
 

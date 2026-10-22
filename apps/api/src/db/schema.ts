@@ -3266,6 +3266,8 @@ export const abmPlayRuns = pgTable(
     abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
     contactId: uuid('contact_id').notNull().references(() => contacts.id),
     stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    /** Fase 8: oportunidade da conta a que o play serve (as tarefas aparecem nela) */
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     status: text('status').notNull().default('em_andamento'),
     startOn: date('start_on', { mode: 'string' }).notNull(),
@@ -3353,4 +3355,31 @@ export const csMilestoneEvents = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ idx: index('cs_milestone_events_idx').on(t.journeyId, t.createdAt), typeCk: check('cs_milestone_events_type_ck', inList('type', ['concluido', 'reaberto', 'reprogramado', 'responsavel', 'observacao'])) }),
+);
+
+// ---------------------------------------------------------------- ABM — Fase 8: vínculos de pessoas com oportunidades, contratos e leads
+/** Pessoa da conta ligada a um registro (oportunidade, contrato ou lead) com o papel que tem nele. Remover é marcar, com motivo. */
+export const stakeholderLinks = pgTable(
+  'stakeholder_links',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    stakeholderId: uuid('stakeholder_id').notNull().references(() => accountStakeholders.id),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    role: text('role').notNull(),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    removedAt: ts('removed_at'),
+    removedBy: uuid('removed_by').references(() => users.id),
+    removeReason: text('remove_reason'),
+    rowVersion: integer('row_version').notNull().default(1),
+  },
+  (t) => ({
+    activeUq: uniqueIndex('stakeholder_links_active_uq').on(t.stakeholderId, t.entityType, t.entityId).where(sql`removed_at is null`),
+    entityIdx: index('stakeholder_links_entity_idx').on(t.tenantId, t.entityType, t.entityId),
+    entityCk: check('stakeholder_links_entity_ck', inList('entity_type', ['oportunidade', 'contrato', 'lead'])),
+  }),
 );

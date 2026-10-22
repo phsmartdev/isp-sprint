@@ -521,3 +521,46 @@ test('ABM Fase 5: plays sugeridos com motivo, aplicados como tarefas, cancelados
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'abm-plays');
 });
+
+test('ABM Fase 8: pessoas da conta na oportunidade com papel e influência avaliada nela; IDs externos na Conta 360', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const post = async (url: string, data: object) => { const r = await page.request.post(`/api/v1${url}`, { headers: H, data }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const acc = await post('/abm/new-account', { name: `Secretaria Fictícia Integra ${Date.now().toString(36)}`, nature: 'publica', segment: 'governamental', reason: 'Programa de escolas conectadas' });
+  await post(`/accounts/${acc.contactId}/stakeholders`, { person: { name: 'Marta Diretora Teste' }, title: 'Diretora de compras', roles: ['decisor'] });
+  const plan = (await (await page.request.get('/api/v1/meta/lookups')).json()).plans[0];
+  const opp = await post('/opportunities', { contactId: acc.contactId, planId: plan.id, cableMeters: 30, saleType: 'ativa', customerSuccess: false });
+
+  await page.goto(`/opportunities/${opp.id}?aba=pessoas`);
+  const panel = page.getByRole('region', { name: 'Pessoas e ABM' });
+  await expect(panel.getByText('Conta estratégica no ABM:')).toBeVisible();
+  await expect(panel.getByRole('link', { name: 'Abrir Conta 360' })).toHaveAttribute('href', `/abm/contas/${acc.id}`);
+  await panel.getByRole('button', { name: 'Ligar pessoa' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Ligar pessoa nesta oportunidade' });
+  await dlg.getByLabel('Pessoa da conta').selectOption({ label: 'Marta Diretora Teste · Diretora de compras' });
+  await dlg.getByLabel('Papel nesta oportunidade').selectOption('aprovador_financeiro');
+  await dlg.getByRole('button', { name: 'Ligar' }).click();
+  await expect(page.getByText('Pessoa ligada', { exact: true })).toBeVisible();
+  await expect(panel.getByLabel('Papel de Marta Diretora Teste')).toHaveValue('aprovador_financeiro');
+  // influência nesta oportunidade: avaliação manual com justificativa, pela ficha da pessoa
+  await panel.getByRole('button', { name: 'Avaliar aqui' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Stakeholder' });
+  await expect(drawer.getByText(/Avaliando a influência em: OP-/)).toBeVisible();
+  await drawer.getByLabel(/^Nova avaliação/).selectOption('muito_alto');
+  await drawer.getByLabel(/^Justificativa/).fill('Assina a homologação desta compra');
+  await drawer.getByRole('button', { name: 'Registrar avaliação' }).click();
+  await expect(page.getByText('Influência avaliada e registrada na auditoria', { exact: true })).toBeVisible();
+  await expect(drawer.getByRole('region', { name: 'Vínculos com registros' }).getByText('Aprovador financeiro')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel.getByText('nesta oportunidade', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Reavaliar aqui' })).toBeVisible();
+
+  await page.goto(`/abm/contas/${acc.id}?t=dados`);
+  await expect(page.getByText('Identificadores em outros sistemas')).toBeVisible();
+  await expect(page.getByText(/Conta criada no próprio CRM/)).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/opportunities/${opp.id}?aba=pessoas`);
+  await shot(page, 'abm-integracoes');
+});

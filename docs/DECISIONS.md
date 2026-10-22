@@ -270,3 +270,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** a trilha é só uma visualização dos `cs_milestones` (situação calculada no domínio). Links da trilha ficam numa tabela própria (vários por jornada), com token e código guardados como hash (código com scrypt, mostrado uma vez), prazo, revogação com motivo, bloqueio após 5 códigos errados e registro append-only de cada uso. A página pública mostra marcos, fases e datas; observações só se o link permitir; responsáveis internos nunca. O histórico dos marcos passa a ser gravado em toda mudança (append-only); conclusões anteriores foram reconstituídas e sinalizadas.
 - **Consequência:** o link de kickoff existente não mudou; a revogação e o prazo valem por link.
 
+## ADR-059 — Vínculos de pessoas por registro, sem duplicar cadastro (21/10/2026)
+- **Contexto:** a Fase 8 do ABM liga o mapa de pessoas ao trabalho comercial (oportunidades, contratos, leads) sem criar CRM paralelo.
+- **Decisão:** uma tabela de vínculos (`stakeholder_links`) liga o stakeholder (pessoa na conta) a um registro existente, com papel válido para o tipo de registro; só pessoas da mesma conta; remover é marcar com motivo (histórico na pessoa). A influência por oportunidade usa o contexto "oportunidade" da avaliação manual existente. Plays podem apontar para uma oportunidade e suas tarefas recebem o vínculo. Códigos externos (origem do cadastro, IDs do cliente) são só exibidos.
+- **Consequência:** relatórios de cobertura (Fase 7) podem medir quem decide em cada oportunidade a partir dos vínculos.
+

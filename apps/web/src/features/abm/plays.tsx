@@ -22,13 +22,14 @@ type RunStep = { activityId: string; stepKey: string; title: string; type: PlayS
 export type Run = {
   id: string; playId: string; playName: string; playVersion: number; category: PlayCategory; contactId: string; abmId: string; account: string; stakeholderName: string | null; ownerName: string; status: 'em_andamento' | 'concluido' | 'cancelado';
   startOn: string; reason: string; fromSuggestion: boolean; outcome: string | null; successAchieved: boolean | null; closedAt: string | null;
-  steps: RunStep[]; progress: { total: number; done: number; canceled: number; open: number; late: number; pct: number; canConclude: boolean };
+  opportunityLabel: string | null; steps: RunStep[]; progress: { total: number; done: number; canceled: number; open: number; late: number; pct: number; canConclude: boolean };
 };
 type AccountPlays = {
   inAbm: boolean; influenceVisible: boolean;
   suggestions: { playId: string; playName: string; stakeholderId: string | null; stakeholderName: string | null; reasons: string[] }[];
   plays: { id: string; name: string; category: PlayCategory; target: 'conta' | 'stakeholder'; objective: string; successCriteria: string; steps: PlayStep[] }[];
   stakeholders: { id: string; name: string }[];
+  opportunities: { id: string; code: number; title: string }[];
   runs: Run[];
 };
 
@@ -88,7 +89,7 @@ export function RunCard({ r, onTask, showAccount }: { r: Run; onTask: (id: strin
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-bold text-ink">{r.playName}{r.stakeholderName && <span className="font-normal text-muted"> para {r.stakeholderName}</span>}</p>
-          <p className="text-xs text-muted">{showAccount && <><Link className="font-semibold text-primary hover:underline" to={`/abm/contas/${r.abmId}?t=plays`}>{r.account}</Link> · </>}Conduz: {r.ownerName} · início {fmtDate(r.startOn)} · versão {r.playVersion}{r.fromSuggestion && ' · aplicado a partir de sugestão'}</p>
+          <p className="text-xs text-muted">{showAccount && <><Link className="font-semibold text-primary hover:underline" to={`/abm/contas/${r.abmId}?t=plays`}>{r.account}</Link> · </>}{r.opportunityLabel && <>{r.opportunityLabel} · </>}Conduz: {r.ownerName} · início {fmtDate(r.startOn)} · versão {r.playVersion}{r.fromSuggestion && ' · aplicado a partir de sugestão'}</p>
         </div>
         <span className="flex items-center gap-2">
           {r.status === 'em_andamento' ? (r.progress.late ? <Chip tone="red">{r.progress.late} atrasada(s)</Chip> : <Chip tone="blue">Em andamento</Chip>) : r.status === 'concluido' ? <Chip tone={r.successAchieved ? 'green' : 'orange'}>{r.successAchieved ? 'Concluído com sucesso' : 'Concluído sem atingir o critério'}</Chip> : <Chip tone="neutral">Cancelado</Chip>}
@@ -134,10 +135,10 @@ function ApplyPlay({ contactId, data, initial, onClose }: { contactId: string; d
   const qc = useQueryClient();
   const { me } = useAuth();
   const users = useLookups().data?.users ?? [];
-  const [f, setF] = useState({ ...initial, ownerId: me?.user.id ?? '', startOn: today() });
+  const [f, setF] = useState({ ...initial, opportunityId: '', ownerId: me?.user.id ?? '', startOn: today() });
   const play = data.plays.find((p) => p.id === f.playId);
   const m = useMutation({
-    mutationFn: () => api(`/accounts/${contactId}/play-runs`, { method: 'POST', body: { playId: f.playId, stakeholderId: play?.target === 'stakeholder' ? f.stakeholderId || null : null, ownerId: f.ownerId || undefined, startOn: f.startOn, reason: f.reason, fromSuggestion: f.fromSuggestion } }),
+    mutationFn: () => api(`/accounts/${contactId}/play-runs`, { method: 'POST', body: { playId: f.playId, stakeholderId: play?.target === 'stakeholder' ? f.stakeholderId || null : null, opportunityId: f.opportunityId || null, ownerId: f.ownerId || undefined, startOn: f.startOn, reason: f.reason, fromSuggestion: f.fromSuggestion } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['abm-plays'] }); void qc.invalidateQueries({ queryKey: ['abm'] }); toast({ tone: 'success', message: `Play aplicado: ${play?.steps.length ?? 0} tarefa(s) criada(s)` }); onClose(); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -149,6 +150,7 @@ function ApplyPlay({ contactId, data, initial, onClose }: { contactId: string; d
         <div className="grid gap-3 sm:grid-cols-2">
           <FormField label="Play" htmlFor="ap-p"><Select id="ap-p" value={f.playId} onChange={(e) => setF({ ...f, playId: e.target.value, fromSuggestion: false })}><option value="">Escolha</option>{data.plays.map((p) => <option key={p.id} value={p.id}>{p.name}{p.target === 'stakeholder' ? ' (para uma pessoa)' : ''}</option>)}</Select></FormField>
           {play?.target === 'stakeholder' && <FormField label="Pessoa" htmlFor="ap-s"><Select id="ap-s" value={f.stakeholderId} onChange={(e) => setF({ ...f, stakeholderId: e.target.value })}><option value="">Escolha</option>{data.stakeholders.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></FormField>}
+          {!!data.opportunities.length && <FormField label="Oportunidade (opcional)" htmlFor="ap-op" hint="As tarefas também aparecem na oportunidade"><Select id="ap-op" value={f.opportunityId} onChange={(e) => setF({ ...f, opportunityId: e.target.value })}><option value="">Nenhuma</option>{data.opportunities.map((o) => <option key={o.id} value={o.id}>OP-{o.code} · {o.title}</option>)}</Select></FormField>}
           <FormField label="Quem conduz" htmlFor="ap-o"><Select id="ap-o" value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })}>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
           <FormField label="Início" htmlFor="ap-d"><Input id="ap-d" type="date" value={f.startOn} onChange={(e) => setF({ ...f, startOn: e.target.value })} /></FormField>
         </div>
