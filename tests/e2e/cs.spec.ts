@@ -187,3 +187,67 @@ test('Trilha Visual: paradas sobre os marcos, histórico, apresentar jornada e l
   await page.getByRole('tab', { name: 'Trilha' }).click();
   await shot(page, 'cs-trilha');
 });
+
+test('Pesquisas por link: construtor, convite pela ficha da pessoa, resposta pública única, resultados e revisão do posicionamento', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const post = async (url: string, data: object) => { const r = await page.request.post(`/api/v1${url}`, { headers: H, data }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const acc = await post('/abm/new-account', { name: `Clínica Fictícia Pesquisa ${Date.now().toString(36)}`, reason: 'Teste de pesquisas' });
+  await post(`/accounts/${acc.contactId}/stakeholders`, { person: { name: 'Paula Fictícia Teste' }, roles: ['decisor'] });
+  const sname = `Pesquisa E2E ${Date.now().toString(36)}`;
+
+  await page.goto('/sucesso?t=pesquisas');
+  await page.getByRole('button', { name: 'Nova pesquisa' }).click();
+  const ed = page.getByRole('dialog', { name: 'Nova pesquisa' });
+  await ed.getByLabel('Nome interno').fill(sname);
+  await ed.getByRole('button', { name: 'Incluir pergunta' }).click();
+  const q4 = ed.getByRole('group', { name: 'Pergunta 4' });
+  await q4.getByLabel('Pergunta 4: texto').fill('Você apoia ampliar a rede?');
+  await q4.getByLabel('Pergunta 4: tipo').selectOption('escolha');
+  await q4.getByLabel('Pergunta 4: destino da resposta').selectOption('stakeholder_posicionamento');
+  await expect(q4.getByText('Este dado sempre passa por revisão.')).toBeVisible();
+  await q4.getByLabel('Pergunta 4: opção 1', { exact: true }).fill('Apoio');
+  await q4.getByLabel('Pergunta 4: opção 2', { exact: true }).fill('Não apoio');
+  await q4.getByLabel('Pergunta 4: opção 1 corresponde a').selectOption('favoravel');
+  await q4.getByLabel('Pergunta 4: opção 2 corresponde a').selectOption('resistente');
+  await expect(ed.getByText(/influência não aparece como destino/)).toBeVisible();
+  await ed.getByRole('button', { name: 'Criar pesquisa' }).click();
+  await expect(page.getByText('Pesquisa criada', { exact: true })).toBeVisible();
+
+  // convite pela ficha da pessoa (Conta 360 → Stakeholders)
+  await page.goto(`/abm/contas/${acc.id}?t=stakeholders`);
+  await page.getByRole('button', { name: 'Paula Fictícia Teste' }).click();
+  await page.getByRole('button', { name: 'Enviar pesquisa' }).click();
+  const inv = page.getByRole('dialog', { name: 'Novo convite' });
+  await inv.getByLabel('Pesquisa', { exact: true }).selectOption({ label: sname });
+  await inv.getByRole('button', { name: 'Criar convite' }).click();
+  const url = await page.getByRole('dialog', { name: 'Convite criado' }).getByLabel('Link pessoal').inputValue();
+  await page.getByRole('button', { name: 'Concluir' }).click();
+
+  // resposta sem login, uma vez só
+  const anon = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  await anon.goto(url.replace(/^https?:\/\/[^/]+/, ''));
+  await expect(anon.getByText('Olá, Paula')).toBeVisible();
+  await anon.getByRole('button', { name: 'Enviar respostas' }).click();
+  await expect(anon.getByRole('alert').first()).toContainText('Responda esta pergunta');
+  await anon.getByRole('radio', { name: '10' }).click();
+  await anon.getByLabel('Não apoio').check();
+  await anon.getByRole('button', { name: 'Enviar respostas' }).click();
+  await expect(anon.getByRole('status')).toContainText('Obrigado');
+  await anon.reload();
+  await expect(anon.getByRole('alert')).toContainText('já foi respondido');
+
+  // resultados e revisão do posicionamento
+  await page.goto('/sucesso?t=pesquisas');
+  const pend = page.getByRole('region', { name: 'Atualizações para revisar' });
+  await expect(pend.getByText(/Posicionamento da pessoa: Desconhecido → Resistente/)).toBeVisible();
+  await pend.getByRole('listitem').filter({ hasText: 'Paula Fictícia Teste' }).getByRole('button', { name: 'Aplicar' }).click();
+  await expect(page.getByText('Atualização aplicada ao cadastro')).toBeVisible();
+  await page.getByRole('link', { name: sname }).click();
+  await expect(page.getByText('Taxa de resposta').locator('..')).toContainText('100%');
+  await expect(page.getByText('NPS', { exact: true }).locator('..')).toContainText('100');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'pesquisas');
+});

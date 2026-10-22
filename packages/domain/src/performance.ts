@@ -44,6 +44,7 @@ export const BUSINESS_EVENT_TYPES = [
   { key: 'marco_concluido', label: 'Marco de projeto atingido', module: 'projetos', source: 'Marco marcado como atingido (reabrir invalida)', owner: 'Gerente do projeto' },
   { key: 'projeto_concluido', label: 'Projeto concluído', module: 'projetos', source: 'Projeto concluído (reabrir invalida)', owner: 'Gerente do projeto' },
   { key: 'acompanhamento_registrado', label: 'Acompanhamento de cliente com resultado', module: 'sucesso_cliente', source: 'Atividade de Sucesso do Cliente concluída com resultado', owner: 'Responsável pela atividade' },
+  { key: 'pesquisa_respondida', label: 'Pesquisa respondida pelo cliente', module: 'sucesso_cliente', source: 'Resposta recebida pelo link da pesquisa (quantidade = nota NPS, quando houver)', owner: 'Quem enviou o convite' },
 ] as const satisfies readonly EventTypeDef[];
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPES)[number]['key'];
 export const EVENT_TYPE_KEYS = BUSINESS_EVENT_TYPES.map((t) => t.key) as BusinessEventType[];

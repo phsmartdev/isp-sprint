@@ -11,6 +11,7 @@ import { useLookups, useUrlState } from '../../lib/hooks';
 import { useAuth } from '../../auth/AuthProvider';
 import { EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs } from '../../components/ui/primitives';
 import { PageHeader } from '../../components/layout/PageHeader';
+import { SurveysTab } from './Surveys';
 import { MoneyToggle } from '../../lib/privacy';
 import { FollowUpDialog, PlanDialog, VisitDialog } from '../../features/cs/Account360';
 import { HealthBadge, LevelChip, TierChip, covText, type Coverage } from '../../features/cs/shared';
@@ -202,7 +203,7 @@ function Jornadas() {
   );
 }
 
-type Tab = 'carteira' | 'atencao' | 'cobertura' | 'gestao' | 'jornadas';
+type Tab = 'carteira' | 'atencao' | 'cobertura' | 'gestao' | 'jornadas' | 'pesquisas';
 export function CustomerSuccessPage() {
   const { me } = useAuth();
   const lookups = useLookups();
@@ -212,7 +213,7 @@ export function CustomerSuccessPage() {
   const cfg = useQuery({ queryKey: ['cs-config'], queryFn: () => api<{ config: { visitTypes: string[] } }>('/cs/config') });
   const [act, setAct] = useState<null | { kind: 'followup' | 'visit' | 'plan'; contactId: string; activity?: Portfolio['priorities'][number] }>(null);
   const manage = q.data?.canManage;
-  const tabs: { key: Tab; label: string }[] = [{ key: 'carteira', label: 'Minha carteira' }, { key: 'atencao', label: 'Contas que precisam de atenção' }, { key: 'cobertura', label: 'Cobertura' }, ...(manage ? [{ key: 'gestao' as Tab, label: 'Gestão' }] : []), { key: 'jornadas', label: 'Jornadas' }];
+  const tabs: { key: Tab; label: string }[] = [{ key: 'carteira', label: 'Minha carteira' }, { key: 'atencao', label: 'Contas que precisam de atenção' }, { key: 'cobertura', label: 'Cobertura' }, ...(manage ? [{ key: 'gestao' as Tab, label: 'Gestão' }] : []), { key: 'jornadas', label: 'Jornadas' }, { key: 'pesquisas', label: 'Pesquisas' }];
   const tab = (tabs.some((t) => t.key === f.t) ? f.t : 'carteira') as Tab;
   return (
     <div className="w-full">
@@ -224,7 +225,7 @@ export function CustomerSuccessPage() {
         {tab === 'carteira' && <><FormField label="Cobertura de" htmlFor="cs-f-from"><Input id="cs-f-from" type="date" value={f.from || monthStart()} onChange={(e) => setF({ from: e.target.value })} /></FormField><FormField label="até" htmlFor="cs-f-to"><Input id="cs-f-to" type="date" value={f.to || new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ to: e.target.value })} /></FormField></>}
       </div>
       <Tabs<Tab> label="Sucesso do Cliente" className="mb-5" value={tab} onChange={(t) => setF({ t })} tabs={tabs} />
-      {tab === 'cobertura' ? <Cobertura csmId={f.csm} /> : tab === 'gestao' ? <Gestao /> : tab === 'jornadas' ? <Jornadas /> : q.isLoading ? <div className="card"><LoadingRows /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : tab === 'carteira' ? <Carteira p={q.data!} onAct={setAct} /> : <Atencao p={q.data!} onAct={setAct} />}
+      {tab === 'cobertura' ? <Cobertura csmId={f.csm} /> : tab === 'gestao' ? <Gestao /> : tab === 'jornadas' ? <Jornadas /> : tab === 'pesquisas' ? <SurveysTab /> : q.isLoading ? <div className="card"><LoadingRows /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : tab === 'carteira' ? <Carteira p={q.data!} onAct={setAct} /> : <Atencao p={q.data!} onAct={setAct} />}
       {act?.kind === 'followup' && <FollowUpDialog contactId={act.contactId} activity={act.activity ? { id: act.activity.id, title: act.activity.title, kind: act.activity.kind, dueAt: act.activity.dueAt, plannedAt: act.activity.plannedAt, completedAt: null, result: null, cadence: null, ownerName: null } : null} open onClose={() => setAct(null)} />}
       {act?.kind === 'visit' && <VisitDialog contactId={act.contactId} types={cfg.data?.config.visitTypes ?? ['Relacionamento']} open onClose={() => setAct(null)} />}
       {act?.kind === 'plan' && <PlanDialog contactId={act.contactId} open onClose={() => setAct(null)} />}

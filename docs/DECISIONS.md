@@ -275,3 +275,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** uma tabela de vínculos (`stakeholder_links`) liga o stakeholder (pessoa na conta) a um registro existente, com papel válido para o tipo de registro; só pessoas da mesma conta; remover é marcar com motivo (histórico na pessoa). A influência por oportunidade usa o contexto "oportunidade" da avaliação manual existente. Plays podem apontar para uma oportunidade e suas tarefas recebem o vínculo. Códigos externos (origem do cadastro, IDs do cliente) são só exibidos.
 - **Consequência:** relatórios de cobertura (Fase 7) podem medir quem decide em cada oportunidade a partir dos vínculos.
 
+## ADR-060 — Pesquisas: destinos explícitos, revisão para dados sensíveis, influência fora (21/10/2026)
+- **Contexto:** pesquisas por link podem atualizar o cadastro, mas não podem virar um caminho automático para mudar avaliações humanas.
+- **Decisão:** cada pergunta declara um destino de uma lista fechada; influência não existe na lista e qualquer tentativa é recusada. Posicionamento, e-mail e telefone sempre passam por revisão; interesse e NPS/CSAT podem ser automáticos. NPS/CSAT gravam no registro de pesquisas existente do Sucesso do Cliente (sem tabela paralela de saúde). Convites são individuais, com token em hash, prazo e uso único; respostas e versões são append-only. A resposta vira evento de negócio para os indicadores.
+- **Consequência:** o histórico da pessoa mostra o que mudou "via pesquisa"; a liderança decide o que é sensível.
+
