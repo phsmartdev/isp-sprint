@@ -64,8 +64,8 @@ export function JourneyTrail({ data, selectedId, onSelect, large, dark, animate 
           {reached > 0 && <path key={`p-${reached}-${W}`} d={pathTo(reached)} pathLength={1} fill="none" className={clsx('trail-progress', dark ? 'stroke-lime' : 'stroke-primary')} strokeWidth={large ? 8 : 6} strokeLinecap="round" />}
           {data.stops.map((s, i) => {
             const p = pts[i]!; const sel = s.id === selectedId; const cur = i === data.currentIndex;
-            const fill = s.status === 'concluido' ? 'fill-success' : s.status === 'atrasado' ? 'fill-danger' : s.status === 'atual' ? (dark ? 'fill-lime' : 'fill-primary') : dark ? 'fill-navy' : 'fill-surface';
-            const stroke = s.status === 'proximo' ? (dark ? 'stroke-white/50' : 'stroke-line-strong') : dark ? 'stroke-navy' : 'stroke-surface';
+            const fill = s.status === 'concluido' ? 'fill-success' : s.status === 'atrasado' ? 'fill-danger' : s.status === 'atual' ? (dark ? 'fill-lime' : 'fill-primary') : dark ? 'fill-navy-active' : 'fill-surface';
+            const stroke = s.status === 'proximo' ? (dark ? 'stroke-white/50' : 'stroke-line-strong') : dark ? 'stroke-navy-active' : 'stroke-surface';
             const lines = wrap(s.title, chars);
             const label = `${s.title}: ${STOP_STATUS_LABELS[s.status]}${s.doneAt ? `, concluído em ${fmtDate(s.doneAt)}` : s.plannedAt ? `, previsto para ${fmtDate(s.plannedAt)}` : ''}`;
             return (
@@ -74,7 +74,7 @@ export function JourneyTrail({ data, selectedId, onSelect, large, dark, animate 
                 onKeyDown={(e) => { if (onSelect && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelect(s.id); } }}>
                 {firstOfPhase.has(i) && (
                   <g className="trail-stop" style={{ animationDelay: `${0.2 + i * 0.07}s` }}>
-                    <text x={p.x} y={p.y - R - (large ? 18 : 14)} textAnchor="middle" className={clsx('font-display font-bold', large ? 'text-[15px]' : 'text-[11px]', dark ? 'fill-lime' : 'fill-primary')}>{phaseLabel(s.phase)}</text>
+                    <text x={p.x} y={p.y - R - (large ? 18 : 14)} textAnchor="middle" className={clsx('font-display font-bold', large ? 'text-[15px]' : 'text-[11px]', dark ? 'fill-white' : 'fill-primary')}>{phaseLabel(s.phase)}</text>
                   </g>
                 )}
                 <g className="trail-stop" style={{ animationDelay: `${0.2 + i * 0.07}s` }}>
@@ -85,7 +85,7 @@ export function JourneyTrail({ data, selectedId, onSelect, large, dark, animate 
                     : s.status === 'atrasado' ? <text x={p.x} y={p.y + (large ? 6 : 4.5)} textAnchor="middle" className={clsx('fill-white font-bold', large ? 'text-[18px]' : 'text-[13px]')}>!</text>
                     : <text x={p.x} y={p.y + (large ? 5.5 : 4)} textAnchor="middle" className={clsx('num font-bold', large ? 'text-[15px]' : 'text-[11px]', s.status === 'atual' ? (dark ? 'fill-navy' : 'fill-white') : muted)}>{i + 1}</text>}
                   {lines.map((l, k) => <text key={k} x={p.x} y={p.y + R + (large ? 26 : 18) + k * (large ? 20 : 14)} textAnchor="middle" className={clsx(large ? 'text-[16px]' : 'text-[11.5px]', sel || cur ? 'font-bold' : 'font-semibold', s.status === 'concluido' ? muted : ink)}>{l}</text>)}
-                  <text x={p.x} y={p.y + R + (large ? 26 : 18) + lines.length * (large ? 20 : 14)} textAnchor="middle" className={clsx('num', large ? 'text-[13px]' : 'text-[10px]', s.status === 'atrasado' ? 'fill-danger font-bold' : muted)}>{s.status === 'atrasado' ? `atrasado · ${dateLine(s)}` : dateLine(s)}</text>
+                  <text x={p.x} y={p.y + R + (large ? 26 : 18) + lines.length * (large ? 20 : 14)} textAnchor="middle" className={clsx('num', large ? 'text-[13px]' : 'text-[10px]', s.status === 'atrasado' ? (dark ? 'fill-[#FFB4AB] font-bold' : 'fill-danger font-bold') : muted)}>{s.status === 'atrasado' ? `atrasado · ${dateLine(s)}` : dateLine(s)}</text>
                   {cur && !data.finished && (
                     <g>
                       <rect x={p.x - (large ? 62 : 46)} y={p.y - R - (firstOfPhase.has(i) ? (large ? 58 : 44) : (large ? 40 : 30))} width={large ? 124 : 92} height={large ? 26 : 19} rx={large ? 13 : 9.5} className={s.status === 'atrasado' ? 'fill-danger' : dark ? 'fill-lime' : 'fill-primary'} />
@@ -134,7 +134,7 @@ export function JourneyPresenter({ data, client, subtitle, onClose, allowNotes =
   const next = data.currentIndex !== null ? data.stops[data.currentIndex] : null;
   const Big = ({ v, l }: { v: ReactNode; l: string }) => <div><p className="num font-display text-4xl font-bold text-white sm:text-5xl">{v}</p><p className="text-sm text-white/70">{l}</p></div>;
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-navy text-white" role="dialog" aria-modal="true" aria-label="Apresentar jornada">
+    <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-gradient-to-br from-navy-active to-primary-hover text-white" role="dialog" aria-modal="true" aria-label="Apresentar jornada">
       <header className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-10">
         <div className="min-w-0"><p className="font-display text-xl font-bold sm:text-2xl">{client}</p>{subtitle && <p className="text-sm text-white/70">{subtitle}</p>}</div>
         <div className="flex items-center gap-4">
@@ -152,7 +152,7 @@ export function JourneyPresenter({ data, client, subtitle, onClose, allowNotes =
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="font-display text-sm font-bold text-lime">{data.phases.find((p) => p.key === s.phase)?.label} · marco {step} de {last}</p>
+            <p className="font-display text-sm font-bold text-white/80">{data.phases.find((p) => p.key === s.phase)?.label} · marco {step} de {last}</p>
             <h2 className="font-display text-3xl font-bold sm:text-4xl">{s.title}</h2>
             <p className={clsx('text-lg', s.status === 'atrasado' ? 'font-bold text-[#FF8A80]' : 'text-white/85')}>
               {STOP_STATUS_LABELS[s.status]}{s.doneAt ? ` em ${fmtDate(s.doneAt)}` : s.plannedAt ? ` · previsto para ${fmtDate(s.plannedAt)}` : ' · sem data definida'}
