@@ -1,5 +1,6 @@
 /** Configurações: modelo de instrução, jornadas, SMTP, notificações, registro de e-mails e agendamento. */
 import { timingSafeEqual } from 'node:crypto';
+import { runAbmDaily } from '../services/abmFollowup';
 import { and, desc, eq, max, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { diffInstruction, InstructionUpload, NotificationUpdate, parseInstruction, SmtpTest, SmtpUpdate, type Instruction } from '@isp/shared';
@@ -291,7 +292,7 @@ export const settingsRoutes = [
           const zone = tz?.tz ?? 'America/Sao_Paulo';
           const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date());
           const { config } = await performanceConfig(app.db, t.id);
-          results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today), interventions: await syncInterventions(app.db, t.id, today) };
+          results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today), interventions: await syncInterventions(app.db, t.id, today), abm: await runAbmDaily(app.db, t.id, today, zone) };
         } catch (e) { results[t.id] = { error: (e as Error).message }; }
       }
       return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events, results };

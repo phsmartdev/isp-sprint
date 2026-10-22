@@ -232,7 +232,7 @@ export const abmPlayRoutes = [
           const notes = [st.instructions, '', `Play: ${p.name} (versão ${p.currentVersion}) · ${acc.name}${person ? ` · ${person.name}` : ''}`, p.objective && `Objetivo: ${p.objective}`, `Critério de sucesso: ${def.successCriteria}`].filter((x) => x !== '' && x !== null).join('\n');
           const [a] = await tx.insert(s.activities).values({
             tenantId: auth.tenantId, type: st.type, title: person ? `${st.title} — ${person.name}` : st.title, notes, priority: 'media', ownerId: owner, createdBy: auth.userId, contactId: params.id, opportunityId: body.opportunityId,
-            dueAt: dueAtOf(auth, st.dueOn) as unknown as Date, status: 'a_fazer', category: 'Play ABM', tags: ['abm', 'play'], participants: owner === ownerId ? [] : [ownerId],
+            dueAt: dueAtOf(auth, st.dueOn) as unknown as Date, status: 'a_fazer', category: 'Play ABM', tags: ['abm', 'play'], stakeholderIds: person ? [person.id] : [], participants: owner === ownerId ? [] : [ownerId],
           }).returning({ id: s.activities.id });
           await taskEvent(tx, auth, a!.id, 'created', { delegatedTo: owner !== auth.userId ? owner : null, playRunId: run.id });
           await tx.insert(s.abmPlayRunSteps).values({ tenantId: auth.tenantId, runId: run.id, stepKey: st.key, position: i, activityId: a!.id });

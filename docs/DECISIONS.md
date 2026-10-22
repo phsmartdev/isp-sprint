@@ -280,3 +280,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** cada pergunta declara um destino de uma lista fechada; influência não existe na lista e qualquer tentativa é recusada. Posicionamento, e-mail e telefone sempre passam por revisão; interesse e NPS/CSAT podem ser automáticos. NPS/CSAT gravam no registro de pesquisas existente do Sucesso do Cliente (sem tabela paralela de saúde). Convites são individuais, com token em hash, prazo e uso único; respostas e versões são append-only. A resposta vira evento de negócio para os indicadores.
 - **Consequência:** o histórico da pessoa mostra o que mudou "via pesquisa"; a liderança decide o que é sensível.
 
+## ADR-061 — Sinais calculados com chave estável, resolução automática e supressão (22/10/2026)
+- **Contexto:** acompanhar contas estratégicas pede alertas acionáveis sem virar ruído nem duplicar.
+- **Decisão:** regras puras no domínio geram candidatos com chave estável por conta (ex.: `pessoa:<id>`); a sincronização abre (um aberto por chave), atualiza, resolve sozinha quando a condição some e respeita supressão após tratado (7 dias) ou descartado (30 dias). Sinais registrados pela equipe só fecham por ação humana. Cadências geram tarefas reais (idempotentes por cadência e data). Interações reaproveitam atividades, e-mails, respostas de pesquisa e visitas; a atividade ganhou a lista de pessoas da conta envolvidas.
+- **Consequência:** a inteligência (Fase 7) e futuros indicadores podem contar sinais tratados e tempo de resposta.
+

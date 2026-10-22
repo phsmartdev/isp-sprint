@@ -591,3 +591,50 @@ test('ABM Fase 7: inteligência com indicadores e cobertura explicada na Conta 3
   await page.goto('/abm?tab=inteligencia');
   await shot(page, 'abm-inteligencia');
 });
+
+test('ABM Fase 6: sinais da conta, tarefa a partir do sinal, cadência com tarefa e interação registrada', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const req = async (m: 'post' | 'patch', url: string, data: object) => { const r = await page.request[m](`/api/v1${url}`, { headers: H, data }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const acc = await req('post', '/abm/new-account', { name: `Câmara Fictícia Sinais ${Date.now().toString(36)}`, reason: 'Teste de acompanhamento', priority: 'critica' });
+  const st = await req('post', `/accounts/${acc.contactId}/stakeholders`, { person: { name: 'Vereadora Fictícia' }, roles: ['decisor'] });
+  const det = await (await page.request.get(`/api/v1/stakeholders/${st.id}`)).json();
+  const past = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
+  await req('patch', `/stakeholders/${st.id}`, { rowVersion: det.rowVersion, nextInteractionOn: past });
+
+  await page.goto(`/abm/contas/${acc.id}?t=acompanhamento`);
+  const sig = page.getByRole('listitem').filter({ hasText: 'Interação com Vereadora Fictícia vencida' });
+  await expect(sig.getByText('Alta', { exact: true })).toBeVisible();
+  await sig.getByRole('button', { name: 'Criar tarefa' }).click();
+  await page.getByRole('dialog', { name: 'Criar tarefa para o sinal' }).getByRole('button', { name: 'Criar tarefa' }).click();
+  await expect(page.getByText('Tarefa criada; o sinal está em análise')).toBeVisible();
+  await expect(sig.getByText('Em análise', { exact: true })).toBeVisible();
+  await expect(sig.getByRole('button', { name: 'ver tarefa' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Nova cadência' }).click();
+  const cd = page.getByRole('dialog', { name: 'Nova cadência' });
+  await cd.getByLabel('Nome', { exact: true }).fill('Ligação quinzenal com a vereadora');
+  await cd.getByLabel('A cada (dias)').fill('15');
+  await cd.getByLabel('Com quem (opcional)').selectOption({ label: 'Vereadora Fictícia' });
+  await cd.getByRole('button', { name: 'Criar cadência' }).click();
+  await expect(page.getByText('Cadência criada; a primeira tarefa já está na agenda')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Cadências' }).getByRole('button', { name: /^Tarefa para / })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Registrar interação' }).click();
+  const lg = page.getByRole('dialog', { name: 'Registrar interação' });
+  await lg.getByLabel('Vereadora Fictícia').check();
+  await lg.getByLabel(/^O que foi conversado/).fill('Conversa sobre a votação do orçamento de conectividade.');
+  await lg.getByRole('button', { name: 'Registrar' }).click();
+  await expect(page.getByText('Interação registrada', { exact: true })).toBeVisible();
+  const inter = page.getByRole('region', { name: 'Interações' });
+  await expect(inter.getByText('Conversa sobre a votação do orçamento de conectividade.')).toBeVisible();
+  await expect(inter.getByText(/com Vereadora Fictícia/).first()).toBeVisible();
+
+  await page.goto('/abm?tab=sinais');
+  await expect(page.getByRole('region', { name: 'Sinais' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/abm/contas/${acc.id}?t=acompanhamento`);
+  await shot(page, 'abm-acompanhamento');
+});
