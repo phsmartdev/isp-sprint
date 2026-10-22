@@ -37,7 +37,8 @@ test('login: mostrar senha, esqueci minha senha e link de redefinição inválid
   await expect(pwd).toHaveAttribute('type', 'password');
   await page.getByRole('button', { name: 'Mostrar senha' }).click();
   await expect(pwd).toHaveAttribute('type', 'text');
-  await expect(page.getByRole('link', { name: 'Entrar com Google' })).toHaveCount(0);
+  // o E2E sobe a API com o cliente Google (simulado) configurado: o botão aparece
+  await expect(page.getByRole('link', { name: 'Entrar com Google' })).toHaveCount(1);
   await page.getByRole('button', { name: 'Esqueci minha senha' }).click();
   await page.getByLabel('E-mail').fill('ninguem@exemplo.test');
   await page.getByRole('button', { name: 'Enviar link' }).click();
