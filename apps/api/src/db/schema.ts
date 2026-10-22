@@ -620,6 +620,8 @@ export const activities = pgTable(
     approvedAt: ts('approved_at'),
     approvedBy: uuid('approved_by').references(() => users.id),
     arpId: uuid('arp_id'),
+    /** ABM Fase 6: pessoas da conta (stakeholders) com quem foi a interação */
+    stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
   },
   (t) => ({
     csCadenceUq: uniqueIndex('activities_cs_cadence_uq').on(t.tenantId, t.contactId, t.csCadenceKey).where(sql`cs_cadence_key is not null`),
@@ -3480,4 +3482,85 @@ export const surveyUpdates = pgTable(
     statusCk: check('survey_updates_status_ck', inList('status', ['aplicada', 'pendente', 'rejeitada', 'sem_alvo'])),
     destCk: check('survey_updates_dest_ck', inList('destination', ['cs_nps', 'cs_csat', 'stakeholder_interesse', 'stakeholder_posicionamento', 'pessoa_email', 'pessoa_telefone'])),
   }),
+);
+
+// ---------------------------------------------------------------- ABM — Fase 6: sinais, cadências e interações
+/** Sinal: situação que pede ação numa conta do ABM (detectada pelos dados ou registrada pela equipe). */
+export const abmSignals = pgTable(
+  'abm_signals',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    kind: text('kind').notNull(),
+    key: text('key').notNull(),
+    severity: text('severity').notNull(),
+    title: text('title').notNull(),
+    detail: text('detail'),
+    ref: jsonb('ref').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    status: text('status').notNull().default('novo'),
+    ownerId: uuid('owner_id').references(() => users.id),
+    detectedAt: ts('detected_at').notNull().defaultNow(),
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+    closedAt: ts('closed_at'),
+    closedBy: uuid('closed_by').references(() => users.id),
+    resolution: text('resolution'),
+    suppressUntil: ts('suppress_until'),
+    taskId: uuid('task_id').references(() => activities.id),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+  },
+  (t) => ({
+    openUq: uniqueIndex('abm_signals_open_uq').on(t.abmId, t.key).where(sql`status in ('novo', 'em_analise')`),
+    idx: index('abm_signals_idx').on(t.tenantId, t.status),
+    statusCk: check('abm_signals_status_ck', inList('status', ['novo', 'em_analise', 'tratado', 'descartado', 'resolvido'])),
+    sevCk: check('abm_signals_sev_ck', inList('severity', ['alta', 'media', 'baixa'])),
+  }),
+);
+export const abmSignalEvents = pgTable(
+  'abm_signal_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    signalId: uuid('signal_id').notNull().references(() => abmSignals.id),
+    type: text('type').notNull(),
+    note: text('note'),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('abm_signal_events_idx').on(t.signalId, t.createdAt) }),
+);
+/** Cadência de contato com a conta ou com uma pessoa: a próxima tarefa nasce sozinha. */
+export const abmCadences = pgTable(
+  'abm_cadences',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    abmId: uuid('abm_id').notNull().references(() => abmAccounts.id),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    title: text('title').notNull(),
+    type: text('type').notNull(),
+    everyDays: integer('every_days').notNull(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    startOn: date('start_on', { mode: 'string' }).notNull(),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('abm_cadences_idx').on(t.tenantId, t.contactId), typeCk: check('abm_cadences_type_ck', inList('type', ['ligacao', 'reuniao', 'visita', 'email', 'whatsapp', 'tarefa'])) }),
+);
+export const abmCadenceTasks = pgTable(
+  'abm_cadence_tasks',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    cadenceId: uuid('cadence_id').notNull().references(() => abmCadences.id),
+    dueOn: date('due_on', { mode: 'string' }).notNull(),
+    activityId: uuid('activity_id').notNull().references(() => activities.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('abm_cadence_tasks_uq').on(t.cadenceId, t.dueOn) }),
 );
