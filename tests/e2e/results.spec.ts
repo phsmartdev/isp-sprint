@@ -564,3 +564,30 @@ test('ABM Fase 8: pessoas da conta na oportunidade com papel e influência avali
   await page.goto(`/opportunities/${opp.id}?aba=pessoas`);
   await shot(page, 'abm-integracoes');
 });
+
+test('ABM Fase 7: inteligência com indicadores e cobertura explicada na Conta 360', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const post = async (url: string, data: object) => { const r = await page.request.post(`/api/v1${url}`, { headers: H, data }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const name = `Autarquia Fictícia Intel ${Date.now().toString(36)}`;
+  const acc = await post('/abm/new-account', { name, reason: 'Teste de inteligência', priority: 'critica' });
+  await post(`/accounts/${acc.contactId}/stakeholders`, { person: { name: 'Gestora Fictícia' }, roles: ['decisor'] });
+
+  await page.goto('/abm?tab=inteligencia&priority=critica');
+  await expect(page.getByRole('region', { name: 'Prospecção' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Stakeholders' }).getByText('Decisores mapeados')).toBeVisible();
+  const cov = page.getByRole('region', { name: 'Cobertura de stakeholders por conta' });
+  const row = cov.getByRole('row').filter({ hasText: name });
+  await expect(row.getByText(/Falta mapear: quem aprova o gasto/)).toBeVisible();
+  await row.getByRole('link', { name }).click();
+  const card = page.getByRole('region', { name: 'Cobertura de stakeholders' });
+  await expect(card.getByText('Papéis-chave mapeados')).toBeVisible();
+  await expect(card.getByText('1 pessoa(s) sem influência avaliada')).toBeVisible();
+  await card.getByRole('link', { name: 'resolver' }).first().click();
+  await expect(page.getByRole('tab', { name: 'Stakeholders', selected: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/abm?tab=inteligencia');
+  await shot(page, 'abm-inteligencia');
+});
