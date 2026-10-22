@@ -110,7 +110,7 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Relatórios:** Inteligência ganhou a aba "Projetos", com o mesmo painel (somente leitura) para quem tem acesso a Projetos.
 - "Limpar base" apaga riscos e homologações com os projetos; os impedimentos ficam (são registro dos rituais), só perdem o vínculo.
 - Migração 0052 (`milestone_homologations` append-only, `project_risks`, colunas de critério e homologação em marcos, vínculo de projeto em impedimentos).
-- Testes: domínio (3), API (4), E2E (1). Regressão completa: domínio 153, API 232, E2E (ver commit).
+- Testes: domínio (3), API (4), E2E (1). Regressão completa: domínio 153, API 232, E2E 60/60.
 
 ## Etapa 1 — Fase 1: ativação modular e permissões finas ✅ (2026-10-22)
 - **Sete módulos de negócio** (CRM, Marketing, Produto, Gestão de Time, Contratos, Projetos, Relatórios) sobre os 14 módulos técnicos de acesso. Cada módulo técnico tem um dono de negócio. Contas, pessoas, agenda de atividades, catálogo, Início e Configurações são da fundação e nunca são desligados.
