@@ -1,4 +1,5 @@
 /** Ficha individual do contrato. */
+import { useAuth } from '../../auth/AuthProvider';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { EntityPeoplePanel } from '../../features/abm/EntityPeoplePanel';
 import { useState } from 'react';
@@ -96,6 +97,7 @@ function MoveModal({ c, open, onClose }: { c: ContractDetail; open: boolean; onC
 
 export function ContractDetailPage() {
   const { id = '' } = useParams();
+  const { can, feature } = useAuth();
   const [tab, setTab] = useState<Tab>('resumo');
   const [edit, setEdit] = useState(false);
   const [validate, setValidate] = useState(false);
@@ -155,8 +157,8 @@ export function ContractDetailPage() {
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
-            { key: 'projetos', label: 'Tarefas e projetos' },
-            { key: 'pessoas', label: 'Pessoas e ABM' },
+            ...(can('projetos') ? [{ key: 'projetos' as Tab, label: 'Tarefas e projetos' }] : []),
+            ...(feature('marketing.abm') ? [{ key: 'pessoas' as Tab, label: 'Pessoas e ABM' }] : []),
             { key: 'historico', label: 'Linha do tempo' },
           ]} />
         </div>

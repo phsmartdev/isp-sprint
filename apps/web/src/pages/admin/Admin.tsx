@@ -8,7 +8,7 @@ import {
   Palette, Plus, RefreshCw, Settings, Shield, Target, Trash2, Upload, UserPlus, Users, Workflow,
 } from 'lucide-react';
 import {
-  LEVEL_LABELS, MODULE_LABELS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
+  BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
 } from '@isp/domain';
 import type { BrandSlot } from '@isp/shared';
 import { api, ApiError, qs } from '../../lib/api';
@@ -254,7 +254,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
         <FormField label="Cargo" htmlFor="uf-job" hint="Aparece abaixo do nome no topo"><Input id="uf-job" value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Ex.: Comercial" /></FormField>
         <FormField label="WhatsApp" htmlFor="uf-phone" hint="Para avisos internos (pedidos de aprovação)"><Input id="uf-phone" inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="(79) 99999-0000" /></FormField>
         <FormField label="Perfil de acesso" htmlFor="uf-profile" hint={self ? 'Você não pode tirar o próprio acesso de gerência' : 'Níveis por módulo em Segurança'}>
-          <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => set('profile', e.target.value as ProfileKey)}>{(['vendedor', 'supervisor', 'gerencia'] as ProfileKey[]).map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
+          <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => set('profile', e.target.value as ProfileKey)}>{PROFILE_KEYS.map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
         </FormField>
       </div>
       {form.profile === 'supervisor' ? (
@@ -449,6 +449,7 @@ export { AdminIntegrations } from './Integrations';
 
 // =================================================================== segurança
 type SecurityData = { profiles: { key: ProfileKey; users: number }[]; modules: { key: Module; allowed: AccessLevel[] }[]; matrix: Record<ProfileKey, Record<Module, AccessLevel>>; defaults: Record<ProfileKey, Record<Module, AccessLevel>> };
+const GROUPS = ['crm', 'marketing', 'contratos', 'projetos', 'relatorios', 'gestao_time', 'fundacao'] as const;
 const LEVEL_TONE: Record<AccessLevel, string> = { nenhum: 'border-line bg-surface-2 text-muted', proprio: 'border-success/30 bg-success-soft text-[#15803D]', equipe: 'border-primary/30 bg-primary-soft text-primary', total: 'border-purple/30 bg-purple-soft text-purple' };
 
 export function AdminSecurity() {
@@ -469,7 +470,7 @@ export function AdminSecurity() {
       <section className="card overflow-hidden">
         <div className="px-5 pb-3 pt-4">
           <h2 className="text-lg font-bold text-ink">Níveis de acesso por módulo</h2>
-          <p className="text-sm text-muted">Cada perfil recebe um nível em cada módulo. A regra vale no servidor: a tela e a API obedecem ao mesmo nível. Toda mudança fica no log.</p>
+          <p className="text-sm text-muted">Cada perfil recebe um nível em cada módulo. A regra vale no servidor: a tela e a API obedecem ao mesmo nível. Toda mudança fica no log. Módulo de negócio desligado em Módulos e liberação vale acima deste nível.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
@@ -481,7 +482,9 @@ export function AdminSecurity() {
               </tr>
             </thead>
             <tbody>
-              {d.modules.map((mod) => (
+              {GROUPS.map((g) => [
+                <tr key={`g-${g}`} className="border-t border-line bg-surface-2/60"><th scope="rowgroup" colSpan={d.profiles.length + 1} className="px-5 py-2 text-xs font-bold text-ink">{g === 'fundacao' ? 'Fundação (sempre ligada)' : BUSINESS_MODULE_LABELS[g]}</th></tr>,
+                ...d.modules.filter((mod) => MODULE_OWNER[mod.key] === g).map((mod) => (
                 <tr key={mod.key} className="border-t border-line">
                   <th scope="row" className="px-5 py-3 font-semibold text-ink">{MODULE_LABELS[mod.key]}</th>
                   {d.profiles.map((p) => {
@@ -503,7 +506,7 @@ export function AdminSecurity() {
                     );
                   })}
                 </tr>
-              ))}
+              ))])}
             </tbody>
           </table>
         </div>

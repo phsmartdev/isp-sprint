@@ -305,3 +305,16 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Sem Pub/Sub, a atualização depende de abrir a tela, do botão e da rotina diária.
   - Anexos são apenas indicados (abrir no Gmail).
 
+## ADR-064 — Módulos de negócio sobre os módulos técnicos de acesso (22/10/2026)
+- **Contexto:** a Etapa 1 pede sete módulos de negócio com ativação por empresa, equipe, perfil e pessoa, permissões por funcionalidade, ação e dado sensível, sem reconstruir o sistema nem separar bancos.
+- **Decisão:**
+  - Cada um dos 14 módulos técnicos ganhou um dono de negócio (ou "fundação"). O acesso efetivo é calculado na sessão: módulo de negócio desligado para a pessoa zera o nível dos módulos técnicos dele. Por isso, as 485 rotas e todas as telas obedecem sem alteração individual.
+  - Funcionalidades que moram em módulos técnicos compartilhados são identificadas por regras de rota declaradas num só lugar (domínio), verificadas no registro de rotas.
+  - Ações sensíveis ficam por perfil, com padrão por perfil; a ocultação financeira é aplicada na resposta da API, num único ponto.
+  - A exceção individual (decisão do Paulo, 22/10) só abre ou fecha o módulo, nunca eleva nível, e é auditada com motivo e validade. Isso substitui a regra de 17/10 "sem exceção por usuário".
+  - Contas, pessoas, atividades e catálogo são cadastros da fundação, para Contratos funcionar sem o CRM. As telas do CRM e do ABM sobre eles exigem nível num módulo técnico do próprio CRM ou Marketing.
+- **Consequência:**
+  - Desligar e religar não perde dados.
+  - Um teste percorre o registro de rotas e garante que nenhuma rota protegida fica sem política.
+  - Novas telas de módulos futuros entram declarando dono e funcionalidade, sem mexer no resto.
+

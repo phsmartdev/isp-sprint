@@ -1,3 +1,4 @@
+import { AdminModules } from './pages/admin/Modules';
 import { EmailPage, MailboxesPage } from './pages/email/Email';
 import { AdminGmailSettings } from './pages/admin/GmailSettings';
 import { AbmPage } from './pages/marketing/Abm';
@@ -15,7 +16,7 @@ import { GoalsPage } from './pages/performance/Goals';
 import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import type { Module } from '@isp/domain';
+import type { FeatureKey, Module } from '@isp/domain';
 import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/layout/AppShell';
 import { EmptyState, LoadingRows } from './components/ui/primitives';
@@ -67,8 +68,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 /** Rota protegida pelo nível do módulo; a API também recusa. */
-function Gate({ module, min, children }: { module: Module; min?: 'proprio' | 'equipe' | 'total'; children: ReactNode }) {
-  const { can } = useAuth();
+function Gate({ module, min, feature, children }: { module: Module; min?: 'proprio' | 'equipe' | 'total'; feature?: FeatureKey; children: ReactNode }) {
+  const { can, feature: on } = useAuth();
+  if (feature && !on(feature)) return <div className="card"><EmptyState title="Módulo não liberado" description="Esta área faz parte de um módulo que ainda não foi liberado para você. Fale com a gerência se precisar." /></div>;
   if (!can(module, min)) return <div className="card"><EmptyState title="Sem acesso a este módulo" description="Seu perfil não tem acesso a esta área. Fale com a gerência se precisar." /></div>;
   return <>{children}</>;
 }
@@ -93,13 +95,13 @@ export function App() {
         <Route path="opportunities/:id" element={<Gate module="oportunidades"><OpportunityWorkspacePage /></Gate>} />
         <Route path="opportunities/:id/aprovacao" element={<ApprovalPage />} />
         <Route path="aprovacoes" element={<ApprovalsPage />} />
-        <Route path="customers" element={<Gate module="clientes"><CustomersPage /></Gate>} />
+        <Route path="customers" element={<Gate module="clientes" feature="crm.contas"><CustomersPage /></Gate>} />
         <Route path="customers/:id" element={<Gate module="clientes"><CustomerDetailPage /></Gate>} />
-        <Route path="sucesso" element={<Gate module="clientes"><CustomerSuccessPage /></Gate>} />
-        <Route path="sucesso/jornadas/:id" element={<Gate module="clientes"><JourneyPage /></Gate>} />
-        <Route path="sucesso/pesquisas/:id" element={<Gate module="clientes"><SurveyPage /></Gate>} />
-        <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
-        <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
+        <Route path="sucesso" element={<Gate module="clientes" feature="crm.sucesso_cliente"><CustomerSuccessPage /></Gate>} />
+        <Route path="sucesso/jornadas/:id" element={<Gate module="clientes" feature="crm.sucesso_cliente"><JourneyPage /></Gate>} />
+        <Route path="sucesso/pesquisas/:id" element={<Gate module="clientes" feature="crm.sucesso_cliente"><SurveyPage /></Gate>} />
+        <Route path="activities" element={<Gate module="atividades" feature="crm.atividades"><ActivitiesPage /></Gate>} />
+        <Route path="tarefas" element={<Gate module="atividades" feature="projetos.tarefas"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
         <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
         <Route path="times" element={<Gate module="resultados"><ResultsPage /></Gate>} />
@@ -111,17 +113,17 @@ export function App() {
         <Route path="resultados" element={<Navigate to="/times" replace />} />
         <Route path="email" element={<Gate module="email"><EmailPage /></Gate>} />
         <Route path="email/caixas" element={<Gate module="email"><MailboxesPage /></Gate>} />
-        <Route path="abm" element={<Gate module="clientes"><AbmPage /></Gate>} />
-        <Route path="abm/contas/:id" element={<Gate module="clientes"><Abm360Page /></Gate>} />
-        <Route path="produto" element={<ProductPage />} />
+        <Route path="abm" element={<Gate module="clientes" feature="marketing.abm"><AbmPage /></Gate>} />
+        <Route path="abm/contas/:id" element={<Gate module="clientes" feature="marketing.abm"><Abm360Page /></Gate>} />
+        <Route path="produto" element={<Gate module="inicio" feature="produto.catalogo"><ProductPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
-        <Route path="reports" element={<Gate module="relatorios"><ReportsPage /></Gate>} />
+        <Route path="reports" element={<Gate module="relatorios" feature="relatorios.comercial"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />
         <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
         <Route path="contracts" element={<Gate module="contratos"><ContractsPage /></Gate>} />
         <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />
-        <Route path="contracts/atas/:id" element={<Gate module="contratos"><ArpDetailPage /></Gate>} />
+        <Route path="contracts/atas/:id" element={<Gate module="contratos" feature="contratos.atas"><ArpDetailPage /></Gate>} />
         <Route path="contracts/:id" element={<Gate module="contratos"><ContractDetailPage /></Gate>} />
         <Route path="settings/profile" element={<ProfilePage />} />
         <Route path="settings" element={<Gate module="configuracoes" min="total"><AdminLayout /></Gate>}>
@@ -143,6 +145,7 @@ export function App() {
           <Route path="resultados" element={<AdminResultsSettings />} />
           <Route path="abm" element={<AdminAbmSettings />} />
           <Route path="gmail" element={<AdminGmailSettings />} />
+          <Route path="modulos" element={<AdminModules />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />

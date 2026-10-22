@@ -5,7 +5,7 @@ import { z } from 'zod';
 import {
   BRAND_SLOTS, ImageUpload, PasswordChange, PlanUpsert, SecurityUpdate, SourceUpsert, UserCreate, UserUpdate,
 } from '@isp/shared';
-import { DEFAULT_ACCESS, MODULES, PROFILE_KEYS, allowedLevels, type AccessLevel, type Module, type ProfileKey } from '@isp/domain';
+import { DEFAULT_ACCESS, MODULES, PROFILE_KEYS, PROFILE_LABELS, allowedLevels, type AccessLevel, type Module, type ProfileKey } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -31,7 +31,7 @@ export async function ensureRoles(db: DbOrTx, tenantId: string) {
   const map = await roleMap(db, tenantId);
   for (const key of PROFILE_KEYS) {
     if (!map[key]) {
-      const [r] = await db.insert(s.roles).values({ tenantId, key, name: { vendedor: 'Vendedor', supervisor: 'Supervisor', gerencia: 'Gerência' }[key], isSystem: true }).returning();
+      const [r] = await db.insert(s.roles).values({ tenantId, key, name: PROFILE_LABELS[key], isSystem: true }).returning();
       map[key] = r!.id;
       await db.insert(s.accessPolicies).values(MODULES.map((m) => ({ roleId: r!.id, module: m, level: DEFAULT_ACCESS[key][m] })));
     }

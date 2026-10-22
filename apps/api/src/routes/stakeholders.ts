@@ -3,6 +3,7 @@
  * Regra crítica: o poder de influência só muda por esta API, por pessoa autorizada, com justificativa (origem "manual").
  * Nenhum outro caminho do sistema (importação, sincronização, automação, pesquisa, IA) grava em stakeholder_influence.
  */
+import { requireAction } from '../services/modules';
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -331,6 +332,7 @@ export const stakeholderRoutes = [
     method: 'GET', url: '/accounts/:id/influence-map', summary: 'Mapa influência × interesse da conta (por contexto e departamento), não avaliados à parte; CSV opcional', tag: 'Marketing', module: 'clientes', params: IdParams,
     query: z.object({ context: z.enum(INFLUENCE_CONTEXTS).default('conta'), contextKey: z.string().max(80).default(''), unitId: z.string().uuid().optional(), format: z.enum(['json', 'csv']).default('json') }),
     handler: async ({ app, auth, params, query: q, reply }) => {
+      if (q.format === 'csv') requireAction(auth, 'exportar');
       await assertAccount(app.db, auth, params.id);
       const pol = await abmPolicy(app.db, auth.tenantId);
       if (!canViewInfluence(auth, pol.influence)) throw forbidden('Seu perfil não vê o poder de influência.');

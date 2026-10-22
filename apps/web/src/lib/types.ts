@@ -1,4 +1,4 @@
-import type { Sector, ViabilityResult } from '@isp/domain';
+import type { BusinessModule, Sector, SensitiveAction, ViabilityResult } from '@isp/domain';
 import type { AccessLevel, ActivityPriority, ActivityType, CoverageStatus, ContractRequestStatus, CustomerLifecycle, LeadStatus, Module, OpportunityReason, OpportunityStage, ProposalStatus, Segment } from '@isp/domain';
 
 export type Me = {
@@ -9,6 +9,11 @@ export type Me = {
   teamIds: string[];
   teamMemberIds: string[];
   sectors: Sector[];
+  /** Etapa 1: módulos de negócio ligados para a pessoa, funcionalidades desligadas na empresa e ações sensíveis. */
+  modules: Record<BusinessModule, boolean>;
+  moduleReasons: Record<BusinessModule, string>;
+  disabledFeatures: string[];
+  actions: Record<SensitiveAction, boolean>;
 };
 
 export type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };

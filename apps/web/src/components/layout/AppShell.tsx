@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail } from 'lucide-react';
-import type { Module } from '@isp/domain';
+import type { FeatureKey, Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
 import { useAuth } from '../../auth/AuthProvider';
@@ -15,7 +15,7 @@ import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
-type NavLeaf = { to: string; label: string; icon?: ReactNode; module: Module; badge?: boolean | 'approvals'; also?: string[] };
+type NavLeaf = { to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: boolean | 'approvals'; also?: string[] };
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
 type NavEntry = NavLeaf | NavGroup;
 const ICON = 'h-[22px] w-[22px] shrink-0';
@@ -25,19 +25,19 @@ const NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: <Home className={ICON} />, module: 'inicio' },
   { key: 'comercial', label: 'Comercial', icon: <Briefcase className={ICON} />, children: [
     { to: '/opportunities', label: 'Oportunidades', module: 'oportunidades' },
-    { to: '/customers', label: 'Contas', module: 'clientes' },
+    { to: '/customers', label: 'Contas', module: 'clientes', feature: 'crm.contas' },
     { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
-    { to: '/activities', label: 'Atividades', module: 'atividades', badge: true },
+    { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades', badge: true },
   ] },
   { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
-  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes' },
+  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
     { to: '/leads', label: 'Leads', module: 'leads' },
-    { to: '/abm', label: 'ABM', module: 'clientes' },
+    { to: '/abm', label: 'ABM', module: 'clientes', feature: 'marketing.abm' },
     { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
   ] },
-  { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio' },
+  { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
     { to: '/times', label: 'Visão geral', module: 'resultados' },
     { to: '/times/intervencoes', label: 'Intervenções', module: 'resultados' },
@@ -47,9 +47,9 @@ const NAV: NavEntry[] = [
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
     { to: '/projetos', label: 'Projetos', module: 'projetos' },
-    { to: '/tarefas', label: 'Tarefas', module: 'atividades' },
+    { to: '/tarefas', label: 'Tarefas', module: 'atividades', feature: 'projetos.tarefas' },
   ] },
-  { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios' },
+  { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios', feature: 'relatorios.comercial' },
   { to: '/intelligence', label: 'Inteligência', icon: <Lightbulb className={ICON} />, module: 'inteligencia' },
   { to: '/settings', label: 'Configuração', icon: <Settings className={ICON} />, module: 'configuracoes' },
 ];
@@ -77,6 +77,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/resultados', label: 'Gestão de Times', admin: true },
   { to: '/settings/abm', label: 'ABM', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
+  { to: '/settings/modulos', label: 'Módulos e liberação', admin: true },
   { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
   { to: '/settings/logs', label: 'Logs do sistema', admin: true },
@@ -93,7 +94,8 @@ function useOpenActivities() {
 }
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
+  const show = (n: NavLeaf) => can(n.module) && (!n.feature || feature(n.feature));
   const loc = useLocation();
   const counts = useOpenActivities().data?.counts;
   const badge = counts ? counts.today + counts.overdue : 0;
@@ -112,7 +114,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <ul className="space-y-1">
           {NAV.map((n) => {
             if (isGroup(n)) {
-              const kids = n.children.filter((c) => can(c.module));
+              const kids = n.children.filter((c) => show(c));
               if (!kids.length) return null;
               const active = kids.some((c) => loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`));
               const open = openGroups[n.key] ?? active;
@@ -141,7 +143,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </li>
               );
             }
-            if (!(can(n.module) || (n.module === 'configuracoes' && inSettings))) return null;
+            if (!(show(n) || (n.module === 'configuracoes' && inSettings))) return null;
             return (
               <li key={n.to}>
                 <NavLink

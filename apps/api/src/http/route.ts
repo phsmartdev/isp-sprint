@@ -5,8 +5,8 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, type ZodTypeAny } from 'zod';
-import type { AccessLevel, Module } from '@isp/domain';
-import { unauthorized, unprocessable, zodToProblemErrors } from './errors';
+import { BUSINESS_MODULE_LABELS, MODULE_OWNER, featureDef, featureOn, redactMoney, routeFeature, type AccessLevel, type FeatureKey, type Module } from '@isp/domain';
+import { forbidden, unauthorized, unprocessable, zodToProblemErrors } from './errors';
 import type { AuthContext } from './context';
 import { requireLevel } from '../services/scope';
 
@@ -41,7 +41,19 @@ export type RouteDef<B extends ZodTypeAny = ZodTypeAny, Q extends ZodTypeAny = Z
   }) => Promise<unknown>;
 };
 
-export const routeRegistry: RouteDef[] = [];
+export const routeRegistry: (RouteDef & { feature: FeatureKey | null })[] = [];
+
+/** Etapa 1: módulo de negócio desligado ou funcionalidade desligada → 403 com o motivo, antes da matriz de níveis. */
+export function assertModuleOpen(auth: AuthContext, module: Module | undefined, feature: FeatureKey | null) {
+  const owner = module ? MODULE_OWNER[module] : 'fundacao';
+  if (owner !== 'fundacao' && !auth.modules[owner]) throw forbidden(`O módulo ${BUSINESS_MODULE_LABELS[owner]} não está liberado para você.`);
+  if (feature && !featureOn(feature, auth.modules, auth.disabledFeatures, auth.access)) {
+    const f = featureDef(feature);
+    const off = [f.module, ...(f.requires ?? [])].find((m) => !auth.modules[m]);
+    if (off) throw forbidden(`O módulo ${BUSINESS_MODULE_LABELS[off]} não está liberado para você.`);
+    throw forbidden(auth.disabledFeatures.includes(feature) ? `A funcionalidade "${f.label}" está desligada na empresa.` : `Seu perfil não tem acesso a ${f.label}.`);
+  }
+}
 
 export function defineRoute<B extends ZodTypeAny = ZodTypeAny, Q extends ZodTypeAny = ZodTypeAny, P extends ZodTypeAny = ZodTypeAny>(
   def: RouteDef<B, Q, P>,
@@ -63,7 +75,8 @@ export function registerRoutes(app: FastifyInstance, prefix: string, defs: Route
     if (!def.public && !def.module && !def.anyAuthenticated) {
       throw new Error(`Rota ${def.method} ${def.url} sem política de acesso declarada`);
     }
-    routeRegistry.push({ ...def, url: prefix + def.url });
+    const feature = def.public ? null : routeFeature(def.method, def.url);
+    routeRegistry.push({ ...def, url: prefix + def.url, feature });
     app.route({
       method: def.method,
       url: prefix + def.url,
@@ -73,14 +86,22 @@ export function registerRoutes(app: FastifyInstance, prefix: string, defs: Route
         const auth = req.auth;
         if (!def.public) {
           if (!auth) throw unauthorized();
+          assertModuleOpen(auth, def.module, feature);
           if (def.module) requireLevel(auth, def.module, def.min ?? 'proprio');
+          if (def.method === 'DELETE' && (/^\/[a-z-]+\/:id$/.test(def.url) || def.url === '/contracts/:id/documents/:docId') && !auth.actions.arquivar) throw forbidden('Seu perfil não pode arquivar nem excluir registros.');
         }
         const params = parse(def.params, req.params, 'URL');
         const query = parse(def.query, req.query, 'consulta');
         const body = parse(def.body, req.body, 'corpo');
         const result = await def.handler({ req, reply, auth: auth as AuthContext, body, query, params, app });
         if (reply.sent) return;
-        return result ?? reply.code(204).send();
+        if (result === undefined || result === null) return reply.code(204).send();
+        // sem a ação "ver financeiro", valores em R$ saem como ocultos em qualquer resposta (tela, relatório, indicador)
+        if (auth && !def.public && !auth.actions.ver_financeiro && typeof result === 'object' && !Buffer.isBuffer(result)) {
+          reply.header('x-isp-financeiro', 'oculto');
+          return redactMoney(result);
+        }
+        return result;
       },
     });
   }

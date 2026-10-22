@@ -3747,3 +3747,59 @@ export const mailSyncRuns = pgTable(
   },
   (t) => ({ idx: index('mail_sync_runs_idx').on(t.mailboxId, t.createdAt) }),
 );
+
+// --------------------------------------------------------------- Etapa 1: módulos de negócio, liberação e ações sensíveis
+
+/** Módulo de negócio por empresa (teto). Sem linha = ligado para todos (comportamento anterior). */
+export const tenantModules = pgTable(
+  'tenant_modules',
+  {
+    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    module: text('module').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    mode: text('mode').notNull().default('todos'),
+    disabledFeatures: text('disabled_features').array().notNull().default(sql`'{}'::text[]`),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.module] }),
+    moduleCk: check('tenant_modules_module_ck', inList('module', ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios'])),
+    modeCk: check('tenant_modules_mode_ck', inList('mode', ['todos', 'liberados'])),
+  }),
+);
+
+/** Liberação ou bloqueio de um módulo para uma equipe ou uma pessoa (com motivo e validade). */
+export const moduleGrants = pgTable(
+  'module_grants',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    module: text('module').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: uuid('subject_id').notNull(),
+    effect: text('effect').notNull(),
+    reason: text('reason').notNull(),
+    validUntil: date('valid_until'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('module_grants_uq').on(t.tenantId, t.module, t.subjectType, t.subjectId),
+    subjCk: check('module_grants_subject_ck', inList('subject_type', ['equipe', 'usuario'])),
+    effCk: check('module_grants_effect_ck', inList('effect', ['liberar', 'bloquear'])),
+  }),
+);
+
+/** Ações sensíveis por perfil. Sem linha = padrão do perfil (DEFAULT_ACTIONS). */
+export const actionPolicies = pgTable(
+  'action_policies',
+  {
+    roleId: uuid('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+    action: text('action').notNull(),
+    allowed: boolean('allowed').notNull(),
+    updatedBy: uuid('updated_by'),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.roleId, t.action] }) }),
+);

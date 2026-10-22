@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { atLeast, type AccessLevel, type Module } from '@isp/domain';
+import { atLeast, featureOn, type AccessLevel, type BusinessModule, type FeatureKey, type Module, type SensitiveAction } from '@isp/domain';
 import { api, ApiError } from '../lib/api';
-import { setTimezone } from '../lib/format';
+import { setFinanceRestricted, setTimezone } from '../lib/format';
 import type { Me } from '../lib/types';
 
 type AuthState = {
@@ -11,6 +11,10 @@ type AuthState = {
   /** Nível do usuário no módulo (matriz de segurança). */
   level: (m: Module) => AccessLevel;
   can: (m: Module, min?: AccessLevel) => boolean;
+  /** Etapa 1: módulo de negócio ligado para a pessoa; funcionalidade disponível; ação sensível permitida. */
+  mod: (m: BusinessModule) => boolean;
+  feature: (f: FeatureKey) => boolean;
+  action: (a: SensitiveAction) => boolean;
   refresh: () => Promise<unknown>;
   logout: () => Promise<void>;
 };
@@ -35,6 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (q.data) setTimezone(q.data.tenant.timezone);
+    // Etapa 1: sem "ver financeiro", todo valor em R$ aparece como oculto (inclusive somas feitas na tela)
+    setFinanceRestricted(!!q.data && q.data.actions?.ver_financeiro === false);
   }, [q.data]);
 
   useEffect(() => {
@@ -50,6 +56,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading: q.isLoading,
     level,
     can: (m, min = 'proprio') => atLeast(level(m), min),
+    mod: (m) => me?.modules?.[m] ?? true,
+    feature: (f) => (me?.modules ? featureOn(f, me.modules, me.disabledFeatures ?? [], me.access) : true),
+    action: (a) => me?.actions?.[a] ?? true,
     refresh: () => q.refetch(),
     logout: async () => {
       // para tudo antes de sair: nenhuma tela tenta recarregar sem sessão (o que mostrava "Faça login para continuar")

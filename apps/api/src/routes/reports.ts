@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { requireAction } from '../services/modules';
 import { z } from 'zod';
 import { PeriodQuery, ReportQuery } from '@isp/shared';
 import { CONTRACT_LABELS, csvSafe, STAGE_LABELS, type ContractRequestStatus, SEGMENT_PRODUCT_LABELS, type OpportunityStage, type Segment } from '@isp/domain';
@@ -237,6 +238,7 @@ export const reportRoutes = [
     module: 'relatorios',
     query: ExportQuery,
     handler: async ({ app, auth, query, reply, req }) => {
+      requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.');
       const p = periodBounds(auth, query.from, query.to);
       let header: string[] = [];
       let lines: unknown[][] = [];

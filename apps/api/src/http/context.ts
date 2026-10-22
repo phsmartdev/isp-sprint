@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
-import { MODULES, mergeLevels, type AccessLevel, type Module, type Sector } from '@isp/domain';
+import {
+  BUSINESS_MODULES, DEFAULT_ACTIONS, MODULES, SENSITIVE_ACTIONS, defaultTenantModule, gateAccess, mergeLevels, moduleDecision,
+  type AccessLevel, type BusinessModule, type ModuleDecision, type ModuleGrant, type Module, type ReleaseMode, type Sector, type SensitiveAction,
+} from '@isp/domain';
 import type { DB } from '../db/client';
 import type { Config } from '../config';
 import * as s from '../db/schema';
@@ -24,6 +27,13 @@ export type AuthContext = {
   teamMemberIds: string[];
   /** Setores do usuário (contratos): definem tarefas e quem conclui cada etapa. */
   sectors: Sector[];
+  /** Etapa 1: módulos de negócio ligados para a pessoa (e por quê), funcionalidades desligadas na empresa e ações sensíveis. */
+  modules: Record<BusinessModule, boolean>;
+  moduleReasons: Record<BusinessModule, ModuleDecision['reason']>;
+  disabledFeatures: string[];
+  actions: Record<SensitiveAction, boolean>;
+  /** Nível do perfil antes de desligar módulos (só para mostrar "módulo desligado" em vez de "sem acesso"). */
+  profileAccess: Record<Module, AccessLevel>;
 };
 
 declare module 'fastify' {
@@ -95,7 +105,7 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
   const policies = roleRows.length
     ? await db.select().from(s.accessPolicies).where(inArray(s.accessPolicies.roleId, roleRows.map((r) => r.roleId)))
     : [];
-  const access = Object.fromEntries(
+  const profileAccess = Object.fromEntries(
     MODULES.map((m) => [m, mergeLevels(policies.filter((p) => p.module === m).map((p) => p.level as AccessLevel))]),
   ) as Record<Module, AccessLevel>;
 
@@ -104,6 +114,24 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
   const members = ledTeams.length
     ? await db.select({ userId: s.teamMemberships.userId }).from(s.teamMemberships).where(inArray(s.teamMemberships.teamId, ledTeams))
     : [];
+
+  // módulos de negócio: teto da empresa + liberação por equipe ou pessoa
+  const teamIds = memberships.map((m) => m.teamId);
+  const tms = await db.select().from(s.tenantModules).where(eq(s.tenantModules.tenantId, row.tenantId));
+  const grants = await db.select().from(s.moduleGrants).where(and(eq(s.moduleGrants.tenantId, row.tenantId), inArray(s.moduleGrants.subjectId, [row.userId, ...teamIds])));
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone || 'America/Sao_Paulo' }).format(new Date());
+  const decisions = Object.fromEntries(BUSINESS_MODULES.map((m) => {
+    const t = tms.find((x) => x.module === m);
+    const tm = t ? { module: m, enabled: t.enabled, mode: t.mode as ReleaseMode, disabledFeatures: t.disabledFeatures } : defaultTenantModule(m);
+    return [m, moduleDecision(tm, grants.map((g) => ({ module: g.module as BusinessModule, subjectType: g.subjectType as 'equipe' | 'usuario', subjectId: g.subjectId, effect: g.effect as 'liberar' | 'bloquear', validUntil: g.validUntil })), { id: row.userId, teamIds }, today)];
+  })) as Record<BusinessModule, ModuleDecision>;
+  const modules = Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].enabled])) as Record<BusinessModule, boolean>;
+  // ações sensíveis: linha gravada no perfil ou o padrão do perfil; vale se qualquer perfil permitir
+  const actionRows = roleRows.length ? await db.select().from(s.actionPolicies).where(inArray(s.actionPolicies.roleId, roleRows.map((r) => r.roleId))) : [];
+  const actions = Object.fromEntries(SENSITIVE_ACTIONS.map((a) => [a, roleRows.some((r) => {
+    const saved = actionRows.find((x) => x.roleId === r.roleId && x.action === a);
+    return saved ? saved.allowed : (DEFAULT_ACTIONS[r.key]?.[a] ?? false);
+  })])) as Record<SensitiveAction, boolean>;
 
   return {
     sessionId: row.sessionId,
@@ -115,7 +143,12 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     timezone: row.timezone,
     tenantName: row.tenantName,
     profiles: roleRows.map((r) => r.key),
-    access,
+    access: gateAccess(profileAccess, modules),
+    profileAccess,
+    modules,
+    moduleReasons: Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].reason])) as Record<BusinessModule, ModuleDecision['reason']>,
+    disabledFeatures: [...new Set(tms.flatMap((x) => x.disabledFeatures))],
+    actions,
     teamIds: memberships.map((m) => m.teamId),
     teamMemberIds: [...new Set([row.userId, ...members.map((m) => m.userId)])],
     sectors: (row.sectors ?? []) as Sector[],

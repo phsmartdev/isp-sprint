@@ -92,6 +92,36 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Histórico único de interações** (Conta 360 → Acompanhamento): atividades concluídas, e-mails enviados (oportunidades e contratos da conta), pesquisas respondidas e visitas, com filtro por pessoa; "Registrar interação" (tipo, quando, com quem, o que foi conversado). Atividades passam a guardar com quais pessoas da conta foram (tarefas de plays, cadências e sinais também).
 - Migração 0049 (`abm_signals`, `abm_signal_events` append-only, `abm_cadences`, `abm_cadence_tasks`, `activities.stakeholder_ids`). Testes: domínio (4), API (4), E2E (1). Regressão completa: domínio 140, API 210, E2E 55/55.
 
+## Etapa 1 — Fase 1: ativação modular e permissões finas ✅ (2026-10-22)
+- **Sete módulos de negócio** (CRM, Marketing, Produto, Gestão de Time, Contratos, Projetos, Relatórios) sobre os 14 módulos técnicos de acesso. Cada módulo técnico tem um dono de negócio. Contas, pessoas, agenda de atividades, catálogo, Início e Configurações são da fundação e nunca são desligados.
+  - Leads ficam no Marketing (decidido em 22/10). Sucesso do Cliente e e-mail ficam no CRM.
+- **Acesso efetivo = o menor de quatro camadas:**
+  1. O módulo de negócio está ligado na empresa (teto) e liberado para a pessoa.
+  2. O nível do perfil na matriz de Segurança.
+  3. A funcionalidade está ligada na empresa.
+  4. As ações sensíveis do perfil permitem.
+  - Módulo desligado zera o nível dos módulos técnicos dele na própria sessão. Por isso, todas as checagens que já existiam no servidor e nas telas passam a obedecer sem mudar rota a rota.
+- **Liberação progressiva** (Configuração → Módulos e liberação):
+  - Cada módulo pode ser ligado ou desligado na empresa, e entregue a "todos os perfis com acesso" ou "só equipes e pessoas liberadas".
+  - Liberação ou bloqueio por equipe ou pessoa, com motivo e validade.
+  - Bloqueio vence liberação. A regra da pessoa vence a da equipe.
+  - A regra só abre ou fecha o módulo; o nível dentro dele continua o do perfil.
+  - A exceção por pessoa revoga a regra de 17/10 ("sem exceção por usuário"), com os limites acima.
+- **Funcionalidades:** 18 funcionalidades, desligáveis por empresa. Exemplos: Atas, Modelos de contrato, ABM, Sucesso do Cliente, e-mail.
+  - Regras de rota levam cada tela que mora num cadastro compartilhado (ABM, Sucesso do Cliente, quadro de tarefas, relatórios) à funcionalidade certa.
+  - Telas do CRM e do ABM que usam o cadastro de contas exigem nível em Oportunidades (CRM) ou em Leads/Campanhas (ABM).
+  - Relatórios comerciais exigem o CRM ligado; a inteligência de contratos exige Contratos ligado.
+- **Ações sensíveis por perfil:** ver valores financeiros, exportar planilhas, validar contrato, alterar valores de contrato, arquivar e excluir.
+  - Sem "ver valores financeiros", a API devolve todo campo em R$ (e margem, LTV, CAC, comissão) como oculto, em qualquer tela, relatório ou indicador. As planilhas com valores são recusadas, e a tela mostra "—" até nas somas feitas no navegador.
+- **Dois perfis novos:** Gestão de contratos (Contratos total, CRM próprio, Projetos equipe) e Implantação (Contratos e Projetos total, sem CRM, sem financeiro, sem exportar, arquivar ou validar). Os três perfis anteriores mantêm todas as ações: não houve mudança de comportamento.
+- **Menus e abas cruzadas:**
+  - Somem quando o módulo ou a funcionalidade está desligado: Pessoas e ABM, Tarefas e projetos, Sucesso do Cliente, Contratos, Oportunidades, Atas e Modelos.
+  - A Segurança agrupa os módulos técnicos pelos 7 módulos de negócio.
+  - Prévia do acesso efetivo de qualquer usuário, com o motivo de cada módulo ligado ou desligado.
+- **Outros ajustes:** a validação de contrato só abre a jornada de Sucesso do Cliente com o CRM ligado na empresa. Tudo é auditado: módulo, liberação, retirada e ação sensível.
+- Migração 0051 (`tenant_modules`, `module_grants`, `action_policies`). Sem linha gravada, tudo fica ligado e com as ações padrão: comportamento idêntico ao anterior.
+- Testes: domínio (4), API (7), E2E (1). Regressão completa: domínio 150, API 228, E2E 59/59.
+
 ## Funcionalidade 03 — E-mail corporativo (Gmail) ✅ construída · ⏳ validação real com o Google pendente (2026-10-22)
 - **Situação honesta:** tudo foi construído sobre a Gmail API v1 e o OAuth do Google (endereços oficiais) e testado contra um **servidor do Google simulado** (`apps/api/test/fakeGoogle.ts`). Nada foi validado ainda com o Google de verdade. A API só aceita o simulado fora de produção (`GOOGLE_FAKE_BASE`); em produção usa sempre os endereços reais.
 - **Para validar de verdade:**

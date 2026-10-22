@@ -312,12 +312,13 @@ function Relatorios() {
 
 export function ContractsPage() {
   const nav = useNavigate();
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
+  const tabs = TABS.filter((t) => (t.key !== 'modelos' || (can('configuracoes', 'total') && feature('contratos.modelos'))) && (t.key !== 'atas' || feature('contratos.atas')));
   const [f, setF] = useUrlState({ t: 'painel' });
-  const view = (TABS.some((t) => t.key === f.t) ? f.t : 'painel') as View;
+  const view = (tabs.some((t) => t.key === f.t) ? f.t : 'painel') as View;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TV_TABS = TABS.filter((t) => ['painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
+  const TV_TABS = tabs.filter((t) => ['painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
   return (
     <div className="w-full">
       <PageHeader
@@ -328,7 +329,7 @@ export function ContractsPage() {
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
       {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
-      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={TABS.filter((t) => t.key !== 'modelos' || can('configuracoes', 'total'))} />
+      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={tabs} />
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
       {view === 'atas' && <AtasTab />}

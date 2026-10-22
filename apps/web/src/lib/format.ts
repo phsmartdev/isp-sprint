@@ -27,7 +27,10 @@ export function fmtRelative(v?: string | Date | null) {
   return rtf.format(Math.round(diff / 86_400_000), 'day');
 }
 /** Valor em R$; com o olhinho fechado, mostra a máscara (o número não aparece). */
-export const fmtBRL = (cents?: number | null) => (moneyHidden() && cents !== null && cents !== undefined ? MASK : formatBRL(cents ?? null));
+let financeRestricted = false;
+/** Perfil sem "ver valores financeiros": o servidor já manda os valores ocultos; aqui as somas feitas na tela também somem. */
+export const setFinanceRestricted = (v: boolean) => { financeRestricted = v; };
+export const fmtBRL = (cents?: number | null) => (financeRestricted ? '—' : moneyHidden() && cents !== null && cents !== undefined ? MASK : formatBRL(cents ?? null));
 export const fmtPct = (r?: number | null) => (r === null || r === undefined ? 'N/D' : `${(r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
 export const fmtInt = (n?: number | null) => (n === null || n === undefined ? 'N/D' : n.toLocaleString('pt-BR'));
 export function fmtDuration(seconds: number) {

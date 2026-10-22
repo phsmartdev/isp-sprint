@@ -40,14 +40,16 @@ export function allowedLevels(m: Module): readonly AccessLevel[] {
   return m === 'configuracoes' ? ['nenhum', 'total'] : ACCESS_LEVELS;
 }
 
-export const PROFILE_KEYS = ['vendedor', 'supervisor', 'gerencia'] as const;
+export const PROFILE_KEYS = ['vendedor', 'supervisor', 'gerencia', 'gestao_contratos', 'implantacao'] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
-export const PROFILE_LABELS: Record<ProfileKey, string> = { vendedor: 'Vendedor', supervisor: 'Supervisor', gerencia: 'Gerência' };
+export const PROFILE_LABELS: Record<ProfileKey, string> = { vendedor: 'Vendedor', supervisor: 'Supervisor', gerencia: 'Gerência', gestao_contratos: 'Gestão de contratos', implantacao: 'Implantação' };
 
 export const DEFAULT_ACCESS: Record<ProfileKey, Record<Module, AccessLevel>> = {
   vendedor: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', projetos: 'proprio', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', configuracoes: 'nenhum' },
   supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', projetos: 'equipe', desempenho: 'equipe', resultados: 'equipe', inteligencia: 'equipe', email: 'equipe', configuracoes: 'nenhum' },
   gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', configuracoes: 'total' },
+  gestao_contratos: { inicio: 'proprio', leads: 'nenhum', oportunidades: 'proprio', clientes: 'total', atividades: 'proprio', relatorios: 'nenhum', campanhas: 'nenhum', contratos: 'total', projetos: 'equipe', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', configuracoes: 'nenhum' },
+  implantacao: { inicio: 'proprio', leads: 'nenhum', oportunidades: 'nenhum', clientes: 'proprio', atividades: 'proprio', relatorios: 'nenhum', campanhas: 'nenhum', contratos: 'total', projetos: 'total', desempenho: 'nenhum', resultados: 'nenhum', inteligencia: 'nenhum', email: 'nenhum', configuracoes: 'nenhum' },
 };
 
 export function atLeast(level: AccessLevel | undefined, min: AccessLevel) {

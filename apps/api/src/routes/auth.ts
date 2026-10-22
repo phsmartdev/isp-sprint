@@ -20,6 +20,10 @@ export function meDto(auth: NonNullable<Awaited<ReturnType<typeof resolveSession
     teamIds: auth.teamIds,
     teamMemberIds: auth.teamMemberIds,
     sectors: auth.sectors,
+    modules: auth.modules,
+    moduleReasons: auth.moduleReasons,
+    disabledFeatures: auth.disabledFeatures,
+    actions: auth.actions,
   };
 }
 

@@ -1,4 +1,5 @@
 /** Atas: oportunidades vinculadas, formalização (consumo), adesões, operações entre itens, livro de movimentações, relatórios e inteligência. */
+import { requireAction } from '../services/modules';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -613,6 +614,7 @@ export const arpOpsRoutes = [
       kind: z.enum(ARP_LEDGER_KINDS).optional(), actorId: z.string().uuid().optional(), status: z.string().max(30).optional(), format: z.enum(['json', 'csv']).default('json'),
     }),
     handler: async ({ app, auth, query, reply }) => {
+      if (query.format === 'csv') { requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.'); }
       requireArp(auth, 'view');
       const data = await buildReport(app.db, auth, query);
       if (query.format === 'csv') {

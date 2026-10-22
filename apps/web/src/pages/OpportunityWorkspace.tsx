@@ -510,7 +510,7 @@ function Pendencies({ opp, fields, unmetFields }: { opp: Opportunity; fields: Fi
 
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const nav = useNavigate();
   const lookups = useLookups();
   const toast = useToast();
@@ -663,8 +663,8 @@ export function OpportunityWorkspacePage() {
         <div className="px-5 pt-2">
           <Tabs label="Detalhes" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'atividades', label: 'Atividades', count: acts.data?.items.filter((x) => !x.completedAt).length },
-            { key: 'trabalho', label: 'Tarefas e projetos' },
-            { key: 'pessoas', label: 'Pessoas e ABM' },
+            ...(can('projetos') ? [{ key: 'trabalho' as const, label: 'Tarefas e projetos' }] : []),
+            ...(feature('marketing.abm') ? [{ key: 'pessoas' as const, label: 'Pessoas e ABM' }] : []),
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount },
             { key: 'historico', label: unread.data?.comments ? `Comentários e histórico • ${unread.data.comments} novo(s)` : 'Comentários e histórico' },
             { key: 'chat', label: unread.data?.chat ? `Chat • ${unread.data.chat} nova(s)${unread.data.mentions ? ' @' : ''}` : 'Chat' },

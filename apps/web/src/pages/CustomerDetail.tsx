@@ -78,7 +78,7 @@ const FUTURE_TABS: Record<string, string> = {
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams();
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const nav = useNavigate();
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('t') ?? 'resumo');
   const q = useQuery({ queryKey: ['contact', id], queryFn: () => api<Detail>(`/contacts/${id}`) });
@@ -110,7 +110,7 @@ export function CustomerDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <AddToAbmButton contactId={id} contactName={c.name} />
+          {feature('marketing.abm') && <AddToAbmButton contactId={id} contactName={c.name} />}
           {can('oportunidades') && <Button variant="primary" size="lg" onClick={() => nav('/opportunities/new')}>+ Nova oportunidade</Button>}
         </div>
       </div>
@@ -126,11 +126,11 @@ export function CustomerDetailPage() {
         <div className="px-5 pt-2">
           <Tabs label="Ficha do cliente" value={tab} onChange={setTab} tabs={[
             { key: 'resumo', label: 'Resumo' },
-            { key: 'oportunidades', label: 'Oportunidades', count: c.opportunities.length },
+            ...(can('oportunidades') ? [{ key: 'oportunidades', label: 'Oportunidades', count: c.opportunities.length }] : []),
             { key: 'atividades', label: 'Interações', count: acts.data?.total },
-            { key: 'sucesso', label: 'Sucesso do Cliente' },
-            { key: 'contratos', label: 'Contratos' },
-            ...(can('projetos') || can('atividades') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
+            ...(feature('crm.sucesso_cliente') ? [{ key: 'sucesso', label: 'Sucesso do Cliente' }] : []),
+            ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }] : []),
+            ...(can('projetos') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
           ]} />

@@ -1,4 +1,5 @@
 /** Funil Sucesso do Cliente: criado na primeira vez que for acionado (não muda as jornadas existentes). */
+import { tenantModuleOn } from './modules';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Config } from '../config';
 import { csConfigOf, recomputeAccounts, startJourney } from './cs';
@@ -73,6 +74,7 @@ export async function csOnStage(db: DbOrTx, config: Config, tenantId: string, ac
 
 /** Contrato validado: entra no funil Sucesso do Cliente (uma negociação por contrato), sem mexer na negociação comercial. */
 export async function handoffContractToCs(db: DbOrTx, tenantId: string, actorId: string | null, contract: { id: string; opportunityId: string | null; arpId: string | null }) {
+  if (!(await tenantModuleOn(db, tenantId, 'crm'))) return null; // Etapa 1: Sucesso do Cliente é do CRM
   const { config: cfg } = await csConfigOf(db, tenantId);
   if (!cfg.trigger.createOnContractValidation || !contract.opportunityId || contract.arpId) return null;
   const cs = await ensureCustomerSuccessPipeline(db, tenantId);

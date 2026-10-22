@@ -1,4 +1,5 @@
 /** Gestão de Contratos: cadastro (a partir da oportunidade), edição versionada, validação, funil, painel, calendário e relatórios. */
+import { requireAction } from '../services/modules';
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
@@ -341,6 +342,7 @@ export const contractRoutes = [
     module: 'contratos',
     query: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional(), format: z.enum(['json', 'csv']).default('json') }),
     handler: async ({ app, auth, query, reply }) => {
+      if (query.format === 'csv') { requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.'); }
       const now = new Date();
       const month = query.month ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
       const from = `${month}-01`;
@@ -369,6 +371,7 @@ export const contractRoutes = [
     module: 'contratos',
     query: z.object({ from: day.optional(), to: day.optional(), status: z.enum(['ativos', 'encerrados', 'todos']).default('todos'), billingType: z.enum(BILLING_TYPES).optional(), kind: z.enum(CONTRACT_KINDS).optional(), stage: z.enum(CONTRACT_STAGES).optional(), ownerId: uuid.optional(), format: z.enum(['json', 'csv']).default('json') }),
     handler: async ({ app, auth, query, reply }) => {
+      if (query.format === 'csv') { requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.'); }
       const today = new Date().toISOString().slice(0, 10);
       const from = query.from ?? `${today.slice(0, 4)}-01-01`, to = query.to ?? today;
       if (to < from) throw unprocessable('Período inválido.');
@@ -556,6 +559,7 @@ export const contractRoutes = [
     params: IdParams,
     body: UpdateBody,
     handler: async ({ app, auth, params, body, req }) => {
+      if (body.version && (body.version.items !== undefined || body.version.monthlyCents !== undefined || body.version.totalCents !== undefined)) requireAction(auth, 'editar_valores_contrato');
       const c = await loadContract(app.db, auth, params.id);
       if (!canEdit(auth, c)) throw forbidden('Você não pode editar este contrato.');
       if (c.stage === 'arquivado') throw unprocessable('Contrato arquivado não pode ser alterado.');
@@ -599,6 +603,7 @@ export const contractRoutes = [
     module: 'contratos',
     params: IdParams,
     handler: async ({ app, auth, params, req }) => {
+      requireAction(auth, 'validar_contrato');
       const c = await loadContract(app.db, auth, params.id);
       if (c.stage !== 'cadastro_validacao') throw unprocessable('Este contrato já foi validado.');
       if (!canManage(auth)) throw forbidden('A validação é feita por Administração, Inteligência Comercial, Diretoria ou gerência.');
@@ -683,6 +688,7 @@ export const contractRoutes = [
     params: IdParams,
     body: z.object({ stage: z.enum(CONTRACT_STAGES), reason: z.string().trim().max(500).optional(), closureAt: day.optional() }),
     handler: async ({ app, auth, params, body, req }) => {
+      if (body.stage === 'arquivado') requireAction(auth, 'arquivar');
       const c = await loadContract(app.db, auth, params.id);
       if (!canEdit(auth, c)) throw forbidden('Você não pode mover este contrato.');
       if (c.stage === body.stage) return { ok: true };
