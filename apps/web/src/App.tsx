@@ -52,6 +52,7 @@ import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
+import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
 import { AdminCsSettings } from './pages/admin/CsSettings';
 import { AdminContractSettings } from './pages/admin/ContractSettings';
 
@@ -78,6 +79,7 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/k/:token" element={<PublicKickoffPage />} />
       <Route path="/j/:token" element={<PublicJourneyPage />} />
+      <Route path="/p/:token" element={<PublicSurveyPage />} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
@@ -93,6 +95,7 @@ export function App() {
         <Route path="customers/:id" element={<Gate module="clientes"><CustomerDetailPage /></Gate>} />
         <Route path="sucesso" element={<Gate module="clientes"><CustomerSuccessPage /></Gate>} />
         <Route path="sucesso/jornadas/:id" element={<Gate module="clientes"><JourneyPage /></Gate>} />
+        <Route path="sucesso/pesquisas/:id" element={<Gate module="clientes"><SurveyPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades"><ActivitiesPage /></Gate>} />
         <Route path="tarefas" element={<Gate module="atividades"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />

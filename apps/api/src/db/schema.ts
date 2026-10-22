@@ -3383,3 +3383,101 @@ export const stakeholderLinks = pgTable(
     entityCk: check('stakeholder_links_entity_ck', inList('entity_type', ['oportunidade', 'contrato', 'lead'])),
   }),
 );
+
+// ---------------------------------------------------------------- Funcionalidade 02: Pesquisas por link
+export const surveys = pgTable(
+  'surveys',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    active: boolean('active').notNull().default(true),
+    currentVersion: integer('current_version').notNull().default(1),
+    createdBy: uuid('created_by').references(() => users.id),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({ uq: uniqueIndex('surveys_name_uq').on(t.tenantId, t.name) }),
+);
+/** Versões da pesquisa (append-only): o convite responde sempre à versão em que foi enviado. */
+export const surveyVersions = pgTable(
+  'survey_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    surveyId: uuid('survey_id').notNull().references(() => surveys.id),
+    version: integer('version').notNull(),
+    definition: jsonb('definition').$type<import('@isp/domain').SurveyDefinition>().notNull(),
+    note: text('note').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('survey_versions_uq').on(t.surveyId, t.version) }),
+);
+/** Convite individual (uma resposta por link), para uma conta e, se for o caso, uma pessoa da conta. */
+export const surveyInvites = pgTable(
+  'survey_invites',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    surveyId: uuid('survey_id').notNull().references(() => surveys.id),
+    version: integer('version').notNull(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    respondentName: text('respondent_name'),
+    respondentEmail: text('respondent_email'),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    openedAt: ts('opened_at'),
+    respondedAt: ts('responded_at'),
+    emailedAt: ts('emailed_at'),
+    canceledAt: ts('canceled_at'),
+    canceledBy: uuid('canceled_by').references(() => users.id),
+    cancelReason: text('cancel_reason'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ tokenUq: uniqueIndex('survey_invites_token_uq').on(t.tokenHash), idx: index('survey_invites_idx').on(t.tenantId, t.surveyId), contactIdx: index('survey_invites_contact_idx').on(t.tenantId, t.contactId) }),
+);
+/** Resposta (append-only), uma por convite. */
+export const surveyResponses = pgTable(
+  'survey_responses',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    inviteId: uuid('invite_id').notNull().references(() => surveyInvites.id),
+    surveyId: uuid('survey_id').notNull().references(() => surveys.id),
+    version: integer('version').notNull(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    answers: jsonb('answers').$type<Record<string, unknown>>().notNull(),
+    npsScore: integer('nps_score'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ inviteUq: uniqueIndex('survey_responses_invite_uq').on(t.inviteId), idx: index('survey_responses_idx').on(t.tenantId, t.surveyId) }),
+);
+/** O que a resposta muda no cadastro: aplicado na hora (automática) ou aguardando revisão (pendente). */
+export const surveyUpdates = pgTable(
+  'survey_updates',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    responseId: uuid('response_id').notNull().references(() => surveyResponses.id),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    destination: text('destination').notNull(),
+    value: jsonb('value').notNull(),
+    previous: jsonb('previous'),
+    status: text('status').notNull(),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    idx: index('survey_updates_idx').on(t.tenantId, t.status),
+    statusCk: check('survey_updates_status_ck', inList('status', ['aplicada', 'pendente', 'rejeitada', 'sem_alvo'])),
+    destCk: check('survey_updates_dest_ck', inList('destination', ['cs_nps', 'cs_csat', 'stakeholder_interesse', 'stakeholder_posicionamento', 'pessoa_email', 'pessoa_telefone'])),
+  }),
+);

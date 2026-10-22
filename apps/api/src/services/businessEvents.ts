@@ -110,6 +110,11 @@ async function candidates(db: DbOrTx, t: string): Promise<Candidate[]> {
     select ${csKey} as key, a.id as source_id, a.owner_id, null::uuid[] as participants, a.completed_at as occurred_at, null::bigint as value_cents, null::int as quantity, a.cs_kind as outcome,
            jsonb_build_object('contactId', a.contact_id, 'plannedAt', a.cs_planned_at, 'weight', a.cs_weight, 'onTime', a.cs_planned_at is null or a.completed_at::date <= a.cs_planned_at + 3) as context
       from activities a where a.tenant_id = ${t} and a.deleted_at is null and a.cs_kind is not null and a.completed_at is not null and coalesce(a.cs_result, '') <> '' and ${notExists(csKey)}`);
+  await add('pesquisa_respondida', 'survey_response', sql`
+    select 'pesquisa_respondida:' || r.id as key, r.id as source_id, i.created_by as owner_id, null::uuid[] as participants, r.created_at as occurred_at, null::bigint as value_cents, r.nps_score as quantity,
+           case when r.nps_score is null then null when r.nps_score >= 9 then 'promotor' when r.nps_score >= 7 then 'neutro' else 'detrator' end as outcome,
+           jsonb_build_object('contactId', r.contact_id, 'surveyId', r.survey_id, 'stakeholderId', r.stakeholder_id) as context
+      from survey_responses r join survey_invites i on i.id = r.invite_id where r.tenant_id = ${t} and ${notExists(sql`'pesquisa_respondida:' || r.id`)}`);
   // projetos
   const msKey = sql`'marco_concluido:' || m.id || ':' || (extract(epoch from m.completed_at) * 1000)::bigint`;
   await add('marco_concluido', 'project_milestone', sql`
