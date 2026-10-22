@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   CONSOLIDATIONS, DEFAULT_TRAFFIC_BANDS, GOAL_CATEGORIES, GOAL_SCOPES, GOAL_SCOPE_ORDER, INDICATOR_CALCS, INDICATOR_CATEGORIES, INDICATOR_UNITS, OBJECTIVE_LEVELS, PERIOD_TYPES,
-  SUGGESTED_INDICATORS, atLeast, attainment, canLinkObjective, consolidate, periodRange, previousRange, trafficLight, validateIndicator, validateScorecard,
+  FILTER_FIELDS, NUMERIC_FIELDS, SUGGESTED_INDICATORS, atLeast, attainment, canLinkObjective, consolidate, periodRange, previousRange, trafficLight, validateIndicator, validateScorecard,
   type Consolidation, type IndicatorDef, type ObjectiveLevel, type PeriodType,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -22,8 +22,8 @@ import {
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
 const SourceSchema = z.object({
-  event: z.string().max(60), measure: z.enum(['contagem', 'soma_valor', 'media_valor', 'media_campo']), field: z.enum(['minutesToComplete', 'hoursToDecide', 'cycleDays', 'checklist']).optional(),
-  filters: z.array(z.object({ field: z.enum(['onTime', 'selfCreated', 'approved', 'hadDue', 'saleType', 'priority', 'kind', 'outcome', 'level']), op: z.enum(['eq', 'ne']), value: z.union([z.string().max(60), z.boolean()]) })).max(8).optional(),
+  event: z.string().max(60), measure: z.enum(['contagem', 'soma_valor', 'media_valor', 'media_campo']), field: z.enum(Object.keys(NUMERIC_FIELDS) as [keyof typeof NUMERIC_FIELDS, ...(keyof typeof NUMERIC_FIELDS)[]]).optional(),
+  filters: z.array(z.object({ field: z.enum(Object.keys(FILTER_FIELDS) as [keyof typeof FILTER_FIELDS, ...(keyof typeof FILTER_FIELDS)[]]), op: z.enum(['eq', 'ne']), value: z.union([z.string().max(60), z.boolean()]) })).max(8).optional(),
   credit: z.enum(['direto', 'participacao', 'gestao', 'qualquer']).optional(),
 });
 const DefSchema = z.object({

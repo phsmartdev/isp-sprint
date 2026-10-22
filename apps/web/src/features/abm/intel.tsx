@@ -13,6 +13,7 @@ import { fmtBRL, fmtDate } from '../../lib/format';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { EmptyState, ErrorState, FormField, Input, LoadingRows, Select } from '../../components/ui/primitives';
 import { FitText } from '../../components/ui/FitText';
+import { useAuth } from '../../auth/AuthProvider';
 import { CommercialChip, PriorityChip, StatusChip } from './shared';
 
 type Coverage = { score: number; level: CoverageLevel; gaps: string[]; people: number; items?: { key: string; label: string; weight: number; score: number; detail: string; gap: string | null }[] };
@@ -46,8 +47,16 @@ export function AbmIntelligence() {
   const params = { from: f.from || undefined, to: f.to || undefined, owner: f.owner || undefined, priority: f.priority || undefined, tier: f.tier || undefined };
   const q = useQuery({ queryKey: ['abm', 'intel', params], placeholderData: keepPreviousData, queryFn: () => api<Intel>(`/abm/intelligence${qs(params)}`) });
   const d = q.data;
+  const { can } = useAuth();
   return (
     <div className="space-y-5">
+      {can('desempenho') && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+          <span>Os números do ABM também viram indicadores com meta e semáforo na Gestão de Times.</span>
+          <Link to="/desempenho/metas" className="font-semibold text-primary hover:underline">Ver metas</Link>
+          {can('configuracoes', 'total') && <Link to="/settings/desempenho?t=indicadores" className="font-semibold text-primary hover:underline">Criar indicadores do ABM</Link>}
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <FormField label="De" htmlFor="ai-f"><Input id="ai-f" type="date" value={f.from} onChange={(e) => setF({ from: e.target.value })} /></FormField>
         <FormField label="Até" htmlFor="ai-t"><Input id="ai-t" type="date" value={f.to} onChange={(e) => setF({ to: e.target.value })} /></FormField>

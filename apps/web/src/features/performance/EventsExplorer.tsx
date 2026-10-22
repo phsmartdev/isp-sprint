@@ -154,6 +154,7 @@ function EventDrawer({ id, onClose, canReview }: { id: string | null; onClose: (
 const CONTEXT_LABELS: Record<string, string> = {
   onTime: 'No prazo', selfCreated: 'Criada pela própria pessoa', minutesToComplete: 'Minutos entre criar e concluir', hadDue: 'Tinha prazo', priority: 'Prioridade', approved: 'Entrega aprovada', checklist: 'Itens de checklist',
   dueOn: 'Prazo', dueAt: 'Prazo', kind: 'Tipo', level: 'Alçada', hoursToDecide: 'Horas para decidir', saleType: 'Tipo de venda', channel: 'Canal', weight: 'Peso da criticidade', plannedAt: 'Previsto para',
+  severity: 'Severidade', hoursToResolve: 'Horas até tratar', withPeople: 'Com pessoas da conta',
 };
 function fmtCtx(k: string, v: unknown) {
   if (typeof v === 'boolean') return v ? 'Sim' : 'Não';

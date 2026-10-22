@@ -8,10 +8,10 @@ import { DEFAULT_INTERVENTION_CONFIG, validateInterventionConfig, type Intervent
  * calculados por regras versionadas, sem dupla contagem (créditos diretos somam 100%).
  */
 
-export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente'] as const;
+export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm'] as const;
 export type EventModule = (typeof EVENT_MODULES)[number];
 export const EVENT_MODULE_LABELS: Record<EventModule, string> = {
-  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente',
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM',
 };
 
 export type EventTypeDef = {
@@ -45,6 +45,13 @@ export const BUSINESS_EVENT_TYPES = [
   { key: 'projeto_concluido', label: 'Projeto concluído', module: 'projetos', source: 'Projeto concluído (reabrir invalida)', owner: 'Gerente do projeto' },
   { key: 'acompanhamento_registrado', label: 'Acompanhamento de cliente com resultado', module: 'sucesso_cliente', source: 'Atividade de Sucesso do Cliente concluída com resultado', owner: 'Responsável pela atividade' },
   { key: 'pesquisa_respondida', label: 'Pesquisa respondida pelo cliente', module: 'sucesso_cliente', source: 'Resposta recebida pelo link da pesquisa (quantidade = nota NPS, quando houver)', owner: 'Quem enviou o convite' },
+  { key: 'abm_conta_ativada', label: 'Conta do ABM ativada', module: 'abm', source: 'Conta estratégica passou para o status Ativa', owner: 'Responsável pela conta no ABM' },
+  { key: 'abm_stakeholder_mapeado', label: 'Stakeholder mapeado (ABM)', module: 'abm', source: 'Pessoa incluída numa conta do ABM (tipo = decisor ou outro)', owner: 'Quem incluiu' },
+  { key: 'abm_influencia_avaliada', label: 'Influência avaliada pela equipe (ABM)', module: 'abm', source: 'Avaliação manual de influência registrada na auditoria (conta o ato de avaliar, nunca o nível)', owner: 'Quem avaliou' },
+  { key: 'abm_interacao', label: 'Interação com conta do ABM', module: 'abm', source: 'Atividade concluída numa conta do ABM (tipo = ligação, reunião, visita…)', owner: 'Responsável pela atividade' },
+  { key: 'abm_play_concluido', label: 'Play do ABM encerrado', module: 'abm', source: 'Execução de play encerrada com resultado (resultado = sucesso ou sem_sucesso)', owner: 'Quem conduziu o play' },
+  { key: 'abm_sinal_tratado', label: 'Sinal do ABM tratado', module: 'abm', source: 'Sinal marcado como tratado (horas até tratar; tipo = tipo do sinal; severidade)', owner: 'Quem tratou' },
+  { key: 'abm_oportunidade_gerada', label: 'Oportunidade gerada em conta do ABM', module: 'abm', value: 'mensal_cents', source: 'Oportunidade criada numa conta que já estava no ABM', owner: 'Responsável pela oportunidade' },
 ] as const satisfies readonly EventTypeDef[];
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPES)[number]['key'];
 export const EVENT_TYPE_KEYS = BUSINESS_EVENT_TYPES.map((t) => t.key) as BusinessEventType[];

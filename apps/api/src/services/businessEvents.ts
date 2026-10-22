@@ -115,6 +115,38 @@ async function candidates(db: DbOrTx, t: string): Promise<Candidate[]> {
            case when r.nps_score is null then null when r.nps_score >= 9 then 'promotor' when r.nps_score >= 7 then 'neutro' else 'detrator' end as outcome,
            jsonb_build_object('contactId', r.contact_id, 'surveyId', r.survey_id, 'stakeholderId', r.stakeholder_id) as context
       from survey_responses r join survey_invites i on i.id = r.invite_id where r.tenant_id = ${t} and ${notExists(sql`'pesquisa_respondida:' || r.id`)}`);
+  // ABM (Fase 9): fatos do programa de contas estratégicas para indicadores, metas e intervenções
+  await add('abm_conta_ativada', 'abm_event', sql`
+    select 'abm_conta_ativada:' || e.id as key, a.id as source_id, a.owner_id, null::uuid[] as participants, e.created_at as occurred_at, null::bigint as value_cents, null::int as quantity, null as outcome,
+           jsonb_build_object('contactId', a.contact_id, 'priority', a.priority) as context
+      from abm_events e join abm_accounts a on a.id = e.abm_id where e.tenant_id = ${t} and e.type = 'situacao' and e.payload->'to'->>'status' = 'ativa' and ${notExists(sql`'abm_conta_ativada:' || e.id`)}`);
+  await add('abm_stakeholder_mapeado', 'account_stakeholder', sql`
+    select 'abm_stakeholder_mapeado:' || st.id as key, st.id as source_id, coalesce(st.created_by, a.owner_id) as owner_id, null::uuid[] as participants, st.created_at as occurred_at, null::bigint as value_cents, null::int as quantity, null as outcome,
+           jsonb_build_object('contactId', st.contact_id, 'kind', case when 'decisor' = any(st.roles) then 'decisor' else 'outro' end, 'priority', a.priority) as context
+      from account_stakeholders st join abm_accounts a on a.contact_id = st.contact_id where st.tenant_id = ${t} and ${notExists(sql`'abm_stakeholder_mapeado:' || st.id`)}`);
+  await add('abm_influencia_avaliada', 'influence_history', sql`
+    select 'abm_influencia_avaliada:' || h.id as key, h.id as source_id, h.actor_id as owner_id, null::uuid[] as participants, h.created_at as occurred_at, null::bigint as value_cents, null::int as quantity, null as outcome,
+           jsonb_build_object('stakeholderId', h.stakeholder_id, 'kind', h.context_type) as context
+      from stakeholder_influence_history h where h.tenant_id = ${t} and ${notExists(sql`'abm_influencia_avaliada:' || h.id`)}`);
+  const abmActKey = sql`'abm_interacao:' || ac.id || ':' || (extract(epoch from ac.completed_at) * 1000)::bigint`;
+  await add('abm_interacao', 'activity', sql`
+    select ${abmActKey} as key, ac.id as source_id, ac.owner_id, ac.participants, ac.completed_at as occurred_at, null::bigint as value_cents, cardinality(ac.stakeholder_ids) as quantity, ac.type as outcome,
+           jsonb_build_object('contactId', ac.contact_id, 'kind', ac.type, 'priority', a.priority, 'withPeople', cardinality(ac.stakeholder_ids) > 0) as context
+      from activities ac join abm_accounts a on a.contact_id = ac.contact_id
+     where ac.tenant_id = ${t} and ac.deleted_at is null and ac.status = 'concluida' and ac.completed_at is not null and ac.completed_at >= a.created_at and ${notExists(abmActKey)}`);
+  await add('abm_play_concluido', 'abm_play_run', sql`
+    select 'abm_play_concluido:' || r.id as key, r.id as source_id, r.owner_id, null::uuid[] as participants, r.closed_at as occurred_at, null::bigint as value_cents, null::int as quantity,
+           case when r.success_achieved then 'sucesso' else 'sem_sucesso' end as outcome, jsonb_build_object('contactId', r.contact_id, 'playId', r.play_id) as context
+      from abm_play_runs r where r.tenant_id = ${t} and r.status = 'concluido' and r.closed_at is not null and ${notExists(sql`'abm_play_concluido:' || r.id`)}`);
+  await add('abm_sinal_tratado', 'abm_signal', sql`
+    select 'abm_sinal_tratado:' || x.id as key, x.id as source_id, coalesce(x.closed_by, x.owner_id) as owner_id, null::uuid[] as participants, x.closed_at as occurred_at, null::bigint as value_cents, null::int as quantity, x.kind as outcome,
+           jsonb_build_object('contactId', x.contact_id, 'kind', x.kind, 'severity', x.severity, 'hoursToResolve', round(extract(epoch from (x.closed_at - x.detected_at)) / 3600.0, 1)) as context
+      from abm_signals x where x.tenant_id = ${t} and x.status = 'tratado' and x.closed_at is not null and coalesce(x.closed_by, x.owner_id) is not null and ${notExists(sql`'abm_sinal_tratado:' || x.id`)}`);
+  await add('abm_oportunidade_gerada', 'opportunity', sql`
+    select 'abm_oportunidade_gerada:' || o.id as key, o.id as source_id, o.owner_id, null::uuid[] as participants, o.created_at as occurred_at, o.value_cents, null::int as quantity, o.stage as outcome,
+           jsonb_build_object('contactId', o.contact_id, 'priority', a.priority) as context
+      from opportunities o join abm_accounts a on a.contact_id = o.contact_id
+     where o.tenant_id = ${t} and o.deleted_at is null and o.duplicated_from_id is null and o.created_at >= a.created_at and ${notExists(sql`'abm_oportunidade_gerada:' || o.id`)}`);
   // projetos
   const msKey = sql`'marco_concluido:' || m.id || ':' || (extract(epoch from m.completed_at) * 1000)::bigint`;
   await add('marco_concluido', 'project_milestone', sql`
@@ -141,6 +173,8 @@ async function staleEvents(db: DbOrTx, t: string) {
         when 'tarefa_concluida' then 'Tarefa reaberta, cancelada ou removida'
         when 'entrega_validada' then 'Entrega reaberta ou tarefa removida'
         when 'acompanhamento_registrado' then 'Acompanhamento reaberto ou removido'
+        when 'abm_interacao' then 'Atividade reaberta ou removida'
+        when 'abm_oportunidade_gerada' then 'Oportunidade removida'
         when 'marco_concluido' then 'Marco reaberto ou removido'
         when 'projeto_concluido' then 'Projeto reaberto ou removido'
         else 'Origem desfeita' end as reason
@@ -148,6 +182,8 @@ async function staleEvents(db: DbOrTx, t: string) {
      where be.tenant_id = ${t} and be.validation <> 'invalidado' and (
        (be.type = 'negociacao_ganha' and not exists (select 1 from opportunities o where o.id = be.source_id and o.deleted_at is null and o.stage = 'ganha' and be.idem_key = 'negociacao_ganha:' || o.id || ':' || (extract(epoch from o.won_at) * 1000)::bigint))
     or (be.type = 'negociacao_perdida' and not exists (select 1 from opportunities o where o.id = be.source_id and o.deleted_at is null and o.stage = 'perdida' and be.idem_key = 'negociacao_perdida:' || o.id || ':' || (extract(epoch from o.lost_at) * 1000)::bigint))
+    or (be.type = 'abm_interacao' and not exists (select 1 from activities a where a.id = be.source_id and a.deleted_at is null and a.completed_at is not null and be.idem_key like '%:' || (extract(epoch from a.completed_at) * 1000)::bigint))
+    or (be.type = 'abm_oportunidade_gerada' and not exists (select 1 from opportunities o where o.id = be.source_id and o.deleted_at is null))
     or (be.type in ('tarefa_concluida', 'acompanhamento_registrado') and not exists (select 1 from activities a where a.id = be.source_id and a.deleted_at is null and a.completed_at is not null and be.idem_key like '%:' || (extract(epoch from a.completed_at) * 1000)::bigint))
     or (be.type = 'entrega_validada' and not exists (select 1 from activities a where a.id = be.source_id and a.deleted_at is null and a.completed_at is not null and a.approved_at is not null and be.idem_key like '%:' || (extract(epoch from a.approved_at) * 1000)::bigint))
     or (be.type = 'marco_concluido' and not exists (select 1 from project_milestones m where m.id = be.source_id and m.deleted_at is null and m.completed_at is not null and be.idem_key like '%:' || (extract(epoch from m.completed_at) * 1000)::bigint))

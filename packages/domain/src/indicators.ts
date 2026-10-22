@@ -19,21 +19,21 @@ export const INDICATOR_UNIT_LABELS: Record<IndicatorUnit, string> = { quantidade
 export const PERIOD_TYPES = ['semana', 'mes', 'trimestre', 'ano', 'personalizado'] as const;
 export type PeriodType = (typeof PERIOD_TYPES)[number];
 export const PERIOD_LABELS: Record<PeriodType, string> = { semana: 'Semanal', mes: 'Mensal', trimestre: 'Trimestral', ano: 'Anual', personalizado: 'Personalizado' };
-export const INDICATOR_CATEGORIES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'qualidade', 'prazos', 'colaboracao'] as const;
+export const INDICATOR_CATEGORIES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'qualidade', 'prazos', 'colaboracao'] as const;
 export const INDICATOR_CATEGORY_LABELS: Record<(typeof INDICATOR_CATEGORIES)[number], string> = {
-  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', qualidade: 'Qualidade', prazos: 'Prazos', colaboracao: 'Colaboração',
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', qualidade: 'Qualidade', prazos: 'Prazos', colaboracao: 'Colaboração',
 };
 
 /** Medidas sobre os eventos. `peso` = crédito de resultado da pessoa (1 venda dividida meio a meio conta 0,5 para cada). */
 export const MEASURES = ['contagem', 'soma_valor', 'media_valor', 'media_campo'] as const;
 export type Measure = (typeof MEASURES)[number];
 /** Campos numéricos do contexto que podem ser medidos (lista fechada). */
-export const NUMERIC_FIELDS = { minutesToComplete: 'Minutos entre criar e concluir', hoursToDecide: 'Horas para decidir', cycleDays: 'Dias do ciclo (criação → evento)', checklist: 'Itens de checklist' } as const;
+export const NUMERIC_FIELDS = { minutesToComplete: 'Minutos entre criar e concluir', hoursToDecide: 'Horas para decidir', cycleDays: 'Dias do ciclo (criação → evento)', checklist: 'Itens de checklist', hoursToResolve: 'Horas até tratar' } as const;
 export type NumericField = keyof typeof NUMERIC_FIELDS;
 /** Filtros permitidos (lista fechada; valor sempre parametrizado). */
 export const FILTER_FIELDS = {
   onTime: { label: 'No prazo', type: 'bool' }, selfCreated: { label: 'Criada pela própria pessoa', type: 'bool' }, approved: { label: 'Entrega aprovada', type: 'bool' }, hadDue: { label: 'Tinha prazo', type: 'bool' },
-  saleType: { label: 'Tipo de venda', type: 'text' }, priority: { label: 'Prioridade', type: 'text' }, kind: { label: 'Tipo', type: 'text' }, outcome: { label: 'Resultado', type: 'text' }, level: { label: 'Alçada', type: 'text' },
+  saleType: { label: 'Tipo de venda', type: 'text' }, priority: { label: 'Prioridade', type: 'text' }, kind: { label: 'Tipo', type: 'text' }, outcome: { label: 'Resultado', type: 'text' }, level: { label: 'Alçada', type: 'text' }, severity: { label: 'Severidade', type: 'text' },
 } as const;
 export type FilterField = keyof typeof FILTER_FIELDS;
 export type SourceFilter = { field: FilterField; op: 'eq' | 'ne'; value: string | boolean };
@@ -357,6 +357,13 @@ export const SUGGESTED_INDICATORS: (IndicatorDef & { key: string })[] = [
   { key: 'processos_contrato', name: 'Processos de contrato concluídos no prazo', category: 'contratos', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'processo_contrato_concluido', measure: 'contagem', filters: [{ field: 'onTime', op: 'eq', value: true }] }, denominator: { event: 'processo_contrato_concluido', measure: 'contagem' }, target: 90, weight: 30, minSample: 2 },
   { key: 'acompanhamentos', name: 'Acompanhamentos de clientes com resultado', category: 'sucesso_cliente', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'acompanhamento_registrado', measure: 'contagem' }, target: 20, weight: 30 },
   { key: 'movimentacoes_ata', name: 'Movimentações de ata efetivadas', description: 'Mede o processo concluído com documento, não o volume movimentado.', category: 'atas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'movimentacao_ata_autorizada', measure: 'contagem' }, weight: 20 },
+  { key: 'abm_interacoes', name: 'Interações com contas do ABM', category: 'abm', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'abm_interacao', measure: 'contagem' }, target: 20, weight: 25 },
+  { key: 'abm_stakeholders', name: 'Stakeholders mapeados', description: 'Pessoas incluídas nas contas do ABM.', category: 'abm', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'abm_stakeholder_mapeado', measure: 'contagem' }, target: 10, weight: 15 },
+  { key: 'abm_decisores', name: 'Decisores mapeados', category: 'abm', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'abm_stakeholder_mapeado', measure: 'contagem', filters: [{ field: 'kind', op: 'eq', value: 'decisor' }] }, target: 3, weight: 15 },
+  { key: 'abm_influencia', name: 'Avaliações de influência feitas', description: 'Conta o ato de avaliar (manual, com justificativa); o nível avaliado não entra na meta.', category: 'abm', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'abm_influencia_avaliada', measure: 'contagem' }, target: 10, weight: 10 },
+  { key: 'abm_plays_sucesso', name: 'Plays encerrados com sucesso', description: 'Plays que atingiram o critério ÷ plays encerrados.', category: 'abm', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'trimestre', numerator: { event: 'abm_play_concluido', measure: 'contagem', filters: [{ field: 'outcome', op: 'eq', value: 'sucesso' }] }, denominator: { event: 'abm_play_concluido', measure: 'contagem' }, target: 60, weight: 15, minSample: 3 },
+  { key: 'abm_tempo_sinal', name: 'Tempo médio para tratar sinais', category: 'abm', calc: 'tempo', unit: 'horas', direction: 'menor', period: 'mes', base: { event: 'abm_sinal_tratado', measure: 'media_campo', field: 'hoursToResolve' }, target: 72, weight: 10, minSample: 3 },
+  { key: 'abm_pipeline', name: 'Pipeline gerado em contas do ABM', description: 'Valor mensal das oportunidades criadas em contas do ABM.', category: 'abm', calc: 'valor', unit: 'reais', direction: 'maior', period: 'mes', base: { event: 'abm_oportunidade_gerada', measure: 'soma_valor' }, weight: 10 },
 ];
 
 // ------------------------------------------------------------------ objetivos, cascata e semáforo

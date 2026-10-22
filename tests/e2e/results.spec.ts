@@ -638,3 +638,26 @@ test('ABM Fase 6: sinais da conta, tarefa a partir do sinal, cadência com taref
   await page.goto(`/abm/contas/${acc.id}?t=acompanhamento`);
   await shot(page, 'abm-acompanhamento');
 });
+
+test('ABM Fase 9: indicadores do ABM no mesmo motor de metas, criados a partir da inteligência e testados com fatos reais', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const post = async (url: string, data: object) => { const r = await page.request.post(`/api/v1${url}`, { headers: H, data }); expect(r.status(), await r.text()).toBeLessThan(300); return r.json(); };
+  const acc = await post('/abm/new-account', { name: `Autarquia Fictícia Metas ${Date.now().toString(36)}`, reason: 'Teste de indicadores do ABM' });
+  await post(`/accounts/${acc.contactId}/stakeholders`, { person: { name: 'Diretora Fictícia Metas' }, roles: ['decisor'] });
+
+  await page.goto('/abm?tab=inteligencia');
+  await page.getByRole('link', { name: 'Criar indicadores do ABM' }).click();
+  await expect(page.getByRole('heading', { name: 'Semáforo' })).toBeVisible();
+  const sug = page.getByRole('listitem').filter({ hasText: 'Decisores mapeados' }).filter({ has: page.getByRole('button', { name: 'Criar', exact: true }) });
+  if (await sug.count()) { await sug.getByRole('button', { name: 'Criar', exact: true }).click(); await expect(page.getByText(/indicador\(es\) criado/)).toBeVisible(); }
+  const item = page.getByRole('listitem').filter({ hasText: 'Decisores mapeados' }).filter({ has: page.getByRole('button', { name: 'Editar' }) });
+  await expect(item.getByText(/^ABM · /)).toBeVisible();
+  await item.getByRole('button', { name: 'Editar' }).click();
+  const ed = page.getByRole('dialog', { name: 'Editar indicador' });
+  await ed.getByRole('button', { name: 'Testar no período atual' }).click();
+  await expect(ed.getByText(/Resultado: .* [1-9]\d* evento\(s\)/)).toBeVisible();
+  await shot(page, 'abm-indicador');
+});

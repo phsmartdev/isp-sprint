@@ -22,6 +22,7 @@ const FIELD_SQL: Record<NumericField, SQL> = {
   hoursToDecide: sql`(e.context->>'hoursToDecide')::numeric`,
   cycleDays: sql`(extract(epoch from (e.occurred_at - (e.context->>'createdAt')::timestamptz)) / 86400.0)`,
   checklist: sql`(e.context->>'checklist')::numeric`,
+  hoursToResolve: sql`(e.context->>'hoursToResolve')::numeric`,
 };
 function filterSql(f: SourceFilter): SQL {
   const col = f.field === 'outcome' ? sql`e.outcome` : ['onTime', 'selfCreated', 'approved', 'hadDue'].includes(f.field) ? sql`(e.context->>${f.field})::boolean` : sql`(e.context->>${f.field})`;
