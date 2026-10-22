@@ -11,6 +11,7 @@ import type { Kpi, Lead, Paged } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Notice, Pagination, Select, Tabs, Textarea } from '../components/ui/primitives';
 import { ConfirmDialog, Drawer, Modal, useToast } from '../components/ui/overlay';
+import { EntityPeoplePanel } from '../features/abm/EntityPeoplePanel';
 import { PageHeader } from '../components/layout/PageHeader';
 import { InterestTag, LeadStatusChip, SourceChip, productLabel } from '../components/badges';
 
@@ -358,6 +359,7 @@ export function LeadsPage() {
 
       <Drawer open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'Novo lead' : editing ? editing.name : ''} footer={<><Button onClick={() => setEditing(null)}>Cancelar</Button><Button variant="primary" type="submit" form="lead-form">{editing === 'new' ? 'Criar lead' : 'Salvar lead'}</Button></>}>
         {editing && <LeadForm key={editing === 'new' ? 'new' : editing.id + editing.rowVersion} lead={editing === 'new' ? undefined : editing} onDone={() => setEditing(null)} />}
+        {editing && editing !== 'new' && <div className="mt-6 border-t border-line pt-4"><EntityPeoplePanel entity="lead" entityId={editing.id} compact /></div>}
       </Drawer>
       <ConfirmDialog open={confirmAssign} title="Atribuir leads" confirmLabel="Atribuir" loading={bulk.isPending} onCancel={() => setConfirmAssign(false)} onConfirm={() => bulk.mutate()}>
         <p>{selected.size} lead(s) passarão para <strong>{lookups.data?.users.find((u) => u.id === assignTo)?.name}</strong>. A mudança fica registrada no log.</p>

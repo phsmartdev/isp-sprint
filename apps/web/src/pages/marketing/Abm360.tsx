@@ -185,10 +185,23 @@ function Organization({ d }: { d: D360 }) {
         <FormField label="Cidade" htmlFor="og-c"><Input id="og-c" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} /></FormField>
         <FormField label="Telefone institucional" htmlFor="og-p"><Input id="og-p" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></FormField>
         <FormField label="E-mail institucional" htmlFor="og-e"><Input id="og-e" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></FormField>
-        {o.externalId && <FormField label="Código no sistema de origem" htmlFor="og-x"><Input id="og-x" disabled value={`${o.sourceSystem}: ${o.externalId}`} /></FormField>}
       </div>
       <Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Salvar dados</Button>
+      <ExternalIds contactId={d.abm.contactId} />
     </section>
+  );
+}
+
+/** Identificadores em outros sistemas (ERP/IXC, importação): só leitura, preservados pelo ABM. */
+function ExternalIds({ contactId }: { contactId: string }) {
+  const q = useQuery({ queryKey: ['abm', 'ext', contactId], queryFn: () => api<{ origin: string; items: { system: string; externalId: string }[] }>(`/accounts/${contactId}/external-ids`) });
+  if (!q.data) return null;
+  return (
+    <div className="border-t border-line pt-4" aria-label="Identificadores externos">
+      <h3 className="text-sm font-bold text-ink">Identificadores em outros sistemas</h3>
+      {!q.data.items.length ? <p className="text-sm text-muted">Conta criada no próprio CRM, sem código em outros sistemas.</p> : <ul className="mt-1 space-y-0.5 text-sm">{q.data.items.map((x) => <li key={x.system + x.externalId}><b className="uppercase">{x.system}</b> · <span className="num">{x.externalId}</span></li>)}</ul>}
+      <p className="mt-1 text-xs text-muted">Somente leitura: o ABM nunca altera esses códigos, para a integração continuar casando os registros.</p>
+    </div>
   );
 }
 

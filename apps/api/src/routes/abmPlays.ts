@@ -63,9 +63,9 @@ async function playsWithDefinition(db: DbOrTx, tenantId: string, ids?: string[])
 
 /** Execuções com etapas (situação lida da tarefa: fonte única) e andamento. */
 async function runsDetail(db: DbOrTx, auth: AuthContext, where: ReturnType<typeof and>) {
-  const runs = await db.select({ r: s.abmPlayRuns, play: s.abmPlays.name, category: s.abmPlays.category, owner: s.users.name, account: s.contacts.name, person: s.people.name })
+  const runs = await db.select({ r: s.abmPlayRuns, play: s.abmPlays.name, category: s.abmPlays.category, owner: s.users.name, account: s.contacts.name, person: s.people.name, oppCode: s.opportunities.code, oppTitle: s.opportunities.title })
     .from(s.abmPlayRuns).innerJoin(s.abmPlays, eq(s.abmPlays.id, s.abmPlayRuns.playId)).innerJoin(s.users, eq(s.users.id, s.abmPlayRuns.ownerId)).innerJoin(s.contacts, eq(s.contacts.id, s.abmPlayRuns.contactId))
-    .leftJoin(s.accountStakeholders, eq(s.accountStakeholders.id, s.abmPlayRuns.stakeholderId)).leftJoin(s.people, eq(s.people.id, s.accountStakeholders.personId))
+    .leftJoin(s.accountStakeholders, eq(s.accountStakeholders.id, s.abmPlayRuns.stakeholderId)).leftJoin(s.people, eq(s.people.id, s.accountStakeholders.personId)).leftJoin(s.opportunities, eq(s.opportunities.id, s.abmPlayRuns.opportunityId))
     .where(where).orderBy(desc(s.abmPlayRuns.createdAt)).limit(300);
   if (!runs.length) return [];
   const steps = await db.select({ runId: s.abmPlayRunSteps.runId, position: s.abmPlayRunSteps.position, stepKey: s.abmPlayRunSteps.stepKey, activityId: s.activities.id, title: s.activities.title, type: s.activities.type, status: s.activities.status, deletedAt: s.activities.deletedAt, ownerName: s.users.name,
@@ -75,7 +75,7 @@ async function runsDetail(db: DbOrTx, auth: AuthContext, where: ReturnType<typeo
   const today = todayOf(auth);
   return runs.map(({ r, ...x }) => {
     const st = steps.filter((p) => p.runId === r.id).map((p) => ({ ...p, stepStatus: (p.deletedAt || p.status === 'cancelada' ? 'cancelada' : p.status === 'concluida' ? 'concluida' : 'pendente') as RunStepStatus }));
-    return { ...r, playName: x.play, category: x.category, ownerName: x.owner, account: x.account, stakeholderName: x.person, steps: st, progress: runProgress(st.map((p) => ({ status: p.stepStatus, dueOn: p.dueOn ?? today })), today) };
+    return { ...r, opportunityLabel: x.oppCode ? `OP-${x.oppCode} · ${x.oppTitle}` : null, playName: x.play, category: x.category, ownerName: x.owner, account: x.account, stakeholderName: x.person, steps: st, progress: runProgress(st.map((p) => ({ status: p.stepStatus, dueOn: p.dueOn ?? today })), today) };
   });
 }
 
@@ -191,13 +191,14 @@ export const abmPlayRoutes = [
         inAbm: !!abm, suggestions, influenceVisible: ctx.influenceVisible,
         plays: plays.map((p) => ({ id: p.id, name: p.name, category: p.category, target: p.target, objective: p.objective, successCriteria: p.definition.successCriteria, steps: p.definition.steps })),
         stakeholders: ctx.stakeholders.filter((x) => x.active).map((x) => ({ id: x.id, name: x.name })),
+        opportunities: await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title }).from(s.opportunities).where(and(eq(s.opportunities.contactId, params.id), sql`${s.opportunities.deletedAt} is null`, sql`${s.opportunities.stage} not in ('ganha', 'perdida')`)).orderBy(desc(s.opportunities.createdAt)).limit(50),
         runs: await runsDetail(app.db, auth, and(eq(s.abmPlayRuns.tenantId, auth.tenantId), eq(s.abmPlayRuns.contactId, params.id))),
       };
     },
   }),
   defineRoute({
     method: 'POST', url: '/accounts/:id/play-runs', summary: 'Aplica um play à conta (ou a uma pessoa): cada etapa vira tarefa com prazo e responsável', tag: 'Marketing', module: 'clientes', params: IdParams,
-    body: z.object({ playId: z.string().uuid(), stakeholderId: z.string().uuid().nullable().default(null), ownerId: z.string().uuid().optional(), startOn: isoDate, reason: z.string().trim().min(5).max(1000), fromSuggestion: z.boolean().default(false) }),
+    body: z.object({ playId: z.string().uuid(), stakeholderId: z.string().uuid().nullable().default(null), opportunityId: z.string().uuid().nullable().default(null), ownerId: z.string().uuid().optional(), startOn: isoDate, reason: z.string().trim().min(5).max(1000), fromSuggestion: z.boolean().default(false) }),
     handler: async ({ app, auth, params, body, reply }) => {
       const acc = await assertAccount(app.db, auth, params.id);
       const ownerId = body.ownerId ?? auth.userId;
@@ -216,7 +217,12 @@ export const abmPlayRoutes = [
           if (!st || !st.active) throw unprocessable('Pessoa não encontrada nesta conta.', [{ path: 'stakeholderId', message: 'Escolha uma pessoa ativa da conta' }]);
           person = st;
         } else if (body.stakeholderId) throw unprocessable('Este play é para a conta, não para uma pessoa.');
-        const [run] = await tx.insert(s.abmPlayRuns).values({ tenantId: auth.tenantId, playId: p.id, playVersion: p.currentVersion, abmId: abm.id, contactId: params.id, stakeholderId: person?.id ?? null, ownerId, startOn: body.startOn, reason: body.reason, fromSuggestion: body.fromSuggestion, createdBy: auth.userId })
+        if (body.opportunityId) {
+          const [o] = await tx.select({ id: s.opportunities.id, stage: s.opportunities.stage }).from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.contactId, params.id), sql`${s.opportunities.deletedAt} is null`)).limit(1);
+          if (!o) throw unprocessable('Oportunidade não encontrada nesta conta.', [{ path: 'opportunityId', message: 'Escolha uma oportunidade da conta' }]);
+          if (['ganha', 'perdida'].includes(o.stage)) throw unprocessable('A oportunidade já foi encerrada.', [{ path: 'opportunityId', message: 'Escolha uma oportunidade em aberto' }]);
+        }
+        const [run] = await tx.insert(s.abmPlayRuns).values({ tenantId: auth.tenantId, playId: p.id, playVersion: p.currentVersion, abmId: abm.id, contactId: params.id, stakeholderId: person?.id ?? null, opportunityId: body.opportunityId, ownerId, startOn: body.startOn, reason: body.reason, fromSuggestion: body.fromSuggestion, createdBy: auth.userId })
           .onConflictDoNothing().returning({ id: s.abmPlayRuns.id });
         if (!run) throw unprocessable(person ? `O play "${p.name}" já está em andamento para ${person.name}.` : `O play "${p.name}" já está em andamento nesta conta.`);
         const who = (a: string) => (a === 'responsavel_conta' ? abm.ownerId : a === 'responsavel_relacionamento' ? person?.relationshipOwnerId ?? ownerId : ownerId);
@@ -225,13 +231,13 @@ export const abmPlayRoutes = [
           const owner = who(st.assignee);
           const notes = [st.instructions, '', `Play: ${p.name} (versão ${p.currentVersion}) · ${acc.name}${person ? ` · ${person.name}` : ''}`, p.objective && `Objetivo: ${p.objective}`, `Critério de sucesso: ${def.successCriteria}`].filter((x) => x !== '' && x !== null).join('\n');
           const [a] = await tx.insert(s.activities).values({
-            tenantId: auth.tenantId, type: st.type, title: person ? `${st.title} — ${person.name}` : st.title, notes, priority: 'media', ownerId: owner, createdBy: auth.userId, contactId: params.id,
+            tenantId: auth.tenantId, type: st.type, title: person ? `${st.title} — ${person.name}` : st.title, notes, priority: 'media', ownerId: owner, createdBy: auth.userId, contactId: params.id, opportunityId: body.opportunityId,
             dueAt: dueAtOf(auth, st.dueOn) as unknown as Date, status: 'a_fazer', category: 'Play ABM', tags: ['abm', 'play'], participants: owner === ownerId ? [] : [ownerId],
           }).returning({ id: s.activities.id });
           await taskEvent(tx, auth, a!.id, 'created', { delegatedTo: owner !== auth.userId ? owner : null, playRunId: run.id });
           await tx.insert(s.abmPlayRunSteps).values({ tenantId: auth.tenantId, runId: run.id, stepKey: st.key, position: i, activityId: a!.id });
         }
-        await abmEvent(tx, auth, abm.id, 'play_iniciado', { runId: run.id, play: p.name, version: p.currentVersion, stakeholder: person?.name ?? null, reason: body.reason, fromSuggestion: body.fromSuggestion, steps: planned.length });
+        await abmEvent(tx, auth, abm.id, 'play_iniciado', { runId: run.id, opportunityId: body.opportunityId, play: p.name, version: p.currentVersion, stakeholder: person?.name ?? null, reason: body.reason, fromSuggestion: body.fromSuggestion, steps: planned.length });
         if (person) await tx.insert(s.stakeholderEvents).values({ tenantId: auth.tenantId, stakeholderId: person.id, type: 'play_iniciado', payload: { runId: run.id, play: p.name }, actorId: auth.userId });
         return run.id;
       });

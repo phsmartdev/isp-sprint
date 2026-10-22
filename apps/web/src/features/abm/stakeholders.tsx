@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Download, Plus, UserPlus } from 'lucide-react';
 import {
+  ENTITY_LINK_ROLE_LABELS, type EntityLinkRole,
   INFLUENCE_CONTEXT_LABELS, INTEREST_LABELS, PARTICIPATION_LABELS, QUADRANT_LABELS, RELATIONSHIP_LABELS, STAKEHOLDER_ACCESS_LABELS, STAKEHOLDER_ROLE_LABELS, STANCE_LABELS, ABM_PRIORITY_LABELS,
   type InfluenceContext, type InfluenceLevel, type Interest, type Participation, type Quadrant, type RelationshipStrength, type StakeholderAccess, type StakeholderRole, type Stance, type AbmPriority,
 } from '@isp/domain';
@@ -122,10 +123,13 @@ type Detail = StakeholderRow & {
   requests: { id: string; contextType: InfluenceContext; contextLabel: string | null; fromLevel: InfluenceLevel; toLevel: InfluenceLevel; justification: string; status: string; requestedByName: string | null; decidedByName: string | null; decisionNote: string | null; createdAt: string }[];
   events: { id: string; type: string; payload: Record<string, unknown>; actorName: string | null; createdAt: string }[];
   relations: { id: string; kind: string; otherName: string | null; direction: 'saida' | 'entrada' }[];
+  links: { id: string; entityType: string; entityId: string; role: string; label: string; path: string }[];
+  personOrigin: { sourceSystem: string; externalId: string | null } | null;
 };
 const REL_LABELS: Record<string, string> = { reporta_a: 'reporta a', influencia: 'influencia', aliado: 'é aliado de', conflito: 'tem conflito com', indicou: 'indicou', outro: 'se relaciona com' };
 
-function StakeholderDrawer({ id, contactId, units, peers, onClose }: { id: string | null; contactId: string; units: AccountData['units']; peers: StakeholderRow[]; onClose: () => void }) {
+type Preset = { contextType: InfluenceContext; contextKey: string; contextLabel: string };
+function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { id: string | null; contactId: string; units: AccountData['units']; peers: StakeholderRow[]; onClose: () => void; preset?: Preset }) {
   const toast = useToast();
   const qc = useQueryClient();
   const users = useLookups().data?.users ?? [];
@@ -139,7 +143,8 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose }: { id: strin
     mutationFn: () => api(`/stakeholders/${id}`, { method: 'PATCH', body: { rowVersion: d!.rowVersion, ...f } }),
     onSuccess: () => { setF(null); refresh(); toast({ tone: 'success', message: 'Stakeholder atualizado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
-  const [inf, setInf] = useState({ contextType: 'conta' as InfluenceContext, contextKey: '', contextLabel: '', level: 'nao_avaliado' as InfluenceLevel, justification: '', evidence: '' });
+  const [inf, setInf] = useState({ contextType: (preset?.contextType ?? 'conta') as InfluenceContext, contextKey: preset?.contextKey ?? '', contextLabel: preset?.contextLabel ?? '', level: 'nao_avaliado' as InfluenceLevel, justification: '', evidence: '' });
+  useEffect(() => { if (preset) setInf((o) => ({ ...o, ...preset })); }, [preset?.contextKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const evaluate = useMutation({
     mutationFn: () => api<{ status: string }>(`/stakeholders/${id}/influence`, { method: 'POST', body: { ...inf, contextLabel: inf.contextLabel || (inf.contextType === 'unidade' ? units.find((u) => u.id === inf.contextKey)?.name : null) || null, evidence: inf.evidence || null } }),
     onSuccess: (r) => { setInf({ ...inf, justification: '', evidence: '' }); refresh(); toast({ tone: 'success', message: r.status === 'pendente' ? 'Pedido enviado para aprovação' : 'Influência avaliada e registrada na auditoria' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
@@ -166,11 +171,12 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose }: { id: strin
                 {d.policy.edit && (
                   <div className="space-y-2 rounded-md bg-surface-2 p-3">
                     <div className="grid gap-2 sm:grid-cols-3">
-                      <FormField label="Contexto" htmlFor="if-c"><Select id="if-c" value={inf.contextType} onChange={(e) => setInf({ ...inf, contextType: e.target.value as InfluenceContext, contextKey: '', contextLabel: '' })}>{(['conta', 'unidade', 'processo'] as InfluenceContext[]).map((c) => <option key={c} value={c}>{INFLUENCE_CONTEXT_LABELS[c]}</option>)}</Select></FormField>
+                      <FormField label="Contexto" htmlFor="if-c"><Select id="if-c" value={inf.contextType} onChange={(e) => setInf({ ...inf, contextType: e.target.value as InfluenceContext, contextKey: '', contextLabel: '' })}>{([...(preset && !['conta', 'unidade', 'processo'].includes(preset.contextType) ? [preset.contextType] : []), 'conta', 'unidade', 'processo'] as InfluenceContext[]).map((c) => <option key={c} value={c}>{c === preset?.contextType ? `Est${c === 'oportunidade' ? 'a' : 'e'} ${INFLUENCE_CONTEXT_LABELS[c].toLowerCase()}` : INFLUENCE_CONTEXT_LABELS[c]}</option>)}</Select></FormField>
                       {inf.contextType === 'unidade' && <FormField label="Departamento" htmlFor="if-u"><Select id="if-u" value={inf.contextKey} onChange={(e) => setInf({ ...inf, contextKey: e.target.value })}><option value="">Escolha</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
                       {inf.contextType === 'processo' && <FormField label="Processo decisório" htmlFor="if-p"><Input id="if-p" value={inf.contextLabel} onChange={(e) => setInf({ ...inf, contextLabel: e.target.value, contextKey: e.target.value.trim().toLowerCase().slice(0, 80) })} /></FormField>}
                       <FormField label={`Nova avaliação (atual: ${d.policy.labels[curLevel ?? 'nao_avaliado']})`} htmlFor="if-l"><Select id="if-l" value={inf.level} onChange={(e) => setInf({ ...inf, level: e.target.value as InfluenceLevel })}>{(Object.keys(d.policy.labels) as InfluenceLevel[]).map((l) => <option key={l} value={l}>{d.policy.labels[l]}</option>)}</Select></FormField>
                     </div>
+                    {preset && inf.contextType === preset.contextType && <p className="text-xs text-muted">Avaliando a influência em: <b className="text-ink">{preset.contextLabel}</b></p>}
                     <FormField label="Justificativa" htmlFor="if-j" required hint="Por que esta pessoa tem este poder nesta decisão?"><Textarea id="if-j" rows={2} value={inf.justification} onChange={(e) => setInf({ ...inf, justification: e.target.value })} /></FormField>
                     <FormField label="Evidência" htmlFor="if-e"><Input id="if-e" value={inf.evidence} onChange={(e) => setInf({ ...inf, evidence: e.target.value })} /></FormField>
                     <Button size="sm" variant="primary" disabled={inf.justification.trim().length < 10 || inf.level === curLevel || (inf.contextType !== 'conta' && !inf.contextKey)} loading={evaluate.isPending} onClick={() => evaluate.mutate()}>{d.policy.requireApproval ? 'Enviar para aprovação' : 'Registrar avaliação'}</Button>
@@ -206,6 +212,10 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose }: { id: strin
             {f && <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar alterações</Button>}
           </section>
 
+          {!!d.links?.length && (
+            <section aria-label="Vínculos com registros"><h4 className="mb-1 font-bold text-ink">Vínculos com oportunidades, contratos e leads</h4><ul className="space-y-1 text-sm">{d.links.map((l) => <li key={l.id}><Link className="font-semibold text-primary hover:underline" to={l.path}>{l.label}</Link> · {ENTITY_LINK_ROLE_LABELS[l.role as EntityLinkRole] ?? l.role}</li>)}</ul></section>
+          )}
+          {d.personOrigin && <p className="text-xs text-muted">Cadastro vindo de {d.personOrigin.sourceSystem.toUpperCase()}{d.personOrigin.externalId && ` · ID externo ${d.personOrigin.externalId}`} (preservado; o ABM não altera).</p>}
           <section aria-label="Relações registradas">
             <h4 className="mb-1 font-bold text-ink">Relações registradas</h4>
             {!d.relations.length ? <p className="text-sm text-muted">Nenhuma relação registrada.</p> : <ul className="space-y-1 text-sm">{d.relations.map((r) => <li key={r.id}>{r.direction === 'saida' ? <>{d.name} <b>{REL_LABELS[r.kind]}</b> {r.otherName}</> : <>{r.otherName} <b>{REL_LABELS[r.kind]}</b> {d.name}</>}</li>)}</ul>}
@@ -417,9 +427,9 @@ function RelationshipNetwork({ data, onOpen }: { data: AccountData; onOpen: (id:
 
 // ---------------------------------------------------------------- visão geral (aba Stakeholders do ABM) e aprovações
 /** Abre a ficha de um stakeholder fora da Conta 360 (carrega departamentos e colegas da conta dele). */
-function StakeholderDrawerFor({ id, contactId, onClose }: { id: string | null; contactId: string | null; onClose: () => void }) {
+export function StakeholderDrawerFor({ id, contactId, onClose, preset }: { id: string | null; contactId: string | null; onClose: () => void; preset?: Preset }) {
   const q = useQuery({ queryKey: ['stakeholders', contactId], enabled: !!contactId, queryFn: () => api<AccountData>(`/accounts/${contactId}/stakeholders`) });
-  return <StakeholderDrawer id={q.data ? id : null} contactId={contactId ?? ''} units={q.data?.units ?? []} peers={q.data?.items ?? []} onClose={onClose} />;
+  return <StakeholderDrawer id={q.data ? id : null} contactId={contactId ?? ''} units={q.data?.units ?? []} peers={q.data?.items ?? []} onClose={onClose} preset={preset} />;
 }
 
 type DirRow = StakeholderRow & { abmId: string | null };

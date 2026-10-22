@@ -73,7 +73,7 @@ export const dataAdminRoutes = [
           // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
           // ABM (depende de contatos)
-          for (const tbl of [s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          for (const tbl of [s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
           // Sucesso do Cliente (depende de contatos, contratos, oportunidades e atividades)
           for (const tbl of [s.csJourneyLinkEvents, s.csJourneyLinks, s.csMilestoneEvents, s.csFiles, s.csVisits, s.csMilestones, s.csPresentations, s.csJourneys, s.csAlerts, s.csActionPlans, s.csSurveys, s.csAssessments, s.csAccounts]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
           // atas de registro de preços (dependem de oportunidades, contratos e contatos)
