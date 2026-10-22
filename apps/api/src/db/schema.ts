@@ -3299,3 +3299,58 @@ export const abmPlayRunSteps = pgTable(
   },
   (t) => ({ uq: uniqueIndex('abm_play_run_steps_uq').on(t.runId, t.stepKey), act: index('abm_play_run_steps_act_idx').on(t.activityId) }),
 );
+
+// ---------------------------------------------------------------- Funcionalidade 01: Trilha Visual da Jornada
+/** Link externo da trilha: vários por jornada, com destinatário, prazo, código opcional (hash) e revogação. */
+export const csJourneyLinks = pgTable(
+  'cs_journey_links',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    journeyId: uuid('journey_id').notNull().references(() => csJourneys.id),
+    label: text('label').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    codeHash: text('code_hash'),
+    showNotes: boolean('show_notes').notNull().default(false),
+    expiresAt: ts('expires_at').notNull(),
+    failedAttempts: integer('failed_attempts').notNull().default(0),
+    lockedUntil: ts('locked_until'),
+    accessCount: integer('access_count').notNull().default(0),
+    lastAccessAt: ts('last_access_at'),
+    revokedAt: ts('revoked_at'),
+    revokedBy: uuid('revoked_by').references(() => users.id),
+    revokeReason: text('revoke_reason'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ tokenUq: uniqueIndex('cs_journey_links_token_uq').on(t.tokenHash), idx: index('cs_journey_links_idx').on(t.tenantId, t.journeyId) }),
+);
+/** Registro de cada uso do link (append-only): criado, acesso, código incorreto, bloqueado, revogado. */
+export const csJourneyLinkEvents = pgTable(
+  'cs_journey_link_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    linkId: uuid('link_id').notNull().references(() => csJourneyLinks.id),
+    type: text('type').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    meta: jsonb('meta').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('cs_journey_link_events_idx').on(t.linkId, t.createdAt), typeCk: check('cs_journey_link_events_type_ck', inList('type', ['criado', 'acesso', 'codigo_incorreto', 'bloqueado', 'revogado'])) }),
+);
+/** Histórico dos marcos da jornada (append-only): conclusão, reabertura, data, responsável e observações, com antes e depois. */
+export const csMilestoneEvents = pgTable(
+  'cs_milestone_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    journeyId: uuid('journey_id').notNull().references(() => csJourneys.id),
+    milestoneId: uuid('milestone_id').notNull().references(() => csMilestones.id),
+    type: text('type').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('cs_milestone_events_idx').on(t.journeyId, t.createdAt), typeCk: check('cs_milestone_events_type_ck', inList('type', ['concluido', 'reaberto', 'reprogramado', 'responsavel', 'observacao'])) }),
+);

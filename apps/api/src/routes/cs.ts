@@ -11,19 +11,20 @@ import type { DbOrTx } from '../db/client';
 import type { AuthContext } from '../http/context';
 import { audit } from '../services/audit';
 import { level, ownerScope } from '../services/scope';
-import { atLeast } from '@isp/domain';
+import { atLeast, milestoneChanges } from '@isp/domain';
+import { logMilestone } from '../services/journeyTrail';
 import {
   addDays, alertsFor, csConfigOf, explain, generateCadence, hashToken, newShareToken, openMilestoneTasks, recomputeAccounts, regenerateKickoff, runCsDaily, snapshotOf, startJourney, syncAlerts, todayIso, type Snapshot,
 } from '../services/cs';
 
-const manager = (a: AuthContext) => atLeast(level(a, 'clientes'), 'equipe') || a.sectors.includes('diretoria');
+export const manager = (a: AuthContext) => atLeast(level(a, 'clientes'), 'equipe') || a.sectors.includes('diretoria');
 const isAdmin = (a: AuthContext) => a.access.configuracoes === 'total';
 const ContactParams = z.object({ contactId: z.string().uuid() });
 const Period = z.object({ from: z.string().date().optional(), to: z.string().date().optional() });
 const monthStart = () => `${todayIso().slice(0, 7)}-01`;
 
 /** Acesso à conta: estar na carteira de clientes do usuário ou ser o CSM dela. */
-async function account(db: DbOrTx, auth: AuthContext, contactId: string) {
+export async function account(db: DbOrTx, auth: AuthContext, contactId: string) {
   const [c] = await db.select({ id: s.contacts.id, name: s.contacts.name, ownerId: s.contacts.ownerId }).from(s.contacts).where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId), isNull(s.contacts.deletedAt))).limit(1);
   if (!c) throw notFound('Cliente não encontrado.');
   const [a] = await db.select().from(s.csAccounts).where(and(eq(s.csAccounts.tenantId, auth.tenantId), eq(s.csAccounts.contactId, contactId))).limit(1);
@@ -32,7 +33,7 @@ async function account(db: DbOrTx, auth: AuthContext, contactId: string) {
   if (!inScope && !isCsm && !manager(auth)) throw notFound('Cliente não encontrado.');
   return { contact: c, acc: a ?? null, canEdit: isCsm || manager(auth) || (!!inScope && auth.sectors.includes('sucesso_cliente')) };
 }
-function requireEdit(x: { canEdit: boolean }) { if (!x.canEdit) throw forbidden('Só o CSM da conta ou a gestão alteram o acompanhamento.'); }
+export function requireEdit(x: { canEdit: boolean }) { if (!x.canEdit) throw forbidden('Só o CSM da conta ou a gestão alteram o acompanhamento.'); }
 
 type Row = { contactId: string; name: string; csmId: string | null; csmName: string | null; snapshot: Snapshot };
 /** Carteira visível: gestão vê todas; CSM vê as suas e as da própria carteira de clientes. */
@@ -354,7 +355,8 @@ export const csRoutes = [
         if (a.completedAt && a.csResult) throw unprocessable('Este acompanhamento já foi registrado.');
         await app.db.update(s.activities).set({ completedAt: at, completedBy: auth.userId, csResult: body.result, csKind: a.csKind ?? body.kind, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, id));
         await app.db.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: id, type: 'completed', actorId: auth.userId, payload: { csResult: true } });
-        await app.db.update(s.csMilestones).set({ doneAt: at, doneBy: auth.userId }).where(and(eq(s.csMilestones.activityId, id), isNull(s.csMilestones.doneAt)));
+        const doneMs = await app.db.update(s.csMilestones).set({ doneAt: at, doneBy: auth.userId }).where(and(eq(s.csMilestones.activityId, id), isNull(s.csMilestones.doneAt))).returning({ id: s.csMilestones.id, journeyId: s.csMilestones.journeyId });
+        for (const dm of doneMs) await logMilestone(app.db, auth.tenantId, dm.journeyId, dm.id, [{ type: 'concluido', from: null, to: at, via: 'acompanhamento' }], auth.userId);
       } else {
         const type = body.kind === 'visita' ? 'visita' : body.kind === 'reuniao' || body.kind === 'revisao' ? 'reuniao' : body.kind === 'contato' ? 'ligacao' : 'tarefa';
         const [a] = await app.db.insert(s.activities).values({ tenantId: auth.tenantId, type, title: `Acompanhamento registrado · ${x.contact.name}`.slice(0, 200), notes: body.result, dueAt: at, priority: 'media', ownerId: auth.userId, contactId: params.contactId, csKind: body.kind, csResult: body.result, completedAt: at, completedBy: auth.userId, createdBy: auth.userId }).returning({ id: s.activities.id });
@@ -530,7 +532,9 @@ export const csRoutes = [
       const [m] = await app.db.select({ m: s.csMilestones, contactId: s.csJourneys.contactId }).from(s.csMilestones).innerJoin(s.csJourneys, eq(s.csJourneys.id, s.csMilestones.journeyId)).where(and(eq(s.csMilestones.id, params.id), eq(s.csMilestones.tenantId, auth.tenantId))).limit(1);
       if (!m) throw notFound('Marco não encontrado.');
       requireEdit(await account(app.db, auth, m.contactId));
-      await app.db.update(s.csMilestones).set({ ...(body.done !== undefined ? { doneAt: body.done ? new Date() : null, doneBy: body.done ? auth.userId : null } : {}), ...(body.plannedAt !== undefined ? { plannedAt: body.plannedAt } : {}), ...(body.ownerId !== undefined ? { ownerId: body.ownerId } : {}), ...(body.notes !== undefined ? { notes: body.notes } : {}) }).where(eq(s.csMilestones.id, m.m.id));
+      const doneAt = body.done === undefined ? undefined : body.done ? new Date() : null;
+      await logMilestone(app.db, auth.tenantId, m.m.journeyId, m.m.id, milestoneChanges(m.m, { doneAt, plannedAt: body.plannedAt, ownerId: body.ownerId, notes: body.notes }), auth.userId);
+      await app.db.update(s.csMilestones).set({ ...(doneAt !== undefined ? { doneAt, doneBy: doneAt ? auth.userId : null } : {}), ...(body.plannedAt !== undefined ? { plannedAt: body.plannedAt } : {}), ...(body.ownerId !== undefined ? { ownerId: body.ownerId } : {}), ...(body.notes !== undefined ? { notes: body.notes } : {}) }).where(eq(s.csMilestones.id, m.m.id));
       if (body.done && m.m.activityId) await app.db.update(s.activities).set({ completedAt: new Date(), completedBy: auth.userId, csResult: body.notes ?? m.m.notes ?? `Marco concluído: ${m.m.title}`, updatedAt: new Date() }).where(and(eq(s.activities.id, m.m.activityId), isNull(s.activities.completedAt)));
       if (body.plannedAt && m.m.activityId) await app.db.update(s.activities).set({ dueAt: new Date(`${body.plannedAt}T12:00:00Z`), updatedAt: new Date() }).where(and(eq(s.activities.id, m.m.activityId), isNull(s.activities.completedAt)));
       const [left] = await app.db.select({ n: sql<number>`count(*)::int` }).from(s.csMilestones).where(and(eq(s.csMilestones.journeyId, m.m.journeyId), isNull(s.csMilestones.doneAt)));
@@ -591,6 +595,7 @@ export const csRoutes = [
       const [m] = await app.db.select().from(s.csMilestones).where(and(eq(s.csMilestones.journeyId, j.id), eq(s.csMilestones.key, 'kickoff'))).limit(1);
       if (m && !m.doneAt) {
         await app.db.update(s.csMilestones).set({ doneAt: at, doneBy: auth.userId, notes }).where(eq(s.csMilestones.id, m.id));
+        await logMilestone(app.db, auth.tenantId, j.id, m.id, [{ type: 'concluido', from: null, to: at, via: 'kickoff' }], auth.userId);
         if (m.activityId) await app.db.update(s.activities).set({ completedAt: at, completedBy: auth.userId, csResult: notes, updatedAt: new Date() }).where(and(eq(s.activities.id, m.activityId), isNull(s.activities.completedAt)));
         else await app.db.insert(s.activities).values({ tenantId: auth.tenantId, type: 'reuniao', title: 'Reunião de kickoff', dueAt: at, priority: 'media', ownerId: auth.userId, contactId: j.contactId, contractId: j.contractId, csKind: 'reuniao', csResult: notes, completedAt: at, completedBy: auth.userId, createdBy: auth.userId });
       }

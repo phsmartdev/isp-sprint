@@ -37,6 +37,8 @@ test('Sucesso do Cliente: jornada automática, kickoff editável, conta 360°, c
   // jornadas
   await page.goto('/sucesso?t=jornadas');
   await page.getByRole('link', { name: 'Clínica Fictícia CS E2E' }).click();
+  await expect(page.getByRole('region', { name: 'Trilha da jornada' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Linha do tempo' }).click();
   await expect(page.getByRole('heading', { name: 'Linha do tempo' })).toBeVisible();
   await expect(page.getByText('Reunião de kickoff')).toBeVisible();
   await expect(page.getByText('Formalização', { exact: true })).toBeVisible();
@@ -105,4 +107,83 @@ test('Sucesso do Cliente: jornada automática, kickoff editável, conta 360°, c
   await page.getByLabel('O que mudou').fill('Capacidade revista');
   await page.getByRole('button', { name: 'Salvar nova versão' }).click();
   await expect(page.getByText(/Vigente: v1/)).toBeVisible();
+});
+
+test('Trilha Visual: paradas sobre os marcos, histórico, apresentar jornada e link externo com código e revogação', async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const api = async (method: 'get' | 'post' | 'patch', url: string, data?: object) => {
+    const r = await page.request[method](`/api/v1${url}`, { headers: H, ...(data ? { data } : {}) });
+    expect(r.status(), await r.text()).toBeLessThan(300);
+    return r.json();
+  };
+  const plan = (await api('get', '/meta/lookups')).plans[0];
+  const o = await api('post', '/opportunities', { newContact: { name: 'Laboratório Fictício Trilha', segment: 'empresarial' }, planId: plan.id, cableMeters: 40, saleType: 'ativa' });
+  await api('post', `/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await api('get', `/opportunities/${o.id}`)).rowVersion });
+  const me = await api('get', '/me');
+  const c = await api('post', '/contracts', { opportunityId: o.id, billingType: 'recorrente', commercialOwnerId: me.user.id, version: { number: 'TR-E2E-1', object: 'Conectividade do laboratório', signedAt: day(-30), startAt: day(-30), termMonths: 12, monthlyCents: 800_000, items: [{ planId: null, description: 'Link 300 Mbps', qty: 1, unitCents: 800_000 }] } });
+  await api('post', `/contracts/${c.id}/validate`);
+  const j = await api('post', '/cs/journeys', { contractId: c.id });
+  const jid = j.journeyId ?? j.id ?? (await api('get', `/cs/journeys?contractId=${c.id}`)).items[0].id;
+  const t = await api('get', `/cs/journeys/${jid}/trail`);
+  await api('patch', `/cs/milestones/${t.stops[0].id}`, { done: true, notes: 'Boas-vindas enviadas à diretoria' });
+
+  await page.goto(`/sucesso/jornadas/${jid}`);
+  const trail = page.getByRole('region', { name: 'Trilha da jornada' });
+  await expect(trail.getByRole('button', { name: new RegExp(`^${t.stops[0].title}: Concluído`) })).toBeVisible();
+  await expect(trail.getByRole('button', { name: /: Agora/ }).getByText('Estamos aqui')).toBeVisible();
+  await trail.getByRole('button', { name: new RegExp(`^${t.stops[0].title}:`) }).click();
+  const sel = page.getByRole('region', { name: 'Marco selecionado' });
+  await expect(sel.getByRole('heading', { name: t.stops[0].title })).toBeVisible();
+  await expect(sel.getByText(/concluiu/)).toBeVisible();
+  await expect(sel.getByText(/atualizou as observações/)).toBeVisible();
+
+  // apresentar jornada: visão geral, avança pelo teclado, observações ocultas por padrão
+  await page.getByRole('button', { name: 'Apresentar jornada' }).click();
+  const pres = page.getByRole('dialog', { name: 'Apresentar jornada' });
+  await expect(pres.getByRole('heading', { name: 'Onde estamos na jornada' })).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(pres.getByRole('heading', { name: t.stops[0].title })).toBeVisible();
+  await expect(pres.getByText('Boas-vindas enviadas à diretoria')).toBeHidden();
+  await pres.getByLabel('Mostrar observações internas').check();
+  await expect(pres.getByText('Boas-vindas enviadas à diretoria')).toBeVisible();
+  await pres.getByRole('button', { name: 'Sair da apresentação' }).click();
+
+  // link externo com código
+  await page.getByRole('button', { name: 'Compartilhar trilha' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Compartilhar trilha' });
+  await dlg.getByLabel('Para quem é o link').fill('Diretoria do laboratório');
+  await dlg.getByRole('button', { name: 'Criar link' }).click();
+  const made = page.getByRole('dialog', { name: 'Link criado' });
+  const url = await made.getByLabel('Link', { exact: true }).inputValue();
+  const code = (await made.getByLabel(/^Código \d/).textContent())!.trim();
+  await made.getByRole('button', { name: 'Concluir' }).click();
+  const anon = await (await browser.newContext()).newPage();
+  await anon.goto(url.replace(/^https?:\/\/[^/]+/, ''));
+  await anon.getByLabel('Código de acesso').fill(code === '000000' ? '111111' : '000000');
+  await anon.getByRole('button', { name: 'Ver a trilha' }).click();
+  await expect(anon.getByRole('alert')).toContainText('Restam 4');
+  await anon.getByLabel('Código de acesso').fill(code);
+  await anon.getByRole('button', { name: 'Ver a trilha' }).click();
+  await expect(anon.getByRole('heading', { name: 'Laboratório Fictício Trilha' })).toBeVisible();
+  await expect(anon.getByRole('region', { name: 'Trilha da jornada' })).toBeVisible();
+  await expect(anon.getByText('Boas-vindas enviadas à diretoria')).toHaveCount(0);
+
+  // revogar: o acesso para
+  await page.getByRole('tab', { name: 'Links externos' }).click();
+  const links = page.getByRole('region', { name: 'Links externos da trilha' });
+  await expect(links.getByText(/1 acesso\(s\)/)).toBeVisible();
+  await links.getByRole('button', { name: 'Revogar' }).click();
+  await page.getByLabel(/^Motivo/).fill('Diretoria trocou de contato');
+  await page.getByRole('dialog', { name: 'Revogar link' }).getByRole('button', { name: 'Revogar link' }).click();
+  await expect(page.getByText('Link revogado: o acesso parou agora')).toBeVisible();
+  await expect(links.getByText('Revogado', { exact: true })).toBeVisible();
+  const again = await (await browser.newContext()).newPage();
+  await again.goto(url.replace(/^https?:\/\/[^/]+/, ''));
+  await expect(again.getByRole('alert')).toContainText('Peça um novo link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('tab', { name: 'Trilha' }).click();
+  await shot(page, 'cs-trilha');
 });

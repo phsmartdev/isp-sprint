@@ -265,3 +265,8 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Decisão:** plays do ABM ficam no ABM (por conta e por pessoa), separados das campanhas. Cada etapa vira uma tarefa do módulo de Tarefas (fonte única de situação, prazo e responsável). Definição versionada (append-only); execução guarda a versão. Sugestões são calculadas na hora a partir de critérios explícitos e mostram os motivos; leem influência/posicionamento só como entrada e nunca os gravam. Modelos copiados por empresa na primeira consulta (idempotente).
 - **Consequência:** o resultado de um play é declarado por quem encerra (atingiu ou não o critério); métricas de efetividade por play saem dessas execuções (Fase 7).
 
+## ADR-058 — Trilha da jornada lê os marcos; links externos são individuais, com código e registro (21/10/2026)
+- **Contexto:** a jornada já tinha marcos, linha do tempo e um link único (kickoff). A trilha precisa ser apresentável ao cliente sem expor dados internos e sem criar uma segunda fonte de verdade.
+- **Decisão:** a trilha é só uma visualização dos `cs_milestones` (situação calculada no domínio). Links da trilha ficam numa tabela própria (vários por jornada), com token e código guardados como hash (código com scrypt, mostrado uma vez), prazo, revogação com motivo, bloqueio após 5 códigos errados e registro append-only de cada uso. A página pública mostra marcos, fases e datas; observações só se o link permitir; responsáveis internos nunca. O histórico dos marcos passa a ser gravado em toda mudança (append-only); conclusões anteriores foram reconstituídas e sinalizadas.
+- **Consequência:** o link de kickoff existente não mudou; a revogação e o prazo valem por link.
+
