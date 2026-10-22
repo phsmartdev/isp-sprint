@@ -19,6 +19,7 @@ import { CommercialChip, PriorityChip, StatusChip } from '../../features/abm/sha
 import { AccountDrawer } from './Abm';
 import { InfluenceMapPanel, StakeholdersPanel } from '../../features/abm/stakeholders';
 import { AccountPlaysPanel } from '../../features/abm/plays';
+import { CoverageCard } from '../../features/abm/intel';
 
 type Objective = { id: string; kind: AbmObjectiveKind; title: string; ownerName: string; ownerId: string; dueOn: string | null; status: AbmObjectiveStatus; successCriteria: string | null; result: string | null; rowVersion: number };
 type Unit = { id: string; name: string; kind: OrgUnitKind; parentId: string | null; notes: string | null; active: boolean; depth: number; rowVersion: number };
@@ -156,6 +157,7 @@ function Summary({ d }: { d: D360 }) {
         </ul>
       </section>
       <aside className="space-y-4">
+        <CoverageCard contactId={d.abm.contactId} abmId={d.abm.id} />
         <section className="card p-4 text-sm"><h2 className="mb-1 font-bold text-ink">Por que esta conta</h2><p>{d.abm.reason}</p>{d.abm.origin && <p className="mt-1 text-xs text-muted">Origem: {ABM_ORIGIN_LABELS[d.abm.origin]}</p>}</section>
         <section className="card p-4 text-sm"><h2 className="mb-1 font-bold text-ink">Panorama</h2><ul className="space-y-1"><li><span className="num font-semibold">{d.opportunities.filter((o) => o.stage !== 'ganha' && o.stage !== 'perdida').length}</span> oportunidade(s) aberta(s)</li><li><span className="num font-semibold">{d.contracts.filter((c) => ['implantacao', 'vigente', 'renovacao', 'reajuste'].includes(c.stage)).length}</span> contrato(s) ativo(s)</li><li><span className="num font-semibold">{d.units.filter((u) => u.active).length}</span> unidade(s) mapeada(s) na estrutura</li><li><span className="num font-semibold">{open.length}</span> objetivo(s) em aberto</li></ul></section>
       </aside>

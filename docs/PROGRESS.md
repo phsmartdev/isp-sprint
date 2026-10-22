@@ -85,7 +85,13 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - LTV histórico conta clientes ativos até hoje: tende a subestimar a vida média.
 - Equipamentos por oportunidade usam o kit do caminho; a troca manual existe na API, sem tela ainda.
 
-## Funcionalidade 02 — Pesquisas por link ✅ (2026-10-21) — aguardando aprovação
+## ABM — Fase 7: inteligência e cobertura ✅ (2026-10-22)
+- **ABM → Inteligência**: indicadores das contas do ABM visíveis, com filtros de período, responsável, prioridade e tier — prospecção (contas, novas no período, sem contato há mais de 30 dias, com oportunidade, distribuição por status ABM e comercial), stakeholders (pessoas por conta, decisores, contas sem decisor, % com influência avaliada pela equipe), relacionamento (interações concluídas no período, pessoas de influência alta e quantas têm relacionamento forte ou moderado), plays (em andamento, concluídos, taxa de sucesso, etapas atrasadas, por play), comercial (pipeline aberto, ganho no período, contratos ativos) e NPS do período.
+- **Cobertura de stakeholders** por conta (0 a 100, com nível boa/parcial/baixa), explicada item a item: papéis-chave (quem decide, aprova o gasto, avalia tecnicamente, usa ou fiscaliza), influência avaliada, relacionamento com quem tem influência alta, defensor com influência (reduz se há resistentes de influência alta) e departamentos cobertos. "Não avaliado" é lacuna, nunca estimativa; perfil sem acesso à influência vê só os itens que não dependem dela. Tabela por conta com as lacunas (piores primeiro) e cartão na Conta 360 → Resumo com atalho "resolver" para a aba certa.
+- Somente leitura: nada aqui altera avaliações. Sem migração.
+- Testes: domínio (3), API (2), E2E (1).
+
+## Funcionalidade 02 — Pesquisas por link ✅ (2026-10-21) — aprovada
 - **Onde**: Sucesso do Cliente → aba Pesquisas (lista, revisão e indicadores), página de cada pesquisa (Resultados, Convites, Respostas, Perguntas e versões) e botão "Enviar pesquisa" na ficha da pessoa (Conta 360 → Stakeholders).
 - **Construtor versionado** (liderança): perguntas de NPS (0–10), satisfação (1–5), escala, escolha única, múltipla, sim/não e texto; obrigatórias; ordem; modelo inicial pronto. Mudança nas perguntas gera nova versão com o motivo; cada convite responde à versão em que foi enviado. Desativar impede novos convites.
 - **Destino de cada resposta**: só guardar; NPS ou satisfação da conta (entram no registro de pesquisas do Sucesso do Cliente, que já alimenta a saúde da conta); interesse da pessoa; posicionamento, e-mail e telefone da pessoa (estes três sempre com revisão). Cada destino escolhe "atualizar na hora" ou "revisar antes". **O poder de influência nunca é destino** — recusado no domínio, na API e testado (ADR-056).
