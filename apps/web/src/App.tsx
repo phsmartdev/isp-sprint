@@ -51,6 +51,7 @@ import { NewContractPage } from './pages/contracts/NewContract';
 import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
+import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { AdminCsSettings } from './pages/admin/CsSettings';
 import { AdminContractSettings } from './pages/admin/ContractSettings';
 
@@ -76,6 +77,7 @@ export function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/k/:token" element={<PublicKickoffPage />} />
+      <Route path="/j/:token" element={<PublicJourneyPage />} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>

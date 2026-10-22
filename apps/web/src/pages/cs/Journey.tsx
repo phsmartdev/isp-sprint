@@ -12,6 +12,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { Presenter, SlideView, type Slide } from '../../features/cs/shared';
+import { LinksTab, TrailTab } from './JourneyTrailTab';
 
 type Milestone = { id: string; phase: JourneyPhase; key: string; title: string; plannedAt: string | null; doneAt: string | null; ownerId: string | null; ownerName: string | null; notes: string | null; activityId: string | null };
 type Data = {
@@ -198,9 +199,9 @@ export function JourneyPage() {
   const { id = '' } = useParams();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['cs-journey', id], queryFn: () => api<Data>(`/cs/journeys/${id}`) });
-  const [tab, setTab] = useState<'jornada' | 'kickoff'>('jornada');
+  const [tab, setTab] = useState<'trilha' | 'jornada' | 'kickoff' | 'links'>('trilha');
   const [ko, setKo] = useState(false);
-  const refresh = () => void qc.invalidateQueries({ queryKey: ['cs-journey', id] });
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['cs-journey', id] }); void qc.invalidateQueries({ queryKey: ['cs-trail', id] }); };
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
@@ -210,8 +211,8 @@ export function JourneyPage() {
       <PageHeader icon={<RouteIcon className="h-9 w-9" strokeWidth={2.2} />} title={`Jornada · ${d.client.name}`} subtitle={`${d.journey.templateName} · ${d.journey.isNewCustomer ? 'cliente novo' : 'cliente da base'} · início ${fmtDate(d.journey.startedAt)}${d.contract ? ` · contrato ${d.contract.number}` : ''}${d.csmName ? ` · CSM ${d.csmName}` : ''}`}
         actions={d.canEdit && !d.journey.kickoffAt ? <Button variant="primary" icon={<CalendarCheck className="h-5 w-5" />} onClick={() => setKo(true)}>Registrar kickoff</Button> : d.journey.kickoffAt ? <span className="text-sm text-muted">Kickoff em {fmtDateTime(d.journey.kickoffAt)}</span> : undefined} />
       {d.contract && <p className="mb-4 text-sm text-muted">Contrato: <Link className="font-semibold text-primary hover:underline" to={`/contracts/${d.contract.id}`}>{d.contract.number}</Link>{d.contract.endAt ? ` · vigência até ${fmtDate(d.contract.endAt)} (os marcos de renovação usam esta data)` : ''}</p>}
-      <Tabs label="Jornada" className="mb-5" value={tab} onChange={setTab} tabs={[{ key: 'jornada', label: 'Linha do tempo' }, { key: 'kickoff', label: 'Apresentação de kickoff' }]} />
-      {tab === 'jornada' ? <Timeline d={d} onChanged={refresh} /> : <Editor d={d} onChanged={refresh} />}
+      <Tabs label="Jornada" className="mb-5" value={tab} onChange={setTab} tabs={[{ key: 'trilha', label: 'Trilha' }, { key: 'jornada', label: 'Linha do tempo' }, { key: 'kickoff', label: 'Apresentação de kickoff' }, { key: 'links', label: 'Links externos' }]} />
+      {tab === 'trilha' ? <TrailTab journeyId={d.journey.id} subtitle={`${d.journey.templateName}${d.contract ? ` · contrato ${d.contract.number}` : ''}`} /> : tab === 'jornada' ? <Timeline d={d} onChanged={refresh} /> : tab === 'kickoff' ? <Editor d={d} onChanged={refresh} /> : <LinksTab journeyId={d.journey.id} />}
       <KickoffDialog d={d} open={ko} onClose={() => setKo(false)} onDone={refresh} />
     </div>
   );
