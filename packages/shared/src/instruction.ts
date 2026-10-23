@@ -261,6 +261,87 @@ export const INSTRUCTION_README = [
   'emails.modelos: use {{variavel}}; o sistema recusa variáveis que não existem para aquele modelo.',
 ];
 
+
+/**
+ * Tipos de venda (diretriz de UX de 23/10): cada um é uma jornada, com etapas e campos próprios.
+ * São só a configuração inicial: rótulos, ordem, opções, obrigatoriedade e etapas mudam em Configurações → Jornadas.
+ * Nenhuma etapa exige plano, próxima ação ou roteiro (decisão do Paulo, 23/10).
+ */
+export const SALE_TYPE_KEYS = ['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva'] as const;
+export type SaleTypeKey = (typeof SALE_TYPE_KEYS)[number];
+export function saleTypeJourneys(): InstructionJourney[] {
+  const none = { proposta: false, plano: false, proximaAcao: false, respostasObrigatorias: false };
+  const st = (chave: string, nome: string, cor: string) => ({ chave, nome, tipo: 'aberta' as const, cor, exige: none, perguntas: [], dicas: [] });
+  const fim = (ganha: string, perdida: string) => [
+    { chave: 'ganha', nome: ganha, tipo: 'ganha' as const, cor: '#22C55E', exige: none, perguntas: [], dicas: [] },
+    { chave: 'perdida', nome: perdida, tipo: 'perdida' as const, cor: '#EF4444', exige: none, perguntas: [], dicas: [] },
+  ];
+  const f = (chave: string, rotulo: string, tipo: (typeof FIELD_TYPES)[number] = 'texto', opcoes: string[] = []) => ({ chave, rotulo, tipo, opcoes, obrigatorio: false });
+  const base = { padrao: false, segmentos: [], membros: [], automacoes: [] };
+  return [
+    {
+      ...base, chave: 'licitacao', nome: 'Licitação', descricao: 'Disputas em pregão, dispensa ou inexigibilidade.',
+      campos: [
+        f('tipo_lancamento', 'Tipo de lançamento', 'lista', ['Licitação publicada', 'Análise de TR', 'Pedido de cotação', 'Apoio ao TR']),
+        f('tipo_disputa', 'Tipo de disputa', 'lista', ['Licitação', 'Dispensa', 'Inexigibilidade', 'Outros']),
+        f('objeto', 'Objeto', 'texto_longo'),
+        f('numero_edital', 'Número do edital'),
+        f('orgao_contratante', 'Órgão contratante'),
+        f('numero_processo', 'Número do processo'),
+        f('link_edital', 'Link do edital'),
+        f('data_sessao', 'Data da sessão', 'data'),
+        f('prazo_proposta', 'Prazo de envio da proposta', 'data'),
+        f('lotes_interesse', 'Itens ou lotes de interesse', 'texto_longo'),
+        f('documento_servidor', 'Documento do servidor'),
+        f('valor_estimado', 'Valor estimado', 'moeda'),
+        f('valor_pregao', 'Valor do pregão', 'moeda'),
+        f('valor_lance', 'Valor do lance', 'moeda'),
+        f('valor_vitorioso', 'Valor vitorioso', 'moeda'),
+        // classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
+        f('modalidade_interna', 'Modalidade (classificação interna)', 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
+      ],
+      etapas: [st('captacao', 'Captação', '#3B82F6'), st('analise_edital', 'Análise do edital', '#F59E0B'), st('proposta_documentos', 'Proposta e documentos', '#8B5CF6'), st('sessao_disputa', 'Sessão de disputa', '#60A5FA'), st('habilitacao_recurso', 'Habilitação e recursos', '#4ADE80'), ...fim('Vencida', 'Perdida')],
+    },
+    {
+      ...base, chave: 'adesao_ata', nome: 'Adesão à Ata', descricao: 'Adesão de outro órgão a uma ata de registro de preços.',
+      campos: [
+        f('numero_ata', 'Número da ata'),
+        f('orgao_gerenciador', 'Órgão gerenciador'),
+        f('objeto', 'Objeto', 'texto_longo'),
+        f('fornecedor_registrado', 'Fornecedor registrado'),
+        f('vigencia_ata', 'Vigência da ata', 'data'),
+        f('situacao_autorizacao', 'Situação da autorização de adesão', 'lista', ['Não solicitada', 'Solicitada ao órgão gerenciador', 'Aceita pelo fornecedor', 'Autorizada', 'Negada']),
+        f('valor_estimado', 'Valor total estimado', 'moeda'),
+      ],
+      etapas: [st('identificacao', 'Identificação da ata', '#3B82F6'), st('pedido_adesao', 'Pedido de adesão', '#F59E0B'), st('autorizacao', 'Autorização', '#8B5CF6'), st('contratacao', 'Contratação', '#4ADE80'), ...fim('Aderida', 'Perdida')],
+    },
+    {
+      ...base, chave: 'consumo_contrato', nome: 'Consumo de Contrato', descricao: 'Nova demanda dentro de um contrato que já existe.',
+      campos: [
+        f('objeto_item', 'Objeto ou item contratual', 'texto_longo'),
+        f('tipo_demanda', 'Tipo de demanda', 'lista', ['Nova instalação', 'Ampliação', 'Mudança de endereço', 'Serviço adicional', 'Outro']),
+        f('quantidade', 'Quantidade', 'numero'),
+        f('valor_estimado', 'Valor estimado', 'moeda'),
+        f('localidade', 'Localidade'),
+        f('prazo_solicitado', 'Prazo solicitado', 'data'),
+      ],
+      etapas: [st('demanda', 'Demanda recebida', '#3B82F6'), st('levantamento', 'Levantamento técnico', '#F59E0B'), st('orcamento', 'Orçamento', '#8B5CF6'), st('aprovacao_gestor', 'Aprovação do gestor do contrato', '#4ADE80'), ...fim('Autorizada', 'Perdida')],
+    },
+    {
+      ...base, chave: 'venda_consultiva', nome: 'Venda Consultiva', descricao: 'Clientes privados: necessidade, expansão, modernização ou relacionamento.',
+      campos: [
+        f('origem', 'De onde surgiu', 'lista', ['Necessidade do cliente', 'Expansão', 'Modernização', 'Relacionamento', 'Interesse estratégico']),
+        f('necessidade', 'Necessidade ou objetivo do cliente', 'texto_longo'),
+        f('solucoes_interesse', 'Soluções de interesse'),
+        f('escopo_preliminar', 'Escopo preliminar', 'texto_longo'),
+        f('valor_estimado', 'Valor estimado', 'moeda'),
+        f('prazo_esperado', 'Prazo esperado', 'data'),
+      ],
+      etapas: [st('descoberta', 'Descoberta', '#3B82F6'), st('diagnostico', 'Diagnóstico', '#F59E0B'), st('solucao_escopo', 'Solução e escopo', '#8B5CF6'), st('proposta', 'Proposta', '#60A5FA'), st('negociacao', 'Negociação', '#4ADE80'), ...fim('Venda fechada', 'Perdida')],
+    },
+  ];
+}
+
 const t = (assunto: string, corpo: string) => ({ assunto, corpo });
 
 /** Modelo inicial: jornada Residencial (funil Yepnet) e jornada Empresarial com visita técnica. */
@@ -359,6 +440,7 @@ export function defaultInstruction(): Instruction {
           ...fim,
         ],
       },
+      ...saleTypeJourneys(),
     ],
     objecoes: [
       { id: 'preco_alto', titulo: 'Está caro', resposta: 'Entendo. Posso comparar com o que você paga hoje e o que está incluso? Muitas vezes a diferença está na estabilidade e no suporte local.', jornadas: [] },

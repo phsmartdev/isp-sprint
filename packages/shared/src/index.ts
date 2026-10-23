@@ -42,6 +42,10 @@ export const ContactCreate = z.object({
   segment: z.enum(SEGMENTS).default('residencial'),
   city: optText(80),
   ownerId: uuid.optional().nullable(),
+  /** CNPJ (ou CPF) da conta nova; se já existir na empresa, a criação é recusada para não duplicar. */
+  document: optText(20),
+  /** Endereço da conta (fiscal), informado junto com a conta nova. */
+  address: z.object({ postalCode: optText(10), street: optText(200), number: optText(20), district: optText(100), city: optText(100), state: optText(2) }).optional().nullable(),
 });
 export type ContactCreate = z.infer<typeof ContactCreate>;
 

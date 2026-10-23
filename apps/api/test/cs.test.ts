@@ -23,7 +23,7 @@ afterAll(async () => ctx.close());
 describe('jornada automática e kickoff', () => {
   it('contrato validado entra no funil Sucesso do Cliente; a etapa Planejamento inicia a jornada uma vez só', async () => {
     const plan = (await carlos.get('/meta/lookups')).json().plans[0];
-    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Hospital Fictício CS', segment: 'empresarial', document: '11.222.333/0001-81' }, planId: plan.id, cableMeters: 50, saleType: 'ativa' }), 201).json();
+    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Hospital Fictício CS', segment: 'empresarial' }, planId: plan.id, cableMeters: 50, saleType: 'ativa' }), 201).json();
     contactId = o.contactId;
     ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o.id}`)).json().rowVersion }));
     contractId = ok(await carlos.post('/contracts', { opportunityId: o.id, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { number: 'CS-1', object: 'Conectividade hospitalar fictícia', signedAt: addDays(today, -400), startAt: addDays(today, -400), termMonths: 24, monthlyCents: 1_500_000, items: [{ planId: null, description: 'Link dedicado 1 Gbps', qty: 1, unitCents: 1_500_000 }] } }), 201).json().id;

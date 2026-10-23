@@ -118,9 +118,8 @@ test('atas: cadastra, importa planilha com prévia, torna vigente, cria oportuni
   await login(seller, 'lucas@yepnet.test');
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Secretaria de Saúde E2E (compra)');
-  await seller.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await seller.getByText('Oferta / curiosidade').click();
-  await seller.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await seller.getByRole('button', { name: 'Atrelar ao saldo da ata' }).click();
   const ad = seller.getByRole('dialog', { name: 'Atrelar ao saldo de uma ata' });

@@ -23,7 +23,7 @@ export const useViabilityMeta = () => useQuery({ queryKey: ['viability-meta'], q
 export type AddressValue = { installCep: string; installStreet: string; installNumber: string; installDistrict: string; installCity: string; condominiumId: string; installBlock: string; installUnit: string };
 export const emptyAddress: AddressValue = { installCep: '', installStreet: '', installNumber: '', installDistrict: '', installCity: '', condominiumId: '', installBlock: '', installUnit: '' };
 
-export function AddressFields({ value, onChange, disabled, idPrefix = 'ad' }: { value: AddressValue; onChange: (v: Partial<AddressValue>) => void; disabled?: boolean; idPrefix?: string }) {
+export function AddressFields({ value, onChange, disabled, idPrefix = 'ad', hideCondominium = false }: { value: AddressValue; onChange: (v: Partial<AddressValue>) => void; disabled?: boolean; idPrefix?: string; /** endereço de entrega/conta: sem a escolha de condomínio da venda residencial */ hideCondominium?: boolean }) {
   const area = useArea();
   const [looking, setLooking] = useState(false);
   const [cepMsg, setCepMsg] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export function AddressFields({ value, onChange, disabled, idPrefix = 'ad' }: { 
   const regionName = (id: string) => area.data?.regions.find((r) => r.id === id)?.name ?? 'Sem região';
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
-      <FormField label="Condomínio" htmlFor={`${idPrefix}-condo`} className="sm:col-span-6" hint={condo ? `${regionName(condo.regionId)}${condo.hasNetwork ? ' · prédio já cabeado' : ' · prédio sem rede'}` : 'Escolha da lista ou deixe em branco se for casa/rua'}>
+      {!hideCondominium && <FormField label="Condomínio" htmlFor={`${idPrefix}-condo`} className="sm:col-span-6" hint={condo ? `${regionName(condo.regionId)}${condo.hasNetwork ? ' · prédio já cabeado' : ' · prédio sem rede'}` : 'Escolha da lista ou deixe em branco se for casa/rua'}>
         <Select id={`${idPrefix}-condo`} value={value.condominiumId} disabled={disabled} onChange={(e) => pickCondo(e.target.value)}>
           <option value="">Não é condomínio / não cadastrado</option>
           {area.data?.regions.map((r) => (
@@ -60,8 +60,8 @@ export function AddressFields({ value, onChange, disabled, idPrefix = 'ad' }: { 
             </optgroup>
           ))}
         </Select>
-      </FormField>
-      {condo && (
+      </FormField>}
+      {condo && !hideCondominium && (
         <>
           <FormField label="Bloco" htmlFor={`${idPrefix}-block`} className="sm:col-span-3">
             {condo.blocks.length ? (

@@ -8,7 +8,7 @@
  * O modelo exportado sempre junta os dois, então reflete exatamente o que está em uso.
  */
 import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
-import { defaultInstruction, INSTRUCTION_README, parseInstruction, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
+import { defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEYS, saleTypeJourneys, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -244,4 +244,28 @@ export async function resolvePipeline(db: DbOrTx, tenantId: string, opts: { pipe
   const pipes = opts.userId ? all.filter((p) => pipelineAllowed(p, opts.userId!, !!opts.total)) : all;
   const list = pipes.length ? pipes : all;
   return list.find((x) => opts.segment && x.segments.includes(opts.segment)) ?? list.find((x) => x.isDefault) ?? list[0]!;
+}
+
+/**
+ * Empresas que já existiam antes dos tipos de venda ganham as quatro jornadas (Licitação, Adesão à Ata,
+ * Consumo de Contrato e Venda Consultiva) como uma NOVA versão do modelo de instrução: fica no histórico de versões
+ * e pode ser desfeita reativando a anterior. Jornadas já existentes não mudam.
+ */
+export async function ensureSaleTypeJourneys(db: DbOrTx, tenantId: string) {
+  const have = await db.select({ key: s.pipelines.key }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.active, true), inArray(s.pipelines.key, [...SALE_TYPE_KEYS])));
+  if (have.length === SALE_TYPE_KEYS.length) return false;
+  return (db as unknown as { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + tenantId}))`);
+    const active = await getActiveInstruction(tx, tenantId);
+    const existing = new Set(active.content.jornadas.map((j) => j.chave));
+    const missing = saleTypeJourneys().filter((j) => !existing.has(j.chave));
+    const inactive = SALE_TYPE_KEYS.filter((k) => existing.has(k) && !have.some((h) => h.key === k));
+    if (!missing.length && !inactive.length) return false;
+    const content = { ...active.content, _leia_me: undefined, versao: undefined, jornadas: [...active.content.jornadas, ...missing] };
+    await applyJourneys(tx, tenantId, content.jornadas);
+    const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
+    await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
+    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: [`Tipos de venda incluídos: ${missing.map((j) => j.nome).join(', ') || 'reativados'}.`], activatedAt: new Date() });
+    return true;
+  });
 }

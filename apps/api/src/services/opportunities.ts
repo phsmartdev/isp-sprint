@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { OpportunityReason } from '@isp/domain';
 import type { ContactCreate, OpportunityDetails } from '@isp/shared';
@@ -52,6 +52,11 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   let segment: string | null = input.newContact?.segment ?? null;
   if (!contactId) {
     if (!input.newContact) throw notFound('Contato não encontrado.');
+    const doc = (input.newContact.document ?? '').replace(/\D/g, '');
+    if (doc) {
+      const [dup] = await tx.select({ id: s.contacts.id, name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.tenantId, auth.tenantId), isNull(s.contacts.deletedAt), sql`regexp_replace(coalesce(${s.contacts.document}, ''), '\D', '', 'g') = ${doc}`)).limit(1);
+      if (dup) throw unprocessable(`Já existe uma conta com este CNPJ: ${dup.name}. Use "Cliente da carteira".`, [{ path: 'newContact.document', message: `CNPJ já cadastrado em ${dup.name}` }]);
+    }
     const [c] = await tx
       .insert(s.contacts)
       .values({
@@ -60,7 +65,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
         phone: input.newContact.phone,
         email: input.newContact.email,
         segment: input.newContact.segment,
-        city: input.newContact.city,
+        city: input.newContact.city ?? input.newContact.address?.city ?? null,
+        document: input.newContact.document ?? null,
         ownerId,
         isProvisional: true,
         createdBy: auth.userId,
@@ -68,6 +74,10 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       .returning({ id: s.contacts.id, name: s.contacts.name });
     contactId = c!.id;
     contactName = c!.name;
+    const a = input.newContact.address;
+    if (a && (a.street || a.postalCode || a.city)) {
+      await tx.insert(s.addresses).values({ tenantId: auth.tenantId, contactId, street: a.street ?? null, number: a.number ?? null, district: a.district ?? null, city: a.city ?? null, state: a.state ?? null, postalCode: a.postalCode ?? null });
+    }
   } else {
     // contato existente precisa estar visível na carteira do usuário (Clientes)
     const [c] = await tx

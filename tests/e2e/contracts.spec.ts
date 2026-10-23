@@ -139,11 +139,11 @@ test('oportunidade de cliente da base pergunta sobre Sucesso do Cliente', async 
   await page.locator('#no-search').fill('Sérgio Torres');
   await page.getByRole('list', { name: 'Resultados' }).getByRole('button').filter({ hasText: 'Ativo' }).first().click();
   await expect(page.getByText('Acionar o processo de Sucesso do Cliente?')).toBeVisible();
-  await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page.getByText('Responda se aciona Sucesso do Cliente')).toBeVisible();
   await page.getByRole('radio', { name: 'Sim, acionar' }).check();
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page.getByText(/Sucesso do Cliente acionado/)).toBeVisible();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
 });

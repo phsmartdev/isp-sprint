@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
-import { getActiveInstruction, pipelineAllowed, pipelinesOf } from '../services/instructions';
+import { getActiveInstruction, ensureSaleTypeJourneys, pipelineAllowed, pipelinesOf } from '../services/instructions';
 import { level } from '../services/scope';
 
 export const metaRoutes = [
@@ -14,6 +14,7 @@ export const metaRoutes = [
     handler: async ({ app, auth }) => {
       const t = auth.tenantId;
       await getActiveInstruction(app.db, t);
+      await ensureSaleTypeJourneys(app.db, t);
       const [users, sources, campaigns, pipes, teams, plans] = await Promise.all([
         app.db
           .select({ id: s.users.id, name: s.users.name, hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")` })

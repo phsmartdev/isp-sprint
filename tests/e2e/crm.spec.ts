@@ -10,12 +10,11 @@ async function login(page: Page, email: string) {
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
 
-async function newOpportunity(page: Page, name: string, opts: { plan?: boolean } = {}) {
+async function newOpportunity(page: Page, name: string, opts: { type?: string } = {}) {
   await page.goto('/opportunities/new');
   await page.getByLabel('Nome do cliente').fill(name);
-  if (opts.plan !== false) await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await page.getByText('Oferta / curiosidade').click();
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await page.getByLabel('Tipo de venda').selectOption({ label: opts.type ?? 'Venda Consultiva' });
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
   return page.url();
@@ -124,18 +123,35 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
   await expect(page.getByText('Oportunidade criada')).toBeVisible();
 });
 
-test('Sprint: plano define o valor pelo catálogo', async ({ page }) => {
+test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e endereço do cliente; sem duplicar CNPJ', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await page.goto('/opportunities/new');
-  await page.getByLabel('Nome do cliente').fill('Cliente E2E Plano');
-  const plan = page.getByLabel('Plano', { exact: true });
-  const text = (await plan.locator('option').nth(1).textContent())!;
-  await plan.selectOption({ index: 1 });
-  await page.getByText('Oferta / curiosidade').click();
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  const tipo = page.getByLabel('Tipo de venda');
+  const options = (await tipo.locator('option').allTextContents()).slice(1);
+  expect(options).toEqual(['Licitação', 'Adesão à Ata', 'Consumo de Contrato', 'Venda Consultiva']);
+  await expect(page.getByText('O que motivou o contato?')).toHaveCount(0);
+  await expect(page.getByText('Prévia da viabilidade')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Endereço de entrega' })).toBeVisible();
+  await expect(page.getByLabel('Condomínio')).toHaveCount(0);
+  const doc = `${Date.now()}`.slice(-14).padStart(14, '1');
+  await page.getByLabel('Nome do cliente').fill('Prefeitura E2E Tipo');
+  await page.getByLabel('CNPJ').fill(doc);
+  await page.locator('#no-acc-street').fill('Praça da Matriz');
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
+  await expect(page.getByText('Escolha o tipo de venda')).toBeVisible();
+  await tipo.selectOption({ label: 'Licitação' });
+  await expect(page.getByRole('heading', { name: 'Informações de Licitação' })).toBeVisible();
+  await page.getByLabel('Tipo de disputa').selectOption('Dispensa');
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
-  const price = text.split('—')[1]!.replace('/mês', '').trim();
-  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText(price);
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Licitação');
+  // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
+  await page.goto('/opportunities/new');
+  await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await page.getByLabel('Nome do cliente').fill('Outra Prefeitura');
+  await page.getByLabel('CNPJ').fill(doc);
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
+  await expect(page.getByText(/Já existe uma conta com este CNPJ: Prefeitura E2E Tipo/).first()).toBeVisible();
 });
 
 test('Sprint: venda fechada pede confirmação e não confirma contrato', async ({ page }) => {
@@ -239,27 +255,6 @@ for (const width of [390, 768, 1280, 1440]) {
     }
   });
 }
-
-test('cadastro com condomínio, metragem e venda ativa mostra comissão, CAC e LTV', async ({ page }) => {
-  await login(page, 'lucas@yepnet.test');
-  await page.goto('/opportunities/new');
-  await page.getByLabel('Nome do cliente').fill('Cliente E2E Viabilidade');
-  await page.getByLabel('Nome do deal').fill('500 Mega Ap 101');
-  const condo = page.getByLabel('Condomínio');
-  await condo.selectOption({ index: 1 });
-  await page.getByLabel('Apartamento').fill('101');
-  await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await page.getByRole('radiogroup', { name: 'Tipo de venda' }).getByRole('radio', { name: 'Ativa' }).click();
-  await page.getByLabel('Metragem de cabo (m)').fill('80');
-  const preview = page.locator('aside');
-  await expect(preview.getByText('CAC', { exact: true }).first()).toBeVisible();
-  await expect(preview.getByText('LTV histórico')).toBeVisible();
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
-  await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
-  await expect(page.getByText('Sua comissão').first()).toBeVisible();
-  await page.getByRole('button', { name: 'Endereço de instalação' }).click();
-  await expect(page.getByLabel('Apartamento').first()).toHaveValue('101');
-});
 
 test('gerência abre jornadas, viabilidade, área, modelo de instrução e e-mail; vendedor não', async ({ browser }) => {
   const g = await (await browser.newContext()).newPage();
