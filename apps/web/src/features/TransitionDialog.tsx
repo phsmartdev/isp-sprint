@@ -27,7 +27,7 @@ export const isClosed = (stage: string) => stage === 'ganha' || stage === 'perdi
 export function unmetRequirements(opp: Opportunity, req: StageRequirements, toKind: 'open' | 'won' | 'lost') {
   if (toKind === 'lost') return [];
   const out: { key: keyof StageRequirements; label: string }[] = [];
-  if (req.plano && !opp.planId && !(opp.valueCents && opp.valueCents > 0)) out.push({ key: 'plano', label: 'Definir o valor (plano ou itens)' });
+  if (req.plano && !opp.planId && !(opp.itemCount > 0)) out.push({ key: 'plano', label: 'Lançar os produtos e serviços' });
   if (req.proximaAcao && (!opp.nextAction || !opp.nextActionAt)) out.push({ key: 'proximaAcao', label: 'Definir a próxima ação e quando' });
   if (req.proposta && !opp.proposalCount) out.push({ key: 'proposta', label: 'Anexar a proposta' });
   return out;
@@ -85,7 +85,7 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
         <div className="rounded-md border border-line p-3">
           <p className="mb-2 text-sm font-semibold text-ink">Para entrar em “{request.toName}”</p>
           <ul className="space-y-1.5 text-sm">
-            {request.requirements.plano && <Req ok={!unmet.some((u) => u.key === 'plano')}>Valor definido (plano ou itens)</Req>}
+            {request.requirements.plano && <Req ok={!unmet.some((u) => u.key === 'plano')}>Produtos e serviços lançados</Req>}
             {request.requirements.proximaAcao && <Req ok={!unmet.some((u) => u.key === 'proximaAcao')}>Próxima ação com data</Req>}
             {request.requirements.respostasObrigatorias && <Req ok>Perguntas obrigatórias respondidas <span className="text-xs text-muted">(conferido ao salvar)</span></Req>}
             {request.requirements.proposta && (

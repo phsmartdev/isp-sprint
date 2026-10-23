@@ -5,6 +5,7 @@ import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
+import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -589,7 +590,7 @@ export function OpportunityWorkspacePage() {
           <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
           <dt className="text-muted">Filial</dt><dd className="text-text">{lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
-          <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null ? <span className="font-normal text-muted"> /mês</span> : null}</dd>
+          <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null && !opp.itemCount ? <span className="font-normal text-muted"> /mês</span> : null}{opp.itemCount ? <span className="font-normal text-muted"> · {opp.itemCount} item(ns)</span> : null}</dd>
           {(selectedPlan ?? opp.planName) && (<><dt className="text-muted">Solução</dt><dd className="text-text">{selectedPlan?.name ?? opp.planName}</dd></>)}
           <dt className="text-muted">Canal</dt><dd className="text-text">{opp.sourceName ?? 'Não informado'}</dd>
           <dt className="text-muted">Criada</dt><dd className="num text-text">{fmtDateTime(opp.createdAt)}</dd>
@@ -654,6 +655,7 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
+      <OpportunityItems opp={opp} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">

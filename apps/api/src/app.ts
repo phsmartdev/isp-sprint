@@ -51,6 +51,7 @@ import { projectGovernanceRoutes } from './routes/projectGovernance';
 import { glpiRoutes } from './routes/glpi';
 import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
+import { opportunityItemRoutes } from './routes/opportunityItems';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -196,6 +197,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...glpiRoutes,
     ...opportunityContactRoutes,
     ...salesBranchRoutes,
+    ...opportunityItemRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,

@@ -5,16 +5,16 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 
 export type Requirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
-type Opp = { id: string; pipelineId: string; planId: string | null; valueCents?: number | null; nextAction: string | null; nextActionAt: Date | null };
+type Opp = { id: string; pipelineId: string; planId: string | null; itemCount?: number | null; nextAction: string | null; nextActionAt: Date | null };
 
 export async function checkStageRequirements(db: DbOrTx, tenantId: string, opp: Opp, target: { key: string; requirements: Requirements }, instruction: Instruction, pipelineKey: string) {
   const r = target.requirements ?? {};
   const issues: { path: string; message: string }[] = [];
-  // "plano" = a oportunidade tem valor: plano do catálogo, itens lançados ou itens da ata
-  if (r.plano && !opp.planId && !(opp.valueCents && opp.valueCents > 0)) {
+  // "plano" = a oportunidade tem produtos: itens lançados, plano do catálogo (vendas antigas) ou itens da ata
+  if (r.plano && !opp.planId && !(opp.itemCount && opp.itemCount > 0)) {
     // oportunidade de ata: o produto são os itens da ata reservados
     const [line] = await db.select({ id: s.arpOpportunityLines.id }).from(s.arpOpportunityLines).where(and(eq(s.arpOpportunityLines.opportunityId, opp.id), eq(s.arpOpportunityLines.tenantId, tenantId))).limit(1);
-    if (!line) issues.push({ path: 'requirements.plano', message: 'Defina o valor da oportunidade (plano ou itens) antes de avançar.' });
+    if (!line) issues.push({ path: 'requirements.plano', message: 'Lance os produtos e serviços da oportunidade antes de avançar.' });
   }
   if (r.proximaAcao && (!opp.nextAction || !opp.nextActionAt)) issues.push({ path: 'requirements.proximaAcao', message: 'Defina a próxima ação e quando ela acontece.' });
   if (r.proposta) {

@@ -117,6 +117,10 @@ export type Opportunity = {
   contractId: string | null;
   approvalStatus?: string | null;
   branchId: string | null;
+  /** Quantidade de produtos/serviços lançados. */
+  itemCount: number;
+  bidMode: 'item' | 'global' | null;
+  bidGlobalCents: number | null;
   measurementContractId: string | null;
   measurementCents: number | null;
   executiveTicket: string | null;
