@@ -3916,6 +3916,9 @@ export const glpiTicketEvents = pgTable(
     isPrivate: boolean('is_private').notNull().default(false),
     occurredAt: ts('occurred_at').notNull(),
     actorId: uuid('actor_id').references(() => users.id),
+    /** Validação (aprovação) do GLPI: id dela e situação lida (2 aguardando, 3 aprovada, 4 recusada). */
+    validationId: integer('validation_id'),
+    validationStatus: integer('validation_status'),
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('glpi_ticket_events_uq').on(t.ticketId, t.externalId) }),

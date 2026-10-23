@@ -122,6 +122,16 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Corrigido: a leitura e a resposta do chamado vão na entidade dele (cabeçalho `GLPI-Entity`). Sem isso, o GLPI respondia "não encontrado" para chamados fora da entidade padrão do usuário de integração.
   - Pedido do Paulo: o que a ferramenta envia ao GLPI começa com "Ticket gerado a partir do RevOps:" (abertura) ou "Resposta enviada pelo RevOps:" (respostas), em negrito. O rodapé passou a dizer "Aberto no RevOps por…".
   - Regressão: domínio 158, API 238, E2E 61/61 (o teste de aprovações, intermitente, passou ao ser repetido sozinho).
+- **Pedidos do Paulo (23/10, após a validação real):**
+  - **Mensagem privada**, como o "olho" do GLPI: a caixa "Privado" manda o acompanhamento com `is_private` (só a equipe do GLPI vê). Mensagens privadas, enviadas ou recebidas, aparecem em amarelo, com a etiqueta "Privado".
+  - **Aprovação do GLPI direto da negociação:** cada pedido de validação do chamado aparece com a situação (aguardando, aprovada, recusada) e os botões Aprovar e Recusar.
+    - Rota conferida no código do GLPI 11: `PATCH /Assistance/Ticket/{id}/Timeline/Validation/{id}` com `status` 3 (aceita) ou 4 (recusada) e `approval_comment`.
+    - Respondem o dono da oportunidade ou a gestão comercial. Recusar exige motivo. Tudo auditado.
+    - No GLPI, a resposta fica em nome do usuário de integração. Por isso a validação precisa ser pedida ao `isp.sprint` (ou a um grupo do qual ele faça parte); senão o GLPI recusa, e a ferramenta explica o motivo.
+    - Cada mudança de situação da validação vira um registro novo (append-only), com o id e a situação lida.
+  - **Quem do comercial fez:** tudo o que vai ao GLPI leva o nome da pessoa: "Ticket gerado a partir do RevOps por …", "Resposta enviada pelo RevOps por …" e "Aprovado/Recusado no RevOps por …".
+  - Migração 0055 (colunas `validation_id` e `validation_status` nos eventos do chamado).
+  - Regressão: domínio 159, API 239, E2E 61/61.
 
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):

@@ -60,7 +60,7 @@ describe('GLPI', () => {
     expect(t).toMatchObject({ entity: 3, category: 7, type: 1, urgency: 4, name: 'Viabilidade de link dedicado 200 Mb' });
     expect(t.content).toContain('<p>Cliente pede confirmação de viabilidade<br>para o prédio da secretaria.</p>');
     expect(t.content).toMatch(/Aberto no RevOps por Lucas/);
-    expect(t.content.startsWith('<p><strong>Ticket gerado a partir do RevOps:</strong></p>')).toBe(true);
+    expect(t.content.startsWith('<p><strong>Ticket gerado a partir do RevOps por Lucas Lima:</strong></p>')).toBe(true);
     expect(t.team).toEqual([{ type: 'Group', id: 11, role: 'assigned' }]);
     const opp = ok(await lucas.get(`/opportunities/${oppId}`)).json();
     if (opp.customerId) expect(ok(await lucas.get(`/glpi/entities?opportunityId=${oppId}`)).json().linked).toEqual({ id: 3, name: 'Raiz > Clientes > Prefeitura de Lagarto' });
@@ -98,7 +98,10 @@ describe('GLPI', () => {
   it('resposta do CRM vai como acompanhamento e não volta como "novo"; releitura manual; erro do GLPI aparece claro', async () => {
     ok(await lucas.post(`/glpi-tickets/${ticketId}/followups`, { text: 'Cliente aprovou a rota norte, pode seguir.' }), 201);
     const t = glpi.tickets.get(glpiId)!;
-    expect(t.timeline.at(-1)!.item.content).toBe('<p><strong>Resposta enviada pelo RevOps:</strong></p><p>Cliente aprovou a rota norte, pode seguir.</p>');
+    expect(t.timeline.at(-1)!.item.content).toBe('<p><strong>Resposta enviada pelo RevOps por Lucas Lima:</strong></p><p>Cliente aprovou a rota norte, pode seguir.</p>');
+    expect(t.timeline.at(-1)!.item.is_private).toBe(false);
+    ok(await lucas.post(`/glpi-tickets/${ticketId}/followups`, { text: 'Nota interna: cliente sensível a prazo.', isPrivate: true }), 201);
+    expect(t.timeline.at(-1)!.item.is_private).toBe(true);
     expect(ok(await lucas.post(`/glpi-tickets/${ticketId}/sync`)).json()).toMatchObject({ added: 0, status: 5 });
     glpi.failNext(500);
     const bad = await lucas.post(`/glpi-tickets/${ticketId}/sync`);
@@ -106,7 +109,30 @@ describe('GLPI', () => {
     expect(bad.json().detail).toMatch(/GLPI respondeu 500/);
     const list = ok(await lucas.get(`/opportunities/${oppId}/glpi-tickets`)).json();
     expect(list.items[0].syncError).toMatch(/500/);
-    expect(list.items[0].events.filter((e: { direction: string }) => e.direction === 'saida').map((e: { kind: string; author: string }) => `${e.kind}:${e.author}`)).toEqual(['Abertura:Lucas Lima', 'Followup:Lucas Lima']);
+    expect(list.items[0].events.filter((e: { direction: string }) => e.direction === 'saida').map((e: { kind: string; author: string }) => `${e.kind}:${e.author}`)).toEqual(['Abertura:Lucas Lima', 'Followup:Lucas Lima', 'Followup:Lucas Lima']);
+    expect(list.items[0].events.filter((e: { isPrivate: boolean; direction: string }) => e.direction === 'saida' && e.isPrivate)).toHaveLength(1);
+  });
+
+  it('aprovação do GLPI respondida na negociação: recusa exige motivo; vai em nome de quem decidiu; pedida a outro aprovador, o GLPI recusa', async () => {
+    await glpi.act(glpiId, { kind: 'validation', text: 'Aprovar desconto de 10% na mensalidade' });
+    await glpi.act(glpiId, { kind: 'validation', text: 'Aprovar troca de equipamento', toOther: true });
+    ok(await lucas.post(`/glpi-tickets/${ticketId}/sync`));
+    const list = async () => (ok(await lucas.get(`/opportunities/${oppId}/glpi-tickets`)).json().items[0].events as { kind: string; validationId: number | null; validationStatus: number | null; text: string }[]).filter((e) => e.kind === 'Validation');
+    const vs = await list();
+    const v1 = vs.find((e) => e.text === 'Aprovar desconto de 10% na mensalidade');
+    const v2 = vs.find((e) => e.text === 'Aprovar troca de equipamento');
+    expect(v1).toMatchObject({ validationStatus: 2 });
+    expect((await rafael.post(`/glpi-tickets/${ticketId}/validations/${v1!.validationId}`, { decision: 'aprovar' })).statusCode).toBe(404);
+    expect((await lucas.post(`/glpi-tickets/${ticketId}/validations/${v1!.validationId}`, { decision: 'recusar', comment: 'não' })).statusCode).toBe(422);
+    ok(await lucas.post(`/glpi-tickets/${ticketId}/validations/${v1!.validationId}`, { decision: 'aprovar', comment: 'Margem confere com a tabela.' }));
+    const item = glpi.tickets.get(glpiId)!.timeline.find((x) => x.type === 'Validation' && x.item.id === v1!.validationId)!.item;
+    expect(item).toMatchObject({ status: 3, approval_comment: '<p><strong>Aprovado no RevOps por Lucas Lima</strong></p><p>Margem confere com a tabela.</p>' });
+    const after = await list();
+    expect(after.filter((e) => e.validationId === v1!.validationId).map((e) => e.validationStatus)).toEqual([2, 3]);
+    expect((await lucas.post(`/glpi-tickets/${ticketId}/validations/${v1!.validationId}`, { decision: 'aprovar' })).json().detail).toMatch(/já foi respondida/);
+    const other = await lucas.post(`/glpi-tickets/${ticketId}/validations/${v2!.validationId}`, { decision: 'aprovar' });
+    expect(other.statusCode).toBe(502);
+    expect(other.json().detail).toMatch(/pedida ao usuário de integração/);
   });
 
   it('isolamento: quem não vê a oportunidade não vê nem responde o chamado; validação do endereço pelo GLPI', async () => {

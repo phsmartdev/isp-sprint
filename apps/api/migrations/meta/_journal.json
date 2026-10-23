@@ -386,6 +386,13 @@
       "when": 1792721346462,
       "tag": "0054_glpi_integracao",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792759705166,
+      "tag": "0055_glpi_validacoes",
+      "breakpoints": true
     }
   ]
 }

@@ -22,7 +22,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
-import { GLPI_REPLY_HEADER, GLPI_TICKET_HEADER, glpiBody, glpiStatusLabel, parseTimeline } from '@isp/domain';
+import { glpiBody, glpiReplyHeader, glpiStatusLabel, glpiTicketHeader, parseTimeline } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { decryptSecret } from './email';
@@ -119,10 +119,10 @@ export const glpiEntities = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GE
 export const glpiCategories = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET', '/Dropdowns/ITILCategory', { query: { limit: 100, filter: like(q), sort: 'name' } });
 export const glpiGroups = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET', '/Administration/Group', { query: { limit: 100, filter: like(q), sort: 'name' } });
 
-export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: string; type: number; urgency: number; entityId: number; categoryId?: number | null; groupId?: number | null }) {
+export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: string; author: string; type: number; urgency: number; entityId: number; categoryId?: number | null; groupId?: number | null }) {
   const r = await glpiCall<{ id: number }>(c, 'POST', '/Assistance/Ticket', {
     // no GLPI 11 a entidade do chamado é somente leitura no corpo: vale a entidade ativa da sessão, escolhida pelo cabeçalho GLPI-Entity (Router::handleAuth)
-    body: { name: t.title, content: glpiBody(GLPI_TICKET_HEADER, t.content), type: t.type, urgency: t.urgency, impact: t.urgency, ...(t.categoryId ? { category: t.categoryId } : {}) },
+    body: { name: t.title, content: glpiBody(glpiTicketHeader(t.author), t.content), type: t.type, urgency: t.urgency, impact: t.urgency, ...(t.categoryId ? { category: t.categoryId } : {}) },
     entityId: t.entityId,
   });
   if (!r?.id) throw new GlpiError('O GLPI não devolveu o número do chamado.');
@@ -134,8 +134,23 @@ export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: 
   return { id: r.id, groupWarning };
 }
 
-export const glpiFollowup = (c: GlpiCfg, ticketId: number, entityId: number, text: string) =>
-  glpiCall<{ id: number }>(c, 'POST', `/Assistance/Ticket/${ticketId}/Timeline/Followup`, { body: { content: glpiBody(GLPI_REPLY_HEADER, text), is_private: false }, entityId });
+/** Acompanhamento: público (o solicitante vê) ou privado (só a equipe do GLPI vê), como o "olho" do próprio GLPI. */
+export const glpiFollowup = (c: GlpiCfg, ticketId: number, entityId: number, author: string, text: string, isPrivate = false) =>
+  glpiCall<{ id: number }>(c, 'POST', `/Assistance/Ticket/${ticketId}/Timeline/Followup`, { body: { content: glpiBody(glpiReplyHeader(author), text), is_private: isPrivate }, entityId });
+
+/**
+ * Responde uma validação (aprovação) do GLPI: PATCH /Assistance/Ticket/{id}/Timeline/Validation/{vid} com status 3 (aceita)
+ * ou 4 (recusada) e approval_comment. No GLPI a resposta fica em nome do usuário de integração, então a validação precisa
+ * ter sido pedida a ele (ou a um grupo dele); senão o GLPI recusa.
+ */
+export async function glpiAnswerValidation(c: GlpiCfg, ticketId: number, entityId: number, validationId: number, approve: boolean, comment: string) {
+  try {
+    await glpiCall(c, 'PATCH', `/Assistance/Ticket/${ticketId}/Timeline/Validation/${validationId}`, { body: { status: approve ? 3 : 4, approval_comment: comment }, entityId });
+  } catch (e) {
+    if (e instanceof GlpiError && /permissão/.test(e.message)) throw new GlpiError('O GLPI não deixou o usuário de integração responder esta aprovação. Ela precisa ter sido pedida ao usuário de integração (ou a um grupo do qual ele faça parte).', 502);
+    throw e;
+  }
+}
 
 // ------------------------------------------------------------------ assinatura do webhook
 
@@ -184,10 +199,10 @@ export async function syncTicket(db: DbOrTx, c: GlpiCfg, row: TicketRow): Promis
     const statusName = typeof t.status === 'object' && t.status?.name ? t.status.name : glpiStatusLabel(status);
     const entries = timeline.map((e) => ({
       tenantId: row.tenantId, ticketId: row.id, kind: e.kind, externalId: e.externalId, direction: 'entrada', author: e.author, text: e.text, isPrivate: e.isPrivate,
-      occurredAt: glpiDate(e.occurredAt, tz) ?? new Date(),
+      occurredAt: glpiDate(e.occurredAt, tz) ?? new Date(), validationId: e.validationId ?? null, validationStatus: e.validationStatus ?? null,
     }));
     if (status && status !== row.status) {
-      entries.push({ tenantId: row.tenantId, ticketId: row.id, kind: 'Status', externalId: `Status:${status}:${t.date_mod ?? Date.now()}`, direction: 'entrada', author: null, text: statusName, isPrivate: false, occurredAt: glpiDate(t.date_mod, tz) ?? new Date() });
+      entries.push({ tenantId: row.tenantId, ticketId: row.id, kind: 'Status', externalId: `Status:${status}:${t.date_mod ?? Date.now()}`, direction: 'entrada', author: null, text: statusName, isPrivate: false, occurredAt: glpiDate(t.date_mod, tz) ?? new Date(), validationId: null, validationStatus: null });
     }
     const added = entries.length ? await db.insert(s.glpiTicketEvents).values(entries).onConflictDoNothing().returning({ id: s.glpiTicketEvents.id, kind: s.glpiTicketEvents.kind, direction: s.glpiTicketEvents.direction }) : [];
     // o que nós mesmos enviamos (acompanhamento do CRM) volta pelo GLPI com o mesmo id: não conta como novo
