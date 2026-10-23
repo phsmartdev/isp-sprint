@@ -1,5 +1,7 @@
-import { WorkLinks } from '../features/tasks/WorkLinks';
-import { EntityPeoplePanel } from '../features/abm/EntityPeoplePanel';
+import { LinkedTasks } from '../features/tasks/shared';
+import { TaskDrawer } from '../features/tasks/TaskDrawer';
+import { LinkedProjects } from '../features/projects/shared';
+import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -532,9 +534,11 @@ export function OpportunityWorkspacePage() {
   const [email, setEmail] = useState<'proposta' | 'followup' | null>(null);
   const [genProposal, setGenProposal] = useState(false);
   const [copilot, setCopilot] = useState(false);
-  const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
   const [search] = useSearchParams();
-  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat' | 'trabalho' | 'pessoas' | 'chamados'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' || t === 'trabalho' || t === 'pessoas' || t === 'chamados' ? t : 'atividades'; });
+  // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
+  const [centerTab, setCenterTab] = useState<'historico' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [taskOpen, setTaskOpen] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
   const glpiUnseen = useQuery({ queryKey: ['glpi', 'unseen', id], enabled: feature('crm.chamados'), refetchInterval: 60_000, queryFn: () => api<{ total: number; open: number; unseen: number }>(`/opportunities/${id}/glpi-tickets/unseen`) });
   const move = useMutation({
@@ -543,6 +547,13 @@ export function OpportunityWorkspacePage() {
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
 
+  const loaded = !!q.data;
+  useEffect(() => {
+    if (!loaded) return;
+    const t = search.get('aba');
+    const target = t === 'chat' ? document.getElementById('ws-chat') : t === 'pessoas' ? document.querySelector('[aria-label="Pessoas e ABM"]') : null;
+    if (target) setTimeout(() => target.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
+  }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   if (q.isLoading) return <div className="card"><LoadingRows rows={8} /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const opp = a.base ?? q.data!;
@@ -557,6 +568,8 @@ export function OpportunityWorkspacePage() {
   const pipeline = lookups.data?.pipelines.find((p) => p.id === opp.pipelineId);
   const stages = pipeline?.stages ?? [];
   const current = stages.find((s) => s.key === opp.stage);
+  const workPrefill = { opportunityId: opp.id, contactId: opp.contactId, label: `OP-${opp.code} · ${opp.contactName}`, kind: 'implantacao' as const, name: `Implantação ${opp.contactName}` };
+  const interactions = (acts.data?.items ?? []).filter((x) => x.type !== 'tarefa');
   const unmetFields = (pipeline?.fields ?? []).filter((x) => x.required && (f.custom[x.key] === undefined || f.custom[x.key] === null || f.custom[x.key] === '')).map((x) => x.label);
 
   const requestMove = (to: string) => {
@@ -568,34 +581,22 @@ export function OpportunityWorkspacePage() {
     else transition.mutate({ opp, payload: { toStage: to } });
   };
 
+  const addressSummary = f.condominiumId ? [opp.condominiumName, f.installBlock && `Bl. ${f.installBlock}`, f.installUnit && `Ap. ${f.installUnit}`].filter(Boolean).join(' · ') : [f.installStreet, f.installNumber, f.installCity].filter(Boolean).join(', ');
   const left = (
     <div className="space-y-4">
-      <Panel title="Cliente" icon={<UserRound className="h-5 w-5 text-primary" />}>
-        <p className="text-md font-bold text-ink">{opp.contactName}</p>
-        <p className="text-sm text-muted">{productLabel(opp.contactSegment)}</p>
-        <div className="mt-2 space-y-1 text-sm text-text">
-          {opp.contactPhone && <p className="num flex items-center gap-2"><Phone className="h-4 w-4 text-success" aria-hidden />{opp.contactPhone}</p>}
-          {opp.contactEmail && <p className="flex items-center gap-2 break-all"><Mail className="h-4 w-4 text-primary" aria-hidden />{opp.contactEmail}</p>}
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <LifecycleChip s={opp.customerLifecycle ?? 'prospect'} />
-          {opp.contactProvisional && <span className="text-xs text-muted">Contato provisório</span>}
-        </div>
-        {can('clientes') && <Link to={`/customers/${opp.contactId}`} className="link mt-3 inline-block text-sm font-semibold">Abrir ficha do cliente</Link>}
-        <MeasurementBox opp={opp} />
-      </Panel>
-      <Panel title="Endereço de instalação" icon={<MapPin className="h-5 w-5 text-primary" />}>
-        <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" />
-      </Panel>
-      <Panel title="Situação">
-        <div className="mb-3 flex flex-wrap gap-1.5"><StageChip stage={opp.stage} name={current?.name ?? opp.stageName} color={current?.color} /><CoverageChip s={opp.coverageStatus} /><ProposalChip s={opp.proposalStatus} /><ContractChip s={opp.contractRequestStatus} /></div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-          <dt className="text-muted">Jornada</dt><dd className="text-text">{opp.pipelineName}</dd>
+      <section className="card p-5" aria-label="Informações do deal">
+        <h2 className="mb-2 flex items-center gap-2 text-md font-bold text-ink"><Handshake className="h-5 w-5 text-primary" aria-hidden />Deal</h2>
+        <p className="font-bold text-ink">{opp.title}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5"><StageChip stage={opp.stage} name={current?.name ?? opp.stageName} color={current?.color} /><CoverageChip s={opp.coverageStatus} /><ProposalChip s={opp.proposalStatus} /><ContractChip s={opp.contractRequestStatus} /></div>
+        <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+          <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
-          <dt className="text-muted">Mensalidade</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}</dd>
+          <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null ? <span className="font-normal text-muted"> /mês</span> : null}</dd>
+          {(selectedPlan ?? opp.planName) && (<><dt className="text-muted">Solução</dt><dd className="text-text">{selectedPlan?.name ?? opp.planName}</dd></>)}
           <dt className="text-muted">Canal</dt><dd className="text-text">{opp.sourceName ?? 'Não informado'}</dd>
           <dt className="text-muted">Criada</dt><dd className="num text-text">{fmtDateTime(opp.createdAt)}</dd>
           <dt className="text-muted">Na etapa há</dt><dd className="num text-text">{opp.daysInStage} dia(s)</dd>
+          {(opp.wonAt || opp.lostAt) && (<><dt className="text-muted">Encerrada</dt><dd className="num text-text">{fmtDate(opp.wonAt ?? opp.lostAt)}</dd></>)}
           {opp.lossReason && (<><dt className="text-muted">Perda</dt><dd className="text-text">{LOSS_REASON_LABELS[opp.lossReason as LossReason] ?? opp.lossReason}</dd></>)}
           {opp.condominiumId && opp.stage !== 'perdida' && (<><dt className="text-muted">Porta CTO</dt><dd className="text-text">{opp.stage !== 'ganha' ? 'Reservada (libera se perder)' : opp.portReleasedAt ? `Liberada em ${fmtDate(opp.portReleasedAt)}` : 'Ocupada'}</dd></>)}
           {opp.duplicatedFromId && (<><dt className="text-muted">Origem</dt><dd><Link className="link" to={`/opportunities/${opp.duplicatedFromId}`}>oportunidade anterior</Link></dd></>)}
@@ -603,7 +604,72 @@ export function OpportunityWorkspacePage() {
         {opp.stage === 'ganha' && opp.condominiumId && !opp.portReleasedAt && canReopen && (
           <Button size="sm" className="mt-3" onClick={() => setReleasing(true)}>Cliente cancelou: liberar porta</Button>
         )}
-      </Panel>
+
+        <div className={clsx('mt-4 rounded-md border p-3', opp.overdue && editable ? 'border-danger/40 bg-danger-soft' : 'border-primary/30 bg-primary-soft')}>
+          <p className="mb-2 text-sm font-bold text-ink">Próxima ação{opp.overdue && editable ? <span className="ml-2 text-xs font-semibold text-danger">vencida</span> : null}</p>
+          <div className="space-y-2">
+            <FormField label="Próxima ação" htmlFor="ws-na"><Input id="ws-na" value={f.nextAction} disabled={!editable} onChange={(e) => set('nextAction', e.target.value)} placeholder="Ex.: confirmar cobertura no endereço" /></FormField>
+            <FormField label="Quando" htmlFor="ws-nat"><Input id="ws-nat" type="datetime-local" value={f.nextActionAt} disabled={!editable} onChange={(e) => set('nextActionAt', e.target.value)} /></FormField>
+          </div>
+        </div>
+        <div className="mt-4">
+          <p className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><ListChecks className="h-4 w-4 text-primary" aria-hidden />Pendências</p>
+          <Pendencies opp={opp} fields={f} unmetFields={unmetFields} />
+        </div>
+
+        {/* coluna estreita: as grades internas dos formulários viram uma coluna só */}
+        <div className="mt-4 space-y-3 [&_.grid>*]:!col-span-1 [&_.grid]:!grid-cols-1">
+          <SideSection id="dados" title="Dados do deal" defaultOpen summary={[f.reasons.length ? `${f.reasons.length} motivo(s)` : 'sem motivo', selectedPlan?.name ?? 'sem plano'].join(' · ')}>
+            <div className="space-y-3">
+              <ChipGroup legend="Motivo do contato" options={OPPORTUNITY_REASONS} value={f.reasons} onChange={(v) => editable && set('reasons', v)} labels={REASON_LABELS} disabled={!editable} />
+              <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
+              <FormField label="Plano" htmlFor="ws-plan" hint={selectedPlan ? `Catálogo: ${fmtBRL(selectedPlan.priceCents)}/mês${selectedPlan.speedMbps ? ` · ${selectedPlan.speedMbps} Mbps` : ''}` : 'O valor vem do catálogo'}>
+                <Select id="ws-plan" value={f.planId} disabled={!editable} onChange={(e) => set('planId', e.target.value)}>
+                  <option value="">Ainda não definido</option>
+                  {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmtBRL(p.priceCents)}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Canal de entrada" htmlFor="ws-source">
+                <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
+                  <option value="">Não informado</option>
+                  {lookups.data?.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Campanha" htmlFor="ws-campaign">
+                <Select id="ws-campaign" value={f.campaignId} disabled={!editable} onChange={(e) => set('campaignId', e.target.value)}>
+                  <option value="">Nenhuma</option>
+                  {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Jornada" htmlFor="ws-pipe" hint={a.dirty ? 'Aguarde salvar para trocar' : 'Trocar de jornada mantém o histórico'}>
+                <Select id="ws-pipe" value={opp.pipelineId} disabled={!editable || move.isPending || a.dirty} onChange={(e) => move.mutate(e.target.value)}>
+                  {lookups.data?.pipelines.filter((p) => p.allowed || p.id === opp.pipelineId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </FormField>
+            </div>
+          </SideSection>
+          {pipeline && pipeline.fields.length > 0 && (
+            <SideSection id="tipo" title="Informações do tipo de venda" defaultOpen={unmetFields.length > 0 || pipeline.fields.every((x) => f.custom[x.key] == null || f.custom[x.key] === '')} summary={unmetFields.length ? `Falta: ${unmetFields.join(', ')}` : `${pipeline.fields.length} campo(s)`}>
+              <CustomFieldsEditor fields={pipeline.fields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
+            </SideSection>
+          )}
+          <SideSection id="endereco" title="Endereço de instalação" defaultOpen={!f.condominiumId && !f.installStreet} summary={addressSummary || 'Não informado'}>
+            <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" />
+          </SideSection>
+          <SideSection id="viab" title="Cabo, taxa e equipamentos" defaultOpen={!f.saleType || f.cableMeters === ''} summary={[f.saleType ? (f.saleType === 'ativa' ? 'Venda ativa' : 'Venda receptiva') : null, f.cableMeters !== '' ? `${f.cableMeters} m de cabo` : null].filter(Boolean).join(' · ') || 'Não informado'}>
+            <div className="space-y-3">
+              <ViabilityInputs value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-vb" />
+              <EquipmentOverride routeId={f.routeId} equipment={f.equipment} suggested={{ routeName: opp.viability?.route?.name ?? null }} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-eq" />
+            </div>
+          </SideSection>
+          <SideSection id="notas" title="Anotações da conversa" defaultOpen={!f.notes.trim()} summary={f.notes.trim() ? `${f.notes.trim().slice(0, 90)}${f.notes.trim().length > 90 ? '…' : ''}` : 'Sem anotações'}>
+            <FormField label="Anotações da conversa" htmlFor="ws-notes" hint="O que o cliente valoriza, o que tem hoje (se ele disser), dúvidas e combinados.">
+              <Textarea id="ws-notes" className="min-h-[120px]" value={f.notes} disabled={!editable} onChange={(e) => set('notes', e.target.value)} />
+            </FormField>
+          </SideSection>
+        </div>
+      </section>
+      <AccountPanel opp={opp} peopleOpen={search.get('aba') === 'pessoas'} extra={<MeasurementBox opp={opp} />} />
     </div>
   );
 
@@ -618,71 +684,38 @@ export function OpportunityWorkspacePage() {
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
       <StageScript oppId={opp.id} pipelineKey={pipeline?.key ?? ''} stage={opp.stage} disabled={!editable} />
-      <section className="card space-y-4 p-5">
-        <ChipGroup legend="Motivo do contato" options={OPPORTUNITY_REASONS} value={f.reasons} onChange={(v) => editable && set('reasons', v)} labels={REASON_LABELS} disabled={!editable} />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
-          <FormField label="Plano" htmlFor="ws-plan" hint={selectedPlan ? `Catálogo: ${fmtBRL(selectedPlan.priceCents)}/mês${selectedPlan.speedMbps ? ` · ${selectedPlan.speedMbps} Mbps` : ''}` : 'O valor vem do catálogo'}>
-            <Select id="ws-plan" value={f.planId} disabled={!editable} onChange={(e) => set('planId', e.target.value)}>
-              <option value="">Ainda não definido</option>
-              {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmtBRL(p.priceCents)}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Canal de entrada" htmlFor="ws-source">
-            <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
-              <option value="">Não informado</option>
-              {lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Campanha" htmlFor="ws-campaign">
-            <Select id="ws-campaign" value={f.campaignId} disabled={!editable} onChange={(e) => set('campaignId', e.target.value)}>
-              <option value="">Nenhuma</option>
-              {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Jornada" htmlFor="ws-pipe" hint={a.dirty ? 'Aguarde salvar para trocar' : 'Trocar de jornada mantém o histórico'}>
-            <Select id="ws-pipe" value={opp.pipelineId} disabled={!editable || move.isPending || a.dirty} onChange={(e) => move.mutate(e.target.value)}>
-              {lookups.data?.pipelines.filter((p) => p.allowed || p.id === opp.pipelineId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Próxima ação" htmlFor="ws-na"><Input id="ws-na" value={f.nextAction} disabled={!editable} onChange={(e) => set('nextAction', e.target.value)} placeholder="Ex.: confirmar cobertura no endereço" /></FormField>
-          <FormField label="Quando" htmlFor="ws-nat"><Input id="ws-nat" type="datetime-local" value={f.nextActionAt} disabled={!editable} onChange={(e) => set('nextActionAt', e.target.value)} /></FormField>
-        </div>
-        <ViabilityInputs value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-vb" />
-        <EquipmentOverride routeId={f.routeId} equipment={f.equipment} suggested={{ routeName: opp.viability?.route?.name ?? null }} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-eq" />
-        {pipeline && pipeline.fields.length > 0 && (
-          <div>
-            <p className="mb-2 text-sm font-semibold text-ink">Campos da jornada</p>
-            <CustomFieldsEditor fields={pipeline.fields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
-          </div>
-        )}
-        <FormField label="Anotações da conversa" htmlFor="ws-notes" hint="O que o cliente valoriza, o que tem hoje (se ele disser), dúvidas e combinados.">
-          <Textarea id="ws-notes" className="min-h-[120px]" value={f.notes} disabled={!editable} onChange={(e) => set('notes', e.target.value)} />
-        </FormField>
-      </section>
+      <Objections pipelineKey={pipeline?.key ?? ''} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">
-          <Tabs label="Detalhes" value={centerTab} onChange={setCenterTab} tabs={[
-            { key: 'atividades', label: 'Atividades', count: acts.data?.items.filter((x) => !x.completedAt).length },
-            ...(can('projetos') ? [{ key: 'trabalho' as const, label: 'Tarefas e projetos' }] : []),
-            ...(feature('marketing.abm') ? [{ key: 'pessoas' as const, label: 'Pessoas e ABM' }] : []),
-            { key: 'anexos', label: 'Anexos', count: opp.attachmentCount },
-            ...(feature('crm.chamados') ? [{ key: 'chamados' as const, label: glpiUnseen.data?.unseen ? `Chamados GLPI • ${glpiUnseen.data.unseen} novo(s)` : 'Chamados GLPI', count: glpiUnseen.data?.unseen ? undefined : glpiUnseen.data?.total || undefined }] : []),
-            { key: 'historico', label: unread.data?.comments ? `Comentários e histórico • ${unread.data.comments} novo(s)` : 'Comentários e histórico' },
-            { key: 'chat', label: unread.data?.chat ? `Chat • ${unread.data.chat} nova(s)${unread.data.mentions ? ' @' : ''}` : 'Chat' },
+          <Tabs label="Acompanhamento" className="!gap-3 [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
+            { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
+            ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
+            { key: 'tarefas', label: 'Tarefas', count: acts.data?.items.filter((x) => !x.completedAt).length || undefined },
+            { key: 'anexos', label: 'Anexos', count: opp.attachmentCount || undefined },
+            ...(feature('crm.chamados') ? [{ key: 'chamados' as const, label: glpiUnseen.data?.unseen ? `Chamados • ${glpiUnseen.data.unseen} novo(s)` : 'Chamados', count: glpiUnseen.data?.unseen ? undefined : glpiUnseen.data?.total || undefined }] : []),
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
-          {centerTab === 'atividades' && (!can('atividades') ? <p className="text-sm text-muted">Seu perfil não tem acesso ao módulo Atividades.</p>
-            : acts.isLoading ? <LoadingRows rows={3} /> : acts.data?.items.length ? <ul className="divide-y divide-line">{acts.data.items.map((x) => <ActivityRow key={x.id} a={x} showOwner compact />)}</ul>
-            : <EmptyState title="Nenhuma atividade" description="Agende um retorno para não perder o fio da conversa." action={<Button variant="primary" onClick={() => setScheduling(true)}>Agendar retorno</Button>} />)}
-          {centerTab === 'trabalho' && <WorkLinks prefill={{ opportunityId: opp.id, contactId: opp.contactId, label: `OP-${opp.code} · ${opp.contactName}`, kind: 'implantacao', name: `Implantação ${opp.contactName}` }} />}
-          {centerTab === 'pessoas' && <EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact />}
+          {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
+          {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
+          {centerTab === 'tarefas' && (
+            <div className="space-y-5">
+              <LinkedTasks prefill={workPrefill} onOpen={setTaskOpen} />
+              <section aria-label="Retornos e interações">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-ink">Retornos e interações</h3>
+                  {can('atividades') && editable && <Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setScheduling(true)}>Agendar retorno</Button>}
+                </div>
+                {!can('atividades') ? <p className="text-sm text-muted">Seu perfil não tem acesso ao módulo Atividades.</p>
+                  : acts.isLoading ? <LoadingRows rows={3} /> : interactions.length ? <ul className="divide-y divide-line">{interactions.map((x) => <ActivityRow key={x.id} a={x} showOwner compact />)}</ul>
+                  : <EmptyState title="Nenhum retorno agendado" description="Agende um retorno para não perder o fio da conversa." />}
+              </section>
+              <TaskDrawer id={taskOpen} onClose={() => setTaskOpen(null)} onOpen={setTaskOpen} />
+            </div>
+          )}
           {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
           {centerTab === 'chamados' && <GlpiTickets oppId={opp.id} contactName={opp.contactName} hasCustomer={!!opp.customerId} />}
-          {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
-          {centerTab === 'chat' && <div className="-m-5"><NegotiationChat oppId={opp.id} title={false} className="max-h-[620px]" /></div>}
         </div>
       </section>
     </div>
@@ -692,8 +725,9 @@ export function OpportunityWorkspacePage() {
     <div className="space-y-4">
       <ViabilityPanel v={opp.viability} loading={a.status === 'saving'} title={opp.stage === 'ganha' ? 'Viabilidade no fechamento' : 'Viabilidade da venda'} />
       <EngineeringPanel opp={opp} planName={selectedPlan?.name ?? opp.planName ?? null} speedMbps={selectedPlan?.speedMbps ?? null} notes={f.notes} value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} />
-      <Panel title="Próximo passo" icon={<ListChecks className="h-5 w-5 text-primary" />}><Pendencies opp={opp} fields={f} unmetFields={unmetFields} /></Panel>
-      <Objections pipelineKey={pipeline?.key ?? ''} />
+      <section id="ws-chat" className="card scroll-mt-4">
+        <NegotiationChat oppId={opp.id} className="max-h-[560px]" />
+      </section>
     </div>
   );
 
@@ -727,7 +761,7 @@ export function OpportunityWorkspacePage() {
             <Button icon={<XCircle className="h-4 w-4 text-danger" />} onClick={() => requestMove('perdida')}>Marcar como perdida</Button>
           </>
         )}
-        <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>Viabilidade e próximo passo</Button>
+        <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>{unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat} nova(s)` : 'Viabilidade e chat'}</Button>
         <Button icon={<Scale className="h-4 w-4" />} onClick={() => nav(`/opportunities/${opp.id}/aprovacao`)}>
           Análise e aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
         </Button>
@@ -738,7 +772,7 @@ export function OpportunityWorkspacePage() {
       </div>
 
       <div className="mb-3 ws2:hidden">
-        <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'conversa', label: 'Conversa' }, { key: 'cliente', label: 'Cliente' }, { key: 'passo', label: 'Viabilidade' }]} />
+        <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'cliente', label: 'Deal e conta' }, { key: 'conversa', label: 'Acompanhamento' }, { key: 'passo', label: unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat}` : 'Viabilidade e chat' }]} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 ws2:grid-cols-[300px_minmax(0,1fr)] ws3:grid-cols-[320px_minmax(0,1fr)_380px]">
@@ -747,13 +781,13 @@ export function OpportunityWorkspacePage() {
         <div className={clsx('hidden ws3:block', mobileTab === 'passo' && 'max-ws2:block')}>{right}</div>
       </div>
 
-      <Drawer open={copilot} onClose={() => setCopilot(false)} title="Viabilidade e próximo passo" width="lg">{right}</Drawer>
+      <Drawer open={copilot} onClose={() => setCopilot(false)} title="Viabilidade e chat" width="lg">{right}</Drawer>
       <Modal open={releasing} onClose={() => setReleasing(false)} title="Liberar porta da CTO" size="sm" footer={<><Button onClick={() => setReleasing(false)}>Cancelar</Button><Button variant="primary" loading={release.isPending} disabled={releaseReason.trim().length < 3} onClick={() => release.mutate()}>Liberar porta</Button></>}>
         <p className="mb-3 text-sm text-text">Use quando o cliente cancelar. A porta volta a ficar livre na CTO do condomínio e o registro fica no histórico.</p>
         <FormField label="Motivo do cancelamento" htmlFor="rel-reason" required><Input id="rel-reason" value={releaseReason} onChange={(e) => setReleaseReason(e.target.value)} placeholder="Ex.: mudou de endereço" data-autofocus /></FormField>
       </Modal>
       <Modal open={scheduling} onClose={() => setScheduling(false)} title="Agendar retorno" footer={<><Button onClick={() => setScheduling(false)}>Cancelar</Button><Button variant="primary" type="submit" form="ws-activity">Agendar</Button></>}>
-        <ActivityComposer formId="ws-activity" hideSubmit opportunityId={opp.id} defaultTitle={f.nextAction} onDone={() => setScheduling(false)} />
+        <ActivityComposer formId="ws-activity" hideSubmit opportunityId={opp.id} defaultTitle={f.nextAction} onDone={() => { setScheduling(false); setCenterTab('tarefas'); }} />
       </Modal>
       <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}

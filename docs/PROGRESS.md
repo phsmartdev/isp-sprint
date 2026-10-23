@@ -138,6 +138,27 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
+## UX das oportunidades — Fase 1: tela em três áreas ✅ (2026-10-23)
+- Diretriz "Ajustes de UX e organização das oportunidades no CRM", com as decisões do Paulo em 23/10:
+  - A abertura residencial sai do fluxo de criação; os dados e o histórico ficam.
+  - Uma jornada por tipo de venda (Licitação, Adesão à Ata, Consumo de Contrato e Venda Consultiva), com etapas e campos configuráveis.
+  - A Fase 1 reorganiza a tela; as Fases 2 a 4 tratam da abertura por tipo, dos campos por tipo e dos concorrentes.
+- **Esquerda: Deal e Conta.**
+  - Deal: nome, tipo de venda, etapa e situações, responsável, valor, solução, canal, datas e encerramento.
+  - **Próxima ação em destaque**, vermelha quando vencida, e **Pendências** sempre visíveis.
+  - O formulário foi dividido em seções recolhíveis: Dados do deal, Informações do tipo de venda, Endereço de instalação, Cabo e equipamentos, e Anotações. A seção vem aberta quando falta informação e recolhida, com resumo, quando está preenchida.
+  - Conta: dados, ciclo de vida, resumo do relacionamento, medição, e Pessoas e ABM (que saiu do centro).
+  - **"Saiba mais sobre a conta"**: oportunidades, contratos, projetos e interações da conta, com indicadores, respeitando as permissões. A lista de contratos ganhou o filtro por conta (`contactId`).
+- **Centro:** roteiro e objeções no topo, e as abas na ordem Histórico, Projetos, Tarefas, Anexos e Chamados.
+  - Histórico reúne comentários, eventos e atividades em ordem cronológica.
+  - Tarefas mostra as tarefas da oportunidade e os retornos e interações; agendar um retorno abre essa aba.
+  - Contadores zerados não aparecem, para as abas caberem sem rolagem.
+- **Direita:** Viabilidade da venda, Engenharia (quando exigida) e o **Chat**, reposicionado sem mudanças. Entre 900 e 1280 px, a direita abre pelo botão "Viabilidade e chat".
+- **Celular:** abas "Deal e conta", "Acompanhamento" e "Viabilidade e chat".
+- Endereços antigos continuam valendo: `?aba=atividades` e `?aba=trabalho` abrem Tarefas; `?aba=chat` e `?aba=pessoas` levam ao chat e às pessoas.
+- O design não mudou: mesmos componentes, cores e tipografia; só a distribuição.
+- Testes: E2E novo `opportunity-layout.spec.ts`, e os testes que dependiam das abas antigas foram ajustados. Regressão: API 239, E2E 62/62.
+
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
   - Um projeto por frente (padrão: Contratos, CRM, Projetos — ajustes e homologação, Relatórios), cada uma com responsável próprio e a etiqueta da iniciativa.

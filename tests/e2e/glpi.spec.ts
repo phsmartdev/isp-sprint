@@ -49,7 +49,7 @@ test('GLPI: configura, abre chamado da negociação, recebe acompanhamento e sol
   await login(p2, 'lucas@yepnet.test');
   const opps = await (await p2.request.get('/api/v1/opportunities?scope=minhas&pageSize=1')).json();
   await p2.goto(`/opportunities/${opps.items[0].id}?aba=chamados`);
-  await expect(p2.getByRole('tab', { name: /Chamados GLPI/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(p2.getByRole('tab', { name: /^Chamados/ })).toHaveAttribute('aria-selected', 'true');
   await p2.getByRole('button', { name: 'Abrir chamado no GLPI' }).click();
   const dlg = p2.getByRole('dialog', { name: 'Abrir chamado no GLPI' });
   await dlg.getByLabel('Buscar entidade').fill('hospital');

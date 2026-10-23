@@ -110,6 +110,8 @@ const ListQuery = z.object({
   kind: z.enum(CONTRACT_KINDS).optional(),
   billingType: z.enum(BILLING_TYPES).optional(),
   ownerId: uuid.optional(),
+  /** contratos de uma conta (visão "Saiba mais sobre a conta" na oportunidade) */
+  contactId: uuid.optional(),
   status: z.enum(['ativos', 'encerrados', 'todos']).default('todos'),
   expiringDays: z.coerce.number().int().min(1).max(730).optional(),
   page: z.coerce.number().int().min(1).default(1),
@@ -209,6 +211,7 @@ export const contractRoutes = [
       if (query.kind) where.push(eq(s.contracts.kind, query.kind));
       if (query.billingType) where.push(eq(s.contracts.billingType, query.billingType));
       if (query.ownerId) where.push(eq(s.contracts.commercialOwnerId, query.ownerId));
+      if (query.contactId) where.push(eq(s.contracts.contactId, query.contactId));
       if (query.status === 'ativos') where.push(sql`${s.contracts.stage} <> 'arquivado'`);
       if (query.status === 'encerrados') where.push(eq(s.contracts.stage, 'arquivado'));
       if (query.expiringDays) where.push(and(isNotNull(v.endAt), lte(v.endAt, addDays(today, query.expiringDays)), sql`${s.contracts.stage} <> 'arquivado'`));

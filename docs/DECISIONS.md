@@ -343,3 +343,13 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Funciona só com o GLPI acessível pela internet.
   - Enquanto não houver validação com a instância real, a integração fica marcada como "construída e testada com GLPI simulado".
 
+## ADR-067 — Oportunidade em três áreas, sem redesenho (23/10/2026)
+- **Contexto:** a diretriz de UX pede menos carga cognitiva na oportunidade: deal e conta à esquerda, acompanhamento no centro, viabilidade e chat à direita, sem alterar a linguagem visual.
+- **Decisão:**
+  - Só a distribuição muda. Os componentes existentes foram reposicionados: formulário, timeline, tarefas, projetos, anexos, chamados, chat, pessoas e viabilidade.
+  - As seções da lateral abrem sozinhas quando falta informação e recolhem com resumo quando estão completas. Prazos, próxima ação e pendências nunca ficam recolhidos.
+  - A visão completa da conta é uma gaveta sob demanda que lê as fontes existentes, sem novo cadastro.
+- **Consequência:**
+  - Os links antigos (`?aba=…`) continuam funcionando.
+  - Abrir a oportunidade mostra o histórico e o chat, então comentários e mensagens passam a contar como lidos ao abrir. Entre 900 e 1280 px, o chat fica na gaveta "Viabilidade e chat".
+
