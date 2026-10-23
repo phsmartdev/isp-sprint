@@ -36,6 +36,18 @@ test('Pregão: participantes, ranking, ações do concorrente e inteligência po
   await expect(dlg).toHaveCount(0);
   await expect(ranking.locator('tbody tr').first()).toContainText(rival);
   await expect(ranking.locator('tbody tr').first()).toContainText('Vencedora');
+  // mais de um lote: o lote fica ao lado da marcação de vencedora; cada lote tem a sua
+  await ranking.getByRole('button', { name: 'Editar' }).click();
+  await dlg.getByLabel('Quantidade de lotes').fill('2');
+  await dlg.getByRole('button', { name: 'Adicionar empresa' }).first().click();
+  await dlg.getByLabel('Empresa 3', { exact: true }).fill(`Outra Rede ${tag}`);
+  await dlg.getByLabel('Lance 3').fill('80.000,00');
+  await dlg.getByLabel('Lote 3', { exact: true }).selectOption('2');
+  await dlg.getByLabel('Vencedora 3').check();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(ranking).toContainText('Lote 2');
+  await expect(page.getByRole('region', { name: 'Participantes do pregão' })).toContainText(`Outra Rede ${tag}`);
 
   const tl = page.getByRole('region', { name: 'Linha do tempo do pregão' });
   await tl.getByRole('button', { name: 'Registrar ação' }).click();
