@@ -293,3 +293,23 @@ export async function ensureSaleTypeForm(db: DbOrTx, tenantId: string) {
     return true;
   });
 }
+
+/** Campos que saíram do formulário do tipo de venda (ex.: itens/lotes passaram para Produtos e serviços). Os valores já gravados ficam no histórico. */
+const RETIRED_SALE_FIELDS = ['lotes_interesse'];
+export async function ensureRetiredSaleFields(db: DbOrTx, tenantId: string) {
+  const [corp] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, 'empresarial'), eq(s.pipelines.active, true))).limit(1);
+  if (!corp) return false;
+  const [hit] = await db.select({ id: s.pipelineFields.id }).from(s.pipelineFields).where(and(eq(s.pipelineFields.pipelineId, corp.id), eq(s.pipelineFields.active, true), inArray(s.pipelineFields.key, RETIRED_SALE_FIELDS))).limit(1);
+  if (!hit) return false;
+  return (db as unknown as { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + tenantId}))`);
+    const active = await getActiveInstruction(tx, tenantId);
+    const jornadas = active.content.jornadas.map((j) => (j.chave !== 'empresarial' ? j : { ...j, campos: j.campos.filter((c) => !RETIRED_SALE_FIELDS.includes(c.chave)) }));
+    const content = { ...active.content, _leia_me: undefined, versao: undefined, jornadas };
+    await applyJourneys(tx, tenantId, content.jornadas);
+    const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
+    await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
+    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Licitação: "Itens ou lotes de interesse" sai do formulário; itens e lotes ficam em Produtos e serviços.'], activatedAt: new Date() });
+    return true;
+  });
+}
