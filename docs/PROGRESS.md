@@ -1,6 +1,6 @@
 # Progresso e pendências
 
-Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
+Atualizado em 2026-10-23. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
 
 ## Fase 0 — Auditoria ✅
 - Legado v1.5 auditado (`AUDIT_LEGACY_v1.5.md`): 4 achados críticos (API aberta sem token, contrato confirmado forjável, XSS armazenado via `id`, sobrescrita arbitrária). Decisão: reescrever; portar só conteúdo de playbook e salvaguardas do adaptador IXC; migrar dados como `legacy_v1.5` não verificado (Fase 3).
@@ -137,6 +137,29 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Agora a ferramenta relê a validação depois de responder. Se o GLPI não registrou, avisa o motivo e não registra nada.
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
+
+## Tipo de venda no funil Corporativo, participantes do pregão, Modelos e cantos retos ✅ (2026-10-23)
+- **Tipo de venda (ADR-068).** Licitação, Adesão à Ata, Consumo de Contrato e Venda Consultiva são opção do formulário dentro do funil Corporativo, não funis.
+  - As oportunidades das antigas jornadas migram sozinhas, com etapa equivalente e evento no histórico.
+  - Os campos aparecem conforme o tipo.
+  - As etapas não exigem próxima ação nem roteiro.
+- **Negociação.**
+  - Produtos e serviços viraram a aba ao lado de Histórico.
+  - Dados do deal e Informações do tipo têm botão Salvar e, depois de salvas, ficam em leitura compacta com Editar.
+  - Endereço de entrega saiu da negociação.
+  - Valores em R$ com máscara brasileira.
+  - Modalidade logo abaixo de Tipo de disputa.
+- **Participantes do pregão (ADR-069).** Empresa, CNPJ, lote, lance, situação, "nós" e vencedora.
+  - O ranking é calculado por lote.
+  - Um vencedor por lote; em lote único, só um.
+  - O histórico registra o antes e o depois.
+- **Configurações → Modelos.** Um item só, com as abas Contratos, Propostas, E-mails, Instrução e Tipos de tarefa.
+  - Cada tipo de tarefa tem um roteiro, em versões append-only, mostrado ao agendar.
+  - Os links antigos redirecionam para a aba certa.
+- **Marca BKT.** Cantos retos em toda a aplicação; só fotos de usuário e pontos de status continuam redondos.
+- **Próximo.**
+  - Bloco 3: inteligência por concorrente a partir do CNPJ dos participantes, com linha do tempo de ações no pregão e importação de ata.
+  - Bloco 4: tempo por etapa, conversão e etapas clicáveis na negociação.
 
 ## Abertura por tipo de venda, filial e produtos e serviços ✅ (2026-10-23)
 - **Abertura:**
