@@ -407,6 +407,20 @@
       "when": 1792785351747,
       "tag": "0057_itens_oportunidade",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792788404509,
+      "tag": "0058_tipo_venda_formulario",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792789241610,
+      "tag": "0059_participantes_licitacao",
+      "breakpoints": true
     }
   ]
 }

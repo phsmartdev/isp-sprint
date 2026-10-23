@@ -32,7 +32,7 @@ export type Lookups = {
 };
 export type StageRequirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
 export type LookupStage = { id: string; key: string; name: string; position: number; kind: 'open' | 'won' | 'lost'; isTerminal: boolean; color: string | null; requirements: StageRequirements };
-export type LookupField = { key: string; label: string; type: 'texto' | 'texto_longo' | 'numero' | 'moeda' | 'data' | 'lista' | 'sim_nao'; options: string[]; required: boolean };
+export type LookupField = { key: string; label: string; type: 'texto' | 'texto_longo' | 'numero' | 'moeda' | 'data' | 'lista' | 'sim_nao'; options: string[]; required: boolean; saleKinds?: string[] };
 export type LookupPipeline = { id: string; key: string; name: string; description: string | null; segments: Segment[]; isDefault: boolean; allowed: boolean; fields: LookupField[]; stages: LookupStage[] };
 
 export type Kpi = {
@@ -117,6 +117,8 @@ export type Opportunity = {
   contractId: string | null;
   approvalStatus?: string | null;
   branchId: string | null;
+  /** Tipo de venda (opção de formulário do funil). */
+  saleKind: string | null;
   /** Quantidade de produtos/serviços lançados. */
   itemCount: number;
   bidMode: 'item' | 'global' | null;

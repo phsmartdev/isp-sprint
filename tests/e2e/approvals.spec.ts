@@ -22,6 +22,7 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
   // produtos lançados pela tela: o total vira o valor que vai para a aprovação
+  await seller.getByRole('tab', { name: /^Produtos/ }).click();
   const items = seller.getByRole('region', { name: 'Produtos e serviços' });
   await items.getByRole('button', { name: 'Adicionar item' }).click();
   await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');

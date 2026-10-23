@@ -111,12 +111,13 @@ test('Personalização: identidade BKT fixa, sem envio de imagens', async ({ pag
 test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await newOpportunity(page, 'Cliente E2E Autosave');
+  await page.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await page.getByLabel('Nome do deal').fill('Autosave — 500 Mega com Wi-Fi 6');
   await expect(page.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
   await page.waitForTimeout(2200);
   const before = await page.getByRole('timer').locator('p').first().textContent();
   await page.reload();
-  await expect(page.getByLabel('Nome do deal')).toHaveValue('Autosave — 500 Mega com Wi-Fi 6');
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Autosave — 500 Mega com Wi-Fi 6');
   const after = await page.getByRole('timer').locator('p').first().textContent();
   expect(after).not.toBe('00:00');
   expect(after! >= before!).toBe(true);
@@ -144,17 +145,49 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await expect(page.getByText('Escolha a filial da venda')).toBeVisible();
   await tipo.selectOption({ label: 'Licitação' });
   await expect(page.getByLabel('Etapa do funil')).toBeVisible();
-  await page.getByLabel('Etapa do funil').selectOption({ label: 'Análise do edital' });
+  // o funil é o Corporativo: as etapas são as dele, não uma jornada por tipo
+  await page.getByLabel('Etapa do funil').selectOption({ label: 'Diagnóstico' });
   const filiais = (await page.getByLabel('Filial').locator('option').allTextContents()).slice(1);
   expect(filiais).toEqual(['BKT Soluções', 'UPNET']);
   await page.getByLabel('Filial').selectOption({ label: 'UPNET' });
   await expect(page.getByRole('heading', { name: 'Informações de Licitação' })).toBeVisible();
   await page.getByLabel('Tipo de disputa').selectOption('Dispensa');
+  // modalidade do pregão logo abaixo do tipo de disputa
+  const order = await page.locator('select, input, textarea').evaluateAll((els) => els.map((e) => e.id));
+  expect(order.indexOf(order.find((x) => x.endsWith('modalidade_interna'))!)).toBe(order.indexOf(order.find((x) => x.endsWith('tipo_disputa'))!) + 1);
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Licitação');
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('UPNET');
-  await expect(page.locator('#ws-stage')).toHaveValue('analise_edital');
+  await expect(page.locator('#ws-stage')).toHaveValue('diagnostico');
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Corporativo');
+  // na negociação: seção do tipo de venda com Salvar e leitura compacta; endereço de entrega não aparece
+  await expect(page.getByRole('button', { name: 'Informações de Licitação', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Endereço de entrega' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Editar Informações de Licitação' }).click();
+  await page.getByLabel('Órgão contratante').fill('Prefeitura de Teste');
+  await page.locator('#ss-tipo').getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Editar Informações de Licitação' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Prefeitura de Teste');
+  // participantes do pregão: ranking pelo menor lance e vencedora
+  const part = page.getByRole('region', { name: 'Participantes do pregão' });
+  await part.getByRole('button', { name: 'Registrar participantes' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
+  await dlg.getByLabel('Empresa 1', { exact: true }).fill('Nossa Empresa');
+  await dlg.getByLabel('Nossa empresa 1').check();
+  await dlg.getByLabel('Lance 1').fill('95.000,00');
+  await dlg.getByLabel('Empresa 2', { exact: true }).fill('Rede Concorrente');
+  await dlg.getByLabel('Lance 2').fill('90.000,00');
+  await expect(dlg.locator('tbody tr').nth(1)).toContainText('1º');
+  await dlg.getByLabel('Vencedora 1').check();
+  await dlg.getByLabel('Vencedora 2').check();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('Lote único');
+  await dlg.getByLabel('Vencedora 1').uncheck();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(part).toContainText('Rede Concorrente');
+  await expect(part).toContainText('R$ 90.000,00');
   // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
   await page.goto('/opportunities/new');
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
@@ -168,6 +201,14 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
 test('Sprint: venda fechada pede confirmação e não confirma contrato', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await newOpportunity(page, 'Cliente E2E Ganho');
+  // o funil Corporativo só fecha com produtos lançados
+  await page.getByRole('tab', { name: /^Produtos/ }).click();
+  const items = page.getByRole('region', { name: 'Produtos e serviços' });
+  await items.getByRole('button', { name: 'Adicionar item' }).click();
+  await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');
+  await items.getByLabel('Valor 1').fill('1.200,00');
+  await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
+  await expect(page.getByText('Produtos e serviços salvos')).toBeVisible();
   await page.getByRole('button', { name: 'Venda fechada' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('O contrato só conta como confirmado após validação no IXC');
@@ -189,10 +230,10 @@ test('Oportunidades: mover pelo menu (alternativa ao arrastar) e perder exige mo
   const card = page.locator('li', { hasText: 'Cliente E2E Kanban' });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
-  await page.getByRole('menuitem', { name: 'Proposta' }).click();
-  await expect(page.getByRole('region', { name: /Proposta/ }).getByText('Cliente E2E Kanban')).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Diagnóstico' }).click();
+  await expect(page.getByRole('region', { name: /Diagnóstico/ }).getByText('Cliente E2E Kanban')).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
-  await page.getByRole('menuitem', { name: 'Perdida' }).click();
+  await page.getByRole('menuitem', { name: /^Perdid/ }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Marcar como perdida' })).toBeDisabled();
   await dialog.getByLabel('Motivo da perda').selectOption('preco');
@@ -207,13 +248,15 @@ test('edição simultânea gera conflito visível, não sobrescreve em silêncio
   const b = await (await browser.newContext()).newPage();
   await login(b, 'ana@yepnet.test');
   await b.goto(url);
+  await b.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await expect(b.getByLabel('Nome do deal')).toBeVisible();
+  await a.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await a.getByLabel('Nome do deal').fill('Versão da aba A');
   await expect(a.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
   await b.getByLabel('Nome do deal').fill('Versão da aba B');
   await expect(b.getByText('Outra pessoa alterou esta oportunidade')).toBeVisible();
   await b.getByRole('button', { name: 'Recarregar versão atual' }).click();
-  await expect(b.getByLabel('Nome do deal')).toHaveValue('Versão da aba A');
+  await expect(b.getByRole('region', { name: 'Informações do deal' })).toContainText('Versão da aba A');
 });
 
 test('fora do time ou de outra empresa não abre a oportunidade por URL', async ({ browser }) => {

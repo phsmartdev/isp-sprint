@@ -72,12 +72,22 @@ export const StageSchema = z.object({
 // ------------------------------------------------------------------ campos personalizados e automações
 export const FIELD_TYPES = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'] as const;
 export const FIELD_TYPE_LABELS: Record<(typeof FIELD_TYPES)[number], string> = { texto: 'Texto', texto_longo: 'Texto longo', numero: 'Número', moeda: 'Valor (R$)', data: 'Data', lista: 'Lista de opções', sim_nao: 'Sim/Não' };
+/** Tipos de venda: opções de formulário dentro do funil (não são funis). Cada campo pode valer para alguns tipos. */
+export const SALE_TYPE_KEYS = ['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva'] as const;
+export type SaleTypeKey = (typeof SALE_TYPE_KEYS)[number];
+export const SALE_TYPE_LABELS: Record<SaleTypeKey, string> = { licitacao: 'Licitação', adesao_ata: 'Adesão à Ata', consumo_contrato: 'Consumo de Contrato', venda_consultiva: 'Venda Consultiva' };
+export const SALE_TYPE_HINTS: Record<SaleTypeKey, string> = {
+  licitacao: 'Disputas em pregão, dispensa ou inexigibilidade.', adesao_ata: 'Adesão de outro órgão a uma ata de registro de preços.',
+  consumo_contrato: 'Nova demanda dentro de um contrato que já existe.', venda_consultiva: 'Clientes privados: necessidade, expansão, modernização ou relacionamento.',
+};
 export const FieldSchema = z.object({
   chave: slug,
   rotulo: text(60),
   tipo: z.enum(FIELD_TYPES).default('texto'),
   opcoes: z.array(text(60)).max(30).default([]),
   obrigatorio: z.boolean().default(false),
+  /** Tipos de venda em que o campo aparece. Vazio = todos. */
+  tiposVenda: z.array(z.enum(SALE_TYPE_KEYS)).default([]),
 });
 export type CustomField = z.infer<typeof FieldSchema>;
 
@@ -263,84 +273,46 @@ export const INSTRUCTION_README = [
 
 
 /**
- * Tipos de venda (diretriz de UX de 23/10): cada um é uma jornada, com etapas e campos próprios.
- * São só a configuração inicial: rótulos, ordem, opções, obrigatoriedade e etapas mudam em Configurações → Jornadas.
- * Nenhuma etapa exige plano, próxima ação ou roteiro (decisão do Paulo, 23/10).
+ * Campos de cada tipo de venda (diretriz de UX de 23/10), dentro do funil Corporativo. Configuração inicial:
+ * rótulos, ordem, opções, obrigatoriedade e tipos de cada campo mudam em Configurações → Jornadas.
  */
-export const SALE_TYPE_KEYS = ['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva'] as const;
-export type SaleTypeKey = (typeof SALE_TYPE_KEYS)[number];
-export function saleTypeJourneys(): InstructionJourney[] {
-  const none = { proposta: false, plano: false, proximaAcao: false, respostasObrigatorias: false };
-  const st = (chave: string, nome: string, cor: string) => ({ chave, nome, tipo: 'aberta' as const, cor, exige: none, perguntas: [], dicas: [] });
-  const fim = (ganha: string, perdida: string) => [
-    { chave: 'ganha', nome: ganha, tipo: 'ganha' as const, cor: '#22C55E', exige: none, perguntas: [], dicas: [] },
-    { chave: 'perdida', nome: perdida, tipo: 'perdida' as const, cor: '#EF4444', exige: none, perguntas: [], dicas: [] },
-  ];
-  const f = (chave: string, rotulo: string, tipo: (typeof FIELD_TYPES)[number] = 'texto', opcoes: string[] = []) => ({ chave, rotulo, tipo, opcoes, obrigatorio: false });
-  const base = { padrao: false, segmentos: [], membros: [], automacoes: [] };
+export function saleTypeFields(): CustomField[] {
+  const f = (chave: string, rotulo: string, tiposVenda: SaleTypeKey[], tipo: (typeof FIELD_TYPES)[number] = 'texto', opcoes: string[] = []): CustomField => ({ chave, rotulo, tipo, opcoes, obrigatorio: false, tiposVenda });
+  const L: SaleTypeKey[] = ['licitacao'], A: SaleTypeKey[] = ['adesao_ata'], C: SaleTypeKey[] = ['consumo_contrato'], V: SaleTypeKey[] = ['venda_consultiva'];
   return [
-    {
-      ...base, chave: 'licitacao', nome: 'Licitação', descricao: 'Disputas em pregão, dispensa ou inexigibilidade.',
-      campos: [
-        f('tipo_lancamento', 'Tipo de lançamento', 'lista', ['Licitação publicada', 'Análise de TR', 'Pedido de cotação', 'Apoio ao TR']),
-        f('tipo_disputa', 'Tipo de disputa', 'lista', ['Licitação', 'Dispensa', 'Inexigibilidade', 'Outros']),
-        f('objeto', 'Objeto', 'texto_longo'),
-        f('numero_edital', 'Número do edital'),
-        f('orgao_contratante', 'Órgão contratante'),
-        f('numero_processo', 'Número do processo'),
-        f('link_edital', 'Link do edital'),
-        f('data_sessao', 'Data da sessão', 'data'),
-        f('prazo_proposta', 'Prazo de envio da proposta', 'data'),
-        f('lotes_interesse', 'Itens ou lotes de interesse', 'texto_longo'),
-        f('documento_servidor', 'Documento do servidor'),
-        f('valor_estimado', 'Valor estimado', 'moeda'),
-        f('valor_pregao', 'Valor do pregão', 'moeda'),
-        f('valor_lance', 'Valor do lance', 'moeda'),
-        f('valor_vitorioso', 'Valor vitorioso', 'moeda'),
-        // classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
-        f('modalidade_interna', 'Modalidade (classificação interna)', 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
-      ],
-      etapas: [st('captacao', 'Captação', '#3B82F6'), st('analise_edital', 'Análise do edital', '#F59E0B'), st('proposta_documentos', 'Proposta e documentos', '#8B5CF6'), st('sessao_disputa', 'Sessão de disputa', '#60A5FA'), st('habilitacao_recurso', 'Habilitação e recursos', '#4ADE80'), ...fim('Vencida', 'Perdida')],
-    },
-    {
-      ...base, chave: 'adesao_ata', nome: 'Adesão à Ata', descricao: 'Adesão de outro órgão a uma ata de registro de preços.',
-      campos: [
-        f('numero_ata', 'Número da ata'),
-        f('orgao_gerenciador', 'Órgão gerenciador'),
-        f('objeto', 'Objeto', 'texto_longo'),
-        f('fornecedor_registrado', 'Fornecedor registrado'),
-        f('vigencia_ata', 'Vigência da ata', 'data'),
-        f('situacao_autorizacao', 'Situação da autorização de adesão', 'lista', ['Não solicitada', 'Solicitada ao órgão gerenciador', 'Aceita pelo fornecedor', 'Autorizada', 'Negada']),
-        f('valor_estimado', 'Valor total estimado', 'moeda'),
-      ],
-      etapas: [st('identificacao', 'Identificação da ata', '#3B82F6'), st('pedido_adesao', 'Pedido de adesão', '#F59E0B'), st('autorizacao', 'Autorização', '#8B5CF6'), st('contratacao', 'Contratação', '#4ADE80'), ...fim('Aderida', 'Perdida')],
-    },
-    {
-      ...base, chave: 'consumo_contrato', nome: 'Consumo de Contrato', descricao: 'Nova demanda dentro de um contrato que já existe.',
-      campos: [
-        f('objeto_item', 'Objeto ou item contratual', 'texto_longo'),
-        f('tipo_demanda', 'Tipo de demanda', 'lista', ['Nova instalação', 'Ampliação', 'Mudança de endereço', 'Serviço adicional', 'Outro']),
-        f('quantidade', 'Quantidade', 'numero'),
-        f('valor_estimado', 'Valor estimado', 'moeda'),
-        f('localidade', 'Localidade'),
-        f('prazo_solicitado', 'Prazo solicitado', 'data'),
-      ],
-      etapas: [st('demanda', 'Demanda recebida', '#3B82F6'), st('levantamento', 'Levantamento técnico', '#F59E0B'), st('orcamento', 'Orçamento', '#8B5CF6'), st('aprovacao_gestor', 'Aprovação do gestor do contrato', '#4ADE80'), ...fim('Autorizada', 'Perdida')],
-    },
-    {
-      ...base, chave: 'venda_consultiva', nome: 'Venda Consultiva', descricao: 'Clientes privados: necessidade, expansão, modernização ou relacionamento.',
-      campos: [
-        f('origem', 'De onde surgiu', 'lista', ['Necessidade do cliente', 'Expansão', 'Modernização', 'Relacionamento', 'Interesse estratégico']),
-        f('necessidade', 'Necessidade ou objetivo do cliente', 'texto_longo'),
-        f('solucoes_interesse', 'Soluções de interesse'),
-        f('escopo_preliminar', 'Escopo preliminar', 'texto_longo'),
-        f('valor_estimado', 'Valor estimado', 'moeda'),
-        f('prazo_esperado', 'Prazo esperado', 'data'),
-      ],
-      etapas: [st('descoberta', 'Descoberta', '#3B82F6'), st('diagnostico', 'Diagnóstico', '#F59E0B'), st('solucao_escopo', 'Solução e escopo', '#8B5CF6'), st('proposta', 'Proposta', '#60A5FA'), st('negociacao', 'Negociação', '#4ADE80'), ...fim('Venda fechada', 'Perdida')],
-    },
+    f('tipo_lancamento', 'Tipo de lançamento', L, 'lista', ['Licitação publicada', 'Análise de TR', 'Pedido de cotação', 'Apoio ao TR']),
+    f('tipo_disputa', 'Tipo de disputa', L, 'lista', ['Licitação', 'Dispensa', 'Inexigibilidade', 'Outros']),
+    // modalidade do pregão logo abaixo do tipo de disputa; classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
+    f('modalidade_interna', 'Modalidade (classificação interna)', L, 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
+    f('objeto', 'Objeto', ['licitacao', 'adesao_ata'], 'texto_longo'),
+    f('numero_edital', 'Número do edital', L),
+    f('orgao_contratante', 'Órgão contratante', L),
+    f('numero_processo', 'Número do processo', L),
+    f('link_edital', 'Link do edital', L),
+    f('data_sessao', 'Data da sessão', L, 'data'),
+    f('prazo_proposta', 'Prazo de envio da proposta', L, 'data'),
+    f('lotes_interesse', 'Itens ou lotes de interesse', L, 'texto_longo'),
+    f('documento_servidor', 'Documento do servidor', L),
+    f('valor_pregao', 'Valor do pregão', L, 'moeda'),
+    f('valor_vitorioso', 'Valor vitorioso', L, 'moeda'),
+    f('numero_ata', 'Número da ata', A),
+    f('orgao_gerenciador', 'Órgão gerenciador', A),
+    f('fornecedor_registrado', 'Fornecedor registrado', A),
+    f('vigencia_ata', 'Vigência da ata', A, 'data'),
+    f('situacao_autorizacao', 'Situação da autorização de adesão', A, 'lista', ['Não solicitada', 'Solicitada ao órgão gerenciador', 'Aceita pelo fornecedor', 'Autorizada', 'Negada']),
+    f('objeto_item', 'Objeto ou item contratual', C, 'texto_longo'),
+    f('tipo_demanda', 'Tipo de demanda', C, 'lista', ['Nova instalação', 'Ampliação', 'Mudança de endereço', 'Serviço adicional', 'Outro']),
+    f('localidade', 'Localidade', C),
+    f('prazo_solicitado', 'Prazo solicitado', C, 'data'),
+    f('origem', 'De onde surgiu', V, 'lista', ['Necessidade do cliente', 'Expansão', 'Modernização', 'Relacionamento', 'Interesse estratégico']),
+    f('necessidade', 'Necessidade ou objetivo do cliente', V, 'texto_longo'),
+    f('solucoes_interesse', 'Soluções de interesse', V),
+    f('escopo_preliminar', 'Escopo preliminar', V, 'texto_longo'),
+    f('prazo_esperado', 'Prazo esperado', V, 'data'),
   ];
 }
+/** Chaves das antigas jornadas por tipo de venda (23/10), que viraram opções de formulário do funil Corporativo. */
+export const LEGACY_SALE_TYPE_JOURNEYS = SALE_TYPE_KEYS;
 
 const t = (assunto: string, corpo: string) => ({ assunto, corpo });
 
@@ -364,8 +336,8 @@ export function defaultInstruction(): Instruction {
         segmentos: ['residencial'],
         membros: [],
         campos: [
-          { chave: 'melhor_horario', rotulo: 'Melhor horário para contato', tipo: 'lista', opcoes: ['Manhã', 'Tarde', 'Noite'], obrigatorio: false },
-          { chave: 'provedor_atual', rotulo: 'Provedor atual', tipo: 'texto', opcoes: [], obrigatorio: false },
+          { chave: 'melhor_horario', rotulo: 'Melhor horário para contato', tipo: 'lista', opcoes: ['Manhã', 'Tarde', 'Noite'], obrigatorio: false, tiposVenda: [] },
+          { chave: 'provedor_atual', rotulo: 'Provedor atual', tipo: 'texto', opcoes: [], obrigatorio: false, tiposVenda: [] },
         ],
         automacoes: [
           { nome: 'Perdida vai para Recuperação', ativo: true, gatilho: { tipo: 'perdida' }, acoes: [{ tipo: 'duplicar', jornada: 'recuperacao', etapa: null, responsavel: 'mesmo' }] },
@@ -399,10 +371,8 @@ export function defaultInstruction(): Instruction {
         padrao: false,
         segmentos: ['empresarial', 'governamental', 'institucional'],
         membros: [],
-        campos: [
-          { chave: 'cnpj', rotulo: 'CNPJ', tipo: 'texto', opcoes: [], obrigatorio: false },
-          { chave: 'colaboradores', rotulo: 'Nº de colaboradores', tipo: 'numero', opcoes: [], obrigatorio: false },
-        ],
+        // CNPJ fica no cadastro da conta; os campos variam pelo tipo de venda
+        campos: saleTypeFields(),
         automacoes: [
           { nome: 'Parada há 5 dias: retomar', ativo: true, gatilho: { tipo: 'parada', dias: 5 }, acoes: [{ tipo: 'criar_tarefa', titulo: 'Retomar contato — oportunidade parada', tipoAtividade: 'ligacao', prazoDias: 0, responsavel: 'dono' }] },
         ],
@@ -414,11 +384,11 @@ export function defaultInstruction(): Instruction {
             { id: 'servicos_criticos', texto: 'Quais serviços não podem parar (ERP, telefonia, câmeras)?', tipo: 'texto', obrigatoria: true },
             { id: 'sla', texto: 'Precisa de SLA contratual?', tipo: 'sim_nao', obrigatoria: false },
           ], dicas: ['Entenda o custo de uma hora parada para o cliente.'] },
-          { chave: 'visita_tecnica', nome: 'Visita técnica', tipo: 'aberta', cor: '#8B5CF6', exige: { ...none, proximaAcao: true, respostasObrigatorias: true }, perguntas: [
+          { chave: 'visita_tecnica', nome: 'Visita técnica', tipo: 'aberta', cor: '#8B5CF6', exige: none, perguntas: [
             { id: 'viabilidade', texto: 'Viabilidade técnica confirmada na visita?', tipo: 'sim_nao', obrigatoria: true },
           ], dicas: [] },
           { chave: 'proposta', nome: 'Proposta', tipo: 'aberta', cor: '#60A5FA', exige: { ...none, plano: true }, perguntas: [], dicas: [] },
-          { chave: 'negociacao', nome: 'Negociação', tipo: 'aberta', cor: '#4ADE80', exige: { ...none, proposta: true, plano: true, proximaAcao: true }, perguntas: [], dicas: ['Negocie prazo e escopo antes de preço.'] },
+          { chave: 'negociacao', nome: 'Negociação', tipo: 'aberta', cor: '#4ADE80', exige: { ...none, proposta: true, plano: true }, perguntas: [], dicas: ['Negocie prazo e escopo antes de preço.'] },
           ...fim,
         ],
       },
@@ -440,7 +410,6 @@ export function defaultInstruction(): Instruction {
           ...fim,
         ],
       },
-      ...saleTypeJourneys(),
     ],
     objecoes: [
       { id: 'preco_alto', titulo: 'Está caro', resposta: 'Entendo. Posso comparar com o que você paga hoje e o que está incluso? Muitas vezes a diferença está na estabilidade e no suporte local.', jornadas: [] },

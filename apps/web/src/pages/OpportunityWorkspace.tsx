@@ -1,4 +1,4 @@
-import { SALE_TYPE_KEYS } from '@isp/shared';
+import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -6,6 +6,7 @@ import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel'
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
+import { BidParticipants } from '../features/opportunity/BidParticipants';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,7 +19,7 @@ import {
 import { api, ApiError, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime, isoToLocalInput, localInputToIso } from '../lib/format';
 import { useDebounced, useLookups } from '../lib/hooks';
-import type { Activity, Opportunity, Paged } from '../lib/types';
+import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { OpportunityArpPanel } from '../features/arp/OpportunityArp';
 import { Avatar, Breadcrumb, Button, ChipGroup, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, SaveStatus, Select, Tabs, Textarea } from '../components/ui/primitives';
@@ -77,7 +78,7 @@ export function NewOpportunityPage() {
   const [campaignId, setCampaignId] = useState('');
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [pipelineId, setPipelineId] = useState(params.get('pipelineId') ?? '');
+  const [saleKind, setSaleKind] = useState<SaleTypeKey | ''>('');
   const [branchId, setBranchId] = useState('');
   const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
@@ -93,9 +94,9 @@ export function NewOpportunityPage() {
   const hits = useQuery({ queryKey: ['contacts', dq], enabled: mode === 'existente' && dq.length >= 2, queryFn: () => api<{ items: ContactHit[] }>(`/contacts${qs({ q: dq })}`) });
   const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : segment;
   // abertura por tipo de venda: só as jornadas de tipo de venda (a residencial saiu da abertura em 23/10)
-  const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed && (SALE_TYPE_KEYS as readonly string[]).includes(p.key));
-  const autoJourney = journeys.find((p) => p.segments.includes(seg)) ?? journeys.find((p) => p.isDefault) ?? journeys[0];
-  const journey = journeys.find((p) => p.id === pipelineId);
+  // tipo de venda é opção do formulário; o funil é o de vendas Corporativo (pedido do Paulo, 23/10)
+  const journey = (lookups.data?.pipelines ?? []).find((p) => p.key === 'empresarial' && p.allowed);
+  const kindFields = (journey?.fields ?? []).filter((f) => !f.saleKinds?.length || (!!saleKind && f.saleKinds.includes(saleKind)));
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
 
@@ -108,7 +109,7 @@ export function NewOpportunityPage() {
       api<Opportunity>('/opportunities', {
         method: 'POST',
         body: {
-          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: journey?.key === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
+          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: saleKind === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
@@ -117,6 +118,7 @@ export function NewOpportunityPage() {
           planId: null,
           ownerId: ownerId || null,
           pipelineId: journey?.id ?? null,
+          saleKind: saleKind || null,
           branchId: branchId || null,
           stage: stage || null,
           reasons: [],
@@ -140,12 +142,12 @@ export function NewOpportunityPage() {
     e.preventDefault();
     if (create.isPending) return;
     const errs: Record<string, string> = {};
-    if (!journey) errs.pipelineId = 'Escolha o tipo de venda';
+    if (!saleKind) errs.saleKind = 'Escolha o tipo de venda';
     if ((lookups.data?.branches ?? []).length && !branchId) errs.branchId = 'Escolha a filial da venda';
     if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome da conta (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
     if (mode === 'existente' && isBase && !cs) errs.customerSuccess = 'Responda se aciona Sucesso do Cliente';
-    for (const f of journey?.fields ?? []) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
+    for (const f of kindFields) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
     setErrors(errs);
     if (!Object.keys(errs).length) create.mutate();
     else toast({ tone: 'error', message: 'Confira os campos destacados.' });
@@ -168,10 +170,10 @@ export function NewOpportunityPage() {
               <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente">
                 <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
-              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.pipelineId} hint={journey?.description ?? undefined}>
-                <Select id="no-pipe" value={pipelineId} invalid={!!errors.pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); setStage(''); }}>
+              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
+                <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {journeys.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -283,9 +285,9 @@ export function NewOpportunityPage() {
             <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" hideCondominium />
           </Panel>
 
-          {journey && journey.fields.length > 0 && (
-            <Panel title={`Informações de ${journey.name}`}>
-              <CustomFieldsEditor fields={journey.fields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
+          {saleKind && kindFields.length > 0 && (
+            <Panel title={`Informações de ${SALE_TYPE_LABELS[saleKind]}`}>
+              <CustomFieldsEditor fields={kindFields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
               {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Preencha os campos obrigatórios da jornada.</p>}
             </Panel>
           )}
@@ -428,12 +430,13 @@ function useAutosave(opp: Opportunity | undefined) {
   const dirtyKeys = useMemo(() => (base && fields ? diffFields(fields, toFields(base)) : []), [base, fields]);
   const debounced = useDebounced(fields, 900);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<boolean> => {
     const { base: b, fields: f } = latest.current;
-    if (!b || !f || inFlight.current) return;
+    if (!b || !f) return false;
+    if (inFlight.current) { await new Promise((res) => setTimeout(res, 400)); return save(); }
     const keys = diffFields(f, toFields(b));
-    if (!keys.length) return;
-    if (keys.includes('activationFee') && f.activationFee.trim() && toCents(f.activationFee) === null) { setStatus('error'); setError('Taxa de ativação no formato 50,00'); return; }
+    if (!keys.length) return true;
+    if (keys.includes('activationFee') && f.activationFee.trim() && toCents(f.activationFee) === null) { setStatus('error'); setError('Taxa de ativação no formato 50,00'); return false; }
     inFlight.current = true;
     setStatus('saving');
     try {
@@ -448,12 +451,14 @@ function useAutosave(opp: Opportunity | undefined) {
       if (!diffFields(latest.current.fields!, toFields(updated)).length) {
         try { localStorage.removeItem(draftKey(updated.id)); } catch { /* ignora */ }
       }
+      return true;
     } catch (e) {
       setStatus('error');
       // mostra também o campo recusado, para quem vê o aviso saber o que corrigir
       const fe = e instanceof ApiError ? (e.problem.errors ?? []).map((x) => `${x.path}: ${x.message}`).slice(0, 3).join('; ') : '';
       setError(e instanceof ApiError ? `${e.problem.detail ?? e.message}${fe ? ` (${fe})` : ''}` : (e as Error).message);
       if (e instanceof ApiError && e.status === 409) setConflict(true);
+      return false;
     } finally {
       inFlight.current = false;
     }
@@ -500,6 +505,42 @@ function useAutosave(opp: Opportunity | undefined) {
   return { base, fields, setFields, status, error, conflict, restored, dismissRestored: () => setRestored(false), save, reloadFromServer, dirty: dirtyKeys.length > 0 };
 }
 
+/** valor de um campo do tipo de venda, para a leitura compacta da seção */
+function customText(fd: LookupField, v: unknown): string {
+  if (v === undefined || v === null || v === '') return '—';
+  if (fd.type === 'sim_nao') return v ? 'Sim' : 'Não';
+  if (fd.type === 'moeda' && typeof v === 'number') return fmtBRL(Math.round(v * 100));
+  if (fd.type === 'data' && typeof v === 'string') return fmtDate(v);
+  return String(v);
+}
+
+/** Seção da lateral com botão Salvar: depois de salva, mostra só a leitura compacta (como o bloco do Deal) e o Editar. */
+function SavableSection({ id, title, summary, view, editable, startEditing, onSave, children }: { id: string; title: string; summary?: string; view: (readonly [string, string])[] | string[][]; editable: boolean; startEditing: boolean; onSave: () => Promise<boolean>; children: ReactNode }) {
+  const [editing, setEditing] = useState(startEditing && editable);
+  const [saving, setSaving] = useState(false);
+  const submit = async () => { setSaving(true); const ok = await onSave(); setSaving(false); if (ok) setEditing(false); };
+  return (
+    <SideSection id={id} title={title} defaultOpen summary={summary}>
+      {editing && editable ? (
+        <div className="space-y-3">
+          {children}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" onClick={() => setEditing(false)}>Fechar</Button>
+            <Button size="sm" variant="primary" loading={saving} onClick={() => void submit()}>Salvar</Button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <dl className="space-y-1.5 text-sm">
+            {view.map(([k, v]) => <div key={k} className="flex gap-3"><dt className="w-24 shrink-0 text-muted">{k}</dt><dd className="min-w-0 break-words text-text">{v}</dd></div>)}
+          </dl>
+          {editable && <button type="button" className="mt-2 text-sm font-semibold text-primary hover:underline" aria-label={`Editar ${title}`} onClick={() => setEditing(true)}>Editar</button>}
+        </div>
+      )}
+    </SideSection>
+  );
+}
+
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can, feature } = useAuth();
@@ -526,7 +567,7 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
-  const [centerTab, setCenterTab] = useState<'historico' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
@@ -534,6 +575,11 @@ export function OpportunityWorkspacePage() {
   const setBranch = useMutation({
     mutationFn: (branchId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { branchId: branchId || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); toast({ tone: 'success', message: 'Filial alterada' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const setKind = useMutation({
+    mutationFn: (saleKind: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { saleKind: saleKind || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['timeline', o.id] }); toast({ tone: 'success', message: 'Tipo de venda alterado' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const move = useMutation({
@@ -565,7 +611,9 @@ export function OpportunityWorkspacePage() {
   const current = stages.find((s) => s.key === opp.stage);
   const workPrefill = { opportunityId: opp.id, contactId: opp.contactId, label: `OP-${opp.code} · ${opp.contactName}`, kind: 'implantacao' as const, name: `Implantação ${opp.contactName}` };
   const interactions = (acts.data?.items ?? []).filter((x) => x.type !== 'tarefa');
-  const unmetFields = (pipeline?.fields ?? []).filter((x) => x.required && (f.custom[x.key] === undefined || f.custom[x.key] === null || f.custom[x.key] === '')).map((x) => x.label);
+  const kindLabel = opp.saleKind ? SALE_TYPE_LABELS[opp.saleKind as SaleTypeKey] : null;
+  const kindFields = (pipeline?.fields ?? []).filter((x) => !x.saleKinds?.length || (!!opp.saleKind && x.saleKinds.includes(opp.saleKind)));
+  const unmetFields = kindFields.filter((x) => x.required && (f.custom[x.key] === undefined || f.custom[x.key] === null || f.custom[x.key] === '')).map((x) => x.label);
 
   const requestMove = (to: string) => {
     if (to === opp.stage) return;
@@ -580,14 +628,14 @@ export function OpportunityWorkspacePage() {
     if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName });
   };
 
-  const addressSummary = f.condominiumId ? [opp.condominiumName, f.installBlock && `Bl. ${f.installBlock}`, f.installUnit && `Ap. ${f.installUnit}`].filter(Boolean).join(' · ') : [f.installStreet, f.installNumber, f.installCity].filter(Boolean).join(', ');
   const left = (
     <div className="space-y-4">
       <section className="card p-5" aria-label="Informações do deal">
         <h2 className="mb-2 flex items-center gap-2 text-md font-bold text-ink"><Handshake className="h-5 w-5 text-primary" aria-hidden />Deal</h2>
         <p className="font-bold text-ink">{opp.title}</p>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-          <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
+          <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{kindLabel ?? opp.pipelineName}</dd>
+          {kindLabel && (<><dt className="text-muted">Funil</dt><dd className="text-text">{opp.pipelineName}</dd></>)}
           <dt className="text-muted">Filial</dt><dd className="text-text">{lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
           <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null && !opp.itemCount ? <span className="font-normal text-muted"> /mês</span> : null}{opp.itemCount ? <span className="font-normal text-muted"> · {opp.itemCount} item(ns)</span> : null}</dd>
@@ -607,37 +655,44 @@ export function OpportunityWorkspacePage() {
 
         {/* coluna estreita: as grades internas dos formulários viram uma coluna só */}
         <div className="mt-4 space-y-3 [&_.grid>*]:!col-span-1 [&_.grid]:!grid-cols-1">
-          <SideSection id="dados" title="Dados do deal" defaultOpen summary={f.title}>
-            <div className="space-y-3">
-              <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
-              <FormField label="Filial" htmlFor="ws-branch" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
-                <Select id="ws-branch" value={opp.branchId ?? ''} disabled={!editable || setBranch.isPending || a.dirty} onChange={(e) => setBranch.mutate(e.target.value)}>
-                  <option value="">Não informada</option>
-                  {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </Select>
-              </FormField>
-              <FormField label="Canal de entrada" htmlFor="ws-source">
-                <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
+          <SavableSection id="dados" title="Dados do deal" summary={f.title} editable={editable} startEditing={!f.title.trim()} onSave={a.save}
+            view={[['Nome', f.title || 'Não informado'], ['Tipo de venda', kindLabel ?? 'Não informado'], ['Filial', lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'], ['Canal', lookups.data?.sources.find((x) => x.id === f.sourceId)?.name ?? 'Não informado'], ['Campanha', lookups.data?.campaigns.find((x) => x.id === f.campaignId)?.name ?? 'Nenhuma']]}>
+            <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
+            {pipeline?.key === 'empresarial' && (
+              <FormField label="Tipo de venda" htmlFor="ws-kind" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
+                <Select id="ws-kind" value={opp.saleKind ?? ''} disabled={!editable || setKind.isPending || a.dirty} onChange={(e) => setKind.mutate(e.target.value)}>
                   <option value="">Não informado</option>
-                  {lookups.data?.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
-              <FormField label="Campanha" htmlFor="ws-campaign">
-                <Select id="ws-campaign" value={f.campaignId} disabled={!editable} onChange={(e) => set('campaignId', e.target.value)}>
-                  <option value="">Nenhuma</option>
-                  {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </Select>
-              </FormField>
-            </div>
-          </SideSection>
-          {pipeline && pipeline.fields.length > 0 && (
-            <SideSection id="tipo" title="Informações do tipo de venda" defaultOpen={unmetFields.length > 0 || pipeline.fields.every((x) => f.custom[x.key] == null || f.custom[x.key] === '')} summary={unmetFields.length ? `Falta: ${unmetFields.join(', ')}` : `${pipeline.fields.length} campo(s)`}>
-              <CustomFieldsEditor fields={pipeline.fields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
-            </SideSection>
+            )}
+            <FormField label="Filial" htmlFor="ws-branch" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
+              <Select id="ws-branch" value={opp.branchId ?? ''} disabled={!editable || setBranch.isPending || a.dirty} onChange={(e) => setBranch.mutate(e.target.value)}>
+                <option value="">Não informada</option>
+                {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Canal de entrada" htmlFor="ws-source">
+              <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
+                <option value="">Não informado</option>
+                {lookups.data?.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Campanha" htmlFor="ws-campaign">
+              <Select id="ws-campaign" value={f.campaignId} disabled={!editable} onChange={(e) => set('campaignId', e.target.value)}>
+                <option value="">Nenhuma</option>
+                {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </FormField>
+          </SavableSection>
+          {kindFields.length > 0 && (
+            <SavableSection id="tipo" title={kindLabel ? `Informações de ${kindLabel}` : 'Informações do tipo de venda'} summary={unmetFields.length ? `Falta: ${unmetFields.join(', ')}` : `${kindFields.length} campo(s)`} editable={editable}
+              startEditing={unmetFields.length > 0 || kindFields.every((x) => f.custom[x.key] == null || f.custom[x.key] === '')} onSave={a.save}
+              view={kindFields.map((x) => [x.label, customText(x, f.custom[x.key])])}>
+              <CustomFieldsEditor fields={kindFields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
+            </SavableSection>
           )}
-          <SideSection id="endereco" title="Endereço de entrega" defaultOpen={!f.condominiumId && !f.installStreet} summary={addressSummary || 'Não informado'}>
-            <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" hideCondominium={!f.condominiumId} />
-          </SideSection>
+          {opp.saleKind === 'licitacao' && <BidParticipants oppId={opp.id} />}
         </div>
       </section>
       <OpportunityContacts oppId={opp.id} editable={editable} />
@@ -655,12 +710,12 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
-      <OpportunityItems opp={opp} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">
-          <Tabs label="Acompanhamento" className="!gap-3 [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
+          <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
+            { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
             { key: 'tarefas', label: 'Tarefas', count: acts.data?.items.filter((x) => !x.completedAt).length || undefined },
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount || undefined },
@@ -669,6 +724,7 @@ export function OpportunityWorkspacePage() {
         </div>
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
+          {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
             <div className="space-y-5">

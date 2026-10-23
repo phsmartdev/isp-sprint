@@ -503,6 +503,8 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Tipo de venda (opção de formulário do funil): licitacao, adesao_ata, consumo_contrato, venda_consultiva. */
+    saleKind: text('sale_kind'),
     /** Filial que vende a oportunidade. */
     branchId: uuid('branch_id').references(() => salesBranches.id),
     /** Licitação: lance por item ('item') ou um lance global ('global'). */
@@ -575,6 +577,24 @@ export const opportunityItems = pgTable('opportunity_items', {
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`) }));
+
+/** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
+export const bidParticipants = pgTable('bid_participants', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  position: integer('position').notNull().default(0),
+  company: text('company').notNull(),
+  document: text('document'),
+  lot: text('lot').notNull().default('Único'),
+  bidCents: bigint('bid_cents', { mode: 'number' }),
+  status: text('status').notNull().default('ativo'),
+  winner: boolean('winner').notNull().default(false),
+  isUs: boolean('is_us').notNull().default(false),
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ oppIdx: index('bid_participants_opp_idx').on(t.opportunityId), docIdx: index('bid_participants_doc_idx').on(t.tenantId, t.document), statusCk: check('bid_participants_status_ck', sql`status in ('ativo','desclassificado','desistente')`) }));
 
 export const opportunityEvents = pgTable(
   'opportunity_events',
@@ -868,6 +888,8 @@ export const pipelineFields = pgTable(
     required: boolean('required').notNull().default(false),
     position: integer('position').notNull().default(0),
     active: boolean('active').notNull().default(true),
+    /** Tipos de venda em que o campo aparece (vazio = todos). */
+    saleKinds: text('sale_kinds').array().notNull().default(sql`'{}'::text[]`),
   },
   (t) => ({
     uq: uniqueIndex('pipeline_fields_uq').on(t.pipelineId, t.key),

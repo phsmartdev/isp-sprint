@@ -18,9 +18,11 @@ const ItemBody = z.object({
   unitCents: cents, discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(),
 });
 
-async function isBid(db: Parameters<typeof pipelinesOf>[0], tenantId: string, pipelineId: string) {
-  const pipes = await pipelinesOf(db, tenantId);
-  return pipes.find((p) => p.id === pipelineId)?.key === 'licitacao';
+/** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
+export async function isBid(db: Parameters<typeof pipelinesOf>[0], tenantId: string, opp: { pipelineId: string; saleKind?: string | null }) {
+  if (opp.saleKind) return opp.saleKind === 'licitacao';
+  const pipes = await pipelinesOf(db, tenantId, { includeInactive: true });
+  return pipes.find((p) => p.id === opp.pipelineId)?.key === 'licitacao';
 }
 
 export const opportunityItemRoutes = [
@@ -32,7 +34,7 @@ export const opportunityItemRoutes = [
       return {
         items: rows.map((r) => ({ ...r, totalCents: itemTotal(r) })),
         totals: itemsTotals(rows),
-        bid: await isBid(app.db, auth.tenantId, opp.pipelineId),
+        bid: await isBid(app.db, auth.tenantId, opp),
         bidMode: opp.bidMode ?? null, bidGlobalCents: opp.bidGlobalCents ?? null,
         rowVersion: opp.rowVersion,
         editable: !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]),
@@ -51,7 +53,7 @@ export const opportunityItemRoutes = [
           const err = itemErrors({ ...it, notes: it.notes ?? null, bidUnitCents: it.bidUnitCents ?? null });
           if (err) throw unprocessable(`Item ${i + 1}: ${err}`, [{ path: `items.${i}`, message: err }]);
         }
-        const bid = await isBid(tx, auth.tenantId, opp.pipelineId);
+        const bid = await isBid(tx, auth.tenantId, opp);
         const before = await tx.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, opp.id));
         const beforeTotals = itemsTotals(before);
         await tx.delete(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, auth.tenantId)));

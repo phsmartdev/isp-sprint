@@ -8,7 +8,7 @@
  * O modelo exportado sempre junta os dois, então reflete exatamente o que está em uso.
  */
 import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
-import { defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEYS, saleTypeJourneys, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
+import { defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEYS, saleTypeFields, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -68,7 +68,7 @@ async function journeysFromDb(db: DbOrTx, tenantId: string, stored: Instruction)
         };
       }),
       membros: p.members.map((m) => m.email.toLowerCase()),
-      campos: p.fields.map((f) => ({ chave: f.key, rotulo: f.label, tipo: f.type as never, opcoes: f.options, obrigatorio: f.required })),
+      campos: p.fields.map((f) => ({ chave: f.key, rotulo: f.label, tipo: f.type as never, opcoes: f.options, obrigatorio: f.required, tiposVenda: (f.saleKinds ?? []) as never })),
       automacoes: p.automations
         .filter((a) => a.active)
         .map((a) => {
@@ -162,9 +162,9 @@ export async function setPipelineMembers(tx: DbOrTx, pipelineId: string, userIds
   if (userIds.length) await tx.insert(s.pipelineMembers).values([...new Set(userIds)].map((userId) => ({ pipelineId, userId })));
 }
 
-export async function replaceFields(tx: DbOrTx, tenantId: string, pipelineId: string, fields: { chave: string; rotulo: string; tipo: string; opcoes: string[]; obrigatorio: boolean }[]) {
+export async function replaceFields(tx: DbOrTx, tenantId: string, pipelineId: string, fields: { chave: string; rotulo: string; tipo: string; opcoes: string[]; obrigatorio: boolean; tiposVenda?: string[] }[]) {
   for (const [i, f] of fields.entries()) {
-    const values = { label: f.rotulo, type: f.tipo, options: f.opcoes, required: f.obrigatorio, position: i, active: true };
+    const values = { label: f.rotulo, type: f.tipo, options: f.opcoes, required: f.obrigatorio, position: i, active: true, saleKinds: f.tiposVenda ?? [] };
     await tx.insert(s.pipelineFields).values({ tenantId, pipelineId, key: f.chave, ...values }).onConflictDoUpdate({ target: [s.pipelineFields.pipelineId, s.pipelineFields.key], set: values });
   }
   await tx.update(s.pipelineFields).set({ active: false }).where(and(eq(s.pipelineFields.pipelineId, pipelineId), fields.length ? notInArray(s.pipelineFields.key, fields.map((f) => f.chave)) : undefined));
@@ -246,26 +246,50 @@ export async function resolvePipeline(db: DbOrTx, tenantId: string, opts: { pipe
   return list.find((x) => opts.segment && x.segments.includes(opts.segment)) ?? list.find((x) => x.isDefault) ?? list[0]!;
 }
 
+/** Etapa equivalente no funil Corporativo para quem estava nas antigas jornadas por tipo de venda. */
+const STAGE_MAP: Record<string, string> = {
+  captacao: 'novo_lead', analise_edital: 'diagnostico', proposta_documentos: 'proposta', sessao_disputa: 'negociacao', habilitacao_recurso: 'negociacao',
+  identificacao: 'novo_lead', pedido_adesao: 'diagnostico', autorizacao: 'negociacao', contratacao: 'negociacao',
+  demanda: 'novo_lead', levantamento: 'diagnostico', orcamento: 'proposta', aprovacao_gestor: 'negociacao',
+  descoberta: 'novo_lead', solucao_escopo: 'visita_tecnica',
+};
+
 /**
- * Empresas que já existiam antes dos tipos de venda ganham as quatro jornadas (Licitação, Adesão à Ata,
- * Consumo de Contrato e Venda Consultiva) como uma NOVA versão do modelo de instrução: fica no histórico de versões
- * e pode ser desfeita reativando a anterior. Jornadas já existentes não mudam.
+ * Tipos de venda são opções de formulário do funil Corporativo (pedido do Paulo, 23/10), não funis.
+ * Para empresas que já tinham as quatro jornadas criadas no mesmo dia: as oportunidades delas vão para o Corporativo
+ * (com o tipo de venda e a etapa equivalente, registrado no histórico), os campos de cada tipo entram no Corporativo,
+ * CNPJ e Nº de colaboradores saem (o CNPJ fica na conta) e as etapas deixam de exigir próxima ação e roteiro.
+ * Tudo vira uma NOVA versão do modelo de instrução (reversível). Roda uma vez: depois os campos já existem.
  */
-export async function ensureSaleTypeJourneys(db: DbOrTx, tenantId: string) {
-  const have = await db.select({ key: s.pipelines.key }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.active, true), inArray(s.pipelines.key, [...SALE_TYPE_KEYS])));
-  if (have.length === SALE_TYPE_KEYS.length) return false;
+export async function ensureSaleTypeForm(db: DbOrTx, tenantId: string) {
+  const [corp] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, 'empresarial'), eq(s.pipelines.active, true))).limit(1);
+  if (!corp) return false;
+  const legacy = await db.select({ id: s.pipelines.id, key: s.pipelines.key }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.active, true), inArray(s.pipelines.key, [...SALE_TYPE_KEYS])));
+  const [hasFields] = await db.select({ id: s.pipelineFields.id }).from(s.pipelineFields).where(and(eq(s.pipelineFields.pipelineId, corp.id), eq(s.pipelineFields.active, true), sql`cardinality(${s.pipelineFields.saleKinds}) > 0`)).limit(1);
+  if (!legacy.length && hasFields) return false;
   return (db as unknown as { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + tenantId}))`);
+    // oportunidades das antigas jornadas por tipo vão para o Corporativo, guardando o tipo de venda
+    for (const l of legacy) {
+      const opps = await tx.select({ id: s.opportunities.id, stage: s.opportunities.stage, rowVersion: s.opportunities.rowVersion }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, tenantId), eq(s.opportunities.pipelineId, l.id)));
+      for (const o of opps) {
+        const stage = o.stage === 'ganha' || o.stage === 'perdida' ? o.stage : STAGE_MAP[o.stage] ?? 'novo_lead';
+        await tx.update(s.opportunities).set({ pipelineId: corp.id, saleKind: l.key, stage, rowVersion: o.rowVersion + 1, updatedAt: new Date() }).where(eq(s.opportunities.id, o.id));
+        await tx.insert(s.opportunityEvents).values({ tenantId, opportunityId: o.id, type: 'updated', actorId: null, rowVersion: o.rowVersion + 1, payload: { changed: { 'tipo de venda': { from: `jornada ${l.key}`, to: `funil Corporativo · ${l.key}` }, ...(stage !== o.stage ? { etapa: { from: o.stage, to: stage } } : {}) } } });
+      }
+    }
     const active = await getActiveInstruction(tx, tenantId);
-    const existing = new Set(active.content.jornadas.map((j) => j.chave));
-    const missing = saleTypeJourneys().filter((j) => !existing.has(j.chave));
-    const inactive = SALE_TYPE_KEYS.filter((k) => existing.has(k) && !have.some((h) => h.key === k));
-    if (!missing.length && !inactive.length) return false;
-    const content = { ...active.content, _leia_me: undefined, versao: undefined, jornadas: [...active.content.jornadas, ...missing] };
+    const fields = saleTypeFields();
+    const jornadas = active.content.jornadas.filter((j) => !(SALE_TYPE_KEYS as readonly string[]).includes(j.chave)).map((j) => j.chave !== 'empresarial' ? j : {
+      ...j,
+      campos: [...j.campos.filter((c) => !['cnpj', 'colaboradores'].includes(c.chave) && !fields.some((f) => f.chave === c.chave)), ...fields],
+      etapas: j.etapas.map((e) => ({ ...e, exige: { ...e.exige, proximaAcao: false, respostasObrigatorias: false } })),
+    });
+    const content = { ...active.content, _leia_me: undefined, versao: undefined, jornadas };
     await applyJourneys(tx, tenantId, content.jornadas);
     const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
     await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
-    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: [`Tipos de venda incluídos: ${missing.map((j) => j.nome).join(', ') || 'reativados'}.`], activatedAt: new Date() });
+    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Tipos de venda viram opções de formulário do funil Corporativo (Licitação, Adesão à Ata, Consumo de Contrato, Venda Consultiva).', 'Corporativo: CNPJ e Nº de colaboradores saem dos campos (CNPJ fica na conta); etapas deixam de exigir próxima ação e roteiro.'], activatedAt: new Date() });
     return true;
   });
 }
