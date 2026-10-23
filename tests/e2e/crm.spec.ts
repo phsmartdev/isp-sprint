@@ -134,7 +134,7 @@ test('Sprint: plano define o valor pelo catálogo', async ({ page }) => {
   await page.getByText('Oferta / curiosidade').click();
   await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
-  const price = text.split('—')[1]!.trim();
+  const price = text.split('—')[1]!.replace('/mês', '').trim();
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText(price);
 });
 
