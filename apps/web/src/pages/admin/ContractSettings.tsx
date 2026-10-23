@@ -56,7 +56,7 @@ export function AdminContractSettings() {
       </section>
       <section className="card p-5">
         <h2 className="mb-1 text-md font-bold text-ink">Ofício de renovação</h2>
-        <p className="mb-3 max-w-3xl text-sm text-muted">Texto do ofício com variáveis. Para usar o papel timbrado institucional, crie um modelo em <Link className="link" to="/settings/contract-templates">Modelos de contrato</Link> com a arte e um campo {'{{oficio.corpo}}'} e escolha abaixo.</p>
+        <p className="mb-3 max-w-3xl text-sm text-muted">Texto do ofício com variáveis. Para usar o papel timbrado institucional, crie um modelo em <Link className="link" to="/settings/modelos?aba=contratos">Modelos de contrato</Link> com a arte e um campo {'{{oficio.corpo}}'} e escolha abaixo.</p>
         <FormField label="Modelo institucional (papel timbrado)" htmlFor="cs-tpl" className="mb-3 max-w-md">
           <Select id="cs-tpl" value={f.oficioTemplateId ?? ''} onChange={(e) => set({ oficioTemplateId: e.target.value || null })}><option value="">Sem arte (PDF simples com o nome da empresa)</option>{tpls.data?.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>
         </FormField>

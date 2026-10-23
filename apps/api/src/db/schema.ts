@@ -596,6 +596,16 @@ export const bidParticipants = pgTable('bid_participants', {
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('bid_participants_opp_idx').on(t.opportunityId), docIdx: index('bid_participants_doc_idx').on(t.tenantId, t.document), statusCk: check('bid_participants_status_ck', sql`status in ('ativo','desclassificado','desistente')`) }));
 
+/** Roteiro de cada tipo de tarefa; cada salvamento é uma nova versão (vale a mais recente). */
+export const activityScripts = pgTable('activity_scripts', {
+  id: id(),
+  tenantId: tenantId(),
+  type: text('type').notNull(),
+  script: text('script').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ typeIdx: index('activity_scripts_type_idx').on(t.tenantId, t.type, t.createdAt) }));
+
 export const opportunityEvents = pgTable(
   'opportunity_events',
   {

@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
+import { latestActivityScripts } from './activityScripts';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ensureSalesBranches } from '../services/opportunities';
@@ -42,7 +43,8 @@ export const metaRoutes = [
         stages: p.stages.map((st) => ({ id: st.id, key: st.key, name: st.name, position: st.position, kind: st.kind, isTerminal: st.isTerminal, color: st.color, requirements: st.requirements })),
       }));
       const def = pipelines.find((p) => p.isDefault) ?? pipelines[0];
-      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans, branches };
+      const activityScripts = Object.fromEntries((await latestActivityScripts(app.db, t)).filter((x) => x.script).map((x) => [x.type, x.script]));
+      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans, branches, activityScripts };
     },
   }),
 ];

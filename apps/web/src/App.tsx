@@ -43,11 +43,9 @@ import { AdminLayout, AdminOverview, AdminUsers, AdminPlans, AdminSources, Admin
 import { AdminJourneys } from './pages/admin/Journeys';
 import { AdminArea } from './pages/admin/Area';
 import { AdminViability } from './pages/admin/Viability';
-import { AdminInstructions } from './pages/admin/Instructions';
-import { AdminEmail } from './pages/admin/Email';
+import { AdminModels } from './pages/admin/Models';
 import { AdminData } from './pages/admin/DataAdmin';
 import { AdminCustomFields } from './pages/admin/CustomFields';
-import { AdminContractTemplates, AdminProposalTemplates } from './pages/admin/ProposalTemplates';
 import { ProfilePage } from './pages/admin/Profile';
 import { ContractsPage } from './pages/contracts/Contracts';
 import { ContractDetailPage } from './pages/contracts/ContractDetail';
@@ -135,8 +133,9 @@ export function App() {
           <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
           <Route path="area" element={<AdminArea />} />
           <Route path="viability" element={<AdminViability />} />
-          <Route path="instructions" element={<AdminInstructions />} />
-          <Route path="email" element={<AdminEmail />} />
+          <Route path="modelos" element={<AdminModels />} />
+          <Route path="instructions" element={<Navigate to="/settings/modelos?aba=instrucao" replace />} />
+          <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="data" element={<AdminData />} />
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<AdminContractSettings />} />
@@ -148,11 +147,11 @@ export function App() {
           <Route path="gmail" element={<AdminGmailSettings />} />
           <Route path="modulos" element={<AdminModules />} />
           <Route path="filiais" element={<AdminSalesBranches />} />
-          <Route path="proposals" element={<AdminProposalTemplates />} />
-          <Route path="contract-templates" element={<AdminContractTemplates />} />
+          <Route path="proposals" element={<Navigate to="/settings/modelos?aba=propostas" replace />} />
+          <Route path="contract-templates" element={<Navigate to="/settings/modelos?aba=contratos" replace />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />
-          <Route path="notifications" element={<Navigate to="/settings/email" replace />} />
+          <Route path="notifications" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="security" element={<AdminSecurity />} />
           <Route path="branding" element={<AdminBranding />} />
           <Route path="logs" element={<AdminLogs />} />

@@ -110,7 +110,7 @@ function Notifications() {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-sm text-muted">Quer mudar os textos? <Link className="link" to="/settings/instructions">Exporte o modelo de instrução</Link>, edite e envie de volta.</p>
+      <p className="mt-3 text-sm text-muted">Quer mudar os textos? <Link className="link" to="/settings/modelos?aba=instrucao">Exporte o modelo de instrução</Link>, edite e envie de volta.</p>
     </section>
   );
 }

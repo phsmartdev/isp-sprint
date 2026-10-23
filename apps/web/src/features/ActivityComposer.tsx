@@ -52,6 +52,12 @@ export function ActivityComposer({ opportunityId, contactId, defaultType = 'liga
         <FormField label="Tipo" htmlFor={`${formId}-type`}><Select id={`${formId}-type`} value={type} onChange={(e) => setType(e.target.value as ActivityType)}>{ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{ACTIVITY_TYPE_LABELS[t]}</option>)}</Select></FormField>
         <FormField label="Prioridade" htmlFor={`${formId}-prio`}><Select id={`${formId}-prio`} value={priority} onChange={(e) => setPriority(e.target.value as ActivityPriority)}>{ACTIVITY_PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}</Select></FormField>
       </div>
+      {lookups.data?.activityScripts?.[type] && (
+        <details className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm" open>
+          <summary className="cursor-pointer font-semibold text-ink">Roteiro de {ACTIVITY_TYPE_LABELS[type].toLowerCase()}</summary>
+          <p className="mt-2 whitespace-pre-line text-text">{lookups.data.activityScripts[type]}</p>
+        </details>
+      )}
       <FormField label="O que fazer" htmlFor={`${formId}-title`} required error={errors.title}>
         <Input id={`${formId}-title`} value={title} invalid={!!errors.title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Ligação para Mariana Costa" data-autofocus />
       </FormField>
