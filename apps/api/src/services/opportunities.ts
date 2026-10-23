@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { OpportunityReason } from '@isp/domain';
 import type { ContactCreate, OpportunityDetails } from '@isp/shared';
@@ -23,6 +23,9 @@ export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   campaignId?: string | null;
   planId?: string | null;
   pipelineId?: string | null;
+  branchId?: string | null;
+  /** Etapa inicial (aberta) da jornada. */
+  stage?: string | null;
   channel: string | null;
   reasons: OpportunityReason[];
   title: string | null;
@@ -45,6 +48,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   const ownerId = input.ownerId ?? auth.userId;
   await assertAssignableUser(tx, auth, 'oportunidades', ownerId);
   await assertTenantRefs(tx, auth, { sourceId: input.sourceId, campaignId: input.campaignId });
+  if (input.branchId) await assertBranch(tx, auth.tenantId, input.branchId);
   const plan = await planPrice(tx, auth, input.planId);
 
   let contactId = input.contactId ?? null;
@@ -52,6 +56,11 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   let segment: string | null = input.newContact?.segment ?? null;
   if (!contactId) {
     if (!input.newContact) throw notFound('Contato não encontrado.');
+    const doc = (input.newContact.document ?? '').replace(/\D/g, '');
+    if (doc) {
+      const [dup] = await tx.select({ id: s.contacts.id, name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.tenantId, auth.tenantId), isNull(s.contacts.deletedAt), sql`regexp_replace(coalesce(${s.contacts.document}, ''), '\D', '', 'g') = ${doc}`)).limit(1);
+      if (dup) throw unprocessable(`Já existe uma conta com este CNPJ: ${dup.name}. Use "Cliente da carteira".`, [{ path: 'newContact.document', message: `CNPJ já cadastrado em ${dup.name}` }]);
+    }
     const [c] = await tx
       .insert(s.contacts)
       .values({
@@ -60,7 +69,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
         phone: input.newContact.phone,
         email: input.newContact.email,
         segment: input.newContact.segment,
-        city: input.newContact.city,
+        city: input.newContact.city ?? input.newContact.address?.city ?? null,
+        document: input.newContact.document ?? null,
         ownerId,
         isProvisional: true,
         createdBy: auth.userId,
@@ -68,6 +78,10 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       .returning({ id: s.contacts.id, name: s.contacts.name });
     contactId = c!.id;
     contactName = c!.name;
+    const a = input.newContact.address;
+    if (a && (a.street || a.postalCode || a.city)) {
+      await tx.insert(s.addresses).values({ tenantId: auth.tenantId, contactId, street: a.street ?? null, number: a.number ?? null, district: a.district ?? null, city: a.city ?? null, state: a.state ?? null, postalCode: a.postalCode ?? null });
+    }
   } else {
     // contato existente precisa estar visível na carteira do usuário (Clientes)
     const [c] = await tx
@@ -81,7 +95,10 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     segment = c.segment;
   }
   const pipeline = await resolvePipeline(tx, auth.tenantId, { pipelineId: input.pipelineId, segment, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
-  const firstStage = pipeline.stages.find((st) => st.kind === 'open')!;
+  // etapa inicial escolhida na abertura (só etapas abertas); sem escolha, a primeira
+  const chosen = input.stage ? pipeline.stages.find((st) => st.key === input.stage && st.kind === 'open') : undefined;
+  if (input.stage && !chosen) throw unprocessable('Etapa inicial inválida.', [{ path: 'stage', message: 'Escolha uma etapa aberta deste tipo de venda' }]);
+  const firstStage = chosen ?? pipeline.stages.find((st) => st.kind === 'open')!;
 
   if (input.leadId) {
     const [l] = await tx.select({ id: s.leads.id }).from(s.leads).where(and(eq(s.leads.id, input.leadId), eq(s.leads.tenantId, auth.tenantId))).limit(1);
@@ -106,6 +123,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       reasons: input.reasons,
       channel: input.channel,
       sourceId: input.sourceId ?? null,
+      branchId: input.branchId ?? null,
       campaignId: input.campaignId ?? null,
       planId: plan?.id ?? null,
       valueCents: plan?.priceCents ?? null,
@@ -169,6 +187,10 @@ export const opportunitySelect = {
   executiveTicket: s.opportunities.executiveTicket,
   handoffStage: s.opportunities.handoffStage,
   measurementContractId: s.opportunities.measurementContractId,
+  branchId: s.opportunities.branchId,
+  bidMode: s.opportunities.bidMode,
+  bidGlobalCents: s.opportunities.bidGlobalCents,
+  itemCount: sql<number>`(select count(*)::int from opportunity_items oi where oi.opportunity_id = ${s.opportunities.id})`,
   measurementCents: s.opportunities.measurementCents,
   arpId: s.opportunities.arpId,
   contractId: sql<string | null>`(select c.id from contracts c where c.opportunity_id = "opportunities"."id" limit 1)`,
@@ -299,4 +321,17 @@ export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<Opp
     out.custom = merged;
   }
   return out;
+}
+
+/** A filial precisa ser desta empresa e estar ativa. */
+export async function assertBranch(db: DbOrTx, tenantId: string, branchId: string) {
+  const [b] = await db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(and(eq(s.salesBranches.id, branchId), eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.active, true))).limit(1);
+  if (!b) throw unprocessable('Filial inválida.', [{ path: 'branchId', message: 'Filial inexistente ou desativada' }]);
+}
+
+/** Empresas sem filial cadastrada ganham as filiais iniciais (BKT Soluções e UPNET). */
+export async function ensureSalesBranches(db: DbOrTx, tenantId: string) {
+  const [any] = await db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(eq(s.salesBranches.tenantId, tenantId)).limit(1);
+  if (any) return;
+  await db.insert(s.salesBranches).values([{ tenantId, name: 'BKT Soluções', position: 0 }, { tenantId, name: 'UPNET', position: 1 }]).onConflictDoNothing();
 }

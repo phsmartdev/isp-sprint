@@ -1,9 +1,11 @@
+import { SALE_TYPE_KEYS } from '@isp/shared';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
+import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -65,7 +67,9 @@ export function NewOpportunityPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [segment, setSegment] = useState<Segment>('residencial');
+  const [segment, setSegment] = useState<Segment>('empresarial');
+  const [document_, setDocument] = useState('');
+  const [accAddress, setAccAddress] = useState<AddressValue>(emptyAddress);
   const [search, setSearch] = useState('');
   const [contact, setContact] = useState<ContactHit | null>(null);
   const [cs, setCs] = useState<'' | 'sim' | 'nao'>('');
@@ -74,6 +78,8 @@ export function NewOpportunityPage() {
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [pipelineId, setPipelineId] = useState(params.get('pipelineId') ?? '');
+  const [branchId, setBranchId] = useState('');
+  const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [vb, setVb] = useState<ViabilityValue>({ saleType: '', cableMeters: '', activationFee: '' });
@@ -86,9 +92,10 @@ export function NewOpportunityPage() {
   const dq = useDebounced(search.trim(), 250);
   const hits = useQuery({ queryKey: ['contacts', dq], enabled: mode === 'existente' && dq.length >= 2, queryFn: () => api<{ items: ContactHit[] }>(`/contacts${qs({ q: dq })}`) });
   const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : segment;
-  const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed);
+  // abertura por tipo de venda: só as jornadas de tipo de venda (a residencial saiu da abertura em 23/10)
+  const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed && (SALE_TYPE_KEYS as readonly string[]).includes(p.key));
   const autoJourney = journeys.find((p) => p.segments.includes(seg)) ?? journeys.find((p) => p.isDefault) ?? journeys[0];
-  const journey = journeys.find((p) => p.id === pipelineId) ?? autoJourney;
+  const journey = journeys.find((p) => p.id === pipelineId);
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
 
@@ -101,18 +108,19 @@ export function NewOpportunityPage() {
       api<Opportunity>('/opportunities', {
         method: 'POST',
         body: {
-          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment, city: address.installCity || null } }),
+          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: journey?.key === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
           campaignId: campaignId || null,
           channel: lookups.data?.sources.find((s) => s.id === sourceId)?.name ?? null,
-          planId: planId || null,
+          planId: null,
           ownerId: ownerId || null,
           pipelineId: journey?.id ?? null,
-          reasons,
+          branchId: branchId || null,
+          stage: stage || null,
+          reasons: [],
           ...Object.fromEntries(Object.entries(address).map(([k, v]) => [k, v || null])),
-          ...viabilityPayload(vb),
           custom,
         },
       }),
@@ -132,10 +140,11 @@ export function NewOpportunityPage() {
     e.preventDefault();
     if (create.isPending) return;
     const errs: Record<string, string> = {};
-    if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome do cliente (ao menos 2 letras)';
+    if (!journey) errs.pipelineId = 'Escolha o tipo de venda';
+    if ((lookups.data?.branches ?? []).length && !branchId) errs.branchId = 'Escolha a filial da venda';
+    if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome da conta (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
     if (mode === 'existente' && isBase && !cs) errs.customerSuccess = 'Responda se aciona Sucesso do Cliente';
-    if (vb.activationFee.trim() && toCents(vb.activationFee) === null) errs.activationFeeCents = 'Use o formato 50,00';
     for (const f of journey?.fields ?? []) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
     setErrors(errs);
     if (!Object.keys(errs).length) create.mutate();
@@ -149,20 +158,34 @@ export function NewOpportunityPage() {
         <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary"><Handshake className="h-7 w-7" /></span>
         <div>
           <h1 className="text-xl font-extrabold text-ink">Nova oportunidade</h1>
-          <p className="text-muted">Preencha o que já souber. O cronômetro de 7 minutos começa quando você criar.</p>
+          <p className="text-muted">Escolha o tipo de venda e preencha o que já souber. O cronômetro começa quando você criar.</p>
         </div>
       </div>
       <form onSubmit={submit} noValidate className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         <div className="space-y-4">
           <Panel title="Oportunidade" icon={<Handshake className="h-5 w-5 text-primary" />}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: plano + cliente">
-                <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: 500 Mega — Ap. 302 Bloco B" />
+              <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente">
+                <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
-              <FormField label="Jornada" htmlFor="no-pipe" hint={pipelineId ? undefined : `Pelo tipo do deal: ${autoJourney?.name ?? '—'}`}>
-                <Select id="no-pipe" value={pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); }}>
-                  <option value="">Automática</option>
+              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.pipelineId} hint={journey?.description ?? undefined}>
+                <Select id="no-pipe" value={pipelineId} invalid={!!errors.pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); setStage(''); }}>
+                  <option value="">Escolha o tipo de venda</option>
                   {journeys.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </FormField>
+              {journey && (
+                <FormField label="Etapa do funil" htmlFor="no-stage" hint="Em branco: a primeira etapa">
+                  <Select id="no-stage" value={stage} onChange={(e) => setStage(e.target.value)}>
+                    <option value="">{journey.stages.find((x) => x.kind === 'open')?.name ?? 'Primeira etapa'}</option>
+                    {journey.stages.filter((x) => x.kind === 'open').slice(1).map((x) => <option key={x.key} value={x.key}>{x.name}</option>)}
+                  </Select>
+                </FormField>
+              )}
+              <FormField label="Filial" htmlFor="no-branch" required error={errors.branchId}>
+                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => setBranchId(e.target.value)}>
+                  <option value="">Escolha a filial</option>
+                  {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Canal de entrada" htmlFor="no-source">
@@ -196,19 +219,25 @@ export function NewOpportunityPage() {
               ))}
             </div>
             {mode === 'novo' ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <FormField label="Nome do cliente" htmlFor="no-name" required error={errors['newContact.name']}>
-                  <Input id="no-name" value={name} invalid={!!errors['newContact.name']} onChange={(e) => setName(e.target.value)} autoFocus />
-                </FormField>
-                <FormField label="Tipo do deal" htmlFor="no-seg">
-                  <Select id="no-seg" value={segment} onChange={(e) => { setSegment(e.target.value as Segment); setPlanId(''); }}>{SEGMENTS.map((s) => <option key={s} value={s}>{SEGMENT_LABELS[s]}</option>)}</Select>
-                </FormField>
-                <FormField label="Telefone" htmlFor="no-phone" error={errors['newContact.phone']}>
-                  <Input id="no-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(79) 9 0000-0000" />
-                </FormField>
-                <FormField label="E-mail" htmlFor="no-email" error={errors['newContact.email']}>
-                  <Input id="no-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-                </FormField>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <FormField label="Nome do cliente" htmlFor="no-name" required error={errors['newContact.name']} hint="Razão social ou nome da conta">
+                    <Input id="no-name" value={name} invalid={!!errors['newContact.name']} onChange={(e) => setName(e.target.value)} autoFocus />
+                  </FormField>
+                  <FormField label="CNPJ" htmlFor="no-doc" error={errors['newContact.document']} hint="Se já existir uma conta com este CNPJ, use “Cliente da carteira”">
+                    <Input id="no-doc" inputMode="numeric" value={document_} invalid={!!errors['newContact.document']} onChange={(e) => setDocument(e.target.value)} placeholder="00.000.000/0000-00" />
+                  </FormField>
+                  <FormField label="Telefone" htmlFor="no-phone" error={errors['newContact.phone']}>
+                    <Input id="no-phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(79) 9 0000-0000" />
+                  </FormField>
+                  <FormField label="E-mail" htmlFor="no-email" error={errors['newContact.email']}>
+                    <Input id="no-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                  </FormField>
+                </div>
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-ink">Endereço do cliente</p>
+                  <AddressFields value={accAddress} onChange={(v) => setAccAddress((a) => ({ ...a, ...v }))} idPrefix="no-acc" hideCondominium />
+                </div>
               </div>
             ) : (
               <div>
@@ -250,39 +279,21 @@ export function NewOpportunityPage() {
             )}
           </Panel>
 
-          <Panel title="Endereço de instalação" icon={<MapPin className="h-5 w-5 text-primary" />}>
-            <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" />
-          </Panel>
-
-          <Panel title="Plano e viabilidade" icon={<Building2 className="h-5 w-5 text-primary" />}>
-            <div className="space-y-3">
-              <FormField label="Plano" htmlFor="no-plan" hint="O valor vem do catálogo de planos">
-                <Select id="no-plan" value={planId} onChange={(e) => setPlanId(e.target.value)}>
-                  <option value="">Ainda não definido</option>
-                  {plans.map((p) => <option key={p.id} value={p.id}>{p.name}{p.speedMbps ? ` (${p.speedMbps} Mbps)` : ''} — {fmtBRL(p.priceCents)}/mês</option>)}
-                </Select>
-              </FormField>
-              <ViabilityInputs value={vb} onChange={(v) => setVb((x) => ({ ...x, ...v }))} idPrefix="no-vb" />
-              {errors.activationFeeCents && <p className="text-sm text-danger">{errors.activationFeeCents}</p>}
-              {vmeta.data && !vmeta.data.configured && <Notice tone="warning">Os parâmetros de viabilidade ainda não foram cadastrados (Configurações → Viabilidade). O cálculo fica incompleto.</Notice>}
-            </div>
+          <Panel title="Endereço de entrega" icon={<MapPin className="h-5 w-5 text-primary" />}>
+            <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" hideCondominium />
           </Panel>
 
           {journey && journey.fields.length > 0 && (
-            <Panel title={`Campos da jornada ${journey.name}`}>
+            <Panel title={`Informações de ${journey.name}`}>
               <CustomFieldsEditor fields={journey.fields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
               {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Preencha os campos obrigatórios da jornada.</p>}
             </Panel>
           )}
 
-          <Panel title="O que motivou o contato?">
-            <ChipGroup legend="Pode marcar mais de um" options={OPPORTUNITY_REASONS} value={reasons} onChange={setReasons} labels={REASON_LABELS} />
-          </Panel>
         </div>
         <aside className="space-y-4 xl:sticky xl:top-[88px] xl:self-start">
-          <ViabilityPanel v={sim.data} loading={sim.isFetching} title="Prévia da viabilidade" />
           <div className="card flex flex-col gap-2 p-5">
-            <Button type="submit" variant="primary" size="lg" loading={create.isPending}>Iniciar Sprint</Button>
+            <Button type="submit" variant="primary" size="lg" loading={create.isPending}>Iniciar Negociação</Button>
             <Button onClick={() => nav(-1)}>Cancelar</Button>
           </div>
         </aside>
@@ -439,7 +450,9 @@ function useAutosave(opp: Opportunity | undefined) {
       }
     } catch (e) {
       setStatus('error');
-      setError(e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message);
+      // mostra também o campo recusado, para quem vê o aviso saber o que corrigir
+      const fe = e instanceof ApiError ? (e.problem.errors ?? []).map((x) => `${x.path}: ${x.message}`).slice(0, 3).join('; ') : '';
+      setError(e instanceof ApiError ? `${e.problem.detail ?? e.message}${fe ? ` (${fe})` : ''}` : (e as Error).message);
       if (e instanceof ApiError && e.status === 409) setConflict(true);
     } finally {
       inFlight.current = false;
@@ -518,6 +531,11 @@ export function OpportunityWorkspacePage() {
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
   const glpiUnseen = useQuery({ queryKey: ['glpi', 'unseen', id], enabled: feature('crm.chamados'), refetchInterval: 60_000, queryFn: () => api<{ total: number; open: number; unseen: number }>(`/opportunities/${id}/glpi-tickets/unseen`) });
+  const setBranch = useMutation({
+    mutationFn: (branchId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { branchId: branchId || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); toast({ tone: 'success', message: 'Filial alterada' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
   const move = useMutation({
     mutationFn: (pipelineId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { pipelineId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['pipeline'] }); toast({ tone: 'success', message: `Movida para a jornada ${o.pipelineName}` }); },
@@ -570,8 +588,9 @@ export function OpportunityWorkspacePage() {
         <p className="font-bold text-ink">{opp.title}</p>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
           <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
+          <dt className="text-muted">Filial</dt><dd className="text-text">{lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
-          <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null ? <span className="font-normal text-muted"> /mês</span> : null}</dd>
+          <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null && !opp.itemCount ? <span className="font-normal text-muted"> /mês</span> : null}{opp.itemCount ? <span className="font-normal text-muted"> · {opp.itemCount} item(ns)</span> : null}</dd>
           {(selectedPlan ?? opp.planName) && (<><dt className="text-muted">Solução</dt><dd className="text-text">{selectedPlan?.name ?? opp.planName}</dd></>)}
           <dt className="text-muted">Canal</dt><dd className="text-text">{opp.sourceName ?? 'Não informado'}</dd>
           <dt className="text-muted">Criada</dt><dd className="num text-text">{fmtDateTime(opp.createdAt)}</dd>
@@ -591,6 +610,12 @@ export function OpportunityWorkspacePage() {
           <SideSection id="dados" title="Dados do deal" defaultOpen summary={f.title}>
             <div className="space-y-3">
               <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
+              <FormField label="Filial" htmlFor="ws-branch" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
+                <Select id="ws-branch" value={opp.branchId ?? ''} disabled={!editable || setBranch.isPending || a.dirty} onChange={(e) => setBranch.mutate(e.target.value)}>
+                  <option value="">Não informada</option>
+                  {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </Select>
+              </FormField>
               <FormField label="Canal de entrada" htmlFor="ws-source">
                 <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
                   <option value="">Não informado</option>
@@ -610,8 +635,8 @@ export function OpportunityWorkspacePage() {
               <CustomFieldsEditor fields={pipeline.fields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
             </SideSection>
           )}
-          <SideSection id="endereco" title="Endereço de instalação" defaultOpen={!f.condominiumId && !f.installStreet} summary={addressSummary || 'Não informado'}>
-            <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" />
+          <SideSection id="endereco" title="Endereço de entrega" defaultOpen={!f.condominiumId && !f.installStreet} summary={addressSummary || 'Não informado'}>
+            <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" hideCondominium={!f.condominiumId} />
           </SideSection>
         </div>
       </section>
@@ -630,6 +655,7 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
+      <OpportunityItems opp={opp} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">

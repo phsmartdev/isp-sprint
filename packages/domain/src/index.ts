@@ -24,3 +24,4 @@ export * from './abmSignals';
 export * from './mail';
 export * from './modules';
 export * from './glpi';
+export * from './items';

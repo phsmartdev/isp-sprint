@@ -449,6 +449,16 @@ export const pipelineStages = pgTable(
   }),
 );
 
+/** Filial que vende (ex.: BKT Soluções, UPNET). Lista da empresa, mantida pela gerência. */
+export const salesBranches = pgTable('sales_branches', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  active: boolean('active').notNull().default(true),
+  position: integer('position').notNull().default(0),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name) }));
+
 export const opportunities = pgTable(
   'opportunities',
   {
@@ -493,6 +503,11 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Filial que vende a oportunidade. */
+    branchId: uuid('branch_id').references(() => salesBranches.id),
+    /** Licitação: lance por item ('item') ou um lance global ('global'). */
+    bidMode: text('bid_mode'),
+    bidGlobalCents: bigint('bid_global_cents', { mode: 'number' }),
     /** Contrato por medição de onde sai o consumo quando a venda fecha (e o valor consumido). */
     measurementContractId: uuid('measurement_contract_id'),
     measurementCents: bigint('measurement_cents', { mode: 'number' }),
@@ -542,6 +557,25 @@ export const opportunities = pgTable(
 );
 
 /** Eventos append-only: nunca atualizados nem apagados pela aplicação. */
+/** Produtos e serviços da oportunidade. O total é o valor da oportunidade; cada mudança fica no histórico dela. */
+export const opportunityItems = pgTable('opportunity_items', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  position: integer('position').notNull().default(0),
+  description: text('description').notNull(),
+  unit: text('unit').notNull().default('un'),
+  qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull(),
+  unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+  discountCents: bigint('discount_cents', { mode: 'number' }).notNull().default(0),
+  surchargeCents: bigint('surcharge_cents', { mode: 'number' }).notNull().default(0),
+  notes: text('notes'),
+  /** Licitação: valor do lance por unidade deste item. */
+  bidUnitCents: bigint('bid_unit_cents', { mode: 'number' }),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`) }));
+
 export const opportunityEvents = pgTable(
   'opportunity_events',
   {

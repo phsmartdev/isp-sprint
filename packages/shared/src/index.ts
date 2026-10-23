@@ -42,6 +42,10 @@ export const ContactCreate = z.object({
   segment: z.enum(SEGMENTS).default('residencial'),
   city: optText(80),
   ownerId: uuid.optional().nullable(),
+  /** CNPJ (ou CPF) da conta nova; se já existir na empresa, a criação é recusada para não duplicar. */
+  document: optText(20),
+  /** Endereço da conta (fiscal), informado junto com a conta nova. */
+  address: z.object({ postalCode: optText(10), street: optText(200), number: optText(20), district: optText(100), city: optText(100), state: optText(2) }).optional().nullable(),
 });
 export type ContactCreate = z.infer<typeof ContactCreate>;
 
@@ -139,6 +143,10 @@ export const OpportunityCreate = z
     planId: uuid.optional().nullable(),
     /** Jornada. Em branco: a do segmento do cliente ou a padrão. */
     pipelineId: uuid.optional().nullable(),
+    /** Filial que vende (BKT Soluções, UPNET…). */
+    branchId: uuid.optional().nullable(),
+    /** Etapa inicial do funil (aberta). Em branco: a primeira. */
+    stage: stageKey.optional().nullable(),
     /** Cliente da base: true duplica a oportunidade no funil Sucesso do Cliente. */
     customerSuccess: z.boolean().optional(),
   })
@@ -160,6 +168,7 @@ export const OpportunityUpdate = z.object({
   planId: uuid.optional().nullable(),
   /** Trocar de jornada: a etapa passa para a de mesma chave na nova jornada, ou a primeira. */
   pipelineId: uuid.optional(),
+  branchId: uuid.optional().nullable(),
   nextAction: optText(200),
   nextActionAt: isoDate.optional().nullable(),
   notes: optText(4000),

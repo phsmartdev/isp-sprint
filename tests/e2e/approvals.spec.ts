@@ -16,11 +16,18 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await login(seller, 'lucas@yepnet.test');
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Cliente Aprovação E2E');
-  await seller.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await seller.getByText('Oferta / curiosidade').click();
-  await seller.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByLabel('Filial').selectOption({ index: 1 });
+  await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
+  // produtos lançados pela tela: o total vira o valor que vai para a aprovação
+  const items = seller.getByRole('region', { name: 'Produtos e serviços' });
+  await items.getByRole('button', { name: 'Adicionar item' }).click();
+  await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');
+  await items.getByLabel('Valor 1').fill('1.200,00');
+  await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
+  await expect(seller.getByText('Produtos e serviços salvos')).toBeVisible();
 
   await seller.getByRole('button', { name: /Pedir aprovação/ }).click();
   await expect(seller.getByRole('heading', { name: 'Análise e aprovação' })).toBeVisible();
@@ -134,9 +141,9 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   await login(seller, 'lucas@yepnet.test');
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Cliente Chat E2E');
-  await seller.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await seller.getByText('Oferta / curiosidade').click();
-  await seller.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByLabel('Filial').selectOption({ index: 1 });
+  await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
 

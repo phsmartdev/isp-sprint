@@ -27,6 +27,8 @@ export type Lookups = {
   stages: LookupStage[];
   teams: { id: string; name: string }[];
   plans: { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null }[];
+  /** Filiais ativas da venda (BKT Soluções, UPNET…). */
+  branches: { id: string; name: string }[];
 };
 export type StageRequirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
 export type LookupStage = { id: string; key: string; name: string; position: number; kind: 'open' | 'won' | 'lost'; isTerminal: boolean; color: string | null; requirements: StageRequirements };
@@ -114,6 +116,11 @@ export type Opportunity = {
   handoffStage: string | null;
   contractId: string | null;
   approvalStatus?: string | null;
+  branchId: string | null;
+  /** Quantidade de produtos/serviços lançados. */
+  itemCount: number;
+  bidMode: 'item' | 'global' | null;
+  bidGlobalCents: number | null;
   measurementContractId: string | null;
   measurementCents: number | null;
   executiveTicket: string | null;

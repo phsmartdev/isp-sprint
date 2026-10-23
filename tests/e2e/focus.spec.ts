@@ -11,9 +11,9 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
   for (const ch of 'Cliente Foco Teste') { await page.keyboard.type(ch); await page.waitForTimeout(120); }
   await expect(page.getByLabel('Nome do cliente')).toBeFocused();
   await expect(page.getByLabel('Nome do cliente')).toHaveValue('Cliente Foco Teste');
-  await page.getByLabel('Plano', { exact: true }).selectOption({ index: 1 });
-  await page.getByLabel('Metragem de cabo (m)').fill('30');
-  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await page.getByLabel('Filial').selectOption({ index: 1 });
+  await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const deal = page.getByLabel('Nome do deal');
   await deal.fill('');

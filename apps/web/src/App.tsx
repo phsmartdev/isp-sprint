@@ -1,4 +1,5 @@
 import { AdminModules } from './pages/admin/Modules';
+import { AdminSalesBranches } from './pages/admin/SalesBranches';
 import { EmailPage, MailboxesPage } from './pages/email/Email';
 import { AdminGmailSettings } from './pages/admin/GmailSettings';
 import { AbmPage } from './pages/marketing/Abm';
@@ -146,6 +147,7 @@ export function App() {
           <Route path="abm" element={<AdminAbmSettings />} />
           <Route path="gmail" element={<AdminGmailSettings />} />
           <Route path="modulos" element={<AdminModules />} />
+          <Route path="filiais" element={<AdminSalesBranches />} />
           <Route path="proposals" element={<AdminProposalTemplates />} />
           <Route path="contract-templates" element={<AdminContractTemplates />} />
           <Route path="sources" element={<AdminSources />} />
