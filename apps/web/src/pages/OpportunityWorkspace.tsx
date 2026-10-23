@@ -28,6 +28,7 @@ import { useTransitionMutation } from '../features/useTransition';
 import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type KitValue, type ViabilityValue } from '../features/DealFields';
 import { MeasurementBox } from '../features/MeasurementBox';
 import { Attachments } from '../features/Attachments';
+import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
 import { Objections, StageScript } from '../features/Playbook';
@@ -533,8 +534,9 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>('conversa');
   const [search] = useSearchParams();
-  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat' | 'trabalho' | 'pessoas'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' || t === 'trabalho' || t === 'pessoas' ? t : 'atividades'; });
+  const [centerTab, setCenterTab] = useState<'atividades' | 'historico' | 'anexos' | 'chat' | 'trabalho' | 'pessoas' | 'chamados'>(() => { const t = search.get('aba'); return t === 'chat' || t === 'historico' || t === 'anexos' || t === 'trabalho' || t === 'pessoas' || t === 'chamados' ? t : 'atividades'; });
   const unread = useUnread(id!);
+  const glpiUnseen = useQuery({ queryKey: ['glpi', 'unseen', id], enabled: feature('crm.chamados'), refetchInterval: 60_000, queryFn: () => api<{ total: number; open: number; unseen: number }>(`/opportunities/${id}/glpi-tickets/unseen`) });
   const move = useMutation({
     mutationFn: (pipelineId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { pipelineId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['pipeline'] }); toast({ tone: 'success', message: `Movida para a jornada ${o.pipelineName}` }); },
@@ -666,6 +668,7 @@ export function OpportunityWorkspacePage() {
             ...(can('projetos') ? [{ key: 'trabalho' as const, label: 'Tarefas e projetos' }] : []),
             ...(feature('marketing.abm') ? [{ key: 'pessoas' as const, label: 'Pessoas e ABM' }] : []),
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount },
+            ...(feature('crm.chamados') ? [{ key: 'chamados' as const, label: glpiUnseen.data?.unseen ? `Chamados GLPI • ${glpiUnseen.data.unseen} novo(s)` : 'Chamados GLPI', count: glpiUnseen.data?.unseen ? undefined : glpiUnseen.data?.total || undefined }] : []),
             { key: 'historico', label: unread.data?.comments ? `Comentários e histórico • ${unread.data.comments} novo(s)` : 'Comentários e histórico' },
             { key: 'chat', label: unread.data?.chat ? `Chat • ${unread.data.chat} nova(s)${unread.data.mentions ? ' @' : ''}` : 'Chat' },
           ]} />
@@ -677,6 +680,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'trabalho' && <WorkLinks prefill={{ opportunityId: opp.id, contactId: opp.contactId, label: `OP-${opp.code} · ${opp.contactName}`, kind: 'implantacao', name: `Implantação ${opp.contactName}` }} />}
           {centerTab === 'pessoas' && <EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact />}
           {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
+          {centerTab === 'chamados' && <GlpiTickets oppId={opp.id} contactName={opp.contactName} hasCustomer={!!opp.customerId} />}
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'chat' && <div className="-m-5"><NegotiationChat oppId={opp.id} title={false} className="max-h-[620px]" /></div>}
         </div>

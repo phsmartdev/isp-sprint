@@ -43,6 +43,7 @@ declare module 'fastify' {
   }
   interface FastifyRequest {
     auth: AuthContext | null;
+    rawBody: string | null;
   }
 }
 

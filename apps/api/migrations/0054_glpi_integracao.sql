@@ -1,0 +1,2 @@
+ALTER TABLE "integrations" DROP CONSTRAINT "integrations_kind_ck";--> statement-breakpoint
+ALTER TABLE "integrations" ADD CONSTRAINT "integrations_kind_ck" CHECK (kind in ('ixc','zapi','zapsign','glpi','whatsapp','meta','site'));

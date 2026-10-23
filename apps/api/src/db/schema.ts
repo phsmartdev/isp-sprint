@@ -1037,7 +1037,7 @@ export const integrations = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.kind] }),
     tokenUq: uniqueIndex('integrations_token_uq').on(t.webhookToken),
-    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'zapsign', 'whatsapp', 'meta', 'site'])),
+    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site'])),
   }),
 );
 
@@ -3859,4 +3859,64 @@ export const projectRisks = pgTable(
     impCk: check('project_risks_impact_ck', inList('impact', ['baixo', 'medio', 'alto'])),
     statusCk: check('project_risks_status_ck', inList('status', ['aberto', 'em_mitigacao', 'ocorrido', 'encerrado'])),
   }),
+);
+
+// ------------------------------------------------------------------ GLPI (chamados abertos a partir da negociação)
+
+/** Chamado aberto no GLPI a partir de uma oportunidade. O GLPI é a fonte; aqui fica o vínculo e a última leitura. */
+export const glpiTickets = pgTable(
+  'glpi_tickets',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    customerId: uuid('customer_id').references(() => customers.id),
+    glpiId: integer('glpi_id').notNull(),
+    entityId: integer('entity_id').notNull(),
+    entityName: text('entity_name'),
+    categoryId: integer('category_id'),
+    categoryName: text('category_name'),
+    groupId: integer('group_id'),
+    groupName: text('group_name'),
+    type: integer('type').notNull(),
+    urgency: integer('urgency').notNull(),
+    title: text('title').notNull(),
+    status: integer('status'),
+    statusName: text('status_name'),
+    solvedAt: ts('solved_at'),
+    closedAt: ts('closed_at'),
+    glpiUpdatedAt: text('glpi_updated_at'),
+    lastSyncAt: ts('last_sync_at'),
+    syncError: text('sync_error'),
+    /** Retornos do GLPI ainda não vistos por quem abriu/é dono da oportunidade. */
+    unseen: integer('unseen').notNull().default(0),
+    openedBy: uuid('opened_by').notNull().references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    uq: uniqueIndex('glpi_tickets_uq').on(t.tenantId, t.glpiId),
+    opp: index('glpi_tickets_opp_idx').on(t.opportunityId),
+  }),
+);
+
+/** Retornos do chamado (acompanhamentos, tarefas, solução, documentos, mudanças de situação). Append-only. */
+export const glpiTicketEvents = pgTable(
+  'glpi_ticket_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    ticketId: uuid('ticket_id').notNull().references(() => glpiTickets.id),
+    kind: text('kind').notNull(),
+    externalId: text('external_id').notNull(),
+    /** saida = enviado pelo CRM; entrada = veio do GLPI. */
+    direction: text('direction').notNull().default('entrada'),
+    author: text('author'),
+    text: text('text').notNull().default(''),
+    isPrivate: boolean('is_private').notNull().default(false),
+    occurredAt: ts('occurred_at').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('glpi_ticket_events_uq').on(t.ticketId, t.externalId) }),
 );

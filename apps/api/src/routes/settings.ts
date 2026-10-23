@@ -1,4 +1,5 @@
 /** Configurações: modelo de instrução, jornadas, SMTP, notificações, registro de e-mails e agendamento. */
+import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
 import { timingSafeEqual } from 'node:crypto';
 import { runAbmDaily } from '../services/abmFollowup';
@@ -296,7 +297,9 @@ export const settingsRoutes = [
           results[t.id] = { closed: await closeDueGoals(app.db, t.id, zone, today, config.traffic ?? { green: 0.9, yellow: 0.85 }), recurring: await rollRecurringGoals(app.db, t.id, today), interventions: await syncInterventions(app.db, t.id, today), abm: await runAbmDaily(app.db, t.id, today, zone), mail: await syncTenantMail(app.db, app.config.gmail, t.id, 0).catch((e) => ({ error: (e as Error).message })) };
         } catch (e) { results[t.id] = { error: (e as Error).message }; }
       }
-      return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events, results };
+      const glpi: Record<string, unknown> = {};
+      for (const t of tenants) glpi[t.id] = await syncOpenTickets(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
+      return { ...digests, ...idle, ...contracts, customerSuccess: cs, businessEvents: events, results, glpi };
     },
   }),
 ];

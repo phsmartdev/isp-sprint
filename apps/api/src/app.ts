@@ -48,6 +48,7 @@ import { surveyRoutes } from './routes/surveys';
 import { mailRoutes } from './routes/mail';
 import { moduleRoutes } from './routes/modules';
 import { projectGovernanceRoutes } from './routes/projectGovernance';
+import { glpiRoutes } from './routes/glpi';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -87,6 +88,18 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
   app.decorate('db', db);
   app.decorate('config', config);
   app.decorateRequest('auth', null);
+  // corpo cru guardado para conferir assinatura de webhook (GLPI assina o corpo exato); JSON segue o parser padrão
+  app.decorateRequest('rawBody', null);
+  const defaultJson = app.getDefaultJsonParser('error', 'error');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => { (req as { rawBody: string | null }).rawBody = String(body); defaultJson(req, body as string, done); });
+  app.removeContentTypeParser('text/plain');
+  app.addContentTypeParser('text/plain', { parseAs: 'string' }, (req, body, done) => { (req as { rawBody: string | null }).rawBody = String(body); done(null, String(body)); });
+  // o GLPI envia o webhook sem Content-Type: só o endereço dele aceita outros tipos (corpo como texto)
+  app.addContentTypeParser('*', { parseAs: 'string' }, (req, body, done) => {
+    if (!req.url.startsWith('/api/v1/hooks/glpi/')) { const e = new Error('Tipo de conteúdo não aceito') as Error & { statusCode: number }; e.statusCode = 415; done(e); return; }
+    (req as { rawBody: string | null }).rawBody = String(body);
+    done(null, String(body));
+  });
 
   await app.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } } });
   // webhooks de integração (formulário do site em outro domínio) aceitam qualquer origem, sem cookies
@@ -178,6 +191,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...mailRoutes,
     ...moduleRoutes,
     ...projectGovernanceRoutes,
+    ...glpiRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,

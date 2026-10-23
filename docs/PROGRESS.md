@@ -92,6 +92,33 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Histórico único de interações** (Conta 360 → Acompanhamento): atividades concluídas, e-mails enviados (oportunidades e contratos da conta), pesquisas respondidas e visitas, com filtro por pessoa; "Registrar interação" (tipo, quando, com quem, o que foi conversado). Atividades passam a guardar com quais pessoas da conta foram (tarefas de plays, cadências e sinais também).
 - Migração 0049 (`abm_signals`, `abm_signal_events` append-only, `abm_cadences`, `abm_cadence_tasks`, `activities.stakeholder_ids`). Testes: domínio (4), API (4), E2E (1). Regressão completa: domínio 140, API 210, E2E 55/55.
 
+## Chamados no GLPI a partir da negociação ✅ construída · ⏳ validação com o GLPI real pendente (2026-10-22)
+- **Abrir chamado:** na oportunidade, a aba "Chamados GLPI" tem o botão "Abrir chamado no GLPI".
+  - Entidade do cliente, categoria e grupo técnico vêm do próprio GLPI, buscados na hora. Também se escolhem tipo (incidente ou requisição), urgência, título e descrição.
+  - O chamado leva o nome de quem abriu e o código da oportunidade.
+  - A entidade escolhida fica lembrada para o cliente (vínculo em `customer_external_ids`) e vem selecionada da próxima vez.
+- **Retorno, tudo:** situação, acompanhamentos, tarefas (marcadas "Interno do suporte" quando privadas), solução e documentos.
+  - Chegam pelo webhook nativo do GLPI 11. Cada aviso tem a assinatura conferida (HMAC-SHA256 do corpo + timestamp, recusado após 15 minutos), e o desafio crc_token é respondido.
+  - A rotina diária relê os chamados abertos, caso algum aviso se perca. O botão "Atualizar" relê na hora.
+  - Sem duplicar: cada item do GLPI entra uma vez, em registro append-only.
+  - Contador de retornos novos na aba. Chamado solucionado ou fechado gera a tarefa "Dar retorno ao cliente" para o dono da oportunidade.
+- **Responder:** o vendedor responde no próprio chamado; vai como acompanhamento visível para a equipe do GLPI.
+- **Configuração** (Configurações → Integrações → GLPI):
+  - endereço do GLPI, cliente OAuth, usuário de integração e segredo do webhook. Segredos ficam cifrados e nunca voltam para a tela;
+  - botão "Testar conexão";
+  - em produção, o endereço precisa ser https e acessível pela internet. Endereços internos são recusados.
+- **Funcionalidade "Chamados no GLPI"** (CRM): pode ser desligada em Módulos e liberação. Quem não vê a oportunidade não vê nem responde o chamado.
+- **Rotas da API do GLPI:** conferidas no código-fonte do GLPI 11.0 (branch 11.0/bugfixes): `/api.php/token`, `/Administration/Entity`, `/Administration/Group`, `/Dropdowns/ITILCategory`, `/Assistance/Ticket`, `/Timeline`, `/Timeline/Followup` e `/TeamMember`. Nada foi inventado.
+  - A entidade do chamado vai no cabeçalho `GLPI-Entity`: no GLPI 11, o campo `entity` do chamado é somente leitura no corpo e vale a entidade ativa da sessão. Corrigido em 23/10 depois de conferir `Router::handleAuth` e o esquema do chamado; o GLPI simulado agora se comporta igual.
+- **Testes:** contra um GLPI 11 simulado com o mesmo formato (`apps/api/test/fakeGlpi.ts`; no E2E, porta 3398). Domínio (5), API (6), E2E (1). Regressão completa: domínio 158, API 238, E2E 61/61.
+- **Pendente para validar de verdade:**
+  1. GLPI 11 acessível pela internet.
+  2. Cliente OAuth com escopo "api" e concessão "Senha".
+  3. Usuário de integração com permissão de criar e ver chamados nas entidades dos clientes.
+  4. Webhook cadastrado para Chamado, Acompanhamento, Solução e Tarefa de chamado, com o segredo.
+  - Pontos a conferir: o fuso das datas (lidas no fuso da empresa) e as permissões do usuário de integração para ver acompanhamentos privados.
+- Migrações 0053 (`glpi_tickets`, `glpi_ticket_events` append-only) e 0054 (tipo de integração `glpi`).
+
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
   - Um projeto por frente (padrão: Contratos, CRM, Projetos — ajustes e homologação, Relatórios), cada uma com responsável próprio e a etiqueta da iniciativa.
