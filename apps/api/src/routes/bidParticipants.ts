@@ -63,6 +63,44 @@ export const bidParticipantRoutes = [
       });
     },
   }),
+  defineRoute({
+    method: 'PUT', url: '/opportunities/:id/bid-participants/ours', summary: 'Nosso lance: lotes que vamos disputar e o lance em cada um (entra no ranking)', tag: 'Oportunidades', module: 'oportunidades', params: OppParams,
+    body: z.object({ rowVersion: z.number().int(), items: z.array(z.object({ lot: z.string().trim().max(60).nullable().optional(), bidCents: z.number().int().min(0).max(100_000_000_000).nullable() })).max(100) }),
+    handler: async ({ app, auth, params, body }) => {
+      return app.db.transaction(async (tx) => {
+        const opp = await loadOpportunity(tx, auth, params.id);
+        if (opp.rowVersion !== body.rowVersion) throw conflict(opp.rowVersion);
+        if (!(await isBid(tx, auth.tenantId, opp))) throw unprocessable('O lance é só para oportunidades do tipo Licitação.');
+        const lots = body.items.map((i) => normalizeLot(i.lot));
+        if (new Set(lots).size !== lots.length) throw unprocessable('Cada lote aparece uma vez no nosso lance.');
+        if (lots.includes('Único') && lots.length > 1) throw unprocessable('Lote único não se mistura com lotes numerados: informe o número de cada lote.');
+        const [br] = opp.branchId ? await tx.select({ name: s.salesBranches.name }).from(s.salesBranches).where(eq(s.salesBranches.id, opp.branchId)).limit(1) : [];
+        const company = br?.name ?? 'Nossa empresa';
+        const all = await tx.select().from(s.bidParticipants).where(and(eq(s.bidParticipants.opportunityId, opp.id), eq(s.bidParticipants.tenantId, auth.tenantId))).orderBy(asc(s.bidParticipants.position));
+        const oursBefore = all.filter((r) => r.isUs);
+        const others = all.filter((r) => !r.isUs);
+        // mantém situação e vitória do lote que continua
+        const ours = body.items.map((i, k) => {
+          const prev = oursBefore.find((r) => r.lot === lots[k]);
+          return { company, document: null, lot: lots[k]!, bidCents: i.bidCents, status: (prev?.status ?? 'ativo') as (typeof PARTICIPANT_STATUSES)[number], winner: prev?.winner ?? false, isUs: true, notes: prev?.notes ?? null };
+        });
+        const items = [...ours, ...others.map((r) => ({ company: r.company, document: r.document, lot: r.lot, bidCents: r.bidCents, status: r.status as (typeof PARTICIPANT_STATUSES)[number], winner: r.winner, isUs: false, notes: r.notes }))];
+        const err = participantsError(items);
+        if (err) throw unprocessable(err);
+        await tx.delete(s.bidParticipants).where(and(eq(s.bidParticipants.opportunityId, opp.id), eq(s.bidParticipants.tenantId, auth.tenantId)));
+        if (items.length) await tx.insert(s.bidParticipants).values(items.map((r, position) => ({ ...r, tenantId: auth.tenantId, opportunityId: opp.id, position, createdBy: auth.userId })));
+        const updated = await tx.update(s.opportunities).set({ updatedAt: new Date(), rowVersion: bumpVersion() })
+          .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
+        if (!updated.length) throw conflict(opp.rowVersion);
+        const from = oursBefore.map((r) => `lote ${r.lot}: ${fmt(r.bidCents)}`).join('; ') || 'nenhum';
+        const to = ours.map((r) => `lote ${r.lot}: ${fmt(r.bidCents)}`).join('; ') || 'nenhum';
+        if (from !== to) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: updated[0]!.rowVersion, payload: { changed: { 'nosso lance': { from, to } } } });
+        const rows = await tx.select().from(s.bidParticipants).where(eq(s.bidParticipants.opportunityId, opp.id)).orderBy(asc(s.bidParticipants.position));
+        const ranks = rankParticipants(rows.map((r) => ({ ...r, status: r.status as (typeof PARTICIPANT_STATUSES)[number] })));
+        return { bid: true, rowVersion: updated[0]!.rowVersion, items: rows.map((r, i) => ({ ...r, rank: ranks[i] })) };
+      });
+    },
+  }),
 ];
 
 const ActionBody = z.object({

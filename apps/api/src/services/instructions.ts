@@ -295,7 +295,7 @@ export async function ensureSaleTypeForm(db: DbOrTx, tenantId: string) {
 }
 
 /** Campos que saíram do formulário do tipo de venda (ex.: itens/lotes passaram para Produtos e serviços). Os valores já gravados ficam no histórico. */
-const RETIRED_SALE_FIELDS = ['lotes_interesse'];
+const RETIRED_SALE_FIELDS = ['lotes_interesse', 'valor_pregao', 'valor_vitorioso'];
 export async function ensureRetiredSaleFields(db: DbOrTx, tenantId: string) {
   const [corp] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, 'empresarial'), eq(s.pipelines.active, true))).limit(1);
   if (!corp) return false;
@@ -309,7 +309,7 @@ export async function ensureRetiredSaleFields(db: DbOrTx, tenantId: string) {
     await applyJourneys(tx, tenantId, content.jornadas);
     const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
     await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
-    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Licitação: "Itens ou lotes de interesse" sai do formulário; itens e lotes ficam em Produtos e serviços.'], activatedAt: new Date() });
+    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Licitação: saem do formulário "Itens ou lotes de interesse" (vai para Produtos e serviços), "Valor do pregão" (passa a ser o total dos produtos) e "Valor vitorioso" (sai da lista de participantes).'], activatedAt: new Date() });
     return true;
   });
 }

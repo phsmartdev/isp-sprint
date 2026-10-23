@@ -6,7 +6,7 @@ import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel'
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
-import { BidParticipants } from '../features/opportunity/BidParticipants';
+import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -721,11 +721,11 @@ export function OpportunityWorkspacePage() {
           {kindFields.length > 0 && (
             <SavableSection id="tipo" title={kindLabel ? `Informações de ${kindLabel}` : 'Informações do tipo de venda'} summary={unmetFields.length ? `Falta: ${unmetFields.join(', ')}` : `${kindFields.length} campo(s)`} editable={editable}
               startEditing={unmetFields.length > 0 || kindFields.every((x) => f.custom[x.key] == null || f.custom[x.key] === '')} onSave={a.save}
-              view={kindFields.map((x) => [x.label, customText(x, f.custom[x.key])])}>
+              view={[...kindFields.map((x) => [x.label, customText(x, f.custom[x.key])]), ...(opp.saleKind === 'licitacao' ? [['Valor do pregão', opp.itemCount ? fmtBRL(opp.valueCents) : 'Lance os produtos']] : [])]}>
               <CustomFieldsEditor fields={kindFields} value={f.custom} disabled={!editable} onChange={(k, v) => a.setFields((x) => (x ? { ...x, custom: { ...x.custom, [k]: v } } : x))} idPrefix="ws-cf" />
             </SavableSection>
           )}
-          {opp.saleKind === 'licitacao' && <BidParticipants oppId={opp.id} />}
+          {opp.saleKind === 'licitacao' && <><OurBid oppId={opp.id} editable={editable} /><BidParticipants oppId={opp.id} /></>}
         </div>
       </section>
       <OpportunityContacts oppId={opp.id} editable={editable} />
