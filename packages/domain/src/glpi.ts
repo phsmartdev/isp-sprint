@@ -48,6 +48,12 @@ export function htmlToText(html: string | null | undefined): string {
 }
 
 /** Texto digitado no CRM → HTML simples para o GLPI (escapa e quebra linhas). */
+/** Cabeçalho que identifica, no GLPI, o que foi enviado pela integração (pedido do Paulo, 23/10). */
+export const GLPI_TICKET_HEADER = 'Ticket gerado a partir do RevOps:';
+export const GLPI_REPLY_HEADER = 'Resposta enviada pelo RevOps:';
+/** Corpo enviado ao GLPI: cabeçalho em destaque e, abaixo, o texto escrito na ferramenta. */
+export const glpiBody = (header: string, text: string) => `<p><strong>${header}</strong></p>${textToHtml(text)}`;
+
 export function textToHtml(text: string): string {
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   return esc.split(/\n{2,}/).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');

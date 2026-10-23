@@ -89,7 +89,9 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
       const m = path.match(/^\/Assistance\/Ticket\/(\d+)(\/.*)?$/);
       if (m) {
         const t = tickets.get(Number(m[1]));
-        if (!t) return json(res, 404, { status: 'ERROR_ITEM_NOT_FOUND', title: 'Item not found' });
+        // como no GLPI 11: só se enxerga o chamado na entidade ativa da sessão (cabeçalho GLPI-Entity; sem ele, a padrão do usuário = raiz, não recursiva)
+        const active = req.headers['glpi-entity'] === undefined ? 0 : Number(req.headers['glpi-entity']);
+        if (!t || t.entity !== active) return json(res, 404, { status: 'ERROR_ITEM_NOT_FOUND', title: 'Item not found' });
         const sub = m[2] ?? '';
         if (req.method === 'GET' && sub === '') {
           const ent = ENTITIES.find((e) => e.id === t.entity)!;

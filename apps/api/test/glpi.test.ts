@@ -59,7 +59,8 @@ describe('GLPI', () => {
     const t = glpi.tickets.get(glpiId)!;
     expect(t).toMatchObject({ entity: 3, category: 7, type: 1, urgency: 4, name: 'Viabilidade de link dedicado 200 Mb' });
     expect(t.content).toContain('<p>Cliente pede confirmação de viabilidade<br>para o prédio da secretaria.</p>');
-    expect(t.content).toMatch(/Aberto pelo ISP Sprint por Lucas/);
+    expect(t.content).toMatch(/Aberto no RevOps por Lucas/);
+    expect(t.content.startsWith('<p><strong>Ticket gerado a partir do RevOps:</strong></p>')).toBe(true);
     expect(t.team).toEqual([{ type: 'Group', id: 11, role: 'assigned' }]);
     const opp = ok(await lucas.get(`/opportunities/${oppId}`)).json();
     if (opp.customerId) expect(ok(await lucas.get(`/glpi/entities?opportunityId=${oppId}`)).json().linked).toEqual({ id: 3, name: 'Raiz > Clientes > Prefeitura de Lagarto' });
@@ -97,7 +98,7 @@ describe('GLPI', () => {
   it('resposta do CRM vai como acompanhamento e não volta como "novo"; releitura manual; erro do GLPI aparece claro', async () => {
     ok(await lucas.post(`/glpi-tickets/${ticketId}/followups`, { text: 'Cliente aprovou a rota norte, pode seguir.' }), 201);
     const t = glpi.tickets.get(glpiId)!;
-    expect(t.timeline.at(-1)!.item.content).toBe('<p>Cliente aprovou a rota norte, pode seguir.</p>');
+    expect(t.timeline.at(-1)!.item.content).toBe('<p><strong>Resposta enviada pelo RevOps:</strong></p><p>Cliente aprovou a rota norte, pode seguir.</p>');
     expect(ok(await lucas.post(`/glpi-tickets/${ticketId}/sync`)).json()).toMatchObject({ added: 0, status: 5 });
     glpi.failNext(500);
     const bad = await lucas.post(`/glpi-tickets/${ticketId}/sync`);

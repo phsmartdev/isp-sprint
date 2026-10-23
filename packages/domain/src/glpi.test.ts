@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, htmlToText, parseTimeline, textToHtml, webhookTicketId } from './glpi';
+import { GLPI_TICKET_HEADER, glpiBody, glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, htmlToText, parseTimeline, textToHtml, webhookTicketId } from './glpi';
 
 describe('GLPI', () => {
   it('valida o chamado antes de enviar', () => {
@@ -9,6 +9,7 @@ describe('GLPI', () => {
 
   it('converte texto e HTML nos dois sentidos, sem deixar marcação', () => {
     expect(textToHtml('a < b\n\nlinha 2\nlinha 3')).toBe('<p>a &lt; b</p><p>linha 2<br>linha 3</p>');
+    expect(glpiBody(GLPI_TICKET_HEADER, 'Oi')).toBe('<p><strong>Ticket gerado a partir do RevOps:</strong></p><p>Oi</p>');
     expect(htmlToText('<p>Olá&nbsp;<b>equipe</b></p><ul><li>um</li><li>dois</li></ul><script>x</script>')).toBe('Olá equipe\n• um\n• dois\nx');
   });
 

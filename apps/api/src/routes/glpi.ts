@@ -122,7 +122,7 @@ export const glpiRoutes = [
       if (errs.length) throw unprocessable(errs[0]!.message, errs);
       const c = await glpiConfig(app.db, auth.tenantId);
       const [me] = await app.db.select({ name: s.users.name, email: s.users.email }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
-      const content = `${body.content}\n\n—\nAberto pelo ISP Sprint por ${me?.name ?? 'usuário'} (${me?.email ?? ''}) na oportunidade OP-${opp.code} · ${opp.contactName}.`;
+      const content = `${body.content}\n\n—\nAberto no RevOps por ${me?.name ?? 'usuário'} (${me?.email ?? ''}) na oportunidade OP-${opp.code} · ${opp.contactName}.`;
       const created = await viaGlpi(() => glpiCreateTicket(c, { ...body, content }));
       const [row] = await app.db.transaction(async (tx) => {
         const r = await tx.insert(s.glpiTickets).values({
@@ -150,7 +150,7 @@ export const glpiRoutes = [
       const { t } = await ticketFor(app, auth, params.id);
       if (t.status === 6) throw unprocessable('O chamado está fechado no GLPI. Abra um novo chamado se precisar.');
       const c = await glpiConfig(app.db, auth.tenantId);
-      const f = await viaGlpi(() => glpiFollowup(c, t.glpiId, body.text));
+      const f = await viaGlpi(() => glpiFollowup(c, t.glpiId, t.entityId, body.text));
       await app.db.insert(s.glpiTicketEvents).values({ tenantId: auth.tenantId, ticketId: t.id, kind: 'Followup', externalId: `Followup:${f.id}`, direction: 'saida', text: body.text, occurredAt: new Date(Math.floor(Date.now() / 1000) * 1000), actorId: auth.userId }).onConflictDoNothing();
       reply.code(201);
       return { ok: true };
