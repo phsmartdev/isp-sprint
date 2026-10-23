@@ -2,6 +2,7 @@ import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
+import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,7 +34,6 @@ import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
-import { Objections, StageScript } from '../features/Playbook';
 import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
@@ -609,6 +609,7 @@ export function OpportunityWorkspacePage() {
           </SideSection>
         </div>
       </section>
+      <OpportunityContacts oppId={opp.id} editable={editable} />
       <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={<MeasurementBox opp={opp} />} />
     </div>
   );
@@ -623,8 +624,6 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
-      <StageScript oppId={opp.id} pipelineKey={pipeline?.key ?? ''} stage={opp.stage} disabled={!editable} />
-      <Objections pipelineKey={pipeline?.key ?? ''} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">

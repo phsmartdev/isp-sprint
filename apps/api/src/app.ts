@@ -49,6 +49,7 @@ import { mailRoutes } from './routes/mail';
 import { moduleRoutes } from './routes/modules';
 import { projectGovernanceRoutes } from './routes/projectGovernance';
 import { glpiRoutes } from './routes/glpi';
+import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -192,6 +193,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...moduleRoutes,
     ...projectGovernanceRoutes,
     ...glpiRoutes,
+    ...opportunityContactRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,
