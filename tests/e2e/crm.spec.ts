@@ -144,17 +144,68 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await expect(page.getByText('Escolha a filial da venda')).toBeVisible();
   await tipo.selectOption({ label: 'Licitação' });
   await expect(page.getByLabel('Etapa do funil')).toBeVisible();
-  await page.getByLabel('Etapa do funil').selectOption({ label: 'Análise do edital' });
+  // o funil é o Corporativo: as etapas são as dele, não uma jornada por tipo
+  await page.getByLabel('Etapa do funil').selectOption({ label: 'Diagnóstico' });
   const filiais = (await page.getByLabel('Filial').locator('option').allTextContents()).slice(1);
   expect(filiais).toEqual(['BKT Soluções', 'UPNET']);
   await page.getByLabel('Filial').selectOption({ label: 'UPNET' });
   await expect(page.getByRole('heading', { name: 'Informações de Licitação' })).toBeVisible();
   await page.getByLabel('Tipo de disputa').selectOption('Dispensa');
+  // modalidade do pregão logo abaixo do tipo de disputa
+  const order = await page.locator('select, input, textarea').evaluateAll((els) => els.map((e) => e.id));
+  expect(order.indexOf(order.find((x) => x.endsWith('modalidade_interna'))!)).toBe(order.indexOf(order.find((x) => x.endsWith('tipo_disputa'))!) + 1);
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Licitação');
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('UPNET');
-  await expect(page.locator('#ws-stage')).toHaveValue('analise_edital');
+  await expect(page.locator('#ws-stage')).toHaveValue('diagnostico');
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Corporativo');
+  // na negociação: seção do tipo de venda com Salvar e leitura compacta; endereço de entrega não aparece
+  await expect(page.getByRole('button', { name: 'Informações de Licitação' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Endereço de entrega' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Editar Informações de Licitação' }).click();
+  await page.getByLabel('Órgão contratante').fill('Prefeitura de Teste');
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Editar Informações de Licitação' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Prefeitura de Teste');
+  // participantes do pregão: ranking pelo menor lance e vencedora
+  const part = page.getByRole('region', { name: 'Participantes do pregão' });
+  await part.getByRole('button', { name: 'Registrar participantes' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
+  await dlg.getByLabel('Empresa 1').fill('Nossa Empresa');
+  await dlg.getByLabel('Nossa empresa 1').check();
+  await dlg.getByLabel('Lance 1').fill('95.000,00');
+  await dlg.getByLabel('Empresa 2').fill('Rede Concorrente');
+  await dlg.getByLabel('Lance 2').fill('90.000,00');
+  await expect(dlg.locator('tbody tr').nth(1)).toContainText('1º');
+  await dlg.getByLabel('Vencedora 1').check();
+  await dlg.getByLabel('Vencedora 2').check();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('Lote único');
+  await dlg.getByLabel('Vencedora 1').uncheck();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(part).toContainText('Rede Concorrente');
+  await expect(part).toContainText('R$ 90.000,00');
+  // participantes do pregão: ranking pelo menor lance e vencedora
+  const part = page.getByRole('region', { name: 'Participantes do pregão' });
+  await part.getByRole('button', { name: 'Registrar participantes' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
+  await dlg.getByLabel('Empresa 1').fill('Nossa Empresa');
+  await dlg.getByLabel('Nossa empresa 1').check();
+  await dlg.getByLabel('Lance 1').fill('95.000,00');
+  await dlg.getByLabel('Empresa 2').fill('Rede Concorrente');
+  await dlg.getByLabel('Lance 2').fill('90.000,00');
+  await expect(dlg.locator('tbody tr').nth(1)).toContainText('1º');
+  await dlg.getByLabel('Vencedora 1').check();
+  await dlg.getByLabel('Vencedora 2').check();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('Lote único');
+  await dlg.getByLabel('Vencedora 1').uncheck();
+  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(part).toContainText('Rede Concorrente');
+  await expect(part).toContainText('R$ 90.000,00');
   // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
   await page.goto('/opportunities/new');
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });

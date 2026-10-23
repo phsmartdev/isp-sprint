@@ -24,7 +24,7 @@ const blank = (): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: 
 const fromSaved = (i: Saved | ItemInput): Row => ({ key: `n${++seq}`, description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
 const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null });
 
-export function OpportunityItems({ opp }: { opp: Opportunity }) {
+export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['opp-items', opp.id], queryFn: () => api<Data>(`/opportunities/${opp.id}/items`) });
@@ -83,7 +83,7 @@ export function OpportunityItems({ opp }: { opp: Opportunity }) {
   };
 
   return (
-    <section className="card p-5" aria-label="Produtos e serviços">
+    <section className={embedded ? undefined : 'card p-5'} aria-label="Produtos e serviços">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-md font-bold text-ink"><Package className="h-5 w-5 text-primary" aria-hidden />Produtos e serviços</h2>
         {editable && (
@@ -110,7 +110,7 @@ export function OpportunityItems({ opp }: { opp: Opportunity }) {
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
                     <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => set(r.key, { description: e.target.value })} /></td>
-                    <td className="px-1.5 py-1.5"><Select aria-label={`Medida ${i + 1}`} className="h-9 w-[72px]" value={r.unit} disabled={!editable} onChange={(e) => set(r.key, { unit: e.target.value as ItemUnit })}>{ITEM_UNITS.map((u) => <option key={u} value={u}>{ITEM_UNIT_LABELS[u]}</option>)}</Select></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Medida ${i + 1}`} className="h-9 w-[88px] min-w-[88px]" value={r.unit} disabled={!editable} onChange={(e) => set(r.key, { unit: e.target.value as ItemUnit })}>{ITEM_UNITS.map((u) => <option key={u} value={u}>{ITEM_UNIT_LABELS[u]}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Quantidade ${i + 1}`} inputMode="decimal" className="num h-9 w-[72px]" value={r.qty} disabled={!editable} onChange={(e) => set(r.key, { qty: e.target.value })} /></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Valor ${i + 1}`} inputMode="decimal" className="num h-9 w-[104px]" value={r.unit$} disabled={!editable} onChange={(e) => set(r.key, { unit$: e.target.value })} placeholder="0,00" /></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Desconto ${i + 1}`} inputMode="decimal" className="num h-9 w-[92px]" value={r.discount} disabled={!editable} onChange={(e) => set(r.key, { discount: e.target.value })} placeholder="0,00" /></td>

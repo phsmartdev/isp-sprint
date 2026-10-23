@@ -9,7 +9,7 @@ import { AlertTriangle, Building2, Calculator, Loader2, MapPin, Search } from 'l
 import { SALE_TYPES, SALE_TYPE_LABELS, type SaleType, type ViabilityResult } from '@isp/domain';
 import { api } from '../lib/api';
 import { fmtBRL } from '../lib/format';
-import { toCents } from '@isp/domain';
+import { parseMoney, toCents } from '@isp/domain';
 import type { LookupField } from '../lib/types';
 import { Button, FormField, Input, Select, Textarea } from '../components/ui/primitives';
 
@@ -174,6 +174,21 @@ export function EquipmentOverride({ routeId, equipment, suggested, onChange, dis
 // ------------------------------------------------------------------ campos personalizados
 export type CustomValues = Record<string, string | number | boolean | null>;
 
+const brl = (n: number) => n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Valor em reais com a máscara brasileira: mostra "R$ 500.000,00" e guarda o número (500000). */
+export function MoneyInput({ id, value, onChange, disabled }: { id: string; value: number | null; onChange: (v: number | null) => void; disabled?: boolean }) {
+  const [text, setText] = useState<string | null>(null);
+  const shown = text ?? (value === null ? '' : brl(value));
+  return (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted" aria-hidden>R$</span>
+      <Input id={id} inputMode="decimal" className="pl-9 num" placeholder="0,00" value={shown} disabled={disabled}
+        onChange={(e) => { const t = e.target.value.replace(/[^\d.,]/g, ''); setText(t); const c = parseMoney(t); onChange(t === '' ? null : c === null ? value : c / 100); }}
+        onBlur={() => setText(null)} />
+    </div>
+  );
+}
+
 export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix = 'cf' }: { fields: LookupField[]; value: CustomValues; onChange: (key: string, v: string | number | boolean | null) => void; disabled?: boolean; idPrefix?: string }) {
   if (!fields.length) return null;
   return (
@@ -205,9 +220,15 @@ export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix
               <Textarea id={id} value={(v as string) ?? ''} disabled={disabled} onChange={(e) => onChange(f.key, e.target.value || null)} />
             </FormField>
           );
-        if (f.type === 'numero' || f.type === 'moeda')
+        if (f.type === 'moeda')
           return (
-            <FormField key={f.key} label={f.type === 'moeda' ? `${label} (R$)` : label} htmlFor={id} required={f.required}>
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+              <MoneyInput id={id} value={typeof v === 'number' ? v : null} disabled={disabled} onChange={(n) => onChange(f.key, n)} />
+            </FormField>
+          );
+        if (f.type === 'numero')
+          return (
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
               <Input id={id} inputMode="decimal" value={v === null || v === undefined ? '' : String(v).replace('.', ',')} disabled={disabled} onChange={(e) => { const t = e.target.value.replace(/\./g, '').replace(',', '.'); onChange(f.key, t === '' ? null : Number.isFinite(Number(t)) ? Number(t) : (v as number) ?? null); }} />
             </FormField>
           );

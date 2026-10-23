@@ -20,7 +20,12 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
 
   const deal = page.getByRole('region', { name: 'Informações do deal' });
   await expect(deal).toContainText('Tipo de venda');
+  // seções com Salvar: depois de salva, leitura compacta com Editar
+  await deal.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await expect(deal.getByLabel('Nome do deal')).toBeVisible();
+  await deal.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(deal.getByLabel('Nome do deal')).toHaveCount(0);
+  await expect(deal.getByRole('button', { name: 'Editar Dados do deal' })).toBeVisible();
   // contatos da negociação: vários, sem depender do ABM
   const contatos = page.getByRole('region', { name: 'Contatos' });
   await contatos.getByRole('button', { name: 'Adicionar' }).click();
@@ -42,9 +47,13 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
 
   const tabs = page.getByRole('tablist', { name: 'Acompanhamento' }).getByRole('tab');
   const names = (await tabs.allTextContents()).map((t) => t.replace(/\s*\(\d+\)|\s*•.*$/g, '').trim());
-  expect(names).toEqual(['Histórico', 'Projetos', 'Tarefas', 'Anexos', 'Chamados']);
+  expect(names).toEqual(['Histórico', 'Produtos', 'Projetos', 'Tarefas', 'Anexos', 'Chamados']);
   await expect(page.getByRole('tab', { name: /^Histórico/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('region', { name: 'Chat da negociação' })).toBeVisible();
+  // produtos e serviços ficam na aba ao lado do histórico
+  await page.getByRole('tab', { name: /^Produtos/ }).click();
+  await expect(page.getByRole('region', { name: 'Produtos e serviços' })).toBeVisible();
+  await page.getByRole('tab', { name: /^Histórico/ }).click();
   // sem rolagem horizontal das abas
   const tl = page.getByRole('tablist', { name: 'Acompanhamento' });
   expect(await tl.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);

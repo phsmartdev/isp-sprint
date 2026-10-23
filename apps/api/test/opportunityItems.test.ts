@@ -13,11 +13,14 @@ beforeAll(async () => {
 });
 afterAll(async () => ctx.close());
 
-async function newOpp(typeKey: string) {
+async function newOpp(saleKind: string, custom: Record<string, unknown> = {}) {
   const lk = ok(await lucas.get('/meta/lookups')).json();
-  const p = lk.pipelines.find((x: { key: string }) => x.key === typeKey);
-  expect(p, `jornada ${typeKey}`).toBeTruthy();
-  return ok(await lucas.post('/opportunities', { newContact: { name: `Conta Itens ${Date.now().toString(36)}`, segment: 'governamental' }, pipelineId: p.id, branchId: lk.branches[0].id }), 201).json();
+  const p = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
+  // tipos de venda não são funis: tudo nasce no Corporativo, com o tipo no formulário
+  expect(lk.pipelines.some((x: { key: string }) => ['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva'].includes(x.key))).toBe(false);
+  const fields = p.fields.filter((f: { required: boolean; saleKinds: string[] }) => f.required && f.saleKinds.includes(saleKind));
+  const values = Object.fromEntries(fields.map((f: { key: string; type: string; options: string[] }) => [f.key, f.type === 'numero' || f.type === 'moeda' ? 1 : f.type === 'data' ? '2026-12-01' : f.type === 'lista' ? f.options[0] : f.type === 'sim_nao' ? true : 'Teste']));
+  return ok(await lucas.post('/opportunities', { newContact: { name: `Conta Itens ${Date.now().toString(36)}`, segment: 'governamental' }, pipelineId: p.id, saleKind, branchId: lk.branches[0].id, custom: { ...values, ...custom } }), 201).json();
 }
 
 describe('Produtos e serviços da oportunidade', () => {
@@ -43,8 +46,9 @@ describe('Produtos e serviços da oportunidade', () => {
 
   it('licitação: lance por item ou global; venda fechada exige produtos lançados', async () => {
     const o = await newOpp('licitacao');
+    expect(o.saleKind).toBe('licitacao');
     const lk = ok(await lucas.get('/meta/lookups')).json();
-    const won = lk.pipelines.find((x: { key: string }) => x.key === 'licitacao').stages.find((st: { kind: string }) => st.kind === 'won');
+    const won = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial').stages.find((st: { kind: string }) => st.kind === 'won');
     // sem produtos, não fecha (as jornadas novas não exigem plano, então o bloqueio vem da exigência configurada na etapa, se houver)
     let cur = ok(await lucas.get(`/opportunities/${o.id}`)).json();
     let r = ok(await lucas.put(`/opportunities/${o.id}/items`, { rowVersion: cur.rowVersion, bidMode: 'item', items: [{ description: 'Link 100 Mb', unit: 'un', qtyMilli: 3000, unitCents: 100000, bidUnitCents: 90000 }] })).json();

@@ -578,6 +578,24 @@ export const opportunityItems = pgTable('opportunity_items', {
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`) }));
 
+/** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
+export const bidParticipants = pgTable('bid_participants', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  position: integer('position').notNull().default(0),
+  company: text('company').notNull(),
+  document: text('document'),
+  lot: text('lot').notNull().default('Único'),
+  bidCents: bigint('bid_cents', { mode: 'number' }),
+  status: text('status').notNull().default('ativo'),
+  winner: boolean('winner').notNull().default(false),
+  isUs: boolean('is_us').notNull().default(false),
+  notes: text('notes'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ oppIdx: index('bid_participants_opp_idx').on(t.opportunityId), docIdx: index('bid_participants_doc_idx').on(t.tenantId, t.document), statusCk: check('bid_participants_status_ck', sql`status in ('ativo','desclassificado','desistente')`) }));
+
 export const opportunityEvents = pgTable(
   'opportunity_events',
   {

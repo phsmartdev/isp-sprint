@@ -19,7 +19,7 @@ const ItemBody = z.object({
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
-async function isBid(db: Parameters<typeof pipelinesOf>[0], tenantId: string, opp: { pipelineId: string; saleKind?: string | null }) {
+export async function isBid(db: Parameters<typeof pipelinesOf>[0], tenantId: string, opp: { pipelineId: string; saleKind?: string | null }) {
   if (opp.saleKind) return opp.saleKind === 'licitacao';
   const pipes = await pipelinesOf(db, tenantId, { includeInactive: true });
   return pipes.find((p) => p.id === opp.pipelineId)?.key === 'licitacao';

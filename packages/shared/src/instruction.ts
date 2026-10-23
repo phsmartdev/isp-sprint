@@ -282,6 +282,8 @@ export function saleTypeFields(): CustomField[] {
   return [
     f('tipo_lancamento', 'Tipo de lançamento', L, 'lista', ['Licitação publicada', 'Análise de TR', 'Pedido de cotação', 'Apoio ao TR']),
     f('tipo_disputa', 'Tipo de disputa', L, 'lista', ['Licitação', 'Dispensa', 'Inexigibilidade', 'Outros']),
+    // modalidade do pregão logo abaixo do tipo de disputa; classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
+    f('modalidade_interna', 'Modalidade (classificação interna)', L, 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
     f('objeto', 'Objeto', ['licitacao', 'adesao_ata'], 'texto_longo'),
     f('numero_edital', 'Número do edital', L),
     f('orgao_contratante', 'Órgão contratante', L),
@@ -293,8 +295,6 @@ export function saleTypeFields(): CustomField[] {
     f('documento_servidor', 'Documento do servidor', L),
     f('valor_pregao', 'Valor do pregão', L, 'moeda'),
     f('valor_vitorioso', 'Valor vitorioso', L, 'moeda'),
-    // classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
-    f('modalidade_interna', 'Modalidade (classificação interna)', L, 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
     f('numero_ata', 'Número da ata', A),
     f('orgao_gerenciador', 'Órgão gerenciador', A),
     f('fornecedor_registrado', 'Fornecedor registrado', A),
