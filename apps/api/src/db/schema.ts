@@ -503,6 +503,8 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Tipo de venda (opção de formulário do funil): licitacao, adesao_ata, consumo_contrato, venda_consultiva. */
+    saleKind: text('sale_kind'),
     /** Filial que vende a oportunidade. */
     branchId: uuid('branch_id').references(() => salesBranches.id),
     /** Licitação: lance por item ('item') ou um lance global ('global'). */
@@ -868,6 +870,8 @@ export const pipelineFields = pgTable(
     required: boolean('required').notNull().default(false),
     position: integer('position').notNull().default(0),
     active: boolean('active').notNull().default(true),
+    /** Tipos de venda em que o campo aparece (vazio = todos). */
+    saleKinds: text('sale_kinds').array().notNull().default(sql`'{}'::text[]`),
   },
   (t) => ({
     uq: uniqueIndex('pipeline_fields_uq').on(t.pipelineId, t.key),

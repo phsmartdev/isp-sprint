@@ -1,4 +1,4 @@
-import { SALE_TYPE_KEYS } from '@isp/shared';
+import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -77,7 +77,7 @@ export function NewOpportunityPage() {
   const [campaignId, setCampaignId] = useState('');
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [pipelineId, setPipelineId] = useState(params.get('pipelineId') ?? '');
+  const [saleKind, setSaleKind] = useState<SaleTypeKey | ''>('');
   const [branchId, setBranchId] = useState('');
   const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
@@ -93,9 +93,9 @@ export function NewOpportunityPage() {
   const hits = useQuery({ queryKey: ['contacts', dq], enabled: mode === 'existente' && dq.length >= 2, queryFn: () => api<{ items: ContactHit[] }>(`/contacts${qs({ q: dq })}`) });
   const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : segment;
   // abertura por tipo de venda: só as jornadas de tipo de venda (a residencial saiu da abertura em 23/10)
-  const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed && (SALE_TYPE_KEYS as readonly string[]).includes(p.key));
-  const autoJourney = journeys.find((p) => p.segments.includes(seg)) ?? journeys.find((p) => p.isDefault) ?? journeys[0];
-  const journey = journeys.find((p) => p.id === pipelineId);
+  // tipo de venda é opção do formulário; o funil é o de vendas Corporativo (pedido do Paulo, 23/10)
+  const journey = (lookups.data?.pipelines ?? []).find((p) => p.key === 'empresarial' && p.allowed);
+  const kindFields = (journey?.fields ?? []).filter((f) => !f.saleKinds?.length || (!!saleKind && f.saleKinds.includes(saleKind)));
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
 
@@ -108,7 +108,7 @@ export function NewOpportunityPage() {
       api<Opportunity>('/opportunities', {
         method: 'POST',
         body: {
-          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: journey?.key === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
+          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: saleKind === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
@@ -117,6 +117,7 @@ export function NewOpportunityPage() {
           planId: null,
           ownerId: ownerId || null,
           pipelineId: journey?.id ?? null,
+          saleKind: saleKind || null,
           branchId: branchId || null,
           stage: stage || null,
           reasons: [],
@@ -140,12 +141,12 @@ export function NewOpportunityPage() {
     e.preventDefault();
     if (create.isPending) return;
     const errs: Record<string, string> = {};
-    if (!journey) errs.pipelineId = 'Escolha o tipo de venda';
+    if (!saleKind) errs.saleKind = 'Escolha o tipo de venda';
     if ((lookups.data?.branches ?? []).length && !branchId) errs.branchId = 'Escolha a filial da venda';
     if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome da conta (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
     if (mode === 'existente' && isBase && !cs) errs.customerSuccess = 'Responda se aciona Sucesso do Cliente';
-    for (const f of journey?.fields ?? []) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
+    for (const f of kindFields) if (f.required && (custom[f.key] === undefined || custom[f.key] === null || custom[f.key] === '')) errs[`custom.${f.key}`] = 'Obrigatório';
     setErrors(errs);
     if (!Object.keys(errs).length) create.mutate();
     else toast({ tone: 'error', message: 'Confira os campos destacados.' });
@@ -168,10 +169,10 @@ export function NewOpportunityPage() {
               <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente">
                 <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
-              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.pipelineId} hint={journey?.description ?? undefined}>
-                <Select id="no-pipe" value={pipelineId} invalid={!!errors.pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); setStage(''); }}>
+              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
+                <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {journeys.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -283,9 +284,9 @@ export function NewOpportunityPage() {
             <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" hideCondominium />
           </Panel>
 
-          {journey && journey.fields.length > 0 && (
-            <Panel title={`Informações de ${journey.name}`}>
-              <CustomFieldsEditor fields={journey.fields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
+          {saleKind && kindFields.length > 0 && (
+            <Panel title={`Informações de ${SALE_TYPE_LABELS[saleKind]}`}>
+              <CustomFieldsEditor fields={kindFields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
               {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Preencha os campos obrigatórios da jornada.</p>}
             </Panel>
           )}

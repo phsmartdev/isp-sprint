@@ -145,6 +145,8 @@ export const OpportunityCreate = z
     pipelineId: uuid.optional().nullable(),
     /** Filial que vende (BKT Soluções, UPNET…). */
     branchId: uuid.optional().nullable(),
+    /** Tipo de venda: opção de formulário do funil (licitacao, adesao_ata, consumo_contrato, venda_consultiva). */
+    saleKind: z.enum(['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva']).optional().nullable(),
     /** Etapa inicial do funil (aberta). Em branco: a primeira. */
     stage: stageKey.optional().nullable(),
     /** Cliente da base: true duplica a oportunidade no funil Sucesso do Cliente. */
@@ -169,6 +171,7 @@ export const OpportunityUpdate = z.object({
   /** Trocar de jornada: a etapa passa para a de mesma chave na nova jornada, ou a primeira. */
   pipelineId: uuid.optional(),
   branchId: uuid.optional().nullable(),
+  saleKind: z.enum(['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva']).optional().nullable(),
   nextAction: optText(200),
   nextActionAt: isoDate.optional().nullable(),
   notes: optText(4000),

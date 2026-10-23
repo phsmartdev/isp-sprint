@@ -224,6 +224,7 @@ export const opportunityRoutes = [
           sourceId: body.sourceId,
           campaignId: body.campaignId,
           branchId: body.branchId,
+          saleKind: body.saleKind,
           channel: body.channel,
           reasons: body.reasons,
           planId: plan === undefined ? undefined : plan?.id ?? null,

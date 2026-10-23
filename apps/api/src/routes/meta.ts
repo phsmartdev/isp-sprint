@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ensureSalesBranches } from '../services/opportunities';
-import { getActiveInstruction, ensureSaleTypeJourneys, pipelineAllowed, pipelinesOf } from '../services/instructions';
+import { getActiveInstruction, ensureSaleTypeForm, pipelineAllowed, pipelinesOf } from '../services/instructions';
 import { level } from '../services/scope';
 
 export const metaRoutes = [
@@ -15,7 +15,7 @@ export const metaRoutes = [
     handler: async ({ app, auth }) => {
       const t = auth.tenantId;
       await getActiveInstruction(app.db, t);
-      await ensureSaleTypeJourneys(app.db, t);
+      await ensureSaleTypeForm(app.db, t);
       await ensureSalesBranches(app.db, t);
       const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
       const [users, sources, campaigns, pipes, teams, plans] = await Promise.all([
@@ -38,7 +38,7 @@ export const metaRoutes = [
       const pipelines = pipes.map((p) => ({
         id: p.id, key: p.key, name: p.name, description: p.description, segments: p.segments, isDefault: p.isDefault,
         allowed: pipelineAllowed(p, auth.userId, total),
-        fields: p.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required })),
+        fields: p.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, required: f.required, saleKinds: f.saleKinds })),
         stages: p.stages.map((st) => ({ id: st.id, key: st.key, name: st.name, position: st.position, kind: st.kind, isTerminal: st.isTerminal, color: st.color, requirements: st.requirements })),
       }));
       const def = pipelines.find((p) => p.isDefault) ?? pipelines[0];

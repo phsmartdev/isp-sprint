@@ -24,6 +24,7 @@ export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   planId?: string | null;
   pipelineId?: string | null;
   branchId?: string | null;
+  saleKind?: string | null;
   /** Etapa inicial (aberta) da jornada. */
   stage?: string | null;
   channel: string | null;
@@ -124,6 +125,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       channel: input.channel,
       sourceId: input.sourceId ?? null,
       branchId: input.branchId ?? null,
+      saleKind: input.saleKind ?? null,
       campaignId: input.campaignId ?? null,
       planId: plan?.id ?? null,
       valueCents: plan?.priceCents ?? null,
@@ -144,7 +146,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   });
   await audit(tx, req, { action: 'opportunity.create', entityType: 'opportunity', entityId: opp!.id });
   await storeViability(tx, auth.tenantId, opp!.id);
-  const missing = pipeline.fields.filter((f) => f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
+  // campo obrigatório só vale para o tipo de venda escolhido (ou para todos, se não tiver tipo)
+  const missing = pipeline.fields.filter((f) => (!f.saleKinds?.length || (input.saleKind && f.saleKinds.includes(input.saleKind))) && f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
   if (missing.length) throw unprocessable(`Preencha: ${missing.map((f) => f.label).join(', ')}.`, missing.map((f) => ({ path: `custom.${f.key}`, message: 'Obrigatório' })));
   return { ...opp!, pipelineId: pipeline.id, stage: firstStage.key };
 }
@@ -188,6 +191,7 @@ export const opportunitySelect = {
   handoffStage: s.opportunities.handoffStage,
   measurementContractId: s.opportunities.measurementContractId,
   branchId: s.opportunities.branchId,
+  saleKind: s.opportunities.saleKind,
   bidMode: s.opportunities.bidMode,
   bidGlobalCents: s.opportunities.bidGlobalCents,
   itemCount: sql<number>`(select count(*)::int from opportunity_items oi where oi.opportunity_id = ${s.opportunities.id})`,
