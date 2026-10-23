@@ -140,6 +140,7 @@ test('oportunidade de cliente da base pergunta sobre Sucesso do Cliente', async 
   await page.getByRole('list', { name: 'Resultados' }).getByRole('button').filter({ hasText: 'Ativo' }).first().click();
   await expect(page.getByText('Acionar o processo de Sucesso do Cliente?')).toBeVisible();
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await page.getByLabel('Filial').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page.getByText('Responda se aciona Sucesso do Cliente')).toBeVisible();
   await page.getByRole('radio', { name: 'Sim, acionar' }).check();

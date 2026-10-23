@@ -14,6 +14,7 @@ async function newOpportunity(page: Page, name: string, opts: { type?: string } 
   await page.goto('/opportunities/new');
   await page.getByLabel('Nome do cliente').fill(name);
   await page.getByLabel('Tipo de venda').selectOption({ label: opts.type ?? 'Venda Consultiva' });
+  await page.getByLabel('Filial').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
@@ -139,15 +140,24 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await page.locator('#no-acc-street').fill('Praça da Matriz');
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page.getByText('Escolha o tipo de venda')).toBeVisible();
+  await expect(page.getByText('Escolha a filial da venda')).toBeVisible();
   await tipo.selectOption({ label: 'Licitação' });
+  await expect(page.getByLabel('Etapa do funil')).toBeVisible();
+  await page.getByLabel('Etapa do funil').selectOption({ label: 'Análise do edital' });
+  const filiais = (await page.getByLabel('Filial').locator('option').allTextContents()).slice(1);
+  expect(filiais).toEqual(['BKT Soluções', 'UPNET']);
+  await page.getByLabel('Filial').selectOption({ label: 'UPNET' });
   await expect(page.getByRole('heading', { name: 'Informações de Licitação' })).toBeVisible();
   await page.getByLabel('Tipo de disputa').selectOption('Dispensa');
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Licitação');
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('UPNET');
+  await expect(page.locator('#ws-stage')).toHaveValue('analise_edital');
   // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
   await page.goto('/opportunities/new');
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await page.getByLabel('Filial').selectOption({ index: 1 });
   await page.getByLabel('Nome do cliente').fill('Outra Prefeitura');
   await page.getByLabel('CNPJ').fill(doc);
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();

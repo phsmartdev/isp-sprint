@@ -70,6 +70,7 @@ export const SETTINGS_NAV = [
   { to: '/settings/gmail', label: 'E-mail corporativo (Gmail)', admin: true },
   { to: '/settings/integrations', label: 'Integrações', admin: true },
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
+  { to: '/settings/filiais', label: 'Filiais da venda', admin: true },
   { to: '/settings/contracts', label: 'Contratos', admin: true },
   { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },

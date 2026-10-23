@@ -119,6 +119,7 @@ test('atas: cadastra, importa planilha com prévia, torna vigente, cria oportuni
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Secretaria de Saúde E2E (compra)');
   await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByLabel('Filial').selectOption({ index: 1 });
   await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await seller.getByRole('button', { name: 'Atrelar ao saldo da ata' }).click();

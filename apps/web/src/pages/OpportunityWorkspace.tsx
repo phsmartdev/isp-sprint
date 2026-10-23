@@ -77,6 +77,8 @@ export function NewOpportunityPage() {
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
   const [pipelineId, setPipelineId] = useState(params.get('pipelineId') ?? '');
+  const [branchId, setBranchId] = useState('');
+  const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
   const [vb, setVb] = useState<ViabilityValue>({ saleType: '', cableMeters: '', activationFee: '' });
@@ -114,6 +116,8 @@ export function NewOpportunityPage() {
           planId: null,
           ownerId: ownerId || null,
           pipelineId: journey?.id ?? null,
+          branchId: branchId || null,
+          stage: stage || null,
           reasons: [],
           ...Object.fromEntries(Object.entries(address).map(([k, v]) => [k, v || null])),
           custom,
@@ -136,6 +140,7 @@ export function NewOpportunityPage() {
     if (create.isPending) return;
     const errs: Record<string, string> = {};
     if (!journey) errs.pipelineId = 'Escolha o tipo de venda';
+    if ((lookups.data?.branches ?? []).length && !branchId) errs.branchId = 'Escolha a filial da venda';
     if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome da conta (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
     if (mode === 'existente' && isBase && !cs) errs.customerSuccess = 'Responda se aciona Sucesso do Cliente';
@@ -163,9 +168,23 @@ export function NewOpportunityPage() {
                 <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
               <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.pipelineId} hint={journey?.description ?? undefined}>
-                <Select id="no-pipe" value={pipelineId} invalid={!!errors.pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); }}>
+                <Select id="no-pipe" value={pipelineId} invalid={!!errors.pipelineId} onChange={(e) => { setPipelineId(e.target.value); setCustom({}); setStage(''); }}>
                   <option value="">Escolha o tipo de venda</option>
                   {journeys.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </FormField>
+              {journey && (
+                <FormField label="Etapa do funil" htmlFor="no-stage" hint="Em branco: a primeira etapa">
+                  <Select id="no-stage" value={stage} onChange={(e) => setStage(e.target.value)}>
+                    <option value="">{journey.stages.find((x) => x.kind === 'open')?.name ?? 'Primeira etapa'}</option>
+                    {journey.stages.filter((x) => x.kind === 'open').slice(1).map((x) => <option key={x.key} value={x.key}>{x.name}</option>)}
+                  </Select>
+                </FormField>
+              )}
+              <FormField label="Filial" htmlFor="no-branch" required error={errors.branchId}>
+                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => setBranchId(e.target.value)}>
+                  <option value="">Escolha a filial</option>
+                  {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Canal de entrada" htmlFor="no-source">
@@ -430,7 +449,9 @@ function useAutosave(opp: Opportunity | undefined) {
       }
     } catch (e) {
       setStatus('error');
-      setError(e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message);
+      // mostra também o campo recusado, para quem vê o aviso saber o que corrigir
+      const fe = e instanceof ApiError ? (e.problem.errors ?? []).map((x) => `${x.path}: ${x.message}`).slice(0, 3).join('; ') : '';
+      setError(e instanceof ApiError ? `${e.problem.detail ?? e.message}${fe ? ` (${fe})` : ''}` : (e as Error).message);
       if (e instanceof ApiError && e.status === 409) setConflict(true);
     } finally {
       inFlight.current = false;
@@ -509,6 +530,11 @@ export function OpportunityWorkspacePage() {
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
   const glpiUnseen = useQuery({ queryKey: ['glpi', 'unseen', id], enabled: feature('crm.chamados'), refetchInterval: 60_000, queryFn: () => api<{ total: number; open: number; unseen: number }>(`/opportunities/${id}/glpi-tickets/unseen`) });
+  const setBranch = useMutation({
+    mutationFn: (branchId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { branchId: branchId || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); toast({ tone: 'success', message: 'Filial alterada' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
   const move = useMutation({
     mutationFn: (pipelineId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { pipelineId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['pipeline'] }); toast({ tone: 'success', message: `Movida para a jornada ${o.pipelineName}` }); },
@@ -561,6 +587,7 @@ export function OpportunityWorkspacePage() {
         <p className="font-bold text-ink">{opp.title}</p>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
           <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
+          <dt className="text-muted">Filial</dt><dd className="text-text">{lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
           <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null ? <span className="font-normal text-muted"> /mês</span> : null}</dd>
           {(selectedPlan ?? opp.planName) && (<><dt className="text-muted">Solução</dt><dd className="text-text">{selectedPlan?.name ?? opp.planName}</dd></>)}
@@ -582,6 +609,12 @@ export function OpportunityWorkspacePage() {
           <SideSection id="dados" title="Dados do deal" defaultOpen summary={f.title}>
             <div className="space-y-3">
               <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
+              <FormField label="Filial" htmlFor="ws-branch" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
+                <Select id="ws-branch" value={opp.branchId ?? ''} disabled={!editable || setBranch.isPending || a.dirty} onChange={(e) => setBranch.mutate(e.target.value)}>
+                  <option value="">Não informada</option>
+                  {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </Select>
+              </FormField>
               <FormField label="Canal de entrada" htmlFor="ws-source">
                 <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
                   <option value="">Não informado</option>

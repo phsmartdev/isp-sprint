@@ -449,6 +449,16 @@ export const pipelineStages = pgTable(
   }),
 );
 
+/** Filial que vende (ex.: BKT Soluções, UPNET). Lista da empresa, mantida pela gerência. */
+export const salesBranches = pgTable('sales_branches', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  active: boolean('active').notNull().default(true),
+  position: integer('position').notNull().default(0),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name) }));
+
 export const opportunities = pgTable(
   'opportunities',
   {
@@ -493,6 +503,8 @@ export const opportunities = pgTable(
     portReleaseReason: text('port_release_reason'),
     engineeringTicket: text('engineering_ticket'),
     executiveTicket: text('executive_ticket'),
+    /** Filial que vende a oportunidade. */
+    branchId: uuid('branch_id').references(() => salesBranches.id),
     /** Contrato por medição de onde sai o consumo quando a venda fecha (e o valor consumido). */
     measurementContractId: uuid('measurement_contract_id'),
     measurementCents: bigint('measurement_cents', { mode: 'number' }),

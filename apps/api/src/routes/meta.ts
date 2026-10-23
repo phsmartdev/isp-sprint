@@ -1,6 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
+import { ensureSalesBranches } from '../services/opportunities';
 import { getActiveInstruction, ensureSaleTypeJourneys, pipelineAllowed, pipelinesOf } from '../services/instructions';
 import { level } from '../services/scope';
 
@@ -15,6 +16,8 @@ export const metaRoutes = [
       const t = auth.tenantId;
       await getActiveInstruction(app.db, t);
       await ensureSaleTypeJourneys(app.db, t);
+      await ensureSalesBranches(app.db, t);
+      const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
       const [users, sources, campaigns, pipes, teams, plans] = await Promise.all([
         app.db
           .select({ id: s.users.id, name: s.users.name, hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")` })
@@ -39,7 +42,7 @@ export const metaRoutes = [
         stages: p.stages.map((st) => ({ id: st.id, key: st.key, name: st.name, position: st.position, kind: st.kind, isTerminal: st.isTerminal, color: st.color, requirements: st.requirements })),
       }));
       const def = pipelines.find((p) => p.isDefault) ?? pipelines[0];
-      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans };
+      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans, branches };
     },
   }),
 ];

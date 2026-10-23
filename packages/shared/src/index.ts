@@ -143,6 +143,10 @@ export const OpportunityCreate = z
     planId: uuid.optional().nullable(),
     /** Jornada. Em branco: a do segmento do cliente ou a padrão. */
     pipelineId: uuid.optional().nullable(),
+    /** Filial que vende (BKT Soluções, UPNET…). */
+    branchId: uuid.optional().nullable(),
+    /** Etapa inicial do funil (aberta). Em branco: a primeira. */
+    stage: stageKey.optional().nullable(),
     /** Cliente da base: true duplica a oportunidade no funil Sucesso do Cliente. */
     customerSuccess: z.boolean().optional(),
   })
@@ -164,6 +168,7 @@ export const OpportunityUpdate = z.object({
   planId: uuid.optional().nullable(),
   /** Trocar de jornada: a etapa passa para a de mesma chave na nova jornada, ou a primeira. */
   pipelineId: uuid.optional(),
+  branchId: uuid.optional().nullable(),
   nextAction: optText(200),
   nextActionAt: isoDate.optional().nullable(),
   notes: optText(4000),

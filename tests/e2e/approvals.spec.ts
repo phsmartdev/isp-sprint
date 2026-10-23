@@ -17,6 +17,7 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Cliente Aprovação E2E');
   await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByLabel('Filial').selectOption({ index: 1 });
   await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
@@ -134,6 +135,7 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   await seller.goto('/opportunities/new');
   await seller.getByLabel('Nome do cliente').fill('Cliente Chat E2E');
   await seller.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await seller.getByLabel('Filial').selectOption({ index: 1 });
   await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();

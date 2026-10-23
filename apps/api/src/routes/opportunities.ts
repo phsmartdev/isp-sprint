@@ -16,7 +16,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { storeViability, viabilityFor } from '../services/viability';
 import { assertPortAvailable, portUsage } from '../services/ports';
-import { bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
+import { assertBranch, bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
 import { pctDelta } from '../services/metrics';
@@ -209,6 +209,7 @@ export const opportunityRoutes = [
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
         if (body.ownerId && body.ownerId !== cur.ownerId) await assertAssignableUser(tx, auth, 'oportunidades', body.ownerId);
         await assertTenantRefs(tx, auth, { sourceId: body.sourceId, campaignId: body.campaignId });
+        if (body.branchId) await assertBranch(tx, auth.tenantId, body.branchId);
         const plan = body.planId === undefined ? undefined : await planPrice(tx, auth, body.planId);
         let pipelineChange: { pipelineId: string; stage: string } | undefined;
         if (body.pipelineId && body.pipelineId !== cur.pipelineId) {
@@ -222,6 +223,7 @@ export const opportunityRoutes = [
           ownerId: body.ownerId,
           sourceId: body.sourceId,
           campaignId: body.campaignId,
+          branchId: body.branchId,
           channel: body.channel,
           reasons: body.reasons,
           planId: plan === undefined ? undefined : plan?.id ?? null,
