@@ -172,13 +172,17 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await page.locator('#ss-tipo').getByRole('button', { name: 'Salvar', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Editar Informações de Licitação' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Prefeitura de Teste');
+  // nosso lance entra no ranking pelo campo Nosso lance
+  await page.getByRole('button', { name: 'Editar nosso lance' }).click();
+  await page.getByLabel('Valor do nosso lance 1').fill('95.000,00');
+  await page.getByRole('button', { name: 'Salvar lance' }).click();
+  await expect(page.getByRole('region', { name: 'Nosso lance' })).toContainText('R$ 95.000,00');
   // participantes do pregão: ranking pelo menor lance e vencedora
   const part = page.getByRole('region', { name: 'Participantes do pregão' });
   await part.getByRole('button', { name: 'Registrar participantes' }).click();
   const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
-  await dlg.getByLabel('Empresa 1', { exact: true }).fill('Nossa Empresa');
-  await dlg.getByLabel('Nossa empresa 1').check();
-  await dlg.getByLabel('Lance 1').fill('95.000,00');
+  await expect(dlg.locator('tbody tr').first()).toContainText('(nós)');
+  await expect(dlg.getByLabel('Lance 1')).toBeDisabled();
   await dlg.getByLabel('Empresa 2', { exact: true }).fill('Rede Concorrente');
   await dlg.getByLabel('Lance 2').fill('90.000,00');
   await expect(dlg.locator('tbody tr').nth(1)).toContainText('1º');
@@ -191,6 +195,10 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await expect(dlg).toHaveCount(0);
   await expect(part).toContainText('Rede Concorrente');
   await expect(part).toContainText('R$ 90.000,00');
+  await expect(page.getByRole('region', { name: 'Nosso lance' })).toContainText('2º');
+  // valor do pregão vem dos produtos; valor vitorioso saiu
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Valor do pregão');
+  await expect(page.getByText('Valor vitorioso')).toHaveCount(0);
   // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
   await page.goto('/opportunities/new');
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });

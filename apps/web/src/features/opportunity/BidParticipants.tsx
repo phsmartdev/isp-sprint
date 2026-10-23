@@ -36,7 +36,9 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
     const named = [...new Set(items.map((i) => i.lot).filter((l) => l !== 'Único'))];
     const n = Math.max(1, named.length, ...named.map((l) => (/^\d+$/.test(l) ? Number(l) : 0)));
     setLotCount(n);
-    setRows(items.length ? items.map((i) => ({ key: `p${++seq}`, company: i.company, document: cnpj(i.document), lot: n === 1 ? '' : i.lot === 'Único' ? '1' : i.lot, bid: money(i.bidCents), status: i.status, winner: i.winner, isUs: i.isUs })) : [blank(), blank(), blank()]);
+    const loaded = items.map((i) => ({ key: `p${++seq}`, company: i.company, document: cnpj(i.document), lot: n === 1 ? '' : i.lot === 'Único' ? '1' : i.lot, bid: money(i.bidCents), status: i.status, winner: i.winner, isUs: i.isUs }));
+    // nossa linha vem do campo Nosso lance; sem concorrentes ainda, já abre linhas em branco para eles
+    setRows(loaded.some((r) => !r.isUs) ? loaded : [...loaded, blank(n > 1 ? '1' : ''), blank(n > 1 ? '1' : ''), ...(loaded.length ? [] : [blank(n > 1 ? '1' : '')])]);
     setErr(null);
   };
   const changeLots = (n: number) => {
@@ -77,7 +79,7 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
       <div className="flex items-center justify-between gap-2">
         {full ? <h3 className="flex items-center gap-2 text-md font-bold text-ink"><Trophy className="h-5 w-5 text-primary" aria-hidden />Ranking do pregão</h3>
           : <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Trophy className="h-4 w-4 text-primary" aria-hidden />Participantes do pregão</span>}
-        {editable && <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => void openEditor()}>{saved.length ? 'Editar' : 'Registrar participantes'}</button>}
+        {editable && <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => void openEditor()}>{saved.some((x) => !x.isUs) ? 'Editar' : 'Registrar participantes'}</button>}
       </div>
       {full && saved.length ? (
         <div className="mt-3 space-y-4">
@@ -116,7 +118,7 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
       ) : <p className="mt-1 text-xs text-muted">Nenhuma empresa registrada.</p>}
 
       <Modal open={!!rows} onClose={() => setRows(null)} title="Participantes do pregão" size="xl" footer={<><Button onClick={() => setRows(null)}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={submit}>Salvar participantes</Button></>}>
-        <p className="mb-3 text-sm text-muted">Adicione todas as empresas que participaram, com o lance final. O ranking sai do menor lance em cada lote. Com mais de um lote, indique ao lado da vencedora o lote; cada lote tem a sua vencedora. Uma empresa que disputou vários lotes entra uma vez por lote.</p>
+        <p className="mb-3 text-sm text-muted">Adicione todas as empresas que participaram, com o lance final. A nossa linha vem do campo Nosso lance; aqui só se marca se vencemos. O ranking sai do menor lance em cada lote. Com mais de um lote, indique ao lado da vencedora o lote; cada lote tem a sua vencedora. Uma empresa que disputou vários lotes entra uma vez por lote.</p>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <label className="flex items-center gap-2 text-sm font-semibold text-ink" htmlFor="bp-lots">Quantidade de lotes
             <Input id="bp-lots" type="number" min={1} max={50} className="num w-[90px]" value={lotCount} onChange={(e) => changeLots(Number(e.target.value))} />
@@ -127,27 +129,26 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
         {err && <p role="alert" className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{err}</p>}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Pos.', 'Empresa', 'CNPJ', 'Lance (R$)', 'Situação', 'Nós', lotCount > 1 ? 'Vencedora · lote' : 'Vencedora', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Pos.', 'Empresa', 'CNPJ', 'Lance (R$)', 'Situação', lotCount > 1 ? 'Vencedora · lote' : 'Vencedora', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {rows?.map((r, i) => (
                 <tr key={r.key} className="border-t border-line">
                   <td className="num px-1.5 py-1.5 font-bold text-ink">{ranks[i] ? `${ranks[i]}º` : '—'}</td>
-                  <td className="px-1.5 py-1.5"><Input aria-label={`Empresa ${i + 1}`} value={r.company} onChange={(e) => set(r.key, { company: e.target.value })} /></td>
-                  <td className="px-1.5 py-1.5"><Input aria-label={`CNPJ ${i + 1}`} className="w-[170px]" value={r.document} placeholder="00.000.000/0000-00" onChange={(e) => set(r.key, { document: e.target.value })} /></td>
-                  <td className="px-1.5 py-1.5"><Input aria-label={`Lance ${i + 1}`} className="num w-[140px]" inputMode="decimal" value={r.bid} placeholder="0,00" onChange={(e) => set(r.key, { bid: e.target.value })} /></td>
+                  <td className="px-1.5 py-1.5">{r.isUs ? <span className="block min-w-[160px] font-semibold text-primary" title="O nosso lance muda pelo campo Nosso lance">{r.company} (nós)</span> : <Input aria-label={`Empresa ${i + 1}`} value={r.company} onChange={(e) => set(r.key, { company: e.target.value })} />}</td>
+                  <td className="px-1.5 py-1.5">{r.isUs ? <span className="text-muted">—</span> : <Input aria-label={`CNPJ ${i + 1}`} className="w-[170px]" value={r.document} placeholder="00.000.000/0000-00" onChange={(e) => set(r.key, { document: e.target.value })} />}</td>
+                  <td className="px-1.5 py-1.5"><Input aria-label={`Lance ${i + 1}`} className="num w-[140px]" inputMode="decimal" value={r.bid} placeholder="0,00" disabled={r.isUs} onChange={(e) => set(r.key, { bid: e.target.value })} /></td>
                   <td className="px-1.5 py-1.5"><Select aria-label={`Situação ${i + 1}`} className="w-[150px]" value={r.status} onChange={(e) => set(r.key, { status: e.target.value as ParticipantStatus, ...(e.target.value !== 'ativo' ? { winner: false } : {}) })}>{PARTICIPANT_STATUSES.map((st) => <option key={st} value={st}>{PARTICIPANT_STATUS_LABELS[st]}</option>)}</Select></td>
-                  <td className="px-1.5 py-1.5 text-center"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Nossa empresa ${i + 1}`} checked={r.isUs} onChange={(e) => set(r.key, { isUs: e.target.checked })} /></td>
                   <td className="px-1.5 py-1.5">
                     <span className="flex items-center gap-2">
                       <input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Vencedora ${i + 1}`} checked={r.winner} disabled={r.status !== 'ativo'} onChange={(e) => set(r.key, { winner: e.target.checked })} />
                       {lotCount > 1 && (
-                        <Select aria-label={`Lote ${i + 1}`} className="w-[110px]" value={r.lot || '1'} onChange={(e) => set(r.key, { lot: e.target.value })}>
+                        <Select aria-label={`Lote ${i + 1}`} className="w-[110px]" value={r.lot || '1'} disabled={r.isUs} onChange={(e) => set(r.key, { lot: e.target.value })}>
                           {lotOptions.map((l) => <option key={l} value={l}>Lote {l}</option>)}
                         </Select>
                       )}
                     </span>
                   </td>
-                  <td className="px-1.5 py-1.5"><button type="button" className="p-1 text-muted hover:text-danger" aria-label={`Remover participante ${i + 1}`} onClick={() => setRows(rows.filter((x) => x.key !== r.key))}><Trash2 className="h-4 w-4" /></button></td>
+                  <td className="px-1.5 py-1.5"><button type="button" className="p-1 text-muted hover:text-danger disabled:invisible" disabled={r.isUs} aria-label={`Remover participante ${i + 1}`} onClick={() => setRows(rows.filter((x) => x.key !== r.key))}><Trash2 className="h-4 w-4" /></button></td>
                 </tr>
               ))}
             </tbody>
@@ -163,6 +164,56 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
           }}>Vencedora = 1º de cada lote</Button>
         </div>
       </Modal>
+    </section>
+  );
+}
+
+/** Nosso lance: os lotes que vamos disputar e o lance em cada um. Entra no ranking do pregão com o nome da filial da venda. */
+export function OurBid({ oppId, editable = true }: { oppId: string; editable?: boolean }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['bid-participants', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/bid-participants`) });
+  const ours = (q.data?.items ?? []).filter((x) => x.isUs).sort((a, b) => a.lot.localeCompare(b.lot, 'pt-BR', { numeric: true }));
+  const [rows, setRows] = useState<{ key: string; lot: string; bid: string }[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const start = () => { setRows(ours.length ? ours.map((o) => ({ key: `l${++seq}`, lot: o.lot === 'Único' ? '' : o.lot, bid: money(o.bidCents) })) : [{ key: `l${++seq}`, lot: '', bid: '' }]); setErr(null); };
+  const save = useMutation({
+    // só troca as nossas linhas (as dos concorrentes ficam no servidor): usa a versão atual da oportunidade
+    mutationFn: async () => { const fresh = await api<Data>(`/opportunities/${oppId}/bid-participants`); return api<Data>(`/opportunities/${oppId}/bid-participants/ours`, { method: 'PUT', body: { rowVersion: fresh.rowVersion, items: rows!.filter((r) => r.lot.trim() || r.bid.trim()).map((r) => ({ lot: r.lot.trim() || null, bidCents: r.bid.trim() ? parseMoney(r.bid) : null })) } }); },
+    onSuccess: (d) => { qc.setQueryData(['bid-participants', oppId], d); void qc.invalidateQueries({ queryKey: ['opportunity', oppId] }); void qc.invalidateQueries({ queryKey: ['timeline', oppId] }); setRows(null); toast({ tone: 'success', message: 'Lance salvo' }); },
+    onError: (e) => setErr(errMsg(e)),
+  });
+  const submit = () => {
+    if (rows!.some((r) => r.bid.trim() && parseMoney(r.bid) === null)) return setErr('Lance no formato 1.500,00');
+    save.mutate();
+  };
+  return (
+    <section aria-label="Nosso lance" className="border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold text-ink">Nosso lance</span>
+        {editable && !rows && <button type="button" className="text-sm font-semibold text-primary hover:underline" aria-label="Editar nosso lance" onClick={start}>{ours.length ? 'Editar' : 'Lançar'}</button>}
+      </div>
+      {rows ? (
+        <div className="mt-2 space-y-2">
+          {err && <p role="alert" className="bg-danger-soft px-3 py-2 text-sm text-danger">{err}</p>}
+          {rows.map((r, i) => (
+            <div key={r.key} className="flex items-center gap-2">
+              <Input aria-label={`Lote do nosso lance ${i + 1}`} className="w-[84px]" placeholder="Único" value={r.lot} onChange={(e) => setRows(rows.map((x) => (x.key === r.key ? { ...x, lot: e.target.value } : x)))} />
+              <Input aria-label={`Valor do nosso lance ${i + 1}`} className="num min-w-0 flex-1" inputMode="decimal" placeholder="R$ 0,00" value={r.bid} onChange={(e) => setRows(rows.map((x) => (x.key === r.key ? { ...x, bid: e.target.value } : x)))} />
+              <button type="button" className="p-1 text-muted hover:text-danger" aria-label={`Tirar lote ${i + 1} do nosso lance`} onClick={() => setRows(rows.filter((x) => x.key !== r.key))}><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+          <p className="text-xs text-muted">Deixe o lote em branco se for lote único. Com mais de um lote, informe o número de cada lote que vamos disputar.</p>
+          <div className="flex flex-wrap justify-between gap-2">
+            <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...rows, { key: `l${++seq}`, lot: String(rows.length + 1), bid: '' }])}>Adicionar lote</Button>
+            <span className="flex gap-2"><Button size="sm" onClick={() => setRows(null)}>Fechar</Button><Button size="sm" variant="primary" loading={save.isPending} onClick={submit}>Salvar lance</Button></span>
+          </div>
+        </div>
+      ) : ours.length ? (
+        <dl className="mt-2 space-y-1.5 text-sm">
+          {ours.map((o) => <div key={o.id} className="flex gap-3"><dt className="w-24 shrink-0 text-muted">{o.lot === 'Único' ? 'Lote único' : `Lote ${o.lot}`}</dt><dd className="num text-text">{o.bidCents === null ? 'sem lance' : fmtBRL(o.bidCents)}{o.rank ? <span className="text-muted"> · {o.rank}º</span> : null}{o.winner ? <span className="font-semibold text-[#15803D]"> · vencemos</span> : null}</dd></div>)}
+        </dl>
+      ) : <p className="mt-1 text-xs text-muted">Ainda sem lance.</p>}
     </section>
   );
 }

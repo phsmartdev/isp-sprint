@@ -67,4 +67,22 @@ describe('Participantes da licitação', () => {
     expect(pb.lots[0]).toMatchObject({ them: { rank: 1, winner: true }, us: { rank: 2, winner: false }, winner: { isUs: false } });
     expect(det.actionsByKind).toMatchObject({ lance: 1, recurso: 1 });
   });
+  it('nosso lance: lotes e valores entram no ranking com o nome da filial; concorrentes ficam; vitória do lote se mantém', async () => {
+    const o = await newOpp('licitacao');
+    let r = ok(await lucas.put(`/opportunities/${o.id}/bid-participants`, { rowVersion: o.rowVersion, items: [{ company: 'Rede Delta', lot: '1', bidCents: 9000 }, { company: 'Rede Delta', lot: '2', bidCents: 5000, winner: true }] })).json();
+    r = ok(await lucas.put(`/opportunities/${o.id}/bid-participants/ours`, { rowVersion: r.rowVersion, items: [{ lot: '1', bidCents: 8000 }, { lot: '2', bidCents: 6000 }] })).json();
+    const us = r.items.filter((x: { isUs: boolean }) => x.isUs);
+    expect(us).toHaveLength(2);
+    expect(us[0].company).toMatch(/BKT|UPNET/);
+    expect(r.items.find((x: { isUs: boolean; lot: string }) => x.isUs && x.lot === '1').rank).toBe(1);
+    expect(r.items.find((x: { isUs: boolean; lot: string }) => x.isUs && x.lot === '2').rank).toBe(2);
+    expect(r.items.filter((x: { isUs: boolean }) => !x.isUs)).toHaveLength(2);
+    // marca nossa vitória no lote 1 pela lista e muda só o valor: a vitória continua
+    r = ok(await lucas.put(`/opportunities/${o.id}/bid-participants`, { rowVersion: r.rowVersion, items: r.items.map((x: Record<string, unknown>) => ({ company: x.company, document: x.document, lot: x.lot, bidCents: x.bidCents, status: x.status, isUs: x.isUs, winner: x.isUs && x.lot === '1' ? true : x.winner })) })).json();
+    r = ok(await lucas.put(`/opportunities/${o.id}/bid-participants/ours`, { rowVersion: r.rowVersion, items: [{ lot: '1', bidCents: 7900 }] })).json();
+    expect(r.items.find((x: { isUs: boolean }) => x.isUs)).toMatchObject({ lot: '1', bidCents: 7900, winner: true });
+    expect((await lucas.put(`/opportunities/${o.id}/bid-participants/ours`, { rowVersion: r.rowVersion, items: [{ lot: '1', bidCents: 1 }, { lot: '1', bidCents: 2 }] })).statusCode).toBe(422);
+    const tl = ok(await lucas.get(`/opportunities/${o.id}/timeline`)).json();
+    expect(JSON.stringify(tl.items)).toMatch(/nosso lance/);
+  });
 });

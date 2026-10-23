@@ -292,8 +292,6 @@ export function saleTypeFields(): CustomField[] {
     f('data_sessao', 'Data da sessão', L, 'data'),
     f('prazo_proposta', 'Prazo de envio da proposta', L, 'data'),
     f('documento_servidor', 'Documento do servidor', L),
-    f('valor_pregao', 'Valor do pregão', L, 'moeda'),
-    f('valor_vitorioso', 'Valor vitorioso', L, 'moeda'),
     f('numero_ata', 'Número da ata', A),
     f('orgao_gerenciador', 'Órgão gerenciador', A),
     f('fornecedor_registrado', 'Fornecedor registrado', A),

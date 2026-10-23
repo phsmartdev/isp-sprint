@@ -20,13 +20,15 @@ test('Pregão: participantes, ranking, ações do concorrente e inteligência po
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
 
+  // nosso lance entra no ranking pelo campo Nosso lance
+  await page.getByRole('button', { name: 'Editar nosso lance' }).click();
+  await page.getByLabel('Valor do nosso lance 1').fill('120.000,00');
+  await page.getByRole('button', { name: 'Salvar lance' }).click();
+  await expect(page.getByRole('region', { name: 'Nosso lance' })).toContainText('R$ 120.000,00');
   await page.getByRole('tab', { name: 'Pregão' }).click();
   const ranking = page.getByRole('region', { name: 'Ranking do pregão' });
   await ranking.getByRole('button', { name: 'Registrar participantes' }).click();
   const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
-  await dlg.getByLabel('Empresa 1', { exact: true }).fill('Nossa Empresa');
-  await dlg.getByLabel('Nossa empresa 1').check();
-  await dlg.getByLabel('Lance 1').fill('120.000,00');
   const rival = `Rede Rival ${tag}`;
   await dlg.getByLabel('Empresa 2', { exact: true }).fill(rival);
   await dlg.getByLabel('CNPJ 2').fill('12.345.678/0001-95');
