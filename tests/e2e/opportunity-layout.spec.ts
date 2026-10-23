@@ -27,7 +27,7 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
   const dlg = page.getByRole('dialog', { name: 'Adicionar contato' });
   if (await dlg.getByLabel('Outra pessoa').count()) await dlg.getByLabel('Outra pessoa').check();
   const who = `Contato E2E ${Date.now().toString(36)}`;
-  await dlg.getByLabel('Nome', { exact: true }).fill(who);
+  await dlg.locator('#oc-name').fill(who);
   await dlg.getByLabel('Cargo').fill('Gerente de TI');
   await dlg.getByRole('button', { name: 'Adicionar contato' }).click();
   await expect(contatos).toContainText(who);
