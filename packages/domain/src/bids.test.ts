@@ -20,3 +20,23 @@ describe('participantes da licitação', () => {
     expect(participantsError([p('A', 1, { status: 'desistente', winner: true })])).toMatch(/não pode vencer/);
   });
 });
+
+import { competitorKey, competitorStats } from './bids';
+describe('inteligência por concorrente', () => {
+  const row = (opportunityId: string, company: string, bidCents: number | null, extra: Partial<BidParticipant> = {}, at = '2026-10-01') => ({ opportunityId, at, company, document: null, lot: '', bidCents, status: 'ativo' as const, winner: false, isUs: false, ...extra });
+  it('mesmo CNPJ com nomes diferentes é um concorrente só; nome sem CNPJ ignora acento e caixa', () => {
+    expect(competitorKey({ document: '11.222.333/0001-81', company: 'A' })).toBe(competitorKey({ document: '11222333000181', company: 'B' }));
+    expect(competitorKey({ document: null, company: 'Rede  Ágil' })).toBe(competitorKey({ document: '', company: 'rede agil' }));
+  });
+  it('pregões juntos, vitórias, contra nós, lance médio e mínimo; nossa empresa fica de fora', () => {
+    const doc = '11222333000181';
+    const s = competitorStats([
+      row('o1', 'Nós', 100, { isUs: true, winner: true }), row('o1', 'Rede Alfa', 120, { document: doc }),
+      row('o2', 'Nós', 200, { isUs: true }), row('o2', 'Rede Alfa Telecom', 180, { document: doc, winner: true }, '2026-10-05'),
+      row('o3', 'Rede Alfa', 50, { document: doc, lot: '1', winner: true }), row('o3', 'Rede Alfa', null, { document: doc, lot: '2' }),
+    ]);
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ name: 'Rede Alfa Telecom', document: doc, bids: 3, lots: 4, wins: 2, ourWinsAgainst: 1, theirWinsAgainstUs: 1, avgBidCents: Math.round((120 + 180 + 50) / 3), minBidCents: 50, lastAt: '2026-10-05' });
+    expect(s[0]!.winRate).toBe(0.5);
+  });
+});

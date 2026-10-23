@@ -50,3 +50,55 @@ export function participantsError(rows: BidParticipant[]): string | null {
   if (rows.filter((r) => r.isUs).length && new Set(rows.filter((r) => r.isUs).map((r) => normalizeLot(r.lot))).size !== rows.filter((r) => r.isUs).length) return 'Nossa empresa aparece duas vezes no mesmo lote.';
   return null;
 }
+
+// ------------------------------------------------------------------ ações durante o pregão (linha do tempo append-only)
+export const BID_ACTION_KINDS = ['lance', 'negociacao', 'esclarecimento', 'impugnacao', 'habilitacao', 'inabilitacao', 'desclassificacao', 'recurso', 'contrarrazao', 'desistencia', 'adjudicacao', 'homologacao', 'outro'] as const;
+export type BidActionKind = (typeof BID_ACTION_KINDS)[number];
+export const BID_ACTION_LABELS: Record<BidActionKind, string> = {
+  lance: 'Lance', negociacao: 'Negociação', esclarecimento: 'Pedido de esclarecimento', impugnacao: 'Impugnação', habilitacao: 'Habilitação', inabilitacao: 'Inabilitação',
+  desclassificacao: 'Desclassificação', recurso: 'Recurso', contrarrazao: 'Contrarrazão', desistencia: 'Desistência', adjudicacao: 'Adjudicação', homologacao: 'Homologação', outro: 'Outra ação',
+};
+
+// ------------------------------------------------------------------ inteligência por concorrente
+/** Chave do concorrente: CNPJ quando houver; senão o nome normalizado. */
+export const competitorKey = (r: { document: string | null; company: string }) => {
+  const d = onlyDigits(r.document);
+  return d.length === 14 ? d : `nome:${r.company.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')}`;
+};
+
+export type ParticipantRow = BidParticipant & { opportunityId: string; at: string };
+export type CompetitorStats = {
+  key: string; name: string; document: string | null;
+  bids: number; lots: number; wins: number; winRate: number | null;
+  ourWinsAgainst: number; theirWinsAgainstUs: number;
+  avgBidCents: number | null; minBidCents: number | null; lastAt: string;
+};
+
+/** Agrega os participantes de todos os pregões em indicadores por concorrente (nossa empresa fica de fora). */
+export function competitorStats(rows: ParticipantRow[]): CompetitorStats[] {
+  const byOpp = new Map<string, ParticipantRow[]>();
+  for (const r of rows) byOpp.set(r.opportunityId, [...(byOpp.get(r.opportunityId) ?? []), r]);
+  const acc = new Map<string, CompetitorStats & { opps: Set<string>; sum: number; n: number; lastName: string; lastNameAt: string }>();
+  for (const list of byOpp.values()) {
+    const ours = new Map(list.filter((r) => r.isUs).map((r) => [normalizeLot(r.lot), r]));
+    for (const r of list) {
+      if (r.isUs) continue;
+      const k = competitorKey(r);
+      const lot = normalizeLot(r.lot);
+      const a = acc.get(k) ?? { key: k, name: r.company.trim(), document: onlyDigits(r.document).length === 14 ? onlyDigits(r.document) : null, bids: 0, lots: 0, wins: 0, winRate: null, ourWinsAgainst: 0, theirWinsAgainstUs: 0, avgBidCents: null, minBidCents: null, lastAt: r.at, opps: new Set(), sum: 0, n: 0, lastName: r.company.trim(), lastNameAt: r.at };
+      a.opps.add(r.opportunityId);
+      a.lots += 1;
+      if (r.winner) a.wins += 1;
+      const us = ours.get(lot);
+      if (us?.winner) a.ourWinsAgainst += 1;
+      if (us && r.winner) a.theirWinsAgainstUs += 1;
+      if (r.bidCents !== null) { a.sum += r.bidCents; a.n += 1; a.minBidCents = a.minBidCents === null ? r.bidCents : Math.min(a.minBidCents, r.bidCents); }
+      if (r.at > a.lastAt) a.lastAt = r.at;
+      if (r.at >= a.lastNameAt) { a.lastName = r.company.trim(); a.lastNameAt = r.at; }
+      acc.set(k, a);
+    }
+  }
+  return [...acc.values()].map(({ opps, sum, n, lastName, lastNameAt: _l, ...a }) => ({
+    ...a, name: lastName, bids: opps.size, winRate: a.lots ? a.wins / a.lots : null, avgBidCents: n ? Math.round(sum / n) : null,
+  })).sort((x, y) => y.bids - x.bids || y.wins - x.wins || x.name.localeCompare(y.name));
+}
