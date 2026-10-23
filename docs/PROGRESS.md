@@ -118,6 +118,10 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   4. Webhook cadastrado para Chamado, Acompanhamento, Solução e Tarefa de chamado, com o segredo.
   - Pontos a conferir: o fuso das datas (lidas no fuso da empresa) e as permissões do usuário de integração para ver acompanhamentos privados.
 - Migrações 0053 (`glpi_tickets`, `glpi_ticket_events` append-only) e 0054 (tipo de integração `glpi`).
+- **Validação real começou (23/10, glpi.jedx.com.br):** OAuth, usuário de integração e criação de chamado funcionaram (chamado #2 na entidade SSP).
+  - Corrigido: a leitura e a resposta do chamado vão na entidade dele (cabeçalho `GLPI-Entity`). Sem isso, o GLPI respondia "não encontrado" para chamados fora da entidade padrão do usuário de integração.
+  - Pedido do Paulo: o que a ferramenta envia ao GLPI começa com "Ticket gerado a partir do RevOps:" (abertura) ou "Resposta enviada pelo RevOps:" (respostas), em negrito. O rodapé passou a dizer "Aberto no RevOps por…".
+  - Regressão: domínio 158, API 238, E2E 61/61 (o teste de aprovações, intermitente, passou ao ser repetido sozinho).
 
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
