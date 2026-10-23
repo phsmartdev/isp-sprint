@@ -9,7 +9,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { encryptSecret } from './email';
 
-export const INTEGRATION_KINDS = ['ixc', 'zapi', 'zapsign', 'whatsapp', 'meta', 'site'] as const;
+export const INTEGRATION_KINDS = ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
 
@@ -48,6 +48,21 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
     fields: [
       { key: 'apiToken', label: 'Token da API', secret: true, hint: 'ZapSign → Configurações → Integrações → ZAPSIGN API' },
       { key: 'environment', label: 'Ambiente', hint: 'producao ou sandbox (sandbox não tem validade jurídica)' },
+    ],
+  },
+  glpi: {
+    name: 'GLPI (chamados)',
+    description: 'Abre chamados no GLPI a partir da negociação e traz de volta situação, acompanhamentos, tarefas, solução e documentos. No GLPI 11: crie um cliente OAuth (Configuração → Clientes OAuth, escopo "api", concessão "Senha") e um usuário de integração com permissão para criar e ver chamados nas entidades dos clientes. Em Configuração → Webhooks, cadastre o endereço abaixo para Chamado, Acompanhamento, Solução e Tarefa de chamado (criação e atualização), com o mesmo segredo informado aqui.',
+    receivesLeads: false,
+    webhook: true,
+    status: 'Construída e testada com GLPI simulado · validação com a instância real pendente',
+    fields: [
+      { key: 'baseUrl', label: 'Endereço do GLPI', hint: 'Ex.: https://glpi.suaempresa.com.br (precisa estar acessível pela internet)' },
+      { key: 'clientId', label: 'ID do cliente OAuth' },
+      { key: 'clientSecret', label: 'Segredo do cliente OAuth', secret: true },
+      { key: 'username', label: 'Usuário de integração', hint: 'Login do usuário que abre os chamados no GLPI' },
+      { key: 'password', label: 'Senha do usuário de integração', secret: true },
+      { key: 'webhookSecret', label: 'Segredo do webhook', secret: true, hint: 'O mesmo segredo cadastrado no webhook do GLPI (confere a assinatura de cada aviso)' },
     ],
   },
   whatsapp: {
@@ -124,7 +139,7 @@ export async function logEvent(db: DbOrTx, tenantId: string, kind: IntegrationKi
   await db.update(s.integrations).set({ lastEventAt: new Date() }).where(and(eq(s.integrations.tenantId, tenantId), eq(s.integrations.kind, kind)));
 }
 
-const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', zapsign: 'ZapSign', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
+const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
 const clean = (v: unknown, max = 200) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const digits = (v: string | null) => (v ? v.replace(/\D/g, '') : '');
 

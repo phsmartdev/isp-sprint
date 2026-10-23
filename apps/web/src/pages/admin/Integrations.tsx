@@ -1,7 +1,7 @@
 /** Configurações → Integrações: IXC, WhatsApp (Z-API e Cloud API), Meta Lead Ads e formulário do site. */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Database, Globe, MessageCircle, PenLine, MessageSquare, PlugZap, RefreshCw, Users } from 'lucide-react';
+import { Copy, Database, LifeBuoy, Globe, MessageCircle, PenLine, MessageSquare, PlugZap, RefreshCw, Users } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { useLookups } from '../../lib/hooks';
@@ -9,12 +9,12 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Select } from 
 import { useToast } from '../../components/ui/overlay';
 
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
-type Item = { kind: 'ixc' | 'zapi' | 'zapsign' | 'whatsapp' | 'meta' | 'site'; name: string; description: string; status: string; fields: Field[]; receivesLeads: boolean; enabled: boolean; config: Record<string, string | null>; secretsSet: Record<string, boolean>; webhookUrl: string | null; lastEventAt: string | null };
+type Item = { kind: 'ixc' | 'zapi' | 'zapsign' | 'glpi' | 'whatsapp' | 'meta' | 'site'; name: string; description: string; status: string; fields: Field[]; receivesLeads: boolean; enabled: boolean; config: Record<string, string | null>; secretsSet: Record<string, boolean>; webhookUrl: string | null; lastEventAt: string | null };
 type Event = { id: string; kind: string; status: string; summary: string; leadId: string | null; createdAt: string };
 
-const ICONS = { ixc: Database, zapi: MessageCircle, zapsign: PenLine, whatsapp: MessageSquare, meta: Users, site: Globe };
+const ICONS = { ixc: Database, zapi: MessageCircle, zapsign: PenLine, glpi: LifeBuoy, whatsapp: MessageSquare, meta: Users, site: Globe };
 const EVENT_LABEL: Record<string, { label: string; tone: 'green' | 'neutral' | 'red' | 'yellow' }> = { lead_criado: { label: 'Lead criado', tone: 'green' }, duplicado: { label: 'Já existia', tone: 'yellow' }, ignorado: { label: 'Ignorado', tone: 'neutral' }, erro: { label: 'Erro', tone: 'red' }, recebido: { label: 'Recebido', tone: 'neutral' }, enviado: { label: 'Enviado', tone: 'green' } };
-const KIND_NAME: Record<string, string> = { ixc: 'IXC', zapi: 'Z-API', zapsign: 'ZapSign', whatsapp: 'WhatsApp Cloud', meta: 'Meta', site: 'Site' };
+const KIND_NAME: Record<string, string> = { ixc: 'IXC', zapi: 'Z-API', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp Cloud', meta: 'Meta', site: 'Site' };
 
 function copy(text: string, toast: ReturnType<typeof useToast>) {
   void navigator.clipboard?.writeText(text).then(() => toast({ tone: 'success', message: 'Copiado' }), () => toast({ tone: 'error', message: 'Não foi possível copiar' }));
@@ -49,7 +49,7 @@ function IntegrationCard({ item }: { item: Item }) {
   const Icon = ICONS[item.kind];
   const test = useMutation({
     mutationFn: () => api<{ ok: boolean; message: string }>(`/admin/integrations/${item.kind}/test`, { method: 'POST' }),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: r.ok ? 'success' : 'error', message: `Z-API: ${r.message}` }); },
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: r.ok ? 'success' : 'error', message: `${KIND_NAME[item.kind] ?? item.name}: ${r.message}` }); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
   });
   const save = useMutation({
@@ -108,7 +108,7 @@ function IntegrationCard({ item }: { item: Item }) {
             <Button size="sm" icon={<Copy className="h-4 w-4" />} onClick={() => copy(item.webhookUrl!, toast)}>Copiar</Button>
             <Button size="sm" variant="ghost" icon={<RefreshCw className="h-4 w-4" />} loading={rotate.isPending} onClick={() => { if (confirm('Gerar um novo endereço? O atual para de funcionar.')) rotate.mutate(); }}>Gerar novo</Button>
           </div>
-          <p className="mt-1 text-xs text-muted">O código no fim do endereço é secreto: quem tiver o endereço consegue enviar leads.</p>
+          <p className="mt-1 text-xs text-muted">{item.kind === 'glpi' ? 'Cada aviso do GLPI é conferido pela assinatura feita com o segredo do webhook.' : 'O código no fim do endereço é secreto: quem tiver o endereço consegue enviar leads.'}</p>
           {item.kind === 'site' && (
             <div className="mt-2">
               <Button size="sm" variant="ghost" onClick={() => setShowSnippet((x) => !x)}>{showSnippet ? 'Ocultar código do formulário' : 'Ver código pronto para o site'}</Button>
@@ -123,7 +123,7 @@ function IntegrationCard({ item }: { item: Item }) {
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {item.kind === 'zapi' && <Button icon={<PlugZap className="h-4 w-4" />} loading={test.isPending} onClick={() => test.mutate()}>Testar conexão</Button>}
+        {(item.kind === 'zapi' || item.kind === 'glpi') && <Button icon={<PlugZap className="h-4 w-4" />} loading={test.isPending} onClick={() => test.mutate()}>Testar conexão</Button>}
         <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>
       </div>
     </section>

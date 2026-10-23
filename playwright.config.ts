@@ -9,6 +9,7 @@ const TEST_DB = process.env.TEST_DATABASE_URL ?? 'postgres://isp:isp@localhost:5
 const API_PORT = 3334;
 const WEB_PORT = 5174;
 const FAKE_GOOGLE_PORT = 3399;
+const FAKE_GLPI_PORT = 3398;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -33,6 +34,13 @@ export default defineConfig({
       url: `http://127.0.0.1:${FAKE_GOOGLE_PORT}/__test/sent`,
       reuseExistingServer: false,
       env: { FAKE_GOOGLE_PORT: String(FAKE_GOOGLE_PORT) },
+    },
+    {
+      // GLPI 11 SIMULADO (API /api.php + webhook assinado) para os chamados a partir da negociação
+      command: `pnpm --filter @isp/api exec tsx test/fakeGlpiServer.ts`,
+      url: `http://127.0.0.1:${FAKE_GLPI_PORT}/__test/health`,
+      reuseExistingServer: false,
+      env: { FAKE_GLPI_PORT: String(FAKE_GLPI_PORT) },
     },
     {
       command: `pnpm --filter @isp/api exec tsx src/server.ts`,

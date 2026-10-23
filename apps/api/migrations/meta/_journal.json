@@ -372,6 +372,20 @@
       "when": 1792710920410,
       "tag": "0052_projetos_governanca",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792720940024,
+      "tag": "0053_glpi",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792721346462,
+      "tag": "0054_glpi_integracao",
+      "breakpoints": true
     }
   ]
 }

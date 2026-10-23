@@ -118,6 +118,9 @@ export const dataAdminRoutes = [
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(eq(s.negotiationReads.tenantId, t));
           await tx.delete(s.negotiationMessages).where(eq(s.negotiationMessages.tenantId, t));
+          // chamados do GLPI ligados às oportunidades (o chamado continua existindo no GLPI)
+          await tx.delete(s.glpiTicketEvents).where(eq(s.glpiTicketEvents.tenantId, t));
+          await tx.delete(s.glpiTickets).where(eq(s.glpiTickets.tenantId, t));
           await tx.delete(s.approvalDecisions).where(eq(s.approvalDecisions.tenantId, t));
           await tx.delete(s.approvalRequests).where(eq(s.approvalRequests.tenantId, t));
           await tx.delete(s.opportunityAnswers).where(inArray(s.opportunityAnswers.opportunityId, opps));

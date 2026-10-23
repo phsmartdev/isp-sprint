@@ -330,3 +330,16 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Um impedimento registrado no projeto aparece também nos rituais.
   - O mesmo painel serve à Inteligência sem duplicar consulta.
 
+## ADR-066 — Chamados no GLPI: o GLPI é a fonte, o CRM guarda o vínculo e os retornos (22/10/2026)
+- **Contexto:** o Paulo quer abrir chamado no GLPI a partir da negociação e receber todo o retorno. A entidade deve ser a do cliente, escolhida entre as que já existem no GLPI.
+- **Decisão:**
+  - O CRM usa a API de alto nível do GLPI 11, com OAuth 2.0 (concessão por senha de um usuário de integração). As rotas foram conferidas no código-fonte do GLPI, sem endpoint inventado.
+  - O CRM não replica o cadastro do GLPI: entidades, categorias e grupos são lidos na hora.
+  - O chamado fica ligado à oportunidade. A entidade escolhida fica ligada ao cliente, pelo cadastro de IDs externos que já existia.
+  - O retorno chega pelo webhook nativo do GLPI, com assinatura conferida, e pela releitura diária dos chamados abertos. Os itens entram uma vez só, em registro append-only.
+  - O que o CRM envia (abertura e respostas) fica marcado como saída e não conta como retorno novo.
+  - Em produção, o endereço do GLPI precisa ser público e em https, para o servidor não ser usado para sondar a rede interna.
+- **Consequência:**
+  - Funciona só com o GLPI acessível pela internet.
+  - Enquanto não houver validação com a instância real, a integração fica marcada como "construída e testada com GLPI simulado".
+
