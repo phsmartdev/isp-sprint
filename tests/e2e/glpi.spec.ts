@@ -106,6 +106,17 @@ test('GLPI: configura, abre chamado da negociação, recebe acompanhamento e sol
   await expect(p2.getByText('Aprovação registrada no GLPI')).toBeVisible();
   await expect(t2.getByText('Aprovada', { exact: true })).toBeVisible();
   await expect(t2.getByRole('button', { name: 'Aprovar' })).toHaveCount(0);
+  await expect(t2.getByText('Pedido de aprovação')).toBeVisible();
+  await expect(t2.getByRole('listitem').filter({ hasText: 'Margem confere com a tabela.' })).toContainText('Lucas Lima');
+  // pedida a outra pessoa: o GLPI descarta em silêncio; a ferramenta avisa e mantém o pedido aberto
+  await p2.request.post(`${GLPI}/__test/tickets/${glpiId}`, { data: { kind: 'validation', text: 'Aprovar troca de equipamento', toOther: true, hook: { url: `${API}/hooks/glpi/${token}`, secret: SECRET } } });
+  await p2.reload();
+  const val2 = t2.getByRole('listitem').filter({ hasText: 'Aprovar troca de equipamento' });
+  await val2.getByRole('button', { name: 'Aprovar' }).click();
+  await p2.getByRole('dialog', { name: 'Aprovar no GLPI' }).getByRole('button', { name: 'Aprovar' }).click();
+  await expect(p2.getByText(/O GLPI não registrou a resposta/)).toBeVisible();
+  await p2.getByRole('dialog', { name: 'Aprovar no GLPI' }).getByRole('button', { name: 'Cancelar' }).click();
+  await expect(val2).toContainText('Aguardando aprovação');
   await expect(t2).toContainText('Cliente aprovou, pode seguir com a proposta.');
   await shot(p2, 'glpi-chamado');
 

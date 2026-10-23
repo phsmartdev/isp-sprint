@@ -95,7 +95,8 @@ export const glpiRoutes = [
           id: t.id, glpiId: t.glpiId, title: t.title, entityName: t.entityName, categoryName: t.categoryName, groupName: t.groupName, type: t.type, urgency: t.urgency,
           status: t.status, statusName: t.statusName ?? glpiStatusLabel(t.status), open: glpiOpen(t.status), solvedAt: t.solvedAt, closedAt: t.closedAt,
           lastSyncAt: t.lastSyncAt, syncError: t.syncError, unseen: t.unseen, openedByName, createdAt: t.createdAt, url: base ? glpiTicketUrl(base, t.glpiId) : null,
-          events: events.filter((x) => x.e.ticketId === t.id).map(({ e, actorName }) => ({ id: e.id, kind: e.kind, direction: e.direction, author: e.direction === 'saida' ? actorName : e.author, text: e.text, isPrivate: e.isPrivate, occurredAt: e.occurredAt, validationId: e.validationId, validationStatus: e.validationStatus })),
+          // validações lidas antes de 23/10 (sem id/situação) ficam no histórico, mas não aparecem: a releitura trouxe a versão completa
+          events: events.filter((x) => x.e.ticketId === t.id && !(x.e.kind === 'Validation' && x.e.validationId == null)).map(({ e, actorName }) => ({ id: e.id, kind: e.kind, direction: e.direction, author: e.direction === 'saida' ? actorName : e.author, text: e.text, isPrivate: e.isPrivate, occurredAt: e.occurredAt, validationId: e.validationId, validationStatus: e.validationStatus })),
         })),
       };
     },
@@ -176,6 +177,9 @@ export const glpiRoutes = [
       const html = glpiBody(glpiValidationHeader(approve, me?.name ?? 'usuário'), body.comment ?? '');
       const c = await glpiConfig(app.db, auth.tenantId);
       await viaGlpi(() => glpiAnswerValidation(c, t.glpiId, t.entityId, params.validationId, approve, html));
+      // registra a decisão com quem decidiu e o que escreveu; a releitura do GLPI traz o mesmo id e não duplica
+      const st = approve ? 3 : 4;
+      await app.db.insert(s.glpiTicketEvents).values({ tenantId: auth.tenantId, ticketId: t.id, kind: 'Validation', externalId: `Validation:${params.validationId}:${st}`, direction: 'saida', text: body.comment ?? '', occurredAt: new Date(Math.floor(Date.now() / 1000) * 1000), actorId: auth.userId, validationId: params.validationId, validationStatus: st }).onConflictDoNothing();
       await audit(app.db, req, { action: approve ? 'glpi.validation_approve' : 'glpi.validation_refuse', entityType: 'opportunity', entityId: t.opportunityId, metadata: { glpiId: t.glpiId, validationId: params.validationId, comment: body.comment ?? null } });
       return viaGlpi(() => syncTicket(app.db, c, t));
     },

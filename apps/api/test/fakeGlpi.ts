@@ -106,12 +106,17 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
           return json(res, 201, { id, href: `/Assistance/Ticket/${t.id}/Timeline/Followup/${id}` });
         }
         const vm = sub.match(/^\/Timeline\/Validation\/(\d+)$/);
+        if (req.method === 'GET' && vm) {
+          const v = t.timeline.find((x) => x.type === 'Validation' && x.item.id === Number(vm[1]));
+          return v ? json(res, 200, v.item) : json(res, 404, { status: 'ERROR_ITEM_NOT_FOUND', title: 'Item not found' });
+        }
         if (req.method === 'PATCH' && vm) {
           // como no GLPI 11: só quem foi indicado como aprovador (usuário ou grupo) responde a validação
           const v = t.timeline.find((x) => x.type === 'Validation' && x.item.id === Number(vm[1]));
           if (!v) return json(res, 404, { status: 'ERROR_ITEM_NOT_FOUND', title: 'Item not found' });
-          if (v.item.requested_approver_id !== 9) return json(res, 403, { status: 'ERROR_RIGHT_MISSING', title: "You don't have permission to perform this action." });
           const b = JSON.parse(raw);
+          // como no GLPI 11: quem não é o aprovador indicado tem a situação descartada em silêncio, e a resposta ainda é 200
+          if (v.item.requested_approver_id !== 9) return json(res, 200, { id: v.item.id });
           if (![3, 4].includes(b.status)) return json(res, 400, { status: 'ERROR_INVALID_PARAMETER', title: 'Invalid input parameters' });
           Object.assign(v.item, { status: b.status, approval_comment: b.approval_comment ?? null, approver: { id: 9, name: GLPI_CREDS.username }, approval_date: now() });
           t.date_mod = now();
