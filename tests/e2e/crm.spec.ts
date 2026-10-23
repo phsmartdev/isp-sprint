@@ -300,6 +300,7 @@ test('agendar retorno não duplica e aparece na oportunidade', async ({ page }) 
 
 for (const width of [390, 768, 1280, 1440]) {
   test(`sem rolagem horizontal da página em ${width}px`, async ({ browser }) => {
+    test.setTimeout(150_000); // 19 telas com networkidle: 45 s estourava na suíte completa
     const page = await (await browser.newContext({ viewport: { width, height: 900 } })).newPage();
     await login(page, 'carlos@yepnet.test');
     for (const path of ['/', '/leads', '/opportunities', '/customers', '/activities', '/reports', '/intelligence', '/settings', '/settings/security', '/contracts', '/contracts?t=lista', '/contracts?t=funil', '/contracts?t=calendario', '/contracts?t=renovacoes', '/contracts?t=relatorios', '/intelligence?v=contratos', '/settings/contracts', '/aprovacoes', '/settings/approvals']) {
