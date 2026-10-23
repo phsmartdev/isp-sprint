@@ -123,6 +123,9 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
   expect(after! >= before!).toBe(true);
   await page.getByRole('tab', { name: 'Histórico' }).click();
   await expect(page.getByText('Oportunidade criada')).toBeVisible();
+  // avançar pela faixa de etapas
+  await page.getByRole('navigation', { name: 'Etapas do funil' }).getByRole('button', { name: /^Diagnóstico/ }).click();
+  await expect(page.locator('#ws-stage')).toHaveValue('diagnostico');
 });
 
 test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e endereço do cliente; sem duplicar CNPJ', async ({ page }) => {
@@ -217,6 +220,9 @@ test('Sprint: venda fechada pede confirmação e não confirma contrato', async 
   await expect(page.getByRole('status', { name: 'Venda fechada' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('#ws-stage')).toHaveValue('ganha');
+  // depois de fechar: botão azul para cadastrar o contrato
+  await expect(page.getByRole('button', { name: 'Cadastrar contrato' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Etapas do funil' }).locator('[aria-current="step"]')).toContainText('Venda fechada');
   const opp = await (await page.request.get(`/api/v1/opportunities/${page.url().split('/').pop()}`)).json();
   expect(opp.contractRequestStatus).not.toBe('confirmada');
   await expect(page.locator('#ws-stage')).toBeDisabled();

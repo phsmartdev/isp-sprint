@@ -18,6 +18,10 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
   const opp = list.items.find((o: { customerId: string | null }) => o.customerId) ?? list.items[0];
   await page.goto(`/opportunities/${opp.id}`);
 
+  // etapas do funil entre os botões e as colunas, com a atual marcada
+  const steps = page.getByRole('navigation', { name: 'Etapas do funil' });
+  await expect(steps).toBeVisible();
+  await expect(steps.locator('[aria-current="step"]')).toHaveCount(1);
   const deal = page.getByRole('region', { name: 'Informações do deal' });
   await expect(deal).toContainText('Tipo de venda');
   // seções com Salvar: depois de salva, leitura compacta com Editar
