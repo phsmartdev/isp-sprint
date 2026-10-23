@@ -38,9 +38,10 @@ export function SideSection({ id, title, summary, defaultOpen = false, open: for
 type ContactDetail = { id: string; name: string; phone: string | null; email: string | null; city: string | null; lifecycle: string; planName: string | null; contractStart: string | null; ownerName: string | null; createdAt: string; opportunities: Opportunity[] };
 
 /** Bloco da conta na lateral esquerda: dados essenciais, pessoas e o acesso ao histórico completo. */
-export function AccountPanel({ opp, peopleOpen, extra }: { opp: Opportunity; peopleOpen?: boolean; extra?: ReactNode }) {
-  const { can, feature } = useAuth();
-  const [more, setMore] = useState(false);
+export function AccountPanel({ opp, openMore, extra }: { opp: Opportunity; openMore?: boolean; extra?: ReactNode }) {
+  const { can } = useAuth();
+  // ?aba=pessoas (links antigos) abre direto a visão da conta, onde ficam Pessoas e ABM
+  const [more, setMore] = useState(!!openMore);
   const c = useQuery({ queryKey: ['contact', opp.contactId], enabled: can('clientes'), queryFn: () => api<ContactDetail>(`/contacts/${opp.contactId}`), staleTime: 60_000 });
   const others = (c.data?.opportunities ?? []).filter((o) => o.id !== opp.id);
   const won = others.filter((o) => o.stage === 'ganha');
@@ -66,20 +67,13 @@ export function AccountPanel({ opp, peopleOpen, extra }: { opp: Opportunity; peo
       )}
       {extra}
       <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => setMore(true)}>Saiba mais sobre a conta</Button>
-      {feature('marketing.abm') && (
-        <div className="mt-4">
-          <SideSection id="pessoas" title="Pessoas e ABM" summary="Contatos da conta e papel de cada um nesta negociação" open={peopleOpen}>
-            <EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact />
-          </SideSection>
-        </div>
-      )}
       <AccountDrawer open={more} onClose={() => setMore(false)} opp={opp} detail={c.data} />
     </section>
   );
 }
 
 function AccountDrawer({ open, onClose, opp, detail }: { open: boolean; onClose: () => void; opp: Opportunity; detail: ContactDetail | undefined }) {
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const contracts = useQuery({ queryKey: ['contracts', 'by-contact', opp.contactId], enabled: open && can('contratos'), queryFn: () => api<{ items: ContractRow[]; total: number }>(`/contracts${qs({ contactId: opp.contactId, pageSize: 20 })}`) });
   const acts = useQuery({ queryKey: ['activities', 'contact', opp.contactId], enabled: open && can('atividades'), queryFn: () => api<Paged<Activity>>(`/activities${qs({ contactId: opp.contactId, status: 'todas', scope: can('atividades', 'equipe') ? 'equipe' : 'minhas', pageSize: 10 })}`) });
   const opps = detail?.opportunities ?? [];
@@ -130,6 +124,12 @@ function AccountDrawer({ open, onClose, opp, detail }: { open: boolean; onClose:
                 ))}
               </ul>
             )}
+          </Block>
+        )}
+
+        {feature('marketing.abm') && (
+          <Block title="Pessoas e ABM">
+            <EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact />
           </Block>
         )}
 
