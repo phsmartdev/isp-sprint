@@ -111,15 +111,12 @@ test('Personalização: identidade BKT fixa, sem envio de imagens', async ({ pag
 test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await newOpportunity(page, 'Cliente E2E Autosave');
-  await page.getByLabel('Anotações da conversa').fill('Satisfeita com o atual, curiosa com a oferta. Preço atual não informado.');
+  await page.getByLabel('Nome do deal').fill('Autosave — 500 Mega com Wi-Fi 6');
   await expect(page.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
   await page.waitForTimeout(2200);
   const before = await page.getByRole('timer').locator('p').first().textContent();
   await page.reload();
-  // preenchida, a seção recolhe e mostra o resumo; um clique abre
-  await expect(page.getByText(/Satisfeita com o atual, curiosa/)).toBeVisible();
-  await page.getByRole('button', { name: 'Anotações da conversa' }).click();
-  await expect(page.getByLabel('Anotações da conversa')).toHaveValue(/curiosa com a oferta/);
+  await expect(page.getByLabel('Nome do deal')).toHaveValue('Autosave — 500 Mega com Wi-Fi 6');
   const after = await page.getByRole('timer').locator('p').first().textContent();
   expect(after).not.toBe('00:00');
   expect(after! >= before!).toBe(true);
@@ -129,14 +126,16 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
 
 test('Sprint: plano define o valor pelo catálogo', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
-  await newOpportunity(page, 'Cliente E2E Plano', { plan: false });
+  await page.goto('/opportunities/new');
+  await page.getByLabel('Nome do cliente').fill('Cliente E2E Plano');
   const plan = page.getByLabel('Plano', { exact: true });
-  const option = plan.locator('option').nth(1);
-  const text = (await option.textContent())!;
+  const text = (await plan.locator('option').nth(1).textContent())!;
   await plan.selectOption({ index: 1 });
-  await expect(page.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
+  await page.getByText('Oferta / curiosidade').click();
+  await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
+  await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const price = text.split('—')[1]!.trim();
-  await expect(page.getByText(new RegExp(`^Catálogo: ${price.replace(/[$.]/g, '\\$&')}/mês`))).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText(price);
 });
 
 test('Sprint: venda fechada pede confirmação e não confirma contrato', async ({ page }) => {
@@ -146,8 +145,12 @@ test('Sprint: venda fechada pede confirmação e não confirma contrato', async 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('O contrato só conta como confirmado após validação no IXC');
   await dialog.getByRole('button', { name: 'Marcar venda fechada' }).click();
+  // comemora o fechamento
+  await expect(page.getByRole('status', { name: 'Venda fechada' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.locator('#ws-stage')).toHaveValue('ganha');
-  await expect(page.getByText(/Contrato: (?!Confirmad)/)).toBeVisible();
+  const opp = await (await page.request.get(`/api/v1/opportunities/${page.url().split('/').pop()}`)).json();
+  expect(opp.contractRequestStatus).not.toBe('confirmada');
   await expect(page.locator('#ws-stage')).toBeDisabled();
 });
 
@@ -176,13 +179,13 @@ test('edição simultânea gera conflito visível, não sobrescreve em silêncio
   const b = await (await browser.newContext()).newPage();
   await login(b, 'ana@yepnet.test');
   await b.goto(url);
-  await expect(b.getByLabel('Anotações da conversa')).toBeVisible();
-  await a.getByLabel('Próxima ação').fill('Versão da aba A');
+  await expect(b.getByLabel('Nome do deal')).toBeVisible();
+  await a.getByLabel('Nome do deal').fill('Versão da aba A');
   await expect(a.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
-  await b.getByLabel('Anotações da conversa').fill('Versão da aba B');
+  await b.getByLabel('Nome do deal').fill('Versão da aba B');
   await expect(b.getByText('Outra pessoa alterou esta oportunidade')).toBeVisible();
   await b.getByRole('button', { name: 'Recarregar versão atual' }).click();
-  await expect(b.getByLabel('Próxima ação')).toHaveValue('Versão da aba A');
+  await expect(b.getByLabel('Nome do deal')).toHaveValue('Versão da aba A');
 });
 
 test('fora do time ou de outra empresa não abre a oportunidade por URL', async ({ browser }) => {

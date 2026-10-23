@@ -128,9 +128,7 @@ function AccountDrawer({ open, onClose, opp, detail }: { open: boolean; onClose:
         )}
 
         {feature('marketing.abm') && (
-          <Block title="Pessoas e ABM">
-            <EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact />
-          </Block>
+          <div><h3 className="mb-2 text-sm font-bold text-ink">Pessoas e ABM</h3><EntityPeoplePanel entity="oportunidade" entityId={opp.id} compact /></div>
         )}
 
         {can('projetos') && <LinkedProjects prefill={{ contactId: opp.contactId, label: opp.contactName, kind: 'implantacao', name: `Implantação ${opp.contactName}` }} title="Projetos da conta" />}

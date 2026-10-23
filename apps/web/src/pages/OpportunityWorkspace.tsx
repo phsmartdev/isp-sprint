@@ -3,6 +3,7 @@ import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
+import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -489,6 +490,7 @@ function useAutosave(opp: Opportunity | undefined) {
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can, feature } = useAuth();
+  const [outcome, setOutcome] = useState<Outcome>(null);
   const nav = useNavigate();
   const lookups = useLookups();
   const toast = useToast();
@@ -553,7 +555,11 @@ export function OpportunityWorkspacePage() {
     if (!target) return;
     const req: TransitionRequest = { opp, from: opp.stage, to, fromName: current?.name ?? opp.stage, toName: target.name, toKind: target.kind, requirements: target.requirements ?? {}, title: opp.contactName };
     if (needsDialog(req)) setPending(req);
-    else transition.mutate({ opp, payload: { toStage: to } });
+    else transition.mutate({ opp, payload: { toStage: to } }, { onSuccess: () => celebrate(target.kind) });
+  };
+  // venda fechada comemora; perdida lamenta
+  const celebrate = (kind: string | undefined) => {
+    if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName });
   };
 
   const addressSummary = f.condominiumId ? [opp.condominiumName, f.installBlock && `Bl. ${f.installBlock}`, f.installUnit && `Ap. ${f.installUnit}`].filter(Boolean).join(' · ') : [f.installStreet, f.installNumber, f.installCity].filter(Boolean).join(', ');
@@ -694,16 +700,16 @@ export function OpportunityWorkspacePage() {
         <Button icon={<FileText className="h-4 w-4" />} onClick={() => setGenProposal(true)}>Gerar proposta</Button>
         <Button icon={<Send className="h-4 w-4" />} onClick={() => setEmail('proposta')}>Enviar proposta</Button>
         <Button icon={<Mail className="h-4 w-4" />} onClick={() => setEmail('followup')}>Follow-up</Button>
-        {editable && (
-          <>
-            <Button icon={<CheckCircle2 className="h-4 w-4 text-success" />} onClick={() => requestMove('ganha')}>Venda fechada</Button>
-            <Button icon={<XCircle className="h-4 w-4 text-danger" />} onClick={() => requestMove('perdida')}>Marcar como perdida</Button>
-          </>
-        )}
         <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>{unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat} nova(s)` : 'Viabilidade e chat'}</Button>
         <Button icon={<Scale className="h-4 w-4" />} onClick={() => nav(`/opportunities/${opp.id}/aprovacao`)}>
-          Análise e aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
+          Pedir aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
         </Button>
+        {editable && (
+          <>
+            <Button className="!bg-success !text-white hover:!opacity-90" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => requestMove('ganha')}>Venda fechada</Button>
+            <Button variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => requestMove('perdida')}>Venda perdida</Button>
+          </>
+        )}
         {opp.stage === 'ganha' && can('contratos') && (opp.contractId
           ? <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
           : <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
@@ -730,7 +736,8 @@ export function OpportunityWorkspacePage() {
       </Modal>
       <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
-      <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => void q.refetch() })} />
+      <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => { const kind = pending?.toKind; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => { void q.refetch(); celebrate(kind); } }); }} />
+      <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
     </div>
   );
 }

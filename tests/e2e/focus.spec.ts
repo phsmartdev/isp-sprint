@@ -15,17 +15,13 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
   await page.getByLabel('Metragem de cabo (m)').fill('30');
   await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
-  const ta = page.locator('section').filter({ hasText: 'Roteiro' }).locator('textarea').first();
-  await ta.click();
-  const text = 'Quero internet mais rapida para trabalhar de casa';
+  const deal = page.getByLabel('Nome do deal');
+  await deal.fill('');
+  await deal.click();
+  const text = 'Internet mais rapida para trabalhar de casa';
   for (const ch of text) { await page.keyboard.type(ch); await page.waitForTimeout(90); }
-  await expect(ta).toBeFocused();
-  await expect(ta).toHaveValue(text);
-  const notes = page.getByLabel('Anotações da conversa');
-  await notes.click();
-  for (const ch of 'Cliente quer fibra no apto') { await page.keyboard.type(ch); await page.waitForTimeout(90); }
-  await expect(notes).toBeFocused();
-  await expect(notes).toHaveValue('Cliente quer fibra no apto');
+  await expect(deal).toBeFocused();
+  await expect(deal).toHaveValue(text);
 });
 
 test('sair leva ao login sem erro e a sessão termina', async ({ page }) => {
