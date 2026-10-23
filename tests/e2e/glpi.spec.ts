@@ -75,6 +75,10 @@ test('GLPI: configura, abre chamado da negociação, recebe acompanhamento e sol
   }
   await p2.reload();
   const t2 = p2.getByRole('listitem', { name: `Chamado ${glpiId}` });
+  // o chamado vem recolhido: o histórico só abre ao clicar
+  await expect(t2.getByRole('list', { name: `Retornos do chamado ${glpiId}` })).toHaveCount(0);
+  const expand = async () => { await t2.getByRole('button', { name: `Abrir histórico do chamado ${glpiId}` }).click(); await expect(t2.getByRole('list', { name: `Retornos do chamado ${glpiId}` })).toBeVisible(); };
+  await expand();
   await expect(t2).toContainText('Solucionado');
   await expect(t2.getByRole('list', { name: `Retornos do chamado ${glpiId}` })).toContainText('Visita técnica marcada para segunda às 9h.');
   await expect(t2).toContainText('Viável: 300 Mb com rota dupla pelo POP Centro.');
@@ -94,6 +98,8 @@ test('GLPI: configura, abre chamado da negociação, recebe acompanhamento e sol
   const v = await (await p2.request.post(`${GLPI}/__test/tickets/${glpiId}`, { data: { kind: 'validation', text: 'Aprovar desconto de 10% na mensalidade', hook: { url: `${API}/hooks/glpi/${token}`, secret: SECRET } } })).json();
   expect(v.hookStatus).toBe(200);
   await p2.reload();
+  await expect(t2).toContainText('1 aprovação(ões) pendente(s)');
+  await expand();
   const val = t2.getByRole('listitem').filter({ hasText: 'Aprovar desconto de 10% na mensalidade' });
   await expect(val).toContainText('Aguardando aprovação');
   await val.getByRole('button', { name: 'Recusar' }).click();
@@ -111,6 +117,7 @@ test('GLPI: configura, abre chamado da negociação, recebe acompanhamento e sol
   // pedida a outra pessoa: o GLPI descarta em silêncio; a ferramenta avisa e mantém o pedido aberto
   await p2.request.post(`${GLPI}/__test/tickets/${glpiId}`, { data: { kind: 'validation', text: 'Aprovar troca de equipamento', toOther: true, hook: { url: `${API}/hooks/glpi/${token}`, secret: SECRET } } });
   await p2.reload();
+  await expand();
   const val2 = t2.getByRole('listitem').filter({ hasText: 'Aprovar troca de equipamento' });
   await val2.getByRole('button', { name: 'Aprovar' }).click();
   await p2.getByRole('dialog', { name: 'Aprovar no GLPI' }).getByRole('button', { name: 'Aprovar' }).click();
