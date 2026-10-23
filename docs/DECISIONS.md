@@ -376,3 +376,13 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - A lista é salva inteira, com controle de versão da oportunidade, e o quadro antes/depois entra no histórico.
   - Pode ser registrada depois do encerramento.
 - **Consequência:** a inteligência por concorrente (pregões juntos, taxa de vitória, lances) virá do CNPJ dessas linhas, no Bloco 3.
+
+## ADR-070 — Inteligência de licitação por concorrente (23/10/2026)
+- **Contexto:** o Paulo precisa do histórico de cada concorrente nos pregões: quantas vezes disputamos juntos, a taxa de vitória dele, os valores de lance e as ações que tomou durante o pregão.
+- **Decisão:**
+  - Não existe cadastro paralelo de concorrentes. O concorrente é derivado dos participantes de cada pregão (`bid_participants`), identificado pelo CNPJ. Quando não há CNPJ, usa-se o nome normalizado, sem acento nem maiúsculas.
+  - As ações do pregão ficam em `bid_actions`, em registro append-only: sem edição e sem exclusão; uma correção entra como nova ação.
+  - Os indicadores são calculados na hora (`competitorStats` no domínio), dentro do alcance do módulo Inteligência.
+- **Consequência:**
+  - A ata ou o relatório dos portais poderá alimentar as mesmas tabelas quando houver arquivos de exemplo.
+  - Um CNPJ informado errado separa o histórico. Corrigir o CNPJ nos participantes reúne tudo de novo.

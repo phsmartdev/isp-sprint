@@ -157,9 +157,14 @@ Atualizado em 2026-10-23. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Cada tipo de tarefa tem um roteiro, em versões append-only, mostrado ao agendar.
   - Os links antigos redirecionam para a aba certa.
 - **Marca BKT.** Cantos retos em toda a aplicação; só fotos de usuário e pontos de status continuam redondos.
-- **Próximo.**
-  - Bloco 3: inteligência por concorrente a partir do CNPJ dos participantes, com linha do tempo de ações no pregão e importação de ata.
-  - Bloco 4: tempo por etapa, conversão e etapas clicáveis na negociação.
+- **Negociação: etapas e contrato.**
+  - Faixa de etapas do funil clicável entre os botões e as colunas, no lugar do seletor.
+  - Botão azul "Cadastrar contrato" no canto superior direito depois da venda fechada.
+- **Bloco 3 (ADR-070).**
+  - Aba Pregão na licitação, com ranking por lote e linha do tempo append-only das ações de cada empresa.
+  - Inteligência → Concorrentes, por CNPJ: pregões juntos, vitórias e taxa de vitória, ganhamos e perdemos, lance médio e mínimo; o detalhe mostra cada pregão e as ações do concorrente.
+  - A importação da ata ou relatório dos portais aguarda arquivos de exemplo.
+- **Próximo.** Bloco 4: tempo por etapa (inclusive as concluídas) e conversão por etapa e do funil.
 
 ## Abertura por tipo de venda, filial e produtos e serviços ✅ (2026-10-23)
 - **Abertura:**
