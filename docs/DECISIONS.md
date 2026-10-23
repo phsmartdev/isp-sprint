@@ -353,3 +353,26 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Os links antigos (`?aba=…`) continuam funcionando.
   - Abrir a oportunidade mostra o histórico e o chat, então comentários e mensagens passam a contar como lidos ao abrir. Entre 900 e 1280 px, o chat fica na gaveta "Viabilidade e chat".
 
+
+## ADR-068 — Tipo de venda é opção do formulário, não funil (23/10/2026)
+- **Contexto:** Licitação, Adesão à Ata, Consumo de Contrato e Venda Consultiva tinham virado jornadas próprias. O Paulo corrigiu: são opções do formulário dentro do funil de vendas Corporativo.
+- **Decisão:**
+  - A oportunidade guarda `sale_kind`. O campo da jornada guarda `sale_kinds`, para os campos aparecerem só no tipo certo.
+  - Na primeira leitura de `/meta/lookups`, `ensureSaleTypeForm` faz a migração de cada base:
+    - move as oportunidades das antigas jornadas para o Corporativo, com etapa equivalente e evento no histórico;
+    - remove essas jornadas;
+    - cria uma nova versão ativa da instrução.
+  - As etapas do Corporativo deixam de exigir próxima ação e roteiro.
+- **Consequência:**
+  - Um funil só para relatórios e conversão.
+  - O tipo de venda pode ser trocado na negociação, com registro no histórico.
+
+## ADR-069 — Participantes do pregão (23/10/2026)
+- **Contexto:** o Paulo precisa registrar as empresas que disputaram, os lances, o ranking e o(s) vencedor(es). É a base do histórico de concorrentes.
+- **Decisão:**
+  - Tabela `bid_participants` por oportunidade (só Licitação) com empresa, CNPJ, lote, lance, situação, "nós" e vencedora.
+  - O ranking é calculado (menor lance por lote) e não é gravado.
+  - Um vencedor por lote; em lote único, só um.
+  - A lista é salva inteira, com controle de versão da oportunidade, e o quadro antes/depois entra no histórico.
+  - Pode ser registrada depois do encerramento.
+- **Consequência:** a inteligência por concorrente (pregões juntos, taxa de vitória, lances) virá do CNPJ dessas linhas, no Bloco 3.

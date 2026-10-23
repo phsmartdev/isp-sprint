@@ -187,25 +187,6 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await expect(dlg).toHaveCount(0);
   await expect(part).toContainText('Rede Concorrente');
   await expect(part).toContainText('R$ 90.000,00');
-  // participantes do pregão: ranking pelo menor lance e vencedora
-  const part = page.getByRole('region', { name: 'Participantes do pregão' });
-  await part.getByRole('button', { name: 'Registrar participantes' }).click();
-  const dlg = page.getByRole('dialog', { name: 'Participantes do pregão' });
-  await dlg.getByLabel('Empresa 1').fill('Nossa Empresa');
-  await dlg.getByLabel('Nossa empresa 1').check();
-  await dlg.getByLabel('Lance 1').fill('95.000,00');
-  await dlg.getByLabel('Empresa 2').fill('Rede Concorrente');
-  await dlg.getByLabel('Lance 2').fill('90.000,00');
-  await expect(dlg.locator('tbody tr').nth(1)).toContainText('1º');
-  await dlg.getByLabel('Vencedora 1').check();
-  await dlg.getByLabel('Vencedora 2').check();
-  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
-  await expect(dlg.getByRole('alert')).toContainText('Lote único');
-  await dlg.getByLabel('Vencedora 1').uncheck();
-  await dlg.getByRole('button', { name: 'Salvar participantes' }).click();
-  await expect(dlg).toHaveCount(0);
-  await expect(part).toContainText('Rede Concorrente');
-  await expect(part).toContainText('R$ 90.000,00');
   // mesmo CNPJ de novo: recusa e orienta a usar a conta existente
   await page.goto('/opportunities/new');
   await page.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
