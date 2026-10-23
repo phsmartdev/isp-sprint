@@ -127,6 +127,7 @@ export const dataAdminRoutes = [
           await tx.delete(s.opportunityAttachments).where(inArray(s.opportunityAttachments.opportunityId, opps));
           await tx.delete(s.opportunityItems).where(eq(s.opportunityItems.tenantId, t));
           await tx.delete(s.bidParticipants).where(eq(s.bidParticipants.tenantId, t));
+          await tx.delete(s.bidActions).where(eq(s.bidActions.tenantId, t));
           await del('historico_oportunidades', tx.delete(s.opportunityEvents).where(eq(s.opportunityEvents.tenantId, t)).returning({ id: s.opportunityEvents.id }));
           await del('oportunidades', tx.delete(s.opportunities).where(eq(s.opportunities.tenantId, t)).returning({ id: s.opportunities.id }));
           await tx.update(s.integrationEvents).set({ leadId: null }).where(eq(s.integrationEvents.tenantId, t));

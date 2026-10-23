@@ -428,6 +428,13 @@
       "when": 1792791382055,
       "tag": "0060_roteiros_tarefas",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1792795128873,
+      "tag": "0061_acoes_pregao",
+      "breakpoints": true
     }
   ]
 }

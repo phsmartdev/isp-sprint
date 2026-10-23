@@ -7,6 +7,7 @@ import { OpportunityContacts } from '../features/opportunity/OpportunityContacts
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { BidParticipants } from '../features/opportunity/BidParticipants';
+import { BidTimeline } from '../features/opportunity/BidTimeline';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -599,7 +600,7 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
-  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'pregao' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'pregao' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
@@ -748,6 +749,7 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
+            ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
             { key: 'tarefas', label: 'Tarefas', count: acts.data?.items.filter((x) => !x.completedAt).length || undefined },
             { key: 'anexos', label: 'Anexos', count: opp.attachmentCount || undefined },
@@ -757,6 +759,7 @@ export function OpportunityWorkspacePage() {
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
+          {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
             <div className="space-y-5">
@@ -812,10 +815,6 @@ export function OpportunityWorkspacePage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <label htmlFor="ws-stage" className="text-sm text-muted">Etapa</label>
-        <Select id="ws-stage" className="w-auto" value={opp.stage} onChange={(e) => requestMove(e.target.value)} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)}>
-          {stages.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
-        </Select>
         {can('atividades') && <Button icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setScheduling(true)}>Agendar retorno</Button>}
         <Button icon={<FileText className="h-4 w-4" />} onClick={() => setGenProposal(true)}>Gerar proposta</Button>
         <Button icon={<Send className="h-4 w-4" />} onClick={() => setEmail('proposta')}>Enviar proposta</Button>

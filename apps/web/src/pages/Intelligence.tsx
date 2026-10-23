@@ -1,3 +1,4 @@
+import { CompetitorsPanel } from '../features/intel/Competitors';
 import { useRef } from 'react';
 import { ArpDashboard } from '../features/arp/AtasTab';
 import { useQuery } from '@tanstack/react-query';
@@ -54,7 +55,7 @@ export function IntelligencePage() {
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TABS = [{ key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, { key: 'atas', label: 'Atas de registro de preços' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
+  const TABS = [{ key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'concorrentes', label: 'Concorrentes' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
   return (
     <div className="w-full">
       <PageHeader
@@ -79,7 +80,7 @@ export function IntelligencePage() {
         onChange={(v) => setF({ v })}
         tabs={TABS}
       />
-      {f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
+      {f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'concorrentes' ? <CompetitorsPanel /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
       {f.v === 'comercial' && (<div className="mt-6">
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
       <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

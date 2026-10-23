@@ -596,6 +596,23 @@ export const bidParticipants = pgTable('bid_participants', {
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('bid_participants_opp_idx').on(t.opportunityId), docIdx: index('bid_participants_doc_idx').on(t.tenantId, t.document), statusCk: check('bid_participants_status_ck', sql`status in ('ativo','desclassificado','desistente')`) }));
 
+/** Licitação: linha do tempo do pregão (append-only) — lances, recursos, impugnações, desclassificações… por empresa. */
+export const bidActions = pgTable('bid_actions', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  company: text('company').notNull(),
+  document: text('document'),
+  isUs: boolean('is_us').notNull().default(false),
+  kind: text('kind').notNull(),
+  lot: text('lot'),
+  amountCents: bigint('amount_cents', { mode: 'number' }),
+  description: text('description'),
+  occurredAt: ts('occurred_at').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ oppIdx: index('bid_actions_opp_idx').on(t.opportunityId, t.occurredAt), docIdx: index('bid_actions_doc_idx').on(t.tenantId, t.document) }));
+
 /** Roteiro de cada tipo de tarefa; cada salvamento é uma nova versão (vale a mais recente). */
 export const activityScripts = pgTable('activity_scripts', {
   id: id(),

@@ -22,7 +22,7 @@ const cnpj = (d: string | null) => (d && d.length === 14 ? `${d.slice(0, 2)}.${d
 const blank = (lot = ''): Row => ({ key: `p${++seq}`, company: '', document: '', lot, bid: '', status: 'ativo', winner: false, isUs: false });
 const toInput = (r: Row) => ({ company: r.company.trim(), document: r.document.trim() || null, lot: r.lot.trim() || null, bidCents: r.bid.trim() ? parseMoney(r.bid) : null, status: r.status, winner: r.winner, isUs: r.isUs });
 
-export function BidParticipants({ oppId, editable = true }: { oppId: string; editable?: boolean }) {
+export function BidParticipants({ oppId, editable = true, full = false }: { oppId: string; editable?: boolean; /** aba Pregão: ranking completo por lote */ full?: boolean }) {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['bid-participants', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/bid-participants`) });
@@ -61,12 +61,39 @@ export function BidParticipants({ oppId, editable = true }: { oppId: string; edi
   };
 
   return (
-    <section aria-label="Participantes do pregão" className="border-t border-line pt-3">
+    <section aria-label={full ? 'Ranking do pregão' : 'Participantes do pregão'} className={full ? undefined : 'border-t border-line pt-3'}>
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Trophy className="h-4 w-4 text-primary" aria-hidden />Participantes do pregão</span>
+        {full ? <h3 className="flex items-center gap-2 text-md font-bold text-ink"><Trophy className="h-5 w-5 text-primary" aria-hidden />Ranking do pregão</h3>
+          : <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Trophy className="h-4 w-4 text-primary" aria-hidden />Participantes do pregão</span>}
         {editable && <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => void openEditor()}>{saved.length ? 'Editar' : 'Registrar participantes'}</button>}
       </div>
-      {saved.length ? (
+      {full && saved.length ? (
+        <div className="mt-3 space-y-4">
+          {lots.map((lot) => {
+            const inLot = saved.filter((x) => x.lot === lot).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+            return (
+              <div key={lot} className="overflow-x-auto">
+                {lots.length > 1 && <p className="mb-1 text-sm font-semibold text-ink">Lote {lot}</p>}
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead className="text-xs text-muted"><tr>{['Pos.', 'Empresa', 'CNPJ', 'Lance', 'Situação', ''].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {inLot.map((x) => (
+                      <tr key={x.id} className={x.isUs ? 'border-t border-line bg-primary-soft' : 'border-t border-line'}>
+                        <td className="num px-2 py-1.5 font-bold text-ink">{x.rank ? `${x.rank}º` : '—'}</td>
+                        <td className="px-2 py-1.5 text-text">{x.company}{x.isUs ? ' (nós)' : ''}</td>
+                        <td className="num px-2 py-1.5 text-muted">{cnpj(x.document) || '—'}</td>
+                        <td className="num px-2 py-1.5 text-text">{x.bidCents === null ? '—' : fmtBRL(x.bidCents)}</td>
+                        <td className="px-2 py-1.5 text-muted">{PARTICIPANT_STATUS_LABELS[x.status]}</td>
+                        <td className="px-2 py-1.5">{x.winner && <span className="bg-success-soft px-2 py-0.5 text-xs font-bold text-[#15803D]">Vencedora</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+        </div>
+      ) : saved.length ? (
         <dl className="mt-2 space-y-1.5 text-sm">
           <div className="flex gap-3"><dt className="w-24 shrink-0 text-muted">Empresas</dt><dd className="text-text">{new Set(saved.map((s) => s.document || s.company)).size} em {lots.length} lote(s)</dd></div>
           {lots.map((lot) => {
