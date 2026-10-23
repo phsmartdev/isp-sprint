@@ -109,7 +109,8 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - em produção, o endereço precisa ser https e acessível pela internet. Endereços internos são recusados.
 - **Funcionalidade "Chamados no GLPI"** (CRM): pode ser desligada em Módulos e liberação. Quem não vê a oportunidade não vê nem responde o chamado.
 - **Rotas da API do GLPI:** conferidas no código-fonte do GLPI 11.0 (branch 11.0/bugfixes): `/api.php/token`, `/Administration/Entity`, `/Administration/Group`, `/Dropdowns/ITILCategory`, `/Assistance/Ticket`, `/Timeline`, `/Timeline/Followup` e `/TeamMember`. Nada foi inventado.
-- **Testes:** contra um GLPI 11 simulado com o mesmo formato (`apps/api/test/fakeGlpi.ts`; no E2E, porta 3398). Domínio (5), API (6), E2E (1). Regressão completa: domínio 158, API 238, E2E (ver commit).
+  - A entidade do chamado vai no cabeçalho `GLPI-Entity`: no GLPI 11, o campo `entity` do chamado é somente leitura no corpo e vale a entidade ativa da sessão. Corrigido em 23/10 depois de conferir `Router::handleAuth` e o esquema do chamado; o GLPI simulado agora se comporta igual.
+- **Testes:** contra um GLPI 11 simulado com o mesmo formato (`apps/api/test/fakeGlpi.ts`; no E2E, porta 3398). Domínio (5), API (6), E2E (1). Regressão completa: domínio 158, API 238, E2E (ver commit de merge).
 - **Pendente para validar de verdade:**
   1. GLPI 11 acessível pela internet.
   2. Cliente OAuth com escopo "api" e concessão "Senha".

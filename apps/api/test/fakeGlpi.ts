@@ -78,9 +78,12 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
       if (req.method === 'GET' && path === '/Dropdowns/ITILCategory') return json(res, 200, filterBy(CATEGORIES, u.searchParams.get('filter')));
       if (req.method === 'POST' && path === '/Assistance/Ticket') {
         const b = JSON.parse(raw);
-        if (!b.name || !b.content || b.entity === undefined || !ENTITIES.some((e) => e.id === b.entity)) return json(res, 400, { status: 'ERROR_INVALID_PARAMETER', title: 'Invalid input parameters', detail: 'entity' });
+        // como no GLPI 11: `entity` é somente leitura no corpo; vale a entidade ativa (cabeçalho GLPI-Entity, padrão a raiz 0)
+        const hdr = req.headers['glpi-entity'];
+        const entity = hdr === undefined ? 0 : Number(hdr);
+        if (!b.name || !b.content || !ENTITIES.some((e) => e.id === entity)) return json(res, 400, { status: 'ERROR_INVALID_PARAMETER', title: 'Invalid input parameters', detail: 'entity' });
         const id = ++seq;
-        tickets.set(id, { id, name: b.name, content: b.content, type: b.type, urgency: b.urgency, entity: b.entity, category: b.category ?? null, status: 1, date_mod: now(), date_solve: null, date_close: null, timeline: [], team: [] });
+        tickets.set(id, { id, name: b.name, content: b.content, type: b.type, urgency: b.urgency, entity, category: b.category ?? null, status: 1, date_mod: now(), date_solve: null, date_close: null, timeline: [], team: [] });
         return json(res, 201, { id, href: `/Assistance/Ticket/${id}` }, { Location: `/Assistance/Ticket/${id}` });
       }
       const m = path.match(/^\/Assistance\/Ticket\/(\d+)(\/.*)?$/);

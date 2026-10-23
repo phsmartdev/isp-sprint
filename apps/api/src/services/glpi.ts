@@ -10,6 +10,7 @@
  *   GET  /api.php/Assistance/Ticket/{id}/Timeline             → [{ type, item }] (Followup, Task, Solution, Document, Validation)
  *   POST /api.php/Assistance/Ticket/{id}/Timeline/Followup    → acompanhamento
  *   POST /api.php/Assistance/Ticket/{id}/TeamMember           → { type: 'Group', id, role: 'assigned' }
+ * Entidade do chamado: cabeçalho GLPI-Entity (o campo `entity` do Ticket é somente leitura na API).
  * Versão pedida pelo cabeçalho GLPI-API-Version: 2 (o GLPI usa a 2.x mais nova que tiver).
  * Webhook nativo: cabeçalhos X-GLPI-signature = HMAC-SHA256(corpo + X-GLPI-timestamp, segredo) e X-GLPI-timestamp;
  * na validação do endereço o GLPI faz GET ?crc_token=… e espera HMAC-SHA256(crc_token, segredo) no corpo.
@@ -87,11 +88,11 @@ async function accessToken(c: GlpiCfg, fresh = false): Promise<string> {
   return j.access_token;
 }
 
-export async function glpiCall<T>(c: GlpiCfg, method: 'GET' | 'POST' | 'PATCH', path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {}): Promise<T> {
+export async function glpiCall<T>(c: GlpiCfg, method: 'GET' | 'POST' | 'PATCH', path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined>; entityId?: number } = {}): Promise<T> {
   const q = opts.query ? `?${new URLSearchParams(Object.entries(opts.query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString()}` : '';
   const go = async (fresh: boolean) => hfetch(`${c.baseUrl}/api.php${path}${q}`, {
     method,
-    headers: { authorization: `Bearer ${await accessToken(c, fresh)}`, accept: 'application/json', 'GLPI-API-Version': '2', ...(opts.body ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: `Bearer ${await accessToken(c, fresh)}`, accept: 'application/json', 'GLPI-API-Version': '2', ...(opts.entityId !== undefined ? { 'GLPI-Entity': String(opts.entityId) } : {}), ...(opts.body ? { 'content-type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let r = await go(false);
@@ -118,12 +119,14 @@ export const glpiGroups = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET'
 
 export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: string; type: number; urgency: number; entityId: number; categoryId?: number | null; groupId?: number | null }) {
   const r = await glpiCall<{ id: number }>(c, 'POST', '/Assistance/Ticket', {
-    body: { name: t.title, content: textToHtml(t.content), type: t.type, urgency: t.urgency, impact: t.urgency, entity: t.entityId, ...(t.categoryId ? { category: t.categoryId } : {}) },
+    // no GLPI 11 a entidade do chamado é somente leitura no corpo: vale a entidade ativa da sessão, escolhida pelo cabeçalho GLPI-Entity (Router::handleAuth)
+    body: { name: t.title, content: textToHtml(t.content), type: t.type, urgency: t.urgency, impact: t.urgency, ...(t.categoryId ? { category: t.categoryId } : {}) },
+    entityId: t.entityId,
   });
   if (!r?.id) throw new GlpiError('O GLPI não devolveu o número do chamado.');
   let groupWarning: string | null = null;
   if (t.groupId) {
-    try { await glpiCall(c, 'POST', `/Assistance/Ticket/${r.id}/TeamMember`, { body: { type: 'Group', id: t.groupId, role: 'assigned' } }); }
+    try { await glpiCall(c, 'POST', `/Assistance/Ticket/${r.id}/TeamMember`, { body: { type: 'Group', id: t.groupId, role: 'assigned' }, entityId: t.entityId }); }
     catch (e) { groupWarning = (e as Error).message; }
   }
   return { id: r.id, groupWarning };
