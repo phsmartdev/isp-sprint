@@ -88,7 +88,7 @@ test('Indicadores, semáforo, scorecard e metas em cascata', async ({ page }) =>
   await gd.getByLabel('Novo alvo').fill('35');
   await gd.getByLabel('Motivo').fill('Campanha de fim de ano antecipada');
   await gd.getByRole('button', { name: 'Salvar revisão' }).click();
-  await expect(gd.getByText(/original/)).toBeVisible();
+  await expect(gd.getByText(/^original \d/)).toBeVisible();
   await shot(page, 'perf-meta');
   await gd.getByRole('button', { name: 'Fechar' }).click();
   await page.getByRole('tab', { name: 'Objetivos' }).click();

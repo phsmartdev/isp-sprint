@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { CheckCircle2, X, XCircle } from 'lucide-react';
@@ -20,6 +20,9 @@ function useDialogFocus(open: boolean, onClose: () => void) {
     const first = el?.querySelector<HTMLElement>('[data-autofocus]') ?? el?.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
+      // com diálogos empilhados, Esc e Tab valem só para o de cima (o último aberto)
+      const dialogs = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+      if (el && dialogs.length && dialogs[dialogs.length - 1] !== el) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeRef.current();
@@ -46,12 +49,13 @@ function useDialogFocus(open: boolean, onClose: () => void) {
 
 export function Modal({ open, onClose, title, children, footer, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   const ref = useDialogFocus(open, onClose);
+  const titleId = useId();
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="modal-title" className={clsx('flex max-h-[92vh] w-full flex-col rounded-t-lg bg-surface shadow-overlay sm:rounded-lg', size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : size === 'xl' ? 'sm:max-w-6xl' : 'sm:max-w-xl')}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} className={clsx('flex max-h-[92vh] w-full flex-col rounded-t-lg bg-surface shadow-overlay sm:rounded-lg', size === 'sm' ? 'sm:max-w-md' : size === 'lg' ? 'sm:max-w-3xl' : size === 'xl' ? 'sm:max-w-6xl' : 'sm:max-w-xl')}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 id="modal-title" className="text-lg font-bold text-ink">{title}</h2>
+          <h2 id={titleId} className="text-lg font-bold text-ink">{title}</h2>
           <button onClick={onClose} className="rounded-sm p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Fechar"><X className="h-5 w-5" /></button>
         </div>
         <div className="overflow-y-auto px-5 py-4">{children}</div>
@@ -64,12 +68,14 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
 
 export function Drawer({ open, onClose, title, children, footer, width = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; width?: 'md' | 'lg' }) {
   const ref = useDialogFocus(open, onClose);
+  // id próprio: com duas gavetas abertas (ex.: pessoa dentro da conta), cada uma mantém o seu nome
+  const titleId = useId();
   if (!open) return null;
   return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end bg-ink/30" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="drawer-title" className={clsx('flex h-full w-full flex-col bg-surface shadow-overlay', width === 'lg' ? 'sm:max-w-2xl' : 'sm:max-w-lg')}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} className={clsx('flex h-full w-full flex-col bg-surface shadow-overlay', width === 'lg' ? 'sm:max-w-2xl' : 'sm:max-w-lg')}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 id="drawer-title" className="text-lg font-bold text-ink">{title}</h2>
+          <h2 id={titleId} className="text-lg font-bold text-ink">{title}</h2>
           <button onClick={onClose} className="rounded-sm p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Fechar"><X className="h-5 w-5" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>

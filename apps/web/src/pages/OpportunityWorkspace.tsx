@@ -2,6 +2,8 @@ import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
+import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
+import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,7 +35,6 @@ import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
-import { Objections, StageScript } from '../features/Playbook';
 import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
@@ -486,34 +487,10 @@ function useAutosave(opp: Opportunity | undefined) {
   return { base, fields, setFields, status, error, conflict, restored, dismissRestored: () => setRestored(false), save, reloadFromServer, dirty: dirtyKeys.length > 0 };
 }
 
-function Pendencies({ opp, fields, unmetFields }: { opp: Opportunity; fields: Fields; unmetFields: string[] }) {
-  const items: { tone: 'warning' | 'info'; text: string }[] = [];
-  const open = !isClosed(opp.stage);
-  if (open && !fields.reasons.length) items.push({ tone: 'warning', text: 'Registre o motivo do contato. Curiosidade e comparação também contam.' });
-  if (open && !fields.planId) items.push({ tone: 'warning', text: 'Escolha o plano: é ele que define o valor da proposta.' });
-  if (open && (!fields.saleType || fields.cableMeters === '')) items.push({ tone: 'warning', text: 'Informe tipo de venda e metragem de cabo para calcular comissão, CAC e payback.' });
-  if (open && !fields.condominiumId && !fields.installStreet) items.push({ tone: 'warning', text: 'Informe o endereço de instalação (condomínio, bloco e apartamento).' });
-  if (open && unmetFields.length) items.push({ tone: 'warning', text: `Campos obrigatórios da jornada: ${unmetFields.join(', ')}.` });
-  if (open && opp.coverageStatus !== 'elegivel') items.push({ tone: 'warning', text: `Cobertura ${opp.coverageStatus === 'nao_consultada' ? 'não consultada' : 'não confirmada'}: não prometa plano nem data de instalação.` });
-  if (open && (!fields.nextAction || !fields.nextActionAt)) items.push({ tone: 'warning', text: 'Defina a próxima ação e quando ela acontece.' });
-  if (open && opp.overdue) items.push({ tone: 'warning', text: 'A próxima ação está vencida. Reagende ou conclua.' });
-  if (open && opp.viability?.engineering?.required && fields.engineeringStatus !== 'aprovada') items.push({ tone: 'warning', text: `Fora da autonomia (${opp.viability.engineering.reasons.join(' e ')}): abra o chamado de viabilidade na engenharia. A venda só fecha com a viabilidade aprovada.` });
-  if (opp.stage === 'ganha' && opp.viability?.engineering?.required && !fields.executiveTicket) items.push({ tone: 'warning', text: 'Venda fechada fora da autonomia: abra o chamado de projeto executivo na engenharia.' });
-  if (open && opp.viability?.route?.requiresApproval) items.push({ tone: 'info', text: `O caminho “${opp.viability.route.name}” exige aprovação antes de fechar.` });
-  if (opp.customerLifecycle && opp.customerLifecycle !== 'prospect') items.push({ tone: 'info', text: 'Cliente já existente: confira os contratos ativos antes de uma nova contratação.' });
-  if (opp.stage === 'ganha' && opp.contractRequestStatus !== 'confirmada') items.push({ tone: 'info', text: 'Venda fechada no comercial. O contrato só é confirmado depois da validação no IXC.' });
-  return items.length === 0 ? (
-    <p className="flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="h-4 w-4" aria-hidden />Nenhuma pendência de dados.</p>
-  ) : (
-    <ul className="space-y-2">
-      {items.map((i) => <li key={i.text} className={clsx('rounded-md border px-3 py-2 text-sm', i.tone === 'warning' ? 'border-warning/30 bg-warning-soft text-[#9A5B00]' : 'border-primary/20 bg-primary-soft text-primary')}>{i.text}</li>)}
-    </ul>
-  );
-}
-
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can, feature } = useAuth();
+  const [outcome, setOutcome] = useState<Outcome>(null);
   const nav = useNavigate();
   const lookups = useLookups();
   const toast = useToast();
@@ -551,7 +528,7 @@ export function OpportunityWorkspacePage() {
   useEffect(() => {
     if (!loaded) return;
     const t = search.get('aba');
-    const target = t === 'chat' ? document.getElementById('ws-chat') : t === 'pessoas' ? document.querySelector('[aria-label="Pessoas e ABM"]') : null;
+    const target = t === 'chat' ? document.getElementById('ws-chat') : null;
     if (target) setTimeout(() => target.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
   }, [loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   if (q.isLoading) return <div className="card"><LoadingRows rows={8} /></div>;
@@ -578,7 +555,11 @@ export function OpportunityWorkspacePage() {
     if (!target) return;
     const req: TransitionRequest = { opp, from: opp.stage, to, fromName: current?.name ?? opp.stage, toName: target.name, toKind: target.kind, requirements: target.requirements ?? {}, title: opp.contactName };
     if (needsDialog(req)) setPending(req);
-    else transition.mutate({ opp, payload: { toStage: to } });
+    else transition.mutate({ opp, payload: { toStage: to } }, { onSuccess: () => celebrate(target.kind) });
+  };
+  // venda fechada comemora; perdida lamenta
+  const celebrate = (kind: string | undefined) => {
+    if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName });
   };
 
   const addressSummary = f.condominiumId ? [opp.condominiumName, f.installBlock && `Bl. ${f.installBlock}`, f.installUnit && `Ap. ${f.installUnit}`].filter(Boolean).join(' · ') : [f.installStreet, f.installNumber, f.installCity].filter(Boolean).join(', ');
@@ -587,7 +568,6 @@ export function OpportunityWorkspacePage() {
       <section className="card p-5" aria-label="Informações do deal">
         <h2 className="mb-2 flex items-center gap-2 text-md font-bold text-ink"><Handshake className="h-5 w-5 text-primary" aria-hidden />Deal</h2>
         <p className="font-bold text-ink">{opp.title}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5"><StageChip stage={opp.stage} name={current?.name ?? opp.stageName} color={current?.color} /><CoverageChip s={opp.coverageStatus} /><ProposalChip s={opp.proposalStatus} /><ContractChip s={opp.contractRequestStatus} /></div>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
           <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{opp.pipelineName}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
@@ -605,30 +585,12 @@ export function OpportunityWorkspacePage() {
           <Button size="sm" className="mt-3" onClick={() => setReleasing(true)}>Cliente cancelou: liberar porta</Button>
         )}
 
-        <div className={clsx('mt-4 rounded-md border p-3', opp.overdue && editable ? 'border-danger/40 bg-danger-soft' : 'border-primary/30 bg-primary-soft')}>
-          <p className="mb-2 text-sm font-bold text-ink">Próxima ação{opp.overdue && editable ? <span className="ml-2 text-xs font-semibold text-danger">vencida</span> : null}</p>
-          <div className="space-y-2">
-            <FormField label="Próxima ação" htmlFor="ws-na"><Input id="ws-na" value={f.nextAction} disabled={!editable} onChange={(e) => set('nextAction', e.target.value)} placeholder="Ex.: confirmar cobertura no endereço" /></FormField>
-            <FormField label="Quando" htmlFor="ws-nat"><Input id="ws-nat" type="datetime-local" value={f.nextActionAt} disabled={!editable} onChange={(e) => set('nextActionAt', e.target.value)} /></FormField>
-          </div>
-        </div>
-        <div className="mt-4">
-          <p className="mb-2 flex items-center gap-2 text-sm font-bold text-ink"><ListChecks className="h-4 w-4 text-primary" aria-hidden />Pendências</p>
-          <Pendencies opp={opp} fields={f} unmetFields={unmetFields} />
-        </div>
 
         {/* coluna estreita: as grades internas dos formulários viram uma coluna só */}
         <div className="mt-4 space-y-3 [&_.grid>*]:!col-span-1 [&_.grid]:!grid-cols-1">
-          <SideSection id="dados" title="Dados do deal" defaultOpen summary={[f.reasons.length ? `${f.reasons.length} motivo(s)` : 'sem motivo', selectedPlan?.name ?? 'sem plano'].join(' · ')}>
+          <SideSection id="dados" title="Dados do deal" defaultOpen summary={f.title}>
             <div className="space-y-3">
-              <ChipGroup legend="Motivo do contato" options={OPPORTUNITY_REASONS} value={f.reasons} onChange={(v) => editable && set('reasons', v)} labels={REASON_LABELS} disabled={!editable} />
               <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
-              <FormField label="Plano" htmlFor="ws-plan" hint={selectedPlan ? `Catálogo: ${fmtBRL(selectedPlan.priceCents)}/mês${selectedPlan.speedMbps ? ` · ${selectedPlan.speedMbps} Mbps` : ''}` : 'O valor vem do catálogo'}>
-                <Select id="ws-plan" value={f.planId} disabled={!editable} onChange={(e) => set('planId', e.target.value)}>
-                  <option value="">Ainda não definido</option>
-                  {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmtBRL(p.priceCents)}</option>)}
-                </Select>
-              </FormField>
               <FormField label="Canal de entrada" htmlFor="ws-source">
                 <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
                   <option value="">Não informado</option>
@@ -641,11 +603,6 @@ export function OpportunityWorkspacePage() {
                   {lookups.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
               </FormField>
-              <FormField label="Jornada" htmlFor="ws-pipe" hint={a.dirty ? 'Aguarde salvar para trocar' : 'Trocar de jornada mantém o histórico'}>
-                <Select id="ws-pipe" value={opp.pipelineId} disabled={!editable || move.isPending || a.dirty} onChange={(e) => move.mutate(e.target.value)}>
-                  {lookups.data?.pipelines.filter((p) => p.allowed || p.id === opp.pipelineId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </Select>
-              </FormField>
             </div>
           </SideSection>
           {pipeline && pipeline.fields.length > 0 && (
@@ -656,20 +613,10 @@ export function OpportunityWorkspacePage() {
           <SideSection id="endereco" title="Endereço de instalação" defaultOpen={!f.condominiumId && !f.installStreet} summary={addressSummary || 'Não informado'}>
             <AddressFields value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-ad" />
           </SideSection>
-          <SideSection id="viab" title="Cabo, taxa e equipamentos" defaultOpen={!f.saleType || f.cableMeters === ''} summary={[f.saleType ? (f.saleType === 'ativa' ? 'Venda ativa' : 'Venda receptiva') : null, f.cableMeters !== '' ? `${f.cableMeters} m de cabo` : null].filter(Boolean).join(' · ') || 'Não informado'}>
-            <div className="space-y-3">
-              <ViabilityInputs value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-vb" />
-              <EquipmentOverride routeId={f.routeId} equipment={f.equipment} suggested={{ routeName: opp.viability?.route?.name ?? null }} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} idPrefix="ws-eq" />
-            </div>
-          </SideSection>
-          <SideSection id="notas" title="Anotações da conversa" defaultOpen={!f.notes.trim()} summary={f.notes.trim() ? `${f.notes.trim().slice(0, 90)}${f.notes.trim().length > 90 ? '…' : ''}` : 'Sem anotações'}>
-            <FormField label="Anotações da conversa" htmlFor="ws-notes" hint="O que o cliente valoriza, o que tem hoje (se ele disser), dúvidas e combinados.">
-              <Textarea id="ws-notes" className="min-h-[120px]" value={f.notes} disabled={!editable} onChange={(e) => set('notes', e.target.value)} />
-            </FormField>
-          </SideSection>
         </div>
       </section>
-      <AccountPanel opp={opp} peopleOpen={search.get('aba') === 'pessoas'} extra={<MeasurementBox opp={opp} />} />
+      <OpportunityContacts oppId={opp.id} editable={editable} />
+      <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={<MeasurementBox opp={opp} />} />
     </div>
   );
 
@@ -683,8 +630,6 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
-      <StageScript oppId={opp.id} pipelineKey={pipeline?.key ?? ''} stage={opp.stage} disabled={!editable} />
-      <Objections pipelineKey={pipeline?.key ?? ''} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">
@@ -755,16 +700,16 @@ export function OpportunityWorkspacePage() {
         <Button icon={<FileText className="h-4 w-4" />} onClick={() => setGenProposal(true)}>Gerar proposta</Button>
         <Button icon={<Send className="h-4 w-4" />} onClick={() => setEmail('proposta')}>Enviar proposta</Button>
         <Button icon={<Mail className="h-4 w-4" />} onClick={() => setEmail('followup')}>Follow-up</Button>
-        {editable && (
-          <>
-            <Button icon={<CheckCircle2 className="h-4 w-4 text-success" />} onClick={() => requestMove('ganha')}>Venda fechada</Button>
-            <Button icon={<XCircle className="h-4 w-4 text-danger" />} onClick={() => requestMove('perdida')}>Marcar como perdida</Button>
-          </>
-        )}
         <Button className="ws3:hidden max-ws2:hidden" icon={<ListChecks className="h-4 w-4" />} onClick={() => setCopilot(true)}>{unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat} nova(s)` : 'Viabilidade e chat'}</Button>
         <Button icon={<Scale className="h-4 w-4" />} onClick={() => nav(`/opportunities/${opp.id}/aprovacao`)}>
-          Análise e aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
+          Pedir aprovação{opp.approvalStatus ? <span className={clsx('ml-1 rounded-sm px-1.5 py-0.5 text-2xs font-bold', { pendente: 'bg-[#FFF6D6] text-[#9A6B00]', aprovada: 'bg-success-soft text-[#15803D]', reprovada: 'bg-danger-soft text-danger', correcao: 'bg-warning-soft text-[#C2610C]', substituida: 'bg-surface-2 text-muted' }[opp.approvalStatus] ?? 'bg-surface-2 text-muted')}>{{ pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada', correcao: 'correção', substituida: 'pendente' }[opp.approvalStatus] ?? opp.approvalStatus}</span> : null}
         </Button>
+        {editable && (
+          <>
+            <Button className="!bg-success !text-white hover:!opacity-90" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => requestMove('ganha')}>Venda fechada</Button>
+            <Button variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => requestMove('perdida')}>Venda perdida</Button>
+          </>
+        )}
         {opp.stage === 'ganha' && can('contratos') && (opp.contractId
           ? <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
           : <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
@@ -791,7 +736,8 @@ export function OpportunityWorkspacePage() {
       </Modal>
       <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
-      <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => void q.refetch() })} />
+      <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => { const kind = pending?.toKind; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => { void q.refetch(); celebrate(kind); } }); }} />
+      <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
     </div>
   );
 }

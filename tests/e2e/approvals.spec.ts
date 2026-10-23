@@ -22,7 +22,7 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
 
-  await seller.getByRole('button', { name: /Análise e aprovação/ }).click();
+  await seller.getByRole('button', { name: /Pedir aprovação/ }).click();
   await expect(seller.getByRole('heading', { name: 'Análise e aprovação' })).toBeVisible();
   await expect(seller.getByText('Novo cliente', { exact: true }).first()).toBeVisible();
   await expect(seller.getByRole('heading', { name: /Parecer de apoio à decisão/ })).toBeVisible();
@@ -61,7 +61,7 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await mgr.getByRole('button', { name: 'Mostrar valores' }).click();
 
   await seller.goto(oppUrl);
-  await expect(seller.getByRole('button', { name: /Análise e aprovação\s*aprovada/ })).toBeVisible();
+  await expect(seller.getByRole('button', { name: /Pedir aprovação\s*aprovada/ })).toBeVisible();
 
   // celular
   const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();

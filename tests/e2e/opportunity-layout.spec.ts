@@ -20,8 +20,23 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
 
   const deal = page.getByRole('region', { name: 'Informações do deal' });
   await expect(deal).toContainText('Tipo de venda');
-  await expect(deal.getByText('Pendências')).toBeVisible();
-  await expect(deal.getByLabel('Próxima ação')).toBeVisible();
+  await expect(deal.getByLabel('Nome do deal')).toBeVisible();
+  // contatos da negociação: vários, sem depender do ABM
+  const contatos = page.getByRole('region', { name: 'Contatos' });
+  await contatos.getByRole('button', { name: 'Adicionar' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Adicionar contato' });
+  if (await dlg.getByLabel('Outra pessoa').count()) await dlg.getByLabel('Outra pessoa').check();
+  const who = `Contato E2E ${Date.now().toString(36)}`;
+  await dlg.locator('#oc-name').fill(who);
+  await dlg.getByLabel('Cargo').fill('Gerente de TI');
+  await dlg.getByRole('button', { name: 'Adicionar contato' }).click();
+  await expect(contatos).toContainText(who);
+  await expect(contatos.getByLabel(`Papel de ${who}`)).toBeVisible();
+  // botões: pedir aprovação antes de fechar ou perder
+  const bar = page.getByRole('button', { name: /^Pedir aprovação/ });
+  await expect(bar).toBeVisible();
+  const order = await page.evaluate(() => [...document.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '').filter((t) => /^(Pedir aprovação|Venda fechada|Venda perdida)/.test(t)).map((t) => t.split(/\s/)[0] + ' ' + t.split(/\s/)[1]));
+  expect(order.slice(0, 3)).toEqual(['Pedir aprovação', 'Venda fechada', 'Venda perdida']);
   const conta = page.getByRole('region', { name: 'Conta', exact: true });
   await expect(conta).toContainText(opp.contactName);
 
@@ -48,7 +63,8 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
   await expect(page.getByRole('tab', { name: /^Tarefas/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('region', { name: 'Retornos e interações' })).toBeVisible();
   await page.goto(`/opportunities/${opp.id}?aba=pessoas`);
-  await expect(page.getByRole('region', { name: 'Pessoas e ABM' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: `Conta: ${opp.contactName}` }).getByRole('region', { name: 'Pessoas e ABM' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/opportunities/${opp.id}`);

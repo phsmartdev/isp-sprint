@@ -138,6 +138,19 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
+## UX das oportunidades — tela enxuta, Contatos e resultado da venda ✅ (2026-10-23)
+- Pedidos do Paulo após usar a Fase 1:
+  - **Saíram da tela:** etiquetas de situação, próxima ação, pendências, motivos do contato, plano, jornada, cabo e taxa, anotações, roteiro e objeções. Os dados continuam gravados.
+  - **Pessoas e ABM** foi para "Saiba mais sobre a conta".
+  - As jornadas antigas ficam como estão (decisão do Paulo); as novas, por tipo de venda, nascem sem exigir plano, próxima ação ou roteiro.
+- **Contatos da oportunidade:** várias pessoas, cada uma com o papel na negociação; a primeira vira contato principal.
+  - Não depende do ABM e reaproveita o cadastro único de pessoas: o mesmo e-mail aponta para a mesma pessoa.
+  - Retirar o contato mantém a pessoa na conta e no histórico dela.
+  - Rotas `/opportunities/:id/contacts`.
+- **Resultado da venda:** "Pedir aprovação" vem antes de "Venda fechada" (verde) e "Venda perdida" (vermelho). Fechar comemora com confete; perder mostra lamento. Respeita "reduzir movimento".
+- **Diálogos empilhados:** cada diálogo tem título próprio e Esc fecha só o de cima. Antes, abrir uma pessoa dentro da conta confundia os títulos e fechava as duas janelas.
+- Testes: API (contatos, 2), E2E ajustados. Regressão: E2E 62/62 (com o teste de 768 px, intermitente por tempo, repetido sozinho).
+
 ## UX das oportunidades — Fase 1: tela em três áreas ✅ (2026-10-23)
 - Diretriz "Ajustes de UX e organização das oportunidades no CRM", com as decisões do Paulo em 23/10:
   - A abertura residencial sai do fluxo de criação; os dados e o histórico ficam.
