@@ -40,7 +40,7 @@ export function OutcomeCelebration({ outcome, onClose }: { outcome: Outcome; onC
         </div>
       )}
       <div className="isp-motion relative w-full max-w-sm rounded-lg bg-surface p-6 text-center shadow-xl" style={{ animation: won ? 'isp-pop .45s ease-out' : 'isp-sink .5s ease-out' }}>
-        <span className={won ? 'mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success-soft text-success' : 'mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-danger-soft text-danger'} aria-hidden>
+        <span className={won ? 'mx-auto flex h-16 w-16 items-center justify-center rounded-circle bg-success-soft text-success' : 'mx-auto flex h-16 w-16 items-center justify-center rounded-circle bg-danger-soft text-danger'} aria-hidden>
           {won ? <PartyPopper className="h-9 w-9" /> : <Frown className="h-9 w-9" />}
         </span>
         <p className="mt-3 font-display text-2xl font-bold text-ink">{won ? 'Venda fechada!' : 'Venda perdida'}</p>

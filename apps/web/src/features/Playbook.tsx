@@ -51,7 +51,7 @@ export function StageScript({ oppId, pipelineKey, stage, disabled }: { oppId: st
     return (
       <div key={q.id} className="rounded-md border border-line p-3">
         <label htmlFor={id} className="flex items-start gap-2 text-sm font-semibold text-ink">
-          {answered(q.id) ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden /> : <span className={clsx('mt-1 h-2.5 w-2.5 shrink-0 rounded-full', q.obrigatoria ? 'bg-warning' : 'bg-line-strong')} aria-hidden />}
+          {answered(q.id) ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden /> : <span className={clsx('mt-1 h-2.5 w-2.5 shrink-0 rounded-circle', q.obrigatoria ? 'bg-warning' : 'bg-line-strong')} aria-hidden />}
           <span>{q.texto}{q.obrigatoria && <span className="ml-1 text-xs font-normal text-[#B45309]">(obrigatória)</span>}</span>
         </label>
         {q.ajuda && <p className="ml-6 text-xs text-muted">{q.ajuda}</p>}

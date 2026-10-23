@@ -22,7 +22,7 @@ export function SprintTimer({ startedAt, baseSeconds, running }: { startedAt: st
         {Array.from({ length: GOAL_MIN }).map((_, i) => {
           const fill = Math.min(1, Math.max(0, minutes - i));
           return (
-            <div key={i} className="relative w-[7px] overflow-hidden rounded-[2px] bg-[#E5EAF3]" style={{ height: `${11 + i * 3}px` }}>
+            <div key={i} className="relative w-[7px] overflow-hidden rounded-none bg-[#E5EAF3]" style={{ height: `${11 + i * 3}px` }}>
               <div className={clsx('absolute inset-x-0 bottom-0', over ? 'bg-warning' : 'bg-lime')} style={{ height: `${fill * 100}%` }} />
             </div>
           );

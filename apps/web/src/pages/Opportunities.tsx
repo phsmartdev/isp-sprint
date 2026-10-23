@@ -34,7 +34,7 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
           {stages.filter((s) => s.key !== opp.stage).map((s, i) => (
             <li key={s.key}>
               <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-2" onClick={() => { setOpen(false); onMove(s.key); }}>
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: stageColor(s.key, s.color, i) }} aria-hidden />
+                <span className="h-2.5 w-2.5 rounded-circle" style={{ background: stageColor(s.key, s.color, i) }} aria-hidden />
                 {s.name}
               </button>
             </li>

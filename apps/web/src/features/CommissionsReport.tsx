@@ -31,7 +31,7 @@ export function CommissionsReport({ from, to }: { from: string; to: string }) {
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {tiles.map((t) => (
           <div key={t.label} className="card flex items-center gap-4 p-4">
-            <span className={`flex h-12 w-12 items-center justify-center rounded-full ${t.tone}`}>{t.icon}</span>
+            <span className={`flex h-12 w-12 items-center justify-center rounded-circle ${t.tone}`}>{t.icon}</span>
             <span className="min-w-0 flex-1"><FitText as="span" className="num text-xl font-extrabold text-ink">{t.value}</FitText><span className="text-sm text-muted">{t.label}</span></span>
           </div>
         ))}

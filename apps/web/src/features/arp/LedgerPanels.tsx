@@ -326,7 +326,7 @@ export function HistoryPanel({ arp }: { arp: ArpDetail }) {
       <h2 className="mb-3 text-lg font-bold text-ink">Histórico da ata</h2>
       {q.isLoading ? <LoadingRows rows={4} /> : !q.data?.items.length ? <p className="text-sm text-muted">Sem eventos.</p> : (
         <ol className="space-y-3 border-l-2 border-line pl-4">
-          {q.data.items.map((e) => <li key={e.id} className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary" aria-hidden /><p className="text-sm text-ink">{e.summary}</p><p className="text-xs text-muted">{e.actorName ?? 'Sistema'} · {fmtDateTime(e.occurredAt)}</p></li>)}
+          {q.data.items.map((e) => <li key={e.id} className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-circle bg-primary" aria-hidden /><p className="text-sm text-ink">{e.summary}</p><p className="text-xs text-muted">{e.actorName ?? 'Sistema'} · {fmtDateTime(e.occurredAt)}</p></li>)}
         </ol>
       )}
       <h3 className="mb-2 mt-6 text-base font-bold text-ink">Alterações dos itens</h3>

@@ -48,14 +48,14 @@ function MonthCalendar({ month, selected, days, onPick, onMonth }: { month: stri
           const inMonth = d.getMonth() === m - 1;
           return (
             <button key={k} onClick={() => onPick(k)} aria-pressed={k === selected} aria-label={`${d.getDate()}${info ? `, ${info.types.length} tipo(s) de atividade` : ''}`} className="flex flex-col items-center gap-0.5 py-1">
-              <span className={clsx('num flex h-8 w-8 items-center justify-center rounded-full text-sm', k === selected ? 'bg-primary font-bold text-white' : k === today ? 'font-bold text-primary' : inMonth ? 'text-ink' : 'text-faint')}>{d.getDate()}</span>
-              <span className="flex h-1.5 gap-0.5">{(info?.types ?? []).slice(0, 3).map((t) => <span key={t} className={clsx('h-1.5 w-1.5 rounded-full', DOT[t])} />)}</span>
+              <span className={clsx('num flex h-8 w-8 items-center justify-center rounded-circle text-sm', k === selected ? 'bg-primary font-bold text-white' : k === today ? 'font-bold text-primary' : inMonth ? 'text-ink' : 'text-faint')}>{d.getDate()}</span>
+              <span className="flex h-1.5 gap-0.5">{(info?.types ?? []).slice(0, 3).map((t) => <span key={t} className={clsx('h-1.5 w-1.5 rounded-circle', DOT[t])} />)}</span>
             </button>
           );
         })}
       </div>
       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-        {(['tarefa', 'ligacao', 'reuniao', 'email', 'whatsapp'] as ActivityType[]).map((t) => <li key={t} className="flex items-center gap-1.5"><span className={clsx('h-2 w-2 rounded-full', DOT[t])} />{ACTIVITY_TYPE_LABELS[t]}</li>)}
+        {(['tarefa', 'ligacao', 'reuniao', 'email', 'whatsapp'] as ActivityType[]).map((t) => <li key={t} className="flex items-center gap-1.5"><span className={clsx('h-2 w-2 rounded-circle', DOT[t])} />{ACTIVITY_TYPE_LABELS[t]}</li>)}
       </ul>
     </section>
   );

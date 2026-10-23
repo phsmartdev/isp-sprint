@@ -150,7 +150,7 @@ export function ReportsPage() {
                 <ul className="flex-1 space-y-2.5">
                   {d.status.items.map((s) => (
                     <li key={s.stage} className="grid grid-cols-[1fr_auto_44px] items-center gap-3 text-sm">
-                      <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 shrink-0 rounded-full" style={{ background: stageColor(s.stage, s.color, d.status.items.indexOf(s)) }} />{s.label}</span>
+                      <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 shrink-0 rounded-circle" style={{ background: stageColor(s.stage, s.color, d.status.items.indexOf(s)) }} />{s.label}</span>
                       <span className="num font-bold text-ink">{s.n}</span>
                       <span className="num text-right text-muted">{s.share === null ? 'N/D' : `${Math.round(s.share * 100)}%`}</span>
                     </li>

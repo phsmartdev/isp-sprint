@@ -79,7 +79,7 @@ export function ComboChart({
         <div className="pointer-events-none absolute top-2 z-10 min-w-[150px] rounded-md border border-line bg-surface px-3.5 py-2.5 shadow-overlay" style={{ left: `min(${((cx(hover) + 14) / W) * 100}%, calc(100% - 170px))` }}>
           <p className="mb-1 font-semibold text-ink">{tooltipTitle(hover)}</p>
           {tooltipRows(hover).map((r) => (
-            <p key={r.text} className="flex items-center gap-2 text-sm text-text"><span className="h-3 w-3 rounded-full" style={{ background: r.color }} />{r.text}</p>
+            <p key={r.text} className="flex items-center gap-2 text-sm text-text"><span className="h-3 w-3 rounded-circle" style={{ background: r.color }} />{r.text}</p>
           ))}
         </div>
       )}
@@ -99,7 +99,7 @@ export function ComboChart({
 export function Legend({ items }: { items: { label: string; color: string }[] }) {
   return (
     <ul className="flex flex-wrap items-center gap-5 text-sm text-muted">
-      {items.map((i) => <li key={i.label} className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: i.color }} aria-hidden />{i.label}</li>)}
+      {items.map((i) => <li key={i.label} className="flex items-center gap-2"><span className="h-3 w-3 rounded-circle" style={{ background: i.color }} aria-hidden />{i.label}</li>)}
     </ul>
   );
 }
@@ -134,7 +134,7 @@ export function Donut({ items, centerValue, centerLabel, ariaLabel }: { items: {
       <ul className="min-w-[200px] flex-1 space-y-2.5">
         {items.map((it, idx) => (
           <li key={it.label} className="grid grid-cols-[1fr_auto_52px] items-center gap-3 text-sm">
-            <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 rounded-full" style={{ background: CHART.donut[idx % CHART.donut.length] }} aria-hidden />{it.label}</span>
+            <span className="flex items-center gap-2 text-text"><span className="h-3 w-3 rounded-circle" style={{ background: CHART.donut[idx % CHART.donut.length] }} aria-hidden />{it.label}</span>
             <span className="num font-bold text-ink">{it.value}</span>
             <span className="num text-right text-muted">{it.share === null ? 'N/D' : `${Math.round(it.share * 100)}%`}</span>
           </li>
@@ -152,9 +152,9 @@ export function BarRows({ items, color = '#2F5986', track = '#EEF2F9', gradient 
       {items.map((it, idx) => (
         <li key={it.label} className="grid grid-cols-[minmax(96px,120px)_1fr_auto_48px] items-center gap-3 text-sm">
           <span className="truncate text-text">{it.label}</span>
-          <span className="h-[18px] overflow-hidden rounded-[4px]" style={{ background: track }}>
+          <span className="h-[18px] overflow-hidden rounded-none" style={{ background: track }}>
             <span
-              className="block h-full rounded-[4px]"
+              className="block h-full rounded-none"
               style={{ width: `${(it.value / max) * 100}%`, background: it.color ?? (gradient ? `rgba(29,95,230,${Math.max(0.35, 1 - idx * 0.16)})` : color) }}
             />
           </span>

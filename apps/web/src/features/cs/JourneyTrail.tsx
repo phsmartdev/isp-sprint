@@ -104,7 +104,7 @@ export function JourneyTrail({ data, selectedId, onSelect, large, dark, animate 
 
 /** Legenda curta das cores da trilha. */
 export function TrailLegend({ dark }: { dark?: boolean }) {
-  const item = (cls: string, l: string) => <span className="inline-flex items-center gap-1.5"><span className={clsx('inline-block h-2.5 w-2.5 rounded-full', cls)} />{l}</span>;
+  const item = (cls: string, l: string) => <span className="inline-flex items-center gap-1.5"><span className={clsx('inline-block h-2.5 w-2.5 rounded-circle', cls)} />{l}</span>;
   return <p className={clsx('flex flex-wrap gap-x-4 gap-y-1 text-xs', dark ? 'text-white/70' : 'text-muted')}>{item('bg-success', 'Concluído')}{item(dark ? 'bg-lime' : 'bg-primary', 'Estamos aqui')}{item('bg-danger', 'Atrasado')}{item(dark ? 'border border-white/50' : 'border border-line-strong bg-surface', 'Próximos')}</p>;
 }
 

@@ -30,7 +30,7 @@ export const LevelChip = ({ level, manual }: { level: CsLevel; manual?: boolean 
 export const TierChip = ({ tier }: { tier: Tier | null }) => (tier ? <Chip tone={tier === 'large' ? 'purple' : tier === 'middle' ? 'blue' : 'neutral'}>{TIER_LABELS[tier].split(' ')[0]}</Chip> : <span className="text-muted">—</span>);
 export function HealthBadge({ score, label }: { score: number | null; label?: string }) {
   if (score === null) return <span className="text-sm text-muted" title="Dados insuficientes para calcular">Sem dados</span>;
-  return <span className={clsx('num inline-flex items-center gap-1.5 text-sm font-semibold', score >= 75 ? 'text-success' : score >= 50 ? 'text-[#C2610C]' : 'text-danger')}><span className={clsx('h-2.5 w-2.5 rounded-full', score >= 75 ? 'bg-success' : score >= 50 ? 'bg-[#F59E0B]' : 'bg-danger')} aria-hidden />{score}{label ? ` · ${label}` : ''}</span>;
+  return <span className={clsx('num inline-flex items-center gap-1.5 text-sm font-semibold', score >= 75 ? 'text-success' : score >= 50 ? 'text-[#C2610C]' : 'text-danger')}><span className={clsx('h-2.5 w-2.5 rounded-circle', score >= 75 ? 'bg-success' : score >= 50 ? 'bg-[#F59E0B]' : 'bg-danger')} aria-hidden />{score}{label ? ` · ${label}` : ''}</span>;
 }
 export const covText = (c: Coverage | null | undefined, k: 'simple' | 'weighted' = 'simple') => (!c || c[k] === null ? 'Sem cadência prevista' : fmtPct(c[k]));
 export const IPC_LEVEL_OPTS = [['baixo', 'Baixo'], ['medio', 'Médio'], ['alto', 'Alto']] as const;

@@ -220,7 +220,7 @@ export function TimelinePanel({ c }: { c: ContractDetail }) {
       <ol className="relative space-y-3 border-l-2 border-line pl-5">
         {items.map((x) => (
           <li key={`${x.kind}-${x.id}`} className="relative">
-            <span className={clsx('absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-surface', x.kind === 'email' ? 'bg-purple' : x.kind === 'tarefa' ? 'bg-warning' : 'bg-primary')} aria-hidden />
+            <span className={clsx('absolute -left-[27px] top-1 h-3 w-3 rounded-circle border-2 border-surface', x.kind === 'email' ? 'bg-purple' : x.kind === 'tarefa' ? 'bg-warning' : 'bg-primary')} aria-hidden />
             <p className="text-sm text-ink">{x.title}</p>
             <p className="text-xs text-muted">{x.at ? fmtDateTime(x.at) : ''} · {x.sub}</p>
           </li>

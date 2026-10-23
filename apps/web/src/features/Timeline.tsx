@@ -166,7 +166,7 @@ export function Timeline({ opportunityId }: { opportunityId: string }) {
         <ol className="relative space-y-3 border-l border-line pl-4">
           {entries.map((i) => i.type === 'comment' ? (
             <li key={`${i.kind}-${i.id}`} className="relative">
-              <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-full border-2 border-surface bg-[#F5B400]" aria-hidden />
+              <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-circle border-2 border-surface bg-[#F5B400]" aria-hidden />
               <div className={clsx('rounded-md border p-3', ((i.payload?.mentionNames as string[] | undefined) ?? []).includes(me?.user.name ?? '') ? 'border-[#F5B400] bg-[#FFF9E6]' : 'border-line bg-surface')}>
                 <p className="flex items-center gap-2 text-xs text-muted"><Avatar name={i.actorName ?? '?'} size={22} /><span className="font-semibold text-ink">{i.actorName ?? 'Sistema'}</span> comentou · <time dateTime={i.occurredAt}>{fmtDateTime(i.occurredAt)}</time></p>
                 <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-ink"><WithMentions text={i.reason ?? ''} names={(i.payload?.mentionNames as string[] | undefined) ?? []} mine={me?.user.name} /></p>
@@ -174,7 +174,7 @@ export function Timeline({ opportunityId }: { opportunityId: string }) {
             </li>
           ) : (
             <li key={`${i.kind}-${i.id}`} className="relative">
-              <span className={clsx('absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-surface', i.kind === 'activity' ? 'bg-sky' : i.toValue === 'ganha' ? 'bg-success' : i.toValue === 'perdida' ? 'bg-danger' : category(i) === 'alteracoes' ? 'bg-faint' : 'bg-primary')} aria-hidden />
+              <span className={clsx('absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-circle border-2 border-surface', i.kind === 'activity' ? 'bg-sky' : i.toValue === 'ganha' ? 'bg-success' : i.toValue === 'perdida' ? 'bg-danger' : category(i) === 'alteracoes' ? 'bg-faint' : 'bg-primary')} aria-hidden />
               <p className="text-sm text-ink">{describe(i)}{i.count && i.count > 1 ? <span className="text-xs text-muted"> ({i.count} salvamentos)</span> : null}</p>
               {i.changes && Object.keys(i.changes).length > 0 && (
                 <ul className="mt-1 space-y-0.5 text-sm">

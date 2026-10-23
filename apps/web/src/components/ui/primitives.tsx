@@ -118,10 +118,10 @@ export function Avatar({ name, userId, hasPhoto, size = 36, className, tone }: {
   const color = AV_COLORS[(tone ?? [...(name ?? '')].reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_COLORS.length];
   const style = { width: size, height: size, fontSize: Math.max(10, size * 0.38) };
   if (hasPhoto && userId && !failed) {
-    return <img src={`/api/v1/users/${userId}/avatar`} alt="" onError={() => setFailed(true)} style={style} className={clsx('shrink-0 rounded-full object-cover', className)} />;
+    return <img src={`/api/v1/users/${userId}/avatar`} alt="" onError={() => setFailed(true)} style={style} className={clsx('shrink-0 rounded-circle object-cover', className)} />;
   }
   return (
-    <span aria-hidden style={style} className={clsx('inline-flex shrink-0 items-center justify-center rounded-full font-bold', color, className)}>
+    <span aria-hidden style={style} className={clsx('inline-flex shrink-0 items-center justify-center rounded-circle font-bold', color, className)}>
       {initials(name)}
     </span>
   );
@@ -166,7 +166,7 @@ export function KpiCard({ k, icon, tone, compare = 'vs. mês anterior', layout =
   const [open, setOpen] = useState(false);
   return (
     <div className="card group relative flex items-center gap-3.5 p-4">
-      <span className={clsx('flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full', kpiTone[tone])}>{icon}</span>
+      <span className={clsx('flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-circle', kpiTone[tone])}>{icon}</span>
       <div className="min-w-0 flex-1">
         <FitText className="num whitespace-nowrap text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</FitText>
         <p className="text-sm leading-snug text-muted">{k.label}</p>

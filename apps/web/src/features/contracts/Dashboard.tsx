@@ -38,7 +38,7 @@ function Delta({ cur, prev }: { cur: number; prev: number }) {
 function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub?: React.ReactNode; tone: string }) {
   return (
     <div className="card flex items-center gap-4 p-4">
-      <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
+      <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-circle', tone)}>{icon}</span>
       <div className="min-w-0"><p className="text-sm text-muted">{label}</p><FitText className="num truncate text-xl font-extrabold text-ink">{value}</FitText>{sub && <div className="text-xs text-muted">{sub}</div>}</div>
     </div>
   );

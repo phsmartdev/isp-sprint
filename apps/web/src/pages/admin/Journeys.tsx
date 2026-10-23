@@ -249,7 +249,7 @@ function StagesTab({ journey }: { journey: Journey }) {
         {stages.map((s, i) => (
           <li key={s.id ?? `new-${i}`} className="rounded-md border border-line p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="num flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold" style={{ background: `${stageColor(s.key ?? '', s.color, i)}22`, color: stageColor(s.key ?? '', s.color, i) }}>{i + 1}</span>
+              <span className="num flex h-7 w-7 shrink-0 items-center justify-center rounded-circle text-sm font-bold" style={{ background: `${stageColor(s.key ?? '', s.color, i)}22`, color: stageColor(s.key ?? '', s.color, i) }}>{i + 1}</span>
               <Input aria-label={`Nome da etapa ${i + 1}`} className="min-w-[160px] flex-1" value={s.name} onChange={(e) => upd(i, { name: e.target.value })} />
               <Select aria-label="Tipo da etapa" className="w-auto" value={s.kind} onChange={(e) => upd(i, { kind: e.target.value as JStage['kind'] })}>
                 {(['open', 'won', 'lost'] as const).map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
