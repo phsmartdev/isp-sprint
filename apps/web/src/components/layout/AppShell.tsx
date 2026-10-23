@@ -54,10 +54,13 @@ const NAV: NavEntry[] = [
   { to: '/settings', label: 'Configuração', icon: <Settings className={ICON} />, module: 'configuracoes' },
 ];
 
-export const SETTINGS_NAV = [
+export const SETTINGS_NAV: { to: string; label: string; admin: boolean; group?: string }[] = [
   { to: '/settings/profile', label: 'Meu perfil', admin: false },
   { to: '/settings', label: 'Administração', admin: true },
-  { to: '/settings/users', label: 'Usuários', admin: true },
+  // permissões juntas: quem acessa (usuários), o que fica liberado (módulos) e com que nível (segurança)
+  { to: '/settings/users', label: 'Usuários', admin: true, group: 'Permissões' },
+  { to: '/settings/modulos', label: 'Módulos e liberação', admin: true, group: 'Permissões' },
+  { to: '/settings/security', label: 'Segurança', admin: true, group: 'Permissões' },
   { to: '/settings/journeys', label: 'Jornadas e automações', admin: true },
   { to: '/settings/area', label: 'Área de atendimento', admin: true },
   { to: '/settings/viability', label: 'Viabilidade', admin: true },
@@ -78,8 +81,6 @@ export const SETTINGS_NAV = [
   { to: '/settings/resultados', label: 'Gestão de Times', admin: true },
   { to: '/settings/abm', label: 'ABM', admin: true },
   { to: '/settings/data', label: 'Base de dados', admin: true },
-  { to: '/settings/modulos', label: 'Módulos e liberação', admin: true },
-  { to: '/settings/security', label: 'Segurança', admin: true },
   { to: '/settings/branding', label: 'Personalização', admin: true },
   { to: '/settings/logs', label: 'Logs do sistema', admin: true },
 ];
@@ -163,8 +164,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </NavLink>
                 {n.to === '/settings' && inSettings && (
                   <ul className="mb-2 mt-1 space-y-0.5 pl-9">
-                    {SETTINGS_NAV.filter((x) => !x.admin || can('configuracoes', 'total')).map((x) => (
-                      <li key={x.to}>
+                    {SETTINGS_NAV.filter((x) => !x.admin || can('configuracoes', 'total')).map((x, i, all) => (
+                      <li key={x.to} className={clsx(x.group && all[i - 1]?.group !== x.group && 'mt-2', !x.group && all[i - 1]?.group && 'mt-2')}>
+                        {x.group && all[i - 1]?.group !== x.group && <p className="px-3 pb-0.5 text-2xs font-semibold text-white/55">{x.group}</p>}
                         <NavLink
                           to={x.to}
                           end
