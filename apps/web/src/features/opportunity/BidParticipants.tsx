@@ -28,12 +28,24 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
   const q = useQuery({ queryKey: ['bid-participants', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/bid-participants`) });
   const [rows, setRows] = useState<Row[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // quantidade de lotes do pregão: 1 = lote único (sem escolha de lote); mais de um = cada empresa indica o lote e o lote vencido
+  const [lotCount, setLotCount] = useState(1);
   const openEditor = async () => {
     const fresh = await q.refetch();
     const items = fresh.data?.items ?? [];
-    setRows(items.length ? items.map((i) => ({ key: `p${++seq}`, company: i.company, document: cnpj(i.document), lot: i.lot === 'Único' ? '' : i.lot, bid: money(i.bidCents), status: i.status, winner: i.winner, isUs: i.isUs })) : [blank(), blank()]);
+    const named = [...new Set(items.map((i) => i.lot).filter((l) => l !== 'Único'))];
+    const n = Math.max(1, named.length, ...named.map((l) => (/^\d+$/.test(l) ? Number(l) : 0)));
+    setLotCount(n);
+    setRows(items.length ? items.map((i) => ({ key: `p${++seq}`, company: i.company, document: cnpj(i.document), lot: n === 1 ? '' : i.lot === 'Único' ? '1' : i.lot, bid: money(i.bidCents), status: i.status, winner: i.winner, isUs: i.isUs })) : [blank(), blank(), blank()]);
     setErr(null);
   };
+  const changeLots = (n: number) => {
+    const v = Math.min(50, Math.max(1, Math.floor(n) || 1));
+    setLotCount(v);
+    setRows((rs) => rs!.map((r) => ({ ...r, lot: v === 1 ? '' : r.lot && (!/^\d+$/.test(r.lot) || Number(r.lot) <= v) ? r.lot : '1' })));
+  };
+  const lotOptions = [...new Set([...Array.from({ length: lotCount }, (_, i) => String(i + 1)), ...(rows ?? []).map((r) => r.lot).filter(Boolean)])];
+  const addRow = () => setRows([...(rows ?? []), blank(lotCount > 1 ? rows?.[rows.length - 1]?.lot || '1' : '')]);
   const save = useMutation({
     mutationFn: () => api<Data>(`/opportunities/${oppId}/bid-participants`, { method: 'PUT', body: { rowVersion: q.data!.rowVersion, items: rows!.filter((r) => r.company.trim() || r.bid.trim()).map(toInput) } }),
     onSuccess: (d) => {
@@ -47,7 +59,7 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
   });
 
   const saved = q.data?.items ?? [];
-  const lots = [...new Set(saved.map((s) => s.lot))];
+  const lots = [...new Set(saved.map((s) => s.lot))].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
   const winners = saved.filter((s) => s.winner);
   const draft = rows?.map(toInput) ?? [];
   const ranks = rankParticipants(draft.map((d) => ({ lot: normalizeLot(d.lot), bidCents: d.bidCents ?? null, status: d.status })));
@@ -104,22 +116,37 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
       ) : <p className="mt-1 text-xs text-muted">Nenhuma empresa registrada.</p>}
 
       <Modal open={!!rows} onClose={() => setRows(null)} title="Participantes do pregão" size="xl" footer={<><Button onClick={() => setRows(null)}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={submit}>Salvar participantes</Button></>}>
-        <p className="mb-3 text-sm text-muted">Registre cada empresa com o lance final. O ranking sai do menor lance em cada lote. Deixe o lote em branco se for lote único; com lotes diferentes, cada lote tem o seu vencedor.</p>
+        <p className="mb-3 text-sm text-muted">Adicione todas as empresas que participaram, com o lance final. O ranking sai do menor lance em cada lote. Com mais de um lote, indique ao lado da vencedora o lote; cada lote tem a sua vencedora. Uma empresa que disputou vários lotes entra uma vez por lote.</p>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm font-semibold text-ink" htmlFor="bp-lots">Quantidade de lotes
+            <Input id="bp-lots" type="number" min={1} max={50} className="num w-[90px]" value={lotCount} onChange={(e) => changeLots(Number(e.target.value))} />
+            <span className="font-normal text-muted">{lotCount === 1 ? 'lote único' : `${lotCount} lotes`}</span>
+          </label>
+          <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={addRow}>Adicionar empresa</Button>
+        </div>
         {err && <p role="alert" className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{err}</p>}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Pos.', 'Empresa', 'CNPJ', 'Lote', 'Lance (R$)', 'Situação', 'Nós', 'Vencedora', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead className="text-xs text-muted"><tr>{['Pos.', 'Empresa', 'CNPJ', 'Lance (R$)', 'Situação', 'Nós', lotCount > 1 ? 'Vencedora · lote' : 'Vencedora', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {rows?.map((r, i) => (
                 <tr key={r.key} className="border-t border-line">
                   <td className="num px-1.5 py-1.5 font-bold text-ink">{ranks[i] ? `${ranks[i]}º` : '—'}</td>
                   <td className="px-1.5 py-1.5"><Input aria-label={`Empresa ${i + 1}`} value={r.company} onChange={(e) => set(r.key, { company: e.target.value })} /></td>
                   <td className="px-1.5 py-1.5"><Input aria-label={`CNPJ ${i + 1}`} className="w-[170px]" value={r.document} placeholder="00.000.000/0000-00" onChange={(e) => set(r.key, { document: e.target.value })} /></td>
-                  <td className="px-1.5 py-1.5"><Input aria-label={`Lote ${i + 1}`} className="w-[80px]" value={r.lot} placeholder="Único" onChange={(e) => set(r.key, { lot: e.target.value })} /></td>
                   <td className="px-1.5 py-1.5"><Input aria-label={`Lance ${i + 1}`} className="num w-[140px]" inputMode="decimal" value={r.bid} placeholder="0,00" onChange={(e) => set(r.key, { bid: e.target.value })} /></td>
                   <td className="px-1.5 py-1.5"><Select aria-label={`Situação ${i + 1}`} className="w-[150px]" value={r.status} onChange={(e) => set(r.key, { status: e.target.value as ParticipantStatus, ...(e.target.value !== 'ativo' ? { winner: false } : {}) })}>{PARTICIPANT_STATUSES.map((st) => <option key={st} value={st}>{PARTICIPANT_STATUS_LABELS[st]}</option>)}</Select></td>
                   <td className="px-1.5 py-1.5 text-center"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Nossa empresa ${i + 1}`} checked={r.isUs} onChange={(e) => set(r.key, { isUs: e.target.checked })} /></td>
-                  <td className="px-1.5 py-1.5 text-center"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Vencedora ${i + 1}`} checked={r.winner} disabled={r.status !== 'ativo'} onChange={(e) => set(r.key, { winner: e.target.checked })} /></td>
+                  <td className="px-1.5 py-1.5">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Vencedora ${i + 1}`} checked={r.winner} disabled={r.status !== 'ativo'} onChange={(e) => set(r.key, { winner: e.target.checked })} />
+                      {lotCount > 1 && (
+                        <Select aria-label={`Lote ${i + 1}`} className="w-[110px]" value={r.lot || '1'} onChange={(e) => set(r.key, { lot: e.target.value })}>
+                          {lotOptions.map((l) => <option key={l} value={l}>Lote {l}</option>)}
+                        </Select>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-1.5 py-1.5"><button type="button" className="p-1 text-muted hover:text-danger" aria-label={`Remover participante ${i + 1}`} onClick={() => setRows(rows.filter((x) => x.key !== r.key))}><Trash2 className="h-4 w-4" /></button></td>
                 </tr>
               ))}
@@ -127,7 +154,7 @@ export function BidParticipants({ oppId, editable = true, full = false }: { oppI
           </table>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...(rows ?? []), blank(rows?.[rows.length - 1]?.lot ?? '')])}>Adicionar empresa</Button>
+          <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={addRow}>Adicionar empresa</Button>
           <Button size="sm" variant="outline" onClick={() => {
             // marca como vencedora a melhor colocada de cada lote
             const best = new Map<string, number>();
