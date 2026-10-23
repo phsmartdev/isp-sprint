@@ -23,7 +23,7 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
   // seções com Salvar: depois de salva, leitura compacta com Editar
   await deal.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await expect(deal.getByLabel('Nome do deal')).toBeVisible();
-  await deal.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await deal.locator('#ss-dados').getByRole('button', { name: 'Salvar', exact: true }).click();
   await expect(deal.getByLabel('Nome do deal')).toHaveCount(0);
   await expect(deal.getByRole('button', { name: 'Editar Dados do deal' })).toBeVisible();
   // contatos da negociação: vários, sem depender do ABM

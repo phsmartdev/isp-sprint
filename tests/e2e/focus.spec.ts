@@ -15,6 +15,7 @@ test('digitar devagar no cadastro, no roteiro e nas anotações não perde o cam
   await page.getByLabel('Filial').selectOption({ index: 1 });
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+  await page.getByRole('button', { name: 'Editar Dados do deal' }).click();
   const deal = page.getByLabel('Nome do deal');
   await deal.fill('');
   await deal.click();
