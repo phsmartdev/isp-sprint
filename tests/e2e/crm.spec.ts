@@ -116,6 +116,9 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
   await page.waitForTimeout(2200);
   const before = await page.getByRole('timer').locator('p').first().textContent();
   await page.reload();
+  // preenchida, a seção recolhe e mostra o resumo; um clique abre
+  await expect(page.getByText(/Satisfeita com o atual, curiosa/)).toBeVisible();
+  await page.getByRole('button', { name: 'Anotações da conversa' }).click();
   await expect(page.getByLabel('Anotações da conversa')).toHaveValue(/curiosa com a oferta/);
   const after = await page.getByRole('timer').locator('p').first().textContent();
   expect(after).not.toBe('00:00');
@@ -251,6 +254,7 @@ test('cadastro com condomínio, metragem e venda ativa mostra comissão, CAC e L
   await page.getByRole('button', { name: 'Iniciar Sprint' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByText('Sua comissão').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Endereço de instalação' }).click();
   await expect(page.getByLabel('Apartamento').first()).toHaveValue('101');
 });
 

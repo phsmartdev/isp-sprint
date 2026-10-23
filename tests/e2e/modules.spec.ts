@@ -59,7 +59,7 @@ test('Módulos: desligar Atas some a aba e a rota; perfil Implantação vê só 
   await p2.goto(`/contracts/${list.items[0].id}`);
   await expect(p2.getByText('Valor mensal')).toBeVisible();
   await expect(p2.getByText(/R\$\s?\d/)).toHaveCount(0);
-  await expect(p2.getByRole('tab', { name: 'Pessoas e ABM' })).toHaveCount(0);
+  await expect(p2.getByRole('button', { name: 'Pessoas e ABM' })).toHaveCount(0);
   await p2.goto('/opportunities');
   await expect(p2.getByText('Sem acesso a este módulo')).toBeVisible();
   await p2.setViewportSize({ width: 390, height: 844 });

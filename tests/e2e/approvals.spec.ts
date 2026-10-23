@@ -141,7 +141,7 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   const oppUrl = seller.url();
 
   // comentário formal com menção
-  await seller.getByRole('tab', { name: /Comentários e histórico/ }).click();
+  await seller.getByRole('tab', { name: /^Histórico/ }).click();
   const box = seller.getByRole('combobox', { name: 'Comentário' });
   await box.click();
   await box.pressSequentially('Cliente quer instalar no sábado. @Car');
@@ -153,7 +153,7 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   await expect(seller.getByText(/comentou/)).toHaveCount(1);
 
   // chat com menção
-  await seller.getByRole('tab', { name: /^Chat/ }).click();
+  // o chat fica na lateral direita, abaixo da viabilidade
   const chat = seller.getByRole('combobox', { name: 'Mensagem para o time' });
   await chat.click();
   await chat.pressSequentially('@Carl');
@@ -172,12 +172,13 @@ test('negociação: comentário com @, chat com @, menções no topo e históric
   await mgr.getByRole('dialog', { name: 'Menções' }).getByRole('link', { name: /consegue aprovar hoje/ }).click();
   await expect(mgr).toHaveURL(/aba=chat/);
   await expect(mgr.getByText('consegue aprovar hoje?')).toBeVisible();
-  await expect(mgr.getByRole('tab', { name: /Comentários e histórico • 1 novo/ })).toBeVisible();
-  await mgr.getByRole('tab', { name: /Comentários e histórico/ }).click();
+  // o histórico é a aba padrão: o comentário já aparece (e conta como lido)
+  await expect(mgr.getByRole('tab', { name: /^Histórico/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(mgr.getByText('Cliente quer instalar no sábado.', { exact: false })).toBeVisible();
   await expect(mgr.getByText('Oportunidade criada')).toBeVisible();
   await shot(mgr, 'negociacao-historico');
   await mgr.goto(oppUrl);
-  await expect(mgr.getByRole('tab', { name: /^Chat$/ })).toBeVisible();
+  await expect(mgr.getByRole('region', { name: 'Chat da negociação' })).toBeVisible();
 });
 
 test('tela cheia também em Inteligência e Gestão de Contratos', async ({ page }) => {
