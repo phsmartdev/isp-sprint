@@ -140,16 +140,23 @@ export const glpiFollowup = (c: GlpiCfg, ticketId: number, entityId: number, aut
 
 /**
  * Responde uma validação (aprovação) do GLPI: PATCH /Assistance/Ticket/{id}/Timeline/Validation/{vid} com status 3 (aceita)
- * ou 4 (recusada) e approval_comment. No GLPI a resposta fica em nome do usuário de integração, então a validação precisa
- * ter sido pedida a ele (ou a um grupo dele); senão o GLPI recusa.
+ * ou 4 (recusada) e approval_comment, e depois RELÊ a validação para confirmar.
+ * Motivo (CommonITILValidation::prepareInputForUpdate no GLPI 11): se o usuário de integração pode criar validações mas não é
+ * o aprovador indicado, o GLPI descarta a situação em silêncio e ainda responde 200. Sem a releitura, a ferramenta diria
+ * "aprovado" sem o GLPI ter registrado (visto na validação real de 23/10).
  */
 export async function glpiAnswerValidation(c: GlpiCfg, ticketId: number, entityId: number, validationId: number, approve: boolean, comment: string) {
+  const path = `/Assistance/Ticket/${ticketId}/Timeline/Validation/${validationId}`;
+  const notTarget = 'O GLPI não registrou a resposta: esta aprovação não foi pedida ao usuário de integração (nem a um grupo do qual ele faça parte). Peça a aprovação a ele no GLPI ou responda direto no GLPI.';
   try {
-    await glpiCall(c, 'PATCH', `/Assistance/Ticket/${ticketId}/Timeline/Validation/${validationId}`, { body: { status: approve ? 3 : 4, approval_comment: comment }, entityId });
+    await glpiCall(c, 'PATCH', path, { body: { status: approve ? 3 : 4, approval_comment: comment }, entityId });
   } catch (e) {
-    if (e instanceof GlpiError && /permissão/.test(e.message)) throw new GlpiError('O GLPI não deixou o usuário de integração responder esta aprovação. Ela precisa ter sido pedida ao usuário de integração (ou a um grupo do qual ele faça parte).', 502);
+    if (e instanceof GlpiError && /permissão/.test(e.message)) throw new GlpiError(notTarget, 502);
     throw e;
   }
+  const v = await glpiCall<{ status?: number | { id?: number } }>(c, 'GET', path, { entityId });
+  const st = typeof v?.status === 'object' ? v.status?.id : v?.status;
+  if (st !== (approve ? 3 : 4)) throw new GlpiError(notTarget, 502);
 }
 
 // ------------------------------------------------------------------ assinatura do webhook

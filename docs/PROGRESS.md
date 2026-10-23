@@ -132,6 +132,11 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - **Quem do comercial fez:** tudo o que vai ao GLPI leva o nome da pessoa: "Ticket gerado a partir do RevOps por …", "Resposta enviada pelo RevOps por …" e "Aprovado/Recusado no RevOps por …".
   - Migração 0055 (colunas `validation_id` e `validation_status` nos eventos do chamado).
   - Regressão: domínio 159, API 239, E2E 61/61.
+- **Correção da aprovação (23/10, validação real):** depois de aprovar ou recusar, o pedido continuava aberto.
+  - Causa, conferida no código do GLPI 11 (`CommonITILValidation::prepareInputForUpdate`): quando o usuário de integração não é o aprovador indicado, o GLPI descarta a situação em silêncio e ainda responde 200.
+  - Agora a ferramenta relê a validação depois de responder. Se o GLPI não registrou, avisa o motivo e não registra nada.
+  - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
+  - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):

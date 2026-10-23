@@ -53,6 +53,8 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
   const [priv, setPriv] = useState(false);
   const sync = useMutation({ mutationFn: () => api<{ added: number }>(`/glpi-tickets/${t.id}/sync`, { method: 'POST' }), onSuccess: (r) => { refresh(); toast({ tone: 'success', message: r.added ? `${r.added} retorno(s) novo(s)` : 'Chamado atualizado' }); }, onError: (e) => { refresh(); toast({ tone: 'error', message: errMsg(e) }); } });
   const pending = new Set(pendingValidations(t.events).map((e) => e.id));
+  // pedidos já respondidos (no GLPI ou aqui): o pedido vira histórico e a resposta aparece logo abaixo, sem botão
+  const decided = new Set(t.events.filter((e) => e.validationId != null && (e.validationStatus === 3 || e.validationStatus === 4)).map((e) => e.validationId));
   const [answer, setAnswer] = useState<{ ev: Ev; decision: GlpiValidationDecision } | null>(null);
   const [comment, setComment] = useState('');
   const decide = useMutation({
@@ -85,7 +87,7 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
             <p className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted">
               <span className="font-semibold text-ink">{KIND(e.kind)}</span>
               {e.isPrivate && <Chip tone="yellow"><EyeOff className="mr-1 inline h-3 w-3" aria-hidden />{e.direction === 'saida' ? 'Privado' : 'Privado do suporte'}</Chip>}
-              {e.kind === 'Validation' && <Chip tone={VAL_TONE(e.validationStatus)}>{GLPI_VALIDATION_LABELS[e.validationStatus ?? 1]}</Chip>}
+              {e.kind === 'Validation' && (e.validationStatus === 2 && decided.has(e.validationId) ? <Chip tone="neutral">Pedido de aprovação</Chip> : <Chip tone={VAL_TONE(e.validationStatus)}>{GLPI_VALIDATION_LABELS[e.validationStatus ?? 1]}</Chip>)}
               <span>{e.author ?? (e.direction === 'entrada' ? 'GLPI' : '')}</span>
               <span className="num">{fmtDateTime(e.occurredAt)}</span>
             </p>

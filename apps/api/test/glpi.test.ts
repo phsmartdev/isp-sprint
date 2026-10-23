@@ -113,11 +113,11 @@ describe('GLPI', () => {
     expect(list.items[0].events.filter((e: { isPrivate: boolean; direction: string }) => e.direction === 'saida' && e.isPrivate)).toHaveLength(1);
   });
 
-  it('aprovação do GLPI respondida na negociação: recusa exige motivo; vai em nome de quem decidiu; pedida a outro aprovador, o GLPI recusa', async () => {
+  it('aprovação do GLPI respondida na negociação: recusa exige motivo; vai em nome de quem decidiu; pedida a outro aprovador, o GLPI descarta e a ferramenta avisa', async () => {
     await glpi.act(glpiId, { kind: 'validation', text: 'Aprovar desconto de 10% na mensalidade' });
     await glpi.act(glpiId, { kind: 'validation', text: 'Aprovar troca de equipamento', toOther: true });
     ok(await lucas.post(`/glpi-tickets/${ticketId}/sync`));
-    const list = async () => (ok(await lucas.get(`/opportunities/${oppId}/glpi-tickets`)).json().items[0].events as { kind: string; validationId: number | null; validationStatus: number | null; text: string }[]).filter((e) => e.kind === 'Validation');
+    const list = async () => (ok(await lucas.get(`/opportunities/${oppId}/glpi-tickets`)).json().items[0].events as { kind: string; validationId: number | null; validationStatus: number | null; text: string; direction: string; author: string }[]).filter((e) => e.kind === 'Validation');
     const vs = await list();
     const v1 = vs.find((e) => e.text === 'Aprovar desconto de 10% na mensalidade');
     const v2 = vs.find((e) => e.text === 'Aprovar troca de equipamento');
@@ -129,10 +129,16 @@ describe('GLPI', () => {
     expect(item).toMatchObject({ status: 3, approval_comment: '<p><strong>Aprovado no RevOps por Lucas Lima</strong></p><p>Margem confere com a tabela.</p>' });
     const after = await list();
     expect(after.filter((e) => e.validationId === v1!.validationId).map((e) => e.validationStatus)).toEqual([2, 3]);
+    // a decisão fica registrada com quem decidiu e o que escreveu (uma vez só, mesmo depois da releitura)
+    expect(after.find((e) => e.validationId === v1!.validationId && e.validationStatus === 3)).toMatchObject({ direction: 'saida', author: 'Lucas Lima', text: 'Margem confere com a tabela.' });
+    ok(await lucas.post(`/glpi-tickets/${ticketId}/sync`));
+    expect((await list()).filter((e) => e.validationId === v1!.validationId && e.validationStatus === 3)).toHaveLength(1);
     expect((await lucas.post(`/glpi-tickets/${ticketId}/validations/${v1!.validationId}`, { decision: 'aprovar' })).json().detail).toMatch(/já foi respondida/);
     const other = await lucas.post(`/glpi-tickets/${ticketId}/validations/${v2!.validationId}`, { decision: 'aprovar' });
     expect(other.statusCode).toBe(502);
-    expect(other.json().detail).toMatch(/pedida ao usuário de integração/);
+    expect(other.json().detail).toMatch(/não registrou a resposta.*pedida ao usuário de integração/);
+    // o GLPI respondeu 200 mas descartou a situação: a ferramenta não registra decisão e o pedido continua aberto
+    expect((await list()).filter((e) => e.validationId === v2!.validationId).map((e) => e.validationStatus)).toEqual([2]);
   });
 
   it('isolamento: quem não vê a oportunidade não vê nem responde o chamado; validação do endereço pelo GLPI', async () => {
