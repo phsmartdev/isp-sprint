@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ExternalLink, Plus, RefreshCw, EyeOff, Send } from 'lucide-react';
+import { ChevronDown, ExternalLink, Plus, RefreshCw, EyeOff, Send } from 'lucide-react';
 import { GLPI_KIND_LABELS, GLPI_TYPE_LABELS, GLPI_URGENCY_LABELS, GLPI_VALIDATION_LABELS, pendingValidations, type GlpiTimelineKind, type GlpiValidationDecision } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
@@ -52,6 +52,8 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
   const [reply, setReply] = useState('');
   const [priv, setPriv] = useState(false);
   const sync = useMutation({ mutationFn: () => api<{ added: number }>(`/glpi-tickets/${t.id}/sync`, { method: 'POST' }), onSuccess: (r) => { refresh(); toast({ tone: 'success', message: r.added ? `${r.added} retorno(s) novo(s)` : 'Chamado atualizado' }); }, onError: (e) => { refresh(); toast({ tone: 'error', message: errMsg(e) }); } });
+  // recolhido por padrão: o histórico só abre ao clicar no chamado
+  const [open, setOpen] = useState(false);
   const pending = new Set(pendingValidations(t.events).map((e) => e.id));
   // pedidos já respondidos (no GLPI ou aqui): o pedido vira histórico e a resposta aparece logo abaixo, sem botão
   const decided = new Set(t.events.filter((e) => e.validationId != null && (e.validationStatus === 3 || e.validationStatus === 4)).map((e) => e.validationId));
@@ -65,19 +67,24 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
   const send = useMutation({ mutationFn: () => api(`/glpi-tickets/${t.id}/followups`, { method: 'POST', body: { text: reply, isPrivate: priv } }), onSuccess: () => { setReply(''); setPriv(false); refresh(); toast({ tone: 'success', message: priv ? 'Acompanhamento privado enviado ao GLPI' : 'Acompanhamento enviado ao GLPI' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   return (
     <li className="rounded-md border border-line" aria-label={`Chamado ${t.glpiId}`}>
-      <div className="flex flex-wrap items-start gap-3 border-b border-line p-4">
+      <div className={clsx('flex flex-wrap items-start gap-3 p-4', open && 'border-b border-line')}>
+        <button type="button" className="mt-0.5 shrink-0 rounded-sm p-0.5 text-muted hover:bg-surface-2" aria-expanded={open} aria-controls={`glpi-h-${t.id}`} aria-label={`${open ? 'Fechar' : 'Abrir'} histórico do chamado ${t.glpiId}`} onClick={() => setOpen(!open)}>
+          <ChevronDown className={clsx('h-5 w-5 transition-transform', !open && '-rotate-90')} aria-hidden />
+        </button>
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-ink"><span className="num text-muted">#{t.glpiId}</span> {t.title}</p>
+          <button type="button" className="text-left font-semibold text-ink hover:text-primary" aria-expanded={open} aria-controls={`glpi-h-${t.id}`} onClick={() => setOpen(!open)}><span className="num text-muted">#{t.glpiId}</span> {t.title}</button>
           <p className="mt-1 text-xs text-muted">{[t.entityName, t.categoryName, t.groupName && `Grupo ${t.groupName}`, GLPI_TYPE_LABELS[t.type], `Urgência ${GLPI_URGENCY_LABELS[t.urgency]?.toLowerCase()}`].filter(Boolean).join(' · ')}</p>
           <p className="text-xs text-muted">Aberto por {t.openedByName} em {fmtDateTime(t.createdAt)}{t.lastSyncAt ? ` · lido no GLPI em ${fmtDateTime(t.lastSyncAt)}` : ''}</p>
         </div>
         <Chip tone={STATUS_TONE(t.status)}>{t.statusName}</Chip>
         {t.unseen > 0 && <Chip tone="red">{t.unseen} novo(s)</Chip>}
+        {pending.size > 0 && <Chip tone="yellow">{pending.size} aprovação(ões) pendente(s)</Chip>}
         <span className="flex gap-1.5">
           <Button size="sm" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={sync.isPending} onClick={() => sync.mutate()}>Atualizar</Button>
           {t.url && <a href={t.url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded-sm border border-line px-3 text-sm font-semibold text-primary hover:bg-surface-2"><ExternalLink className="h-4 w-4" />Abrir no GLPI</a>}
         </span>
       </div>
+      {open && <div id={`glpi-h-${t.id}`}>
       {t.syncError && <div className="px-4 pt-3"><Notice tone="warning">Última leitura falhou: {t.syncError}</Notice></div>}
       <ol className="space-y-3 p-4" aria-label={`Retornos do chamado ${t.glpiId}`}>
         {t.events.map((e) => (
@@ -110,6 +117,7 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
           <Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={reply.trim().length < 3} loading={send.isPending} onClick={() => send.mutate()}>Enviar ao GLPI</Button>
         </div>
       )}
+      </div>}
       <Modal open={!!answer} onClose={() => setAnswer(null)} title={answer?.decision === 'aprovar' ? 'Aprovar no GLPI' : 'Recusar no GLPI'}
         footer={<><Button variant="secondary" onClick={() => setAnswer(null)}>Cancelar</Button><Button variant={answer?.decision === 'aprovar' ? 'primary' : 'danger'} disabled={answer?.decision === 'recusar' && comment.trim().length < 5} loading={decide.isPending} onClick={() => decide.mutate()}>{answer?.decision === 'aprovar' ? 'Aprovar' : 'Recusar'}</Button></>}>
         <div className="space-y-4">
