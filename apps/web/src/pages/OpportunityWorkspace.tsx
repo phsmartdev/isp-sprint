@@ -541,6 +541,38 @@ function SavableSection({ id, title, summary, view, editable, startEditing, onSa
   );
 }
 
+/** Etapas do funil acima da negociação: concluídas, atual (com dias) e próximas; clicar move (as exigências da etapa continuam valendo). */
+function StageStepper({ stages, current, daysInStage, disabled, onPick }: { stages: { key: string; name: string; kind?: string }[]; current: string; daysInStage: number; disabled: boolean; onPick: (key: string) => void }) {
+  const open = stages.filter((st) => st.kind !== 'won' && st.kind !== 'lost');
+  const closed = stages.find((st) => st.key === current && (st.kind === 'won' || st.kind === 'lost'));
+  const list = closed ? [...open, closed] : open;
+  const idx = closed ? list.length - 1 : list.findIndex((st) => st.key === current);
+  if (!list.length) return null;
+  return (
+    <nav aria-label="Etapas do funil" className="scroll-thin mb-4 overflow-x-auto">
+      <ol className="flex w-full min-w-max">
+        {list.map((st, i) => {
+          const state = i < idx ? 'feita' : i === idx ? 'atual' : 'proxima';
+          const tone = state === 'atual' ? (closed?.kind === 'lost' ? 'bg-danger text-white' : closed ? 'bg-success text-white' : 'bg-primary text-white')
+            : state === 'feita' ? 'bg-primary-soft text-primary hover:bg-primary hover:text-white' : 'bg-surface-2 text-muted hover:bg-primary-soft hover:text-primary';
+          return (
+            <li key={st.key} className={clsx('relative flex-1', i > 0 && '-ml-2')}>
+              <button type="button" disabled={disabled || state === 'atual'} aria-current={state === 'atual' ? 'step' : undefined}
+                aria-label={`${st.name}${state === 'atual' ? ` · etapa atual há ${daysInStage} dia(s)` : state === 'feita' ? ' · concluída' : ' · mover para esta etapa'}`}
+                onClick={() => onPick(st.key)}
+                style={{ clipPath: i === 0 ? 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%)' : 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)' }}
+                className={clsx('flex h-11 w-full min-w-[140px] flex-col items-start justify-center pr-6 text-left transition-colors disabled:cursor-default', i === 0 ? 'pl-4' : 'pl-6', tone, disabled && state !== 'atual' && 'opacity-60')}>
+                <span className="whitespace-nowrap text-sm font-semibold leading-tight">{st.name}</span>
+                <span className="whitespace-nowrap text-2xs leading-tight opacity-80">{state === 'atual' ? `há ${daysInStage} dia(s)` : state === 'feita' ? 'concluída' : 'avançar'}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can, feature } = useAuth();
@@ -770,7 +802,13 @@ export function OpportunityWorkspacePage() {
             <SaveStatus state={a.status} onRetry={() => void a.save()} />
           </p>
         </div>
-        <SprintTimer startedAt={opp.sprintStartedAt} baseSeconds={opp.sprintElapsedSeconds} running={running} />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* venda fechada: o próximo passo é o contrato, no canto superior direito */}
+          {opp.stage === 'ganha' && can('contratos') && (opp.contractId
+            ? <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
+            : <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
+          <SprintTimer startedAt={opp.sprintStartedAt} baseSeconds={opp.sprintElapsedSeconds} running={running} />
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -792,11 +830,10 @@ export function OpportunityWorkspacePage() {
             <Button variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => requestMove('perdida')}>Venda perdida</Button>
           </>
         )}
-        {opp.stage === 'ganha' && can('contratos') && (opp.contractId
-          ? <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
-          : <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? ' — mude a etapa para reabrir.' : '. Reabrir é com a supervisão.'}</span>}
       </div>
+
+      <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
 
       <div className="mb-3 ws2:hidden">
         <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'cliente', label: 'Deal e conta' }, { key: 'conversa', label: 'Acompanhamento' }, { key: 'passo', label: unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat}` : 'Viabilidade e chat' }]} />
