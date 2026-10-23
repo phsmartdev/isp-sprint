@@ -157,7 +157,7 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 - **Celular:** abas "Deal e conta", "Acompanhamento" e "Viabilidade e chat".
 - Endereços antigos continuam valendo: `?aba=atividades` e `?aba=trabalho` abrem Tarefas; `?aba=chat` e `?aba=pessoas` levam ao chat e às pessoas.
 - O design não mudou: mesmos componentes, cores e tipografia; só a distribuição.
-- Testes: E2E novo `opportunity-layout.spec.ts`, e os testes que dependiam das abas antigas foram ajustados.
+- Testes: E2E novo `opportunity-layout.spec.ts`, e os testes que dependiam das abas antigas foram ajustados. Regressão: API 239, E2E 62/62.
 
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
