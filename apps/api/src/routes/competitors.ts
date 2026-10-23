@@ -34,7 +34,12 @@ export const competitorRoutes = [
     handler: async ({ app, auth, query }) => {
       const rows = await scopedRows(app.db, auth);
       let items = competitorStats(rows);
-      if (query.q) { const t = query.q.toLowerCase(); const d = query.q.replace(/\D/g, ''); items = items.filter((c) => c.name.toLowerCase().includes(t) || (d.length >= 3 && c.document?.includes(d))); }
+      if (query.q) {
+        // busca sem diferenciar acento nem maiúscula ("omega" acha "Ômega")
+        const norm = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const t = norm(query.q); const d = query.q.replace(/\D/g, '');
+        items = items.filter((c) => norm(c.name).includes(t) || (d.length >= 3 && !!c.document?.includes(d)));
+      }
       const opps = new Set(rows.map((r) => r.opportunityId));
       const ourLots = rows.filter((r) => r.isUs);
       return { items, totals: { pregoes: opps.size, competitors: items.length, ourLots: ourLots.length, ourWins: ourLots.filter((r) => r.winner).length } };
