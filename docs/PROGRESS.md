@@ -131,6 +131,7 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
     - Cada mudança de situação da validação vira um registro novo (append-only), com o id e a situação lida.
   - **Quem do comercial fez:** tudo o que vai ao GLPI leva o nome da pessoa: "Ticket gerado a partir do RevOps por …", "Resposta enviada pelo RevOps por …" e "Aprovado/Recusado no RevOps por …".
   - Migração 0055 (colunas `validation_id` e `validation_status` nos eventos do chamado).
+  - Regressão: domínio 159, API 239, E2E 61/61.
 
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
