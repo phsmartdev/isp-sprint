@@ -157,7 +157,7 @@ export function NewOpportunityPage() {
     <div className="w-full">
       <Breadcrumb items={[{ label: 'Oportunidades', to: '/opportunities' }, { label: 'Nova' }]} />
       <div className="mb-5 flex items-center gap-4">
-        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary"><Handshake className="h-7 w-7" /></span>
+        <span className="flex h-14 w-14 items-center justify-center rounded-circle bg-primary-soft text-primary"><Handshake className="h-7 w-7" /></span>
         <div>
           <h1 className="text-xl font-extrabold text-ink">Nova oportunidade</h1>
           <p className="text-muted">Escolha o tipo de venda e preencha o que já souber. O cronômetro começa quando você criar.</p>
@@ -634,8 +634,8 @@ export function OpportunityWorkspacePage() {
         <h2 className="mb-2 flex items-center gap-2 text-md font-bold text-ink"><Handshake className="h-5 w-5 text-primary" aria-hidden />Deal</h2>
         <p className="font-bold text-ink">{opp.title}</p>
         <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
-          <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{kindLabel ?? opp.pipelineName}</dd>
-          {kindLabel && (<><dt className="text-muted">Funil</dt><dd className="text-text">{opp.pipelineName}</dd></>)}
+          <dt className="text-muted">Tipo de venda</dt><dd className="text-text">{kindLabel ?? (pipeline?.key === 'empresarial' ? 'Não informado' : opp.pipelineName)}</dd>
+          {(kindLabel || pipeline?.key === 'empresarial') && (<><dt className="text-muted">Funil</dt><dd className="text-text">{opp.pipelineName}</dd></>)}
           <dt className="text-muted">Filial</dt><dd className="text-text">{lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'}</dd>
           <dt className="text-muted">Responsável</dt><dd className="flex items-center gap-2 text-text"><Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={22} />{opp.ownerName}</dd>
           <dt className="text-muted">Valor</dt><dd className="num font-bold text-ink">{fmtBRL(opp.valueCents)}{opp.valueCents !== null && !opp.itemCount ? <span className="font-normal text-muted"> /mês</span> : null}{opp.itemCount ? <span className="font-normal text-muted"> · {opp.itemCount} item(ns)</span> : null}</dd>

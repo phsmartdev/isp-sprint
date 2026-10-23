@@ -36,7 +36,7 @@ export function ProposalCanvas({ templateId, page, index, fields, values, select
           role={editable ? 'button' : undefined}
           tabIndex={editable ? 0 : undefined}
           aria-label={editable ? `Campo: ${f.text.slice(0, 40)}` : undefined}
-          className={clsx('absolute whitespace-pre-wrap break-words leading-[1.25]', editable && 'cursor-move rounded-[2px] outline-dashed outline-1 outline-white/60 hover:outline-lime', selectedId === f.id && 'outline-2 !outline-lime')}
+          className={clsx('absolute whitespace-pre-wrap break-words leading-[1.25]', editable && 'cursor-move rounded-none outline-dashed outline-1 outline-white/60 hover:outline-lime', selectedId === f.id && 'outline-2 !outline-lime')}
           style={{ left: `${f.x}%`, top: `${f.y}%`, width: `${f.w}%`, fontSize: `${f.size / 10}cqw`, color: f.color, textAlign: f.align, fontWeight: f.bold ? 700 : 400, textDecoration: f.strike ? 'line-through' : undefined, fontFamily: 'Helvetica, Arial, sans-serif' }}
           onPointerDown={(e) => { if (!editable) return; e.stopPropagation(); onSelect?.(f.id); const p = pct(e); drag.current = { id: f.id, dx: p.x - f.x, dy: p.y - f.y }; (e.currentTarget as HTMLElement).setPointerCapture?.((e as RPointerEvent).pointerId); }}
         >

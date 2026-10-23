@@ -29,7 +29,7 @@ export function MentionsMenu() {
   const n = q.data?.unread ?? 0;
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="dialog" aria-label={n ? (n === 1 ? '1 menção não lida' : `${n} menções não lidas`) : 'Menções'} className="relative flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface-2">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-haspopup="dialog" aria-label={n ? (n === 1 ? '1 menção não lida' : `${n} menções não lidas`) : 'Menções'} className="relative flex h-11 w-11 items-center justify-center rounded-circle text-ink hover:bg-surface-2">
         <AtSign className="h-6 w-6" strokeWidth={1.8} />
         {n > 0 && <span className="num absolute -right-0.5 top-0.5 min-w-[20px] rounded-full border-2 border-surface bg-[#F5B400] px-1 text-center text-2xs font-bold leading-4 text-navy">{n > 9 ? '9+' : n}</span>}
       </button>
@@ -42,7 +42,7 @@ export function MentionsMenu() {
                 <li key={i}>
                   <Link to={m.kind === 'gestao' ? (m.contactName === 'reuniao' ? `/times/rituais/reunioes/${m.taskId}` : m.contactName === 'ritual' ? '/times/rituais' : `/times/decisoes?tab=${m.contactName === 'impedimento' ? 'impedimentos' : 'decisoes'}&id=${m.taskId}`) : m.kind === 'intervencao' ? `/times/intervencoes?id=${m.taskId}` : m.kind === 'tarefa' ? `/tarefas?task=${m.taskId}` : `/opportunities/${m.opportunityId}?aba=${m.source === 'chat' ? 'chat' : 'historico'}`} onClick={() => setOpen(false)} className={clsx('block px-4 py-2.5 hover:bg-surface-2', m.unread && 'bg-[#FFF9E6]')}>
                     <p className="flex items-center gap-2 text-xs text-muted">
-                      {m.unread && <span className="h-2 w-2 rounded-full bg-[#F5B400]" aria-label="não lida" />}
+                      {m.unread && <span className="h-2 w-2 rounded-circle bg-[#F5B400]" aria-label="não lida" />}
                       {m.kind === 'gestao'
                         ? <span>{m.author && <span className="font-semibold text-ink">{m.author} </span>}{TASK_TEXT[m.source] ?? 'Atualização de gestão'} · {fmtRelative(m.at)}</span>
                         : m.kind === 'intervencao'

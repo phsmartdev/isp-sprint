@@ -172,7 +172,7 @@ export function IntelligencePage() {
               <ul className="divide-y divide-line">
                 {d.insights.map((i) => (
                   <li key={i.kind} className="flex items-center gap-4 py-3">
-                    <span className={clsx('flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 bg-surface', INSIGHT_LOOK[i.kind].cls)}>{INSIGHT_LOOK[i.kind].icon}</span>
+                    <span className={clsx('flex h-10 w-10 shrink-0 items-center justify-center rounded-circle border-2 bg-surface', INSIGHT_LOOK[i.kind].cls)}>{INSIGHT_LOOK[i.kind].icon}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-ink">{i.title}</span>
                       <span className="block text-xs text-muted">{i.detail} <span className="text-faint">(n={i.n})</span></span>

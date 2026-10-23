@@ -101,7 +101,7 @@ export function RunCard({ r, onTask, showAccount }: { r: Run; onTask: (id: strin
       </div>
       <ol className="mt-3 space-y-1">{r.steps.map((s) => (
         <li key={s.activityId} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
-          <span className={clsx('inline-block h-2.5 w-2.5 shrink-0 rounded-full', s.stepStatus === 'concluida' ? 'bg-success' : s.stepStatus === 'cancelada' ? 'bg-line' : s.dueOn && s.dueOn < today0 ? 'bg-danger' : 'bg-sky')} aria-hidden />
+          <span className={clsx('inline-block h-2.5 w-2.5 shrink-0 rounded-circle', s.stepStatus === 'concluida' ? 'bg-success' : s.stepStatus === 'cancelada' ? 'bg-line' : s.dueOn && s.dueOn < today0 ? 'bg-danger' : 'bg-sky')} aria-hidden />
           <button type="button" className={clsx('min-w-0 text-left hover:underline', s.stepStatus === 'cancelada' && 'text-muted line-through', s.stepStatus === 'concluida' && 'text-muted')} onClick={() => onTask(s.activityId)}>{s.title}</button>
           <span className="text-xs text-muted">{PLAY_STEP_TYPE_LABELS[s.type] ?? s.type} · {s.ownerName}{s.dueOn && ` · ${fmtDate(s.dueOn)}`}</span>
           {s.stepStatus !== 'pendente' && <Chip tone={STEP_TONE[s.stepStatus]}>{s.stepStatus === 'concluida' ? 'Concluída' : 'Cancelada'}</Chip>}

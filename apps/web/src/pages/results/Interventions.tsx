@@ -135,7 +135,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
               {d.closings.map((c) => (
                 <li key={c.competencia} className={clsx('rounded-md border px-3 py-2 text-sm', d.competencias.includes(c.competencia) ? 'border-ink/30' : 'border-line')}>
                   <span className="num font-semibold">{comp(c.competencia)}</span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-xs"><span className={clsx('h-2.5 w-2.5 rounded-full', COLOR_DOT[c.color])} aria-hidden />{TRAFFIC_LABELS[c.color]} · <span className="num">{fmtAtt(c.attainment)}</span></span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-xs"><span className={clsx('h-2.5 w-2.5 rounded-circle', COLOR_DOT[c.color])} aria-hidden />{TRAFFIC_LABELS[c.color]} · <span className="num">{fmtAtt(c.attainment)}</span></span>
                 </li>
               ))}
             </ol>

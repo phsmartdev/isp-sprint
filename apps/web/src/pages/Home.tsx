@@ -96,7 +96,7 @@ export function HomePage() {
         {(d?.kpis ?? Array.from({ length: 4 }).map(() => null)).map((k, i) =>
           k ? (
             <div key={k.key} className="card flex items-center gap-4 px-5 py-4" title={k.formula}>
-              <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-full', KPI_LOOK[k.key]?.tone)}>{KPI_LOOK[k.key]?.icon}</span>
+              <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-circle', KPI_LOOK[k.key]?.tone)}>{KPI_LOOK[k.key]?.icon}</span>
               <div className="min-w-0 flex-1">
                 <FitText className="num text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</FitText>
                 <p className="text-md text-text">{k.label}</p>
@@ -207,7 +207,7 @@ export function HomePage() {
               <ul className="space-y-3">
                 {d.performance.map((p, i) => (
                   <li key={p.key} className="grid grid-cols-[14px_1fr_32px_120px_40px] items-center gap-2 text-sm" title={`Meta: ${p.target}`}>
-                    <span className={clsx('h-2.5 w-2.5 rounded-[3px]', ['bg-success', 'bg-[#F59E0B]', 'bg-[#93B8FF]'][i])} aria-hidden />
+                    <span className={clsx('h-2.5 w-2.5 rounded-none', ['bg-success', 'bg-[#F59E0B]', 'bg-[#93B8FF]'][i])} aria-hidden />
                     <span className="text-text">{p.label}</span>
                     <span className="num text-right font-bold text-ink">{p.value}</span>
                     <Progress value={p.progress} />

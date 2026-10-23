@@ -52,7 +52,7 @@ function Timeline({ d, onChanged }: { d: Data; onChanged: () => void }) {
                   const late = !x.doneAt && x.plannedAt && x.plannedAt < today;
                   return (
                     <li key={x.id} className="relative">
-                      <span className={clsx('absolute -left-[23px] top-3 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2', x.doneAt ? 'border-success bg-success' : late ? 'border-danger bg-white' : 'border-primary bg-white')} aria-hidden>{x.doneAt && <Check className="h-2.5 w-2.5 text-white" strokeWidth={4} />}</span>
+                      <span className={clsx('absolute -left-[23px] top-3 flex h-3.5 w-3.5 items-center justify-center rounded-circle border-2', x.doneAt ? 'border-success bg-success' : late ? 'border-danger bg-white' : 'border-primary bg-white')} aria-hidden>{x.doneAt && <Check className="h-2.5 w-2.5 text-white" strokeWidth={4} />}</span>
                       <div className={clsx('rounded-md border bg-white p-2.5', late ? 'border-danger/40' : 'border-line')}>
                         <p className={clsx('text-sm font-semibold', x.doneAt ? 'text-muted line-through decoration-1' : 'text-ink')}>{x.title}</p>
                         <p className="text-xs text-muted">{x.doneAt ? `Realizado em ${fmtDate(x.doneAt)}` : x.plannedAt ? `Previsto ${fmtDate(x.plannedAt)}` : 'Sem data (contrato sem fim de vigência)'}{late && <span className="font-semibold text-danger"> · atrasado</span>}{x.ownerName ? ` · ${x.ownerName}` : ''}</p>

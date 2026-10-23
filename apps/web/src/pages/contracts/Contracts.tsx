@@ -108,7 +108,7 @@ function BoardColumn({ stage, rows }: { stage: ContractStage; rows: ContractRow[
   return (
     <section ref={setNodeRef} aria-labelledby={`cc-${stage}`} style={{ background: `${STAGE_COLOR[stage]}12` }} className={clsx('flex min-w-[230px] flex-1 basis-0 flex-col rounded-lg p-2.5', isOver && 'ring-2 ring-primary')}>
       <header className="mb-3 px-1">
-        <h2 id={`cc-${stage}`} className="flex items-center gap-2 text-sm font-bold text-ink"><span className="h-2.5 w-2.5 rounded-full" style={{ background: STAGE_COLOR[stage] }} aria-hidden />{CONTRACT_STAGE_LABELS[stage]} <span className="num font-normal text-muted">({rows.length})</span></h2>
+        <h2 id={`cc-${stage}`} className="flex items-center gap-2 text-sm font-bold text-ink"><span className="h-2.5 w-2.5 rounded-circle" style={{ background: STAGE_COLOR[stage] }} aria-hidden />{CONTRACT_STAGE_LABELS[stage]} <span className="num font-normal text-muted">({rows.length})</span></h2>
         <p className="num text-xs text-muted">{fmtBRL(rows.reduce((a, r) => a + r.monthlyCents, 0))}/mês</p>
       </header>
       <ul className="flex min-h-[120px] flex-col gap-3">
@@ -183,7 +183,7 @@ function Calendario() {
           <Button variant="ghost" aria-label="Próximo mês" icon={<ChevronRight className="h-5 w-5" />} onClick={() => shift(1)} />
           <Button size="sm" onClick={() => setMonth(todayIso().slice(0, 7))}>Hoje</Button>
         </div>
-        <div className="flex flex-wrap gap-3 text-xs text-muted">{[['termino', 'Término'], ['renovacao', 'Renovação'], ['reajuste', 'Reajuste'], ['garantia', 'Garantia'], ['tarefa', 'Tarefa'], ['acao', 'Próxima ação']].map(([k, l]) => <span key={k} className="flex items-center gap-1"><span className={clsx('h-2.5 w-2.5 rounded-full', EV_COLOR[k!])} aria-hidden />{l}</span>)}</div>
+        <div className="flex flex-wrap gap-3 text-xs text-muted">{[['termino', 'Término'], ['renovacao', 'Renovação'], ['reajuste', 'Reajuste'], ['garantia', 'Garantia'], ['tarefa', 'Tarefa'], ['acao', 'Próxima ação']].map(([k, l]) => <span key={k} className="flex items-center gap-1"><span className={clsx('h-2.5 w-2.5 rounded-circle', EV_COLOR[k!])} aria-hidden />{l}</span>)}</div>
       </div>
       <div className="hidden md:block">
         <div className="grid grid-cols-7 border-l border-t border-line text-xs">
@@ -194,7 +194,7 @@ function Calendario() {
               <div key={d} className={clsx('min-h-[96px] border-b border-r border-line p-1.5', !d.startsWith(month) && 'bg-surface-2/50 text-muted', d === today && 'ring-2 ring-inset ring-primary')}>
                 <p className="num mb-1 text-xs font-semibold">{+d.slice(8)}</p>
                 <ul className="space-y-0.5">
-                  {evs.slice(0, 3).map((e, i) => <li key={i}><Link to={`/contracts/${e.contractId}`} title={`${e.label} · ${e.number} · ${e.client}`} className="flex items-center gap-1 truncate rounded px-1 text-[11px] leading-5 text-ink hover:bg-surface-2"><span className={clsx('h-2 w-2 shrink-0 rounded-full', EV_COLOR[e.kind] ?? 'bg-primary')} aria-hidden /><span className="truncate">{e.client}</span></Link></li>)}
+                  {evs.slice(0, 3).map((e, i) => <li key={i}><Link to={`/contracts/${e.contractId}`} title={`${e.label} · ${e.number} · ${e.client}`} className="flex items-center gap-1 truncate rounded px-1 text-[11px] leading-5 text-ink hover:bg-surface-2"><span className={clsx('h-2 w-2 shrink-0 rounded-circle', EV_COLOR[e.kind] ?? 'bg-primary')} aria-hidden /><span className="truncate">{e.client}</span></Link></li>)}
                   {evs.length > 3 && <li className="px-1 text-[11px] text-muted">+{evs.length - 3}</li>}
                 </ul>
               </div>
@@ -206,7 +206,7 @@ function Calendario() {
         {q.isLoading ? <LoadingRows rows={3} /> : !monthEvents.length ? <li className="py-4 text-sm text-muted">Nenhuma obrigação neste mês.</li> : monthEvents.map((e, i) => (
           <li key={i}><Link to={`/contracts/${e.contractId}`} className="flex flex-wrap items-center gap-3 px-1 py-2 hover:bg-surface-2">
             <span className="num w-20 text-sm font-semibold text-ink">{fmtDate(e.date)}</span>
-            <span className={clsx('h-2.5 w-2.5 rounded-full', EV_COLOR[e.kind] ?? 'bg-primary')} aria-hidden />
+            <span className={clsx('h-2.5 w-2.5 rounded-circle', EV_COLOR[e.kind] ?? 'bg-primary')} aria-hidden />
             <span className="min-w-0 flex-1 text-sm"><span className="font-semibold text-ink">{e.label}</span> · {e.number} · {e.client}</span>
           </Link></li>
         ))}

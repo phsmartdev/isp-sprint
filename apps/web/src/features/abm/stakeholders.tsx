@@ -330,7 +330,7 @@ function InfluenceMatrix({ data, account, onOpen }: { data: { points: MapPoint[]
       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filtrar por posicionamento">
           {(Object.keys(STANCE_LABELS) as Stance[]).map((s) => { const on = stances.includes(s); return (
-            <button key={s} type="button" aria-pressed={on} onClick={() => setStances(on ? stances.filter((x) => x !== s) : [...stances, s])} className={clsx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs', on ? 'border-primary bg-primary-soft font-semibold text-ink' : 'border-line text-muted hover:text-ink')}><span className={clsx('h-2.5 w-2.5 rounded-full', STANCE_BG[s])} />{STANCE_LABELS[s]}</button>
+            <button key={s} type="button" aria-pressed={on} onClick={() => setStances(on ? stances.filter((x) => x !== s) : [...stances, s])} className={clsx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs', on ? 'border-primary bg-primary-soft font-semibold text-ink' : 'border-line text-muted hover:text-ink')}><span className={clsx('h-2.5 w-2.5 rounded-circle', STANCE_BG[s])} />{STANCE_LABELS[s]}</button>
           ); })}
         </div>
         <Select aria-label="Filtrar por papel" value={role} onChange={(e) => setRole(e.target.value)} className="h-8 w-auto text-xs"><option value="">Todos os papéis</option>{(Object.keys(STAKEHOLDER_ROLE_LABELS) as StakeholderRole[]).map((r) => <option key={r} value={r}>{STAKEHOLDER_ROLE_LABELS[r]}</option>)}</Select>

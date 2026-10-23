@@ -232,7 +232,7 @@ function HelpButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button onClick={() => setOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface-2" aria-label="Ajuda">
+      <button onClick={() => setOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-circle text-ink hover:bg-surface-2" aria-label="Ajuda">
         <CircleHelp className="h-7 w-7" strokeWidth={1.6} />
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Ajuda" size="sm">
@@ -276,9 +276,9 @@ export function AppShell() {
           <button className="rounded-sm p-1.5 text-ink hover:bg-surface-2 lg:hidden" aria-label="Abrir menu" onClick={() => setMobileOpen(true)}><Menu className="h-6 w-6" /></button>
           <GlobalSearch ref={search} />
           <div className="ml-auto flex items-center gap-2 sm:gap-4">
-            <Link to="/activities" className="relative flex h-11 w-11 items-center justify-center rounded-full text-ink hover:bg-surface-2" aria-label={notify ? `${notify} atividades para hoje ou vencidas` : 'Sem atividades pendentes hoje'}>
+            <Link to="/activities" className="relative flex h-11 w-11 items-center justify-center rounded-circle text-ink hover:bg-surface-2" aria-label={notify ? `${notify} atividades para hoje ou vencidas` : 'Sem atividades pendentes hoje'}>
               <Bell className="h-7 w-7" strokeWidth={1.6} />
-              {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-surface bg-danger" aria-hidden />}
+              {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
             </Link>
             <MentionsMenu />
             <HelpButton />

@@ -242,7 +242,7 @@ function Calendar({ p, onOpen }: { p: ProjectDetail; onOpen: (t: Task) => void }
             const ms = p.milestones.filter((m) => m.dueOn === d);
             return (
               <div key={d} className={clsx('min-h-[96px] border-b border-r border-line p-1.5', d.slice(0, 7) !== month && 'bg-surface-2/50 text-muted')}>
-                <span className={clsx('num inline-flex h-6 w-6 items-center justify-center rounded-full', d === today && 'bg-primary font-bold text-white')}>{Number(d.slice(8))}</span>
+                <span className={clsx('num inline-flex h-6 w-6 items-center justify-center rounded-circle', d === today && 'bg-primary font-bold text-white')}>{Number(d.slice(8))}</span>
                 <ul className="mt-1 space-y-1">
                   {ms.map((m) => <li key={m.id} className={clsx('flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-semibold', m.completedAt ? 'bg-success-soft text-[#15803D]' : 'bg-purple-soft text-purple')}><Diamond className="h-3 w-3 shrink-0" aria-hidden /><span className="truncate">{m.name}</span></li>)}
                   {tasks.map((t) => <li key={t.id}><button type="button" onClick={() => onOpen(t)} className={clsx('block w-full truncate rounded-sm px-1.5 py-0.5 text-left', t.completedAt ? 'bg-surface-2 text-muted line-through' : isLate(t) ? 'bg-danger-soft text-danger' : 'bg-primary-soft text-primary')}>{t.title}</button></li>)}
@@ -465,7 +465,7 @@ function History({ id }: { id: string }) {
       <h2 className="mb-3 text-lg font-bold text-ink">Histórico</h2>
       {q.isLoading ? <LoadingRows rows={4} /> : !q.data?.items.length ? <p className="text-sm text-muted">Sem eventos.</p> : (
         <ol className="space-y-3 border-l-2 border-line pl-4">
-          {q.data.items.map((e) => <li key={e.id} className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary" aria-hidden /><p className="text-sm text-ink">{e.summary}</p><p className="text-xs text-muted">{e.actorName ?? 'Sistema'} · {fmtDateTime(e.occurredAt)}</p></li>)}
+          {q.data.items.map((e) => <li key={e.id} className="relative"><span className="absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-circle bg-primary" aria-hidden /><p className="text-sm text-ink">{e.summary}</p><p className="text-xs text-muted">{e.actorName ?? 'Sistema'} · {fmtDateTime(e.occurredAt)}</p></li>)}
         </ol>
       )}
     </section>

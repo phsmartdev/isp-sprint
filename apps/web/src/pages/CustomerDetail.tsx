@@ -98,7 +98,7 @@ export function CustomerDetailPage() {
       <Breadcrumb items={[{ label: 'Contas', to: '/customers' }, { label: c.name }]} />
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary"><UserRound className="h-7 w-7" /></span>
+          <span className="flex h-14 w-14 items-center justify-center rounded-circle bg-primary-soft text-primary"><UserRound className="h-7 w-7" /></span>
           <div>
             <h1 className="text-xl font-extrabold text-ink">{c.name}</h1>
             <p className="flex flex-wrap items-center gap-2 text-sm text-muted">

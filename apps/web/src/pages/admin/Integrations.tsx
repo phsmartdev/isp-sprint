@@ -65,7 +65,7 @@ function IntegrationCard({ item }: { item: Item }) {
     <section className="card p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary"><Icon className="h-6 w-6" /></span>
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-circle bg-primary-soft text-primary"><Icon className="h-6 w-6" /></span>
           <div>
             <h2 className="text-md font-bold text-ink">{item.name}</h2>
             <p className="max-w-2xl text-sm text-muted">{item.description}</p>

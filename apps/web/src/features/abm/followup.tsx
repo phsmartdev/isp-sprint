@@ -173,7 +173,7 @@ export function AccountFollowup({ contactId }: { contactId: string }) {
         {inter.isLoading ? <LoadingRows rows={3} /> : !inter.data?.items.length ? <p className="text-sm text-muted">Nenhuma interação registrada{who ? ' com esta pessoa' : ''}.</p> : (
           <ol className="relative space-y-3 border-l-2 border-line pl-5">{inter.data.items.map((i) => { const Icon = KIND_ICON[i.kind] ?? BellRing; return (
             <li key={i.id} className="relative text-sm">
-              <span className="absolute -left-[31px] top-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-soft text-primary"><Icon className="h-3 w-3" aria-hidden /></span>
+              <span className="absolute -left-[31px] top-0.5 flex h-5 w-5 items-center justify-center rounded-circle bg-primary-soft text-primary"><Icon className="h-3 w-3" aria-hidden /></span>
               <p><b className="text-ink">{i.title}</b>{!!i.people.length && <span className="text-muted"> · com {i.people.join(', ')}</span>}</p>
               {i.text && <p className="whitespace-pre-line text-text">{i.text}</p>}
               <p className="text-xs text-muted">{fmtDateTime(i.at)}{i.by && ` · ${i.by}`} · {i.source === 'gmail' ? 'Gmail' : i.source}{i.activityId && <> · <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setTask(i.activityId)}>abrir</button></>}</p>

@@ -28,7 +28,8 @@ export default {
         yellow: c('yellow'),
         focus: c('focus'),
       },
-      borderRadius: { sm: 'var(--radius-sm)', DEFAULT: 'var(--radius-md)', md: 'var(--radius-md)', lg: 'var(--radius-lg)' },
+      // marca BKT: cantos retos em tudo; só fotos/indicadores redondos usam rounded-circle
+      borderRadius: { none: '0', sm: '0', DEFAULT: '0', md: '0', lg: '0', xl: '0', '2xl': '0', '3xl': '0', full: '0', circle: '9999px' },
       boxShadow: { card: 'var(--shadow-card)', overlay: 'var(--shadow-overlay)' },
       fontFamily: { sans: ['"Work Sans"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'], display: ['Orbitron', '"Work Sans"', 'system-ui', 'sans-serif'] },
       fontSize: {

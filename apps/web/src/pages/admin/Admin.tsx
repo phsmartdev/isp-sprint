@@ -83,7 +83,7 @@ function uptime(s: number) {
 function Tile({ to, icon, tone, title, desc, foot }: { to: string; icon: ReactNode; tone: string; title: string; desc: string; foot: string }) {
   return (
     <Link to={to} className="card group flex gap-4 p-5 hover:border-line-strong">
-      <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
+      <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-circle', tone)}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-start justify-between gap-2"><span className="text-md font-bold text-ink">{title}</span><ChevronRight className="h-5 w-5 text-ink" aria-hidden /></span>
         <span className="mt-1 block text-sm text-muted">{desc}</span>
@@ -101,7 +101,7 @@ export function AdminOverview() {
   const d = q.data!;
   const stat = (to: string, icon: ReactNode, tone: string, n: number, label: string) => (
     <Link to={to} className="card flex items-center gap-3 p-4 hover:border-line-strong">
-      <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-full', tone)}>{icon}</span>
+      <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-circle', tone)}>{icon}</span>
       <span className="min-w-0 flex-1"><FitText as="span" className="num text-xl font-extrabold text-ink">{n}</FitText><span className="block whitespace-nowrap text-sm text-muted">{label}</span></span>
       <ChevronRight className="h-5 w-5 text-ink" aria-hidden />
     </Link>
@@ -159,7 +159,7 @@ export function AdminOverview() {
       </div>
       <aside className="space-y-4">
         <section className="card p-5">
-          <div className="mb-3 flex items-center justify-between"><h2 className="text-md font-bold text-ink">Informações do sistema</h2><Chip tone="green"><span className="h-2 w-2 rounded-full bg-success" />Online</Chip></div>
+          <div className="mb-3 flex items-center justify-between"><h2 className="text-md font-bold text-ink">Informações do sistema</h2><Chip tone="green"><span className="h-2 w-2 rounded-circle bg-success" />Online</Chip></div>
           <dl className="space-y-3 text-sm">
             {[
               [<Monitor key="i" className="h-4 w-4 text-primary" />, 'Versão', d.system.version],
