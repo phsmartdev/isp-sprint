@@ -138,6 +138,23 @@ Atualizado em 2026-10-20. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
+## Abertura por tipo de venda, filial e produtos e serviços ✅ (2026-10-23)
+- **Abertura:**
+  - "Tipo de venda" obrigatório: Licitação, Adesão à Ata, Consumo de Contrato ou Venda Consultiva. São quatro jornadas novas, com etapas e campos configuráveis. Elas entraram como nova versão do modelo de instrução, para as empresas que já existiam.
+  - Etapa inicial do funil e **Filial** obrigatória (BKT Soluções ou UPNET; a lista fica em Configurações → Filiais da venda).
+  - Cliente novo com CNPJ e endereço; CNPJ repetido é recusado. Cliente da carteira não pede CNPJ.
+  - "Endereço de entrega", sem condomínio. Saíram plano, viabilidade e motivo do contato. O botão virou "Iniciar Negociação".
+- **Produtos e serviços na oportunidade:**
+  - Cada item tem produto/serviço, medida (Un, Km, R$, H), quantidade, valor, desconto, acréscimo e observação.
+  - Os itens podem ser importados de planilha (Excel ou CSV) ou colados do Excel. Linhas recusadas voltam com o motivo.
+  - O total vira o valor da oportunidade, e cada mudança fica no histórico.
+  - Licitação: lance por item ou global.
+  - **Venda fechada exige produtos lançados** (ou o plano, nas vendas antigas).
+- **Configurações:** Usuários, Módulos e liberação e Segurança ficam juntos em "Permissões".
+- O aviso "Não salvou" passou a mostrar o campo recusado.
+- Migrações: 0056 (filiais) e 0057 (itens e lance).
+- Testes: domínio 161; API (itens 3, contatos 2); E2E das áreas mexidas 35/35. A regressão completa roda depois da publicação (pedido do Paulo para acelerar).
+
 ## UX das oportunidades — tela enxuta, Contatos e resultado da venda ✅ (2026-10-23)
 - Pedidos do Paulo após usar a Fase 1:
   - **Saíram da tela:** etiquetas de situação, próxima ação, pendências, motivos do contato, plano, jornada, cabo e taxa, anotações, roteiro e objeções. Os dados continuam gravados.

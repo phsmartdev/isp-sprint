@@ -21,6 +21,13 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   await seller.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(seller).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   const oppUrl = seller.url();
+  // produtos lançados pela tela: o total vira o valor que vai para a aprovação
+  const items = seller.getByRole('region', { name: 'Produtos e serviços' });
+  await items.getByRole('button', { name: 'Adicionar item' }).click();
+  await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');
+  await items.getByLabel('Valor 1').fill('1.200,00');
+  await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
+  await expect(seller.getByText('Produtos e serviços salvos')).toBeVisible();
 
   await seller.getByRole('button', { name: /Pedir aprovação/ }).click();
   await expect(seller.getByRole('heading', { name: 'Análise e aprovação' })).toBeVisible();

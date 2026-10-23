@@ -128,6 +128,7 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await login(page, 'lucas@yepnet.test');
   await page.goto('/opportunities/new');
   const tipo = page.getByLabel('Tipo de venda');
+  await expect(tipo.locator('option')).toHaveCount(5);
   const options = (await tipo.locator('option').allTextContents()).slice(1);
   expect(options).toEqual(['Licitação', 'Adesão à Ata', 'Consumo de Contrato', 'Venda Consultiva']);
   await expect(page.getByText('O que motivou o contato?')).toHaveCount(0);
@@ -139,7 +140,7 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   await page.getByLabel('CNPJ').fill(doc);
   await page.locator('#no-acc-street').fill('Praça da Matriz');
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
-  await expect(page.getByText('Escolha o tipo de venda')).toBeVisible();
+  await expect(page.getByText('Escolha o tipo de venda', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('Escolha a filial da venda')).toBeVisible();
   await tipo.selectOption({ label: 'Licitação' });
   await expect(page.getByLabel('Etapa do funil')).toBeVisible();
@@ -183,14 +184,15 @@ test('Sprint: venda fechada pede confirmação e não confirma contrato', async 
 test('Oportunidades: mover pelo menu (alternativa ao arrastar) e perder exige motivo', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await newOpportunity(page, 'Cliente E2E Kanban');
-  await page.goto('/opportunities?q=E2E%20Kanban');
+  const created = await (await page.request.get(`/api/v1/opportunities/${page.url().split('/').pop()}`)).json();
+  await page.goto(`/opportunities?pipelineId=${created.pipelineId}&q=E2E%20Kanban`);
   const card = page.locator('li', { hasText: 'Cliente E2E Kanban' });
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
   await page.getByRole('menuitem', { name: 'Proposta' }).click();
   await expect(page.getByRole('region', { name: /Proposta/ }).getByText('Cliente E2E Kanban')).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
-  await page.getByRole('menuitem', { name: 'Perdido' }).click();
+  await page.getByRole('menuitem', { name: 'Perdida' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Marcar como perdida' })).toBeDisabled();
   await dialog.getByLabel('Motivo da perda').selectOption('preco');
