@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHmac, randomBytes } from 'node:crypto';
 
-type TL = { type: 'Followup' | 'Task' | 'Solution' | 'Document'; item: Record<string, unknown> };
+type TL = { type: 'Followup' | 'Task' | 'Solution' | 'Document' | 'Validation'; item: Record<string, unknown> };
 type Ticket = { id: number; name: string; content: string; type: number; urgency: number; entity: number; category: number | null; status: number; date_mod: string; date_solve: string | null; date_close: string | null; timeline: TL[]; team: { type: string; id: number; role: string }[] };
 
 export const GLPI_CREDS = { clientId: 'isp-sprint', clientSecret: 'glpi-secret', username: 'integracao', password: 'Integra@2026' };
@@ -22,7 +22,7 @@ export type FakeGlpi = {
   close: () => Promise<void>;
   tickets: Map<number, Ticket>;
   /** O técnico responde/age no GLPI; com `hook`, dispara o webhook assinado como o GLPI faz. */
-  act: (ticketId: number, a: { kind: 'followup' | 'task' | 'solution' | 'status'; text?: string; status?: number; isPrivate?: boolean }, hook?: { url: string; secret: string; badSignature?: boolean }) => Promise<number | null>;
+  act: (ticketId: number, a: { kind: 'followup' | 'task' | 'solution' | 'status' | 'validation'; text?: string; status?: number; isPrivate?: boolean; toOther?: boolean }, hook?: { url: string; secret: string; badSignature?: boolean }) => Promise<number | null>;
   failNext: (status: number) => void;
 };
 
@@ -105,6 +105,18 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
           t.date_mod = now();
           return json(res, 201, { id, href: `/Assistance/Ticket/${t.id}/Timeline/Followup/${id}` });
         }
+        const vm = sub.match(/^\/Timeline\/Validation\/(\d+)$/);
+        if (req.method === 'PATCH' && vm) {
+          // como no GLPI 11: só quem foi indicado como aprovador (usuário ou grupo) responde a validação
+          const v = t.timeline.find((x) => x.type === 'Validation' && x.item.id === Number(vm[1]));
+          if (!v) return json(res, 404, { status: 'ERROR_ITEM_NOT_FOUND', title: 'Item not found' });
+          if (v.item.requested_approver_id !== 9) return json(res, 403, { status: 'ERROR_RIGHT_MISSING', title: "You don't have permission to perform this action." });
+          const b = JSON.parse(raw);
+          if (![3, 4].includes(b.status)) return json(res, 400, { status: 'ERROR_INVALID_PARAMETER', title: 'Invalid input parameters' });
+          Object.assign(v.item, { status: b.status, approval_comment: b.approval_comment ?? null, approver: { id: 9, name: GLPI_CREDS.username }, approval_date: now() });
+          t.date_mod = now();
+          return json(res, 200, { id: v.item.id });
+        }
         if (req.method === 'POST' && sub === '/TeamMember') {
           const b = JSON.parse(raw);
           if (!GROUPS.some((g) => g.id === b.id)) return json(res, 400, { status: 'ERROR_INVALID_PARAMETER', title: 'Invalid input parameters' });
@@ -141,6 +153,10 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
         t.status = 5; t.date_solve = now(); t.date_mod = now();
         item = { id, itemtype: 'Ticket', items_id: t.id, content: `<p>${a.text ?? 'Resolvido'}</p>`, user: { id: 5, name: 'Técnico NOC' }, date_creation: now() };
         t.timeline.push({ type: 'Solution', item });
+      } else if (a.kind === 'validation') {
+        item = { id, tickets_id: t.id, status: 2, submission_comment: `<p>${a.text ?? 'Aprovar'}</p>`, requester: { id: 5, name: 'Técnico NOC' }, requested_approver_type: 'User', requested_approver_id: a.toOther ? 7 : 9, submission_date: now() };
+        t.timeline.push({ type: 'Validation', item });
+        t.date_mod = now();
       } else {
         const type = a.kind === 'task' ? 'Task' : 'Followup';
         item = type === 'Task'

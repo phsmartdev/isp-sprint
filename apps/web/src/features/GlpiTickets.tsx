@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ExternalLink, Plus, RefreshCw, Send } from 'lucide-react';
-import { GLPI_KIND_LABELS, GLPI_TYPE_LABELS, GLPI_URGENCY_LABELS, type GlpiTimelineKind } from '@isp/domain';
+import { ExternalLink, Plus, RefreshCw, EyeOff, Send } from 'lucide-react';
+import { GLPI_KIND_LABELS, GLPI_TYPE_LABELS, GLPI_URGENCY_LABELS, GLPI_VALIDATION_LABELS, pendingValidations, type GlpiTimelineKind, type GlpiValidationDecision } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
 import { useDebounced } from '../lib/hooks';
@@ -11,13 +11,14 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, No
 import { Modal, useToast } from '../components/ui/overlay';
 import { errMsg } from './contracts/shared';
 
-type Ev = { id: string; kind: GlpiTimelineKind | 'Abertura'; direction: 'entrada' | 'saida'; author: string | null; text: string; isPrivate: boolean; occurredAt: string };
+type Ev = { id: string; kind: GlpiTimelineKind | 'Abertura'; direction: 'entrada' | 'saida'; author: string | null; text: string; isPrivate: boolean; occurredAt: string; validationId: number | null; validationStatus: number | null };
 type Ticket = {
   id: string; glpiId: number; title: string; entityName: string | null; categoryName: string | null; groupName: string | null; type: number; urgency: number;
   status: number | null; statusName: string; open: boolean; lastSyncAt: string | null; syncError: string | null; unseen: number; openedByName: string; createdAt: string; url: string | null; events: Ev[];
 };
 type Opt = { id: number; name: string };
 const STATUS_TONE = (s: number | null) => (s === 5 ? 'green' : s === 6 ? 'neutral' : s === 4 ? 'orange' : 'blue') as 'green' | 'neutral' | 'orange' | 'blue';
+const VAL_TONE = (st: number | null) => (st === 3 ? 'green' : st === 4 ? 'red' : 'yellow') as 'green' | 'red' | 'yellow';
 const KIND = (k: Ev['kind']) => (k === 'Abertura' ? 'Abertura' : GLPI_KIND_LABELS[k]);
 
 export function GlpiTickets({ oppId, contactName, hasCustomer }: { oppId: string; contactName: string; hasCustomer: boolean }) {
@@ -49,8 +50,17 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
   const qc = useQueryClient();
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['glpi', 'tickets', oppId] }); void qc.invalidateQueries({ queryKey: ['glpi', 'unseen', oppId] }); };
   const [reply, setReply] = useState('');
+  const [priv, setPriv] = useState(false);
   const sync = useMutation({ mutationFn: () => api<{ added: number }>(`/glpi-tickets/${t.id}/sync`, { method: 'POST' }), onSuccess: (r) => { refresh(); toast({ tone: 'success', message: r.added ? `${r.added} retorno(s) novo(s)` : 'Chamado atualizado' }); }, onError: (e) => { refresh(); toast({ tone: 'error', message: errMsg(e) }); } });
-  const send = useMutation({ mutationFn: () => api(`/glpi-tickets/${t.id}/followups`, { method: 'POST', body: { text: reply } }), onSuccess: () => { setReply(''); refresh(); toast({ tone: 'success', message: 'Acompanhamento enviado ao GLPI' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const pending = new Set(pendingValidations(t.events).map((e) => e.id));
+  const [answer, setAnswer] = useState<{ ev: Ev; decision: GlpiValidationDecision } | null>(null);
+  const [comment, setComment] = useState('');
+  const decide = useMutation({
+    mutationFn: () => api(`/glpi-tickets/${t.id}/validations/${answer!.ev.validationId}`, { method: 'POST', body: { decision: answer!.decision, comment: comment || undefined } }),
+    onSuccess: () => { toast({ tone: 'success', message: answer!.decision === 'aprovar' ? 'Aprovação registrada no GLPI' : 'Recusa registrada no GLPI' }); setAnswer(null); setComment(''); refresh(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const send = useMutation({ mutationFn: () => api(`/glpi-tickets/${t.id}/followups`, { method: 'POST', body: { text: reply, isPrivate: priv } }), onSuccess: () => { setReply(''); setPriv(false); refresh(); toast({ tone: 'success', message: priv ? 'Acompanhamento privado enviado ao GLPI' : 'Acompanhamento enviado ao GLPI' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   return (
     <li className="rounded-md border border-line" aria-label={`Chamado ${t.glpiId}`}>
       <div className="flex flex-wrap items-start gap-3 border-b border-line p-4">
@@ -69,25 +79,44 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
       {t.syncError && <div className="px-4 pt-3"><Notice tone="warning">Última leitura falhou: {t.syncError}</Notice></div>}
       <ol className="space-y-3 p-4" aria-label={`Retornos do chamado ${t.glpiId}`}>
         {t.events.map((e) => (
-          <li key={e.id} className={clsx('rounded-md p-3 text-sm', e.direction === 'saida' ? 'ml-6 bg-primary-soft' : e.kind === 'Solution' ? 'border border-success/40 bg-success-soft' : e.kind === 'Status' ? 'bg-surface-2' : 'mr-6 border border-line')}>
+          <li key={e.id} className={clsx('rounded-md p-3 text-sm', e.direction === 'saida' ? 'ml-6' : e.kind !== 'Status' && e.kind !== 'Solution' && 'mr-6',
+            // privado (como no GLPI): fundo amarelo, para ninguém confundir com o que o solicitante vê
+            e.isPrivate ? 'border border-warning/50 bg-warning-soft' : e.direction === 'saida' ? 'bg-primary-soft' : e.kind === 'Solution' ? 'border border-success/40 bg-success-soft' : e.kind === 'Status' ? 'bg-surface-2' : e.kind === 'Validation' && pending.has(e.id) ? 'border border-warning/50' : 'border border-line')}>
             <p className="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted">
               <span className="font-semibold text-ink">{KIND(e.kind)}</span>
-              {e.isPrivate && <Chip tone="neutral">Interno do suporte</Chip>}
+              {e.isPrivate && <Chip tone="yellow"><EyeOff className="mr-1 inline h-3 w-3" aria-hidden />{e.direction === 'saida' ? 'Privado' : 'Privado do suporte'}</Chip>}
+              {e.kind === 'Validation' && <Chip tone={VAL_TONE(e.validationStatus)}>{GLPI_VALIDATION_LABELS[e.validationStatus ?? 1]}</Chip>}
               <span>{e.author ?? (e.direction === 'entrada' ? 'GLPI' : '')}</span>
               <span className="num">{fmtDateTime(e.occurredAt)}</span>
             </p>
-            {e.kind === 'Status' ? <p>Situação mudou para <span className="font-semibold text-ink">{e.text}</span></p> : <p className="whitespace-pre-line">{e.text}</p>}
+            {e.kind === 'Status' ? <p>Situação mudou para <span className="font-semibold text-ink">{e.text}</span></p> : e.text ? <p className="whitespace-pre-line">{e.text}</p> : null}
+            {pending.has(e.id) && (
+              <span className="mt-2 flex flex-wrap gap-1.5">
+                <Button size="sm" variant="primary" onClick={() => { setComment(''); setAnswer({ ev: e, decision: 'aprovar' }); }}>Aprovar</Button>
+                <Button size="sm" variant="secondary" onClick={() => { setComment(''); setAnswer({ ev: e, decision: 'recusar' }); }}>Recusar</Button>
+              </span>
+            )}
           </li>
         ))}
       </ol>
       {t.status !== 6 && (
         <div className="flex flex-wrap items-end gap-2 border-t border-line p-4">
-          <FormField label="Responder no chamado" htmlFor={`glpi-r-${t.id}`} className="min-w-[240px] flex-1" hint="Vai como acompanhamento visível para a equipe do GLPI">
+          <FormField label="Responder no chamado" htmlFor={`glpi-r-${t.id}`} className="min-w-[240px] flex-1" hint={priv ? 'Privado: só a equipe do GLPI vê; o solicitante não recebe' : 'Público: a equipe do GLPI e o solicitante veem'}>
             <Textarea id={`glpi-r-${t.id}`} rows={2} value={reply} onChange={(e) => setReply(e.target.value)} />
           </FormField>
+          <label className="flex h-10 items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={priv} onChange={(e) => setPriv(e.target.checked)} /><EyeOff className="h-4 w-4 text-muted" aria-hidden />Privado</label>
           <Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={reply.trim().length < 3} loading={send.isPending} onClick={() => send.mutate()}>Enviar ao GLPI</Button>
         </div>
       )}
+      <Modal open={!!answer} onClose={() => setAnswer(null)} title={answer?.decision === 'aprovar' ? 'Aprovar no GLPI' : 'Recusar no GLPI'}
+        footer={<><Button variant="secondary" onClick={() => setAnswer(null)}>Cancelar</Button><Button variant={answer?.decision === 'aprovar' ? 'primary' : 'danger'} disabled={answer?.decision === 'recusar' && comment.trim().length < 5} loading={decide.isPending} onClick={() => decide.mutate()}>{answer?.decision === 'aprovar' ? 'Aprovar' : 'Recusar'}</Button></>}>
+        <div className="space-y-4">
+          {answer?.ev.text && <div className="rounded-md bg-surface-2 p-3 text-sm"><p className="font-semibold text-ink">Pedido de aprovação{answer.ev.author ? ` de ${answer.ev.author}` : ''}</p><p className="mt-1 whitespace-pre-line">{answer.ev.text}</p></div>}
+          <FormField label={answer?.decision === 'recusar' ? 'Motivo da recusa' : 'Comentário (opcional)'} htmlFor={`glpi-v-${t.id}`} required={answer?.decision === 'recusar'} hint="Vai para o GLPI com o seu nome: “Aprovado/Recusado no RevOps por …”">
+            <Textarea id={`glpi-v-${t.id}`} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
+          </FormField>
+        </div>
+      </Modal>
     </li>
   );
 }

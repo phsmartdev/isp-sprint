@@ -48,11 +48,16 @@ export function htmlToText(html: string | null | undefined): string {
 }
 
 /** Texto digitado no CRM → HTML simples para o GLPI (escapa e quebra linhas). */
-/** Cabeçalho que identifica, no GLPI, o que foi enviado pela integração (pedido do Paulo, 23/10). */
-export const GLPI_TICKET_HEADER = 'Ticket gerado a partir do RevOps:';
-export const GLPI_REPLY_HEADER = 'Resposta enviada pelo RevOps:';
+/**
+ * Cabeçalhos que identificam, no GLPI, o que foi enviado pela integração e quem do comercial fez (pedidos do Paulo, 23/10).
+ * No GLPI tudo fica em nome do usuário de integração; o nome real vai no cabeçalho.
+ */
+export const glpiTicketHeader = (name: string) => `Ticket gerado a partir do RevOps por ${name}:`;
+export const glpiReplyHeader = (name: string) => `Resposta enviada pelo RevOps por ${name}:`;
+export const glpiValidationHeader = (approved: boolean, name: string) => `${approved ? 'Aprovado' : 'Recusado'} no RevOps por ${name}`;
+const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 /** Corpo enviado ao GLPI: cabeçalho em destaque e, abaixo, o texto escrito na ferramenta. */
-export const glpiBody = (header: string, text: string) => `<p><strong>${header}</strong></p>${textToHtml(text)}`;
+export const glpiBody = (header: string, text: string) => `<p><strong>${escHtml(header)}</strong></p>${text.trim() ? textToHtml(text) : ''}`;
 
 export function textToHtml(text: string): string {
   const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -60,7 +65,23 @@ export function textToHtml(text: string): string {
 }
 
 type Ref = { id?: number | null; name?: string | null } | null | undefined;
-export type GlpiTimelineEntry = { kind: GlpiTimelineKind; externalId: string; author: string | null; text: string; isPrivate: boolean; occurredAt: string | null };
+export type GlpiTimelineEntry = { kind: GlpiTimelineKind; externalId: string; author: string | null; text: string; isPrivate: boolean; occurredAt: string | null; validationId?: number; validationStatus?: number };
+
+/** Validação (aprovação) do GLPI 11: status 1 nenhuma, 2 aguardando, 3 aceita, 4 recusada (esquema TicketValidation da API). */
+export const GLPI_VALIDATION_LABELS: Record<number, string> = { 1: 'Sem aprovação', 2: 'Aguardando aprovação', 3: 'Aprovada', 4: 'Recusada' };
+export const GLPI_VALIDATION_DECISIONS = ['aprovar', 'recusar'] as const;
+export type GlpiValidationDecision = (typeof GLPI_VALIDATION_DECISIONS)[number];
+/** Recusar exige motivo (o GLPI também pede); aprovar aceita comentário opcional. */
+export function glpiValidationError(decision: GlpiValidationDecision, comment: string | null | undefined): string | null {
+  if (decision === 'recusar' && (comment ?? '').trim().length < 5) return 'Diga o motivo da recusa (mínimo de 5 caracteres).';
+  return null;
+}
+/** Situação atual de cada validação = a última leitura dela (cada mudança de situação vira um registro novo). */
+export function pendingValidations<T extends { validationId?: number | null; validationStatus?: number | null; occurredAt: string }>(events: T[]): T[] {
+  const last = new Map<number, T>();
+  for (const e of events) if (e.validationId != null) { const cur = last.get(e.validationId); if (!cur || cur.occurredAt <= e.occurredAt) last.set(e.validationId, e); }
+  return [...last.values()].filter((e) => e.validationStatus === 2);
+}
 
 const refName = (r: Ref) => (r && typeof r === 'object' ? (r.name ?? null) : null);
 
@@ -74,6 +95,16 @@ export function parseTimeline(raw: unknown): GlpiTimelineEntry[] {
     const item = (row as { item?: unknown }).item as Record<string, unknown> | undefined;
     if (typeof type !== 'string' || !(GLPI_TIMELINE_KINDS as readonly string[]).includes(type) || !item || item.id == null) continue;
     const kind = type as GlpiTimelineKind;
+    if (kind === 'Validation') {
+      const st = typeof item.status === 'number' ? item.status : Number(item.status ?? 0);
+      const decided = st === 3 || st === 4;
+      const comment = htmlToText(String((decided ? item.approval_comment : item.submission_comment) ?? ''));
+      const who = decided ? refName(item.approver as Ref) : refName(item.requester as Ref);
+      const at = (decided ? item.approval_date ?? item.date_mod : item.submission_date ?? item.date_creation) as string | null;
+      // a validação muda de situação no mesmo item: cada situação vira um registro (append-only) com id próprio
+      out.push({ kind, externalId: `Validation:${item.id}:${st}`, author: who, text: comment.slice(0, 20_000), isPrivate: false, occurredAt: at ?? null, validationId: Number(item.id), validationStatus: st });
+      continue;
+    }
     const text = kind === 'Document' ? String(item.filename ?? item.name ?? 'Documento anexado') : htmlToText(String(item.content ?? item.comment ?? ''));
     const author = refName(item.user as Ref) ?? refName(item.user_tech as Ref) ?? refName(item.user_editor as Ref);
     const at = (item.date ?? item.date_creation ?? item.date_mod ?? null) as string | null;

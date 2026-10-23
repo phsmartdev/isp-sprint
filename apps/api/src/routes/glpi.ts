@@ -2,15 +2,16 @@
 import { timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, webhookTicketId } from '@isp/domain';
+import { GLPI_VALIDATION_DECISIONS, glpiBody, glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, glpiValidationError, glpiValidationHeader, pendingValidations, webhookTicketId } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
-import { AppError, notFound, unauthorized, unprocessable } from '../http/errors';
+import { AppError, forbidden, notFound, unauthorized, unprocessable } from '../http/errors';
+import { level } from '../services/scope';
 import * as s from '../db/schema';
 import type { DB } from '../db/client';
 import { audit } from '../services/audit';
 import { loadOpportunity } from '../services/opportunities';
 import { integrationRow, logEvent } from '../services/integrations';
-import { crcAnswer, GlpiError, glpiCategories, glpiConfig, glpiCreateTicket, glpiEntities, glpiFollowup, glpiGroups, syncTicket, validWebhookSignature, type GlpiCfg } from '../services/glpi';
+import { crcAnswer, GlpiError, glpiAnswerValidation, glpiCategories, glpiConfig, glpiCreateTicket, glpiEntities, glpiFollowup, glpiGroups, syncTicket, validWebhookSignature, type GlpiCfg } from '../services/glpi';
 
 const ENTITY_SYSTEM = 'glpi_entidade';
 const TicketParams = z.object({ id: z.string().uuid('ID inválido') });
@@ -94,7 +95,7 @@ export const glpiRoutes = [
           id: t.id, glpiId: t.glpiId, title: t.title, entityName: t.entityName, categoryName: t.categoryName, groupName: t.groupName, type: t.type, urgency: t.urgency,
           status: t.status, statusName: t.statusName ?? glpiStatusLabel(t.status), open: glpiOpen(t.status), solvedAt: t.solvedAt, closedAt: t.closedAt,
           lastSyncAt: t.lastSyncAt, syncError: t.syncError, unseen: t.unseen, openedByName, createdAt: t.createdAt, url: base ? glpiTicketUrl(base, t.glpiId) : null,
-          events: events.filter((x) => x.e.ticketId === t.id).map(({ e, actorName }) => ({ id: e.id, kind: e.kind, direction: e.direction, author: e.direction === 'saida' ? actorName : e.author, text: e.text, isPrivate: e.isPrivate, occurredAt: e.occurredAt })),
+          events: events.filter((x) => x.e.ticketId === t.id).map(({ e, actorName }) => ({ id: e.id, kind: e.kind, direction: e.direction, author: e.direction === 'saida' ? actorName : e.author, text: e.text, isPrivate: e.isPrivate, occurredAt: e.occurredAt, validationId: e.validationId, validationStatus: e.validationStatus })),
         })),
       };
     },
@@ -123,7 +124,7 @@ export const glpiRoutes = [
       const c = await glpiConfig(app.db, auth.tenantId);
       const [me] = await app.db.select({ name: s.users.name, email: s.users.email }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
       const content = `${body.content}\n\n—\nAberto no RevOps por ${me?.name ?? 'usuário'} (${me?.email ?? ''}) na oportunidade OP-${opp.code} · ${opp.contactName}.`;
-      const created = await viaGlpi(() => glpiCreateTicket(c, { ...body, content }));
+      const created = await viaGlpi(() => glpiCreateTicket(c, { ...body, content, author: me?.name ?? 'usuário' }));
       const [row] = await app.db.transaction(async (tx) => {
         const r = await tx.insert(s.glpiTickets).values({
           tenantId: auth.tenantId, opportunityId: opp.id, customerId: opp.customerId, glpiId: created.id, entityId: body.entityId, entityName: body.entityName ?? null,
@@ -144,16 +145,39 @@ export const glpiRoutes = [
     },
   }),
   defineRoute({
-    method: 'POST', url: '/glpi-tickets/:id/followups', summary: 'Envia um acompanhamento ao chamado (visível para a equipe do GLPI)', tag: 'GLPI', module: 'oportunidades', params: TicketParams,
-    body: z.object({ text: z.string().trim().min(3).max(10_000) }),
+    method: 'POST', url: '/glpi-tickets/:id/followups', summary: 'Envia um acompanhamento ao chamado (público ou privado, como no GLPI)', tag: 'GLPI', module: 'oportunidades', params: TicketParams,
+    body: z.object({ text: z.string().trim().min(3).max(10_000), isPrivate: z.boolean().default(false) }),
     handler: async ({ app, auth, params, body, reply }) => {
       const { t } = await ticketFor(app, auth, params.id);
       if (t.status === 6) throw unprocessable('O chamado está fechado no GLPI. Abra um novo chamado se precisar.');
       const c = await glpiConfig(app.db, auth.tenantId);
-      const f = await viaGlpi(() => glpiFollowup(c, t.glpiId, t.entityId, body.text));
-      await app.db.insert(s.glpiTicketEvents).values({ tenantId: auth.tenantId, ticketId: t.id, kind: 'Followup', externalId: `Followup:${f.id}`, direction: 'saida', text: body.text, occurredAt: new Date(Math.floor(Date.now() / 1000) * 1000), actorId: auth.userId }).onConflictDoNothing();
+      const [me] = await app.db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
+      const f = await viaGlpi(() => glpiFollowup(c, t.glpiId, t.entityId, me?.name ?? 'usuário', body.text, body.isPrivate));
+      await app.db.insert(s.glpiTicketEvents).values({ tenantId: auth.tenantId, ticketId: t.id, kind: 'Followup', externalId: `Followup:${f.id}`, direction: 'saida', text: body.text, isPrivate: body.isPrivate, occurredAt: new Date(Math.floor(Date.now() / 1000) * 1000), actorId: auth.userId }).onConflictDoNothing();
       reply.code(201);
       return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/glpi-tickets/:id/validations/:validationId', summary: 'Aprova ou recusa, a partir da negociação, uma aprovação pedida no GLPI', tag: 'GLPI', module: 'oportunidades',
+    params: z.object({ id: z.string().uuid(), validationId: z.coerce.number().int().positive() }),
+    body: z.object({ decision: z.enum(GLPI_VALIDATION_DECISIONS), comment: z.string().trim().max(4000).optional() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const { t, opp } = await ticketFor(app, auth, params.id);
+      // aprovar é decisão comercial: dono da oportunidade ou quem gerencia oportunidades da equipe
+      if (opp.ownerId !== auth.userId && !['equipe', 'total'].includes(level(auth, 'oportunidades'))) throw forbidden('Só o dono da oportunidade ou a gestão comercial responde aprovações do GLPI.');
+      const err = glpiValidationError(body.decision, body.comment);
+      if (err) throw unprocessable(err, [{ path: 'comment', message: err }]);
+      const evs = await app.db.select({ validationId: s.glpiTicketEvents.validationId, validationStatus: s.glpiTicketEvents.validationStatus, occurredAt: s.glpiTicketEvents.occurredAt }).from(s.glpiTicketEvents).where(and(eq(s.glpiTicketEvents.ticketId, t.id), eq(s.glpiTicketEvents.validationId, params.validationId)));
+      if (!evs.length) throw notFound('Aprovação não encontrada neste chamado.');
+      if (!pendingValidations(evs.map((e) => ({ ...e, occurredAt: e.occurredAt.toISOString() }))).length) throw unprocessable('Esta aprovação já foi respondida. Clique em Atualizar para ver a situação atual.');
+      const [me] = await app.db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
+      const approve = body.decision === 'aprovar';
+      const html = glpiBody(glpiValidationHeader(approve, me?.name ?? 'usuário'), body.comment ?? '');
+      const c = await glpiConfig(app.db, auth.tenantId);
+      await viaGlpi(() => glpiAnswerValidation(c, t.glpiId, t.entityId, params.validationId, approve, html));
+      await audit(app.db, req, { action: approve ? 'glpi.validation_approve' : 'glpi.validation_refuse', entityType: 'opportunity', entityId: t.opportunityId, metadata: { glpiId: t.glpiId, validationId: params.validationId, comment: body.comment ?? null } });
+      return viaGlpi(() => syncTicket(app.db, c, t));
     },
   }),
   defineRoute({

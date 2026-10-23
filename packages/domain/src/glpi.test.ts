@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GLPI_TICKET_HEADER, glpiBody, glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, htmlToText, parseTimeline, textToHtml, webhookTicketId } from './glpi';
+import { glpiTicketHeader, glpiBody, glpiOpen, glpiValidationError, pendingValidations, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, htmlToText, parseTimeline, textToHtml, webhookTicketId } from './glpi';
 
 describe('GLPI', () => {
   it('valida o chamado antes de enviar', () => {
@@ -9,7 +9,7 @@ describe('GLPI', () => {
 
   it('converte texto e HTML nos dois sentidos, sem deixar marcação', () => {
     expect(textToHtml('a < b\n\nlinha 2\nlinha 3')).toBe('<p>a &lt; b</p><p>linha 2<br>linha 3</p>');
-    expect(glpiBody(GLPI_TICKET_HEADER, 'Oi')).toBe('<p><strong>Ticket gerado a partir do RevOps:</strong></p><p>Oi</p>');
+    expect(glpiBody(glpiTicketHeader('Ana <Lima>'), 'Oi')).toBe('<p><strong>Ticket gerado a partir do RevOps por Ana &lt;Lima&gt;:</strong></p><p>Oi</p>');
     expect(htmlToText('<p>Olá&nbsp;<b>equipe</b></p><ul><li>um</li><li>dois</li></ul><script>x</script>')).toBe('Olá equipe\n• um\n• dois\nx');
   });
 
@@ -40,5 +40,19 @@ describe('GLPI', () => {
     expect(glpiOpen(4)).toBe(true);
     expect(glpiOpen(6)).toBe(false);
     expect(glpiTicketUrl('https://glpi.bk.com.br/', 12)).toBe('https://glpi.bk.com.br/front/ticket.form.php?id=12');
+  });
+
+  it('validação: cada situação vira um registro; pendente = última situação aguardando', () => {
+    const tl = parseTimeline([
+      { type: 'Validation', item: { id: 7, status: 2, submission_comment: '<p>Aprovar desconto de 10%</p>', requester: { id: 5, name: 'Técnico NOC' }, submission_date: '2026-10-23 09:45:00' } },
+    ]);
+    expect(tl[0]).toMatchObject({ kind: 'Validation', externalId: 'Validation:7:2', text: 'Aprovar desconto de 10%', author: 'Técnico NOC', validationId: 7, validationStatus: 2 });
+    const later = parseTimeline([{ type: 'Validation', item: { id: 7, status: 3, approval_comment: '<p>ok</p>', approver: { id: 9, name: 'isp.sprint' }, approval_date: '2026-10-23 10:00:00' } }]);
+    expect(later[0]).toMatchObject({ externalId: 'Validation:7:3', validationStatus: 3, text: 'ok' });
+    const ev = (st: number, at: string) => ({ validationId: 7, validationStatus: st, occurredAt: at });
+    expect(pendingValidations([ev(2, '2026-10-23T12:45:00Z')])).toHaveLength(1);
+    expect(pendingValidations([ev(2, '2026-10-23T12:45:00Z'), ev(3, '2026-10-23T13:00:00Z')])).toHaveLength(0);
+    expect(glpiValidationError('recusar', 'não')).toMatch(/motivo/);
+    expect(glpiValidationError('aprovar', '')).toBeNull();
   });
 });
