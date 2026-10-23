@@ -53,6 +53,7 @@ import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
 import { opportunityItemRoutes } from './routes/opportunityItems';
 import { bidParticipantRoutes } from './routes/bidParticipants';
+import { activityScriptRoutes } from './routes/activityScripts';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
@@ -200,6 +201,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...salesBranchRoutes,
     ...opportunityItemRoutes,
     ...bidParticipantRoutes,
+    ...activityScriptRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,

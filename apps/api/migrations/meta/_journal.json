@@ -421,6 +421,13 @@
       "when": 1792789241610,
       "tag": "0059_participantes_licitacao",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1792791382055,
+      "tag": "0060_roteiros_tarefas",
+      "breakpoints": true
     }
   ]
 }

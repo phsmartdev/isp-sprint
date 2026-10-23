@@ -29,6 +29,8 @@ export type Lookups = {
   plans: { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null }[];
   /** Filiais ativas da venda (BKT Soluções, UPNET…). */
   branches: { id: string; name: string }[];
+  /** roteiro de cada tipo de tarefa (Configurações → Modelos) */
+  activityScripts?: Partial<Record<string, string>>;
 };
 export type StageRequirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
 export type LookupStage = { id: string; key: string; name: string; position: number; kind: 'open' | 'won' | 'lost'; isTerminal: boolean; color: string | null; requirements: StageRequirements };

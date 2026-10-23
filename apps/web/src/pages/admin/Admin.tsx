@@ -30,10 +30,10 @@ const TABS = [
   { to: '/settings/viability', label: 'Viabilidade' },
   { to: '/settings/plans', label: 'Planos e produtos' },
   { to: '/settings/sources', label: 'Canais de entrada' },
-  { to: '/settings/proposals', label: 'Modelos de proposta' },
-  { to: '/settings/contract-templates', label: 'Modelos de contrato' },
-  { to: '/settings/instructions', label: 'Modelo de instrução' },
-  { to: '/settings/email', label: 'E-mail e alertas' },
+  { to: '/settings/modelos?aba=propostas', label: 'Modelos de proposta' },
+  { to: '/settings/modelos?aba=contratos', label: 'Modelos de contrato' },
+  { to: '/settings/modelos?aba=instrucao', label: 'Modelo de instrução' },
+  { to: '/settings/modelos?aba=emails', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },
   { to: '/settings/fields', label: 'Campos personalizados' },
   { to: '/settings/contracts', label: 'Contratos' },
@@ -124,10 +124,10 @@ export function AdminOverview() {
             <Tile to="/settings/journeys" icon={<Filter className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Jornadas e automações" desc="Crie funis, defina quem trabalha em cada um, campos do cadastro e automações." foot={`${d.counts.stages} etapas configuradas`} />
             <Tile to="/settings/viability" icon={<Target className="h-7 w-7" />} tone="bg-success-soft text-success" title="Viabilidade" desc="Tributos, parceiros, equipamentos, caminhos de entrega, comissão e LTV." foot="CAC, margem e payback" />
             <Tile to="/settings/area" icon={<Box className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Área de atendimento" desc="Regiões e condomínios, com blocos e endereço." foot="Região → condomínio" />
-            <Tile to="/settings/instructions" icon={<FileText className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="Modelo de instrução" desc="Exporte e adapte o playbook: roteiro, insights, jornadas e e-mails." foot="Versões com prévia" />
+            <Tile to="/settings/modelos?aba=instrucao" icon={<FileText className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="Modelo de instrução" desc="Exporte e adapte o playbook: roteiro, insights, jornadas e e-mails." foot="Versões com prévia" />
             <Tile to="/settings/sources" icon={<Target className="h-7 w-7" />} tone="bg-warning-soft text-[#EA580C]" title="Canais de entrada" desc="WhatsApp, Instagram, telefone, site: por onde o cliente chega." foot={`${d.counts.sources} canais configurados`} />
             <Tile to="/settings/integrations" icon={<Link2 className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Integrações" desc="Conecte com IXC, WhatsApp, e-mail e sistemas externos." foot={`${d.counts.integrations} integrações ativas`} />
-            <Tile to="/settings/email" icon={<Bell className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="E-mail e alertas" desc="Servidor SMTP, alertas automáticos e registro de envios." foot="Propostas, follow-ups e avisos" />
+            <Tile to="/settings/modelos?aba=emails" icon={<Bell className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="E-mail e alertas" desc="Servidor SMTP, alertas automáticos e registro de envios." foot="Propostas, follow-ups e avisos" />
             <Tile to="/settings/security" icon={<Shield className="h-7 w-7" />} tone="bg-danger-soft text-danger" title="Segurança" desc="Defina níveis de acesso por módulo e perfil, e acompanhe a auditoria." foot="Matriz de acesso por módulo" />
             <Tile to="/settings/branding" icon={<Palette className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Personalização" desc="Identidade visual BKT aplicada em todo o sistema." foot="Identidade BKT" />
             <Tile to="/settings/logs" icon={<FileText className="h-7 w-7" />} tone="bg-surface-2 text-ink" title="Logs do sistema" desc="Acompanhe todas as ações realizadas na plataforma." foot="Registro de atividades" />
@@ -178,7 +178,7 @@ export function AdminOverview() {
               ['/settings/users?novo=1', <UserPlus key="i" className="h-4 w-4 text-primary" />, 'Adicionar novo usuário'],
               ['/settings/plans?novo=1', <Box key="i" className="h-4 w-4 text-success" />, 'Cadastrar plano'],
               ['/settings/journeys', <Filter key="i" className="h-4 w-4 text-purple" />, 'Configurar jornadas'],
-              ['/settings/email', <Bell key="i" className="h-4 w-4 text-[#E5A100]" />, 'Configurar e-mail (SMTP)'],
+              ['/settings/modelos?aba=emails', <Bell key="i" className="h-4 w-4 text-[#E5A100]" />, 'Configurar e-mail (SMTP)'],
               ['/settings/integrations', <MessageSquare key="i" className="h-4 w-4 text-success" />, 'Integrar WhatsApp'],
               ['/settings/branding', <Palette key="i" className="h-4 w-4 text-purple" />, 'Identidade visual'],
             ].map(([to, icon, label]) => (
