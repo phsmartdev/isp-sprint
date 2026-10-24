@@ -138,6 +138,21 @@ Atualizado em 2026-10-23. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
+## Pendências em aberto (24/10/2026)
+- **Bloco 4:** tempo em cada etapa (inclusive as concluídas), conversão por etapa e do funil.
+- **Indicador de consumo de contrato:** acompanha os valores de medição; o Paulo vai detalhar.
+- **Importação de ata/relatório dos portais de pregão:** aguarda arquivos de exemplo.
+- **IPC:** confirmar a pontuação do "Potencial de receita adicional" (hoje 10/15/20, que fecha 100 pontos) e as faixas do "Tempo de relacionamento" (menos de 6 meses, de 6 a 24 meses, mais de 24 meses).
+- **Validações com sistemas reais:** GLPI da empresa; Gmail pela Gmail API (Google Cloud), já que a senha de app foi conectada; webhook do GLPI no domínio de produção.
+- **Assinatura de e-mail com logo:** exige envio em HTML.
+- **Produção ainda com a base fictícia (yepnet.test):** cadastrar os usuários reais e o domínio da empresa.
+- **Backlog das fases:** importação CSV/JSON e migração do legado v1.5; IXC (matriz de endpoints verificados, conector, contratação idempotente); custos, atribuição, CAC/LTV/churn; ABM Fase 10; segurança (MFA, RLS, backups, observabilidade, CI/CD, mapa LGPD).
+- **Testes instáveis:** varredura de rolagem lateral (768/1280 px) e módulos estouram tempo na suíte completa e passam quando rodam sozinhos.
+
+## E-mail: Gmail por senha de app, cópia original, pastas, e-mail novo e assinatura; Tier consolidado ✅ (2026-10-24)
+- ADR-071 e ADR-072.
+- Tier do Sucesso do Cliente pelo valor anual consolidado: contratos (recorrente ×12, medição, frequente) mais as ganhas sem contrato. O consumo de medição fica fora do total.
+
 ## Tipo de venda no funil Corporativo, participantes do pregão, Modelos e cantos retos ✅ (2026-10-23)
 - **Tipo de venda (ADR-068).** Licitação, Adesão à Ata, Consumo de Contrato e Venda Consultiva são opção do formulário dentro do funil Corporativo, não funis.
   - As oportunidades das antigas jornadas migram sozinhas, com etapa equivalente e evento no histórico.
