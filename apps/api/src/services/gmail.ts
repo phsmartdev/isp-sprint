@@ -159,8 +159,12 @@ export async function ingestMessage(db: DbOrTx, box: Box, ctx: Ctx, m: GMessage,
   const tenantId = box.tenantId;
   // a mesma mensagem por outro caminho (ex.: enviada pelo SMTP e depois lida na IMAP) não entra duas vezes
   if (p.rfcId) {
-    const [dup] = await db.select({ id: s.mailMessages.id }).from(s.mailMessages).where(and(eq(s.mailMessages.mailboxId, box.id), eq(s.mailMessages.rfcMessageId, p.rfcId))).limit(1);
-    if (dup) return false;
+    const [dup] = await db.select({ id: s.mailMessages.id, threadId: s.mailMessages.threadId }).from(s.mailMessages).where(and(eq(s.mailMessages.mailboxId, box.id), eq(s.mailMessages.rfcMessageId, p.rfcId))).limit(1);
+    if (dup) {
+      // e-mail novo enviado pelo SMTP nasce com conversa provisória; quando o Gmail devolve o id real da conversa, ela passa a usá-lo
+      if (!m.threadId.startsWith('smtp:')) await db.update(s.mailThreads).set({ gmailThreadId: m.threadId }).where(and(eq(s.mailThreads.id, dup.threadId), sql`${s.mailThreads.gmailThreadId} like 'smtp:%'`));
+      return false;
+    }
   }
 
   let [thread] = await db.select().from(s.mailThreads).where(and(eq(s.mailThreads.mailboxId, box.id), eq(s.mailThreads.gmailThreadId, m.threadId))).limit(1);

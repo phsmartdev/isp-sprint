@@ -90,6 +90,19 @@ async function visibleBoxes(db: DbOrTx, auth: AuthContext) {
   const qs = await myQueues(db, auth);
   return all.filter((b) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : qs.some((q) => q.mailboxId === b.id)));
 }
+/** Assinatura da pessoa no fim do texto (separador padrão "-- "). */
+async function withSignature(db: DbOrTx, auth: AuthContext, text: string, include: boolean | undefined) {
+  if (include === false) return text;
+  const [sig] = await db.select({ text: s.mailSignatures.text }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
+  return sig?.text.trim() ? `${text.trimEnd()}\n\n-- \n${sig.text.trim()}` : text;
+}
+/** Envia pela caixa: a pessoal só a dona; a compartilhada quem tem total no E-mail, configura, ou está numa fila dela. */
+async function canSendFrom(db: DbOrTx, auth: AuthContext, b: typeof s.mailboxes.$inferSelect) {
+  if (b.kind === 'pessoal') return b.ownerId === auth.userId;
+  if (isTotal(auth) || canConfigure(auth)) return true;
+  return (await myQueues(db, auth)).some((q) => q.mailboxId === b.id);
+}
+
 const FolderBody = z.object({ match: z.enum(['todas', 'qualquer']), conditions: z.array(z.object({ field: z.enum(RULE_FIELDS), op: z.enum(RULE_OPS), value: z.string().trim().max(200) })).max(10) });
 /** Pasta da caixa pessoal: a dona; da compartilhada: quem tem acesso total em Configurações. */
 const canManageBox = (auth: AuthContext, b: typeof s.mailboxes.$inferSelect) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : canConfigure(auth));
@@ -137,7 +150,7 @@ const lastMsgOfThread = async (db: DbOrTx, threadId: string, dir?: 'entrada' | '
 
 type ReplyApp = { db: DbOrTx; config: Parameters<typeof gmailOn>[0] & { gmail: Parameters<typeof sendFromBox>[1] | null | undefined } };
 /** Resposta pela caixa da conversa (sai pelo Gmail, na mesma conversa). Usada no E-mail e na negociação que nasceu do e-mail. */
-async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<typeof audit>[1], t: typeof s.mailThreads.$inferSelect, box: typeof s.mailboxes.$inferSelect, body: { text: string; to?: string[]; cc?: string[]; resolve?: boolean }) {
+async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<typeof audit>[1], t: typeof s.mailThreads.$inferSelect, box: typeof s.mailboxes.$inferSelect, body: { text: string; to?: string[]; cc?: string[]; resolve?: boolean; signature?: boolean }) {
       if (box.provider !== 'gmail_senha') gmailOn(app.config);
       if (!(await canWork(app.db, auth, t, box))) throw forbidden(`Só quem atende a caixa ${box.address} responde esta conversa.`);
       if (box.status !== 'conectada') throw unprocessable('A caixa desta conversa não está conectada.');
@@ -147,7 +160,7 @@ async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<t
       const cc = (body.cc ?? []).map((x) => x.toLowerCase());
       if (!to.length || [...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
       try {
-        await sendFromBox(app.db, app.config.gmail ?? null, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: body.text, inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
+        await sendFromBox(app.db, app.config.gmail ?? null, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: await withSignature(app.db, auth, body.text, body.signature), inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
       } catch (e) {
         if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
         throw e;
@@ -305,6 +318,50 @@ export const mailRoutes = [
       }
       await audit(app.db, req, { action: `mail.${body.action}`, entityType: 'mailbox', entityId: b.id });
       return { ok: true };
+    },
+  }),
+
+  // ---------------------------------------------------------------- e-mail novo e assinatura
+  defineRoute({
+    method: 'GET', url: '/mail/signature', summary: 'Minha assinatura de e-mail', tag: 'E-mail', module: 'email',
+    handler: async ({ app, auth }) => {
+      const [sig] = await app.db.select({ text: s.mailSignatures.text, updatedAt: s.mailSignatures.updatedAt }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
+      return { text: sig?.text ?? '', updatedAt: sig?.updatedAt ?? null };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/mail/signature', summary: 'Salva a minha assinatura (vai no fim dos e-mails novos e das respostas)', tag: 'E-mail', module: 'email',
+    body: z.object({ text: z.string().max(2000) }),
+    handler: async ({ app, auth, body }) => {
+      const text = body.text.replace(/\r\n/g, '\n').replace(/^\s*--\s*\n/, '').trimEnd();
+      await app.db.insert(s.mailSignatures).values({ userId: auth.userId, tenantId: auth.tenantId, text, updatedAt: new Date() }).onConflictDoUpdate({ target: s.mailSignatures.userId, set: { text, updatedAt: new Date() } });
+      return { text };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/mail/compose', summary: 'Envia um e-mail novo por uma caixa (abre uma conversa nova)', tag: 'E-mail', module: 'email',
+    body: z.object({ mailboxId: z.string().uuid(), to: z.array(z.string().trim().max(200)).min(1).max(20), cc: z.array(z.string().trim().max(200)).max(20).default([]), subject: z.string().trim().min(1).max(250), text: z.string().trim().min(1).max(20_000), signature: z.boolean().optional() }),
+    rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
+    handler: async ({ app, auth, req, body, reply }) => {
+      const b = (await visibleBoxes(app.db, auth)).find((x) => x.id === body.mailboxId);
+      if (!b) throw notFound('Caixa não encontrada.');
+      if (!(await canSendFrom(app.db, auth, b))) throw forbidden(`Você não envia pela caixa ${b.address}.`);
+      if (b.status !== 'conectada') throw unprocessable('A caixa não está conectada.');
+      if (b.provider !== 'gmail_senha') gmailOn(app.config);
+      const to = body.to.map((x) => x.toLowerCase()), cc = body.cc.map((x) => x.toLowerCase());
+      if ([...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
+      let sent: { id: string; threadId: string };
+      try {
+        sent = await sendFromBox(app.db, app.config.gmail ?? null, b, { to, cc, subject: body.subject, text: await withSignature(app.db, auth, body.text, body.signature), fromName: b.kind === 'pessoal' ? auth.name : b.displayName }, auth.userId);
+      } catch (e) {
+        if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
+        throw e;
+      }
+      const [t] = await app.db.select({ id: s.mailThreads.id }).from(s.mailThreads).where(and(eq(s.mailThreads.mailboxId, b.id), eq(s.mailThreads.gmailThreadId, sent.threadId))).limit(1);
+      if (t && b.kind === 'compartilhada') await app.db.update(s.mailThreads).set({ assigneeId: auth.userId, assignedAt: new Date() }).where(and(eq(s.mailThreads.id, t.id), sql`${s.mailThreads.assigneeId} is null`));
+      await audit(app.db, req, { action: 'mail.compose', entityType: 'mail_thread', entityId: t?.id ?? undefined });
+      reply.code(201);
+      return { threadId: t?.id ?? null };
     },
   }),
 
@@ -580,7 +637,7 @@ export const mailRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/mail/threads/:id/reply', summary: 'Responde pela caixa da conversa (sai pelo Gmail, na mesma conversa)', tag: 'E-mail', module: 'email', params: IdParams,
-    body: z.object({ text: z.string().trim().min(1).max(20_000), to: z.array(z.string().trim().max(200)).max(20).optional(), cc: z.array(z.string().trim().max(200)).max(20).optional(), resolve: z.boolean().optional() }),
+    body: z.object({ text: z.string().trim().min(1).max(20_000), to: z.array(z.string().trim().max(200)).max(20).optional(), cc: z.array(z.string().trim().max(200)).max(20).optional(), resolve: z.boolean().optional(), signature: z.boolean().optional() }),
     rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
     handler: async ({ app, auth, req, params, body }) => {
       const { t, box } = await loadThread(app.db, auth, params.id);
@@ -677,7 +734,7 @@ export const mailRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/opportunities/:id/origin-email/reply', summary: 'Responde o e-mail que deu origem à negociação, pela mesma caixa e na mesma conversa', tag: 'E-mail', module: 'oportunidades', params: IdParams,
-    body: z.object({ text: z.string().trim().min(1).max(20_000), cc: z.array(z.string().trim().max(200)).max(20).optional() }),
+    body: z.object({ text: z.string().trim().min(1).max(20_000), cc: z.array(z.string().trim().max(200)).max(20).optional(), signature: z.boolean().optional() }),
     rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
     handler: async ({ app, auth, req, params, body }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
@@ -685,7 +742,7 @@ export const mailRoutes = [
       if (!o?.tid) throw unprocessable('Esta negociação não nasceu de um e-mail.');
       const [r] = await app.db.select({ t: s.mailThreads, box: s.mailboxes }).from(s.mailThreads).innerJoin(s.mailboxes, eq(s.mailboxes.id, s.mailThreads.mailboxId)).where(and(eq(s.mailThreads.id, o.tid), eq(s.mailThreads.tenantId, auth.tenantId))).limit(1);
       if (!r) throw notFound('Conversa de origem não encontrada.');
-      await replyOnThread(app, auth, req, r.t, r.box, { text: body.text, cc: body.cc });
+      await replyOnThread(app, auth, req, r.t, r.box, { text: body.text, cc: body.cc, signature: body.signature });
       const [cur] = await app.db.select({ rowVersion: s.opportunities.rowVersion }).from(s.opportunities).where(eq(s.opportunities.id, opp.id)).limit(1);
       await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: cur!.rowVersion, payload: { changed: { 'e-mail de origem': { from: null, to: `resposta enviada pela caixa ${r.box.address}` } } } });
       return { ok: true };

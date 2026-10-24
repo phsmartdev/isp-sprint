@@ -456,6 +456,13 @@
       "when": 1792813684485,
       "tag": "0064_email_pastas",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1792814193362,
+      "tag": "0065_assinatura_email",
+      "breakpoints": true
     }
   ]
 }

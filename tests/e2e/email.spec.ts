@@ -45,6 +45,10 @@ test('E-mail corporativo: configura domínio, caixa e fila; conecta pelo Google;
   await expect(page.getByText('Caixa conectada. As mensagens dos últimos dias já foram trazidas.')).toBeVisible();
   await expect(page.getByRole('article', { name: `Caixa ${box}` }).getByText('Conectada', { exact: true })).toBeVisible();
   await shot(page, 'email-caixas');
+  // assinatura de cada pessoa
+  await page.locator('#sig-text').fill('Carlos Silva\nComercial Yepnet');
+  await page.getByRole('button', { name: 'Salvar assinatura' }).click();
+  await expect(page.getByText('Assinatura salva')).toBeVisible();
 
   await page.goto('/email?view=minhas');
   await page.getByRole('button', { name: new RegExp(`Cotação ${stamp}`) }).click();
@@ -61,6 +65,21 @@ test('E-mail corporativo: configura domínio, caixa e fila; conecta pelo Google;
   const sent = await (await page.request.get(`${FAKE}/__test/sent`)).json();
   expect(sent.sent.some((x: { from: string; parsed: { text: string } }) => x.from === box && x.parsed.text.includes('Enviamos a proposta'))).toBe(true);
   await shot(page, 'email-conversa');
+
+  // e-mail novo pela caixa da empresa, com a assinatura
+  await page.getByRole('button', { name: 'Novo e-mail' }).click();
+  const cp = page.getByRole('dialog', { name: 'Novo e-mail' });
+  await cp.getByLabel('De').selectOption({ label: `Comercial Yepnet (${box})` });
+  await cp.getByLabel('Para').fill('novo.cliente@empresa-ficticia.test');
+  await cp.getByLabel('Assunto').fill(`Apresentação ${stamp}`);
+  await cp.getByLabel('Mensagem').fill('Olá! Segue nossa apresentação.');
+  await expect(cp.getByText('Comercial Yepnet', { exact: false }).last()).toBeVisible();
+  await cp.getByRole('button', { name: 'Enviar' }).click();
+  await expect(page.getByText('E-mail enviado', { exact: true })).toBeVisible();
+  await expect(conv.getByRole('heading', { name: `Apresentação ${stamp}` })).toBeVisible();
+  const sent3 = await (await page.request.get(`${FAKE}/__test/sent`)).json();
+  expect(sent3.sent.some((x: { from: string; parsed: { text: string } }) => x.from === box && x.parsed.text.includes('Segue nossa apresentação') && /-- ?\r?\nCarlos Silva/.test(x.parsed.text))).toBe(true);
+  await page.getByRole('region', { name: 'Conversas' }).getByRole('button', { name: new RegExp(`Cotação ${stamp}`) }).click();
 
   // pasta com regra de armazenamento, aplicada às conversas que já estão na Entrada
   await page.getByRole('button', { name: 'Nova pasta' }).click();

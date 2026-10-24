@@ -22,6 +22,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { EmailToDeal } from '../../features/email/EmailToDeal';
 import { FolderRail } from '../../features/email/Folders';
+import { ComposeButton, SignatureEditor } from '../../features/email/Compose';
 
 export type MailboxRow = { id: string; kind: MailboxKind; address: string; displayName: string | null; ownerId: string | null; status: MailboxStatus; lastSyncAt: string | null; lastError: string | null; connectedAt: string | null; rowVersion: number; scopes: string[]; lastRun: { kind: string; ok: boolean; fetched: number; stored: number; error: string | null; created_at: string } | null };
 type Queue = { id: string; name: string; mailboxId: string | null; routing: string; slaHours: number; members: string[]; active: boolean; rowVersion: number };
@@ -79,7 +80,7 @@ export function EmailPage() {
   return (
     <div>
       <PageHeader icon={<Mail />} title="E-mail" subtitle="Conversas das caixas da empresa e a sua, ligadas às contas do CRM."
-        actions={<Link to="/email/caixas" className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-line bg-surface px-4 font-semibold text-ink hover:bg-surface-2">Caixas e conexão</Link>} />
+        actions={<><ComposeButton boxes={boxes.data?.items ?? []} onSent={(t) => setF({ t: t ?? '' })} /><Link to="/email/caixas" className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-line bg-surface px-4 font-semibold text-ink hover:bg-surface-2">Caixas e conexão</Link></>} />
       {none ? (
         <div className="card"><EmptyState icon={<Inbox className="h-10 w-10" />} title="Nenhuma caixa conectada" description="Conecte a sua caixa do Gmail ou peça à gerência para conectar as caixas compartilhadas da empresa." action={<Link to="/email/caixas" className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm bg-primary px-4 font-semibold text-white hover:bg-primary-hover">Conectar caixa</Link>} /></div>
       ) : (
@@ -167,8 +168,9 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
     mutationFn: (b: Record<string, unknown>) => api(`/mail/threads/${id}`, { method: 'PATCH', body: { rowVersion: q.data!.rowVersion, ...b } }),
     onSuccess: () => done('Conversa atualizada'), onError: (e) => { toast({ tone: 'error', message: errMsg(e) }); void q.refetch(); },
   });
+  const [withSig, setWithSig] = useState(true);
   const reply = useMutation({
-    mutationFn: (resolve: boolean) => api(`/mail/threads/${id}/reply`, { method: 'POST', body: { text, resolve } }),
+    mutationFn: (resolve: boolean) => api(`/mail/threads/${id}/reply`, { method: 'POST', body: { text, resolve, signature: withSig } }),
     onSuccess: (_, resolve) => { setText(''); done(resolve ? 'Resposta enviada e conversa resolvida' : 'Resposta enviada'); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -249,7 +251,8 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
             <>
               <label htmlFor="th-r" className="sr-only">Resposta</label>
               <Textarea id="th-r" rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Responder como ${d.mailbox.address}`} />
-              <div className="mt-2 flex flex-wrap justify-end gap-2">
+              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                <label className="mr-auto flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={withSig} onChange={(e) => setWithSig(e.target.checked)} />Incluir assinatura</label>
                 <Button variant="secondary" disabled={!text.trim()} loading={reply.isPending && reply.variables === true} onClick={() => reply.mutate(true)}>Responder e resolver</Button>
                 <Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!text.trim()} loading={reply.isPending && reply.variables === false} onClick={() => reply.mutate(false)}>Responder</Button>
               </div>
@@ -425,6 +428,7 @@ export function MailboxesPage() {
           </article>
         ))}
       </div>
+      <section className="card p-4" aria-label="Minha assinatura"><SignatureEditor /></section>
       {d.canConfigure && <p className="text-sm text-muted">Caixas compartilhadas, filas e regras ficam em <Link to="/settings/gmail" className="font-semibold text-primary hover:underline">Configuração → E-mail corporativo</Link>.</p>}
     </div>
   );

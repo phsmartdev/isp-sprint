@@ -22,8 +22,9 @@ export function OriginEmail({ oppId }: { oppId: string }) {
   const q = useOriginEmail(oppId);
   const [text, setText] = useState('');
   const [viewing, setViewing] = useState<string | null>(null);
+  const [withSig, setWithSig] = useState(true);
   const reply = useMutation({
-    mutationFn: () => api(`/opportunities/${oppId}/origin-email/reply`, { method: 'POST', body: { text } }),
+    mutationFn: () => api(`/opportunities/${oppId}/origin-email/reply`, { method: 'POST', body: { text, signature: withSig } }),
     onSuccess: () => { setText(''); toast({ tone: 'success', message: 'Resposta enviada pelo e-mail de origem' }); void qc.invalidateQueries({ queryKey: ['origin-email', oppId] }); void qc.invalidateQueries({ queryKey: ['timeline', oppId] }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -52,7 +53,7 @@ export function OriginEmail({ oppId }: { oppId: string }) {
       {t.canReply ? (
         <div className="space-y-2">
           <Textarea aria-label="Resposta ao e-mail de origem" value={text} placeholder="Escreva a resposta ao cliente" onChange={(e) => setText(e.target.value)} />
-          <div className="flex justify-end"><Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!text.trim()} loading={reply.isPending} onClick={() => reply.mutate()}>Responder e-mail</Button></div>
+          <div className="flex flex-wrap items-center justify-end gap-2"><label className="mr-auto flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={withSig} onChange={(e) => setWithSig(e.target.checked)} />Incluir assinatura</label><Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!text.trim()} loading={reply.isPending} onClick={() => reply.mutate()}>Responder e-mail</Button></div>
         </div>
       ) : (
         <p className="bg-surface-2 px-3 py-2 text-sm text-muted">{!t.mailboxConnected ? `A caixa ${t.mailbox} não está conectada; a resposta volta a funcionar quando ela for reconectada.` : `Só quem atende a caixa ${t.mailbox} responde por ela.`}</p>

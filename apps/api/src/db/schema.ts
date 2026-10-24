@@ -3786,6 +3786,14 @@ export const mailThreads = pgTable(
 );
 
 /** Cada mensagem sincronizada (ou enviada pelo CRM). Imutável. */
+/** Assinatura de e-mail de cada pessoa (texto), usada nos e-mails novos e nas respostas pelo CRM. */
+export const mailSignatures = pgTable('mail_signatures', {
+  userId: uuid('user_id').primaryKey().references(() => users.id),
+  tenantId: tenantId(),
+  text: text('text').notNull().default(''),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
 /** Pastas da caixa, com regra de armazenamento (as conversas novas que batem caem nela). */
 export const mailFolders = pgTable('mail_folders', {
   id: id(),
