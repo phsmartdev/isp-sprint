@@ -51,7 +51,7 @@ export function assertModuleOpen(auth: AuthContext, module: Module | undefined, 
     const f = featureDef(feature);
     const off = [f.module, ...(f.requires ?? [])].find((m) => !auth.modules[m]);
     if (off) throw forbidden(`O módulo ${BUSINESS_MODULE_LABELS[off]} não está liberado para você.`);
-    throw forbidden(auth.disabledFeatures.includes(feature) ? `A funcionalidade "${f.label}" está desligada na empresa.` : `Seu perfil não tem acesso a ${f.label}.`);
+    throw forbidden(auth.disabledFeatures.includes(feature) ? `A funcionalidade "${f.label}" está desligada na empresa. Quem administra liga em Configurações → Permissões → Módulos e liberação.` : `Seu perfil não tem acesso a ${f.label}.`);
   }
 }
 
