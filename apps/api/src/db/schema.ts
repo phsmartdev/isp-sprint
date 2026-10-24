@@ -1399,6 +1399,8 @@ export const contractLedger = pgTable(
     occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
     description: text('description').notNull(),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    /** Empenho (contrato público) contra o qual o consumo/lançamento foi faturado. */
+    commitmentId: uuid('commitment_id'),
     reversesId: uuid('reverses_id'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
@@ -1412,6 +1414,23 @@ export const contractLedger = pgTable(
 );
 
 /** Modelos de contrato (Word com {{variáveis}}). */
+/** Notas de empenho do contrato público: valor empenhado e saldo (faturado contra ele pelo extrato). Anulação não apaga. */
+export const contractCommitments = pgTable('contract_commitments', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  number: text('number').notNull(),
+  issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+  fiscalYear: integer('fiscal_year').notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  notes: text('notes'),
+  cancelledAt: ts('cancelled_at'),
+  cancelledBy: uuid('cancelled_by').references(() => users.id),
+  cancelReason: text('cancel_reason'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ ctIdx: index('contract_commitments_ct_idx').on(t.contractId, t.issuedOn), uq: uniqueIndex('contract_commitments_uq').on(t.contractId, t.number), amountCk: check('contract_commitments_amount_ck', sql`amount_cents > 0`) }));
+
 export const contractTemplates = pgTable(
   'contract_templates',
   {

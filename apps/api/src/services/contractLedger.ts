@@ -1,6 +1,6 @@
 /** Extrato dos contratos: saldo de medição, consumo pelas oportunidades e lançamentos de faturamento. */
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { ledgerTotals } from '@isp/domain';
+import { commitmentBalances, consumptionIndicator, ledgerTotals, monthlyConsumption } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -37,7 +37,8 @@ export async function consumeForOpportunity(db: DbOrTx, tenantId: string, actorI
   await db.execute(sql`select id from contracts where id = ${c.id} for update`);
   const { totals } = await ledgerOf(db, c.id);
   if (amount > totals.available) throw unprocessable(`Saldo insuficiente no contrato: disponível ${brl(totals.available)}, necessário ${brl(amount)}.`, [{ path: 'measurementCents', message: 'Saldo insuficiente' }]);
-  const [e] = await db.insert(s.contractLedger).values({ tenantId, contractId: c.id, kind: 'consumo', amountCents: amount, occurredOn: new Date().toISOString().slice(0, 10), description: `OP-${opp.code} · ${opp.title}`, opportunityId: opp.id, createdBy: actorId }).returning({ id: s.contractLedger.id });
+  const commitmentId = await pickCommitment(db, c.id, amount);
+  const [e] = await db.insert(s.contractLedger).values({ tenantId, contractId: c.id, kind: 'consumo', amountCents: amount, occurredOn: new Date().toISOString().slice(0, 10), description: `OP-${opp.code} · ${opp.title}`, opportunityId: opp.id, commitmentId, createdBy: actorId }).returning({ id: s.contractLedger.id });
   await addEvent(db, tenantId, c.id, actorId, 'consumo', `Consumo de ${brl(amount)} pela oportunidade OP-${opp.code}. Saldo disponível: ${brl(totals.available - amount)}.`, { opportunityId: opp.id, amountCents: amount });
   return e!.id;
 }
@@ -48,7 +49,31 @@ export async function reverseForOpportunity(db: DbOrTx, tenantId: string, actorI
   if (net <= 0) return null;
   const [last] = await db.select().from(s.contractLedger).where(and(eq(s.contractLedger.opportunityId, opp.id), eq(s.contractLedger.kind, 'consumo'))).orderBy(sql`${s.contractLedger.createdAt} desc`).limit(1);
   if (!last) return null;
-  await db.insert(s.contractLedger).values({ tenantId, contractId: last.contractId, kind: 'estorno', amountCents: net, occurredOn: new Date().toISOString().slice(0, 10), description: `Estorno: OP-${opp.code} reaberta`, opportunityId: opp.id, reversesId: last.id, createdBy: actorId });
+  await db.insert(s.contractLedger).values({ tenantId, contractId: last.contractId, kind: 'estorno', amountCents: net, occurredOn: new Date().toISOString().slice(0, 10), description: `Estorno: OP-${opp.code} reaberta`, opportunityId: opp.id, reversesId: last.id, commitmentId: last.commitmentId, createdBy: actorId });
   await addEvent(db, tenantId, last.contractId, actorId, 'estorno', `Estorno de ${brl(net)}: oportunidade OP-${opp.code} reaberta.`, { opportunityId: opp.id });
   return last.id;
+}
+
+/** Empenhos do contrato com saldo calculado (o que foi faturado contra cada um). */
+export async function commitmentsOf(db: DbOrTx, contractId: string) {
+  const list = await db.select().from(s.contractCommitments).where(eq(s.contractCommitments.contractId, contractId)).orderBy(asc(s.contractCommitments.issuedOn), asc(s.contractCommitments.createdAt));
+  if (!list.length) return [];
+  const uses = await db.select({ commitmentId: s.contractLedger.commitmentId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents }).from(s.contractLedger).where(and(eq(s.contractLedger.contractId, contractId), inArray(s.contractLedger.kind, ['consumo', 'estorno', 'faturamento'])));
+  const bal = commitmentBalances(list.map((c) => ({ id: c.id, amountCents: c.amountCents, cancelled: !!c.cancelledAt })), uses);
+  return list.map((c, i) => ({ ...c, ...bal[i]! }));
+}
+
+/** Empenho para um faturamento: o mais antigo que cobre o valor; senão o mais antigo com saldo; sem empenho, null (vira alerta). */
+export async function pickCommitment(db: DbOrTx, contractId: string, amount: number) {
+  const list = (await commitmentsOf(db, contractId)).filter((c) => !c.cancelledAt && c.available > 0);
+  return (list.find((c) => c.available >= amount) ?? list[0])?.id ?? null;
+}
+
+/** Indicador de consumo (medição) e empenhos (público) de um contrato. */
+export async function consumptionOf(db: DbOrTx, c: { id: string; billingType: string; kind: string }, v: { startAt: string | null; endAt: string | null }, today = new Date().toISOString().slice(0, 10)) {
+  const { entries, totals } = await ledgerOf(db, c.id);
+  const monthly = monthlyConsumption(entries.map((e) => ({ kind: e.kind, amountCents: e.amountCents, occurredOn: String(e.occurredOn) })));
+  const indicator = c.billingType === 'medicao' && totals.credited > 0 ? consumptionIndicator({ credited: totals.credited, consumed: totals.consumed, startAt: v.startAt, endAt: v.endAt, today, monthly }) : null;
+  const commitments = c.kind === 'publico' ? await commitmentsOf(db, c.id) : null;
+  return { indicator, monthly, commitments, billed: totals.billed };
 }

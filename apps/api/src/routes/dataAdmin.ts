@@ -83,6 +83,7 @@ export const dataAdminRoutes = [
           counts.atas = (await tx.delete(s.arps).where(eq(s.arps.tenantId, t)).returning({ id: s.arps.id })).length;
           await tx.delete(s.contractAlerts).where(eq(s.contractAlerts.tenantId, t));
           await tx.delete(s.contractLedger).where(eq(s.contractLedger.tenantId, t));
+          await tx.delete(s.contractCommitments).where(eq(s.contractCommitments.tenantId, t));
           await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));
           await tx.delete(s.contractDocuments).where(eq(s.contractDocuments.tenantId, t));
           await tx.delete(s.contractProcesses).where(eq(s.contractProcesses.tenantId, t));

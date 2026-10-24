@@ -97,7 +97,7 @@ export const DEFAULT_CONTRACT_SETTINGS = {
 };
 export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail: string | null; deliveryEmail: string | null; oficioTemplate: string };
 
-export const ALERT_KINDS = ['renovacao', 'reajuste', 'garantia', 'documento_pendente', 'assinatura', 'provisionamento', 'implantacao', 'encerramento_90', 'encerramento_30'] as const;
+export const ALERT_KINDS = ['renovacao', 'reajuste', 'garantia', 'documento_pendente', 'assinatura', 'provisionamento', 'implantacao', 'encerramento_90', 'encerramento_30', 'consumo_acelerado', 'consumo_lento', 'saldo_baixo', 'esgotamento', 'empenho_baixo', 'sem_empenho'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const ALERT_LABELS: Record<AlertKind, string> = {
   renovacao: 'Renovação',
@@ -109,6 +109,12 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   implantacao: 'Implantação atrasada',
   encerramento_90: 'Encerramento em 90 dias',
   encerramento_30: 'Encerramento em 30 dias',
+  consumo_acelerado: 'Consumo acima do ritmo',
+  consumo_lento: 'Consumo abaixo do ritmo',
+  saldo_baixo: 'Saldo baixo',
+  esgotamento: 'Saldo acaba antes da vigência',
+  empenho_baixo: 'Empenho perto do fim',
+  sem_empenho: 'Sem empenho com saldo',
 };
 
 export type AlertInput = {
@@ -126,6 +132,11 @@ export type AlertInput = {
   hasSignedContractDoc: boolean;
   provisioningDone: boolean;
   openSignatureSince: string | null;
+  /** Medição: indicador de consumo (null quando não se aplica). */
+  consumption?: ConsumptionIndicator | null;
+  /** Contrato público: empenhos com saldo (null quando não se aplica). */
+  commitments?: { id: string; number: string; share: number | null; available: number }[] | null;
+  isPublic?: boolean;
 };
 export type DueAlert = { kind: AlertKind; cycleKey: string; dueAt: string };
 
@@ -157,6 +168,20 @@ export function dueAlerts(i: AlertInput, cfg: Pick<typeof DEFAULT_CONTRACT_SETTI
     if (!i.provisioningDone && i.today >= addDays(v, cfg.provisioningSlaDays)) out.push({ kind: 'provisionamento', cycleKey: v, dueAt: addDays(v, cfg.provisioningSlaDays) });
     if (!i.activationAt && i.today >= addDays(v, cfg.implantationSlaDays)) out.push({ kind: 'implantacao', cycleKey: v, dueAt: addDays(v, cfg.implantationSlaDays) });
     if (!i.hasSignedContractDoc) out.push({ kind: 'documento_pendente', cycleKey: `contrato:${v}`, dueAt: addDays(v, 7) });
+  }
+  // consumo (medição): ritmo, saldo e esgotamento — um alerta por mês/nível, para não repetir todo dia
+  const k = i.consumption;
+  const month = i.today.slice(0, 7);
+  if (k && (i.stage === 'vigente' || i.stage === 'renovacao' || i.stage === 'reajuste' || i.stage === 'implantacao')) {
+    if (k.pace === 'acelerado') out.push({ kind: 'consumo_acelerado', cycleKey: month, dueAt: addDays(i.today, 7) });
+    if (k.pace === 'lento') out.push({ kind: 'consumo_lento', cycleKey: month, dueAt: addDays(i.today, 15) });
+    if (k.lowBalance) out.push({ kind: 'saldo_baixo', cycleKey: `${k.credited}`, dueAt: addDays(i.today, 7) });
+    if (k.exhaustBeforeEnd && k.exhaustAt) out.push({ kind: 'esgotamento', cycleKey: k.exhaustAt.slice(0, 7), dueAt: k.exhaustAt });
+  }
+  // empenho (público): cada empenho perto do fim; contrato vigente sem nenhum empenho com saldo (por ano)
+  if (i.isPublic && i.commitments && (i.stage === 'vigente' || i.stage === 'renovacao' || i.stage === 'reajuste' || i.stage === 'implantacao')) {
+    for (const c of i.commitments) if (c.share !== null && c.share >= 0.8 && c.available > 0) out.push({ kind: 'empenho_baixo', cycleKey: c.id, dueAt: addDays(i.today, 10) });
+    if (!i.commitments.some((c) => c.available > 0)) out.push({ kind: 'sem_empenho', cycleKey: i.today.slice(0, 4), dueAt: addDays(i.today, 5) });
   }
   if (i.openSignatureSince && i.today >= addDays(i.openSignatureSince.slice(0, 10), cfg.signatureSlaDays)) out.push({ kind: 'assinatura', cycleKey: i.openSignatureSince.slice(0, 10), dueAt: addDays(i.openSignatureSince.slice(0, 10), cfg.signatureSlaDays) });
   return out;
@@ -312,3 +337,62 @@ export const CONTRACT_TEMPLATE_VARIABLES: { key: string; label: string }[] = [
 ];
 /** Bloco de repetição para a tabela de itens: {{#itens}} {{descricao}} {{quantidade}} {{valor_unitario}} {{valor_total}} {{/itens}} */
 export const CONTRACT_ITEM_LOOP = ['descricao', 'quantidade', 'valor_unitario', 'valor_total'];
+
+// ------------------------------------------------------------------ consumo (medição) e empenho (público)
+export type ConsumptionPace = 'sem_dados' | 'no_ritmo' | 'acelerado' | 'lento' | 'esgotado';
+export const PACE_LABELS: Record<ConsumptionPace, string> = { sem_dados: 'Sem dados suficientes', no_ritmo: 'No ritmo', acelerado: 'Acima do ritmo', lento: 'Abaixo do ritmo', esgotado: 'Saldo esgotado' };
+export type ConsumptionIndicator = {
+  credited: number; consumed: number; remaining: number; share: number | null; elapsedShare: number | null; gapPp: number | null;
+  pace: ConsumptionPace; avgMonthlyCents: number | null; exhaustAt: string | null; exhaustBeforeEnd: boolean; lowBalance: boolean; unusedAtEndCents: number | null;
+};
+export const CONSUMPTION_RULES = { fastGap: 0.15, slowGap: 0.25, slowMinElapsed: 0.3, lowBalance: 0.15 };
+
+/**
+ * Ritmo do consumo: % consumido contra % da vigência já decorrida. Projeção pela média dos últimos 3 meses com consumo:
+ * quando o saldo acaba (e se acaba antes do fim) ou quanto sobra no fim (receita contratada que não vira faturamento).
+ */
+export function consumptionIndicator(i: { credited: number; consumed: number; startAt: string | null; endAt: string | null; today: string; monthly: { month: string; cents: number }[] }, rules = CONSUMPTION_RULES): ConsumptionIndicator {
+  const remaining = i.credited - i.consumed;
+  const share = i.credited > 0 ? i.consumed / i.credited : null;
+  const elapsedShare = i.startAt && i.endAt && i.endAt > i.startAt ? Math.max(0, Math.min(1, daysBetween(i.startAt, i.today) / Math.max(1, daysBetween(i.startAt, i.endAt)))) : null;
+  const gapPp = share !== null && elapsedShare !== null ? Math.round((share - elapsedShare) * 1000) / 10 : null;
+  const recent = [...i.monthly].filter((m) => m.month <= i.today.slice(0, 7)).sort((a, b) => b.month.localeCompare(a.month)).slice(0, 3).filter((m) => m.cents > 0);
+  const avgMonthlyCents = recent.length ? Math.round(recent.reduce((t, m) => t + m.cents, 0) / recent.length) : null;
+  let exhaustAt: string | null = null;
+  if (remaining > 0 && avgMonthlyCents && avgMonthlyCents > 0) exhaustAt = addDays(i.today, Math.round((remaining / avgMonthlyCents) * 30.44));
+  const exhaustBeforeEnd = !!(exhaustAt && i.endAt && exhaustAt < i.endAt && i.today < i.endAt);
+  const monthsLeft = i.endAt && i.today < i.endAt ? daysBetween(i.today, i.endAt) / 30.44 : 0;
+  const unusedAtEndCents = avgMonthlyCents !== null && i.endAt ? Math.max(0, Math.round(remaining - avgMonthlyCents * monthsLeft)) : null;
+  let pace: ConsumptionPace = 'sem_dados';
+  if (i.credited > 0 && remaining <= 0) pace = 'esgotado';
+  else if (share !== null && elapsedShare !== null && elapsedShare > 0.05) {
+    if (share - elapsedShare > rules.fastGap) pace = 'acelerado';
+    else if (elapsedShare >= rules.slowMinElapsed && elapsedShare - share > rules.slowGap) pace = 'lento';
+    else pace = 'no_ritmo';
+  }
+  const lowBalance = i.credited > 0 && remaining > 0 && remaining / i.credited <= rules.lowBalance;
+  return { credited: i.credited, consumed: i.consumed, remaining, share, elapsedShare, gapPp, pace, avgMonthlyCents, exhaustAt, exhaustBeforeEnd, lowBalance, unusedAtEndCents };
+}
+
+/** Consumo líquido por mês (consumos − estornos), para a curva e a projeção. */
+export function monthlyConsumption(entries: { kind: string; amountCents: number; occurredOn: string }[]) {
+  const map = new Map<string, number>();
+  for (const e of entries) {
+    if (e.kind !== 'consumo' && e.kind !== 'estorno') continue;
+    const m = e.occurredOn.slice(0, 7);
+    map.set(m, (map.get(m) ?? 0) + (e.kind === 'consumo' ? e.amountCents : -e.amountCents));
+  }
+  return [...map.entries()].map(([month, cents]) => ({ month, cents })).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/**
+ * Saldo de cada empenho: valor empenhado − o que foi faturado contra ele (consumos/lançamentos ligados, estornos devolvem).
+ * Empenho anulado não tem saldo.
+ */
+export function commitmentBalances(commitments: { id: string; amountCents: number; cancelled: boolean }[], uses: { commitmentId: string | null; kind: string; amountCents: number }[]) {
+  return commitments.map((c) => {
+    const used = uses.filter((u) => u.commitmentId === c.id).reduce((t, u) => t + (u.kind === 'estorno' ? -u.amountCents : u.amountCents), 0);
+    const available = c.cancelled ? 0 : c.amountCents - used;
+    return { id: c.id, used, available, share: c.amountCents > 0 ? used / c.amountCents : null };
+  });
+}

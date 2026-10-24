@@ -51,3 +51,31 @@ describe('tipos e extrato', () => {
     expect(recurringBilledInPeriod(1000, null, null, '2026-01-01', '2026-03-31')).toBe(0);
   });
 });
+
+import { commitmentBalances, consumptionIndicator, dueAlerts as dueAlerts2, monthlyConsumption, DEFAULT_CONTRACT_SETTINGS as CS2 } from './contracts';
+describe('consumo e empenho', () => {
+  const base = { credited: 1_200_000, startAt: '2026-01-01', endAt: '2026-12-31', today: '2026-07-01' };
+  it('ritmo: acelerado, lento, no ritmo; projeção de esgotamento e sobra no fim', () => {
+    const fast = consumptionIndicator({ ...base, consumed: 900_000, monthly: [{ month: '2026-04', cents: 150_000 }, { month: '2026-05', cents: 150_000 }, { month: '2026-06', cents: 150_000 }] });
+    expect(fast.pace).toBe('acelerado');
+    expect(fast.exhaustAt).toBe('2026-08-31');
+    expect(fast.exhaustBeforeEnd).toBe(true);
+    const slow = consumptionIndicator({ ...base, consumed: 100_000, monthly: [{ month: '2026-06', cents: 20_000 }] });
+    expect(slow.pace).toBe('lento');
+    expect(slow.unusedAtEndCents).toBeGreaterThan(900_000);
+    const ok = consumptionIndicator({ ...base, consumed: 600_000, monthly: [{ month: '2026-06', cents: 100_000 }] });
+    expect(ok.pace).toBe('no_ritmo');
+    expect(consumptionIndicator({ ...base, consumed: 1_200_000, monthly: [] }).pace).toBe('esgotado');
+    expect(consumptionIndicator({ ...base, consumed: 1_100_000, monthly: [] }).lowBalance).toBe(true);
+  });
+  it('consumo mensal líquido; saldo de empenho; alertas por mês e por empenho', () => {
+    expect(monthlyConsumption([{ kind: 'consumo', amountCents: 100, occurredOn: '2026-05-03' }, { kind: 'estorno', amountCents: 30, occurredOn: '2026-05-20' }, { kind: 'credito', amountCents: 999, occurredOn: '2026-05-01' }])).toEqual([{ month: '2026-05', cents: 70 }]);
+    const b = commitmentBalances([{ id: 'e1', amountCents: 1000, cancelled: false }, { id: 'e2', amountCents: 500, cancelled: true }], [{ commitmentId: 'e1', kind: 'consumo', amountCents: 900 }, { commitmentId: 'e1', kind: 'estorno', amountCents: 50 }]);
+    expect(b).toEqual([{ id: 'e1', used: 850, available: 150, share: 0.85 }, { id: 'e2', used: 0, available: 0, share: 0 }]);
+    const input = { today: '2026-07-01', stage: 'vigente' as const, endAt: '2026-12-31', closureExpected: false, closureAt: null, guaranteeExpiresAt: null, adjustmentBaseDate: null, signedAt: null, activationAt: null, validatedAt: null, hasSignedContractDoc: true, provisioningDone: true, openSignatureSince: null };
+    const k = consumptionIndicator({ ...base, consumed: 900_000, monthly: [{ month: '2026-06', cents: 150_000 }] });
+    const kinds = dueAlerts2({ ...input, consumption: k, isPublic: true, commitments: [{ id: 'e1', number: '2026NE1', share: 0.85, available: 150 }] }, CS2).map((a) => `${a.kind}:${a.cycleKey}`);
+    expect(kinds).toEqual(expect.arrayContaining(['consumo_acelerado:2026-07', 'esgotamento:2026-08', 'empenho_baixo:e1']));
+    expect(dueAlerts2({ ...input, isPublic: true, commitments: [] }, CS2).map((a) => a.kind)).toContain('sem_empenho');
+  });
+});
