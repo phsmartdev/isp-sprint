@@ -398,3 +398,16 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
   - Caixa pessoal pode ter um endereço diferente do login (Gmail particular), até 3 por pessoa. Ela fica fora da regra de domínio e só a dona vê. O Google confere se quem autoriza é a conta da caixa. Caixa compartilhada continua presa ao domínio da empresa.
 - **Consequência:**
   - Conectar contas @gmail.com exige o app OAuth do Google Cloud em modo "Externo". Os escopos do Gmail são restritos: em modo de teste, só os usuários de teste cadastrados conseguem conectar; para todo mundo, o Google exige verificação do app.
+
+## ADR-072 — Gmail por senha de app, cópia original, pastas e e-mail novo (24/10/2026)
+- **Contexto:** o Paulo quis conectar o Gmail pessoal sem configurar o Google Cloud. Também pediu que o anexo da negociação fosse a cópia exata do e-mail e que todos pudessem lê-lo, pastas com regras na caixa, envio de e-mail novo e assinatura.
+- **Decisão:**
+  - Caixa pessoal pode usar `provider = 'gmail_senha'`. A leitura é pela IMAP do Gmail, na pasta "Todos os e-mails", com os ids X-GM-MSGID e X-GM-THRID, que são os mesmos da Gmail API. O envio é pelo SMTP do Gmail.
+  - A senha de app fica cifrada. As mensagens entram pelo mesmo `ingestMessage`, e quem chega duas vezes pelo mesmo Message-ID é ignorado.
+  - E-mail novo enviado por SMTP nasce numa conversa provisória (`smtp:`), que adota o id real do Gmail na próxima leitura.
+  - O anexo `.eml` da negociação é a fonte original (`format=raw` na Gmail API, ou a fonte pela IMAP). Quem vê a negociação lê pelo CRM: o HTML abre num iframe isolado, sem scripts, com política de conteúdo restrita, e os anexos internos podem ser baixados.
+  - Pastas (`mail_folders`) têm regra de armazenamento com as mesmas condições das regras de entrada. A primeira pasta que bater recebe a conversa nova; dá para aplicar a regra às conversas existentes e mover à mão. Excluir uma pasta devolve as conversas para a Entrada.
+  - Assinatura por pessoa (`mail_signatures`), em texto, separada por "-- ". Ela vai nos e-mails novos e nas respostas e pode ser desligada a cada envio.
+- **Consequência:**
+  - A leitura por IMAP é feita em lotes: 50 mensagens na primeira vez e 100 nas seguintes, para caber no tempo da função.
+  - A assinatura ainda não aceita imagem, porque os e-mails saem em texto simples.
