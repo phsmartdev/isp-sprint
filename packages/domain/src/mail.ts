@@ -194,3 +194,27 @@ export function autoLinkContact(matches: { email: string; contactId: string }[])
 
 /** Assunto de resposta (sem repetir "Re:"). */
 export const replySubject = (s: string) => (/^\s*re\s*:/i.test(s) ? s.trim() : `Re: ${s.trim() || '(sem assunto)'}`);
+
+// ------------------------------------------------------------------ pastas com regra de armazenamento
+export type FolderDef = { match: 'todas' | 'qualquer'; conditions: RuleCondition[] };
+export type MailFolder = { id: string; mailboxId: string; position: number; active: boolean; def: FolderDef };
+
+/** As condições batem com a mensagem? (mesma leitura das regras de entrada) */
+export function conditionsMatch(def: FolderDef, f: IncomingFacts) {
+  if (!def.conditions.length) return false;
+  const hits = def.conditions.map((c) => condMatches(c, f));
+  return def.match === 'todas' ? hits.every(Boolean) : hits.some(Boolean);
+}
+
+/** Primeira pasta ativa da caixa (na ordem) cuja regra bate; pasta sem condição só recebe à mão. */
+export function folderFor(folders: MailFolder[], f: IncomingFacts): MailFolder | null {
+  return [...folders].filter((x) => x.active && x.mailboxId === f.mailboxId).sort((a, b) => a.position - b.position).find((x) => conditionsMatch(x.def, f)) ?? null;
+}
+
+export function folderErrors(x: { name: string; def: FolderDef }) {
+  const e: string[] = [];
+  if (x.name.trim().length < 2) e.push('Dê um nome à pasta.');
+  if (x.name.trim().length > 60) e.push('Nome da pasta com até 60 caracteres.');
+  for (const c of x.def.conditions) if (!c.value.trim()) e.push('Preencha o valor de cada condição.');
+  return e;
+}

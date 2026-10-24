@@ -210,6 +210,34 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     expect((await carlos.post('/mail/mailboxes', { kind: 'compartilhada', address: `vendas.${stamp}@gmail.test` })).statusCode).toBe(422);
   });
 
+  it('pastas com regra: aplica às existentes, recebe as novas, move à mão e excluir devolve para a Entrada', async () => {
+    const def = { match: 'qualquer', conditions: [{ field: 'dominio', op: 'termina_com', value: 'prefeitura-ficticia.test' }] };
+    expect((await lucas.post('/mail/folders', { mailboxId: sharedId, name: 'Prefeituras', def })).statusCode).toBe(403);
+    expect((await carlos.post('/mail/folders', { mailboxId: sharedId, name: ' ', def })).statusCode).toBe(422);
+    const f = ok(await carlos.post('/mail/folders', { mailboxId: sharedId, name: `Prefeituras ${stamp}`, def, applyExisting: true }), 201).json();
+    expect(f.moved).toBeGreaterThanOrEqual(1);
+    expect((await carlos.post('/mail/folders', { mailboxId: sharedId, name: `prefeituras ${stamp}`, def })).statusCode).toBe(422);
+    const inFolder = await threads(carlos, `mailboxId=${sharedId}&status=todas&folderId=${f.id}`);
+    expect(inFolder.length).toBe(f.moved);
+    g.deliver(SHARED, { from: `Outra <outra-${stamp}@prefeitura-ficticia.test>`, subject: `Nova demanda ${stamp}`, text: 'Pedido novo.' });
+    await syncMailbox(ctx.db, ctx.app.config.gmail!, sharedId);
+    const nova = (await threads(carlos, `mailboxId=${sharedId}&status=todas&folderId=${f.id}`)).find((x) => x.subject === `Nova demanda ${stamp}`)!;
+    expect(nova).toBeTruthy();
+    const list = ok(await carlos.get('/mail/folders')).json().items.find((x: { id: string }) => x.id === f.id);
+    expect(list).toMatchObject({ name: `Prefeituras ${stamp}`, canEdit: true });
+    expect(list.open).toBeGreaterThanOrEqual(1);
+    let d = ok(await carlos.get(`/mail/threads/${nova.id}`)).json();
+    expect(d.folderId).toBe(f.id);
+    expect(d.folders.map((x: { id: string }) => x.id)).toContain(f.id);
+    ok(await carlos.patch(`/mail/threads/${nova.id}`, { rowVersion: d.rowVersion, folderId: null }));
+    expect((await threads(carlos, `mailboxId=${sharedId}&status=todas&folderId=entrada`)).some((x) => x.id === nova.id)).toBe(true);
+    d = ok(await carlos.get(`/mail/threads/${nova.id}`)).json();
+    ok(await carlos.patch(`/mail/threads/${nova.id}`, { rowVersion: d.rowVersion, folderId: f.id }));
+    ok(await carlos.patch(`/mail/folders/${f.id}`, { active: false }));
+    expect(ok(await carlos.get(`/mail/threads/${nova.id}`)).json().folderId).toBeNull();
+    expect(ok(await carlos.get('/mail/folders')).json().items.some((x: { id: string }) => x.id === f.id)).toBe(false);
+  });
+
   it('Gmail com senha de app (sem Google Cloud): conecta, lê, responde na mesma conversa, não duplica a enviada', async () => {
     const fake = fakeGmailPassword('abcdefghijklmnop');
     setGmailPasswordGateway(fake.gateway);

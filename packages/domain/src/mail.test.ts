@@ -56,3 +56,25 @@ describe('e-mail: regras, direcionamento e prazo', () => {
     expect(statusAfterMessage('resolvida', 'entrada', false)).toBe('nova');
   });
 });
+
+import { folderErrors, folderFor, type MailFolder } from './mail';
+describe('pastas com regra de armazenamento', () => {
+  const f = (id: string, position: number, def: MailFolder['def'], active = true): MailFolder => ({ id, mailboxId: 'b1', position, active, def });
+  const facts = { from: 'compras@prefeitura.gov.br', to: ['eu@gmail.com'], subject: 'Pregão eletrônico 12/2026', text: 'Segue o edital', mailboxId: 'b1' };
+  it('primeira pasta da ordem que bate; inativa e sem condição não recebem', () => {
+    const folders = [
+      f('manual', 0, { match: 'todas', conditions: [] }),
+      f('off', 1, { match: 'qualquer', conditions: [{ field: 'dominio', op: 'termina_com', value: 'gov.br' }] }, false),
+      f('gov', 2, { match: 'qualquer', conditions: [{ field: 'dominio', op: 'termina_com', value: '.gov.br' }] }),
+      f('pregao', 3, { match: 'todas', conditions: [{ field: 'assunto', op: 'contem', value: 'pregão' }] }),
+    ];
+    expect(folderFor(folders, facts)?.id).toBe('gov');
+    expect(folderFor(folders, { ...facts, from: 'x@empresa.com' })?.id).toBe('pregao');
+    expect(folderFor(folders, { ...facts, from: 'x@empresa.com', subject: 'Oi' })).toBeNull();
+    expect(folderFor(folders, { ...facts, mailboxId: 'outra' })).toBeNull();
+  });
+  it('valida nome e condições', () => {
+    expect(folderErrors({ name: ' ', def: { match: 'todas', conditions: [] } })).toContain('Dê um nome à pasta.');
+    expect(folderErrors({ name: 'Licitações', def: { match: 'todas', conditions: [{ field: 'assunto', op: 'contem', value: ' ' }] } })).toContain('Preencha o valor de cada condição.');
+  });
+});

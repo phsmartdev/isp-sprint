@@ -11,7 +11,7 @@ import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   MAIL_PRIORITIES, MAIL_SCOPES, OPEN_THREAD, ROUTING_MODES, RULE_FIELDS, RULE_OPS, THREAD_STATUSES, atLeast, domainAllowed, evaluateRules, isEmail,
-  buildEml, emlFilename, mailSettingsErrors, queueErrors, replySubject, ruleErrors, slaState, threadTransitionError, type MailRuleDef, type ThreadStatus,
+  buildEml, emlFilename, conditionsMatch, folderErrors, mailSettingsErrors, queueErrors, replySubject, type FolderDef, ruleErrors, slaState, threadTransitionError, type MailRuleDef, type ThreadStatus,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../http/errors';
@@ -90,6 +90,24 @@ async function visibleBoxes(db: DbOrTx, auth: AuthContext) {
   const qs = await myQueues(db, auth);
   return all.filter((b) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : qs.some((q) => q.mailboxId === b.id)));
 }
+const FolderBody = z.object({ match: z.enum(['todas', 'qualquer']), conditions: z.array(z.object({ field: z.enum(RULE_FIELDS), op: z.enum(RULE_OPS), value: z.string().trim().max(200) })).max(10) });
+/** Pasta da caixa pessoal: a dona; da compartilhada: quem tem acesso total em Configurações. */
+const canManageBox = (auth: AuthContext, b: typeof s.mailboxes.$inferSelect) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : canConfigure(auth));
+
+/** Aplica a regra da pasta às conversas da caixa que estão na Entrada (sem pasta), olhando a primeira mensagem. */
+async function applyFolder(db: DbOrTx, auth: AuthContext, folderId: string, mailboxId: string, def: FolderDef) {
+  const rows = (await db.execute(sql`
+    select t.id, m.from_addr, m.to_addrs, m.subject, coalesce(m.body_text, m.snippet, '') as text
+      from mail_threads t
+      join lateral (select * from mail_messages mm where mm.thread_id = t.id order by (mm.direction = 'entrada') desc, mm.sent_at asc limit 1) m on true
+     where t.tenant_id = ${auth.tenantId} and t.mailbox_id = ${mailboxId} and t.folder_id is null`)).rows as { id: string; from_addr: string; to_addrs: string[]; subject: string; text: string }[];
+  const hit = rows.filter((r) => conditionsMatch(def, { from: r.from_addr, to: r.to_addrs ?? [], subject: r.subject, text: r.text, mailboxId }));
+  if (!hit.length) return 0;
+  await db.update(s.mailThreads).set({ folderId }).where(inArray(s.mailThreads.id, hit.map((h) => h.id)));
+  await db.insert(s.mailThreadEvents).values(hit.map((h) => ({ tenantId: auth.tenantId, threadId: h.id, type: 'pasta', payload: { folderId, automatic: true, existente: true }, actorId: auth.userId })));
+  return hit.length;
+}
+
 const publicBox = (b: typeof s.mailboxes.$inferSelect) => ({
   id: b.id, kind: b.kind, provider: b.provider, address: b.address, displayName: b.displayName, ownerId: b.ownerId, status: b.status, lastSyncAt: b.lastSyncAt, lastError: b.lastError, connectedAt: b.connectedAt, rowVersion: b.rowVersion,
   scopes: b.grantedScopes ? b.grantedScopes.split(' ').filter((x) => x.includes('gmail')) : [],
@@ -290,6 +308,59 @@ export const mailRoutes = [
     },
   }),
 
+  // ---------------------------------------------------------------- pastas com regra de armazenamento
+  defineRoute({
+    method: 'GET', url: '/mail/folders', summary: 'Pastas das caixas que a pessoa vê, com a regra e quantas conversas abertas há em cada uma', tag: 'E-mail', module: 'email',
+    handler: async ({ app, auth }) => {
+      const boxes = await visibleBoxes(app.db, auth);
+      if (!boxes.length) return { items: [] };
+      const rows = await app.db.select().from(s.mailFolders).where(and(eq(s.mailFolders.tenantId, auth.tenantId), eq(s.mailFolders.active, true), inArray(s.mailFolders.mailboxId, boxes.map((b) => b.id)))).orderBy(asc(s.mailFolders.position), asc(s.mailFolders.name));
+      const counts = rows.length ? (await app.db.execute(sql`select folder_id, count(*) filter (where status in ('nova','em_atendimento','aguardando_cliente'))::int open, count(*) filter (where unread)::int unread from mail_threads where tenant_id = ${auth.tenantId} and folder_id = any(${`{${rows.map((r) => r.id).join(',')}}`}::uuid[]) group by folder_id`)).rows as { folder_id: string; open: number; unread: number }[] : [];
+      return { items: rows.map((r) => { const b = boxes.find((x) => x.id === r.mailboxId)!; const c = counts.find((x) => x.folder_id === r.id); return { id: r.id, mailboxId: r.mailboxId, name: r.name, position: r.position, def: r.def, open: c?.open ?? 0, unread: c?.unread ?? 0, canEdit: canManageBox(auth, b) }; }) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/mail/folders', summary: 'Cria pasta na caixa com regra de armazenamento; pode aplicar às conversas que já estão na Entrada', tag: 'E-mail', module: 'email',
+    body: z.object({ mailboxId: z.string().uuid(), name: z.string().trim().max(60), def: FolderBody, applyExisting: z.boolean().default(false) }),
+    handler: async ({ app, auth, req, body, reply }) => {
+      const b = (await visibleBoxes(app.db, auth)).find((x) => x.id === body.mailboxId);
+      if (!b) throw notFound('Caixa não encontrada.');
+      if (!canManageBox(auth, b)) throw forbidden('Pastas da caixa compartilhada são criadas por quem tem acesso total em Configurações.');
+      const errs = folderErrors({ name: body.name, def: body.def });
+      if (errs.length) throw unprocessable(errs[0]!);
+      const [dup] = await app.db.select({ id: s.mailFolders.id }).from(s.mailFolders).where(and(eq(s.mailFolders.mailboxId, b.id), eq(s.mailFolders.active, true), sql`lower(${s.mailFolders.name}) = lower(${body.name})`)).limit(1);
+      if (dup) throw unprocessable('Já existe uma pasta com este nome nesta caixa.');
+      const [m] = await app.db.select({ v: sql<number>`coalesce(max(${s.mailFolders.position}), -1)` }).from(s.mailFolders).where(eq(s.mailFolders.mailboxId, b.id));
+      const [f] = await app.db.insert(s.mailFolders).values({ tenantId: auth.tenantId, mailboxId: b.id, name: body.name, position: (m?.v ?? -1) + 1, def: body.def, createdBy: auth.userId }).returning();
+      const moved = body.applyExisting ? await applyFolder(app.db, auth, f!.id, b.id, body.def) : 0;
+      await audit(app.db, req, { action: 'mail.folder_created', entityType: 'mail_folder', entityId: f!.id, metadata: { moved } });
+      reply.code(201);
+      return { id: f!.id, moved };
+    },
+  }),
+  defineRoute({
+    method: 'PATCH', url: '/mail/folders/:id', summary: 'Renomeia, muda a regra ou a ordem, reaplica a regra ou exclui a pasta (as conversas voltam para a Entrada)', tag: 'E-mail', module: 'email', params: IdParams,
+    body: z.object({ name: z.string().trim().max(60).optional(), def: FolderBody.optional(), position: z.number().int().min(0).max(999).optional(), active: z.literal(false).optional(), applyExisting: z.boolean().optional() }),
+    handler: async ({ app, auth, req, params, body }) => {
+      const [f] = await app.db.select().from(s.mailFolders).where(and(eq(s.mailFolders.id, params.id), eq(s.mailFolders.tenantId, auth.tenantId), eq(s.mailFolders.active, true))).limit(1);
+      const b = f ? (await visibleBoxes(app.db, auth)).find((x) => x.id === f.mailboxId) : undefined;
+      if (!f || !b) throw notFound('Pasta não encontrada.');
+      if (!canManageBox(auth, b)) throw forbidden('Só quem administra esta caixa altera as pastas.');
+      if (body.active === false) {
+        await app.db.update(s.mailFolders).set({ active: false }).where(eq(s.mailFolders.id, f.id));
+        await app.db.update(s.mailThreads).set({ folderId: null }).where(eq(s.mailThreads.folderId, f.id));
+        await audit(app.db, req, { action: 'mail.folder_removed', entityType: 'mail_folder', entityId: f.id });
+        return { ok: true, moved: 0 };
+      }
+      const next = { name: body.name ?? f.name, def: body.def ?? (f.def as FolderDef) };
+      const errs = folderErrors(next);
+      if (errs.length) throw unprocessable(errs[0]!);
+      await app.db.update(s.mailFolders).set({ name: next.name, def: next.def, ...(body.position !== undefined ? { position: body.position } : {}) }).where(eq(s.mailFolders.id, f.id));
+      const moved = body.applyExisting ? await applyFolder(app.db, auth, f.id, f.mailboxId, next.def) : 0;
+      return { ok: true, moved };
+    },
+  }),
+
   // ---------------------------------------------------------------- filas e regras
   defineRoute({
     method: 'GET', url: '/mail/queues', summary: 'Filas de atendimento por e-mail', tag: 'E-mail', module: 'email',
@@ -382,16 +453,18 @@ export const mailRoutes = [
   // ---------------------------------------------------------------- conversas
   defineRoute({
     method: 'GET', url: '/mail/threads', summary: 'Conversas visíveis com filtros (caixa, fila, situação, minhas, sem responsável, prazo, conta, busca)', tag: 'E-mail', module: 'email',
-    query: z.object({ mailboxId: z.string().uuid().optional(), queueId: z.string().uuid().optional(), status: z.enum(['abertas', 'todas', ...THREAD_STATUSES]).default('abertas'), view: z.enum(['todas', 'minhas', 'sem_responsavel', 'prazo']).default('todas'), contactId: z.string().uuid().optional(), q: z.string().trim().max(120).optional(), page: z.coerce.number().int().min(1).default(1) }),
+    query: z.object({ mailboxId: z.string().uuid().optional(), queueId: z.string().uuid().optional(), status: z.enum(['abertas', 'todas', ...THREAD_STATUSES]).default('abertas'), view: z.enum(['todas', 'minhas', 'sem_responsavel', 'prazo']).default('todas'), contactId: z.string().uuid().optional(), folderId: z.union([z.literal('entrada'), z.string().uuid()]).optional(), q: z.string().trim().max(120).optional(), page: z.coerce.number().int().min(1).default(1) }),
     handler: async ({ app, auth, query: f }) => {
-      if (app.config.gmail) {
+      {
+        // caixas pela Gmail API e pela senha de app (IMAP) se atualizam ao abrir a lista
         const boxes = (await visibleBoxes(app.db, auth)).map((b) => b.id);
-        await syncTenantMail(app.db, app.config.gmail, auth.tenantId, 2 * 60_000, boxes).catch(() => undefined);
+        await syncTenantMail(app.db, app.config.gmail ?? null, auth.tenantId, 2 * 60_000, boxes).catch(() => undefined);
       }
       const conds: SQL[] = [eq(s.mailThreads.tenantId, auth.tenantId), await threadScope(app.db, auth)];
       if (f.mailboxId) conds.push(eq(s.mailThreads.mailboxId, f.mailboxId));
       if (f.queueId) conds.push(eq(s.mailThreads.queueId, f.queueId));
       if (f.contactId) conds.push(eq(s.mailThreads.contactId, f.contactId));
+      if (f.folderId === 'entrada') conds.push(sql`${s.mailThreads.folderId} is null`); else if (f.folderId) conds.push(eq(s.mailThreads.folderId, f.folderId));
       if (f.status === 'abertas') conds.push(inArray(s.mailThreads.status, OPEN_THREAD)); else if (f.status !== 'todas') conds.push(eq(s.mailThreads.status, f.status));
       if (f.view === 'minhas') conds.push(eq(s.mailThreads.assigneeId, auth.userId));
       if (f.view === 'sem_responsavel') conds.push(sql`${s.mailThreads.assigneeId} is null`);
@@ -405,7 +478,7 @@ export const mailRoutes = [
       const items = rows.slice(0, 50).map((r) => ({
         id: r.t.id, sender: r.sender, subject: r.t.subject, snippet: r.t.snippet, participants: r.t.participants, lastMessageAt: r.t.lastMessageAt, status: r.t.status, priority: r.t.priority, tags: r.t.tags, unread: r.t.unread,
         mailbox: r.box, queue: r.t.queueId ? { id: r.t.queueId, name: r.queue?.name } : null, assignee: r.t.assigneeId ? { id: r.t.assigneeId, name: r.assignee?.name } : null,
-        contact: r.t.contactId ? { id: r.t.contactId, name: r.contact?.name } : null, linkAmbiguous: r.t.linkAmbiguous,
+        contact: r.t.contactId ? { id: r.t.contactId, name: r.contact?.name } : null, linkAmbiguous: r.t.linkAmbiguous, folderId: r.t.folderId,
         sla: slaState({ firstInboundAt: r.t.firstInboundAt?.toISOString() ?? null, firstReplyAt: r.t.firstReplyAt?.toISOString() ?? null, slaHours: r.t.queueId ? r.queue?.slaHours ?? null : null }, now),
       }));
       return { items, hasMore: rows.length > 50 };
@@ -430,7 +503,8 @@ export const mailRoutes = [
       return {
         id: t.id, subject: t.subject, status: t.status, priority: t.priority, tags: t.tags, rowVersion: t.rowVersion, participants: t.participants,
         mailbox: { id: box.id, address: box.address, kind: box.kind, status: box.status }, queue: q ? { id: q.id, name: q.name, slaHours: q.slaHours, members: q.members } : null,
-        assigneeId: t.assigneeId, contact: c ?? null, opportunityId: t.opportunityId, contractId: t.contractId, linkSource: t.linkSource, linkAmbiguous: t.linkAmbiguous,
+        assigneeId: t.assigneeId, contact: c ?? null, opportunityId: t.opportunityId, folderId: t.folderId,
+        folders: (await app.db.select({ id: s.mailFolders.id, name: s.mailFolders.name }).from(s.mailFolders).where(and(eq(s.mailFolders.mailboxId, box.id), eq(s.mailFolders.active, true))).orderBy(asc(s.mailFolders.position), asc(s.mailFolders.name))), contractId: t.contractId, linkSource: t.linkSource, linkAmbiguous: t.linkAmbiguous,
         sla: slaState({ firstInboundAt: t.firstInboundAt?.toISOString() ?? null, firstReplyAt: t.firstReplyAt?.toISOString() ?? null, slaHours: q?.slaHours ?? null }, new Date().toISOString()),
         messages: messages.map(({ m, by }) => ({ id: m.id, direction: m.direction, from: m.fromAddr, fromName: m.fromName, to: m.toAddrs, cc: m.ccAddrs, subject: m.subject, sentAt: m.sentAt, text: m.bodyText ?? m.snippet ?? '', hasAttachments: m.hasAttachments, sentBy: by })),
         events: events.map(({ e, actor }) => ({ id: e.id, type: e.type, payload: e.payload, actor, at: e.createdAt })),
@@ -443,7 +517,7 @@ export const mailRoutes = [
     body: z.object({
       rowVersion: z.number().int(), status: z.enum(THREAD_STATUSES).optional(), assigneeId: z.string().uuid().nullable().optional(), priority: z.enum(MAIL_PRIORITIES).optional(),
       queueId: z.string().uuid().nullable().optional(), tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
-      contactId: z.string().uuid().nullable().optional(), opportunityId: z.string().uuid().nullable().optional(), note: z.string().trim().max(500).optional(),
+      contactId: z.string().uuid().nullable().optional(), opportunityId: z.string().uuid().nullable().optional(), folderId: z.string().uuid().nullable().optional(), note: z.string().trim().max(500).optional(),
     }),
     handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
       const { t, box } = await loadThread(tx, auth, params.id);
@@ -477,6 +551,10 @@ export const mailRoutes = [
         patch.assigneeId = body.assigneeId; patch.assignedAt = body.assigneeId ? new Date() : null;
         if (body.assigneeId && t.status === 'nova' && !body.status) patch.status = 'em_atendimento';
         e('atribuida', { from: t.assigneeId, to: body.assigneeId, how: body.assigneeId === auth.userId ? 'assumiu' : 'manual' });
+      }
+      if (body.folderId !== undefined && body.folderId !== t.folderId) {
+        if (body.folderId) { const [fo] = await tx.select({ id: s.mailFolders.id }).from(s.mailFolders).where(and(eq(s.mailFolders.id, body.folderId), eq(s.mailFolders.mailboxId, t.mailboxId), eq(s.mailFolders.active, true))).limit(1); if (!fo) throw unprocessable('Pasta não encontrada nesta caixa.'); }
+        patch.folderId = body.folderId; e('pasta', { from: t.folderId, folderId: body.folderId, automatic: false });
       }
       if (body.priority && body.priority !== t.priority) { patch.priority = body.priority; e('prioridade', { from: t.priority, to: body.priority }); }
       if (body.tags) patch.tags = [...new Set(body.tags)];

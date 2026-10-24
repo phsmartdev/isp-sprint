@@ -21,6 +21,7 @@ import { useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { EmailToDeal } from '../../features/email/EmailToDeal';
+import { FolderRail } from '../../features/email/Folders';
 
 export type MailboxRow = { id: string; kind: MailboxKind; address: string; displayName: string | null; ownerId: string | null; status: MailboxStatus; lastSyncAt: string | null; lastError: string | null; connectedAt: string | null; rowVersion: number; scopes: string[]; lastRun: { kind: string; ok: boolean; fetched: number; stored: number; error: string | null; created_at: string } | null };
 type Queue = { id: string; name: string; mailboxId: string | null; routing: string; slaHours: number; members: string[]; active: boolean; rowVersion: number };
@@ -29,7 +30,7 @@ type ThreadRow = { id: string; sender: string | null; subject: string; snippet: 
 type ThreadDetail = {
   id: string; subject: string; status: ThreadStatus; priority: MailPriority; tags: string[]; rowVersion: number; participants: string[];
   mailbox: { id: string; address: string; kind: MailboxKind; status: MailboxStatus }; queue: { id: string; name: string; slaHours: number; members: string[] } | null;
-  assigneeId: string | null; contact: { id: string; name: string } | null; opportunityId: string | null; linkSource: string | null; linkAmbiguous: boolean; sla: Sla;
+  assigneeId: string | null; contact: { id: string; name: string } | null; opportunityId: string | null; folderId: string | null; folders: { id: string; name: string }[]; linkSource: string | null; linkAmbiguous: boolean; sla: Sla;
   messages: { id: string; direction: 'entrada' | 'saida'; from: string; fromName: string | null; to: string[]; cc: string[]; subject: string; sentAt: string; text: string; hasAttachments: boolean; sentBy: string | null }[];
   events: { id: string; type: string; payload: Record<string, unknown>; actor: string | null; at: string }[];
   suggestions: { id: string; name: string; via: string }[]; opportunities: { id: string; label: string; stage: string }[]; canWork: boolean;
@@ -62,13 +63,14 @@ const who = (participants: string[], own: string) => participants.filter((p) => 
 
 // ---------------------------------------------------------------- caixa de entrada
 export function EmailPage() {
-  const [f, setF] = useUrlState({ view: 'minhas', queue: '', box: '', status: 'abertas', q: '', t: '' });
+  const [f, setF] = useUrlState({ view: 'minhas', queue: '', box: '', status: 'abertas', q: '', t: '', pasta: '' });
+  const myId = useAuth().me?.user.id ?? null;
   const [search, setSearch] = useState(f.q);
   const dq = useDebounced(search, 350);
   useEffect(() => { if (dq !== f.q) setF({ q: dq }); }, [dq]); // eslint-disable-line react-hooks/exhaustive-deps
   const boxes = useMailboxes();
   const queues = useQuery({ queryKey: ['mail', 'queues'], queryFn: () => api<{ items: Queue[]; canEdit: boolean }>('/mail/queues') });
-  const params = { view: f.view, queueId: f.queue || undefined, mailboxId: f.box || undefined, status: f.status, q: f.q || undefined };
+  const params = { view: f.view, queueId: f.queue || undefined, mailboxId: f.box || undefined, status: f.status, q: f.q || undefined, folderId: f.pasta || undefined };
   const list = useQuery({ queryKey: ['mail', 'threads', params], placeholderData: keepPreviousData, refetchInterval: 60_000, queryFn: () => api<{ items: ThreadRow[]; hasMore: boolean }>(`/mail/threads${qs(params)}`) });
   const queueSla = useMemo(() => new Map((queues.data?.items ?? []).map((q) => [q.id, q.slaHours])), [queues.data]);
   const connected = (boxes.data?.items ?? []).filter((b) => b.status === 'conectada');
@@ -95,6 +97,7 @@ export function EmailPage() {
               <FormField label="Caixa" htmlFor="ml-b"><Select id="ml-b" value={f.box} onChange={(e) => setF({ box: e.target.value, t: '' })}><option value="">Todas</option>{(boxes.data?.items ?? []).map((b) => <option key={b.id} value={b.id}>{b.kind === 'pessoal' ? 'Minha caixa' : b.displayName ?? b.address}</option>)}</Select></FormField>
               <FormField label="Situação" htmlFor="ml-s"><Select id="ml-s" value={f.status} onChange={(e) => setF({ status: e.target.value, t: '' })}><option value="abertas">Abertas</option><option value="todas">Todas</option>{THREAD_STATUSES.map((s) => <option key={s} value={s}>{THREAD_STATUS_LABELS[s]}</option>)}</Select></FormField>
             </div>
+            <FolderRail boxes={boxes.data?.items ?? []} canConfigure={!!boxes.data?.canConfigure} myId={myId} box={f.box} value={f.pasta} onChange={(pasta) => setF({ pasta, t: '' })} />
             {!!connected.length && <p className="hidden px-3 pb-3 text-xs text-muted lg:block">Sincronizado {connected[0]!.lastSyncAt ? fmtRelativeShort(connected[0]!.lastSyncAt) : 'agora'}.</p>}
           </nav>
 
@@ -206,6 +209,13 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         )}
         <CrmLink d={d} onPatch={(b) => patch.mutate(b)} busy={patch.isPending} />
+        {d.canWork && (
+          <label className="mt-2 flex items-center gap-2 text-sm"><span className="text-xs text-muted">Pasta</span>
+            <Select aria-label="Pasta da conversa" className="h-8 w-auto py-0 text-sm" value={d.folderId ?? ''} disabled={patch.isPending} onChange={(e) => patch.mutate({ folderId: e.target.value || null })}>
+              <option value="">Entrada</option>{d.folders.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </Select>
+          </label>
+        )}
         {d.canWork && can('oportunidades') && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {d.opportunityId

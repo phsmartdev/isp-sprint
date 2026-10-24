@@ -62,6 +62,20 @@ test('E-mail corporativo: configura domínio, caixa e fila; conecta pelo Google;
   expect(sent.sent.some((x: { from: string; parsed: { text: string } }) => x.from === box && x.parsed.text.includes('Enviamos a proposta'))).toBe(true);
   await shot(page, 'email-conversa');
 
+  // pasta com regra de armazenamento, aplicada às conversas que já estão na Entrada
+  await page.getByRole('button', { name: 'Nova pasta' }).click();
+  const fd = page.getByRole('dialog', { name: 'Nova pasta' });
+  await fd.getByLabel('Nome da pasta').fill(`Prefeituras ${stamp}`);
+  await fd.getByLabel('Caixa').selectOption({ label: 'Comercial Yepnet' });
+  await fd.getByLabel('Campo da condição 1').selectOption({ label: 'Domínio do remetente' });
+  await fd.getByLabel('Operador da condição 1').selectOption({ label: 'termina com' });
+  await fd.getByLabel('Valor da condição 1').fill('prefeitura-ficticia.test');
+  await fd.getByRole('button', { name: 'Criar pasta' }).click();
+  await expect(page.getByText(/Pasta criada: \d+ conversa\(s\) movida\(s\)/)).toBeVisible();
+  await page.getByRole('button', { name: new RegExp(`^Prefeituras ${stamp}`) }).click();
+  await page.getByRole('region', { name: 'Conversas' }).getByRole('button', { name: new RegExp(`Cotação ${stamp}`) }).click();
+  await expect(conv.getByLabel('Pasta da conversa')).toHaveValue(/[0-9a-f-]{36}/);
+
   // e-mail vira negociação: anexo do e-mail e resposta pela mesma conversa
   await conv.getByRole('button', { name: 'Transformar em negociação' }).click();
   const td = page.getByRole('dialog', { name: 'Transformar e-mail em negociação' });
