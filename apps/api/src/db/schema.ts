@@ -42,6 +42,8 @@ export const users = pgTable(
     active: boolean('active').notNull().default(true),
     lastLoginAt: ts('last_login_at'),
     failedLogins: integer('failed_logins').notNull().default(0),
+    /** pode entrar de qualquer IP, mesmo com o acesso por IP ligado na empresa (viagem, diretoria) */
+    ipBypass: boolean('ip_bypass').notNull().default(false),
     lockedUntil: ts('locked_until'),
     /** Cargo exibido no topo (ex.: "Comercial"). */
     jobTitle: text('job_title'),
@@ -4145,3 +4147,12 @@ export const contractYearValues = pgTable('contract_year_values', {
   createdAt: createdAt(),
   supersededAt: ts('superseded_at'),
 }, (t) => ({ idx: index('contract_year_values_idx').on(t.tenantId, t.contractId, t.year) }));
+
+/** Acesso por IP liberado: quando ligado, só entra quem está num endereço ou faixa autorizada. */
+export const tenantIpPolicies = pgTable('tenant_ip_policies', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  enabled: boolean('enabled').notNull().default(false),
+  rules: jsonb('rules').$type<{ cidr: string; label: string }[]>().notNull().default([]),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});

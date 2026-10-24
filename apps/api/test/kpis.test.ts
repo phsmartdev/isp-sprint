@@ -151,7 +151,8 @@ describe('KPIs da Inteligência', () => {
     // lead time: sem categoria escolhida fica o informado; escolhendo, calcula a média
     let calc = ok(await carlos.get(`/intelligence/kpis/${lead.id}/calc`)).json();
     expect(calc).toMatchObject({ kind: 'lead_time', taskCategories: [] });
-    const [{ tenant_id: tid, id: uid }] = (await ctx.db.execute<{ tenant_id: string; id: string }>(sql`select tenant_id, id from users where email = 'carlos@yepnet.test'`)).rows as { tenant_id: string; id: string }[];
+    const urow = (await ctx.db.execute<{ tenant_id: string; id: string }>(sql`select tenant_id, id from users where email = 'carlos@yepnet.test'`)).rows[0]!;
+    const tid = urow.tenant_id, uid = urow.id;
     await ctx.db.execute(sql`insert into activities (tenant_id, type, title, owner_id, category, created_at, completed_at, status) values
       (${tid}, 'tarefa', 'Viabilidade engenharia fictícia', ${uid}, 'Viabilidade Engenharia', now() - interval '3 days', now(), 'concluida'),
       (${tid}, 'tarefa', 'Viabilidade infra fictícia', ${uid}, 'Viabilidade Infraestrutura', now() - interval '1 days', now(), 'concluida')`);

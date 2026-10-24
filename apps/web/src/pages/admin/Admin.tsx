@@ -20,6 +20,7 @@ import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { BrandImage, useBrand } from '../../components/brand';
 import { FitText } from '../../components/ui/FitText';
+import { IpAccessCard } from '../../features/admin/IpAccess';
 
 // =================================================================== layout
 const TABS = [
@@ -211,7 +212,7 @@ export function AdminOverview() {
 
 // =================================================================== usuários
 type AdminUser = {
-  id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
+  id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; ipBypass?: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
   goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[];
 };
 
@@ -229,7 +230,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
   const toast = useToast();
   const { me } = useAuth();
   const [form, setForm] = useState({
-    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true,
+    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
     teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -239,7 +240,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
       : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
@@ -312,6 +313,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
         </fieldset>
       )}
       {user && !self && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active} onChange={(e) => set('active', e.target.checked)} />Usuário ativo (desativar encerra as sessões)</label>}
+      {user && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ipBypass} onChange={(e) => set('ipBypass', e.target.checked)} />Pode entrar de qualquer IP (exceção ao acesso por IP liberado)</label>}
     </form>
   );
 }
@@ -467,6 +469,7 @@ export function AdminSecurity() {
   const d = q.data!;
   return (
     <div className="space-y-4">
+      <IpAccessCard />
       <section className="card overflow-hidden">
         <div className="px-5 pb-3 pt-4">
           <h2 className="text-lg font-bold text-ink">Níveis de acesso por módulo</h2>

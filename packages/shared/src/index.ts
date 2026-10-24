@@ -272,6 +272,7 @@ export const UserUpdate = z.object({
   phone: z.string().trim().max(30).nullable().optional().transform((v) => (v === undefined ? undefined : v || null)),
   profile: z.enum(PROFILE_KEYS).optional(),
   active: z.boolean().optional(),
+  ipBypass: z.boolean().optional(),
   teamIds: z.array(uuid).max(20).optional(),
   leadTeamIds: z.array(uuid).max(20).optional(),
   goalSales: z.number().int().min(0).max(100_000).optional(),

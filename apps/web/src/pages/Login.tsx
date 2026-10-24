@@ -17,6 +17,7 @@ const GOOGLE_ERRORS: Record<string, string> = {
   google_dominio: 'Use a conta Google do e-mail corporativo.',
   google_sem_usuario: 'Não há usuário ativo no CRM com esse e-mail do Google. Peça à gerência para cadastrar ou corrigir seu e-mail.',
   google_outra_conta: 'Seu usuário já está vinculado a outra conta Google. Entre com ela ou peça à gerência para corrigir o e-mail.',
+  ip_bloqueado: 'A empresa só libera o acesso a partir dos endereços (IPs) autorizados. Entre pela rede da empresa ou peça à gerência a liberação.',
 };
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.problem.detail ?? err.problem.title : 'Não foi possível concluir. Verifique a conexão.');
