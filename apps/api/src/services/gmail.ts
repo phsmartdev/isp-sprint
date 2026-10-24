@@ -374,3 +374,14 @@ async function sendWithPassword(db: DbOrTx, box: Box, input: { threadGmailId?: s
   await ingestMessage(db, box, ctx, { id, threadId: input.threadGmailId ?? id, labelIds: ['SENT'], snippet: input.text.slice(0, 200), internalDate: String(Date.now()), payload: { mimeType: 'text/plain', headers, body: { data: b64u(input.text) } } }, userId);
   return { id, threadId: input.threadGmailId ?? id };
 }
+
+/** Fonte original da mensagem (RFC 822), igual à que está no Gmail; null quando não dá para buscar. */
+export async function fetchOriginalRaw(db: DbOrTx, cfg: GmailCfg | null, box: Box, gmailId: string): Promise<Buffer | null> {
+  if (gmailId.startsWith('smtp:')) return null;
+  try {
+    if (box.provider === 'gmail_senha') return await gmailPassword().fetchRaw(box.address, boxPassword(box), gmailId);
+    if (!cfg) return null;
+    const r = await gmailApi<{ raw?: string }>(db, cfg, box, `/messages/${encodeURIComponent(gmailId)}?format=raw`);
+    return r.raw ? Buffer.from(r.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64') : null;
+  } catch { return null; }
+}

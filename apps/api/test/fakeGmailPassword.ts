@@ -27,6 +27,10 @@ export function fakeGmailPassword(appPassword = 'abcdefghijklmnop') {
       const lastUid = list.length ? Math.max(...list.map((m) => m.uid), o.afterUid ?? 0) : incremental ? o.afterUid! : (b.msgs.at(-1)?.uid ?? 0);
       return { uidValidity: b.uidValidity, lastUid, messages: list };
     },
+    async fetchRaw(user, p, id) {
+      check(p);
+      return box(user).msgs.find((m) => m.emailId === id)?.raw ?? null;
+    },
     async send(user, p, m) {
       check(p);
       const messageId = `<${randomBytes(6).toString('hex')}@gmail.test>`;

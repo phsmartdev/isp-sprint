@@ -14,6 +14,8 @@ export type GmailPasswordGateway = {
   verify(user: string, pass: string): Promise<void>;
   fetch(user: string, pass: string, opts: { since: Date; afterUid?: number; uidValidity?: string; max: number }): Promise<ImapFetch>;
   send(user: string, pass: string, mail: OutMail): Promise<{ messageId: string }>;
+  /** Fonte original (RFC 822) de uma mensagem pelo id do Gmail (hexadecimal). */
+  fetchRaw(user: string, pass: string, emailIdHex: string): Promise<Buffer | null>;
 };
 
 export class GmailPasswordError extends Error {
@@ -71,6 +73,22 @@ const realGateway: GmailPasswordGateway = {
         }
         const lastUid = uids.length ? Math.max(...uids, opts.afterUid ?? 0) : opts.afterUid && opts.uidValidity === uidValidity ? opts.afterUid : Math.max(0, (mb.uidNext ?? 1) - 1);
         return { uidValidity, lastUid, messages };
+      } finally { lock.release(); }
+    } catch (e) { throw e instanceof GmailPasswordError ? e : friendly(e); } finally { await c.logout().catch(() => undefined); }
+  },
+  async fetchRaw(user, pass, emailIdHex) {
+    const c = client(user, pass);
+    try {
+      await c.connect();
+      const all = (await c.list()).find((b) => b.specialUse === '\\All')?.path ?? 'INBOX';
+      const lock = await c.getMailboxLock(all, { readOnly: true });
+      try {
+        const dec = (() => { try { return BigInt(`0x${emailIdHex}`).toString(); } catch { return null; } })();
+        if (!dec) return null;
+        const uids = (await c.search({ emailId: dec } as Parameters<typeof c.search>[0], { uid: true })) || [];
+        if (!uids.length) return null;
+        const m = await c.fetchOne(String(uids[0]), { source: true }, { uid: true });
+        return m && m.source ? (m.source as Buffer) : null;
       } finally { lock.release(); }
     } catch (e) { throw e instanceof GmailPasswordError ? e : friendly(e); } finally { await c.logout().catch(() => undefined); }
   },

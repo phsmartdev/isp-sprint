@@ -147,6 +147,13 @@ export async function startFakeGoogle(port = 0): Promise<FakeGoogle> {
         if (mm && req.method === 'GET') {
           const m = b.messages.find((x) => x.id === mm[1]);
           if (!m) return json(res, 404, { error: { code: 404, message: 'Requested entity was not found.' } });
+          if (u.searchParams.get('format') === 'raw') {
+            // fonte original: cabeçalhos + texto + um anexo de exemplo (como o Gmail devolve em format=raw)
+            const boundary = `b${m.id}`;
+            const hdr = Object.entries(m.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n');
+            const raw = `${hdr}\r\nDate: ${new Date(m.internalDate).toUTCString()}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n--${boundary}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n<p><b>${m.text}</b></p>\r\n--${boundary}\r\nContent-Type: text/plain; name="pedido.txt"\r\nContent-Disposition: attachment; filename="pedido.txt"\r\n\r\nItem 1: link 300 Mbps\r\n--${boundary}--\r\n`;
+            return json(res, 200, { id: m.id, threadId: m.threadId, raw: Buffer.from(raw).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') });
+          }
           return json(res, 200, { id: m.id, threadId: m.threadId, labelIds: m.labelIds, snippet: m.text.slice(0, 120), historyId: String(m.historyId), internalDate: String(m.internalDate), payload: payloadOf(m) });
         }
         if (rest === '/history') {
