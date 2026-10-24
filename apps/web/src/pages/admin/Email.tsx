@@ -55,8 +55,8 @@ function SmtpForm() {
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <FormField label="Servidor" htmlFor="sm-host" required error={errors.host} className="xl:col-span-2"><Input id="sm-host" value={f.host} onChange={(e) => set({ host: e.target.value })} placeholder="smtp.seuprovedor.com.br" /></FormField>
-        <FormField label="Porta" htmlFor="sm-port" required error={errors.port}><Input id="sm-port" type="number" value={f.port} onChange={(e) => set({ port: e.target.value, secure: e.target.value === '465' ? true : f.secure })} /></FormField>
-        <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.secure} onChange={(e) => set({ secure: e.target.checked })} />SSL direto (porta 465)</label>
+        <FormField label="Porta" htmlFor="sm-port" required error={errors.port}><Input id="sm-port" type="number" value={f.port} onChange={(e) => set({ port: e.target.value, secure: e.target.value === '465' ? true : e.target.value === '587' || e.target.value === '25' ? false : f.secure })} /></FormField>
+        <label className="flex items-end gap-2 pb-2 text-sm" title="Na 587 e na 25 a conexão sobe para TLS sozinha (STARTTLS)"><input type="checkbox" checked={f.secure} onChange={(e) => set({ secure: e.target.checked })} />{f.port === '587' || f.port === '25' ? 'STARTTLS obrigatório' : 'SSL/TLS direto (porta 465)'}</label>
         <FormField label="Usuário" htmlFor="sm-user"><Input id="sm-user" autoComplete="off" value={f.username} onChange={(e) => set({ username: e.target.value })} /></FormField>
         <FormField label="Senha" htmlFor="sm-pass" hint={d.configured && d.hasPassword && !changePwd ? 'Guardada' : 'Em branco: sem senha'}>
           {changePwd ? <Input id="sm-pass" type="password" autoComplete="new-password" value={f.password} onChange={(e) => set({ password: e.target.value })} /> : <Button id="sm-pass" onClick={() => setChangePwd(true)}>Trocar senha</Button>}

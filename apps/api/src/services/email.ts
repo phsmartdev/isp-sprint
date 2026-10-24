@@ -77,6 +77,23 @@ export function setTransportFactory(f: typeof transportFactory) {
 const withTimeout = <T>(p: Promise<T>, ms: number) =>
   Promise.race([p, new Promise<never>((_r, rej) => setTimeout(() => rej(new Error(`Tempo esgotado após ${ms / 1000}s falando com o servidor SMTP`)), ms))]);
 
+export function smtpTls(port: number, secure: boolean) {
+  if (port === 465) return { secure: true, requireTLS: false };
+  if ([587, 25, 2525].includes(port)) return { secure: false, requireTLS: secure || port === 587 };
+  return { secure, requireTLS: false };
+}
+
+/** Erros de TLS/conexão em português, com o que fazer. */
+export function smtpErrorText(raw: string) {
+  if (/wrong version number|tls_validate_record_header/i.test(raw)) return 'A porta e a segurança não combinam: use a porta 465 com SSL/TLS ou a porta 587 com STARTTLS.';
+  if (/ECONNREFUSED/i.test(raw)) return 'O servidor SMTP recusou a conexão: confira o endereço e a porta.';
+  if (/ETIMEDOUT|timeout/i.test(raw)) return 'O servidor SMTP não respondeu a tempo: confira o endereço, a porta e se o provedor libera o acesso externo.';
+  if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) return 'Endereço do servidor SMTP não encontrado: confira o host.';
+  if (/535|Invalid login|authentication failed|Username and Password not accepted/i.test(raw)) return 'Usuário ou senha do SMTP recusados. No Gmail/Google Workspace, use uma senha de app.';
+  if (/self.signed|certificate/i.test(raw)) return 'O certificado do servidor SMTP não é válido para este endereço: confira o host.';
+  return raw;
+}
+
 export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResult> {
   const cfg = await smtpConfig(db, input.tenantId);
   const subject = input.subject.replace(/[\r\n]+/g, ' ').slice(0, 250);
@@ -96,10 +113,13 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
     const error = 'A senha do SMTP não pôde ser lida (a chave do servidor mudou). Cadastre a senha de novo em Configurações → Integrações.';
     return { ok: false, error, id: await log('falhou', error, null) };
   }
+  // TLS pela porta: 465 usa TLS direto; 587/25/2525 começam sem TLS e sobem com STARTTLS (marcar "SSL" na 587 dá "wrong version number")
+  const tls = smtpTls(cfg.port, cfg.secure);
   const opts = {
     host: cfg.host,
     port: cfg.port,
-    secure: cfg.secure,
+    secure: tls.secure,
+    requireTLS: tls.requireTLS,
     auth: cfg.username ? { user: cfg.username, pass: password ?? '' } : undefined,
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
@@ -122,7 +142,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
     );
     return { ok: true, messageId: String(info.messageId ?? ''), id: await log('enviado', null, String(info.messageId ?? '')) };
   } catch (e) {
-    const error = (e as Error).message.slice(0, 500);
+    const error = smtpErrorText((e as Error).message).slice(0, 500);
     return { ok: false, error, id: await log('falhou', error, null) };
   }
 }
