@@ -91,3 +91,28 @@ describe('habilitação', () => {
     expect(docStatus('2026-10-23', '2026-10-24')).toEqual({ status: 'vencida', days: -1 });
   });
 });
+
+import { accumulatedPct, adjustmentWindow, amendmentError, amendmentLimits, indexCodeOf, originalValue } from './contracts';
+describe('aditivos e reajuste', () => {
+  it('limite legal: acréscimos e supressões separados; 25% ou 50% em reforma; supressão acima só com acordo', () => {
+    const base = originalValue({ totalCents: null, monthlyCents: 100_000, termMonths: 12 });
+    expect(base).toBe(1_200_000);
+    const l = amendmentLimits(base, [{ kind: 'acrescimo', valueDeltaCents: 200_000 }, { kind: 'supressao', valueDeltaCents: -100_000 }]);
+    expect(l.acrescimo).toMatchObject({ cents: 200_000, remainingCents: 100_000 });
+    expect(l.supressao).toMatchObject({ cents: 100_000, remainingCents: 200_000 });
+    expect(amendmentError(true, l, { kind: 'acrescimo', valueDeltaCents: 150_000 })).toMatch(/limite legal de acréscimo \(25%/);
+    expect(amendmentError(true, l, { kind: 'acrescimo', valueDeltaCents: 100_000 })).toBeNull();
+    expect(amendmentError(false, l, { kind: 'acrescimo', valueDeltaCents: 9_999_999 })).toBeNull();
+    expect(amendmentError(true, l, { kind: 'supressao', valueDeltaCents: 300_000 })).toMatch(/acordo/);
+    expect(amendmentError(true, l, { kind: 'supressao', valueDeltaCents: 300_000, acordo: true })).toBeNull();
+    expect(amendmentLimits(base, [], true).acrescimo.remainingCents).toBe(600_000);
+  });
+  it('índice pelo nome, janela de 12 meses antes do aniversário e acumulado', () => {
+    expect(indexCodeOf('IPCA/IBGE')).toEqual({ key: 'IPCA', code: 433 });
+    expect(indexCodeOf('igp-m (FGV)')).toEqual({ key: 'IGP-M', code: 189 });
+    expect(indexCodeOf('IST')).toBeNull();
+    expect(adjustmentWindow('2026-03-10')).toEqual({ from: '2025-03-01', to: '2026-02-01' });
+    expect(accumulatedPct([0.5, 0.5])).toBe(1.0025);
+    expect(accumulatedPct(Array(12).fill(0.4))).toBe(4.9070);
+  });
+});

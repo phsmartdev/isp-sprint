@@ -224,3 +224,38 @@ test('habilitação: quadro de certidões por filial, envio e aviso do que preci
   await expect(att.getByText('CNDT (débitos trabalhistas)').first()).toBeVisible();
   await expect(att).toContainText('Vence em até 7 dias');
 });
+
+test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato público', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  const api = page.request;
+  const shift = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const lk = await (await api.get('/api/v1/meta/lookups')).json();
+  const o = await (await api.post('/api/v1/opportunities', { data: { newContact: { name: `Câmara E2E Aditivo ${Date.now().toString(36)}`, segment: 'governamental' }, planId: lk.plans[0].id } })).json();
+  const cur = await (await api.get(`/api/v1/opportunities/${o.id}`)).json();
+  expect((await api.post(`/api/v1/opportunities/${o.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: cur.rowVersion } })).ok()).toBe(true);
+  const me = await (await api.get('/api/v1/me')).json();
+  const created = await api.post('/api/v1/contracts', { data: { opportunityId: o.id, billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: me.user.id, version: { number: `AD-${Date.now().toString(36)}`, object: 'Link público', signedAt: shift(-40), startAt: shift(-35), termMonths: 12, monthlyCents: 100_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 100_000 }], publicTerms: { agency: 'Câmara E2E', processNumber: '2/2026', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } } });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).id;
+  expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
+
+  await page.goto(`/contracts/${id}`);
+  await page.getByRole('tab', { name: 'Aditivos' }).click();
+  const sec = page.getByRole('region', { name: 'Termos aditivos' });
+  await expect(sec).toContainText('R$ 12.000,00');
+  await sec.getByRole('button', { name: 'Registrar aditivo' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Registrar termo aditivo' });
+  await dlg.getByLabel('Valor acrescido').fill('4000');
+  await expect(dlg.getByRole('alert')).toContainText('Acima do limite legal: restam R$ 3.000,00');
+  await expect(dlg.getByRole('button', { name: 'Registrar aditivo' })).toBeDisabled();
+  await dlg.getByLabel('Valor acrescido').fill('2400');
+  await dlg.getByLabel('Diferença no valor mensal').fill('200');
+  await dlg.getByLabel('Objeto do aditivo').fill('Inclusão de dois pontos de acesso');
+  await dlg.getByRole('button', { name: 'Registrar aditivo' }).click();
+  await expect(sec.getByText('Aditivo 1 · Acréscimo de valor/quantidade')).toBeVisible();
+  await expect(sec).toContainText('20% de 25% · restam R$ 600,00');
+  await expect(sec).toContainText('Mensal +R$ 200,00');
+  await page.getByRole('tab', { name: /Versões/ }).click();
+  await expect(page.getByText('Termo aditivo').first()).toBeVisible();
+});

@@ -1276,7 +1276,7 @@ export const contractVersions = pgTable(
   },
   (t) => ({
     uq: uniqueIndex('contract_versions_uq').on(t.contractId, t.version),
-    changeCk: check('contract_versions_change_ck', inList('change_kind', ['cadastro', 'edicao', 'ativacao', 'renovacao', 'reajuste', 'encerramento'])),
+    changeCk: check('contract_versions_change_ck', inList('change_kind', ['cadastro', 'edicao', 'ativacao', 'renovacao', 'reajuste', 'encerramento', 'aditivo'])),
     valueCk: check('contract_versions_value_ck', sql`monthly_cents >= 0`),
   }),
 );
@@ -1414,6 +1414,25 @@ export const contractLedger = pgTable(
 );
 
 /** Modelos de contrato (Word com {{variáveis}}). */
+/** Termos aditivos: acréscimo, supressão, prazo, reequilíbrio. Cada um gera nova versão do contrato; não se apaga. */
+export const contractAmendments = pgTable('contract_amendments', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  number: text('number').notNull(),
+  kind: text('kind').notNull(),
+  signedOn: date('signed_on', { mode: 'string' }).notNull(),
+  valueDeltaCents: bigint('value_delta_cents', { mode: 'number' }).notNull().default(0),
+  monthlyDeltaCents: bigint('monthly_delta_cents', { mode: 'number' }).notNull().default(0),
+  newEndAt: date('new_end_at', { mode: 'string' }),
+  reforma: boolean('reforma').notNull().default(false),
+  acordo: boolean('acordo').notNull().default(false),
+  description: text('description').notNull(),
+  version: integer('version'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'])) }));
+
 /** Notas de empenho do contrato público: valor empenhado e saldo (faturado contra ele pelo extrato). Anulação não apaga. */
 export const contractCommitments = pgTable('contract_commitments', {
   id: id(),
