@@ -4156,3 +4156,13 @@ export const tenantIpPolicies = pgTable('tenant_ip_policies', {
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 });
+/** Resumo diário da central de atenção dos contratos: um por pessoa por dia (controle de duplicidade). */
+export const contractDigests = pgTable('contract_digests', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  day: date('day', { mode: 'string' }).notNull(),
+  items: integer('items').notNull().default(0),
+  status: text('status').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_digests_uq').on(t.tenantId, t.userId, t.day) }));

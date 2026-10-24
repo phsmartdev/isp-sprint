@@ -14,7 +14,64 @@ import { DaysLeft, MoneyRows, TYPE_COLOR, type ContractRow } from './shared';
 import { FitText } from '../../components/ui/FitText';
 
 type Strat = { key: string; label: string; n: number; monthlyCents: number; billedCents: number };
+type Exec = {
+  contractedAnnualCents: number; backlogCents: number; publicAnnualCents: number;
+  backlogByType: { type: BillingType; label: string; cents: number }[];
+  risk: { days: number; n: number; monthlyCents: number; annualCents: number }[];
+  concentration: { totalCents: number; top1: { key: string; name: string; cents: number } | null; top1Share: number | null; top5Share: number | null; hhi: number | null; level: 'baixa' | 'moderada' | 'alta' | null };
+};
+const CONC_LABEL = { baixa: 'Concentração baixa', moderada: 'Concentração moderada', alta: 'Concentração alta' } as const;
+const CONC_TONE = { baixa: 'text-success', moderada: 'text-[#C2610C]', alta: 'text-danger' } as const;
+
+/** Visão executiva: carteira, backlog, receita em risco por janela e dependência dos maiores clientes. */
+function Executive({ e }: { e: Exec }) {
+  const maxRisk = Math.max(1, ...e.risk.map((r) => r.monthlyCents));
+  const c = e.concentration;
+  return (
+    <section aria-label="Visão executiva" className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="card p-4">
+          <p className="text-sm text-muted">Carteira contratada (12 meses)</p>
+          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(e.contractedAnnualCents)}</FitText>
+          <p className="text-xs text-muted">{e.contractedAnnualCents ? `${fmtPct(e.publicAnnualCents / e.contractedAnnualCents)} em contratos públicos` : 'Sem contratos ativos'}</p>
+        </div>
+        <div className="card p-4">
+          <p className="text-sm text-muted">Backlog: falta faturar do contratado</p>
+          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(e.backlogCents)}</FitText>
+          <div className="mt-2 flex h-2 w-full overflow-hidden bg-surface-2" aria-hidden>{e.backlogByType.map((t) => t.cents ? <div key={t.type} style={{ width: `${(t.cents / Math.max(1, e.backlogCents)) * 100}%`, background: TYPE_COLOR[t.type] }} /> : null)}</div>
+          <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted">{e.backlogByType.map((t) => <span key={t.type}>{t.label} <span className="num">{fmtBRL(t.cents)}</span></span>)}</p>
+        </div>
+        <div className="card p-4">
+          <p className="text-sm text-muted">Dependência dos maiores clientes</p>
+          {!c.top1 ? <p className="mt-2 text-sm text-muted">Sem dados.</p> : <>
+            <p className="num text-2xl font-extrabold text-ink">{fmtPct(c.top1Share)} <span className="text-sm font-semibold text-muted">no maior cliente</span></p>
+            <p className="truncate text-xs text-muted" title={c.top1.name}>{c.top1.name} · 5 maiores somam {fmtPct(c.top5Share)}</p>
+            {c.level && <p className={clsx('mt-1 text-xs font-semibold', CONC_TONE[c.level])}>{CONC_LABEL[c.level]} (HHI {fmtInt(c.hhi ?? 0)})</p>}
+          </>}
+        </div>
+      </div>
+      <div className="card p-4">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="font-bold text-ink">Receita em risco</h3>
+          <p className="text-xs text-muted">Contratos que terminam na janela sem renovação concluída, mais os com encerramento previsto.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {e.risk.map((r) => (
+            <div key={r.days} className="border border-line p-3">
+              <p className="text-xs font-semibold text-muted">Em {r.days} dias</p>
+              <p className="num text-lg font-extrabold text-ink">{fmtBRL(r.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></p>
+              <p className="num text-xs text-muted">{r.n} contrato(s) · {fmtBRL(r.annualCents)}/ano</p>
+              <div className="mt-2 h-1.5 bg-surface-2" aria-hidden><div className="h-1.5 bg-danger" style={{ width: `${(r.monthlyCents / maxRisk) * 100}%`, opacity: 0.45 + 0.55 * (1 - r.days / 180) }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type Dash = {
+  executive: Exec;
   period: { from: string; to: string; prevFrom: string; prevTo: string };
   billing: { totalCents: number; prevTotalCents: number; note: string; byType: { type: BillingType; label: string; active: number; billedCents: number; billedPrevCents: number; monthlyCents: number; balance?: { credited: number; consumed: number; available: number } }[] };
   byBillingType: Strat[]; byKind: Strat[]; bySegment: Strat[]; byOwner: Strat[];
@@ -96,6 +153,7 @@ export function ContractsDashboard() {
         ))}
       </section>
       <p className="-mt-2 text-xs text-muted">{d.billing.note}</p>
+      <Executive e={d.executive} />
 
       <section aria-label="Indicadores da carteira" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat icon={<FileSignature className="h-6 w-6" />} tone="bg-primary-soft text-primary" label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} />

@@ -14,6 +14,8 @@ test('gestão de contratos: painel, funil, calendário, validação e etapa de i
   await login(page, 'carlos@yepnet.test');
   await page.getByRole('link', { name: 'Gestão de Contratos' }).first().click();
   await expect(page.getByRole('heading', { name: 'Gestão de Contratos' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Central de atenção/ })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('tab', { name: 'Painel' }).click();
   await expect(page.getByText('Contratos ativos')).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-painel.png', fullPage: true });
   await page.getByRole('tab', { name: 'Funil' }).click();
@@ -79,7 +81,7 @@ test('oportunidade fechada: cadastrar contrato com os dados do CRM', async ({ pa
 test('modelos com timbrado, gerar contrato, saldo de medição, painel por tipo e relatório completo', async ({ page }) => {
   test.setTimeout(150_000);
   await login(page, 'carlos@yepnet.test');
-  await page.goto('/contracts');
+  await page.goto('/contracts?t=painel');
   await expect(page.getByText('Faturamento total no período')).toBeVisible();
   for (const t of ['Recorrente', 'Frequente', 'Medição']) await expect(page.getByLabel('Faturamento por tipo de contrato').getByText(t, { exact: false }).first()).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-painel2.png', fullPage: true });
@@ -264,4 +266,46 @@ test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato pú
   await expect(yv.getByText(/900,00\/mês/)).toBeVisible();
   await page.getByRole('tab', { name: /Versões/ }).click();
   await expect(page.getByText('Termo aditivo').first()).toBeVisible();
+});
+
+test('central de atenção: fila por gravidade, filtros, resolver na fila e visão executiva', async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page, 'carlos@yepnet.test');
+  const api = page.request;
+  const shift = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const lk = await (await api.get('/api/v1/meta/lookups')).json();
+  const me = await (await api.get('/api/v1/me')).json();
+  const name = `Empresa E2E Atenção ${Date.now().toString(36)}`;
+  const o = await (await api.post('/api/v1/opportunities', { data: { newContact: { name, segment: 'empresarial' }, planId: lk.plans[0].id } })).json();
+  const cur = await (await api.get(`/api/v1/opportunities/${o.id}`)).json();
+  expect((await api.post(`/api/v1/opportunities/${o.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: cur.rowVersion } })).ok()).toBe(true);
+  const created = await api.post('/api/v1/contracts', { data: { opportunityId: o.id, billingType: 'recorrente', kind: 'privado', commercialOwnerId: me.user.id, version: { number: `AT-${Date.now().toString(36)}`, object: 'Link', signedAt: shift(-345), startAt: shift(-340), termMonths: 12, monthlyCents: 300_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 300_000 }] } } });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).id;
+  expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
+  expect((await api.post('/api/v1/contracts/alerts/run')).ok()).toBe(true);
+
+  await page.goto('/contracts');
+  await expect(page.getByRole('tab', { name: /Central de atenção/ })).toHaveAttribute('aria-selected', 'true');
+  const summary = page.getByRole('region', { name: 'Resumo da central de atenção' });
+  await expect(summary.getByRole('button', { name: /Crítico/ })).toBeVisible();
+  const list = page.getByRole('list', { name: 'Itens que pedem ação' });
+  const row = list.getByRole('listitem').filter({ hasText: `Renovação: ${name}` });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('R$ 36.000,00/ano');
+  await page.screenshot({ path: 'test-results/contracts-atencao.png', fullPage: true });
+  await page.getByRole('group', { name: 'Origem' }).getByRole('button', { name: /Notificação/ }).click();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Resolver' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Resolver notificação' });
+  await dlg.getByLabel('Providência tomada').fill('Ofício de renovação enviado ao cliente');
+  await dlg.getByRole('button', { name: 'Concluir notificação' }).click();
+  await expect(row).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Painel' }).click();
+  const ex = page.getByRole('region', { name: 'Visão executiva' });
+  await expect(ex.getByText('Carteira contratada (12 meses)')).toBeVisible();
+  await expect(ex.getByText('Em 180 dias')).toBeVisible();
+  await expect(ex.getByText('Dependência dos maiores clientes')).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-executivo.png', fullPage: true });
 });

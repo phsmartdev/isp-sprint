@@ -16,6 +16,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { AlertList } from '../../features/contracts/ContractPanels';
 import { ContractsDashboard } from '../../features/contracts/Dashboard';
+import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
 import { HabilitationTab } from '../../features/contracts/Habilitation';
@@ -23,9 +24,9 @@ import { TemplatesManager } from '../../features/contracts/SignaturePanels';
 import { AdminContractTemplates } from '../admin/ProposalTemplates';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
 
-type View = 'painel' | 'lista' | 'habilitacao' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
+type View = 'atencao' | 'painel' | 'lista' | 'habilitacao' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
 const TABS: { key: View; label: string }[] = [
-  { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'habilitacao', label: 'Habilitação' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
+  { key: 'atencao', label: 'Central de atenção' }, { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'habilitacao', label: 'Habilitação' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
   { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
 ];
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
@@ -315,11 +316,14 @@ export function ContractsPage() {
   const nav = useNavigate();
   const { can, feature } = useAuth();
   const tabs = TABS.filter((t) => (t.key !== 'modelos' || (can('configuracoes', 'total') && feature('contratos.modelos'))) && (t.key !== 'atas' || feature('contratos.atas')));
-  const [f, setF] = useUrlState({ t: 'painel' });
-  const view = (tabs.some((t) => t.key === f.t) ? f.t : 'painel') as View;
+  const [f, setF] = useUrlState({ t: 'atencao' });
+  const view = (tabs.some((t) => t.key === f.t) ? f.t : 'atencao') as View;
+  const att = useQuery({ queryKey: ['contracts', 'attention', 'todos'], queryFn: () => api<{ summary: { critica: number; alta: number } }>('/contracts/attention'), staleTime: 60_000 });
+  const urgent = att.data ? att.data.summary.critica + att.data.summary.alta : undefined;
+  const shownTabs = tabs.map((t) => (t.key === 'atencao' && urgent ? { ...t, count: urgent } : t));
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TV_TABS = tabs.filter((t) => ['painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
+  const TV_TABS = tabs.filter((t) => ['atencao', 'painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
   return (
     <div className="w-full">
       <PageHeader
@@ -330,7 +334,8 @@ export function ContractsPage() {
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
       {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
-      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={tabs} />
+      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} />
+      {view === 'atencao' && <AttentionCenter />}
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
       {view === 'habilitacao' && <HabilitationTab />}

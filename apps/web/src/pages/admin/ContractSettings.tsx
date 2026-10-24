@@ -10,7 +10,7 @@ import { errMsg } from '../../features/contracts/shared';
 type S = {
   renewalAlertDays: number; closureNoticeDays: number; closureFinalDays: number; guaranteeAlertDays: number; adjustmentAlertDays: number;
   provisioningSlaDays: number; implantationSlaDays: number; signatureSlaDays: number;
-  ccEmail: string; financeEmail: string | null; deliveryEmail: string | null; renewalSubject: string; closureSubject: string; oficioTemplate: string; oficioTemplateId: string | null;
+  ccEmail: string; financeEmail: string | null; deliveryEmail: string | null; renewalSubject: string; closureSubject: string; oficioTemplate: string; oficioTemplateId: string | null; dailyDigest: boolean;
 };
 const DAYS: [keyof S, string, string][] = [
   ['renewalAlertDays', 'Alerta de renovação (dias antes do término)', 'Abre a renovação e cria tarefas para Inteligência Comercial.'],
@@ -53,6 +53,7 @@ export function AdminContractSettings() {
           <FormField label="Assunto do ofício de renovação" htmlFor="cs-rs" className="md:col-span-3" hint="[Nº] e [Nome] viram o número do contrato e o cliente."><Input id="cs-rs" value={f.renewalSubject} onChange={(e) => set({ renewalSubject: e.target.value })} /></FormField>
           <FormField label="Assunto do aviso de encerramento" htmlFor="cs-cs" className="md:col-span-3"><Input id="cs-cs" value={f.closureSubject} onChange={(e) => set({ closureSubject: e.target.value })} /></FormField>
         </div>
+        <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={f.dailyDigest !== false} onChange={(e) => set({ dailyDigest: e.target.checked })} /><span><b className="text-ink">Resumo diário da central de atenção</b><span className="block text-muted">Todo dia cedo, cada pessoa recebe por e-mail o que está com ela; Inteligência Comercial, Diretoria e Administração recebem o resumo da carteira inteira.</span></span></label>
       </section>
       <section className="card p-5">
         <h2 className="mb-1 text-md font-bold text-ink">Ofício de renovação</h2>

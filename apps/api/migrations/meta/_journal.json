@@ -505,6 +505,13 @@
       "when": 1792843453296,
       "tag": "0071_acesso_por_ip",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792850830793,
+      "tag": "0072_resumo_contratos",
+      "breakpoints": true
     }
   ]
 }

@@ -100,7 +100,7 @@ function MoveModal({ c, open, onClose }: { c: ContractDetail; open: boolean; onC
 export function ContractDetailPage() {
   const { id = '' } = useParams();
   const { can, feature } = useAuth();
-  const [tab, setTab] = useState<Tab>('resumo');
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get('aba') as Tab | null) ?? 'resumo');
   const [edit, setEdit] = useState(false);
   const [validate, setValidate] = useState(false);
   const [move, setMove] = useState(false);
