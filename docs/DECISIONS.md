@@ -386,3 +386,15 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Consequência:**
   - A ata ou o relatório dos portais poderá alimentar as mesmas tabelas quando houver arquivos de exemplo.
   - Um CNPJ informado errado separa o histórico. Corrigir o CNPJ nos participantes reúne tudo de novo.
+
+## ADR-071 — E-mail vira negociação; Gmail particular (23/10/2026)
+- **Contexto:** o Paulo quer transformar qualquer e-mail recebido, de caixa de departamento ou pessoal, em negociação. O e-mail deve virar anexo, e a resposta precisa sair pela conversa de origem. Cada pessoa também deve poder conectar o próprio Gmail: o corporativo e, se quiser, um particular.
+- **Decisão:**
+  - Novas rotas: `POST /mail/threads/:id/opportunity` cria a negociação, que nasce no funil Corporativo, usando o mesmo serviço de criação de oportunidade.
+  - A negociação guarda a conversa de origem em `opportunities.origin_mail_thread_id`.
+  - A primeira mensagem recebida vira um anexo `.eml` (RFC 5322, tipo `email`), com download sempre como anexo.
+  - A conversa fica ligada à conta e à negociação.
+  - A resposta pela negociação (`/opportunities/:id/origin-email/reply`) usa a mesma rotina da tela de E-mail. Ela sai pela caixa e na conversa de origem, e só quem atende aquela caixa pode responder.
+  - Caixa pessoal pode ter um endereço diferente do login (Gmail particular), até 3 por pessoa. Ela fica fora da regra de domínio e só a dona vê. O Google confere se quem autoriza é a conta da caixa. Caixa compartilhada continua presa ao domínio da empresa.
+- **Consequência:**
+  - Conectar contas @gmail.com exige o app OAuth do Google Cloud em modo "Externo". Os escopos do Gmail são restritos: em modo de teste, só os usuários de teste cadastrados conseguem conectar; para todo mundo, o Google exige verificação do app.
