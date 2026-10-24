@@ -1,5 +1,5 @@
 /** Termos aditivos com o limite legal de alteração e a sugestão de reajuste pelo índice oficial (Banco Central). */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { AMENDMENT_KINDS, AMENDMENT_LABELS, amendmentError, amendmentLimits, originalValue } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -24,6 +24,33 @@ async function summary(db: Parameters<typeof currentVersion>[0], c: { id: string
 }
 
 export const contractAmendmentRoutes = [
+  defineRoute({
+    method: 'GET', url: '/contracts/:id/year-values', summary: 'Valor mensal do contrato por ano (para comparar receita sem o efeito do reajuste)', tag: 'Contratos', module: 'contratos', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const c = await loadContract(app.db, auth, params.id);
+      const rows = await app.db.select({ id: s.contractYearValues.id, year: s.contractYearValues.year, monthlyCents: s.contractYearValues.monthlyCents, onlyAdjustment: s.contractYearValues.onlyAdjustment, note: s.contractYearValues.note, createdAt: s.contractYearValues.createdAt, supersededAt: s.contractYearValues.supersededAt, by: s.users.name })
+        .from(s.contractYearValues).leftJoin(s.users, eq(s.users.id, s.contractYearValues.createdBy)).where(eq(s.contractYearValues.contractId, c.id)).orderBy(desc(s.contractYearValues.year), desc(s.contractYearValues.createdAt));
+      return { items: rows, canManage: canManage(auth) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/contracts/:id/year-values', summary: 'Informa quanto o contrato valia por mês num ano (corrigir grava novo valor e guarda o anterior)', tag: 'Contratos', module: 'contratos', params: IdParams,
+    body: z.object({ year: z.number().int().min(2000).max(2100), monthlyCents: z.number().int().min(0).max(1_000_000_000_000), onlyAdjustment: z.boolean().default(true), note: z.string().trim().max(500).nullable().optional() }),
+    handler: async ({ app, auth, params, body, req, reply }) => {
+      const c = await loadContract(app.db, auth, params.id);
+      if (!canManage(auth)) throw forbidden('O valor por ano é informado pela gestão de contratos, Inteligência Comercial, Jurídico ou Diretoria.');
+      if (body.year >= Number(new Date().toISOString().slice(0, 4)) + 1) throw unprocessable('Informe um ano que já passou ou o atual.');
+      const id = await app.db.transaction(async (tx) => {
+        await tx.update(s.contractYearValues).set({ supersededAt: new Date() }).where(and(eq(s.contractYearValues.contractId, c.id), eq(s.contractYearValues.year, body.year), isNull(s.contractYearValues.supersededAt)));
+        const [r] = await tx.insert(s.contractYearValues).values({ tenantId: auth.tenantId, contractId: c.id, year: body.year, monthlyCents: body.monthlyCents, onlyAdjustment: body.onlyAdjustment, note: body.note ?? null, createdBy: auth.userId }).returning({ id: s.contractYearValues.id });
+        await addEvent(tx, auth.tenantId, c.id, auth.userId, 'valor_ano', `Valor mensal em ${body.year} informado: ${brl(body.monthlyCents)}${body.onlyAdjustment ? ' (diferença para o valor atual é reajuste)' : ''}.`, { year: body.year, monthlyCents: body.monthlyCents });
+        return r!.id;
+      });
+      await audit(app.db, req, { action: 'contract.year_value', entityType: 'contract', entityId: c.id, metadata: { year: body.year, monthlyCents: body.monthlyCents } });
+      reply.code(201);
+      return { id };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/contracts/:id/amendments', summary: 'Aditivos do contrato e o uso do limite legal de acréscimo e supressão', tag: 'Contratos', module: 'contratos', params: IdParams,
     handler: async ({ app, auth, params }) => {
@@ -53,7 +80,7 @@ export const contractAmendmentRoutes = [
         if (body.newEndAt && cur.endAt && body.newEndAt <= cur.endAt && body.kind === 'prazo') throw unprocessable('O novo término precisa ser depois do atual.');
         if (body.newEndAt && c.legalLimitAt && body.newEndAt > c.legalLimitAt) throw unprocessable(`O novo término passa do limite total de vigência (${c.legalLimitAt}).`);
         const sign = body.kind === 'supressao' ? -1 : 1;
-        const patch: Parameters<typeof newVersion>[3] = {};
+        const patch: Parameters<typeof newVersion>[3] = { effectiveFrom: body.signedOn };
         if (body.monthlyDeltaCents) patch.monthlyCents = Math.max(0, cur.monthlyCents + sign * body.monthlyDeltaCents);
         if (body.valueDeltaCents && cur.totalCents !== null) patch.totalCents = Math.max(0, cur.totalCents + sign * body.valueDeltaCents);
         if (body.newEndAt) { patch.endAt = body.newEndAt; patch.renewalAt = body.newEndAt; }

@@ -45,9 +45,9 @@ test('indicadores principais: importa as fichas, lança resultados e mostra o pa
   await expect(board.getByRole('region', { name: 'Evolução de Booking de Contratos' })).toBeVisible();
   await expect(board.getByRole('region', { name: 'Contratos fechados no trimestre' })).toBeVisible();
   const bk = board.getByRole('region', { name: 'Evolução de Booking de Contratos' });
-  await expect(bk).toContainText('No ano');
+  await expect(bk).toContainText('Crescimento sem reajuste');
   await bk.getByRole('button', { name: 'Ocultar valores' }).click();
-  await expect(bk.getByText('R$ •••••')).toBeVisible();
+  await expect(bk.getByText('R$ •••••').first()).toBeVisible();
   await page.screenshot({ path: 'test-results/kpis-oculto.png' });
   await bk.getByRole('button', { name: 'Mostrar valores' }).click();
   await expect(board.getByRole('region', { name: 'Negociações em andamento' })).toBeVisible();
@@ -56,6 +56,7 @@ test('indicadores principais: importa as fichas, lança resultados e mostra o pa
   await board.getByRole('button', { name: /Taxa de Conversão:/ }).click();
   const drawer = page.getByRole('dialog', { name: 'Taxa de Conversão' });
   await expect(drawer.getByText('Objetivo fictício de Taxa de Conversão.')).toBeVisible();
+  await expect(drawer.getByRole('region', { name: 'Como é calculado' })).toContainText('Das negociações abertas no período');
   await drawer.getByRole('button', { name: 'Lançar resultado' }).click();
   const entry = page.getByRole('dialog', { name: 'Lançar resultado' });
   await entry.getByLabel(/Resultado/).fill('33,5');
@@ -99,4 +100,21 @@ test('dados de demonstração dos indicadores: aviso no painel e retirada com um
   await page.getByRole('button', { name: 'Tirar dados de demonstração' }).click();
   await expect(page.getByText(/resultado\(s\) de demonstração retirado/)).toBeVisible();
   await expect(page.getByText('Resultados de demonstração (fictícios)')).toHaveCount(0);
+});
+
+test('régua de ativação das contas-alvo: sugestão ajustável na ficha', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  expect((await page.request.post('/api/v1/intelligence/kpis/demo')).ok()).toBe(true);
+  await page.goto('/intelligence');
+  await page.getByRole('region', { name: 'Painel de indicadores principais' }).getByRole('button', { name: /Ativação de Contas-Alvo:/ }).click();
+  const calc = page.getByRole('dialog', { name: 'Ativação de Contas-Alvo' }).getByRole('region', { name: 'Como é calculado' });
+  await expect(calc.getByLabel('1:1 (estratégicas): windowDays')).toHaveValue('30');
+  await calc.getByLabel('1:muitos: windowDays').fill('120');
+  await calc.getByLabel('Peso: Resposta à pesquisa de ativação').selectOption('forte');
+  await calc.getByRole('button', { name: 'Salvar régua' }).click();
+  await expect(page.getByText('Cálculo ajustado (nova versão da ficha)')).toBeVisible();
+  await expect(calc.getByLabel('1:muitos: windowDays')).toHaveValue('120');
+  await expect(calc.getByText('Contas-alvo hoje')).toBeVisible();
+  await page.screenshot({ path: 'test-results/kpis-ativacao.png', fullPage: true });
 });

@@ -1,6 +1,7 @@
 /** Indicadores principais (Inteligência): importação da ficha .xlsx, metas por trimestre, lançamentos e farol. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import PizZip from 'pizzip';
+import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -114,6 +115,59 @@ describe('KPIs da Inteligência', () => {
     expect(ok(await carlos.post('/intelligence/kpis/demo/clear')).json().cleared).toBe(r.entries - 1);
     b = ok(await carlos.get('/intelligence/kpis')).json();
     expect(b.demoEntries).toBe(0);
-    expect(b.items.find((i: { key: string }) => i.key === 'kpi_booking_de_contratos').current.months.find((m: { period: string }) => m.period === month).value).toBe(50);
+    const ent = ok(await carlos.get(`/intelligence/kpis/${bk.id}/entries`)).json().items.filter((e: { supersededAt: string | null }) => !e.supersededAt);
+    expect(ent).toHaveLength(1);
+    expect(ent[0]).toMatchObject({ period: month, value: 50 });
+  });
+  it('receita da base de contratos: ano anterior informado separa o reajuste e o Booking passa a ser calculado', async () => {
+    const y = Number(new Date().toISOString().slice(0, 4));
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Cliente Antigo Fictício', segment: 'empresarial' }, planId: plan.id }), 201).json();
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o.id}`)).json().rowVersion }));
+    const id = ok(await carlos.post('/contracts', { opportunityId: o.id, billingType: 'recorrente', kind: 'privado', commercialOwnerId: lucas.me.user.id, version: { number: 'ANT-1', object: 'Link', signedAt: `${y - 1}-01-01`, startAt: `${y - 1}-01-01`, termMonths: 36, monthlyCents: 100_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 100_000 }] } }), 201).json().id;
+    ok(await carlos.post(`/contracts/${id}/validate`));
+    const before = ok(await carlos.get('/intelligence/revenue')).json();
+    expect(before.months).toHaveLength(12);
+    expect(before.missingHistory).toBeGreaterThanOrEqual(1); // cadastrado agora, existia no ano anterior e sem valor daquele ano
+    expect((await lucas.post(`/contracts/${id}/year-values`, { year: y - 1, monthlyCents: 90_000 })).statusCode).toBe(403);
+    ok(await carlos.post(`/contracts/${id}/year-values`, { year: y - 1, monthlyCents: 90_000, onlyAdjustment: true, note: 'Valor antes do reajuste' }), 201);
+    const after = ok(await carlos.get('/intelligence/revenue')).json();
+    expect(after.prevMonths[0].total - before.prevMonths[0].total).toBe(-10_000);
+    expect(after.months[0].reajuste - before.months[0].reajuste).toBe(10_000);
+    expect(after.missingHistory).toBe(before.missingHistory - 1);
+    expect(after.totals[String(y - 1)]).toBeGreaterThan(0);
+    const hist = ok(await carlos.get(`/contracts/${id}/year-values`)).json();
+    expect(hist.items[0]).toMatchObject({ year: y - 1, monthlyCents: 90_000, onlyAdjustment: true });
+    const k = ok(await carlos.get('/intelligence/kpis')).json().items.find((i: { key: string }) => i.key === 'kpi_booking_de_contratos');
+    expect(k.source).toBe('crm');
+    expect(k.annual.value).toBeCloseTo(after.ytd.growthComparable, 0);
+  });
+  it('KPIs calculados do CRM: lead time pelas categorias escolhidas, ativação pela régua ajustável', async () => {
+    const all = ok(await carlos.get('/intelligence/kpis')).json().items as { id: string; key: string; source: string; current: { value: number | null } | null }[];
+    const lead = all.find((i) => i.key === 'kpi_lead_time_viabilidade')!;
+    const abm = all.find((i) => i.key === 'kpi_ativacao_de_contas_alvo')!;
+    // conversão e win rate saem do funil
+    expect(all.find((i) => i.key === 'kpi_taxa_de_conversao')!.source).toBe('crm');
+    // lead time: sem categoria escolhida fica o informado; escolhendo, calcula a média
+    let calc = ok(await carlos.get(`/intelligence/kpis/${lead.id}/calc`)).json();
+    expect(calc).toMatchObject({ kind: 'lead_time', taskCategories: [] });
+    const [{ tenant_id: tid, id: uid }] = (await ctx.db.execute<{ tenant_id: string; id: string }>(sql`select tenant_id, id from users where email = 'carlos@yepnet.test'`)).rows as { tenant_id: string; id: string }[];
+    await ctx.db.execute(sql`insert into activities (tenant_id, type, title, owner_id, category, created_at, completed_at, status) values
+      (${tid}, 'tarefa', 'Viabilidade engenharia fictícia', ${uid}, 'Viabilidade Engenharia', now() - interval '3 days', now(), 'concluida'),
+      (${tid}, 'tarefa', 'Viabilidade infra fictícia', ${uid}, 'Viabilidade Infraestrutura', now() - interval '1 days', now(), 'concluida')`);
+    expect((await lucas.put(`/intelligence/kpis/${lead.id}/calc`, { taskCategories: ['Viabilidade Engenharia'] })).statusCode).toBe(403);
+    ok(await carlos.put(`/intelligence/kpis/${lead.id}/calc`, { taskCategories: ['Viabilidade Engenharia', 'viabilidade infraestrutura'] }));
+    const after = (ok(await carlos.get('/intelligence/kpis')).json().items as typeof all).find((i) => i.key === 'kpi_lead_time_viabilidade')!;
+    expect(after.source).toBe('crm');
+    expect(after.current!.value).toBeCloseTo(2, 0);
+    // ativação: régua sugerida, ajustável e validada
+    calc = ok(await carlos.get(`/intelligence/kpis/${abm.id}/calc`)).json();
+    expect(calc.activation.tiers['1_1']).toEqual({ windowDays: 30, minPoints: 6, minStrong: 1, minPeople: 2 });
+    expect((await carlos.put(`/intelligence/kpis/${abm.id}/calc`, { activation: { ...calc.activation, tiers: { ...calc.activation.tiers, '1_1': { windowDays: 2, minPoints: 6, minStrong: 1, minPeople: 2 } } } })).statusCode).toBe(422);
+    ok(await carlos.put(`/intelligence/kpis/${abm.id}/calc`, { activation: { ...calc.activation, tiers: { ...calc.activation.tiers, '1_muitos': { windowDays: 120, minPoints: 2, minStrong: 0, minPeople: 1 } } } }));
+    expect(ok(await carlos.get(`/intelligence/kpis/${abm.id}/calc`)).json().activation.tiers['1_muitos'].windowDays).toBe(120);
+    const acc = ok(await carlos.get('/intelligence/kpis/activation/accounts')).json();
+    expect(Array.isArray(acc.items)).toBe(true);
+    for (const a of acc.items) expect(['ativada', 'engajada', 'esfriando', 'nao_engajada']).toContain(a.state);
   });
 });

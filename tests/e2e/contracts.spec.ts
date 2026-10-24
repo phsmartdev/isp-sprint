@@ -256,6 +256,12 @@ test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato pú
   await expect(sec.getByText('Aditivo 1 · Acréscimo de valor/quantidade')).toBeVisible();
   await expect(sec).toContainText('20% de 25% · restam R$ 600,00');
   await expect(sec).toContainText('Mensal +R$ 200,00');
+  // valor do ano anterior (para o Booking não contar reajuste como crescimento)
+  const yv = page.getByRole('region', { name: 'Valor por ano' });
+  await yv.getByLabel('Valor mensal naquele ano').fill('900');
+  await yv.getByLabel('Observação').fill('Antes do reajuste');
+  await yv.getByRole('button', { name: 'Salvar valor' }).click();
+  await expect(yv.getByText(/900,00\/mês/)).toBeVisible();
   await page.getByRole('tab', { name: /Versões/ }).click();
   await expect(page.getByText('Termo aditivo').first()).toBeVisible();
 });

@@ -160,7 +160,7 @@ export const contractWorkRoutes = [
               if ((p.steps.aprovacao?.value as { decision?: string } | undefined)?.decision !== 'sim') throw bad('O reajuste precisa estar aprovado.');
               const cur = await currentVersion(tx, c);
               const factor = calc.newCents / Math.max(1, cur.monthlyCents);
-              await newVersion(tx, c, auth.userId, { monthlyCents: calc.newCents, items: cur.items.map((i) => ({ ...i, unitCents: Math.round(i.unitCents * factor) })) }, 'reajuste', `Reajuste ${calc.index ?? ''} ${calc.pct}% aplicado em ${val.date}: ${brl(cur.monthlyCents)} → ${brl(calc.newCents)}`.replace(/\s+/g, ' '));
+              await newVersion(tx, c, auth.userId, { monthlyCents: calc.newCents, effectiveFrom: /^\d{4}-\d{2}-\d{2}$/.test(p.cycleKey) ? p.cycleKey : val.date, items: cur.items.map((i) => ({ ...i, unitCents: Math.round(i.unitCents * factor) })) }, 'reajuste', `Reajuste ${calc.index ?? ''} ${calc.pct}% aplicado em ${val.date}: ${brl(cur.monthlyCents)} → ${brl(calc.newCents)}`.replace(/\s+/g, ' '));
               result.monthlyCents = calc.newCents;
             }
             break;

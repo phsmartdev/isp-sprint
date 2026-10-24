@@ -12,6 +12,7 @@ import { fmtDateTime } from '../../lib/format';
 import { Button, ErrorState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { KpiCalc } from './KpiCalc';
 import { KpiBoard, ST_LABEL, kpiText, monthName, useKpis, type KpiData, type KpiItem } from './KpiBoard';
 
 export function KpiPanel() {
@@ -98,6 +99,7 @@ function KpiDrawer({ it, d, onClose, onEnter }: { it: KpiItem; d: KpiData; onClo
           </table></div>
           <p className="mt-2 text-xs text-muted">{[limit, `Trimestre e ano: ${KPI_AGGREGATION_LABELS[sh.aggregation].toLowerCase()}`, it.def.direction === 'menor' ? 'Quanto menor, melhor' : 'Quanto maior, melhor'].filter(Boolean).join(' · ')}</p>
         </section>
+        <KpiCalc id={it.id} />
         <section aria-label="Ficha do indicador">
           <h3 className="mb-1 text-md font-bold text-ink">Ficha do indicador</h3>
           <dl>
@@ -106,7 +108,8 @@ function KpiDrawer({ it, d, onClose, onEnter }: { it: KpiItem; d: KpiData; onClo
             <Row label="Descrição">{it.def.description}</Row>
             <Row label="Fórmula">{sh.formulaText}</Row>
             <Row label="Unidade">{INDICATOR_UNIT_LABELS[u]}</Row>
-            <Row label="Fonte dos dados">{sh.sourceSystem ? `${sh.sourceSystem} (por enquanto, lançado à mão aqui)` : null}</Row>
+            <Row label="Fonte na ficha original">{sh.sourceSystem}</Row>
+            <Row label="Resultado no painel">{it.source === 'crm' ? 'Calculado do CRM (veja Como é calculado)' : 'Lançado na tela'}</Row>
             <Row label="Medição">{it.def.period === 'mes' ? 'Mensal' : 'Trimestral'}</Row>
             <Row label="Revisão">{sh.reviewFreq}</Row>
             <Row label="Responsável">{sh.owner}</Row>
