@@ -1,4 +1,5 @@
 import { CompetitorsPanel } from '../features/intel/Competitors';
+import { StageFunnel } from '../features/intel/StageFunnel';
 import { KpiPanel } from '../features/kpis/KpiPanel';
 import { useRef } from 'react';
 import { ArpDashboard } from '../features/arp/AtasTab';
@@ -163,6 +164,7 @@ export function IntelligencePage() {
               </tbody>
             </table>
           </section>
+          <div className="xl:col-span-12"><StageFunnel from={f.from} to={f.to} /></div>
           <section className="card p-5 xl:col-span-7" aria-labelledby="h-ins">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="h-ins" className="text-lg font-bold text-ink">Principais insights</h2>
