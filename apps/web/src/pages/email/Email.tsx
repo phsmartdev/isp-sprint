@@ -321,6 +321,29 @@ const CONNECT_MSG: Record<string, { tone: 'info' | 'warning'; text: string }> = 
   google_desligado: { tone: 'warning', text: 'A integração com o Google não está configurada no servidor.' },
 };
 
+/** Conexão do Gmail pessoal com senha de app (IMAP/SMTP do Gmail), sem depender do Google Cloud. */
+function AppPasswordConnect({ boxId, address }: { boxId: string; address: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [pwd, setPwd] = useState('');
+  const go = useMutation({
+    mutationFn: () => api<{ ok: boolean; sync: { ok: boolean; stored: number; error: string | null } }>(`/mail/mailboxes/${boxId}/app-password`, { method: 'POST', body: { password: pwd } }),
+    onSuccess: (r) => { setPwd(''); void qc.invalidateQueries({ queryKey: ['mail'] }); toast({ tone: r.sync.ok ? 'success' : 'error', message: r.sync.ok ? `Gmail conectado. ${r.sync.stored} mensagem(ns) trazida(s).` : `Conectado, mas a leitura falhou: ${r.sync.error}` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const letters = pwd.replace(/\s+/g, '');
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      <p className="text-sm text-text">Conectar com <b>senha de app</b> do Gmail</p>
+      <p className="text-xs text-muted">Crie em <a className="font-semibold text-primary hover:underline" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">myaccount.google.com/apppasswords</a> entrando com {address} (precisa da verificação em duas etapas). São 16 letras; não é a senha normal da conta.</p>
+      <div className="flex flex-wrap gap-2">
+        <Input aria-label={`Senha de app de ${address}`} type="password" autoComplete="off" className="min-w-0 flex-1" placeholder="abcd efgh ijkl mnop" value={pwd} onChange={(e) => setPwd(e.target.value)} />
+        <Button size="sm" variant="primary" disabled={letters.length !== 16} loading={go.isPending} onClick={() => go.mutate()}>Conectar com senha de app</Button>
+      </div>
+    </div>
+  );
+}
+
 export function MailboxesPage() {
   const toast = useToast();
   const qc = useQueryClient();
@@ -333,6 +356,7 @@ export function MailboxesPage() {
   const [privateAddr, setPrivateAddr] = useState('');
   const create = useMutation({
     mutationFn: (address?: string) => api<{ id: string }>('/mail/mailboxes', { method: 'POST', body: { kind: 'pessoal', ...(address ? { address } : {}) } }),
+    // com a integração do Google, já abre a autorização; sem ela, a caixa aparece pedindo a senha de app
     onSuccess: (b) => { void qc.invalidateQueries({ queryKey: ['mail'] }); setPrivateAddr(''); if (settings.data?.google.configured) connect.mutate(b.id); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -351,13 +375,13 @@ export function MailboxesPage() {
       <PageHeader icon={<Mail />} title="Caixas de e-mail" subtitle="Conecte o Gmail para ler e responder pelo CRM. O acesso fica guardado cifrado e pode ser removido a qualquer momento." actions={<Link to="/email" className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-sm border border-line bg-surface px-4 font-semibold text-ink hover:bg-surface-2">Voltar ao e-mail</Link>} />
       {result && CONNECT_MSG[result] && <Notice tone={CONNECT_MSG[result]!.tone}>{CONNECT_MSG[result]!.text} <button type="button" className="font-semibold underline" onClick={() => nav('/email/caixas', { replace: true })}>ok</button></Notice>}
       {settings.data?.google.simulated && <Notice tone="warning">Ambiente de teste: o Google aqui é simulado. A conexão real depende do projeto no Google Cloud com a Gmail API aprovada.</Notice>}
-      {!settings.data?.google.configured && <Notice tone="warning">A integração com o Google ainda não está configurada no servidor. Fale com a gerência.</Notice>}
+      {!settings.data?.google.configured && <Notice>Conecte o seu Gmail com uma <b>senha de app</b>: cadastre a caixa e cole a senha de 16 letras criada em myaccount.google.com/apppasswords (precisa da verificação em duas etapas ligada).</Notice>}
       <div className="grid gap-3 md:grid-cols-2">
         {!mine && (
           <div className="card flex flex-col items-start gap-2 p-4">
             <h2 className="text-md font-bold text-ink">Meu e-mail corporativo</h2>
             <p className="text-sm text-muted">{domainOk ? `Conecte ${d.me.email}. Só você vê esta caixa.` : `O domínio ${myDomain} não está liberado em Configurações → E-mail corporativo.`}</p>
-            <Button variant="primary" disabled={!domainOk || !settings.data?.google.configured} loading={create.isPending && !create.variables} onClick={() => create.mutate(undefined)}>Conectar meu Gmail</Button>
+            <Button variant="primary" disabled={!domainOk} loading={create.isPending && !create.variables} onClick={() => create.mutate(undefined)}>Conectar meu Gmail</Button>
           </div>
         )}
         {privates.length < 2 && (
@@ -366,7 +390,7 @@ export function MailboxesPage() {
             <p className="text-sm text-muted">Conecte também uma conta Gmail sua fora do domínio da empresa (ex.: @gmail.com). Só você vê esta caixa; o Google pede para entrar com essa mesma conta.</p>
             <div className="flex w-full flex-wrap gap-2">
               <Input aria-label="Endereço do Gmail particular" type="email" className="min-w-0 flex-1" placeholder="seu.nome@gmail.com" value={privateAddr} onChange={(e) => setPrivateAddr(e.target.value)} />
-              <Button variant="primary" disabled={!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(privateAddr.trim()) || !settings.data?.google.configured} loading={create.isPending && !!create.variables} onClick={() => create.mutate(privateAddr.trim())}>Conectar Gmail particular</Button>
+              <Button variant="primary" disabled={!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(privateAddr.trim())} loading={create.isPending && !!create.variables} onClick={() => create.mutate(privateAddr.trim())}>Conectar Gmail particular</Button>
             </div>
           </div>
         )}
@@ -380,13 +404,14 @@ export function MailboxesPage() {
             <p className="text-xs text-muted">{b.lastRun ? `Última sincronização ${fmtDateTime(b.lastRun.created_at)} (${b.lastRun.kind}): ${b.lastRun.ok ? `${b.lastRun.stored} nova(s)` : 'falhou'}` : 'Ainda não sincronizada.'}</p>
             {(b.kind === 'pessoal' || d.canConfigure) && (
               <div className="flex flex-wrap gap-2">
-                {b.status !== 'conectada' && <Button size="sm" variant="primary" loading={connect.isPending && connect.variables === b.id} disabled={!settings.data?.google.configured} onClick={() => connect.mutate(b.id)}>{b.status === 'desconectada' ? 'Conectar com o Google' : 'Reconectar'}</Button>}
+                {b.status !== 'conectada' && settings.data?.google.configured && <Button size="sm" variant="primary" loading={connect.isPending && connect.variables === b.id} onClick={() => connect.mutate(b.id)}>{b.status === 'desconectada' ? 'Conectar com o Google' : 'Reconectar'}</Button>}
                 {b.status === 'conectada' && <Button size="sm" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={sync.isPending && sync.variables === b.id} onClick={() => sync.mutate(b.id)}>Sincronizar agora</Button>}
                 {b.status === 'conectada' && <Button size="sm" variant="ghost" onClick={() => state.mutate({ id: b.id, action: 'pausar' })}>Pausar</Button>}
                 {b.status === 'pausada' && <Button size="sm" variant="ghost" onClick={() => state.mutate({ id: b.id, action: 'retomar' })}>Retomar</Button>}
                 {b.status !== 'desconectada' && <Button size="sm" variant="ghost" onClick={() => state.mutate({ id: b.id, action: 'desconectar' })}>Desconectar</Button>}
               </div>
             )}
+            {b.kind === 'pessoal' && b.status !== 'conectada' && b.status !== 'pausada' && <AppPasswordConnect boxId={b.id} address={b.address} />}
           </article>
         ))}
       </div>

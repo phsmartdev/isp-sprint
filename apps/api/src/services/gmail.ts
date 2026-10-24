@@ -19,6 +19,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { Config } from '../config';
 import { decryptSecret, encryptSecret } from './email';
+import { gmailPassword, GmailPasswordError, imapToGMessage } from './gmailPassword';
 
 type GmailCfg = NonNullable<Config['gmail']>;
 type Box = typeof s.mailboxes.$inferSelect;
@@ -154,6 +155,11 @@ export async function ingestMessage(db: DbOrTx, box: Box, ctx: Ctx, m: GMessage,
   const direction: 'entrada' | 'saida' = fromEmail === box.address || p.labels.includes('SENT') ? 'saida' : 'entrada';
   const participants = [...new Set([fromEmail, ...p.to, ...p.cc].filter(Boolean))];
   const tenantId = box.tenantId;
+  // a mesma mensagem por outro caminho (ex.: enviada pelo SMTP e depois lida na IMAP) não entra duas vezes
+  if (p.rfcId) {
+    const [dup] = await db.select({ id: s.mailMessages.id }).from(s.mailMessages).where(and(eq(s.mailMessages.mailboxId, box.id), eq(s.mailMessages.rfcMessageId, p.rfcId))).limit(1);
+    if (dup) return false;
+  }
 
   let [thread] = await db.select().from(s.mailThreads).where(and(eq(s.mailThreads.mailboxId, box.id), eq(s.mailThreads.gmailThreadId, m.threadId))).limit(1);
   const isNewThread = !thread;
@@ -226,9 +232,11 @@ export async function ingestMessage(db: DbOrTx, box: Box, ctx: Ctx, m: GMessage,
 type ListResp = { messages?: { id: string; threadId: string }[]; nextPageToken?: string };
 type HistoryResp = { history?: { messagesAdded?: { message: { id: string; threadId: string; labelIds?: string[] } }[] }[]; historyId?: string; nextPageToken?: string };
 
-export async function syncMailbox(db: DbOrTx, cfg: GmailCfg, boxId: string, actorId: string | null = null, kind = 'incremental') {
+export async function syncMailbox(db: DbOrTx, cfg: GmailCfg | null, boxId: string, actorId: string | null = null, kind = 'incremental') {
   const [box] = await db.select().from(s.mailboxes).where(eq(s.mailboxes.id, boxId)).limit(1);
   if (!box || box.status === 'desconectada' || box.status === 'pausada') return { ok: false, fetched: 0, stored: 0, error: 'Caixa não conectada.' };
+  if (box.provider === 'gmail_senha') return syncPasswordBox(db, box, actorId, kind);
+  if (!cfg) return { ok: false, fetched: 0, stored: 0, error: 'A integração com o Google não está configurada no servidor.' };
   const ctx = await loadCtx(db, box.tenantId);
   const [st] = await db.select().from(s.mailSettings).where(eq(s.mailSettings.tenantId, box.tenantId)).limit(1);
   let fetched = 0, stored = 0;
@@ -278,10 +286,12 @@ export async function syncMailbox(db: DbOrTx, cfg: GmailCfg, boxId: string, acto
 
 /** Sincroniza as caixas conectadas da empresa que não sincronizam há `maxAgeMs`. */
 export async function syncTenantMail(db: DbOrTx, cfg: Config['gmail'], tenantId: string, maxAgeMs = 5 * 60_000, onlyIds?: string[]) {
-  if (!cfg) return { boxes: 0 };
-  const boxes = await db.select({ id: s.mailboxes.id, last: s.mailboxes.lastSyncAt }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, tenantId), eq(s.mailboxes.status, 'conectada'), ...(onlyIds ? [inArray(s.mailboxes.id, onlyIds.length ? onlyIds : ['00000000-0000-0000-0000-000000000000'])] : [])));
+  const boxes = await db.select({ id: s.mailboxes.id, last: s.mailboxes.lastSyncAt, provider: s.mailboxes.provider }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, tenantId), eq(s.mailboxes.status, 'conectada'), ...(onlyIds ? [inArray(s.mailboxes.id, onlyIds.length ? onlyIds : ['00000000-0000-0000-0000-000000000000'])] : [])));
   let n = 0;
-  for (const b of boxes) if (!b.last || Date.now() - b.last.getTime() > maxAgeMs) { await syncMailbox(db, cfg, b.id); n++; }
+  for (const b of boxes) {
+    if (b.provider !== 'gmail_senha' && !cfg) continue;
+    if (!b.last || Date.now() - b.last.getTime() > maxAgeMs) { await syncMailbox(db, cfg, b.id); n++; }
+  }
   return { boxes: n };
 }
 
@@ -304,7 +314,9 @@ export function buildRaw(m: { from: string; fromName?: string | null; to: string
   return b64u(lines.join('\r\n'));
 }
 
-export async function sendFromBox(db: DbOrTx, cfg: GmailCfg, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
+export async function sendFromBox(db: DbOrTx, cfg: GmailCfg | null, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
+  if (box.provider === 'gmail_senha') return sendWithPassword(db, box, input, userId);
+  if (!cfg) throw new GmailError('A integração com o Google não está configurada no servidor.', 503);
   const raw = buildRaw({ from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, inReplyTo: input.inReplyTo, references: input.references });
   const sent = await gmailApi<{ id: string; threadId: string; labelIds?: string[] }>(db, cfg, box, '/messages/send', { method: 'POST', body: JSON.stringify({ raw, ...(input.threadGmailId ? { threadId: input.threadGmailId } : {}) }) });
   // guarda já a mensagem enviada (a próxima sincronização encontra o mesmo id e ignora)
@@ -315,3 +327,50 @@ export async function sendFromBox(db: DbOrTx, cfg: GmailCfg, box: Box, input: { 
 }
 
 export { domainAllowed };
+
+// ------------------------------------------------------------------ Gmail com senha de app (IMAP/SMTP)
+
+function boxPassword(box: Box) {
+  const pass = box.appPasswordEnc ? decryptSecret(box.appPasswordEnc) : null;
+  if (!pass) throw new GmailPasswordError('A senha de app desta caixa não pôde ser lida. Conecte de novo com a senha de app.', true);
+  return pass;
+}
+
+async function syncPasswordBox(db: DbOrTx, box: Box, actorId: string | null, kind: string) {
+  const ctx = await loadCtx(db, box.tenantId);
+  const [st] = await db.select().from(s.mailSettings).where(eq(s.mailSettings.tenantId, box.tenantId)).limit(1);
+  let fetched = 0, stored = 0;
+  try {
+    const [uv, last] = (box.historyId ?? '').split(':');
+    const since = new Date(Date.now() - (st?.syncDays ?? 30) * 86_400_000);
+    const r = await gmailPassword().fetch(box.address, boxPassword(box), { since, afterUid: last ? Number(last) : undefined, uidValidity: uv || undefined, max: last ? 100 : 50 }); // cabe no tempo da função; o resto vem nas próximas leituras
+    if (!last || uv !== r.uidValidity) kind = 'completa';
+    fetched = r.messages.length;
+    const msgs = await Promise.all(r.messages.map(imapToGMessage));
+    msgs.sort((a, b) => Number(a.internalDate) - Number(b.internalDate));
+    for (const m of msgs) if (await ingestMessage(db, box, ctx, m)) stored++;
+    await db.update(s.mailboxes).set({ historyId: `${r.uidValidity}:${r.lastUid}`, lastSyncAt: new Date(), lastError: null, status: 'conectada' }).where(eq(s.mailboxes.id, box.id));
+    await db.insert(s.mailSyncRuns).values({ tenantId: box.tenantId, mailboxId: box.id, kind, ok: true, fetched, stored, actorId });
+    return { ok: true, fetched, stored, error: null };
+  } catch (e) {
+    const msg = (e as Error).message.slice(0, 500);
+    await db.update(s.mailboxes).set({ lastError: msg, lastSyncAt: new Date(), ...(e instanceof GmailPasswordError && e.auth ? { status: 'erro' } : {}) }).where(eq(s.mailboxes.id, box.id));
+    await db.insert(s.mailSyncRuns).values({ tenantId: box.tenantId, mailboxId: box.id, kind, ok: false, fetched, stored, error: msg, actorId });
+    return { ok: false, fetched, stored, error: msg };
+  }
+}
+
+async function sendWithPassword(db: DbOrTx, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
+  let sent: { messageId: string };
+  try {
+    sent = await gmailPassword().send(box.address, boxPassword(box), { from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, inReplyTo: input.inReplyTo, references: input.references });
+  } catch (e) {
+    throw new GmailError((e as Error).message, e instanceof GmailPasswordError && e.auth ? 401 : 502);
+  }
+  // guarda já a enviada; quando a IMAP trouxer a mesma mensagem (mesmo Message-ID), ela é ignorada
+  const ctx = await loadCtx(db, box.tenantId);
+  const id = `smtp:${sent.messageId}`;
+  const headers = [{ name: 'From', value: box.address }, { name: 'To', value: input.to.join(', ') }, ...(input.cc?.length ? [{ name: 'Cc', value: input.cc.join(', ') }] : []), { name: 'Subject', value: input.subject }, { name: 'Message-ID', value: sent.messageId }];
+  await ingestMessage(db, box, ctx, { id, threadId: input.threadGmailId ?? id, labelIds: ['SENT'], snippet: input.text.slice(0, 200), internalDate: String(Date.now()), payload: { mimeType: 'text/plain', headers, body: { data: b64u(input.text) } } }, userId);
+  return { id, threadId: input.threadGmailId ?? id };
+}
