@@ -17,7 +17,7 @@ export type KpiItem = {
   id: string; key: string; version: number; def: IndicatorDef; quarters: KpiQuarter[]; current: KpiQuarter | null;
   annual: { target: number | null; value: number | null; status: KpiStatus; attainment: number | null }; lastEntryAt: string | null; lastPeriod: string | null;
 };
-export type KpiData = { year: number; today: string; quarter: number | null; items: KpiItem[]; canEnter: boolean; canImport: boolean; summary: { total: number; atingido: number; atencao: number; abaixo: number; sem_dado: number } };
+export type KpiData = { year: number; today: string; quarter: number | null; items: KpiItem[]; canEnter: boolean; canImport: boolean; demoEntries: number; summary: { total: number; atingido: number; atencao: number; abaixo: number; sem_dado: number } };
 
 export const useKpis = (year?: number, refetchMs = 60_000) => useQuery({ queryKey: ['kpis', year ?? 'atual'], queryFn: () => api<KpiData>(`/intelligence/kpis${qs({ year })}`), refetchInterval: refetchMs, refetchIntervalInBackground: true, retry: 2 });
 
@@ -230,6 +230,7 @@ function Summary({ d, updatedAt, stale }: { d: KpiData; updatedAt: number; stale
         <span className="flex gap-1.5" aria-hidden>{live(d).map((i) => <Dot key={i.id} st={i.current?.status ?? 'sem_dado'} className="h-2.5 w-2.5" />)}</span>
         <span className="text-sm text-muted"><b className="text-ink">{s.atingido} de {s.total}</b> na meta{s.atencao ? ` · ${s.atencao} no limite` : ''}{s.abaixo ? ` · ${s.abaixo} fora` : ''}{s.sem_dado ? ` · ${s.sem_dado} sem resultado` : ''}</span>
       </div>
+      {d.demoEntries > 0 && <p className="bg-warning-soft px-2.5 py-1 text-xs font-semibold text-[#9A4B07]">Resultados de demonstração (fictícios)</p>}
       <p className={clsx('ml-auto text-xs', stale ? 'font-semibold text-[#C2610C]' : 'text-muted')}>{stale ? 'Sem conexão desde' : 'Dados de'} {new Date(updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
     </section>
   );

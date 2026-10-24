@@ -14,6 +14,7 @@ import { allIndicators, indicatorDef, indicatorEntriesOf } from '../services/ind
 import { level } from '../services/scope';
 import { todayLocal } from '../services/projects';
 import { excelDate, readXlsx } from '../services/xlsx';
+import { clearKpiDemo, loadKpiDemo } from '../services/kpiDemo';
 import type { AuthContext } from '../http/context';
 
 const canEnter = (auth: AuthContext) => level(auth, 'configuracoes') === 'total' || level(auth, 'inteligencia') === 'total' || auth.sectors.some((x) => x === 'inteligencia_comercial' || x === 'diretoria');
@@ -147,6 +148,24 @@ async function bookingContext(db: Parameters<typeof allIndicators>[0], tenantId:
 
 export const kpiRoutes = [
   defineRoute({
+    method: 'POST', url: '/intelligence/kpis/demo', summary: 'Cria as fichas dos indicadores principais que faltam e lança resultados fictícios de demonstração onde não há resultado', tag: 'Inteligência', module: 'inteligencia',
+    handler: async ({ app, auth, req }) => {
+      if (!canImport(auth)) throw forbidden('Dados de demonstração exigem visão total em Configurações.');
+      const r = await app.db.transaction((tx) => loadKpiDemo(tx, auth.tenantId, todayLocal(auth), auth.userId));
+      await audit(app.db, req, { action: 'kpi.demo.load', entityType: 'tenant', entityId: auth.tenantId, metadata: r });
+      return r;
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/intelligence/kpis/demo/clear', summary: 'Tira os resultados fictícios de demonstração (ficam no histórico como substituídos)', tag: 'Inteligência', module: 'inteligencia',
+    handler: async ({ app, auth, req }) => {
+      if (!canEnter(auth)) throw forbidden('Sem permissão para mexer nos resultados dos indicadores.');
+      const r = await clearKpiDemo(app.db, auth.tenantId);
+      await audit(app.db, req, { action: 'kpi.demo.clear', entityType: 'tenant', entityId: auth.tenantId, metadata: r });
+      return r;
+    },
+  }),
+  defineRoute({
     method: 'GET', url: '/intelligence/kpis/context', summary: 'Contexto do Booking no trimestre: contratos fechados, negociações em andamento e saúde das contas', tag: 'Inteligência', module: 'inteligencia',
     query: z.object({ year: z.coerce.number().int().min(2020).max(2100).optional(), quarter: z.coerce.number().int().min(1).max(4).optional() }),
     handler: async ({ app, auth, query }) => {
@@ -170,6 +189,7 @@ export const kpiRoutes = [
       const count = (st: KpiStatus) => live.filter((i) => i.current?.status === st).length;
       return {
         year, today, quarter: Number(today.slice(0, 4)) === year ? quarterOf(today) : null, items, canEnter: canEnter(auth), canImport: canImport(auth),
+        demoEntries: (await app.db.select({ id: s.indicatorEntries.id }).from(s.indicatorEntries).where(and(eq(s.indicatorEntries.tenantId, auth.tenantId), eq(s.indicatorEntries.source, 'demonstracao'), isNull(s.indicatorEntries.supersededAt)))).length,
         summary: { total: live.length, atingido: count('atingido'), atencao: count('atencao'), abaixo: count('abaixo'), sem_dado: count('sem_dado') },
       };
     },
@@ -219,6 +239,7 @@ export const kpiRoutes = [
         const p = parseKpiForm(sh.name, rows);
         if (!p) return null;
         const ex = existing.find((i) => i.key === p.key);
+        if (ex?.def.sheet?.main) p.def.sheet!.main = true; // reimportar não tira o indicador principal
         return { ...p, action: ex ? 'atualizar' : 'criar', indicatorId: ex?.id ?? null };
       }).filter(Boolean);
       // a primeira ficha do arquivo é o indicador principal (dá para trocar na prévia)

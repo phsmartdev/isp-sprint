@@ -97,4 +97,23 @@ describe('KPIs da Inteligência', () => {
     expect(c.pipeline.won).toBeGreaterThan(0);
     expect(c.health.bands.map((b: { key: string }) => b.key)).toEqual(['saudavel', 'atencao', 'risco', 'sem_dado']);
   });
+  it('dados de demonstração: cria as 9 fichas, lança só onde não há resultado, aparece marcado e sai com um clique', async () => {
+    expect((await lucas.post('/intelligence/kpis/demo')).statusCode).toBe(403);
+    const r = ok(await carlos.post('/intelligence/kpis/demo')).json();
+    expect(r.created).toBe(9);
+    expect(r.entries).toBeGreaterThan(9);
+    expect(ok(await carlos.post('/intelligence/kpis/demo')).json()).toEqual({ created: 0, entries: 0 }); // idempotente
+    let b = ok(await carlos.get('/intelligence/kpis')).json();
+    expect(b.demoEntries).toBe(r.entries);
+    const bk = b.items.find((i: { key: string }) => i.key === 'kpi_booking_de_contratos');
+    expect(bk.def.sheet).toMatchObject({ main: true, owner: null, quarterTargets: [35, 60, 50, 35] });
+    expect(bk.current.value).not.toBeNull();
+    expect(b.items.filter((i: { def: { sheet: { paused: boolean } } }) => i.def.sheet.paused).map((i: { key: string }) => i.key)).toEqual(expect.arrayContaining(['kpi_mix_receita_produto', 'kpi_taxa_de_conversao_sql']));
+    // resultado real lançado não é tocado pela limpeza
+    ok(await carlos.post(`/intelligence/kpis/${bk.id}/entries`, { period: month, value: 50 }), 201);
+    expect(ok(await carlos.post('/intelligence/kpis/demo/clear')).json().cleared).toBe(r.entries - 1);
+    b = ok(await carlos.get('/intelligence/kpis')).json();
+    expect(b.demoEntries).toBe(0);
+    expect(b.items.find((i: { key: string }) => i.key === 'kpi_booking_de_contratos').current.months.find((m: { period: string }) => m.period === month).value).toBe(50);
+  });
 });

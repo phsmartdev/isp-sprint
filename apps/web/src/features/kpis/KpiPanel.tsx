@@ -15,12 +15,19 @@ import { errMsg } from '../contracts/shared';
 import { KpiBoard, ST_LABEL, kpiText, monthName, useKpis, type KpiData, type KpiItem } from './KpiBoard';
 
 export function KpiPanel() {
+  const qc = useQueryClient();
+  const toast = useToast();
   const year = new Date().getFullYear();
   const [y, setY] = useState(year);
   const q = useKpis(y);
   const [open, setOpen] = useState<KpiItem | null>(null);
   const [entry, setEntry] = useState<KpiItem | 'escolher' | null>(null);
   const [importing, setImporting] = useState(false);
+  const demo = useMutation({
+    mutationFn: (what: 'load' | 'clear') => api<{ cleared?: number; created?: number; entries?: number }>(what === 'load' ? '/intelligence/kpis/demo' : '/intelligence/kpis/demo/clear', { method: 'POST' }),
+    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['kpis'] }); toast({ tone: 'success', message: r.cleared !== undefined ? `${r.cleared} resultado(s) de demonstração retirado(s)` : `${r.created} ficha(s) e ${r.entries} resultado(s) de exemplo` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   if (q.isLoading) return <div className="card"><LoadingRows rows={8} /></div>;
   if (q.isError && !q.data) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
@@ -36,6 +43,15 @@ export function KpiPanel() {
         {d.canImport && <Button variant="outline" icon={<FileUp className="h-4 w-4" />} onClick={() => setImporting(true)}>Importar fichas (.xlsx)</Button>}
         <a href="/painel/indicadores" target="_blank" rel="noopener" className="inline-flex h-10 items-center gap-2 bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-hover"><Monitor className="h-4 w-4" aria-hidden />Abrir painel da TV</a>
       </div>
+      {d.demoEntries > 0 && (
+        <div className="flex flex-wrap items-center gap-3 border border-warning/30 bg-warning-soft px-4 py-3 text-sm text-[#9A4B07]">
+          <span className="flex-1">Os resultados no painel são <b>fictícios, de demonstração</b> ({d.demoEntries} lançamento(s)). Ao lançar o resultado real de um período, ele substitui o de demonstração.</span>
+          {d.canEnter && <Button size="sm" variant="outline" loading={demo.isPending} onClick={() => demo.mutate('clear')}>Tirar dados de demonstração</Button>}
+        </div>
+      )}
+      {!d.items.length && d.canImport && (
+        <div className="card flex flex-wrap items-center gap-3 p-4 text-sm"><span className="flex-1 text-text">Comece pelas fichas dos indicadores da área (com resultados de exemplo) ou importe o seu formulário .xlsx.</span><Button size="sm" variant="primary" loading={demo.isPending} onClick={() => demo.mutate('load')}>Carregar fichas com exemplo</Button></div>
+      )}
       <KpiBoard d={d} updatedAt={q.dataUpdatedAt} error={q.isError} onOpen={setOpen} />
       {paused.length > 0 && (
         <section className="card p-4" aria-label="Indicadores pausados">

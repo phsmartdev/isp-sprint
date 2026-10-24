@@ -87,3 +87,16 @@ test('indicadores principais: importa as fichas, lança resultados e mostra o pa
     await ctx.close();
   }
 });
+
+test('dados de demonstração dos indicadores: aviso no painel e retirada com um clique', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  expect((await page.request.post('/api/v1/intelligence/kpis/demo')).ok()).toBe(true);
+  await page.goto('/intelligence');
+  await expect(page.getByText('Resultados de demonstração (fictícios)')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Painel de indicadores principais' }).getByRole('button', { name: /Booking de Contratos:/ })).toBeVisible();
+  await page.screenshot({ path: 'test-results/kpis-demo.png', fullPage: true });
+  await page.getByRole('button', { name: 'Tirar dados de demonstração' }).click();
+  await expect(page.getByText(/resultado\(s\) de demonstração retirado/)).toBeVisible();
+  await expect(page.getByText('Resultados de demonstração (fictícios)')).toHaveCount(0);
+});
