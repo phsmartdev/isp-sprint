@@ -181,14 +181,20 @@ export const mailRoutes = [
     body: z.object({ kind: z.enum(['pessoal', 'compartilhada']), address: z.string().trim().max(200).optional(), displayName: z.string().trim().max(120).nullable().optional() }),
     handler: async ({ app, auth, req, body, reply }) => {
       const st = await settingsOf(app.db, auth.tenantId);
-      const address = (body.kind === 'pessoal' ? auth.email : body.address ?? '').toLowerCase();
+      // pessoal: a corporativa do login (padrão) ou um Gmail particular da própria pessoa (fora do domínio da empresa)
+      const address = (body.kind === 'pessoal' ? body.address?.trim() || auth.email : body.address ?? '').toLowerCase();
+      const particular = body.kind === 'pessoal' && address !== auth.email.toLowerCase();
       if (body.kind === 'compartilhada' && !canConfigure(auth)) throw forbidden('Só quem tem acesso total em Configurações cadastra caixas compartilhadas.');
       if (!isEmail(address)) throw unprocessable('Informe o endereço da caixa.');
-      if (!domainAllowed(address, st.allowedDomains)) throw unprocessable(st.allowedDomains.length ? `Só caixas dos domínios da empresa (${st.allowedDomains.join(', ')}).` : 'Configure antes os domínios da empresa em Configurações → E-mail.');
+      if (particular) {
+        const mine = await app.db.select({ id: s.mailboxes.id }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), eq(s.mailboxes.kind, 'pessoal'), eq(s.mailboxes.ownerId, auth.userId)));
+        if (mine.length >= 3) throw unprocessable('Cada pessoa conecta no máximo 3 caixas pessoais.');
+      }
+      if (!particular && !domainAllowed(address, st.allowedDomains)) throw unprocessable(st.allowedDomains.length ? `Só caixas dos domínios da empresa (${st.allowedDomains.join(', ')}).` : 'Configure antes os domínios da empresa em Configurações → E-mail.');
       const [dup] = await app.db.select({ id: s.mailboxes.id }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), eq(s.mailboxes.address, address))).limit(1);
       if (dup) throw unprocessable('Esta caixa já está cadastrada.');
       const [b] = await app.db.insert(s.mailboxes).values({ tenantId: auth.tenantId, kind: body.kind, address, displayName: body.displayName ?? (body.kind === 'pessoal' ? auth.name : null), ownerId: body.kind === 'pessoal' ? auth.userId : null, createdBy: auth.userId }).returning();
-      await audit(app.db, req, { action: 'mail.mailbox_created', entityType: 'mailbox', entityId: b!.id, metadata: { kind: body.kind } });
+      await audit(app.db, req, { action: 'mail.mailbox_created', entityType: 'mailbox', entityId: b!.id, metadata: { kind: body.kind, particular } });
       reply.code(201);
       return publicBox(b!);
     },

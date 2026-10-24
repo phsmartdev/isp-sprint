@@ -329,14 +329,21 @@ export function MailboxesPage() {
   const result = sp.get('conexao');
   const boxes = useMailboxes();
   const settings = useQuery({ queryKey: ['mail', 'settings'], queryFn: () => api<{ allowedDomains: string[]; google: { configured: boolean; simulated: boolean } }>('/mail/settings') });
-  const create = useMutation({ mutationFn: () => api('/mail/mailboxes', { method: 'POST', body: { kind: 'pessoal' } }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['mail'] }), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  // pessoal: cadastra e já leva para a autorização do Google (corporativa do login ou Gmail particular)
+  const [privateAddr, setPrivateAddr] = useState('');
+  const create = useMutation({
+    mutationFn: (address?: string) => api<{ id: string }>('/mail/mailboxes', { method: 'POST', body: { kind: 'pessoal', ...(address ? { address } : {}) } }),
+    onSuccess: (b) => { void qc.invalidateQueries({ queryKey: ['mail'] }); setPrivateAddr(''); if (settings.data?.google.configured) connect.mutate(b.id); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const connect = useMutation({ mutationFn: (id: string) => api<{ url: string }>(`/mail/mailboxes/${id}/connect`, { method: 'POST' }), onSuccess: (r) => { window.location.assign(r.url); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const sync = useMutation({ mutationFn: (id: string) => api<{ ok: boolean; stored: number; error: string | null }>(`/mail/mailboxes/${id}/sync`, { method: 'POST' }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['mail'] }); toast({ tone: r.ok ? 'success' : 'error', message: r.ok ? `${r.stored} mensagem(ns) nova(s)` : r.error ?? 'Falhou' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const state = useMutation({ mutationFn: (v: { id: string; action: string }) => api(`/mail/mailboxes/${v.id}/state`, { method: 'POST', body: { action: v.action } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['mail'] }); toast({ tone: 'success', message: 'Caixa atualizada' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   if (boxes.isLoading || settings.isLoading) return <div className="card"><LoadingRows rows={4} /></div>;
   if (boxes.isError) return <ErrorState error={boxes.error} onRetry={() => boxes.refetch()} />;
   const d = boxes.data!;
-  const mine = d.items.find((b) => b.kind === 'pessoal');
+  const mine = d.items.find((b) => b.kind === 'pessoal' && b.address.toLowerCase() === d.me.email.toLowerCase());
+  const privates = d.items.filter((b) => b.kind === 'pessoal' && b.address.toLowerCase() !== d.me.email.toLowerCase());
   const myDomain = d.me.email.split('@')[1] ?? '';
   const domainOk = settings.data?.allowedDomains.includes(myDomain);
   return (
@@ -348,15 +355,25 @@ export function MailboxesPage() {
       <div className="grid gap-3 md:grid-cols-2">
         {!mine && (
           <div className="card flex flex-col items-start gap-2 p-4">
-            <h2 className="text-md font-bold text-ink">Minha caixa</h2>
+            <h2 className="text-md font-bold text-ink">Meu e-mail corporativo</h2>
             <p className="text-sm text-muted">{domainOk ? `Conecte ${d.me.email}. Só você vê esta caixa.` : `O domínio ${myDomain} não está liberado em Configurações → E-mail corporativo.`}</p>
-            <Button variant="primary" disabled={!domainOk} loading={create.isPending} onClick={() => create.mutate()}>Cadastrar minha caixa</Button>
+            <Button variant="primary" disabled={!domainOk || !settings.data?.google.configured} loading={create.isPending && !create.variables} onClick={() => create.mutate(undefined)}>Conectar meu Gmail</Button>
+          </div>
+        )}
+        {privates.length < 2 && (
+          <div className="card flex flex-col items-start gap-2 p-4">
+            <h2 className="text-md font-bold text-ink">Meu Gmail particular</h2>
+            <p className="text-sm text-muted">Conecte também uma conta Gmail sua fora do domínio da empresa (ex.: @gmail.com). Só você vê esta caixa; o Google pede para entrar com essa mesma conta.</p>
+            <div className="flex w-full flex-wrap gap-2">
+              <Input aria-label="Endereço do Gmail particular" type="email" className="min-w-0 flex-1" placeholder="seu.nome@gmail.com" value={privateAddr} onChange={(e) => setPrivateAddr(e.target.value)} />
+              <Button variant="primary" disabled={!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(privateAddr.trim()) || !settings.data?.google.configured} loading={create.isPending && !!create.variables} onClick={() => create.mutate(privateAddr.trim())}>Conectar Gmail particular</Button>
+            </div>
           </div>
         )}
         {d.items.map((b) => (
           <article key={b.id} className="card space-y-2 p-4" aria-label={`Caixa ${b.address}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0"><h2 className="truncate text-md font-bold text-ink">{b.kind === 'pessoal' ? 'Minha caixa' : b.displayName ?? b.address}</h2><p className="truncate text-sm text-muted">{b.address}</p></div>
+              <div className="min-w-0"><h2 className="truncate text-md font-bold text-ink">{b.kind === 'pessoal' ? (b.address.toLowerCase() === d.me.email.toLowerCase() ? 'Meu e-mail corporativo' : 'Meu Gmail particular') : b.displayName ?? b.address}</h2><p className="truncate text-sm text-muted">{b.address}</p></div>
               <div className="flex gap-1.5"><Chip>{MAILBOX_KIND_LABELS[b.kind]}</Chip><Chip tone={b.status === 'conectada' ? 'green' : b.status === 'erro' ? 'red' : 'neutral'}>{MAILBOX_STATUS_LABELS[b.status]}</Chip></div>
             </div>
             {b.lastError && <Notice tone="warning">{b.lastError}</Notice>}

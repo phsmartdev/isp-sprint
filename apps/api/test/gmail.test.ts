@@ -194,6 +194,20 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     expect(st.resolvidas).toBeGreaterThanOrEqual(1);
   });
 
+  it('Gmail particular: a pessoa conecta uma conta fora do domínio; só ela vê; outra conta no Google é recusada', async () => {
+    const addr = `lucas.particular.${stamp}@gmail.test`;
+    expect((await lucas.post('/mail/mailboxes', { kind: 'pessoal', address: 'invalido' })).statusCode).toBe(422);
+    const box = ok(await lucas.post('/mail/mailboxes', { kind: 'pessoal', address: addr }), 201).json();
+    expect(box).toMatchObject({ kind: 'pessoal', address: addr });
+    expect(ok(await carlos.get('/mail/mailboxes')).json().items.some((b: { id: string }) => b.id === box.id)).toBe(false);
+    g.setNextAccount(`outra.${stamp}@gmail.test`);
+    expect((await connect(lucas, box.id)).headers.location).toBe('/email/caixas?conexao=outra_conta');
+    g.setNextAccount(null);
+    expect((await connect(lucas, box.id)).headers.location).toBe('/email/caixas?conexao=ok');
+    // caixa compartilhada continua presa ao domínio da empresa
+    expect((await carlos.post('/mail/mailboxes', { kind: 'compartilhada', address: `vendas.${stamp}@gmail.test` })).statusCode).toBe(422);
+  });
+
   it('e-mail vira negociação: anexo .eml, conversa ligada, resposta da negociação sai pela mesma conversa', async () => {
     g.deliver(SHARED, { from: `Licitações <licita-${stamp}@camara-ficticia.test>`, subject: `Pedido de proposta ${stamp}`, text: 'Solicitamos proposta para 10 pontos de fibra.' });
     await syncMailbox(ctx.db, ctx.app.config.gmail!, sharedId);

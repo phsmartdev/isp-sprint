@@ -98,3 +98,17 @@ test('E-mail: vendedor fora da fila não vê a caixa compartilhada nem a configu
   const r = await page.request.get('/api/v1/mail/rules');
   expect(r.status()).toBe(403);
 });
+
+test('Gmail pessoal: pelo perfil, conecta o Gmail particular e só a pessoa vê a caixa', async ({ page }) => {
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/settings/profile');
+  await page.getByRole('region', { name: 'Meu Gmail' }).getByRole('link', { name: 'Conectar meu Gmail' }).click();
+  await expect(page).toHaveURL(/\/email\/caixas/);
+  const addr = `lucas.${Date.now().toString(36)}@gmail.test`;
+  await page.getByLabel('Endereço do Gmail particular').fill(addr);
+  await page.getByRole('button', { name: 'Conectar Gmail particular' }).click();
+  await expect(page.getByText('Caixa conectada. As mensagens dos últimos dias já foram trazidas.')).toBeVisible();
+  const card = page.getByRole('article', { name: `Caixa ${addr}` });
+  await expect(card.getByRole('heading', { name: 'Meu Gmail particular' })).toBeVisible();
+  await expect(card.getByText('Conectada', { exact: true })).toBeVisible();
+});

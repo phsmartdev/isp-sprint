@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Camera, UserRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Camera, Mail, UserRound } from 'lucide-react';
 import { MODULES, MODULE_LABELS, LEVEL_LABELS, PROFILE_LABELS, type ProfileKey } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { useAuth } from '../../auth/AuthProvider';
@@ -16,7 +17,7 @@ async function toBase64(f: File) {
 }
 
 export function ProfilePage() {
-  const { me, refresh } = useAuth();
+  const { me, refresh, can } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const file = useRef<HTMLInputElement>(null);
@@ -58,6 +59,12 @@ export function ProfilePage() {
     <div className="mx-auto max-w-[1000px]">
       <PageHeader icon={<UserRound className="h-9 w-9" strokeWidth={2.2} />} title="Meu perfil" subtitle="Seus dados, foto e senha." />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {can('email') && (
+          <section className="card flex flex-wrap items-center justify-between gap-3 p-5 lg:col-span-2" aria-label="Meu Gmail">
+            <div className="flex items-center gap-3"><Mail className="h-6 w-6 text-primary" aria-hidden /><div><h2 className="text-md font-bold text-ink">Meu Gmail</h2><p className="text-sm text-muted">Conecte o seu e-mail corporativo e, se quiser, um Gmail particular, para ler e responder pelo CRM. Só você vê essas caixas.</p></div></div>
+            <Link to="/email/caixas" className="inline-flex h-10 items-center justify-center whitespace-nowrap bg-primary px-4 font-semibold text-white hover:bg-primary-hover">Conectar meu Gmail</Link>
+          </section>
+        )}
         <section className="card p-5">
           <h2 className="mb-4 text-md font-bold text-ink">Dados</h2>
           <div className="mb-4 flex items-center gap-4">
