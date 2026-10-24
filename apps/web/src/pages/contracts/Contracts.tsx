@@ -20,13 +20,14 @@ import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
 import { HabilitationTab } from '../../features/contracts/Habilitation';
+import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
 import { TemplatesManager } from '../../features/contracts/SignaturePanels';
 import { AdminContractTemplates } from '../admin/ProposalTemplates';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
 
-type View = 'atencao' | 'painel' | 'lista' | 'habilitacao' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
+type View = 'atencao' | 'painel' | 'lista' | 'habilitacao' | 'atestados' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
 const TABS: { key: View; label: string }[] = [
-  { key: 'atencao', label: 'Central de atenção' }, { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'habilitacao', label: 'Habilitação' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
+  { key: 'atencao', label: 'Central de atenção' }, { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'habilitacao', label: 'Habilitação' }, { key: 'atestados', label: 'Atestados' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
   { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
 ];
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
@@ -339,6 +340,7 @@ export function ContractsPage() {
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
       {view === 'habilitacao' && <HabilitationTab />}
+      {view === 'atestados' && <CertificatesLibrary />}
       {view === 'atas' && <AtasTab />}
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
