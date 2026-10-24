@@ -53,10 +53,18 @@ export const stageFunnelRoutes = [
     query: FunnelQuery,
     handler: async ({ app, auth, query }) => {
       const pipes = await app.db.select({ id: s.pipelines.id, name: s.pipelines.name, isDefault: s.pipelines.isDefault }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, auth.tenantId), eq(s.pipelines.active, true))).orderBy(asc(s.pipelines.position));
-      const pipe = pipes.find((p) => p.id === query.pipelineId) ?? (query.pipelineId ? null : pipes.find((p) => p.isDefault) ?? pipes[0]);
+      const p = periodBounds(auth, query.from, query.to);
+      let pipe = pipes.find((x) => x.id === query.pipelineId) ?? null;
+      if (query.pipelineId && !pipe) throw notFound('Funil não encontrado.');
+      if (!pipe) {
+        // sem escolha: o funil com mais negociações criadas no período
+        const [top] = await app.db.select({ id: s.opportunities.pipelineId, n: sql<number>`count(*)::int` }).from(s.opportunities)
+          .where(and(ownerScope(auth, 'inteligencia', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt }), gte(s.opportunities.createdAt, p.from), lt(s.opportunities.createdAt, p.to)))
+          .groupBy(s.opportunities.pipelineId).orderBy(sql`2 desc`).limit(1);
+        pipe = pipes.find((x) => x.id === top?.id) ?? pipes.find((x) => x.isDefault) ?? pipes[0] ?? null;
+      }
       if (!pipe) throw notFound('Funil não encontrado.');
       const stages = await app.db.select({ key: s.pipelineStages.key, name: s.pipelineStages.name, kind: s.pipelineStages.kind, position: s.pipelineStages.position }).from(s.pipelineStages).where(and(eq(s.pipelineStages.pipelineId, pipe.id), eq(s.pipelineStages.active, true))).orderBy(asc(s.pipelineStages.position));
-      const p = periodBounds(auth, query.from, query.to);
       const opps = await app.db.select({ id: s.opportunities.id, stage: s.opportunities.stage, createdAt: s.opportunities.createdAt }).from(s.opportunities)
         .where(and(ownerScope(auth, 'inteligencia', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt }), eq(s.opportunities.pipelineId, pipe.id), gte(s.opportunities.createdAt, p.from), lt(s.opportunities.createdAt, p.to)));
       const moves = await stageMovesOf(app.db, auth.tenantId, opps);

@@ -11,6 +11,7 @@ import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
+import { groupBy } from '../services/group';
 import type { DbOrTx } from '../db/client';
 import { handoffContractToCs } from '../services/customerSuccess';
 import { audit } from '../services/audit';
@@ -244,14 +245,15 @@ export const contractRoutes = [
       const ids = rows.map((r) => r.id);
       const alerts = ids.length ? await app.db.select({ kind: s.contractAlerts.kind, dueAt: s.contractAlerts.dueAt, contractId: s.contractAlerts.contractId, id: s.contractAlerts.id, detail: s.contractAlerts.detail }).from(s.contractAlerts).where(and(inArray(s.contractAlerts.contractId, ids), eq(s.contractAlerts.status, 'aberto'))).orderBy(asc(s.contractAlerts.dueAt)) : [];
       const ledger = ids.length ? await app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : [];
+      const ledBy = groupBy(ledger, (e) => e.contractId);
       // faturamento do período por contrato (registrado no CRM; recorrente = previsto pela mensalidade)
       const billed = (r: (typeof rows)[number], f: string, t: string) => {
         if (r.billingType === 'recorrente') return r.validatedAt ? recurringBilledInPeriod(r.monthlyCents, r.billingStartAt ?? r.activationAt ?? r.startAt, r.archivedAt ? r.archivedAt.toISOString().slice(0, 10) : r.endAt, f, t) : 0;
-        const inP = ledger.filter((e) => e.contractId === r.id && e.occurredOn >= f && e.occurredOn <= t);
+        const inP = (ledBy.get(r.id) ?? []).filter((e) => e.occurredOn >= f && e.occurredOn <= t);
         if (r.billingType === 'frequente') return inP.filter((e) => e.kind === 'faturamento').reduce((a, e) => a + e.amountCents, 0);
         return inP.reduce((a, e) => a + (e.kind === 'consumo' ? e.amountCents : e.kind === 'estorno' ? -e.amountCents : 0), 0);
       };
-      const withBilling = rows.map((r) => ({ ...r, billedCents: billed(r, from, to), billedPrevCents: billed(r, prevFrom, prevTo), ledger: ledgerTotals(ledger.filter((e) => e.contractId === r.id)) }));
+      const withBilling = rows.map((r) => ({ ...r, billedCents: billed(r, from, to), billedPrevCents: billed(r, prevFrom, prevTo), ledger: ledgerTotals(ledBy.get(r.id) ?? []) }));
       const sumBy = <K extends string>(keyOf: (r: (typeof withBilling)[number]) => K, label: (k: K) => string) => {
         const m = new Map<K, { n: number; monthlyCents: number; billedCents: number }>();
         for (const r of withBilling.filter((x) => (x.stage !== 'arquivado' && x.validatedAt) || x.billedCents)) { const k = keyOf(r); const v = m.get(k) ?? { n: 0, monthlyCents: 0, billedCents: 0 }; if (r.stage !== 'arquivado') { v.n++; v.monthlyCents += r.monthlyCents; } v.billedCents += r.billedCents; m.set(k, v); }
@@ -405,12 +407,16 @@ export const contractRoutes = [
       const extra = ids.length ? await app.db.select({ id: s.contracts.id, document: s.contacts.document, operationalOwnerId: s.contracts.operationalOwnerId, csmId: s.contracts.csmId, closureReason: s.contracts.closureReason, legalLimitAt: s.contracts.legalLimitAt, renewalAt: v.renewalAt, adjustmentRule: v.adjustmentRule, billingDay: v.billingDay, opportunityCode: s.opportunities.code })
         .from(s.contracts).innerJoin(v, and(eq(v.contractId, s.contracts.id), eq(v.version, s.contracts.currentVersion))).innerJoin(s.contacts, eq(s.contacts.id, s.contracts.contactId)).leftJoin(s.opportunities, eq(s.opportunities.id, s.contracts.opportunityId)).where(inArray(s.contracts.id, ids)) : [];
       const people = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(eq(s.users.tenantId, auth.tenantId));
-      const pname = (id: string | null | undefined) => people.find((p) => p.id === id)?.name ?? '';
+      const pname = (id: string | null | undefined) => (id ? people0.get(id) ?? '' : '');
       const ledger = ids.length ? await app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : [];
       const procs = ids.length ? await app.db.select({ contractId: s.contractProcesses.contractId, kind: s.contractProcesses.kind, status: s.contractProcesses.status }).from(s.contractProcesses).where(inArray(s.contractProcesses.contractId, ids)) : [];
+      const extraBy = new Map(extra.map((e) => [e.id, e]));
+      const ledBy = groupBy(ledger, (e) => e.contractId);
+      const procBy = groupBy(procs, (p) => p.contractId);
+      const people0 = new Map(people.map((p) => [p.id, p.name]));
       const items = rows.map((r) => {
-        const x = extra.find((e) => e.id === r.id);
-        const led = ledger.filter((e) => e.contractId === r.id);
+        const x = extraBy.get(r.id);
+        const led = ledBy.get(r.id) ?? [];
         const inP = led.filter((e) => e.occurredOn >= from && e.occurredOn <= to);
         const billedCents = r.billingType === 'recorrente'
           ? (r.validatedAt ? recurringBilledInPeriod(r.monthlyCents, r.billingStartAt ?? r.activationAt ?? r.startAt, r.archivedAt ? r.archivedAt.toISOString().slice(0, 10) : r.endAt, from, to) : 0)
@@ -421,7 +427,7 @@ export const contractRoutes = [
           ...r, document: x?.document ?? null, operationalOwnerName: pname(x?.operationalOwnerId), csmName: pname(x?.csmId), closureReason: x?.closureReason ?? null, legalLimitAt: x?.legalLimitAt ?? null,
           renewalAt: x?.renewalAt ?? null, adjustmentRule: x?.adjustmentRule ?? null, billingDay: x?.billingDay ?? null, opportunityCode: x?.opportunityCode ?? null,
           billedCents, balance: r.billingType === 'medicao' ? totals : null,
-          openProcesses: procs.filter((p) => p.contractId === r.id && p.status === 'aberto').map((p) => p.kind),
+          openProcesses: (procBy.get(r.id) ?? []).filter((p) => p.status === 'aberto').map((p) => p.kind),
         };
       });
       const sum = (list: typeof items, f: (r: (typeof items)[number]) => number) => list.reduce((a, r) => a + f(r), 0);

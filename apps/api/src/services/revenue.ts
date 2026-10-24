@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { growthToMonth, revenueByMonth, type RevContract, type RevLedger } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { groupBy } from './group';
 
 export async function revenueInputs(db: DbOrTx, tenantId: string) {
   const cs = await db.select({ id: s.contracts.id, billingType: s.contracts.billingType, archivedAt: s.contracts.archivedAt, validatedAt: s.contracts.validatedAt, createdAt: s.contracts.createdAt }).from(s.contracts).where(eq(s.contracts.tenantId, tenantId));
@@ -10,11 +11,13 @@ export async function revenueInputs(db: DbOrTx, tenantId: string) {
     .from(s.contractVersions).where(eq(s.contractVersions.tenantId, tenantId));
   const ys = await db.select().from(s.contractYearValues).where(and(eq(s.contractYearValues.tenantId, tenantId), isNull(s.contractYearValues.supersededAt)));
   const ledger: RevLedger[] = (await db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(eq(s.contractLedger.tenantId, tenantId)));
+  const vBy = groupBy(vs, (v) => v.contractId);
+  const yBy = groupBy(ys, (y) => y.contractId);
   // só contratos validados entram na receita (cadastro em validação ainda não é contrato)
   const contracts: (RevContract & { createdAt: string })[] = cs.filter((c) => c.validatedAt).map((c) => ({
     id: c.id, billingType: c.billingType, archivedAt: c.archivedAt ? c.archivedAt.toISOString().slice(0, 10) : null, createdAt: c.createdAt.toISOString().slice(0, 10),
-    versions: vs.filter((v) => v.contractId === c.id).map((v) => ({ ...v, createdAt: v.createdAt.toISOString() })),
-    yearValues: ys.filter((y) => y.contractId === c.id).map((y) => ({ year: y.year, monthlyCents: y.monthlyCents, onlyAdjustment: y.onlyAdjustment })),
+    versions: (vBy.get(c.id) ?? []).map((v) => ({ ...v, createdAt: v.createdAt.toISOString() })),
+    yearValues: (yBy.get(c.id) ?? []).map((y) => ({ year: y.year, monthlyCents: y.monthlyCents, onlyAdjustment: y.onlyAdjustment })),
   }));
   const valid = new Set(contracts.map((c) => c.id));
   return { contracts, ledger: ledger.filter((e) => valid.has(e.contractId)) };
