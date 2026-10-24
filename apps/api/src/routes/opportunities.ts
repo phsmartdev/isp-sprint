@@ -1,5 +1,6 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
-import { csOnStage, ensureCustomerSuccessPipeline, isBaseCustomer } from '../services/customerSuccess';
+import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
+import { groupBy } from '../services/group';
 import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
@@ -7,7 +8,7 @@ import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, Opportu
 import { pipelinesOf, resolvePipeline, getActiveInstruction } from '../services/instructions';
 import { checkStageRequirements } from '../services/requirements';
 import { notifyDealWon } from '../services/alerts';
-import { duplicateOpportunity, runAutomations } from '../services/automations';
+import { runAutomations } from '../services/automations';
 import { TERMINAL_STAGES, atLeast, validateTransition, type OpportunityStage } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
@@ -138,10 +139,13 @@ export const opportunityRoutes = [
       where.push(OPEN);
       const rows = await opportunityQuery(app.db).where(and(...where)).orderBy(desc(s.opportunities.updatedAt)).limit(1000);
       const now = new Date();
+      // Sucesso do Cliente trabalha por conta: cada card traz a lista de contratos vigentes da conta
+      const ctrs = pipe.key === CS_KEY ? groupBy(await accountContracts(app.db, auth.tenantId, [...new Set(rows.map((r) => r.contactId))]), (c) => c.contactId) : null;
+      const dto = (r: (typeof rows)[number]) => ({ ...opportunityDto(r, now), ...(ctrs ? { accountContracts: (ctrs.get(r.contactId) ?? []).map((c) => ({ id: c.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, stage: c.stage, endAt: c.endAt })) } : {}) });
       return {
         pipeline: { id: pipe.id, key: pipe.key, name: pipe.name },
         stages: pipe.stages.filter((st) => st.kind === 'open').map((st) => {
-          const cards = rows.filter((r) => r.stage === st.key).map((r) => opportunityDto(r, now));
+          const cards = rows.filter((r) => r.stage === st.key).map(dto);
           return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: false, count: cards.length, valueCents: cards.reduce((a, c) => a + (c.valueCents ?? 0), 0), cards };
         }),
         terminalStages: pipe.stages.filter((st) => st.kind !== 'open').map((st) => ({ key: st.key, name: st.name })),
@@ -175,8 +179,10 @@ export const opportunityRoutes = [
       if (await isBaseCustomer(app.db, auth.tenantId, contactId)) {
         await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'sucesso_cliente_decisao', actorId: auth.userId, payload: { acionar: !!body.customerSuccess } });
         if (body.customerSuccess) {
-          const cs = await ensureCustomerSuccessPipeline(app.db, auth.tenantId);
-          customerSuccessId = await duplicateOpportunity(app.db, auth.tenantId, auth.userId, opp.id, { tipo: 'duplicar', jornada: cs.key, etapa: null, responsavel: 'mesmo' }, 'Sucesso do Cliente acionado na criação');
+          // um card por conta: se a conta já está no funil, a nova negociação só é registrada no card dela
+          const card = await ensureAccountCard(app.db, auth.tenantId, auth.userId, { contactId, sourceOpportunityId: opp.id, ownerId: null, reason: 'Sucesso do Cliente acionado na criação' });
+          if (!card.created) await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: card.id, type: 'negociacao_acionou', actorId: auth.userId, payload: { opportunityId: opp.id } });
+          customerSuccessId = card.id;
           await audit(app.db, req, { action: 'opportunity.customer_success', entityType: 'opportunity', entityId: opp.id, metadata: { copy: customerSuccessId } });
         }
       }

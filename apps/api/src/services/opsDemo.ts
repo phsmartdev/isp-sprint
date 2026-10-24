@@ -578,6 +578,7 @@ export async function loadOpsDemo(db: DB, tenantId: string, opts: { today: strin
     }
   });
   counts.lead_time_categorias = await setLeadTimeCategories(db, tenantId, mgr) ? 1 : 0;
+  try { counts.cards_cs = await demoAccountCards(db, tenantId); } catch (e) { counts.cards_cs = -1; console.warn('[ops-demo] cards do CS', e); }
   // fotografia atual das contas (Tier, saúde, criticidade)
   try { counts.contas_cs = await recomputeAccounts(db, tenantId); } catch (e) { counts.contas_cs = -1; console.warn('[ops-demo] recomputeAccounts falhou', e); }
   return counts;
@@ -609,3 +610,37 @@ async function setLeadTimeCategories(db: DB, tenantId: string, actorId: string) 
   });
   return true;
 }
+
+/**
+ * Funil Sucesso do Cliente da operação fictícia: um card por conta com contrato vigente, com os contratos dela
+ * e etapas distribuídas (a maioria em acompanhamento). Idempotente: conta que já tem card não ganha outro.
+ */
+export async function demoAccountCards(db: DB, tenantId: string, seed = 99) {
+  const { accountContracts, ensureAccountCard } = await import('./customerSuccess');
+  const r = rng(seed);
+  const accs = await db.execute<{ id: string; csm: string | null }>(sql`
+    select c.id, (select k.csm_id from contracts k where k.contact_id = c.id and k.csm_id is not null limit 1) csm from contacts c
+     where c.tenant_id = ${tenantId} and c.source_system = ${OPS_SOURCE}
+       and exists (select 1 from contracts k where k.contact_id = c.id and k.stage <> 'arquivado' and k.validated_at is not null and k.arp_id is null)`);
+  const STAGES: [string, number][] = [['acionado', 10], ['planejamento', 15], ['diagnostico', 18], ['plano_acao', 15], ['acompanhamento', 42]];
+  const ORDER = ['acionado', 'planejamento', 'diagnostico', 'plano_acao', 'acompanhamento'];
+  let n = 0;
+  for (const a of accs.rows) {
+    const card = await ensureAccountCard(db, tenantId, null, { contactId: a.id, sourceOpportunityId: null, ownerId: a.csm, reason: 'Operação fictícia: conta com contrato vigente' });
+    if (!card.created) continue;
+    n++;
+    const list = await accountContracts(db, tenantId, [a.id]);
+    for (const c of [...list].reverse()) {
+      await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: card.id, type: 'contrato_incluido', actorId: null, payload: { contractId: c.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, endAt: c.endAt }, occurredAt: c.validatedAt ?? new Date() });
+    }
+    let x = r() * 100, target = 'acompanhamento';
+    for (const [k, w] of STAGES) if ((x -= w) <= 0) { target = k; break; }
+    const steps = ORDER.slice(1, ORDER.indexOf(target) + 1);
+    let prev = 'acionado';
+    for (const st of steps) { await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: card.id, type: 'stage_changed', actorId: null, fromValue: prev, toValue: st, reason: 'Operação fictícia' }); prev = st; }
+    const monthly = list.filter((c) => c.billingType === 'recorrente').reduce((t, c) => t + c.monthlyCents, 0);
+    await db.update(s.opportunities).set({ stage: target, stageChangedAt: new Date(Date.now() - Math.floor(r() * 40) * DAY), valueCents: monthly, nextAction: pick(r, ['Agendar reunião de acompanhamento', 'Revisar SLA do trimestre', 'Apresentar plano de expansão', 'Coletar pesquisa de satisfação']), nextActionAt: new Date(Date.now() + Math.floor(r() * 12 - 3) * DAY) }).where(eq(s.opportunities.id, card.id));
+  }
+  return n;
+}
+const pick = <T,>(r: () => number, a: readonly T[]) => a[Math.floor(r() * a.length)] as T;
