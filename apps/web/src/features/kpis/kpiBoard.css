@@ -1,0 +1,7 @@
+/* Painel na TV da diretoria: tela inteira, fundo das páginas, cursor some parado. O resto usa as classes do sistema. */
+.kb-tv { position: fixed; inset: 0; z-index: 60; overflow: auto; background: rgb(var(--bg)); padding: 28px 36px; display: flex; flex-direction: column; }
+.kb-tv > div:last-child { flex: 1; min-height: 0; }
+.kb-tv.kb-idle, .kb-tv.kb-idle * { cursor: none !important; }
+.kb-tv.kb-idle .kb-exit { visibility: hidden; }
+@media (min-width: 2400px) { .kb-tv { zoom: 1.35; } }
+@media (min-width: 3400px) { .kb-tv { zoom: 1.9; } }

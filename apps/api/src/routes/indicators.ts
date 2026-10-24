@@ -19,6 +19,7 @@ import { descendants, orgData, resultsScope } from '../services/results';
 import {
   allIndicators, computeIndicator, goalProgress, indicatorDef, rollRecurringGoals, scorecardsFor, sourceEvents, teamUsers, type Who,
 } from '../services/indicators';
+import { SheetSchema } from './kpis';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
 const SourceSchema = z.object({
@@ -31,6 +32,7 @@ const DefSchema = z.object({
   direction: z.enum(['maior', 'menor']), period: z.enum(['semana', 'mes', 'trimestre', 'ano']),
   base: SourceSchema.optional(), numerator: SourceSchema.optional(), denominator: SourceSchema.optional(), vars: z.record(z.string(), SourceSchema).optional(), expr: z.string().max(300).optional(),
   profiles: z.array(z.string().max(40)).max(10).optional(), target: z.number().nullable().optional(), weight: z.number().min(0).max(100).optional(), minSample: z.number().int().min(0).max(10_000).optional(),
+  sheet: SheetSchema.optional(),
 });
 const checkDef = (d: IndicatorDef) => { const e = validateIndicator(d); if (e.length) throw unprocessable(e[0]!, e.map((m) => ({ path: 'def', message: m }))); };
 const slug = (t: string) => t.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'indicador';
@@ -203,7 +205,7 @@ export const indicatorRoutes = [
       const who = await resolveWho(app.db, auth, q);
       const range = q.from && q.to ? { from: q.from, to: q.to } : periodRange(d.def.period, q.ref ?? todayLocal(auth));
       const prev = previousRange(range, q.from ? undefined : d.def.period);
-      const [cur, before, { config }] = await Promise.all([computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, range), computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, prev), performanceConfig(app.db, auth.tenantId)]);
+      const [cur, before, { config }] = await Promise.all([computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, range, params.id), computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, prev, params.id), performanceConfig(app.db, auth.tenantId)]);
       const target = d.def.target ?? null;
       const att = cur.status === 'ok' || cur.status === 'incompleto' ? attainment(cur.value, target, d.def.direction) : null;
       return { indicator: { id: d.indicator.id, version: d.version, ...d.def }, range, previous: { range: prev, ...before }, ...cur, target, attainment: att, color: trafficLight(att, config.traffic) };

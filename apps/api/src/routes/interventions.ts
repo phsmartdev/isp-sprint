@@ -182,7 +182,7 @@ export const interventionRoutes = [
           let ref = today;
           for (let k = 0; k < 6; k++) {
             const r = periodRange('mes', ref);
-            const v = await computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, r);
+            const v = await computeIndicator(app.db, auth.tenantId, auth.timezone, d.def, who, r, i.indicatorId ?? undefined);
             months.unshift({ competencia: r.from.slice(0, 7), value: v.value ?? null, partial: k === 0 });
             ref = addDaysIso(r.from, -1);
           }
