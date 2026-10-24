@@ -72,6 +72,12 @@ test('E-mail corporativo: configura domínio, caixa e fila; conecta pelo Google;
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await page.getByRole('tab', { name: /^Anexos/ }).click();
   await expect(page.getByText(`E-mail de origem - Cotação ${stamp}.eml`)).toBeVisible();
+  // cópia do original: abre na negociação, com o anexo de dentro do e-mail
+  await page.getByRole('button', { name: 'Ver e-mail', exact: true }).click();
+  const viewer = page.getByRole('dialog', { name: `Cotação ${stamp}` });
+  await expect(viewer.frameLocator('iframe[title="Conteúdo do e-mail"]').getByText('Precisamos de 300 Mbps na sede.')).toBeVisible();
+  await expect(viewer.getByRole('link', { name: /pedido\.txt/ })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'E-mail' }).click();
   const origin = page.getByRole('region', { name: 'E-mail de origem' });
   await expect(origin.getByText('Precisamos de 300 Mbps na sede.')).toBeVisible();

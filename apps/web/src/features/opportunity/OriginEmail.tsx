@@ -8,9 +8,10 @@ import { fmtDateTime } from '../../lib/format';
 import { Button, LoadingRows, Textarea } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { EmailViewer } from './EmailViewer';
 
 export type OriginThread = {
-  id: string; subject: string; mailbox: string; mailboxKind: string; mailboxConnected: boolean; canReply: boolean;
+  id: string; subject: string; mailbox: string; originalAttachmentId: string | null; mailboxKind: string; mailboxConnected: boolean; canReply: boolean;
   messages: { id: string; direction: string; from: string; fromName: string | null; to: string[]; cc: string[]; sentAt: string; text: string; hasAttachments: boolean; sentBy: string | null }[];
 };
 export const useOriginEmail = (oppId: string) => useQuery({ queryKey: ['origin-email', oppId], queryFn: () => api<{ thread: OriginThread | null }>(`/opportunities/${oppId}/origin-email`) });
@@ -20,6 +21,7 @@ export function OriginEmail({ oppId }: { oppId: string }) {
   const qc = useQueryClient();
   const q = useOriginEmail(oppId);
   const [text, setText] = useState('');
+  const [viewing, setViewing] = useState<string | null>(null);
   const reply = useMutation({
     mutationFn: () => api(`/opportunities/${oppId}/origin-email/reply`, { method: 'POST', body: { text } }),
     onSuccess: () => { setText(''); toast({ tone: 'success', message: 'Resposta enviada pelo e-mail de origem' }); void qc.invalidateQueries({ queryKey: ['origin-email', oppId] }); void qc.invalidateQueries({ queryKey: ['timeline', oppId] }); },
@@ -33,6 +35,8 @@ export function OriginEmail({ oppId }: { oppId: string }) {
       <div>
         <h3 className="flex items-center gap-2 text-md font-bold text-ink"><Mail className="h-5 w-5 text-primary" aria-hidden />{t.subject || '(sem assunto)'}</h3>
         <p className="text-sm text-muted">Conversa da caixa {t.mailbox}. A resposta sai por ela, na mesma conversa com o cliente.</p>
+        {t.originalAttachmentId && <Button size="sm" variant="outline" className="mt-2" icon={<Mail className="h-4 w-4" />} onClick={() => setViewing(t.originalAttachmentId)}>Ver e-mail original</Button>}
+        <EmailViewer oppId={oppId} attachmentId={viewing} onClose={() => setViewing(null)} />
       </div>
       <ol className="space-y-2">
         {t.messages.map((m) => (

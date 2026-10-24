@@ -5,6 +5,7 @@
  * Visibilidade: caixa pessoal só para a dona. Caixa compartilhada: quem tem acesso total ao E-mail, quem está numa fila
  * da caixa ou da conversa, e quem vê a pessoa atribuída (Equipe = times que lidera).
  */
+import { simpleParser, type AddressObject } from 'mailparser';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
@@ -24,7 +25,7 @@ import { OpportunityCreate } from '@isp/shared';
 import { createOpportunity, loadOpportunity } from '../services/opportunities';
 import { runAutomations } from '../services/automations';
 import { gmailPassword, GmailPasswordError, normalizeAppPassword } from '../services/gmailPassword';
-import { exchangeCode, GmailError, revokeToken, sendFromBox, syncMailbox, syncTenantMail } from '../services/gmail';
+import { exchangeCode, fetchOriginalRaw, GmailError, revokeToken, sendFromBox, syncMailbox, syncTenantMail } from '../services/gmail';
 
 const STATE_COOKIE = 'isp_mail_oauth';
 const COOKIE_PATH = '/api/v1/mail/oauth';
@@ -543,6 +544,11 @@ export const mailRoutes = [
     body: z.object({ opportunity: OpportunityCreate }),
     handler: async ({ app, auth, req, params, body, reply }) => {
       if (!atLeast(level(auth, 'oportunidades'), 'proprio')) throw forbidden('Seu perfil não cria oportunidades.');
+      // cópia exata do e-mail original (como está no Gmail); busca antes da transação
+      const pre = await loadThread(app.db, auth, params.id);
+      const preMsgs = await app.db.select({ gmailId: s.mailMessages.gmailId, direction: s.mailMessages.direction }).from(s.mailMessages).where(eq(s.mailMessages.threadId, pre.t.id)).orderBy(asc(s.mailMessages.sentAt));
+      const origin = preMsgs.find((m) => m.direction === 'entrada') ?? preMsgs[0];
+      const originalRaw = origin ? await fetchOriginalRaw(app.db, app.config.gmail ?? null, pre.box, origin.gmailId) : null;
       const created = await app.db.transaction(async (tx) => {
         const { t, box } = await loadThread(tx, auth, params.id);
         if (!(await canWork(tx, auth, t, box))) throw forbidden('Você não atende esta conversa.');
@@ -558,7 +564,7 @@ export const mailRoutes = [
         const msgs = await tx.select().from(s.mailMessages).where(eq(s.mailMessages.threadId, t.id)).orderBy(asc(s.mailMessages.sentAt));
         const first = msgs.find((m) => m.direction === 'entrada') ?? msgs[0];
         if (first) {
-          const data = Buffer.from(buildEml({ from: first.fromAddr, fromName: first.fromName, to: first.toAddrs, cc: first.ccAddrs, subject: first.subject || t.subject, date: first.sentAt, messageId: first.rfcMessageId, text: first.bodyText ?? first.snippet ?? '' }), 'utf8');
+          const data = first.gmailId === origin?.gmailId && originalRaw && originalRaw.length <= 20 * 1024 * 1024 ? originalRaw : Buffer.from(buildEml({ from: first.fromAddr, fromName: first.fromName, to: first.toAddrs, cc: first.ccAddrs, subject: first.subject || t.subject, date: first.sentAt, messageId: first.rfcMessageId, text: first.bodyText ?? first.snippet ?? '' }), 'utf8');
           await tx.insert(s.opportunityAttachments).values({ tenantId: auth.tenantId, opportunityId: opp.id, kind: 'email', filename: emlFilename(t.subject), mime: 'message/rfc822', sizeBytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), data, uploadedBy: auth.userId });
         }
         await tx.update(s.mailThreads).set({ contactId: o!.contactId, opportunityId: opp.id, linkSource: 'negociacao', linkAmbiguous: false, rowVersion: (cur?.rowVersion ?? t.rowVersion) + 1 }).where(eq(s.mailThreads.id, t.id));
@@ -582,9 +588,10 @@ export const mailRoutes = [
       if (!r) return { thread: null };
       const messages = await app.db.select({ m: s.mailMessages, by: s.users.name }).from(s.mailMessages).leftJoin(s.users, eq(s.users.id, s.mailMessages.sentBy)).where(eq(s.mailMessages.threadId, r.t.id)).orderBy(asc(s.mailMessages.sentAt));
       const canReply = r.box.status === 'conectada' && (await canWork(app.db, auth, r.t, r.box));
+      const [att] = await app.db.select({ id: s.opportunityAttachments.id }).from(s.opportunityAttachments).where(and(eq(s.opportunityAttachments.opportunityId, opp.id), eq(s.opportunityAttachments.kind, 'email'), sql`${s.opportunityAttachments.deletedAt} is null`)).orderBy(asc(s.opportunityAttachments.createdAt)).limit(1);
       return {
         thread: {
-          id: r.t.id, subject: r.t.subject, mailbox: r.box.address, mailboxKind: r.box.kind, mailboxConnected: r.box.status === 'conectada', canReply,
+          id: r.t.id, subject: r.t.subject, mailbox: r.box.address, originalAttachmentId: att?.id ?? null, mailboxKind: r.box.kind, mailboxConnected: r.box.status === 'conectada', canReply,
           messages: messages.map(({ m, by }) => ({ id: m.id, direction: m.direction, from: m.fromAddr, fromName: m.fromName, to: m.toAddrs, cc: m.ccAddrs, sentAt: m.sentAt, text: m.bodyText ?? m.snippet ?? '', hasAttachments: m.hasAttachments, sentBy: by })),
         },
       };
@@ -606,4 +613,39 @@ export const mailRoutes = [
       return { ok: true };
     },
   }),
+  // ---------------------------------------------------------------- e-mail anexado à negociação: leitura para quem vê a negociação
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/attachments/:aid/email', summary: 'Abre o e-mail anexado (cópia do original): cabeçalhos, texto, HTML e lista de anexos', tag: 'Oportunidades', module: 'oportunidades',
+    params: z.object({ id: z.string().uuid(), aid: z.string().uuid() }),
+    handler: async ({ app, auth, params }) => {
+      const a = await emailAttachment(app.db, auth, params.id, params.aid);
+      const p = await simpleParser(a.data);
+      const list = (v: AddressObject | AddressObject[] | undefined) => (!v ? [] : (Array.isArray(v) ? v : [v]).flatMap((x) => x.value.map((y) => ({ name: y.name || null, address: y.address ?? '' }))));
+      return {
+        filename: a.filename, subject: p.subject ?? '', date: p.date ?? null, from: list(p.from)[0] ?? null, to: list(p.to), cc: list(p.cc),
+        text: p.text ?? null, html: typeof p.html === 'string' ? p.html : null,
+        attachments: p.attachments.filter((x) => x.contentDisposition !== 'inline' || !x.cid).map((x, i) => ({ index: i, filename: x.filename || `anexo-${i + 1}`, contentType: x.contentType, size: x.size })),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/attachments/:aid/email/parts/:n', summary: 'Baixa um anexo de dentro do e-mail anexado', tag: 'Oportunidades', module: 'oportunidades',
+    params: z.object({ id: z.string().uuid(), aid: z.string().uuid(), n: z.coerce.number().int().min(0).max(500) }),
+    handler: async ({ app, auth, params, reply }) => {
+      const a = await emailAttachment(app.db, auth, params.id, params.aid);
+      const p = await simpleParser(a.data);
+      const part = p.attachments.filter((x) => x.contentDisposition !== 'inline' || !x.cid)[params.n];
+      if (!part) throw notFound('Anexo não encontrado no e-mail.');
+      const name = part.filename || `anexo-${params.n + 1}`;
+      return reply.header('content-type', 'application/octet-stream').header('x-content-type-options', 'nosniff').header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`).send(part.content);
+    },
+  }),
 ];
+
+async function emailAttachment(db: DbOrTx, auth: AuthContext, oppId: string, aid: string) {
+  const opp = await loadOpportunity(db, auth, oppId);
+  const [a] = await db.select({ data: s.opportunityAttachments.data, filename: s.opportunityAttachments.filename, kind: s.opportunityAttachments.kind }).from(s.opportunityAttachments)
+    .where(and(eq(s.opportunityAttachments.id, aid), eq(s.opportunityAttachments.opportunityId, opp.id), eq(s.opportunityAttachments.tenantId, auth.tenantId), sql`${s.opportunityAttachments.deletedAt} is null`)).limit(1);
+  if (!a || a.kind !== 'email') throw notFound('E-mail anexado não encontrado.');
+  return a;
+}

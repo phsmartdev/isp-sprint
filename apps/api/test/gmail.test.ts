@@ -260,12 +260,21 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     const eml = att.find((a) => a.kind === 'email')!;
     expect(eml).toMatchObject({ mime: 'message/rfc822', filename: `E-mail de origem - Pedido de proposta ${stamp}.eml` });
     const dl = await carlos.get(`/opportunities/${oppId}/attachments/${eml.id}/download`);
-    expect(dl.body).toContain(`From: =?UTF-8?B?`);
+    // cópia do original do Gmail (format=raw): HTML e anexo de dentro do e-mail preservados
     expect(dl.body).toContain(`<licita-${stamp}@camara-ficticia.test>`);
+    expect(dl.body).toContain('filename="pedido.txt"');
+    const view = ok(await carlos.get(`/opportunities/${oppId}/attachments/${eml.id}/email`)).json();
+    expect(view).toMatchObject({ subject: `Pedido de proposta ${stamp}`, from: { address: `licita-${stamp}@camara-ficticia.test` }, attachments: [{ index: 0, filename: 'pedido.txt' }] });
+    expect(view.html).toContain('<b>Solicitamos proposta para 10 pontos de fibra.</b>');
+    const part = await carlos.get(`/opportunities/${oppId}/attachments/${eml.id}/email/parts/0`);
+    expect(part.statusCode).toBe(200);
+    expect(part.headers['content-disposition']).toMatch(/attachment; filename\*=UTF-8''pedido\.txt/);
+    expect(part.body).toContain('Item 1: link 300 Mbps');
+    expect((await rafael.get(`/opportunities/${oppId}/attachments/${eml.id}/email`)).statusCode).toBe(404);
     const d = ok(await carlos.get(`/mail/threads/${t.id}`)).json();
     expect(d.opportunityId).toBe(oppId);
     const origin = ok(await carlos.get(`/opportunities/${oppId}/origin-email`)).json().thread;
-    expect(origin).toMatchObject({ id: t.id, mailbox: SHARED, canReply: true });
+    expect(origin).toMatchObject({ id: t.id, mailbox: SHARED, canReply: true, originalAttachmentId: eml.id });
     expect(origin.messages[0].text).toMatch(/10 pontos de fibra/);
     const before = g.sent.length;
     ok(await carlos.post(`/opportunities/${oppId}/origin-email/reply`, { text: 'Recebemos o pedido; enviaremos a proposta amanhã.' }));
