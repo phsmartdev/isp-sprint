@@ -10,7 +10,9 @@ import { poolConfig } from './db/client';
 import { recoverAccess, RECOVER_MESSAGES } from './db/recover';
 import { createDb } from './db/client';
 import { loadKpiDemo, tenantsWithoutKpis } from './services/kpiDemo';
-import { loadOpsDemo, tenantsForOpsDemo } from './services/opsDemo';
+import { demoAccountCards, loadOpsDemo, OPS_SOURCE, tenantsForOpsDemo } from './services/opsDemo';
+import { consolidateAccountCards } from './services/customerSuccess';
+import { sql } from 'drizzle-orm';
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -29,6 +31,7 @@ async function main() {
   await seedDemo(url);
   await kpiDemo(url);
   await opsDemo(url);
+  await csByAccount(url);
   const re = process.env.ADMIN_RESET_EMAIL, rp = process.env.ADMIN_RESET_PASSWORD;
   if (re && rp) {
     const r = await recoverAccess(url, re, rp);
@@ -59,6 +62,23 @@ async function opsDemo(url: string) {
       const t0 = Date.now();
       const r = await loadOpsDemo(db, t, { today, scale: Number(process.env.OPS_DEMO_SCALE ?? 1) });
       console.log(`[setup] operação fictícia na empresa ${t} em ${Math.round((Date.now() - t0) / 1000)}s: ${r.opportunities ?? 0} negociações, ${r.contracts ?? 0} contratos, ${r.activities ?? 0} atividades.`);
+    }
+  } finally { await pool.end(); }
+}
+
+/** Sucesso do Cliente por conta: junta cards repetidos da mesma conta e cria os cards da operação fictícia que faltarem. */
+async function csByAccount(url: string) {
+  const { db, pool } = createDb(url);
+  try {
+    const ts = await db.execute<{ id: string }>(sql`select id from tenants`);
+    for (const t of ts.rows) {
+      const n = await consolidateAccountCards(db, t.id);
+      if (n) console.log(`[setup] Sucesso do Cliente na empresa ${t.id}: ${n} card(s) repetido(s) juntado(s) no card da conta.`);
+      const [demo] = (await db.execute<{ n: number }>(sql`select count(*)::int n from contacts where tenant_id = ${t.id} and source_system = ${OPS_SOURCE}`)).rows;
+      if (demo?.n && process.env.OPS_DEMO !== 'false') {
+        const c = await demoAccountCards(db, t.id);
+        if (c) console.log(`[setup] Sucesso do Cliente na empresa ${t.id}: ${c} card(s) de conta da operação fictícia.`);
+      }
     }
   } finally { await pool.end(); }
 }

@@ -161,6 +161,7 @@ export const opportunitySelect = {
   stage: s.opportunities.stage,
   pipelineId: s.opportunities.pipelineId,
   pipelineName: s.pipelines.name,
+  pipelineKey: s.pipelines.key,
   installCep: s.opportunities.installCep,
   installStreet: s.opportunities.installStreet,
   installNumber: s.opportunities.installNumber,

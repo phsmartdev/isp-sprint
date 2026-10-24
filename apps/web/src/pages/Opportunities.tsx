@@ -75,8 +75,24 @@ function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: 
         <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={24} />
         {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
       </div>
+      {opp.accountContracts && (
+        <div className="mt-2.5 border-t border-line pt-2" aria-label={`Contratos de ${opp.contactName}`}>
+          <p className="mb-1 text-2xs font-semibold text-muted">{opp.accountContracts.length ? `${opp.accountContracts.length} contrato${opp.accountContracts.length > 1 ? 's' : ''} vigente${opp.accountContracts.length > 1 ? 's' : ''}` : 'Sem contrato vigente'}</p>
+          <ul className="space-y-1">
+            {opp.accountContracts.slice(0, 4).map((c) => (
+              <li key={c.id}>
+                <a href={`/contracts/${c.id}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); nav(`/contracts/${c.id}`); }} onPointerDown={(e) => e.stopPropagation()} className="flex items-baseline justify-between gap-2 text-xs hover:text-primary" title={c.object}>
+                  <span className="min-w-0 truncate text-ink">{c.number} · {c.object.replace(/ \(fictício\)$/, '')}</span>
+                  <span className="num shrink-0 text-muted">{c.billingType === 'recorrente' ? `${fmtBRL(c.monthlyCents)}/mês` : c.billingType === 'medicao' ? 'medição' : 'frequente'}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          {opp.accountContracts.length > 4 && <p className="mt-1 text-2xs text-muted">+{opp.accountContracts.length - 4} contrato(s)</p>}
+        </div>
+      )}
       <div className="mt-3 flex items-center justify-between gap-2">
-        {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : <SourceChip name={opp.sourceName} />}
+        {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
         <span className={clsx('text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
       </div>
     </li>
