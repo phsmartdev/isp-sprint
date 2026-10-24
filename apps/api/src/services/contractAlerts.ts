@@ -10,6 +10,7 @@ import { brl as brlOf } from './email';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { consumptionOf } from './contractLedger';
+import { runCompanyDocAlerts } from './companyDocs';
 import { addEvent, contractSettingsOf, contractSummary, createTask, mailTo, openProcess, sectorOwners, setStage, userById, type ContractRow } from './contracts';
 
 type Settings = Awaited<ReturnType<typeof contractSettingsOf>>;
@@ -220,6 +221,12 @@ export async function runContractAlerts(db: DbOrTx, config: Config, opts: { tena
         case 'provisionamento': return input.provisioningDone;
         case 'implantacao': return !!input.activationAt;
         case 'assinatura': return !input.openSignatureSince;
+        case 'consumo_acelerado': return input.consumption?.pace !== 'acelerado';
+        case 'consumo_lento': return input.consumption?.pace !== 'lento';
+        case 'saldo_baixo': return !input.consumption?.lowBalance || `${input.consumption.credited}` !== e.cycleKey;
+        case 'esgotamento': return !input.consumption?.exhaustBeforeEnd;
+        case 'empenho_baixo': return !input.commitments?.some((x) => x.id === e.cycleKey && x.available > 0 && (x.share ?? 0) >= 0.8);
+        case 'sem_empenho': return !!input.commitments?.some((x) => x.available > 0);
         default: return false;
       }
     };
@@ -230,5 +237,9 @@ export async function runContractAlerts(db: DbOrTx, config: Config, opts: { tena
       resolved += stale.length;
     }
   }
-  return { contractAlerts: created, contractAlertsResolved: resolved };
+  // habilitação da empresa (certidões por filial)
+  const tenants = opts.tenantId ? [opts.tenantId] : (await db.select({ id: s.tenants.id }).from(s.tenants)).map((t) => t.id);
+  let companyDocAlerts = 0;
+  for (const t of tenants) companyDocAlerts += (await runCompanyDocAlerts(db, t, today)).created;
+  return { contractAlerts: created, contractAlertsResolved: resolved, companyDocAlerts };
 }

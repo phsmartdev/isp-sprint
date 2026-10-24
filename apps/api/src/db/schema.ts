@@ -1431,6 +1431,38 @@ export const contractCommitments = pgTable('contract_commitments', {
   createdAt: createdAt(),
 }, (t) => ({ ctIdx: index('contract_commitments_ct_idx').on(t.contractId, t.issuedOn), uq: uniqueIndex('contract_commitments_uq').on(t.contractId, t.number), amountCk: check('contract_commitments_amount_ck', sql`amount_cents > 0`) }));
 
+/** Habilitação da empresa (certidões e alvarás) por filial, com validade e arquivo. Nova certidão substitui a anterior, que fica no histórico. */
+export const companyDocuments = pgTable('company_documents', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').references(() => salesBranches.id),
+  kind: text('kind').notNull(),
+  label: text('label'),
+  number: text('number'),
+  issuedOn: date('issued_on', { mode: 'string' }),
+  expiresOn: date('expires_on', { mode: 'string' }),
+  filename: text('filename').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  sha256: text('sha256').notNull(),
+  data: bytea('data').notNull(),
+  notes: text('notes'),
+  supersededAt: ts('superseded_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ curIdx: index('company_documents_cur_idx').on(t.tenantId, t.branchId, t.kind) }));
+
+/** Avisos de validade da habilitação: um por documento e marco (30, 15, 7 dias, vencida). */
+export const companyDocAlerts = pgTable('company_doc_alerts', {
+  id: id(),
+  tenantId: tenantId(),
+  documentId: uuid('document_id').notNull().references(() => companyDocuments.id),
+  threshold: text('threshold').notNull(),
+  activityIds: uuid('activity_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  emails: jsonb('emails').$type<{ to: string; status: string; error: string | null }[]>().notNull().default([]),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('company_doc_alerts_uq').on(t.documentId, t.threshold) }));
+
 export const contractTemplates = pgTable(
   'contract_templates',
   {

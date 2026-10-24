@@ -79,3 +79,15 @@ describe('consumo e empenho', () => {
     expect(dueAlerts2({ ...input, isPublic: true, commitments: [] }, CS2).map((a) => a.kind)).toContain('sem_empenho');
   });
 });
+
+import { docStatus } from './contracts';
+describe('habilitação', () => {
+  it('situação pela validade: 30/15/7 dias e vencida (o último dia ainda vale)', () => {
+    expect(docStatus(null, '2026-10-24')).toEqual({ status: 'falta', days: null });
+    expect(docStatus('2026-12-31', '2026-10-24').status).toBe('valida');
+    expect(docStatus('2026-11-20', '2026-10-24').status).toBe('vence_30');
+    expect(docStatus('2026-11-05', '2026-10-24').status).toBe('vence_15');
+    expect(docStatus('2026-10-24', '2026-10-24')).toEqual({ status: 'vence_7', days: 0 });
+    expect(docStatus('2026-10-23', '2026-10-24')).toEqual({ status: 'vencida', days: -1 });
+  });
+});
