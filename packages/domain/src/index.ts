@@ -27,3 +27,4 @@ export * from './glpi';
 export * from './items';
 export * from './bids';
 export * from './eml';
+export * from './revenue';

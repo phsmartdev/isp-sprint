@@ -1261,6 +1261,8 @@ export const contractVersions = pgTable(
     billingStartAt: date('billing_start_at', { mode: 'string' }),
     renewalAt: date('renewal_at', { mode: 'string' }),
     monthlyCents: bigint('monthly_cents', { mode: 'number' }).notNull().default(0),
+    /** desde quando esta versão vale (reajuste: aniversário; aditivo: assinatura). Sem data, vale desde o registro. */
+    effectiveFrom: date('effective_from', { mode: 'string' }),
     totalCents: bigint('total_cents', { mode: 'number' }),
     billingDay: integer('billing_day'),
     billingTerms: text('billing_terms'),
@@ -4125,3 +4127,21 @@ export const indicatorEntries = pgTable('indicator_entries', {
   supersededAt: ts('superseded_at'),
   supersededBy: uuid('superseded_by'),
 }, (t) => ({ idx: index('indicator_entries_idx').on(t.tenantId, t.indicatorId, t.periodStart) }));
+
+/**
+ * Quanto o contrato valia (mensal) num ano, para comparar um ano com o outro sem o efeito do reajuste.
+ * Serve para contratos cadastrados no CRM já com o valor reajustado. Só INSERT: corrigir substitui.
+ */
+export const contractYearValues = pgTable('contract_year_values', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  year: integer('year').notNull(),
+  monthlyCents: bigint('monthly_cents', { mode: 'number' }).notNull(),
+  /** a diferença para o valor do ano seguinte é só reajuste (não é crescimento) */
+  onlyAdjustment: boolean('only_adjustment').notNull().default(true),
+  note: text('note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('contract_year_values_idx').on(t.tenantId, t.contractId, t.year) }));

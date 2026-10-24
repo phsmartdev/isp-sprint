@@ -78,6 +78,7 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
         </ol>
       )}
       {open && <AmendmentDialog c={c} d={d} onClose={() => setOpen(false)} />}
+      <YearValues c={c} />
     </section>
   );
 }
@@ -127,5 +128,49 @@ function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClos
         <FormField label="Objeto do aditivo" htmlFor="am-desc" required><Textarea id="am-desc" rows={3} value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: inclusão de 2 pontos de acesso na unidade Centro" /></FormField>
       </div>
     </Modal>
+  );
+}
+
+type YearValue = { id: string; year: number; monthlyCents: number; onlyAdjustment: boolean; note: string | null; createdAt: string; supersededAt: string | null; by: string | null };
+/** Quanto o contrato valia por mês em cada ano: o Booking compara um ano com o outro sem contar o reajuste como crescimento. */
+function YearValues({ c }: { c: ContractDetail }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['contract-year-values', c.id], queryFn: () => api<{ items: YearValue[]; canManage: boolean }>(`/contracts/${c.id}/year-values`) });
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState(String(thisYear - 1));
+  const [value, setValue] = useState<number | null>(null);
+  const [only, setOnly] = useState(true);
+  const [note, setNote] = useState('');
+  const save = useMutation({
+    mutationFn: () => api(`/contracts/${c.id}/year-values`, { method: 'POST', body: { year: Number(year), monthlyCents: Math.round((value ?? 0) * 100), onlyAdjustment: only, note: note.trim() || null } }),
+    onSuccess: () => { for (const k of ['contract-year-values', 'kpis', 'contract']) void qc.invalidateQueries({ queryKey: [k] }); setValue(null); setNote(''); toast({ tone: 'success', message: `Valor de ${year} salvo` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const items = q.data?.items ?? [];
+  return (
+    <section className="border-t border-line pt-5" aria-label="Valor por ano">
+      <h3 className="text-md font-bold text-ink">Valor do contrato por ano</h3>
+      <p className="text-sm text-muted">Para o Booking comparar um ano com o outro sem contar o reajuste como crescimento. Use quando o contrato foi cadastrado já com o valor reajustado: informe quanto ele valia por mês no ano anterior.</p>
+      {items.length > 0 && (
+        <ul className="mt-3 divide-y divide-line border border-line text-sm">
+          {items.map((y) => (
+            <li key={y.id} className={clsx('flex flex-wrap items-baseline justify-between gap-2 px-3 py-2', y.supersededAt && 'text-faint line-through')}>
+              <span><b className="text-ink">{y.year}</b> · <span className="num">{fmtBRL(y.monthlyCents)}/mês</span>{y.onlyAdjustment ? <span className="text-muted"> · diferença é reajuste</span> : <span className="text-muted"> · diferença é crescimento</span>}{y.note ? <span className="text-muted"> · {y.note}</span> : null}</span>
+              <span className="text-xs text-muted">{y.by ?? '—'} · {fmtDate(y.createdAt)}{y.supersededAt ? ' · substituído' : ''}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {q.data?.canManage && (
+        <div className="mt-3 grid grid-cols-1 items-end gap-3 sm:grid-cols-[110px_200px_1fr_auto]">
+          <FormField label="Ano" htmlFor="yv-year"><Select id="yv-year" value={year} onChange={(e) => setYear(e.target.value)}>{[thisYear, thisYear - 1, thisYear - 2, thisYear - 3].map((y) => <option key={y} value={y}>{y}</option>)}</Select></FormField>
+          <FormField label="Valor mensal naquele ano" htmlFor="yv-value"><MoneyInput id="yv-value" value={value} onChange={setValue} /></FormField>
+          <FormField label="Observação" htmlFor="yv-note"><Input id="yv-note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: antes do reajuste IPCA de março" /></FormField>
+          <Button variant="primary" loading={save.isPending} disabled={!value} onClick={() => save.mutate()}>Salvar valor</Button>
+          <label className="flex items-center gap-2 text-sm sm:col-span-4"><input type="checkbox" className="h-4 w-4 accent-primary" checked={only} onChange={(e) => setOnly(e.target.checked)} />A diferença para o valor atual é só reajuste (não é crescimento)</label>
+        </div>
+      )}
+    </section>
   );
 }

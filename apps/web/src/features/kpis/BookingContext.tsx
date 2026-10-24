@@ -142,58 +142,79 @@ function useBox<T extends HTMLElement>() {
 
 const ST_DOT = { atingido: '#16A34A', atencao: '#EA7A12', abaixo: '#D23434', sem_dado: '#C9CFD6' } as const;
 
+export type Revenue = {
+  year: number; upTo: number;
+  months: { month: string; recorrente: number; reajuste: number; medicao: number; frequente: number; total: number; comparavel: number }[];
+  prevMonths: Revenue['months'];
+  quarters: { q: number; months: number; base: number; real: number; comparable: number; growthComparable: number | null; growthReal: number | null }[];
+  ytd: { base: number; real: number; comparable: number; reajuste: number; growthReal: number | null; growthComparable: number | null } | null;
+  totals: Record<string, number>; missingHistory: number;
+};
+export const useRevenue = (year?: number) => useQuery({ queryKey: ['kpis', 'revenue', year ?? 'atual'], queryFn: () => api<Revenue>(`/intelligence/revenue${qs({ year })}`), refetchInterval: 120_000, refetchIntervalInBackground: true, retry: 2 });
+const pctTxt = (v: number | null) => (v === null ? '—' : `${v >= 0 ? '+' : ''}${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
+
 /**
- * Booking em R$, mês a mês (contratos novos + aditivos, valor anual), com o % da meta lançado no indicador.
+ * Booking: receita da base de contratos mês a mês (recorrente + medição + frequente) contra o ano anterior.
+ * A parte clara da barra é reajuste (não é crescimento); embaixo, o crescimento sem reajuste.
  * O olhinho esconde os valores em R$ (reunião, TV): as barras continuam, só os números somem.
  */
-export function BookingChart({ it, c, onOpen, fill }: { it: KpiItem; c: BookingCtx; onOpen?: (it: KpiItem) => void; fill?: boolean }) {
+export function BookingChart({ it, r, onOpen, fill }: { it: KpiItem; r: Revenue; onOpen?: (it: KpiItem) => void; fill?: boolean }) {
   const hidden = useMoneyHidden();
   const [ref, box] = useBox<HTMLDivElement>();
-  const pctOf = new Map(it.quarters.flatMap((q) => q.months ?? []).map((m) => [m.period, m]));
-  const months = c.bookingMonths;
-  const curMonth = c.period.today.slice(0, 7);
-  const total = months.reduce((t, m) => t + m.cents, 0);
+  const y = r.year;
   const fs = Math.max(10, Math.min(15, box.w / 70));
   const W = box.w, H = fill ? box.h : Math.min(box.h, 270), L = hidden ? 8 : fs * 5.2, R = 8, T = fs * 1.9, B = fs * 3.6;
-  const top = Math.max(1, ...months.map((m) => m.cents)) * 1.15;
+  const top = Math.max(1, ...r.months.map((m) => m.total), ...r.prevMonths.map((m) => m.total)) * 1.15;
   const slot = (W - L - R) / 12;
-  const y = (v: number) => T + (H - T - B) * (1 - v / top);
-  const bw = Math.min(fs * 5, slot * 0.58);
+  const yy = (v: number) => T + (H - T - B) * (1 - v / top);
+  const bw = Math.min(fs * 2.6, slot * 0.32);
+  const g = r.ytd;
   return (
     <section className="card flex h-full flex-col p-5" aria-label={`Evolução de ${it.def.name}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-md font-bold text-ink">{it.def.name} <span className="ml-1 align-middle text-2xs font-semibold text-primary">indicador principal</span></h3>
-          <p className="text-xs text-muted">Fechado por mês em {c.period.year} (valor anual de contratos novos e aditivos) · embaixo, o % da meta lançado no indicador</p>
+          <p className="text-xs text-muted">Receita da base de contratos (recorrente + medição + frequente), {y} contra {y - 1}. Crescimento sem o efeito do reajuste.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-right text-xs text-muted">No ano<b className="num block text-md text-ink">{brlShort(total)}</b></span>
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="text-right text-xs text-muted">{y - 1} (ano todo)<b className="num block text-md text-ink">{brlShort(r.totals[String(y - 1)] ?? 0)}</b></span>
+          <span className="text-right text-xs text-muted">{y} até {r.upTo ? MONTHS[r.upTo - 1] : '—'}<b className="num block text-md text-ink">{brlShort(r.totals[`${y}_ate_mes`] ?? 0)}</b></span>
+          <span className="text-right text-xs text-muted">Crescimento sem reajuste<b className="num block text-md text-primary">{pctTxt(g?.growthComparable ?? null)}</b></span>
           <MoneyToggle compact />
           {onOpen && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => onOpen(it)}>Ver ficha</button>}
         </div>
       </div>
-      <div ref={ref} className={fill ? 'mt-3 min-h-[200px] w-full flex-1' : 'mt-3 h-[270px] w-full'}>
-        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="block" role="img" aria-label={`Booking em reais por mês em ${c.period.year}`}>
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-muted">
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5" style={{ background: BRAND.grey }} aria-hidden />{y - 1}</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5" style={{ background: BRAND.blue }} aria-hidden />{y}</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5" style={{ background: BRAND.light }} aria-hidden />Reajuste</span>
+        {g && <span>Com reajuste: <b className="num text-ink">{pctTxt(g.growthReal)}</b></span>}
+      </div>
+      {(() => { const gaps = r.months.slice(0, r.upTo).filter((m, i) => m.total > 0 && !r.prevMonths[i]!.total).length; return gaps > 0 ? <p className="mt-2 bg-warning-soft px-3 py-1.5 text-xs text-[#9A4B07]">{y - 1} sem receita no CRM em {gaps} mês(es) em que {y} tem: a base do ano anterior está incompleta e o crescimento fica exagerado. Cadastre os contratos de {y - 1} com as datas certas ou informe o valor de {y - 1} nos contratos.</p> : null; })()}
+      {r.missingHistory > 0 && <p className="mt-2 bg-warning-soft px-3 py-1.5 text-xs text-[#9A4B07]">{r.missingHistory} contrato(s) cadastrado(s) já reajustado(s), sem o valor de {y - 1}: informe na aba Aditivos do contrato para o reajuste não contar como crescimento.</p>}
+      <div ref={ref} className={fill ? 'mt-2 min-h-[200px] w-full flex-1' : 'mt-2 h-[270px] w-full'}>
+        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="block" role="img" aria-label={`Receita por mês: ${y} contra ${y - 1}`}>
           {[0, 0.25, 0.5, 0.75, 1].map((k) => (
             <g key={k}>
-              <line x1={L} x2={W - R} y1={y(top * k)} y2={y(top * k)} stroke="#E1E5EA" />
-              {!hidden && <text x={L - 6} y={y(top * k) + 3.5} textAnchor="end" fontSize={fs * 0.85} fill="#7D8791">{k === 0 ? 'R$ 0' : brlShort(top * k)}</text>}
+              <line x1={L} x2={W - R} y1={yy(top * k)} y2={yy(top * k)} stroke="#E1E5EA" />
+              {!hidden && <text x={L - 6} y={yy(top * k) + 3.5} textAnchor="end" fontSize={fs * 0.85} fill="#7D8791">{k === 0 ? 'R$ 0' : brlShort(top * k)}</text>}
             </g>
           ))}
-          {months.map((m, i) => {
+          {r.months.map((m, i) => {
+            const p = r.prevMonths[i]!;
             const cx = L + i * slot + slot / 2;
-            const future = m.month > curMonth;
-            const pm = pctOf.get(m.month);
-            const label = MONTHS[i]!;
+            const future = i >= r.upTo;
+            const growth = !future && p.total ? (m.comparavel / p.total - 1) * 100 : null;
+            const base = m.total - m.reajuste;
             return (
               <g key={m.month}>
-                {m.cents > 0 && <rect x={cx - bw / 2} y={y(m.cents)} width={bw} height={Math.max(0, y(0) - y(m.cents))} fill={m.month === curMonth ? BRAND.blue2 : BRAND.blue} />}
-                {m.cents > 0 && !hidden && <text x={cx} y={y(m.cents) - 5} textAnchor="middle" fontSize={fs * 0.9} fontWeight="700" fill={BRAND.ink}>{brlShort(m.cents)}</text>}
-                <text x={cx} y={H - fs * 2.1} textAnchor="middle" fontSize={fs} fill={future ? '#B4BCC4' : '#5F6B76'}>{label}</text>
-                {pm && pm.value !== null && <>
-                  <circle cx={cx - fs * 1.5} cy={H - fs * 0.75} r={fs * 0.28} fill={ST_DOT[pm.status]} />
-                  <text x={cx + fs * 0.2} y={H - fs * 0.4} textAnchor="middle" fontSize={fs * 0.85} fontWeight="600" fill={BRAND.ink}>{pm.value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</text>
+                {p.total > 0 && <rect x={cx - bw - 1} y={yy(p.total)} width={bw} height={Math.max(0, yy(0) - yy(p.total))} fill={BRAND.grey} />}
+                {!future && m.total > 0 && <>
+                  <rect x={cx + 1} y={yy(base)} width={bw} height={Math.max(0, yy(0) - yy(base))} fill={BRAND.blue} />
+                  {m.reajuste > 0 && <rect x={cx + 1} y={yy(m.total)} width={bw} height={Math.max(0, yy(base) - yy(m.total))} fill={BRAND.light} />}
                 </>}
+                <text x={cx} y={H - fs * 2.1} textAnchor="middle" fontSize={fs} fill={future ? '#B4BCC4' : '#5F6B76'}>{MONTHS[i]}</text>
+                {growth !== null && <text x={cx} y={H - fs * 0.45} textAnchor="middle" fontSize={fs * 0.85} fontWeight="700" fill={growth >= 0 ? BRAND.blue : BRAND.risk}>{pctTxt(Math.round(growth))}</text>}
               </g>
             );
           })}

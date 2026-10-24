@@ -9,12 +9,12 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { kpiBands, type IndicatorDef, type KpiStatus } from '@isp/domain';
 import { api, qs } from '../../lib/api';
-import { AccountHealth, BookingChart, ClosedContracts, OpenPipeline, useBookingContext } from './BookingContext';
+import { AccountHealth, BookingChart, ClosedContracts, OpenPipeline, useBookingContext, useRevenue } from './BookingContext';
 import './kpiBoard.css';
 
 export type KpiQuarter = { q: number; target: number | null; value: number | null; status: KpiStatus; attainment: number | null; months: { period: string; value: number | null; status: KpiStatus }[] | null; phase: 'fechado' | 'atual' | 'futuro'; entries: number };
 export type KpiItem = {
-  id: string; key: string; version: number; def: IndicatorDef; quarters: KpiQuarter[]; current: KpiQuarter | null;
+  id: string; key: string; version: number; def: IndicatorDef; source?: 'crm' | 'informado'; quarters: KpiQuarter[]; current: KpiQuarter | null;
   annual: { target: number | null; value: number | null; status: KpiStatus; attainment: number | null }; lastEntryAt: string | null; lastPeriod: string | null;
 };
 export type KpiData = { year: number; today: string; quarter: number | null; items: KpiItem[]; canEnter: boolean; canImport: boolean; demoEntries: number; summary: { total: number; atingido: number; atencao: number; abaixo: number; sem_dado: number } };
@@ -88,7 +88,7 @@ function KpiCardTile({ it, selected, onSelect }: { it: KpiItem; selected: boolea
         {c?.attainment != null && <span className={clsx('num font-semibold', ST_TEXT[st])}>{Math.round(c.attainment * 100)}%</span>}
       </span>
       <ProgressBar it={it} />
-      <span className="mt-2 text-2xs text-faint">No ano <b className="num font-semibold text-muted">{short(it.annual.value, it.def.unit)}</b> · meta {goalText(it, it.annual.target)}</span>
+      <span className="mt-2 text-2xs text-faint">{it.source === 'crm' && <span className="mr-1 font-semibold text-primary">CRM ·</span>}No ano <b className="num font-semibold text-muted">{short(it.annual.value, it.def.unit)}</b> · meta {goalText(it, it.annual.target)}</span>
     </button>
   );
 }
@@ -258,6 +258,7 @@ export function KpiBoard({ d, updatedAt, error, tv, onOpen, onExit, className }:
   // o gráfico de evolução é sempre do indicador principal da área (marcado na ficha; sem marca, o primeiro)
   const sel = items.find((i) => i.def.sheet!.main) ?? items[0];
   const ctx = useBookingContext(d.year, d.quarter);
+  const rev = useRevenue(d.year);
   const [page, setPage] = useState(0);
   useEffect(() => {
     if (!tv) return;
@@ -280,7 +281,7 @@ export function KpiBoard({ d, updatedAt, error, tv, onOpen, onExit, className }:
               Na TV a parte de baixo alterna entre duas visões para caber numa tela só. */}
           <div className={clsx('grid grid-cols-1 gap-4 xl:grid-cols-12', tv && 'min-h-0 flex-1 xl:grid-rows-1')}>
             {(!tv || page === 0) && <>
-              <div className="xl:col-span-8">{sel && (ctx.data && sel.def.period === 'mes' ? <BookingChart it={sel} c={ctx.data} onOpen={tv ? undefined : onOpen} fill={tv} /> : <Evolution it={sel} year={d.year} onOpen={tv ? undefined : onOpen} wide={tv} />)}</div>
+              <div className="xl:col-span-8">{sel && (rev.data && sel.key === 'kpi_booking_de_contratos' ? <BookingChart it={sel} r={rev.data} onOpen={tv ? undefined : onOpen} fill={tv} /> : <Evolution it={sel} year={d.year} onOpen={tv ? undefined : onOpen} wide={tv} />)}</div>
               <div className="xl:col-span-4">{ctx.data ? <ClosedContracts c={ctx.data} link={!tv} /> : <div className="card h-full min-h-[200px]" />}</div>
             </>}
             {(!tv || page === 1) && <>

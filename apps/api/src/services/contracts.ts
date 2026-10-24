@@ -92,7 +92,8 @@ export async function newVersion(db: DbOrTx, c: ContractRow, actorId: string | n
   const changed = Object.entries(patch).filter(([k, v]) => v !== undefined && JSON.stringify(v) !== JSON.stringify((cur as Record<string, unknown>)[k])).map(([k]) => k);
   if (!changed.length) return { version: cur.version, changed };
   const next = cur.version + 1;
-  const values = { ...keep, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), version: next, changeKind, reason, createdBy: actorId };
+  // a vigência é de cada versão: não passa para a seguinte
+  const values = { ...keep, effectiveFrom: null, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)), version: next, changeKind, reason, createdBy: actorId };
   await db.insert(s.contractVersions).values(values as typeof s.contractVersions.$inferInsert);
   await db.update(s.contracts).set({ currentVersion: next, updatedAt: new Date(), rowVersion: sql`${s.contracts.rowVersion} + 1` }).where(eq(s.contracts.id, c.id));
   await addEvent(db, c.tenantId, c.id, actorId, 'versao', `Versão ${next} (${changeKind}): ${reason}`, { version: next, changed });

@@ -45,9 +45,9 @@ test('indicadores principais: importa as fichas, lança resultados e mostra o pa
   await expect(board.getByRole('region', { name: 'Evolução de Booking de Contratos' })).toBeVisible();
   await expect(board.getByRole('region', { name: 'Contratos fechados no trimestre' })).toBeVisible();
   const bk = board.getByRole('region', { name: 'Evolução de Booking de Contratos' });
-  await expect(bk).toContainText('No ano');
+  await expect(bk).toContainText('Crescimento sem reajuste');
   await bk.getByRole('button', { name: 'Ocultar valores' }).click();
-  await expect(bk.getByText('R$ •••••')).toBeVisible();
+  await expect(bk.getByText('R$ •••••').first()).toBeVisible();
   await page.screenshot({ path: 'test-results/kpis-oculto.png' });
   await bk.getByRole('button', { name: 'Mostrar valores' }).click();
   await expect(board.getByRole('region', { name: 'Negociações em andamento' })).toBeVisible();

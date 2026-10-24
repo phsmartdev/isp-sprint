@@ -15,6 +15,8 @@ import { level } from '../services/scope';
 import { todayLocal } from '../services/projects';
 import { excelDate, readXlsx } from '../services/xlsx';
 import { clearKpiDemo, loadKpiDemo } from '../services/kpiDemo';
+import { revenueReport } from '../services/revenue';
+import { kpiAuto } from '../services/kpiAuto';
 import type { AuthContext } from '../http/context';
 
 const canEnter = (auth: AuthContext) => level(auth, 'configuracoes') === 'total' || level(auth, 'inteligencia') === 'total' || auth.sectors.some((x) => x === 'inteligencia_comercial' || x === 'diretoria');
@@ -30,6 +32,7 @@ export const SheetSchema = z.object({
   impact: z.string().max(1000).nullable(), related: z.string().max(500).nullable(), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), notes: z.string().max(5000).nullable(),
   quarterTargets: z.array(z.number().nullable()).length(4), minAcceptable: z.number().nullable(), minOfTarget: z.number().min(0).max(1).nullable(), maxDesirable: z.number().nullable(),
   aggregation: z.enum(['media', 'ultimo', 'soma']), featured: z.boolean(), paused: z.boolean(), main: z.boolean().optional(),
+  auto: z.enum(['booking', 'win_rate', 'conversao', 'health', 'lead_time', 'abm']).nullable().optional(), taskCategories: z.array(z.string().trim().min(1).max(60)).max(20).optional(), abmInteractions: z.array(z.enum(['reuniao_visita', 'resposta_email', 'passo_play', 'play_sucesso'])).max(10).optional(),
 });
 const KpiDefSchema = z.object({
   name: z.string().trim().min(3).max(120), description: z.string().max(1000).optional(), category: z.string().max(40), calc: z.literal('informado'),
@@ -38,18 +41,28 @@ const KpiDefSchema = z.object({
 });
 
 /** Placar de um KPI no ano: meta e resultado de cada trimestre (e dos meses, quando mensal) e do ano. */
-function board(def: IndicatorDef, entries: { period: string; periodStart: string; value: number; createdAt: Date; note: string | null }[], year: number, today: string) {
+type Auto = { months: Map<string, number | null>; quarters: Map<number, number | null>; annual?: number | null };
+const r1 = (v: number | null) => (v === null ? null : Math.round(v * 10) / 10);
+/** Booking calculado da base de contratos: crescimento comparável (sem reajuste) sobre o mesmo período do ano anterior. */
+function bookingAuto(rev: Awaited<ReturnType<typeof revenueReport>>): Auto | null {
+  if (!rev.ytd || !rev.ytd.base) return null;
+  const months = new Map<string, number | null>();
+  rev.months.forEach((m, i) => { const p = rev.prevMonths[i]!; months.set(m.month, i < rev.upTo && p.total ? r1((m.comparavel / p.total - 1) * 100) : null); });
+  return { months, quarters: new Map(rev.quarters.map((q) => [q.q, r1(q.growthComparable)])), annual: r1(rev.ytd.growthComparable) };
+}
+
+function board(def: IndicatorDef, entries: { period: string; periodStart: string; value: number; createdAt: Date; note: string | null }[], year: number, today: string, auto: Auto | null = null) {
   const curQ = Number(today.slice(0, 4)) === year ? quarterOf(today) : year < Number(today.slice(0, 4)) ? 5 : 0;
   const inYear = entries.filter((e) => e.periodStart.startsWith(`${year}-`));
   const agg = def.sheet?.aggregation ?? 'media';
   const quarters = [1, 2, 3, 4].map((q) => {
     const list = inYear.filter((e) => quarterOf(e.periodStart) === q);
-    const value = aggregate(list.map((e) => e.value), agg);
+    const value = auto?.quarters.get(q) ?? aggregate(list.map((e) => e.value), agg);
     const target = kpiTarget(def, q);
-    const months = def.period === 'mes' ? [0, 1, 2].map((k) => { const m = `${year}-${String((q - 1) * 3 + k + 1).padStart(2, '0')}`; const e = list.find((x) => x.period === m); return { period: m, value: e?.value ?? null, status: kpiStatus(def, e?.value ?? null, target) }; }) : null;
+    const months = def.period === 'mes' ? [0, 1, 2].map((k) => { const m = `${year}-${String((q - 1) * 3 + k + 1).padStart(2, '0')}`; const v = auto?.months.get(m) ?? list.find((x) => x.period === m)?.value ?? null; return { period: m, value: v, status: kpiStatus(def, v, target) }; }) : null;
     return { q, target, value, status: kpiStatus(def, value, target) as KpiStatus, attainment: kpiAttainment(def.direction, value, target), months, phase: q < curQ ? 'fechado' : q === curQ ? 'atual' : 'futuro', entries: list.length };
   });
-  const value = aggregate(quarters.filter((q) => q.value !== null).map((q) => q.value!), agg === 'soma' ? 'soma' : 'media');
+  const value = auto?.annual ?? aggregate(quarters.filter((q) => q.value !== null).map((q) => q.value!), agg === 'soma' ? 'soma' : 'media');
   const last = [...entries].sort((a, b) => +b.createdAt - +a.createdAt)[0] ?? null;
   return {
     quarters, current: quarters.find((q) => q.phase === 'atual') ?? null,
@@ -148,6 +161,25 @@ async function bookingContext(db: Parameters<typeof allIndicators>[0], tenantId:
 
 export const kpiRoutes = [
   defineRoute({
+    method: 'GET', url: '/intelligence/kpis/task-categories', summary: 'Categorias de tarefa em uso (para escolher as que entram no Lead Time de Viabilidade)', tag: 'Inteligência', module: 'inteligencia',
+    handler: async ({ app, auth }) => {
+      const r = await app.db.execute<{ category: string; n: number }>(sql`
+        select category, sum(n)::int n from (
+          select category, count(*) n from activities where tenant_id = ${auth.tenantId} and category is not null and category <> '' group by category
+          union all select category, 0 n from task_templates where tenant_id = ${auth.tenantId} and active and category is not null and category <> '') x
+         group by category order by category`);
+      return { items: r.rows };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/intelligence/revenue', summary: 'Receita da base de contratos por mês (recorrente + medição + frequente), ano anterior, efeito do reajuste e crescimento comparável', tag: 'Inteligência', module: 'inteligencia',
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100).optional() }),
+    handler: async ({ app, auth, query }) => {
+      const today = todayLocal(auth);
+      return revenueReport(app.db, auth.tenantId, query.year ?? Number(today.slice(0, 4)), today);
+    },
+  }),
+  defineRoute({
     method: 'POST', url: '/intelligence/kpis/demo', summary: 'Cria as fichas dos indicadores principais que faltam e lança resultados fictícios de demonstração onde não há resultado', tag: 'Inteligência', module: 'inteligencia',
     handler: async ({ app, auth, req }) => {
       if (!canImport(auth)) throw forbidden('Dados de demonstração exigem visão total em Configurações.');
@@ -181,9 +213,13 @@ export const kpiRoutes = [
       const year = query.year ?? Number(today.slice(0, 4));
       const all = (await allIndicators(app.db, auth.tenantId)).filter((i) => i.active && i.def.calc === 'informado' && i.def.sheet);
       const items = [];
+      // Booking de Contratos: calculado da base de contratos (crescimento sem reajuste) quando há receita do ano anterior para comparar
+      const rev = all.some((i) => i.key === 'kpi_booking_de_contratos') ? await revenueReport(app.db, auth.tenantId, year, today) : null;
       for (const i of all) {
         const entries = await indicatorEntriesOf(app.db, auth.tenantId, i.id);
-        items.push({ id: i.id, key: i.key, version: i.currentVersion, def: i.def, ...board(i.def, entries, year, today) });
+        const auto = i.key === 'kpi_booking_de_contratos' ? (rev ? bookingAuto(rev) : null) : (await kpiAuto(app.db, auth.tenantId, i.key, i.def, year, today))?.auto ?? null;
+        const hasAuto = !!auto && ([...auto.quarters.values()].some((v) => v !== null) || [...auto.months.values()].some((v) => v !== null));
+        items.push({ id: i.id, key: i.key, version: i.currentVersion, def: i.def, source: hasAuto ? 'crm' as const : 'informado' as const, ...board(i.def, entries, year, today, hasAuto ? auto : null) });
       }
       const live = items.filter((i) => !i.def.sheet!.paused);
       const count = (st: KpiStatus) => live.filter((i) => i.current?.status === st).length;

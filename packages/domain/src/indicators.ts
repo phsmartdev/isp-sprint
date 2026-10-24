@@ -450,6 +450,12 @@ export type KpiSheet = {
   featured: boolean; paused: boolean;
   /** indicador principal da área: é o do gráfico de evolução no painel */
   main?: boolean;
+  /** cálculo direto do CRM (sem ele, o resultado é informado) */
+  auto?: 'booking' | 'win_rate' | 'conversao' | 'health' | 'lead_time' | 'abm' | null;
+  /** Lead Time: categorias de tarefa que contam (ex.: viabilidade de engenharia e de infraestrutura) */
+  taskCategories?: string[];
+  /** Ativação de contas-alvo: interações que contam como engajamento */
+  abmInteractions?: string[];
 };
 export const KPI_STATUS = ['atingido', 'atencao', 'abaixo', 'sem_dado'] as const;
 export type KpiStatus = (typeof KPI_STATUS)[number];
