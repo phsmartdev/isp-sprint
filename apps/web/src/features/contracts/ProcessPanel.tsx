@@ -1,6 +1,6 @@
 /** Processo do contrato (implantação, renovação, reajuste, encerramento): roteiro de etapas com o que cada uma exige. */
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { CheckCircle2, Circle, FileText, Mail, MinusCircle } from 'lucide-react';
 import { PROCESS_LABELS, SECTOR_LABELS, adjustedCents, addDays, processSteps, toCents, type StepDef } from '@isp/domain';
@@ -18,6 +18,24 @@ const DECISION_LABELS: Record<string, [string, string]> = {
   aprovacao: ['Aprovado', 'Reprovado'],
   validacao_cs: ['Encerramento validado', 'Não validado'],
 };
+
+type Suggestion = { ok: boolean; reason?: string; index?: string; pct?: number; newCents?: number; window?: { from: string; to: string }; source?: string; monthly?: { month: string; pct: number }[] };
+/** Acumulado oficial do índice do contrato nos 12 meses antes do aniversário (Banco Central), com botão para usar no cálculo. */
+function IndexSuggestion({ c, p, onUse }: { c: ContractDetail; p: Process; onUse: (index: string, pct: number) => void }) {
+  const stored = (p.data as { suggestion?: Suggestion }).suggestion;
+  const q = useQuery({ queryKey: ['adjustment-suggestion', c.id, p.cycleKey], queryFn: () => api<Suggestion>(`/contracts/${c.id}/adjustment-suggestion?anniversary=${p.cycleKey}`), staleTime: 3_600_000, retry: false });
+  const s = q.data?.ok ? q.data : stored?.pct !== undefined ? { ...stored, ok: true } : q.data;
+  if (q.isLoading && !stored) return <p className="text-sm text-muted">Buscando o índice no Banco Central…</p>;
+  if (!s) return null;
+  if (!s.ok) return <p className="bg-surface px-3 py-2 text-sm text-muted">{s.reason ?? 'Índice oficial indisponível agora. Informe o percentual à mão.'}</p>;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border border-primary/30 bg-primary-soft/40 px-3 py-2" aria-label="Reajuste sugerido pelo índice oficial">
+      <p className="text-sm text-text"><b className="text-ink">{s.index} acumulado: <span className="num">{s.pct!.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}%</span></b>
+        {s.window && <> de {fmtDate(s.window.from)} a {fmtDate(s.window.to)}</>} · novo mensal <b className="num">{fmtBRL(s.newCents!)}</b> <span className="text-xs text-muted">({s.source})</span></p>
+      <Button size="sm" variant="primary" onClick={() => onUse(s.index!, s.pct!)}>Usar este percentual</Button>
+    </div>
+  );
+}
 
 function StepForm({ c, p, d, onDone, onUpload }: { c: ContractDetail; p: Process; d: StepDef; onDone: () => void; onUpload: (category: string) => void }) {
   const qc = useQueryClient();
@@ -75,6 +93,7 @@ function StepForm({ c, p, d, onDone, onUpload }: { c: ContractDetail; p: Process
           </div>
         </fieldset>
       )}
+      {d.key === 'calculo' && p.kind === 'reajuste' && <IndexSuggestion c={c} p={p} onUse={(i, v) => { setIndex(i); setPct(String(v).replace('.', ',')); }} />}
       {d.key === 'calculo' && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <FormField label="Índice" htmlFor={id('idx')} required><Input id={id('idx')} value={index} onChange={(e) => setIndex(e.target.value)} /></FormField>

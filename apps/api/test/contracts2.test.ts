@@ -250,3 +250,33 @@ describe('consumo do contrato e empenho', () => {
     expect(JSON.stringify(tl)).toMatch(/Empenho 2026NE000123 anulado/);
   });
 });
+
+describe('aditivos e reajuste pelo índice oficial', () => {
+  it('limite de 25% bloqueia acréscimo em contrato público; prazo gera nova versão; reajuste sugerido pelo IPCA', async () => {
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Câmara Aditivo Fictícia', segment: 'governamental' }, planId: plan.id }), 201).json();
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o.id}`)).json().rowVersion }));
+    const id = ok(await carlos.post('/contracts', { opportunityId: o.id, billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: lucas.me.user.id, version: { number: 'AD-1', object: 'Link público', signedAt: addDays(today, -400), startAt: addDays(today, -395), termMonths: 12, monthlyCents: 100_000, adjustmentIndex: 'IPCA', adjustmentBaseDate: addDays(today, -400), items: [{ planId: null, description: 'Link', qty: 1, unitCents: 100_000 }], publicTerms: { agency: 'Câmara', processNumber: '9/2025', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } }), 201).json().id;
+    ok(await carlos.post(`/contracts/${id}/validate`));
+    let am = ok(await carlos.get(`/contracts/${id}/amendments`)).json();
+    expect(am.limits).toMatchObject({ baseCents: 1_200_000, capCents: 300_000 });
+    expect(am.legalLimit).toBe(true);
+    expect((await lucas.post(`/contracts/${id}/amendments`, { number: '1', kind: 'acrescimo', signedOn: today, valueDeltaCents: 100_000, monthlyDeltaCents: 10_000, description: 'Mais um ponto' })).statusCode).toBe(403);
+    const over = await carlos.post(`/contracts/${id}/amendments`, { number: '1', kind: 'acrescimo', signedOn: today, valueDeltaCents: 400_000, monthlyDeltaCents: 30_000, description: 'Acréscimo grande' });
+    expect(over.statusCode).toBe(422);
+    expect(over.json().detail).toMatch(/limite legal de acréscimo \(25%/);
+    ok(await carlos.post(`/contracts/${id}/amendments`, { number: '1', kind: 'acrescimo', signedOn: today, valueDeltaCents: 240_000, monthlyDeltaCents: 20_000, description: 'Mais dois pontos' }), 201);
+    const d = (await carlos.get(`/contracts/${id}`)).json();
+    expect(d.current.monthlyCents).toBe(120_000);
+    expect(d.versions[0].changeKind ?? d.versions.at(-1).changeKind).toBeTruthy();
+    am = ok(await carlos.get(`/contracts/${id}/amendments`)).json();
+    expect(am.limits.acrescimo).toMatchObject({ cents: 240_000, remainingCents: 60_000 });
+    expect((await carlos.post(`/contracts/${id}/amendments`, { number: '2', kind: 'acrescimo', signedOn: today, valueDeltaCents: 70_000, description: 'Passa do limite' })).statusCode).toBe(422);
+    ok(await carlos.post(`/contracts/${id}/amendments`, { number: '2', kind: 'prazo', signedOn: today, newEndAt: addDays(today, 400), description: 'Prorrogação por 12 meses' }), 201);
+    expect((await carlos.get(`/contracts/${id}`)).json().current.endAt).toBe(addDays(today, 400));
+    // reajuste: acumulado de 12 meses de 0,40% = 4,907%
+    const sug = ok(await carlos.get(`/contracts/${id}/adjustment-suggestion?anniversary=${today}`)).json();
+    expect(sug).toMatchObject({ ok: true, index: 'IPCA', pct: 4.907, currentCents: 120_000, newCents: Math.round(120_000 * 1.04907), source: 'Banco Central (SGS)' });
+    expect(sug.monthly).toHaveLength(12);
+  });
+});

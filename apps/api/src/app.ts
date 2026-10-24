@@ -55,6 +55,7 @@ import { opportunityItemRoutes } from './routes/opportunityItems';
 import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants';
 import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
+import { contractAmendmentRoutes } from './routes/contractAmendments';
 import { activityScriptRoutes } from './routes/activityScripts';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
@@ -206,6 +207,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...bidActionRoutes,
     ...competitorRoutes,
     ...contractHabilitationRoutes,
+    ...contractAmendmentRoutes,
     ...activityScriptRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,

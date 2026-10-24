@@ -1,3 +1,5 @@
+import { setIndexFetcher } from '../src/services/indices';
+import { addMonths } from '@isp/domain';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
@@ -10,6 +12,8 @@ export const PASSWORD = 'Sprint@2026';
 export async function makeApp(env: Record<string, string> = {}) {
   const config = loadConfig({ ...process.env, DATABASE_URL: TEST_DB, WEB_ORIGIN: ORIGIN, NODE_ENV: 'test', LOG_LEVEL: 'silent', LOGIN_RATE_LIMIT_PER_MINUTE: '1000', ...env });
   const { db, pool } = createDb(TEST_DB);
+  // índices oficiais simulados nos testes (sem rede): 0,40% ao mês em qualquer série
+  setIndexFetcher(async (_code, from, to) => { const out: { month: string; pct: number }[] = []; for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addMonths(`${m}-01`, 1).slice(0, 7)) out.push({ month: m, pct: 0.4 }); return out; });
   const app = await buildApp({ config, db, logger: false, rateLimitMax: 10_000 });
   return { app, db, pool, close: async () => { await app.close(); await pool.end(); } };
 }

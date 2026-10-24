@@ -414,3 +414,61 @@ export function docStatus(expiresOn: string | null | undefined, today: string): 
   const days = daysBetween(today, expiresOn);
   return { status: days < 0 ? 'vencida' : days <= 7 ? 'vence_7' : days <= 15 ? 'vence_15' : days <= 30 ? 'vence_30' : 'valida', days };
 }
+
+// ------------------------------------------------------------------ aditivos (limite legal) e reajuste por índice oficial
+export const AMENDMENT_KINDS = ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'] as const;
+export type AmendmentKind = (typeof AMENDMENT_KINDS)[number];
+export const AMENDMENT_LABELS: Record<AmendmentKind, string> = { acrescimo: 'Acréscimo de valor/quantidade', supressao: 'Supressão', prazo: 'Prorrogação de prazo', reequilibrio: 'Reequilíbrio econômico-financeiro', outro: 'Outro' };
+
+/** Valor original do contrato (base do limite): valor global da 1ª versão; sem ele, mensal × prazo. */
+export function originalValue(v: { totalCents: number | null; monthlyCents: number; termMonths: number | null }) {
+  return v.totalCents && v.totalCents > 0 ? v.totalCents : v.monthlyCents * (v.termMonths ?? 12);
+}
+
+/**
+ * Uso do limite legal de alteração (Lei 14.133 art. 125 / Lei 8.666 art. 65 §1º): acréscimos e supressões são somados
+ * separadamente (sem compensar um com o outro), sobre o valor inicial atualizado. Limite: 25% (50% em reforma).
+ * Supressão acima do limite só por acordo entre as partes.
+ */
+export function amendmentLimits(baseCents: number, list: { kind: string; valueDeltaCents: number }[], reforma = false) {
+  const limitPct = reforma ? 0.5 : 0.25;
+  const add = list.filter((a) => a.kind === 'acrescimo').reduce((t, a) => t + Math.abs(a.valueDeltaCents), 0);
+  const sup = list.filter((a) => a.kind === 'supressao').reduce((t, a) => t + Math.abs(a.valueDeltaCents), 0);
+  const cap = Math.round(baseCents * limitPct);
+  return {
+    baseCents, limitPct, capCents: cap,
+    acrescimo: { cents: add, share: baseCents ? add / baseCents : null, remainingCents: Math.max(0, cap - add) },
+    supressao: { cents: sup, share: baseCents ? sup / baseCents : null, remainingCents: Math.max(0, Math.round(baseCents * 0.25) - sup) },
+  };
+}
+
+/** Erro de limite para um novo aditivo em contrato público (null = permitido). */
+export function amendmentError(isPublicRegime: boolean, limits: ReturnType<typeof amendmentLimits>, a: { kind: string; valueDeltaCents: number; acordo?: boolean }) {
+  if (!isPublicRegime) return null;
+  const v = Math.abs(a.valueDeltaCents);
+  const fmt = (c: number) => `R$ ${(c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (a.kind === 'acrescimo' && v > limits.acrescimo.remainingCents) return `Acima do limite legal de acréscimo (${Math.round(limits.limitPct * 100)}% do valor inicial): restam ${fmt(limits.acrescimo.remainingCents)}.`;
+  if (a.kind === 'supressao' && !a.acordo && v > limits.supressao.remainingCents) return `Supressão acima de 25% do valor inicial só com acordo entre as partes: restam ${fmt(limits.supressao.remainingCents)}.`;
+  return null;
+}
+
+/** Série mensal do índice (Banco Central, SGS) pelo nome do índice informado no contrato. IST (Anatel) não tem série no SGS. */
+export const INDEX_SGS: Record<string, number> = { IPCA: 433, INPC: 188, 'IGP-M': 189, 'IGP-DI': 190 };
+export function indexCodeOf(name: string | null | undefined): { key: string; code: number } | null {
+  const n = (name ?? '').toUpperCase().replace(/\s+/g, '');
+  if (n.includes('IGP-M') || n.includes('IGPM')) return { key: 'IGP-M', code: 189 };
+  if (n.includes('IGP-DI') || n.includes('IGPDI')) return { key: 'IGP-DI', code: 190 };
+  if (n.includes('IPCA')) return { key: 'IPCA', code: 433 };
+  if (n.includes('INPC')) return { key: 'INPC', code: 188 };
+  return null;
+}
+/** Os 12 meses que antecedem o aniversário (ex.: aniversário 2026-03-10 → mar/2025 a fev/2026). */
+export function adjustmentWindow(anniversary: string) {
+  const end = addMonths(`${anniversary.slice(0, 7)}-01`, -1);
+  return { from: addMonths(end, -11), to: end };
+}
+/** Acumulado de variações mensais em %: Π(1 + v/100) − 1, em % com 4 casas. */
+export function accumulatedPct(monthly: number[]) {
+  const f = monthly.reduce((t, v) => t * (1 + v / 100), 1);
+  return Math.round((f - 1) * 1_000_000) / 10_000;
+}

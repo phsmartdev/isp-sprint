@@ -11,6 +11,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { consumptionOf } from './contractLedger';
 import { runCompanyDocAlerts } from './companyDocs';
+import { adjustmentSuggestion } from './indices';
 import { addEvent, contractSettingsOf, contractSummary, createTask, mailTo, openProcess, sectorOwners, setStage, userById, type ContractRow } from './contracts';
 
 type Settings = Awaited<ReturnType<typeof contractSettingsOf>>;
@@ -88,9 +89,12 @@ async function act(db: DbOrTx, config: Config, c: ContractRow, a: DueAlert, cfg:
       break;
     }
     case 'reajuste': {
-      await openProcess(db, c, 'reajuste', a.cycleKey, SYSTEM, { baseDate: sum.v.adjustmentBaseDate, index: sum.v.adjustmentIndex, rule: sum.v.adjustmentRule, currentCents: sum.v.monthlyCents, anniversary: a.cycleKey }, a.dueAt);
+      const { process: rp } = await openProcess(db, c, 'reajuste', a.cycleKey, SYSTEM, { baseDate: sum.v.adjustmentBaseDate, index: sum.v.adjustmentIndex, rule: sum.v.adjustmentRule, currentCents: sum.v.monthlyCents, anniversary: a.cycleKey }, a.dueAt);
+      // já deixa o cálculo pronto pelo índice oficial (quando houver série e o índice já tiver sido divulgado)
+      const sug = await adjustmentSuggestion(sum.v.adjustmentIndex, a.cycleKey, sum.v.monthlyCents).catch(() => null);
+      if (sug?.ok) await db.update(s.contractProcesses).set({ data: { ...rp.data, suggestion: { index: sug.index, pct: sug.pct, newCents: sug.newCents, window: sug.window, source: sug.source } } }).where(eq(s.contractProcesses.id, rp.id));
       const fin = await sectorOwners(db, c.tenantId, ['financeiro', 'inteligencia_comercial'], [c.commercialOwnerId]);
-      await taskFor(fin, `Reajuste: contrato ${sum.v.number} – ${client}`, `Data-base ${a.cycleKey} (${when}). Índice: ${sum.v.adjustmentIndex ?? 'não informado'}.${sum.v.adjustmentRule ? `\nRegra: ${sum.v.adjustmentRule}` : ''}\n\n${sum.text}`, a.dueAt);
+      await taskFor(fin, `Reajuste: contrato ${sum.v.number} – ${client}`, `Data-base ${a.cycleKey} (${when}). Índice: ${sum.v.adjustmentIndex ?? 'não informado'}.${sug?.ok ? `\nAcumulado ${sug.index} (${sug.window.from.slice(0, 7)} a ${sug.window.to.slice(0, 7)}): ${sug.pct.toLocaleString('pt-BR')}% → ${brlOf(sum.v.monthlyCents)} passa a ${brlOf(sug.newCents)}.` : ''}${sum.v.adjustmentRule ? `\nRegra: ${sum.v.adjustmentRule}` : ''}\n\n${sum.text}`, a.dueAt);
       detail = `Reajuste na data-base ${a.cycleKey}.`;
       break;
     }

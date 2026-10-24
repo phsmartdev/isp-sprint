@@ -56,7 +56,7 @@ export const errMsg = (e: unknown) => (e instanceof ApiError ? [e.problem.detail
 export const dec = (n: number | null | undefined) => (n === null || n === undefined ? '' : (n / 100).toFixed(2).replace('.', ','));
 export const todayIso = () => new Date().toISOString().slice(0, 10);
 export const KIND_LABEL = { publico: 'Público', privado: 'Privado' } as const;
-export const CHANGE_LABEL: Record<string, string> = { cadastro: 'Cadastro', edicao: 'Edição', ativacao: 'Ativação/faturamento', renovacao: 'Renovação', reajuste: 'Reajuste', encerramento: 'Encerramento' };
+export const CHANGE_LABEL: Record<string, string> = { cadastro: 'Cadastro', edicao: 'Edição', ativacao: 'Ativação/faturamento', renovacao: 'Renovação', reajuste: 'Reajuste', aditivo: 'Termo aditivo', encerramento: 'Encerramento' };
 
 /** Lista com barra proporcional, quantidade e valor mensal (sem cortar o rótulo). */
 export function MoneyRows({ items, colorOf }: { items: { key: string; label: string; n: number; monthlyCents: number }[]; colorOf?: (key: string) => string }) {
