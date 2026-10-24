@@ -5,12 +5,12 @@
  * Visibilidade: caixa pessoal só para a dona. Caixa compartilhada: quem tem acesso total ao E-mail, quem está numa fila
  * da caixa ou da conversa, e quem vê a pessoa atribuída (Equipe = times que lidera).
  */
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   MAIL_PRIORITIES, MAIL_SCOPES, OPEN_THREAD, ROUTING_MODES, RULE_FIELDS, RULE_OPS, THREAD_STATUSES, atLeast, domainAllowed, evaluateRules, isEmail,
-  mailSettingsErrors, queueErrors, replySubject, ruleErrors, slaState, threadTransitionError, type MailRuleDef, type ThreadStatus,
+  buildEml, emlFilename, mailSettingsErrors, queueErrors, replySubject, ruleErrors, slaState, threadTransitionError, type MailRuleDef, type ThreadStatus,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { AppError, conflict, forbidden, notFound, unprocessable } from '../http/errors';
@@ -20,6 +20,9 @@ import * as s from '../db/schema';
 import { level, visibleUserIds } from '../services/scope';
 import { audit } from '../services/audit';
 import { encryptSecret } from '../services/email';
+import { OpportunityCreate } from '@isp/shared';
+import { createOpportunity, loadOpportunity } from '../services/opportunities';
+import { runAutomations } from '../services/automations';
 import { exchangeCode, GmailError, revokeToken, sendFromBox, syncMailbox, syncTenantMail } from '../services/gmail';
 
 const STATE_COOKIE = 'isp_mail_oauth';
@@ -110,6 +113,36 @@ const lastMsgOfThread = async (db: DbOrTx, threadId: string, dir?: 'entrada' | '
   const [m] = await db.select().from(s.mailMessages).where(and(eq(s.mailMessages.threadId, threadId), ...(dir ? [eq(s.mailMessages.direction, dir)] : []))).orderBy(desc(s.mailMessages.sentAt)).limit(1);
   return m ?? null;
 };
+
+
+type ReplyApp = { db: DbOrTx; config: Parameters<typeof gmailOn>[0] & { gmail: Parameters<typeof sendFromBox>[1] | null | undefined } };
+/** Resposta pela caixa da conversa (sai pelo Gmail, na mesma conversa). Usada no E-mail e na negociação que nasceu do e-mail. */
+async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<typeof audit>[1], t: typeof s.mailThreads.$inferSelect, box: typeof s.mailboxes.$inferSelect, body: { text: string; to?: string[]; cc?: string[]; resolve?: boolean }) {
+      gmailOn(app.config);
+      if (!(await canWork(app.db, auth, t, box))) throw forbidden(`Só quem atende a caixa ${box.address} responde esta conversa.`);
+      if (box.status !== 'conectada') throw unprocessable('A caixa desta conversa não está conectada.');
+      const lastIn = await lastMsgOfThread(app.db, t.id, 'entrada');
+      const last = await lastMsgOfThread(app.db, t.id);
+      const to = (body.to?.length ? body.to : lastIn ? [lastIn.fromAddr] : t.participants.filter((p) => p !== box.address)).map((x) => x.toLowerCase());
+      const cc = (body.cc ?? []).map((x) => x.toLowerCase());
+      if (!to.length || [...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
+      try {
+        await sendFromBox(app.db, app.config.gmail!, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: body.text, inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
+      } catch (e) {
+        if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
+        throw e;
+      }
+      const [fresh] = await app.db.select().from(s.mailThreads).where(eq(s.mailThreads.id, t.id)).limit(1);
+      if (body.resolve && fresh && fresh.status !== 'resolvida') {
+        await app.db.update(s.mailThreads).set({ status: 'resolvida', resolvedAt: new Date(), resolvedBy: auth.userId, rowVersion: fresh.rowVersion + 1 }).where(eq(s.mailThreads.id, t.id));
+        await app.db.insert(s.mailThreadEvents).values({ tenantId: auth.tenantId, threadId: t.id, type: 'situacao', payload: { from: fresh.status, to: 'resolvida', note: 'Respondida e resolvida' }, actorId: auth.userId });
+      }
+      if (!fresh?.assigneeId && box.kind === 'compartilhada') {
+        await app.db.update(s.mailThreads).set({ assigneeId: auth.userId, assignedAt: new Date() }).where(eq(s.mailThreads.id, t.id));
+        await app.db.insert(s.mailThreadEvents).values({ tenantId: auth.tenantId, threadId: t.id, type: 'atribuida', payload: { from: null, to: auth.userId, how: 'respondeu' }, actorId: auth.userId });
+      }
+      await audit(app.db, req, { action: 'mail.reply', entityType: 'mail_thread', entityId: t.id });
+}
 
 export const mailRoutes = [
   // ---------------------------------------------------------------- configuração
@@ -445,31 +478,8 @@ export const mailRoutes = [
     body: z.object({ text: z.string().trim().min(1).max(20_000), to: z.array(z.string().trim().max(200)).max(20).optional(), cc: z.array(z.string().trim().max(200)).max(20).optional(), resolve: z.boolean().optional() }),
     rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
     handler: async ({ app, auth, req, params, body }) => {
-      gmailOn(app.config);
       const { t, box } = await loadThread(app.db, auth, params.id);
-      if (!(await canWork(app.db, auth, t, box))) throw forbidden('Você não atende esta conversa.');
-      if (box.status !== 'conectada') throw unprocessable('A caixa desta conversa não está conectada.');
-      const lastIn = await lastMsgOfThread(app.db, t.id, 'entrada');
-      const last = await lastMsgOfThread(app.db, t.id);
-      const to = (body.to?.length ? body.to : lastIn ? [lastIn.fromAddr] : t.participants.filter((p) => p !== box.address)).map((x) => x.toLowerCase());
-      const cc = (body.cc ?? []).map((x) => x.toLowerCase());
-      if (!to.length || [...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
-      try {
-        await sendFromBox(app.db, app.config.gmail!, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: body.text, inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
-      } catch (e) {
-        if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
-        throw e;
-      }
-      const [fresh] = await app.db.select().from(s.mailThreads).where(eq(s.mailThreads.id, t.id)).limit(1);
-      if (body.resolve && fresh && fresh.status !== 'resolvida') {
-        await app.db.update(s.mailThreads).set({ status: 'resolvida', resolvedAt: new Date(), resolvedBy: auth.userId, rowVersion: fresh.rowVersion + 1 }).where(eq(s.mailThreads.id, t.id));
-        await app.db.insert(s.mailThreadEvents).values({ tenantId: auth.tenantId, threadId: t.id, type: 'situacao', payload: { from: fresh.status, to: 'resolvida', note: 'Respondida e resolvida' }, actorId: auth.userId });
-      }
-      if (!fresh?.assigneeId && box.kind === 'compartilhada') {
-        await app.db.update(s.mailThreads).set({ assigneeId: auth.userId, assignedAt: new Date() }).where(eq(s.mailThreads.id, t.id));
-        await app.db.insert(s.mailThreadEvents).values({ tenantId: auth.tenantId, threadId: t.id, type: 'atribuida', payload: { from: null, to: auth.userId, how: 'respondeu' }, actorId: auth.userId });
-      }
-      await audit(app.db, req, { action: 'mail.reply', entityType: 'mail_thread', entityId: t.id });
+      await replyOnThread(app, auth, req, t, box, body);
       return { ok: true };
     },
   }),
@@ -501,5 +511,73 @@ export const mailRoutes = [
       return { items: rows.map(({ t, address }) => ({ id: t.id, subject: t.subject, snippet: t.snippet, lastMessageAt: t.lastMessageAt, status: t.status, mailbox: address })) };
     },
   }),
+  // ---------------------------------------------------------------- e-mail que vira negociação
+  defineRoute({
+    method: 'POST', url: '/mail/threads/:id/opportunity', summary: 'Transforma a conversa (de qualquer caixa) em negociação: o e-mail vira anexo e a resposta sai por esta conversa', tag: 'E-mail', module: 'email', params: IdParams,
+    body: z.object({ opportunity: OpportunityCreate }),
+    handler: async ({ app, auth, req, params, body, reply }) => {
+      if (!atLeast(level(auth, 'oportunidades'), 'proprio')) throw forbidden('Seu perfil não cria oportunidades.');
+      const created = await app.db.transaction(async (tx) => {
+        const { t, box } = await loadThread(tx, auth, params.id);
+        if (!(await canWork(tx, auth, t, box))) throw forbidden('Você não atende esta conversa.');
+        const [cur] = await tx.select({ opportunityId: s.mailThreads.opportunityId, rowVersion: s.mailThreads.rowVersion }).from(s.mailThreads).where(eq(s.mailThreads.id, t.id)).for('update');
+        if (cur?.opportunityId) {
+          const [o] = await tx.select({ code: s.opportunities.code, origin: s.opportunities.originMailThreadId }).from(s.opportunities).where(eq(s.opportunities.id, cur.opportunityId)).limit(1);
+          if (o?.origin === t.id) throw unprocessable(`Esta conversa já virou a negociação OP-${o.code}.`);
+        }
+        const opp = await createOpportunity(tx, auth, req, body.opportunity);
+        const [o] = await tx.select({ contactId: s.opportunities.contactId, rowVersion: s.opportunities.rowVersion }).from(s.opportunities).where(eq(s.opportunities.id, opp.id)).limit(1);
+        await tx.update(s.opportunities).set({ originMailThreadId: t.id }).where(eq(s.opportunities.id, opp.id));
+        // o e-mail que deu origem vira anexo (.eml); vale a primeira mensagem recebida (ou a primeira da conversa)
+        const msgs = await tx.select().from(s.mailMessages).where(eq(s.mailMessages.threadId, t.id)).orderBy(asc(s.mailMessages.sentAt));
+        const first = msgs.find((m) => m.direction === 'entrada') ?? msgs[0];
+        if (first) {
+          const data = Buffer.from(buildEml({ from: first.fromAddr, fromName: first.fromName, to: first.toAddrs, cc: first.ccAddrs, subject: first.subject || t.subject, date: first.sentAt, messageId: first.rfcMessageId, text: first.bodyText ?? first.snippet ?? '' }), 'utf8');
+          await tx.insert(s.opportunityAttachments).values({ tenantId: auth.tenantId, opportunityId: opp.id, kind: 'email', filename: emlFilename(t.subject), mime: 'message/rfc822', sizeBytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), data, uploadedBy: auth.userId });
+        }
+        await tx.update(s.mailThreads).set({ contactId: o!.contactId, opportunityId: opp.id, linkSource: 'negociacao', linkAmbiguous: false, rowVersion: (cur?.rowVersion ?? t.rowVersion) + 1 }).where(eq(s.mailThreads.id, t.id));
+        await tx.insert(s.mailThreadEvents).values({ tenantId: auth.tenantId, threadId: t.id, type: 'oportunidade', payload: { opportunityId: opp.id, criada: true }, actorId: auth.userId });
+        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: o!.rowVersion, payload: { changed: { origem: { from: null, to: `e-mail "${t.subject || '(sem assunto)'}" da caixa ${box.address}` } } } });
+        return opp;
+      });
+      await runAutomations(app.db, app.config, auth.tenantId, auth.userId, created.id, { type: 'criada' });
+      await audit(app.db, req, { action: 'mail.to_opportunity', entityType: 'mail_thread', entityId: params.id, metadata: { opportunityId: created.id } });
+      reply.code(201);
+      return { id: created.id };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/origin-email', summary: 'E-mail que deu origem à negociação (mensagens) e se quem vê pode responder por ele', tag: 'E-mail', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const [o] = await app.db.select({ tid: s.opportunities.originMailThreadId }).from(s.opportunities).where(eq(s.opportunities.id, opp.id)).limit(1);
+      if (!o?.tid) return { thread: null };
+      const [r] = await app.db.select({ t: s.mailThreads, box: s.mailboxes }).from(s.mailThreads).innerJoin(s.mailboxes, eq(s.mailboxes.id, s.mailThreads.mailboxId)).where(and(eq(s.mailThreads.id, o.tid), eq(s.mailThreads.tenantId, auth.tenantId))).limit(1);
+      if (!r) return { thread: null };
+      const messages = await app.db.select({ m: s.mailMessages, by: s.users.name }).from(s.mailMessages).leftJoin(s.users, eq(s.users.id, s.mailMessages.sentBy)).where(eq(s.mailMessages.threadId, r.t.id)).orderBy(asc(s.mailMessages.sentAt));
+      const canReply = r.box.status === 'conectada' && (await canWork(app.db, auth, r.t, r.box));
+      return {
+        thread: {
+          id: r.t.id, subject: r.t.subject, mailbox: r.box.address, mailboxKind: r.box.kind, mailboxConnected: r.box.status === 'conectada', canReply,
+          messages: messages.map(({ m, by }) => ({ id: m.id, direction: m.direction, from: m.fromAddr, fromName: m.fromName, to: m.toAddrs, cc: m.ccAddrs, sentAt: m.sentAt, text: m.bodyText ?? m.snippet ?? '', hasAttachments: m.hasAttachments, sentBy: by })),
+        },
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/opportunities/:id/origin-email/reply', summary: 'Responde o e-mail que deu origem à negociação, pela mesma caixa e na mesma conversa', tag: 'E-mail', module: 'oportunidades', params: IdParams,
+    body: z.object({ text: z.string().trim().min(1).max(20_000), cc: z.array(z.string().trim().max(200)).max(20).optional() }),
+    rateLimit: () => ({ max: 30, timeWindow: '1 minute' }),
+    handler: async ({ app, auth, req, params, body }) => {
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const [o] = await app.db.select({ tid: s.opportunities.originMailThreadId }).from(s.opportunities).where(eq(s.opportunities.id, opp.id)).limit(1);
+      if (!o?.tid) throw unprocessable('Esta negociação não nasceu de um e-mail.');
+      const [r] = await app.db.select({ t: s.mailThreads, box: s.mailboxes }).from(s.mailThreads).innerJoin(s.mailboxes, eq(s.mailboxes.id, s.mailThreads.mailboxId)).where(and(eq(s.mailThreads.id, o.tid), eq(s.mailThreads.tenantId, auth.tenantId))).limit(1);
+      if (!r) throw notFound('Conversa de origem não encontrada.');
+      await replyOnThread(app, auth, req, r.t, r.box, { text: body.text, cc: body.cc });
+      const [cur] = await app.db.select({ rowVersion: s.opportunities.rowVersion }).from(s.opportunities).where(eq(s.opportunities.id, opp.id)).limit(1);
+      await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: cur!.rowVersion, payload: { changed: { 'e-mail de origem': { from: null, to: `resposta enviada pela caixa ${r.box.address}` } } } });
+      return { ok: true };
+    },
+  }),
 ];
-

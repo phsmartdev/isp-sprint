@@ -10,7 +10,7 @@ import { useToast } from '../components/ui/overlay';
 import type { Opportunity } from '../lib/types';
 import { WhatsAppSend } from './WhatsAppSend';
 
-export type Attachment = { id: string; kind: 'proposta' | 'outro'; filename: string; mime: string; sizeBytes: number; createdAt: string; uploadedBy: string | null; uploadedByName: string | null };
+export type Attachment = { id: string; kind: 'proposta' | 'outro' | 'email'; filename: string; mime: string; sizeBytes: number; createdAt: string; uploadedBy: string | null; uploadedByName: string | null };
 export const useAttachments = (oppId: string) => useQuery({ queryKey: ['attachments', oppId], queryFn: () => api<{ items: Attachment[] }>(`/opportunities/${oppId}/attachments`) });
 
 export function Attachments({ oppId }: { oppId: string }) {
@@ -54,7 +54,7 @@ export function Attachments({ oppId }: { oppId: string }) {
                 <span className="block truncate text-sm font-semibold text-ink">{a.filename}</span>
                 <span className="block text-xs text-muted">{fmtBytes(a.sizeBytes)} · {fmtDateTime(a.createdAt)}{a.uploadedByName ? ` · ${a.uploadedByName}` : ''}</span>
               </span>
-              <Chip tone={a.kind === 'proposta' ? 'green' : 'neutral'}>{a.kind === 'proposta' ? 'Proposta' : 'Outro'}</Chip>
+              <Chip tone={a.kind === 'proposta' ? 'green' : a.kind === 'email' ? 'blue' : 'neutral'}>{a.kind === 'proposta' ? 'Proposta' : a.kind === 'email' ? 'E-mail de origem' : 'Outro'}</Chip>
               <button type="button" className="rounded-sm p-1.5 text-success hover:bg-surface-2" onClick={() => setWa({ id: a.id, filename: a.filename })} aria-label={`Enviar ${a.filename} pelo WhatsApp`} title="Enviar pelo WhatsApp"><MessageCircle className="h-4 w-4" /></button>
               <a className="rounded-sm p-1.5 text-ink hover:bg-surface-2" href={`/api/v1/opportunities/${oppId}/attachments/${a.id}/download`} aria-label={`Baixar ${a.filename}`}><Download className="h-4 w-4" /></a>
               {(a.uploadedBy === me?.user.id || can('oportunidades', 'equipe')) && (

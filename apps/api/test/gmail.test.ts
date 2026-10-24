@@ -194,6 +194,41 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     expect(st.resolvidas).toBeGreaterThanOrEqual(1);
   });
 
+  it('e-mail vira negociação: anexo .eml, conversa ligada, resposta da negociação sai pela mesma conversa', async () => {
+    g.deliver(SHARED, { from: `Licitações <licita-${stamp}@camara-ficticia.test>`, subject: `Pedido de proposta ${stamp}`, text: 'Solicitamos proposta para 10 pontos de fibra.' });
+    await syncMailbox(ctx.db, ctx.app.config.gmail!, sharedId);
+    const t = (await threads(carlos, `mailboxId=${sharedId}&status=todas`)).find((x) => x.subject === `Pedido de proposta ${stamp}`)!;
+    expect(t).toBeTruthy();
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
+    const body = { opportunity: { pipelineId: corp.id, saleKind: 'venda_consultiva', branchId: lk.branches[0].id, title: `Pedido de proposta ${stamp}`, newContact: { name: `Câmara Fictícia ${stamp}`, email: `licita-${stamp}@camara-ficticia.test`, segment: 'governamental' } } };
+    const oppId = ok(await carlos.post(`/mail/threads/${t.id}/opportunity`, body), 201).json().id;
+    expect((await carlos.post(`/mail/threads/${t.id}/opportunity`, body)).statusCode).toBe(422);
+    const att = ok(await carlos.get(`/opportunities/${oppId}/attachments`)).json().items as { id: string; kind: string; filename: string; mime: string }[];
+    const eml = att.find((a) => a.kind === 'email')!;
+    expect(eml).toMatchObject({ mime: 'message/rfc822', filename: `E-mail de origem - Pedido de proposta ${stamp}.eml` });
+    const dl = await carlos.get(`/opportunities/${oppId}/attachments/${eml.id}/download`);
+    expect(dl.body).toContain(`From: =?UTF-8?B?`);
+    expect(dl.body).toContain(`<licita-${stamp}@camara-ficticia.test>`);
+    const d = ok(await carlos.get(`/mail/threads/${t.id}`)).json();
+    expect(d.opportunityId).toBe(oppId);
+    const origin = ok(await carlos.get(`/opportunities/${oppId}/origin-email`)).json().thread;
+    expect(origin).toMatchObject({ id: t.id, mailbox: SHARED, canReply: true });
+    expect(origin.messages[0].text).toMatch(/10 pontos de fibra/);
+    const before = g.sent.length;
+    ok(await carlos.post(`/opportunities/${oppId}/origin-email/reply`, { text: 'Recebemos o pedido; enviaremos a proposta amanhã.' }));
+    expect(g.sent.length).toBe(before + 1);
+    const sent = g.sent.at(-1)!;
+    expect(sent.from).toBe(SHARED);
+    expect(sent.threadId).toBeTruthy();
+    const raw = Buffer.from(sent.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+    expect(raw).toContain(`To: licita-${stamp}@camara-ficticia.test`);
+    expect(raw).toMatch(/In-Reply-To: <.+>/);
+    expect((await rafael.post(`/opportunities/${oppId}/origin-email/reply`, { text: 'x' })).statusCode).toBe(404);
+    const tl = ok(await carlos.get(`/opportunities/${oppId}/timeline`)).json();
+    expect(JSON.stringify(tl.items)).toMatch(/resposta enviada pela caixa/);
+  });
+
   it('acesso revogado no Google: caixa fica com erro e pede nova conexão; desconectar apaga os tokens', async () => {
     g.revokeAll();
     await ctx.db.execute(sql`update mailboxes set access_expires_at = now() - interval '1 hour' where id = ${sharedId}`);

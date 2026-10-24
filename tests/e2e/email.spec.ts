@@ -62,6 +62,26 @@ test('E-mail corporativo: configura domínio, caixa e fila; conecta pelo Google;
   expect(sent.sent.some((x: { from: string; parsed: { text: string } }) => x.from === box && x.parsed.text.includes('Enviamos a proposta'))).toBe(true);
   await shot(page, 'email-conversa');
 
+  // e-mail vira negociação: anexo do e-mail e resposta pela mesma conversa
+  await conv.getByRole('button', { name: 'Transformar em negociação' }).click();
+  const td = page.getByRole('dialog', { name: 'Transformar e-mail em negociação' });
+  await td.getByLabel('Nova conta').check();
+  await td.getByLabel('Nome do cliente').fill(`Prefeitura Fictícia ${stamp}`);
+  await td.getByLabel('Tipo de venda').selectOption({ label: 'Venda Consultiva' });
+  await td.getByRole('button', { name: 'Criar negociação' }).click();
+  await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
+  await page.getByRole('tab', { name: /^Anexos/ }).click();
+  await expect(page.getByText(`E-mail de origem - Cotação ${stamp}.eml`)).toBeVisible();
+  await page.getByRole('tab', { name: 'E-mail' }).click();
+  const origin = page.getByRole('region', { name: 'E-mail de origem' });
+  await expect(origin.getByText('Precisamos de 300 Mbps na sede.')).toBeVisible();
+  await origin.getByLabel('Resposta ao e-mail de origem').fill('Segue a proposta em anexo no portal.');
+  await origin.getByRole('button', { name: 'Responder e-mail' }).click();
+  await expect(page.getByText('Resposta enviada pelo e-mail de origem')).toBeVisible();
+  const sent2 = await (await page.request.get(`${FAKE}/__test/sent`)).json();
+  expect(sent2.sent.some((x: { from: string; parsed: { text: string } }) => x.from === box && x.parsed.text.includes('Segue a proposta em anexo no portal'))).toBe(true);
+  await page.goBack(); await page.goBack();
+
   // celular: lista e conversa uma de cada vez, sem rolagem horizontal
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/email?view=todas&status=todas');

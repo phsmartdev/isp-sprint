@@ -507,6 +507,8 @@ export const opportunities = pgTable(
     saleKind: text('sale_kind'),
     /** Filial que vende a oportunidade. */
     branchId: uuid('branch_id').references(() => salesBranches.id),
+    /** E-mail (conversa de qualquer caixa do CRM) que deu origem à negociação; a resposta sai por ela. */
+    originMailThreadId: uuid('origin_mail_thread_id'),
     /** Licitação: lance por item ('item') ou um lance global ('global'). */
     bidMode: text('bid_mode'),
     bidGlobalCents: bigint('bid_global_cents', { mode: 'number' }),
@@ -812,7 +814,7 @@ export const opportunityAttachments = pgTable(
   },
   (t) => ({
     oppIdx: index('opp_attach_opp_idx').on(t.tenantId, t.opportunityId),
-    kindCk: check('opp_attach_kind_ck', inList('kind', ['proposta', 'outro'])),
+    kindCk: check('opp_attach_kind_ck', inList('kind', ['proposta', 'outro', 'email'])),
   }),
 );
 

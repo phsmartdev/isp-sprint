@@ -435,6 +435,13 @@
       "when": 1792795128873,
       "tag": "0061_acoes_pregao",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792799864153,
+      "tag": "0062_email_origem",
+      "breakpoints": true
     }
   ]
 }

@@ -20,6 +20,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
+import { EmailToDeal } from '../../features/email/EmailToDeal';
 
 export type MailboxRow = { id: string; kind: MailboxKind; address: string; displayName: string | null; ownerId: string | null; status: MailboxStatus; lastSyncAt: string | null; lastError: string | null; connectedAt: string | null; rowVersion: number; scopes: string[]; lastRun: { kind: string; ok: boolean; fetched: number; stored: number; error: string | null; created_at: string } | null };
 type Queue = { id: string; name: string; mailboxId: string | null; routing: string; slaHours: number; members: string[]; active: boolean; rowVersion: number };
@@ -155,6 +156,7 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
   const [showHist, setShowHist] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const me = useAuth().me?.user.id ?? null;
+  const { can } = useAuth();
   useEffect(() => { setText(''); }, [id]);
   useEffect(() => { if (q.data) { end.current?.scrollIntoView({ block: 'nearest' }); void qc.invalidateQueries({ queryKey: ['mail', 'threads'] }); } }, [q.data?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const done = (m: string) => { void qc.invalidateQueries({ queryKey: ['mail'] }); toast({ tone: 'success', message: m }); };
@@ -204,6 +206,13 @@ function ThreadView({ id, onBack }: { id: string; onBack: () => void }) {
           </div>
         )}
         <CrmLink d={d} onPatch={(b) => patch.mutate(b)} busy={patch.isPending} />
+        {d.canWork && can('oportunidades') && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {d.opportunityId
+              ? <Link className="text-sm font-semibold text-primary hover:underline" to={`/opportunities/${d.opportunityId}`}>Abrir a negociação desta conversa</Link>
+              : <EmailToDeal d={d} />}
+          </div>
+        )}
       </div>
 
       <div className="scroll-thin flex-1 space-y-3 overflow-y-auto bg-surface-2/50 p-4">
