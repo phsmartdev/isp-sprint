@@ -267,6 +267,21 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
       const det = ok(await rafael.get(`/mail/threads/${t.id}`)).json();
       expect(det.messages.map((m: { direction: string }) => m.direction)).toEqual(['entrada', 'saida', 'entrada']);
       expect(det.status).toBe('em_atendimento');
+      // assinatura + e-mail novo: a conversa nasce provisória e adota o id real do Gmail na próxima leitura; a resposta do cliente cai nela
+      ok(await rafael.put('/mail/signature', { text: '-- \nRafael Souza\nComercial BKT' }));
+      expect(ok(await rafael.get('/mail/signature')).json().text).toBe('Rafael Souza\nComercial BKT');
+      const c = ok(await rafael.post('/mail/compose', { mailboxId: box.id, to: [`novo-${stamp}@empresa-ficticia.test`], subject: `Proposta nova ${stamp}`, text: 'Olá! Segue a proposta.' }), 201).json();
+      expect(c.threadId).toBeTruthy();
+      const sentNew = fake.sent.at(-1)!;
+      expect(sentNew.text).toBe('Olá! Segue a proposta.\n\n-- \nRafael Souza\nComercial BKT');
+      ok(await rafael.post(`/mail/threads/${c.threadId}/reply`, { text: 'Complemento sem assinatura.', signature: false, to: [`novo-${stamp}@empresa-ficticia.test`] }));
+      expect(fake.sent.at(-1)!.text).toBe('Complemento sem assinatura.');
+      fake.deliver(addr, { from: `novo-${stamp}@empresa-ficticia.test`, to: addr, subject: `Re: Proposta nova ${stamp}`, text: 'Recebi, obrigado.', inReplyTo: sentNew.messageId });
+      ok(await rafael.post(`/mail/mailboxes/${box.id}/sync`));
+      const conv = ok(await rafael.get(`/mail/threads/${c.threadId}`)).json();
+      expect(conv.messages.map((m: { direction: string }) => m.direction)).toEqual(['saida', 'saida', 'entrada']);
+      expect((await threads(rafael, `mailboxId=${box.id}&status=todas`)).filter((x) => x.subject.includes(`Proposta nova ${stamp}`))).toHaveLength(1);
+      expect((await lucas.post('/mail/compose', { mailboxId: box.id, to: ['a@b.com'], subject: 'x', text: 'y' })).statusCode).toBe(404);
       // desconectar apaga a senha
       ok(await rafael.post(`/mail/mailboxes/${box.id}/state`, { action: 'desconectar' }));
       const [after] = (await ctx.db.execute(sql`select app_password_enc from mailboxes where id = ${box.id}`)).rows as { app_password_enc: string | null }[];
