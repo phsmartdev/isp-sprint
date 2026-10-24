@@ -23,6 +23,7 @@ import { encryptSecret } from '../services/email';
 import { OpportunityCreate } from '@isp/shared';
 import { createOpportunity, loadOpportunity } from '../services/opportunities';
 import { runAutomations } from '../services/automations';
+import { gmailPassword, GmailPasswordError, normalizeAppPassword } from '../services/gmailPassword';
 import { exchangeCode, GmailError, revokeToken, sendFromBox, syncMailbox, syncTenantMail } from '../services/gmail';
 
 const STATE_COOKIE = 'isp_mail_oauth';
@@ -89,7 +90,7 @@ async function visibleBoxes(db: DbOrTx, auth: AuthContext) {
   return all.filter((b) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : qs.some((q) => q.mailboxId === b.id)));
 }
 const publicBox = (b: typeof s.mailboxes.$inferSelect) => ({
-  id: b.id, kind: b.kind, address: b.address, displayName: b.displayName, ownerId: b.ownerId, status: b.status, lastSyncAt: b.lastSyncAt, lastError: b.lastError, connectedAt: b.connectedAt, rowVersion: b.rowVersion,
+  id: b.id, kind: b.kind, provider: b.provider, address: b.address, displayName: b.displayName, ownerId: b.ownerId, status: b.status, lastSyncAt: b.lastSyncAt, lastError: b.lastError, connectedAt: b.connectedAt, rowVersion: b.rowVersion,
   scopes: b.grantedScopes ? b.grantedScopes.split(' ').filter((x) => x.includes('gmail')) : [],
 });
 
@@ -118,7 +119,7 @@ const lastMsgOfThread = async (db: DbOrTx, threadId: string, dir?: 'entrada' | '
 type ReplyApp = { db: DbOrTx; config: Parameters<typeof gmailOn>[0] & { gmail: Parameters<typeof sendFromBox>[1] | null | undefined } };
 /** Resposta pela caixa da conversa (sai pelo Gmail, na mesma conversa). Usada no E-mail e na negociação que nasceu do e-mail. */
 async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<typeof audit>[1], t: typeof s.mailThreads.$inferSelect, box: typeof s.mailboxes.$inferSelect, body: { text: string; to?: string[]; cc?: string[]; resolve?: boolean }) {
-      gmailOn(app.config);
+      if (box.provider !== 'gmail_senha') gmailOn(app.config);
       if (!(await canWork(app.db, auth, t, box))) throw forbidden(`Só quem atende a caixa ${box.address} responde esta conversa.`);
       if (box.status !== 'conectada') throw unprocessable('A caixa desta conversa não está conectada.');
       const lastIn = await lastMsgOfThread(app.db, t.id, 'entrada');
@@ -127,7 +128,7 @@ async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<t
       const cc = (body.cc ?? []).map((x) => x.toLowerCase());
       if (!to.length || [...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
       try {
-        await sendFromBox(app.db, app.config.gmail!, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: body.text, inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
+        await sendFromBox(app.db, app.config.gmail ?? null, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: body.text, inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
       } catch (e) {
         if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
         throw e;
@@ -243,11 +244,30 @@ export const mailRoutes = [
   defineRoute({
     method: 'POST', url: '/mail/mailboxes/:id/sync', summary: 'Sincroniza agora (incremental pelo histórico do Gmail)', tag: 'E-mail', module: 'email', params: IdParams,
     handler: async ({ app, auth, params }) => {
-      gmailOn(app.config);
       const b = (await visibleBoxes(app.db, auth)).find((x) => x.id === params.id);
       if (!b) throw notFound('Caixa não encontrada.');
+      if (b.provider !== 'gmail_senha') gmailOn(app.config);
       if (b.status !== 'conectada' && b.status !== 'erro') throw unprocessable('Conecte a caixa antes de sincronizar.');
-      return syncMailbox(app.db, app.config.gmail!, b.id, auth.userId, 'manual');
+      return syncMailbox(app.db, app.config.gmail, b.id, auth.userId, 'manual');
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/mail/mailboxes/:id/app-password', summary: 'Conecta a caixa pessoal com a senha de app do Gmail (IMAP/SMTP, sem Google Cloud); a senha fica cifrada', tag: 'E-mail', module: 'email', params: IdParams,
+    body: z.object({ password: z.string().trim().min(8).max(64) }),
+    rateLimit: () => ({ max: 10, timeWindow: '10 minutes' }),
+    handler: async ({ app, auth, req, params, body }) => {
+      const [b] = await app.db.select().from(s.mailboxes).where(and(eq(s.mailboxes.id, params.id), eq(s.mailboxes.tenantId, auth.tenantId))).limit(1);
+      if (!b || b.kind !== 'pessoal' || b.ownerId !== auth.userId) throw notFound('Caixa não encontrada.');
+      const pass = normalizeAppPassword(body.password);
+      if (!/^[a-z]{16}$/i.test(pass)) throw unprocessable('A senha de app do Gmail tem 16 letras (o Google mostra em 4 grupos de 4). Copie de myaccount.google.com/apppasswords.', [{ path: 'password', message: '16 letras' }]);
+      try { await gmailPassword().verify(b.address, pass); } catch (e) {
+        throw unprocessable(e instanceof GmailPasswordError ? e.message : 'O Gmail não aceitou a conexão.', [{ path: 'password', message: 'Recusada pelo Gmail' }]);
+      }
+      // trocar de forma de conexão recomeça a leitura (os ids de mensagem são os do Gmail nos dois casos)
+      await app.db.update(s.mailboxes).set({ provider: 'gmail_senha', appPasswordEnc: encryptSecret(pass), refreshTokenEnc: null, accessTokenEnc: null, accessExpiresAt: null, grantedScopes: null, historyId: null, status: 'conectada', lastError: null, connectedBy: auth.userId, connectedAt: new Date(), rowVersion: sql`${s.mailboxes.rowVersion} + 1` }).where(eq(s.mailboxes.id, b.id));
+      await audit(app.db, req, { action: 'mail.connected', entityType: 'mailbox', entityId: b.id, metadata: { provider: 'gmail_senha' } });
+      const r = await syncMailbox(app.db, app.config.gmail, b.id, auth.userId, 'completa');
+      return { ok: true, sync: r };
     },
   }),
   defineRoute({
@@ -258,10 +278,10 @@ export const mailRoutes = [
       if (!b || (b.kind === 'pessoal' && b.ownerId !== auth.userId)) throw notFound('Caixa não encontrada.');
       if (b.kind === 'compartilhada' && !canConfigure(auth)) throw forbidden('Só quem tem acesso total em Configurações altera caixas compartilhadas.');
       if (body.action === 'desconectar') {
-        if (app.config.gmail) await revokeToken(app.config.gmail, b);
-        await app.db.update(s.mailboxes).set({ status: 'desconectada', refreshTokenEnc: null, accessTokenEnc: null, accessExpiresAt: null, historyId: null, rowVersion: sql`${s.mailboxes.rowVersion} + 1` }).where(eq(s.mailboxes.id, b.id));
+        if (app.config.gmail && b.provider !== 'gmail_senha') await revokeToken(app.config.gmail, b);
+        await app.db.update(s.mailboxes).set({ status: 'desconectada', refreshTokenEnc: null, accessTokenEnc: null, accessExpiresAt: null, appPasswordEnc: null, historyId: null, rowVersion: sql`${s.mailboxes.rowVersion} + 1` }).where(eq(s.mailboxes.id, b.id));
       } else {
-        if (!b.refreshTokenEnc) throw unprocessable('Conecte a caixa primeiro.');
+        if (!b.refreshTokenEnc && !b.appPasswordEnc) throw unprocessable('Conecte a caixa primeiro.');
         await app.db.update(s.mailboxes).set({ status: body.action === 'pausar' ? 'pausada' : 'conectada', rowVersion: sql`${s.mailboxes.rowVersion} + 1` }).where(eq(s.mailboxes.id, b.id));
       }
       await audit(app.db, req, { action: `mail.${body.action}`, entityType: 'mailbox', entityId: b.id });

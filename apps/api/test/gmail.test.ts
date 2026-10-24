@@ -9,6 +9,8 @@ import { login, makeApp, ORIGIN, type Client } from './helpers';
 import { startFakeGoogle, type FakeGoogle } from './fakeGoogle';
 import { syncBusinessEvents } from '../src/services/businessEvents';
 import { syncMailbox } from '../src/services/gmail';
+import { setGmailPasswordGateway } from '../src/services/gmailPassword';
+import { fakeGmailPassword } from './fakeGmailPassword';
 
 let g: FakeGoogle;
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -206,6 +208,42 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     expect((await connect(lucas, box.id)).headers.location).toBe('/email/caixas?conexao=ok');
     // caixa compartilhada continua presa ao domínio da empresa
     expect((await carlos.post('/mail/mailboxes', { kind: 'compartilhada', address: `vendas.${stamp}@gmail.test` })).statusCode).toBe(422);
+  });
+
+  it('Gmail com senha de app (sem Google Cloud): conecta, lê, responde na mesma conversa, não duplica a enviada', async () => {
+    const fake = fakeGmailPassword('abcdefghijklmnop');
+    setGmailPasswordGateway(fake.gateway);
+    try {
+      const addr = `rafa.senha.${stamp}@gmail.test`;
+      const first = fake.deliver(addr, { from: `Cliente <cliente-${stamp}@empresa-ficticia.test>`, to: addr, subject: `Orçamento por senha ${stamp}`, text: 'Quero um orçamento de 500 Mbps.' });
+      const box = ok(await rafael.post('/mail/mailboxes', { kind: 'pessoal', address: addr }), 201).json();
+      expect((await rafael.post(`/mail/mailboxes/${box.id}/app-password`, { password: 'minha senha normal' })).statusCode).toBe(422);
+      const bad = await rafael.post(`/mail/mailboxes/${box.id}/app-password`, { password: 'zzzz zzzz zzzz zzzz' });
+      expect(bad.statusCode).toBe(422);
+      expect(bad.json().detail).toMatch(/senha de app de 16 letras/);
+      expect((await lucas.post(`/mail/mailboxes/${box.id}/app-password`, { password: 'abcd efgh ijkl mnop' })).statusCode).toBe(404); // caixa de outra pessoa
+      const r = ok(await rafael.post(`/mail/mailboxes/${box.id}/app-password`, { password: 'abcd efgh ijkl mnop' })).json();
+      expect(r.sync).toMatchObject({ ok: true, stored: 1 });
+      const [row] = (await ctx.db.execute(sql`select provider, app_password_enc, status from mailboxes where id = ${box.id}`)).rows as { provider: string; app_password_enc: string; status: string }[];
+      expect(row).toMatchObject({ provider: 'gmail_senha', status: 'conectada' });
+      expect(row!.app_password_enc).toMatch(/^v1:/);
+      expect(JSON.stringify(ok(await rafael.get('/mail/mailboxes')).json())).not.toMatch(/abcdefgh/);
+      const t = (await threads(rafael, `mailboxId=${box.id}&status=todas`)).find((x) => x.subject === `Orçamento por senha ${stamp}`)!;
+      expect(t).toBeTruthy();
+      ok(await rafael.post(`/mail/threads/${t.id}/reply`, { text: 'Segue o orçamento.' }));
+      const out = fake.sent.at(-1)!;
+      expect(out).toMatchObject({ user: addr, from: addr, inReplyTo: first, to: [`cliente-${stamp}@empresa-ficticia.test`] });
+      // a próxima leitura traz a enviada (mesmo Message-ID) e a resposta do cliente; a enviada não duplica
+      fake.deliver(addr, { from: `cliente-${stamp}@empresa-ficticia.test`, to: addr, subject: `Re: Orçamento por senha ${stamp}`, text: 'Fechado!', inReplyTo: out.messageId });
+      expect(ok(await rafael.post(`/mail/mailboxes/${box.id}/sync`)).json()).toMatchObject({ ok: true, stored: 1 });
+      const det = ok(await rafael.get(`/mail/threads/${t.id}`)).json();
+      expect(det.messages.map((m: { direction: string }) => m.direction)).toEqual(['entrada', 'saida', 'entrada']);
+      expect(det.status).toBe('em_atendimento');
+      // desconectar apaga a senha
+      ok(await rafael.post(`/mail/mailboxes/${box.id}/state`, { action: 'desconectar' }));
+      const [after] = (await ctx.db.execute(sql`select app_password_enc from mailboxes where id = ${box.id}`)).rows as { app_password_enc: string | null }[];
+      expect(after!.app_password_enc).toBeNull();
+    } finally { setGmailPasswordGateway(null); }
   });
 
   it('e-mail vira negociação: anexo .eml, conversa ligada, resposta da negociação sai pela mesma conversa', async () => {

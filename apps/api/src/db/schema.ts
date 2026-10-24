@@ -3680,6 +3680,10 @@ export const mailboxes = pgTable(
     displayName: text('display_name'),
     ownerId: uuid('owner_id').references(() => users.id),
     status: text('status').notNull().default('desconectada'),
+    /** Como a caixa conecta: Gmail API com OAuth ('gmail_api') ou IMAP/SMTP do Gmail com senha de app ('gmail_senha'). */
+    provider: text('provider').notNull().default('gmail_api'),
+    /** Senha de app do Gmail, cifrada (só para provider = 'gmail_senha'). */
+    appPasswordEnc: text('app_password_enc'),
     refreshTokenEnc: text('refresh_token_enc'),
     accessTokenEnc: text('access_token_enc'),
     accessExpiresAt: ts('access_expires_at'),
