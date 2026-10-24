@@ -181,7 +181,7 @@ export const resultsRoutes = [
       const { g, cur } = await closingTarget(app.db, auth, params.id);
       if (!g.indicatorId) return { changed: false, closedValue: cur.value, currentValue: cur.value, manual: true };
       const d = await indicatorDef(app.db, auth.tenantId, g.indicatorId);
-      const r = await computeIndicator(app.db, auth.tenantId, auth.timezone, d!.def, await goalWho(app.db, g), { from: g.periodStart, to: g.periodEnd });
+      const r = await computeIndicator(app.db, auth.tenantId, auth.timezone, d!.def, await goalWho(app.db, g), { from: g.periodStart, to: g.periodEnd }, g.indicatorId);
       const changed = (r.value ?? null) !== (cur.value ?? null) && !(r.value !== null && cur.value !== null && Math.abs(r.value - cur.value) < 1e-6);
       return { changed, closedValue: cur.value, currentValue: r.value, indicatorVersion: d!.version, closedIndicatorVersion: cur.indicatorVersion };
     },
@@ -206,7 +206,7 @@ export const resultsRoutes = [
       let indicatorVersion = cur.indicatorVersion;
       if (g.indicatorId && body.recompute) {
         const d = await indicatorDef(tx, auth.tenantId, g.indicatorId);
-        const r = await computeIndicator(tx, auth.tenantId, auth.timezone, d!.def, await goalWho(tx, g), { from: g.periodStart, to: g.periodEnd });
+        const r = await computeIndicator(tx, auth.tenantId, auth.timezone, d!.def, await goalWho(tx, g), { from: g.periodStart, to: g.periodEnd }, g.indicatorId ?? undefined);
         value = r.value; indicatorVersion = d!.version;
       } else {
         if (body.value === undefined) throw unprocessable('Informe o valor correto.', [{ path: 'value', message: 'Obrigatório sem recálculo' }]);

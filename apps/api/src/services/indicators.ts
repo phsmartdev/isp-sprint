@@ -3,8 +3,9 @@
  * Só campos e filtros de uma lista fechada viram SQL; todo valor vem parametrizado.
  * Sem dado de origem → "indisponível"; denominador zero → "sem base"; amostra pequena → "incompleto".
  */
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import {
+  aggregate,
   attainment, combine, compositeScore, goalStatus, normalizeWeights, periodRange, scorecardScore, trafficLight, DEFAULT_CAP, DEFAULT_TRAFFIC_BANDS, competenciaOf,
   type IndicatorDef, type NumericField, type Source, type SourceFilter, type PeriodType, type GoalStatus, type TrafficBands,
 } from '@isp/domain';
@@ -83,7 +84,19 @@ async function typesWithData(db: DbOrTx, tenantId: string, types: string[]) {
   return new Set(rows.map((r) => r.type));
 }
 
-export async function computeIndicator(db: DbOrTx, tenantId: string, tz: string, def: IndicatorDef, who: Who, range: Range): Promise<IndicatorResult> {
+/** Lançamentos vigentes (não substituídos) de um KPI informado, por competência. */
+export async function indicatorEntriesOf(db: DbOrTx, tenantId: string, indicatorId: string, range?: Range) {
+  return db.select().from(s.indicatorEntries).where(and(eq(s.indicatorEntries.tenantId, tenantId), eq(s.indicatorEntries.indicatorId, indicatorId), isNull(s.indicatorEntries.supersededAt), range ? and(gte(s.indicatorEntries.periodStart, range.from), lte(s.indicatorEntries.periodStart, range.to)) : undefined)).orderBy(asc(s.indicatorEntries.periodStart));
+}
+
+export async function computeIndicator(db: DbOrTx, tenantId: string, tz: string, def: IndicatorDef, who: Who, range: Range, indicatorId?: string): Promise<IndicatorResult> {
+  if (def.calc === 'informado') {
+    // KPI da empresa informado por competência (até a fonte ser integrada): consolida os lançamentos do período
+    if (!indicatorId) return { value: null, status: 'indisponivel', sample: 0, parts: {} };
+    const rows = await indicatorEntriesOf(db, tenantId, indicatorId, range);
+    const value = aggregate(rows.map((r) => r.value), def.sheet?.aggregation ?? 'media');
+    return { value, status: value === null ? 'sem_base' : 'ok', sample: rows.length, parts: {} };
+  }
   const src = sources(def);
   const types = [...new Set(Object.values(src).map((x) => x.event))];
   const have = await typesWithData(db, tenantId, types);
@@ -157,7 +170,7 @@ export async function goalProgress(db: DbOrTx, tz: string, today: string, g: Goa
   let value: number | null;
   let indicatorStatus: IndicatorStatus | 'manual';
   if (def) {
-    const r = await computeIndicator(db, g.tenantId, tz, def, await goalWho(db, g), range);
+    const r = await computeIndicator(db, g.tenantId, tz, def, await goalWho(db, g), range, g.indicatorId ?? undefined);
     value = r.status === 'indisponivel' ? null : r.value;
     indicatorStatus = r.status;
   } else {
@@ -204,7 +217,7 @@ export async function scorecardsFor(db: DbOrTx, tenantId: string, tz: string, us
     for (const it of normalizeWeights(v.def.items)) {
       const ind = inds.find((i) => i.id === it.indicatorId);
       if (!ind) { items.push({ indicatorId: it.indicatorId, name: '(indicador removido)', weight: it.weight, norm: it.norm, value: null, target: null, attainment: null, status: 'indisponivel' as const, unit: 'quantidade', direction: 'maior' as const }); continue; }
-      const r = await computeIndicator(db, tenantId, tz, ind.def, { users: [userId] }, range);
+      const r = await computeIndicator(db, tenantId, tz, ind.def, { users: [userId] }, range, ind.id);
       const [goal] = await db.select({ target: s.goals.target }).from(s.goals).where(and(eq(s.goals.tenantId, tenantId), eq(s.goals.indicatorId, ind.id), eq(s.goals.userId, userId), eq(s.goals.status, 'ativa'), sql`${s.goals.periodStart} <= ${range.to}::date and ${s.goals.periodEnd} >= ${range.from}::date`)).orderBy(desc(s.goals.createdAt)).limit(1);
       const target = goal?.target ?? it.target ?? ind.def.target ?? null;
       const usable = r.status === 'ok' || r.status === 'incompleto';

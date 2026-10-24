@@ -8,10 +8,10 @@
 import { EVENT_TYPE_KEYS } from './performance';
 
 // ------------------------------------------------------------------ definição
-export const INDICATOR_CALCS = ['contagem', 'soma', 'media', 'percentual', 'taxa', 'tempo', 'valor', 'razao', 'formula'] as const;
+export const INDICATOR_CALCS = ['contagem', 'soma', 'media', 'percentual', 'taxa', 'tempo', 'valor', 'razao', 'formula', 'informado'] as const;
 export type IndicatorCalc = (typeof INDICATOR_CALCS)[number];
 export const INDICATOR_CALC_LABELS: Record<IndicatorCalc, string> = {
-  contagem: 'Contagem', soma: 'Soma', media: 'Média', percentual: 'Percentual (parte ÷ total × 100)', taxa: 'Taxa (por 100)', tempo: 'Tempo médio', valor: 'Valor monetário', razao: 'Razão (A ÷ B)', formula: 'Fórmula',
+  contagem: 'Contagem', soma: 'Soma', media: 'Média', percentual: 'Percentual (parte ÷ total × 100)', taxa: 'Taxa (por 100)', tempo: 'Tempo médio', valor: 'Valor monetário', razao: 'Razão (A ÷ B)', formula: 'Fórmula', informado: 'Informado por período (até a fonte ser integrada)',
 };
 export const INDICATOR_UNITS = ['quantidade', 'reais', 'percentual', 'horas', 'dias', 'minutos', 'indice'] as const;
 export type IndicatorUnit = (typeof INDICATOR_UNITS)[number];
@@ -61,6 +61,8 @@ export type IndicatorDef = {
   weight?: number;
   /** abaixo desta amostra o resultado aparece como incompleto */
   minSample?: number;
+  /** ficha do KPI (formulário de criação): metas desdobradas, limites, fonte e responsáveis */
+  sheet?: KpiSheet;
 };
 
 export function validateSource(s: Source | undefined, path: string): string[] {
@@ -86,6 +88,7 @@ export function validateIndicator(d: IndicatorDef): string[] {
   if (!['maior', 'menor'].includes(d.direction)) e.push('Direção inválida.');
   if (['contagem', 'soma', 'media', 'tempo', 'valor'].includes(d.calc)) e.push(...validateSource(d.base, 'Origem'));
   if (['percentual', 'taxa', 'razao'].includes(d.calc)) e.push(...validateSource(d.numerator, 'Parte (numerador)'), ...validateSource(d.denominator, 'Total (denominador)'));
+  if (d.calc === 'informado' && d.sheet && d.sheet.quarterTargets.length !== 4) e.push('Informe as 4 metas trimestrais (ou deixe vazias).');
   if (d.calc === 'formula') {
     const names = Object.keys(d.vars ?? {});
     if (!names.length) e.push('A fórmula precisa de pelo menos uma variável.');
@@ -426,3 +429,150 @@ export function trendOf(values: (number | null)[], direction: 'maior' | 'menor')
 export const TREND_LABELS = { melhorando: 'Melhorando', piorando: 'Piorando', estavel: 'Estável', sem_historico: 'Sem histórico' } as const;
 /** Variação percentual entre dois valores (null se não dá para calcular). */
 export const variation = (prev: number | null, cur: number | null) => (prev === null || cur === null || prev === 0 ? null : (cur - prev) / Math.abs(prev));
+
+// ------------------------------------------------------------------ ficha do KPI (formulário de criação de indicadores)
+export const KPI_AGGREGATIONS = ['media', 'ultimo', 'soma'] as const;
+export type KpiAggregation = (typeof KPI_AGGREGATIONS)[number];
+export const KPI_AGGREGATION_LABELS: Record<KpiAggregation, string> = { media: 'Média dos meses lançados', ultimo: 'Último mês lançado', soma: 'Soma dos meses' };
+export type KpiSheet = {
+  area: string | null; objective: string | null; formulaText: string | null; sourceSystem: string | null;
+  owner: string | null; collector: string | null; tool: string | null;
+  measureFreq: 'mes' | 'trimestre'; reviewFreq: string | null; audience: string | null;
+  strategicObjective: string | null; process: string | null; impact: string | null; related: string | null;
+  startDate: string | null; notes: string | null;
+  /** meta de cada trimestre (1T a 4T), na unidade do indicador; null = usa a anual */
+  quarterTargets: (number | null)[];
+  /** mínimo aceitável (valor) ou como fração da meta (ex.: 0,8 = 80% da meta) */
+  minAcceptable: number | null; minOfTarget: number | null;
+  maxDesirable: number | null;
+  /** como o trimestre e o ano consolidam os meses lançados */
+  aggregation: KpiAggregation;
+  featured: boolean; paused: boolean;
+  /** indicador principal da área: é o do gráfico de evolução no painel */
+  main?: boolean;
+};
+export const KPI_STATUS = ['atingido', 'atencao', 'abaixo', 'sem_dado'] as const;
+export type KpiStatus = (typeof KPI_STATUS)[number];
+export const KPI_STATUS_LABELS: Record<KpiStatus, string> = { atingido: 'Meta atingida', atencao: 'Dentro do limite', abaixo: 'Fora do limite', sem_dado: 'Sem resultado' };
+
+/** Meta do período: trimestre (1 a 4) usa a meta trimestral da ficha; sem ela (ou no ano), a anual. */
+export function kpiTarget(def: Pick<IndicatorDef, 'target' | 'sheet'>, quarter: number | null) {
+  if (quarter && def.sheet?.quarterTargets?.[quarter - 1] != null) return def.sheet.quarterTargets[quarter - 1]!;
+  return def.target ?? null;
+}
+/**
+ * Farol do KPI. Maior é melhor: atingido ≥ meta; atenção ≥ mínimo aceitável; abaixo do mínimo.
+ * Menor é melhor: atingido ≤ meta; atenção ≤ máximo desejável; acima disso, fora.
+ */
+/** Faixas do farol na unidade do KPI (as mesmas regras de kpiStatus), para desenhar a régua. */
+export function kpiBands(def: Pick<IndicatorDef, 'direction' | 'sheet'>, target: number) {
+  const sh = def.sheet;
+  if (def.direction === 'menor') return { direction: 'menor' as const, target, limit: sh?.maxDesirable != null && sh.maxDesirable > target ? sh.maxDesirable : target * 1.2 };
+  return { direction: 'maior' as const, target, limit: sh?.minOfTarget != null ? target * sh.minOfTarget : sh?.minAcceptable != null && sh.minAcceptable < target ? sh.minAcceptable : target * 0.8 };
+}
+export function kpiStatus(def: Pick<IndicatorDef, 'direction' | 'sheet'>, value: number | null, target: number | null): KpiStatus {
+  if (value === null || value === undefined || target === null) return 'sem_dado';
+  const sh = def.sheet;
+  if (def.direction === 'menor') {
+    if (value <= target) return 'atingido';
+    const ceiling = sh?.maxDesirable != null && sh.maxDesirable > target ? sh.maxDesirable : target * 1.2;
+    return value <= ceiling ? 'atencao' : 'abaixo';
+  }
+  if (value >= target) return 'atingido';
+  const floor = sh?.minOfTarget != null ? target * sh.minOfTarget : sh?.minAcceptable != null && sh.minAcceptable < target ? sh.minAcceptable : target * 0.8;
+  return value >= floor ? 'atencao' : 'abaixo';
+}
+/** Atingimento (% da meta): menor é melhor inverte a razão. */
+export function kpiAttainment(direction: 'maior' | 'menor', value: number | null, target: number | null) {
+  if (value === null || target === null || target === 0) return null;
+  if (direction === 'menor') return value === 0 ? 1 : target / value;
+  return value / target;
+}
+export function aggregate(values: number[], how: KpiAggregation) {
+  if (!values.length) return null;
+  if (how === 'soma') return values.reduce((t, v) => t + v, 0);
+  if (how === 'ultimo') return values[values.length - 1]!;
+  return Math.round((values.reduce((t, v) => t + v, 0) / values.length) * 1000) / 1000;
+}
+
+// ------------------------------------------------------------------ leitura do formulário (.xlsx) de criação de KPI
+type Cell = string | number | null;
+const norm = (t: string) => t.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+const num = (t: string) => Number(t.replace(/\./g, '').replace(',', '.'));
+/** "45%", 0.45 (célula em %), "2 dias", "80% da meta" → número na unidade do indicador. */
+function parseAmount(v: Cell, unit: IndicatorUnit): number | null {
+  if (v === null || v === '') return null;
+  if (typeof v === 'number') return unit === 'percentual' && Math.abs(v) <= 1.5 ? Math.round(v * 10000) / 100 : v;
+  const m = String(v).match(/-?\d+(?:[.,]\d+)?/);
+  if (!m) return null;
+  const n = num(m[0]);
+  if (unit === 'percentual' && !/%/.test(String(v)) && Math.abs(n) <= 1.5) return Math.round(n * 10000) / 100;
+  return n;
+}
+/** "1T e 4T - 35% / 2T - 60% / 3T - 50%" → [35, 60, 50, 35]; número único vale para os quatro. */
+export function parseQuarterTargets(v: Cell, unit: IndicatorUnit): (number | null)[] {
+  const out: (number | null)[] = [null, null, null, null];
+  if (v === null || v === '') return out;
+  if (typeof v === 'number' || !/[1-4]\s*T/i.test(String(v))) { const n = parseAmount(v, unit); return [n, n, n, n]; }
+  const re = /((?:[1-4]\s*T\s*(?:e|,|\/)?\s*)+)\s*[-–:]?\s*(\d+(?:[.,]\d+)?)\s*(%|dias?)?/gi;
+  for (const m of String(v).matchAll(re)) {
+    const val = num(m[2]!);
+    for (const q of m[1]!.matchAll(/([1-4])\s*T/gi)) out[Number(q[1]) - 1] = val;
+  }
+  return out;
+}
+const LABELS: Record<string, string> = {
+  'nome do kpi': 'name', 'departamento/area': 'area', 'objetivo do kpi': 'objective', 'descricao detalhada': 'description', 'formula de calculo': 'formula',
+  'unidade de medida': 'unit', 'fonte de dados': 'source', 'meta anual': 'annual', 'meta trimestral': 'quarterly', 'limite minimo aceitavel': 'min', 'limite maximo desejavel': 'max',
+  'frequencia de medicao': 'freq', 'objetivo estrategico': 'strategic', 'processo relacionado': 'process', 'impacto esperado': 'impact', 'kpis relacionados': 'related',
+  'data de inicio': 'start', 'responsavel pela coleta de dados': 'collector', 'ferramenta de acompanhamento': 'tool', 'frequencia de revisao': 'review', 'publico-alvo para relatorio': 'audience',
+  'observacoes adicionais': 'notes', responsavel: 'owner',
+};
+const CATEGORY_OF = (area: string): IndicatorDef['category'] => {
+  const a = norm(area);
+  if (a.includes('sucesso')) return 'sucesso_cliente';
+  if (a.includes('marketing') || a.includes('abm')) return 'abm';
+  if (a.includes('contrat')) return 'contratos';
+  return 'comercial';
+};
+export type ParsedKpi = { key: string; sheetName: string; def: IndicatorDef; warnings: string[] };
+/**
+ * Uma aba do formulário de criação de KPI (rótulo numa célula, valor na seguinte) vira a definição do indicador.
+ * Datas chegam como ISO (aaaa-mm-dd). Nome da aba com "pausar" marca o KPI como pausado.
+ */
+export function parseKpiForm(sheetName: string, rows: Cell[][]): ParsedKpi | null {
+  const f: Record<string, Cell> = {};
+  for (const r of rows) {
+    const cells = r.filter((c) => c !== null && c !== '');
+    if (cells.length < 2 || typeof cells[0] !== 'string') continue;
+    const k = LABELS[norm(cells[0])];
+    if (k && !(k in f)) f[k] = cells[1]!;
+  }
+  if (!f.name || typeof f.name !== 'string') return null;
+  const warnings: string[] = [];
+  const text = (k: string) => (f[k] === undefined || f[k] === null || String(f[k]).trim() === '' ? null : String(f[k]).trim());
+  const name = String(f.name).replace(/\s+/g, ' ').trim();
+  const unitRaw = norm(text('unit') ?? '');
+  const annualRaw = text('annual') ?? '';
+  const unit: IndicatorUnit = unitRaw.includes('%') || unitRaw.includes('percent') ? 'percentual' : unitRaw.includes('dia') || /dias?/.test(norm(annualRaw)) || unitRaw === 'data' ? 'dias' : unitRaw.includes('r$') || unitRaw.includes('reais') ? 'reais' : unitRaw.includes('hora') ? 'horas' : 'quantidade';
+  const target = parseAmount(f.annual ?? null, unit);
+  if (target === null) warnings.push('Meta anual não encontrada: informe antes de acompanhar.');
+  const quarterTargets = parseQuarterTargets(f.quarterly ?? null, unit);
+  const minText = text('min');
+  const minOfTarget = minText && /meta/i.test(minText) ? (parseAmount(minText, 'quantidade') ?? 0) / 100 : null;
+  const minAcceptable = minOfTarget === null ? parseAmount(f.min ?? null, unit) : null;
+  const maxText = text('max');
+  const maxDesirable = maxText && /qual/i.test(maxText) ? null : parseAmount(f.max ?? null, unit);
+  const blob = norm(`${name} ${text('objective') ?? ''}`);
+  const direction: 'maior' | 'menor' = /concentra|lead time|tempo|prazo|dependencia/.test(blob) || unit === 'dias' ? 'menor' : 'maior';
+  const freq = norm(text('freq') ?? '');
+  const sheet: KpiSheet = {
+    area: text('area'), objective: text('objective'), formulaText: text('formula'), sourceSystem: text('source'), owner: text('owner'), collector: text('collector'), tool: text('tool'),
+    measureFreq: freq.includes('trimes') ? 'trimestre' : 'mes', reviewFreq: text('review'), audience: text('audience'), strategicObjective: text('strategic'), process: text('process'),
+    impact: text('impact'), related: text('related'), startDate: typeof f.start === 'string' && /^\d{4}-\d{2}-\d{2}/.test(f.start) ? f.start.slice(0, 10) : null, notes: text('notes'),
+    quarterTargets, minAcceptable, minOfTarget, maxDesirable, aggregation: 'media', featured: true, paused: /\(?\s*paus/i.test(sheetName),
+  };
+  const key = `kpi_${norm(name).replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`.slice(0, 40);
+  const def: IndicatorDef = { name: name.slice(0, 120), description: text('description')?.slice(0, 1000), category: CATEGORY_OF(sheet.area ?? ''), calc: 'informado', unit, direction, period: sheet.measureFreq, target, sheet };
+  return { key, sheetName, def, warnings };
+}

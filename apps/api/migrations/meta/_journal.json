@@ -484,6 +484,13 @@
       "when": 1792818975231,
       "tag": "0068_aditivos",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1792834653088,
+      "tag": "0069_kpis_informados",
+      "breakpoints": true
     }
   ]
 }

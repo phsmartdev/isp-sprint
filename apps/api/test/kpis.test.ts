@@ -1,0 +1,100 @@
+/** Indicadores principais (Inteligência): importação da ficha .xlsx, metas por trimestre, lançamentos e farol. */
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import PizZip from 'pizzip';
+import { login, makeApp, type Client } from './helpers';
+
+let ctx: Awaited<ReturnType<typeof makeApp>>;
+let carlos: Client, lucas: Client;
+const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
+beforeAll(async () => {
+  ctx = await makeApp();
+  [carlos, lucas] = (await Promise.all(['carlos', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client];
+});
+afterAll(async () => ctx.close());
+
+/** .xlsx mínimo com uma aba por ficha (rótulo na coluna A, valor na B). */
+export function kpiWorkbook(sheets: { name: string; pairs: [string, string | number][] }[]) {
+  const zip = new PizZip();
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  zip.file('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+  zip.file('xl/workbook.xml', `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s, i) => `<sheet name="${esc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`);
+  zip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}</Relationships>`);
+  sheets.forEach((s, i) => {
+    const rows = [['FORMULÁRIO DE CRIAÇÃO DE INDICADORES DE DESEMPENHO (KPI)', ''] as [string, string | number], ...s.pairs].map(([a, b], r) => `<row r="${r + 1}"><c r="B${r + 1}" t="inlineStr"><is><t>${esc(a)}</t></is></c>${b === '' ? '' : typeof b === 'number' ? `<c r="D${r + 1}"><v>${b}</v></c>` : `<c r="D${r + 1}" t="inlineStr"><is><t>${esc(b)}</t></is></c>`}</row>`).join('');
+    zip.file(`xl/worksheets/sheet${i + 1}.xml`, `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows}</sheetData></worksheet>`);
+  });
+  return zip.generate({ type: 'nodebuffer' }).toString('base64');
+}
+const year = Number(new Date().toISOString().slice(0, 4));
+const month = new Date().toISOString().slice(0, 7);
+const q = Math.floor((Number(month.slice(5)) - 1) / 3) + 1;
+
+describe('KPIs da Inteligência', () => {
+  it('importa a ficha, desdobra a meta por trimestre, recebe lançamentos com histórico e mostra o farol', async () => {
+    const data = kpiWorkbook([
+      { name: 'Booking', pairs: [['Nome do KPI', 'Booking Fictício'], ['Departamento/Área', 'Comercial'], ['Unidade de Medida', '%'], ['Fonte de Dados', 'ERP fictício'], ['Meta Anual', 0.45], ['Meta Trimestral', '1T e 4T - 35% / 2T - 60% / 3T - 50%'], ['Limite Mínimo Aceitável', '80% da meta'], ['Frequência de Medição', 'Mensal'], ['Data de Início', 46055]] },
+      { name: 'Concentração', pairs: [['Nome do KPI', 'Concentração Fictícia'], ['Unidade de Medida', '%'], ['Meta Anual', 0.15], ['Meta Trimestral', 0.15], ['Limite Máximo Desejável', 0.3], ['Frequência de Medição', 'Trimestral']] },
+      { name: 'Outro (Pausar)', pairs: [['Nome do KPI', 'KPI Pausado Fictício'], ['Unidade de Medida', '%'], ['Meta Anual', 0.2], ['Frequência de Medição', 'Mensal']] },
+      { name: 'Capa', pairs: [['Qualquer coisa', 'sem ficha']] },
+    ]);
+    expect((await lucas.post('/intelligence/kpis/import/preview', { filename: 'kpi.xlsx', data })).statusCode).toBe(403);
+    const pv = ok(await carlos.post('/intelligence/kpis/import/preview', { filename: 'kpi.xlsx', data })).json();
+    expect(pv.items).toHaveLength(3);
+    const booking = pv.items.find((x: { key: string }) => x.key === 'kpi_booking_ficticio');
+    expect(booking).toMatchObject({ action: 'criar', def: { target: 45, unit: 'percentual', period: 'mes', direction: 'maior', sheet: { quarterTargets: [35, 60, 50, 35], minOfTarget: 0.8, startDate: '2026-02-02' } } });
+    expect(pv.items.find((x: { key: string }) => x.key === 'kpi_concentracao_ficticia').def.direction).toBe('menor');
+    ok(await carlos.post('/intelligence/kpis/import', { items: pv.items.map((x: { key: string; def: unknown }) => ({ key: x.key, def: x.def })) }));
+    // reimportar cria nova versão, não duplica
+    const again = ok(await carlos.post('/intelligence/kpis/import/preview', { filename: 'kpi.xlsx', data })).json();
+    expect(again.items.every((x: { action: string }) => x.action === 'atualizar')).toBe(true);
+    expect(ok(await carlos.post('/intelligence/kpis/import', { items: again.items.slice(0, 1).map((x: { key: string; def: unknown }) => ({ key: x.key, def: x.def })) })).json()).toEqual({ created: 0, updated: 1 });
+
+    let b = ok(await carlos.get('/intelligence/kpis')).json();
+    const bk = b.items.find((x: { key: string }) => x.key === 'kpi_booking_ficticio');
+    expect(bk.quarters.map((x: { target: number }) => x.target)).toEqual([35, 60, 50, 35]);
+    expect(bk.current.status).toBe('sem_dado');
+    expect(b.summary.total).toBe(2); // o pausado não entra no placar
+    expect(b.canEnter).toBe(true);
+
+    // lançamentos: competência no formato da frequência, histórico preservado
+    expect((await carlos.post(`/intelligence/kpis/${bk.id}/entries`, { period: `${year}-T${q}`, value: 30 })).statusCode).toBe(422);
+    expect((await lucas.post(`/intelligence/kpis/${bk.id}/entries`, { period: month, value: 30 })).statusCode).toBe(403);
+    ok(await carlos.post(`/intelligence/kpis/${bk.id}/entries`, { period: month, value: 10, note: 'prévia' }), 201);
+    ok(await carlos.post(`/intelligence/kpis/${bk.id}/entries`, { period: month, value: 99 }), 201);
+    const hist = ok(await carlos.get(`/intelligence/kpis/${bk.id}/entries`)).json().items;
+    expect(hist).toHaveLength(2);
+    expect(hist.filter((x: { supersededAt: string | null }) => !x.supersededAt)).toHaveLength(1);
+    const cc = b.items.find((x: { key: string }) => x.key === 'kpi_concentracao_ficticia');
+    ok(await carlos.post(`/intelligence/kpis/${cc.id}/entries`, { period: `${year}-T${q}`, value: 22 }), 201);
+    b = ok(await carlos.get('/intelligence/kpis')).json();
+    const bk2 = b.items.find((x: { key: string }) => x.key === 'kpi_booking_ficticio');
+    expect(bk2.current).toMatchObject({ value: 99, status: 'atingido' });
+    expect(bk2.current.months.find((m: { period: string }) => m.period === month).value).toBe(99);
+    const cc2 = b.items.find((x: { key: string }) => x.key === 'kpi_concentracao_ficticia');
+    expect(cc2.current).toMatchObject({ value: 22, status: 'atencao' }); // acima da meta de 15%, dentro do máximo de 30%
+    expect(b.summary).toMatchObject({ atingido: 1, atencao: 1 });
+    // no mesmo cadastro de indicadores da Gestão de Resultados
+    const inds = ok(await carlos.get('/performance/indicators')).json().items;
+    expect(inds.some((i: { key: string; def: { calc: string } }) => i.key === 'kpi_booking_ficticio' && i.def.calc === 'informado')).toBe(true);
+  });
+  it('contexto do Booking: contratos fechados no trimestre, negociações em andamento e saúde das contas', async () => {
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Empresa Booking Fictícia', segment: 'empresarial' }, planId: plan.id }), 201).json();
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o.id}`)).json().rowVersion }));
+    const today = new Date().toISOString().slice(0, 10);
+    const id = ok(await carlos.post('/contracts', { opportunityId: o.id, billingType: 'recorrente', kind: 'privado', commercialOwnerId: lucas.me.user.id, version: { number: 'BK-1', object: 'Link', signedAt: today, startAt: today, termMonths: 12, monthlyCents: 100_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 100_000 }] } }), 201).json().id;
+    let c = ok(await carlos.get('/intelligence/kpis/context')).json();
+    expect(c.contracts.top.some((x: { id: string }) => x.id === id)).toBe(false); // sem validação não conta
+    ok(await carlos.post(`/contracts/${id}/validate`));
+    ok(await lucas.post('/opportunities', { newContact: { name: 'Prospect Fictício', segment: 'empresarial' }, planId: plan.id }), 201);
+    c = ok(await carlos.get('/intelligence/kpis/context')).json();
+    expect(c.contracts.top.find((x: { id: string }) => x.id === id)).toMatchObject({ client: 'Empresa Booking Fictícia', acvCents: 1_200_000 });
+    expect(c.contracts.bySegment.find((x: { key: string }) => x.key === 'empresarial').cents).toBeGreaterThanOrEqual(1_200_000);
+    expect(c.bookingMonths).toHaveLength(12);
+    expect(c.bookingMonths.find((m: { month: string }) => m.month === today.slice(0, 7)).cents).toBeGreaterThanOrEqual(1_200_000);
+    expect(c.pipeline.n).toBeGreaterThan(0);
+    expect(c.pipeline.stages[0]).toHaveProperty('name');
+    expect(c.pipeline.won).toBeGreaterThan(0);
+    expect(c.health.bands.map((b: { key: string }) => b.key)).toEqual(['saudavel', 'atencao', 'risco', 'sem_dado']);
+  });
+});

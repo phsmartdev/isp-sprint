@@ -57,6 +57,7 @@ import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
 import { AdminCsSettings } from './pages/admin/CsSettings';
 import { AdminContractSettings } from './pages/admin/ContractSettings';
+import { KpiBoardPage } from './pages/KpiBoardPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -85,6 +86,7 @@ export function App() {
       <Route path="/p/:token" element={<PublicSurveyPage />} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
+      <Route path="/painel/indicadores" element={<RequireAuth><Gate module="inteligencia"><KpiBoardPage /></Gate></RequireAuth>} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />

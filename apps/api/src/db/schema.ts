@@ -4105,3 +4105,23 @@ export const glpiTicketEvents = pgTable(
   },
   (t) => ({ uq: uniqueIndex('glpi_ticket_events_uq').on(t.ticketId, t.externalId) }),
 );
+
+/**
+ * Resultado informado de um KPI por competência (mês ou trimestre), enquanto a fonte não é integrada.
+ * Só INSERT: corrigir grava um novo lançamento e marca o anterior como substituído.
+ */
+export const indicatorEntries = pgTable('indicator_entries', {
+  id: id(),
+  tenantId: tenantId(),
+  indicatorId: uuid('indicator_id').notNull().references(() => indicators.id),
+  /** competência: aaaa-mm (mensal) ou aaaa-Tn (trimestral) */
+  period: text('period').notNull(),
+  periodStart: date('period_start', { mode: 'string' }).notNull(),
+  value: doublePrecision('value').notNull(),
+  note: text('note'),
+  source: text('source').notNull().default('informado'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+  supersededBy: uuid('superseded_by'),
+}, (t) => ({ idx: index('indicator_entries_idx').on(t.tenantId, t.indicatorId, t.periodStart) }));
