@@ -1,6 +1,6 @@
 # Progresso e pendências
 
-Atualizado em 2026-10-23. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
+Atualizado em 2026-10-24. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md` ao retomar.
 
 ## Fase 0 — Auditoria ✅
 - Legado v1.5 auditado (`AUDIT_LEGACY_v1.5.md`): 4 achados críticos (API aberta sem token, contrato confirmado forjável, XSS armazenado via `id`, sobrescrita arbitrária). Decisão: reescrever; portar só conteúdo de playbook e salvaguardas do adaptador IXC; migrar dados como `legacy_v1.5` não verificado (Fase 3).
@@ -138,8 +138,27 @@ Atualizado em 2026-10-23. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
   - Quando registra, guarda a decisão com quem decidiu e o que escreveu, e não oferece mais os botões. O pedido vira "Pedido de aprovação", com a resposta logo abaixo.
   - Validações lidas antes da correção (sem id e situação) continuam no histórico, mas não aparecem mais na tela.
 
+## Bloco 4 — tempo e conversão por etapa ✅ (2026-10-24)
+- **Faixa de etapas da negociação:** cada etapa concluída mostra quantos dias ficou nela (soma de todas as passagens, com "2×" quando voltou); a atual mostra "há N dias" e o total quando já passou antes. Etapa sem passagem aparece como "pulada".
+- **Inteligência → Comercial → Conversão e tempo por etapa** (por funil, coorte criada no período): chegaram, avançaram (conversão para a seguinte), perdidas e paradas em cada etapa, tempo médio e mediana; conversão do funil, vitória nas fechadas, ciclo das ganhas e a etapa com maior queda (só com 5+ negociações).
+- Fonte única: histórico append-only de etapas (`opportunity_events`). Quem pulou etapa conta como tendo passado; ganha passou por todas.
+- Testes: domínio 4, API 1, E2E 1 (+ regressão do CRM 20/20).
+
+## Contratos — 6 fases ✅ (2026-10-24)
+- **1–3:** aditivos com limite legal (25%/50% reforma), reajuste pelo índice oficial (BCB SGS) com sugestão, valor do contrato por ano (para comparar sem o reajuste).
+- **4 — Central de atenção:** fila por gravidade (padrão da tela de Contratos), resolver na fila, visão executiva no painel (receita em risco, backlog, concentração) e resumo diário por e-mail (configurável).
+- **5 — Execução:** SLA contratado × realizado, ocorrências e penalidades (multa/glosa com valor, defesa e situação), fiscal e gestor do órgão (histórico), cláusulas críticas com prazo e aviso, atestados de capacidade técnica e acervo pesquisável.
+- **6 — Linha do tempo única:** tudo o que aconteceu por assunto, críticos em destaque, busca, agrupamento por mês e próximos prazos (vigência, renovação, alertas, processos, cláusulas, resposta de ocorrência, tarefas).
+- Migrações 0068–0073.
+
+## Indicadores principais (Inteligência) e acesso por IP ✅ (2026-10-24)
+- Painel da diretoria (também em modo TV `/painel/indicadores`): 7 KPIs em cartões compactos com meta do trimestre, Booking de Contratos em R$ (ocultável) contra o ano anterior sem o reajuste, contratos fechados, negociações em andamento, saúde das contas e atenção.
+- Fichas importadas do formulário (xlsx); resultados informados (append-only) ou calculados do CRM: Booking, win rate em licitação, conversão geral, health score do CS, lead time de viabilidade (categorias de tarefa escolhidas) e ativação de contas-alvo (sinais das plays de ABM + pesquisa de ativação, cadência por tier ajustável, com "Voltar à sugestão").
+- Dados fictícios de demonstração marcados e removíveis.
+- **Acesso por IPs liberados:** lista por empresa (IPv4/IPv6/CIDR), exceção por usuário, bloqueio no login e nas sessões, sem permitir se trancar fora.
+
 ## Pendências em aberto (24/10/2026)
-- **Bloco 4:** tempo em cada etapa (inclusive as concluídas), conversão por etapa e do funil.
+- **Ações do Paulo:** criar a pesquisa de ativação e escolhê-la na ficha do KPI; marcar as categorias de tarefa do lead time (Engenharia e Infraestrutura); confirmar IP fixo antes de ligar o acesso por IP.
 - **Indicador de consumo de contrato:** acompanha os valores de medição; o Paulo vai detalhar.
 - **Importação de ata/relatório dos portais de pregão:** aguarda arquivos de exemplo.
 - **IPC:** confirmar a pontuação do "Potencial de receita adicional" (hoje 10/15/20, que fecha 100 pontos) e as faixas do "Tempo de relacionamento" (menos de 6 meses, de 6 a 24 meses, mais de 24 meses).
