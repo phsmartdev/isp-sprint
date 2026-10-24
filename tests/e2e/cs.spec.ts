@@ -251,3 +251,36 @@ test('Pesquisas por link: construtor, convite pela ficha da pessoa, resposta pú
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'pesquisas');
 });
+
+test('Sucesso do Cliente por conta: o card da conta lista os contratos e um contrato novo entra no mesmo card', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  const H = { origin: new URL(page.url()).origin };
+  const api = async (method: 'get' | 'post', url: string, data?: object) => {
+    const r = await page.request[method](`/api/v1${url}`, { headers: H, ...(data ? { data } : {}) });
+    expect(r.status(), await r.text()).toBeLessThan(300);
+    return r.json();
+  };
+  const lk = await api('get', '/meta/lookups');
+  const me = await api('get', '/me');
+  const name = `Rede Fictícia Conta CS ${Date.now().toString(36)}`;
+  const sell = async (num: string, monthly: number, contactId?: string) => {
+    const o = await api('post', '/opportunities', contactId ? { contactId, planId: lk.plans[0].id } : { newContact: { name, segment: 'empresarial' }, planId: lk.plans[0].id });
+    await api('post', `/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await api('get', `/opportunities/${o.id}`)).rowVersion });
+    const c = await api('post', '/contracts', { opportunityId: o.id, billingType: 'recorrente', commercialOwnerId: me.user.id, version: { number: num, object: `Serviço ${num}`, signedAt: day(-30), startAt: day(-20), termMonths: 12, monthlyCents: monthly, items: [{ planId: null, description: num, qty: 1, unitCents: monthly }] } });
+    await api('post', `/contracts/${c.id}/validate`);
+    return o.contactId as string;
+  };
+  const contactId = await sell('CC-A', 500_000);
+  await sell('CC-B', 200_000, contactId);
+  const pipe = lk.pipelines.find((p: { key: string }) => p.key === 'sucesso_cliente');
+  await page.goto(`/opportunities?pipelineId=${pipe.id}&q=${encodeURIComponent(name)}`);
+  const list = page.getByLabel(`Contratos de ${name}`);
+  await expect(list).toHaveCount(1); // um card por conta
+  await expect(list).toContainText('2 contratos vigentes');
+  await expect(list).toContainText('CC-A');
+  await expect(list).toContainText('CC-B');
+  await list.getByRole('link', { name: /CC-B/ }).click();
+  await expect(page).toHaveURL(/\/contracts\//);
+  await expect(page.getByRole('heading', { name: /Contrato CC-B/ })).toBeVisible();
+});

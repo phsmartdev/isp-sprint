@@ -44,6 +44,25 @@ describe('jornada automática e kickoff', () => {
     expect(ok(await carlos.get(`/cs/journeys?contractId=${contractId}`)).json().items).toHaveLength(1);
   });
 
+  it('CS trabalha por conta: novo contrato da mesma conta vai para o card dela (sem card novo), com a lista de contratos', async () => {
+    const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+    const o2 = ok(await lucas.post('/opportunities', { contactId, planId: plan.id, cableMeters: 50, saleType: 'ativa' }), 201).json();
+    ok(await carlos.post(`/opportunities/${o2.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o2.id}`)).json().rowVersion }));
+    const c2 = ok(await carlos.post('/contracts', { opportunityId: o2.id, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { number: 'CS-2', object: 'Wi-Fi gerenciado fictício', signedAt: addDays(today, -10), startAt: addDays(today, -5), termMonths: 12, monthlyCents: 300_000, items: [{ planId: null, description: 'Wi-Fi', qty: 1, unitCents: 300_000 }] } }), 201).json().id;
+    ok(await carlos.post(`/contracts/${c2}/validate`));
+    const cards = (await ctx.db.execute(sql`select o.id from opportunities o join pipelines p on p.id = o.pipeline_id where p.key = 'sucesso_cliente' and o.contact_id = ${contactId} and o.deleted_at is null and o.stage not in ('ganha','perdida')`)).rows as { id: string }[];
+    expect(cards.map((x) => x.id)).toEqual([csOppId]);
+    const inc = (await ctx.db.execute(sql`select payload->>'number' n from opportunity_events where opportunity_id = ${csOppId} and type = 'contrato_incluido' order by occurred_at`)).rows as { n: string }[];
+    expect(inc.map((x) => x.n)).toEqual(['CS-1', 'CS-2']);
+    // o card já passou do gatilho (Planejamento): a jornada do contrato novo começa na hora
+    expect(ok(await carlos.get(`/cs/journeys?contractId=${c2}`)).json().items).toHaveLength(1);
+    const pipeId = (await ctx.db.execute(sql`select pipeline_id from opportunities where id = ${csOppId}`)).rows[0] as { pipeline_id: string };
+    const board = ok(await carlos.get(`/pipeline?pipelineId=${pipeId.pipeline_id}`)).json();
+    const card = board.stages.flatMap((st: { cards: { id: string }[] }) => st.cards).find((c: { id: string }) => c.id === csOppId);
+    expect(card.accountContracts.map((c: { number: string }) => c.number).sort()).toEqual(['CS-1', 'CS-2']);
+    expect(card.valueCents).toBe(1_800_000);
+  });
+
   it('marcos com datas (renovação pela vigência real), tarefas do onboarding e kickoff com pendências sinalizadas', async () => {
     const j = ok(await mariana.get(`/cs/journeys/${journeyId}`)).json();
     const keys = j.milestones.map((m: { key: string }) => m.key);
@@ -70,7 +89,7 @@ describe('jornada automática e kickoff', () => {
 describe('inteligência da conta', () => {
   it('Tier pelo ACV consolidado e histórico preservado', async () => {
     const a = ok(await mariana.get(`/cs/accounts/${contactId}`)).json();
-    expect(a.snapshot.acvCents).toBe(18_000_000);
+    expect(a.snapshot.acvCents).toBe(21_600_000); // dois contratos da conta: 15 mil + 3 mil por mês
     expect(a.snapshot.tier).toBe('middle');
     expect(a.history.some((h: { kind: string; level: string }) => h.kind === 'tier' && h.level === 'middle')).toBe(true);
     expect(a.snapshot.financial.available).toBe(false); // sem IXC: inadimplência indisponível, não "adimplente"

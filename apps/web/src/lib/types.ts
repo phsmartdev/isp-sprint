@@ -79,13 +79,17 @@ export type Lead = {
   sla: { state: 'cumprido' | 'cumprido_atrasado' | 'violado' | 'no_prazo'; deadline: string };
 };
 
+export type AccountContract = { id: string; number: string; object: string; monthlyCents: number; billingType: string; kind: string; stage: string; endAt: string | null };
 export type Opportunity = {
+  /** Funil Sucesso do Cliente (por conta): contratos vigentes da conta */
+  accountContracts?: AccountContract[];
   id: string;
   code: number;
   title: string;
   stage: string;
   pipelineId: string;
   pipelineName: string;
+  pipelineKey?: string;
   stageName: string | null;
   attachmentCount: number;
   proposalCount: number;

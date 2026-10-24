@@ -1,6 +1,6 @@
 /** Funil Sucesso do Cliente: criado na primeira vez que for acionado (não muda as jornadas existentes). */
 import { tenantModuleOn } from './modules';
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { Config } from '../config';
 import { csConfigOf, recomputeAccounts, startJourney } from './cs';
 import type { DbOrTx } from '../db/client';
@@ -45,42 +45,133 @@ export async function ensurePlanningStage(db: DbOrTx, tenantId: string, pipeline
   await db.insert(s.pipelineStages).values({ tenantId, pipelineId, key: 'planejamento', name: 'Planejamento', kind: 'open', color: '#2F5986', requirements: {}, position: after + 1, isTerminal: false });
 }
 
-/** Contrato da negociação de Sucesso do Cliente: o da própria oportunidade ou o da oportunidade comercial de origem. */
-async function contractFor(db: DbOrTx, opp: { id: string; duplicatedFromId: string | null }) {
-  const ids = [opp.id, opp.duplicatedFromId].filter(Boolean) as string[];
-  const [c] = await db.select().from(s.contracts).where(inArray(s.contracts.opportunityId, ids)).orderBy(desc(s.contracts.createdAt)).limit(1);
-  return c ?? null;
+/** Contratos vigentes (validados, não arquivados) da conta, com a versão atual. */
+export async function accountContracts(db: DbOrTx, tenantId: string, contactIds: string[]) {
+  if (!contactIds.length) return [];
+  return db.select({ id: s.contracts.id, contactId: s.contracts.contactId, code: s.contracts.code, stage: s.contracts.stage, kind: s.contracts.kind, billingType: s.contracts.billingType, csmId: s.contracts.csmId, commercialOwnerId: s.contracts.commercialOwnerId, validatedAt: s.contracts.validatedAt, number: s.contractVersions.number, object: s.contractVersions.object, monthlyCents: s.contractVersions.monthlyCents, totalCents: s.contractVersions.totalCents, endAt: s.contractVersions.endAt, arpId: s.contracts.arpId })
+    .from(s.contracts).innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion)))
+    .where(and(eq(s.contracts.tenantId, tenantId), inArray(s.contracts.contactId, contactIds), sql`${s.contracts.stage} <> 'arquivado'`, isNotNull(s.contracts.validatedAt)))
+    .orderBy(desc(s.contracts.createdAt));
 }
 
-/** Gatilho: a oportunidade entrou no funil/etapa configurados → inicia a jornada (idempotente; voltar à etapa não duplica). */
+/** Card da conta no funil Sucesso do Cliente (um por conta, enquanto aberto). */
+export async function openAccountCard(db: DbOrTx, tenantId: string, pipelineId: string, contactId: string) {
+  const [o] = await db.select({ id: s.opportunities.id, stage: s.opportunities.stage, ownerId: s.opportunities.ownerId }).from(s.opportunities)
+    .where(and(eq(s.opportunities.tenantId, tenantId), eq(s.opportunities.pipelineId, pipelineId), eq(s.opportunities.contactId, contactId), isNull(s.opportunities.deletedAt), sql`${s.opportunities.stage} not in ('ganha','perdida')`))
+    .orderBy(asc(s.opportunities.createdAt)).limit(1);
+  return o ?? null;
+}
+
+/** Valor do card = soma mensal dos contratos recorrentes vigentes da conta (carteira que o CS cuida). */
+async function refreshCardValue(db: DbOrTx, tenantId: string, cardId: string, contactId: string) {
+  const list = await accountContracts(db, tenantId, [contactId]);
+  const monthly = list.filter((c) => c.billingType === 'recorrente').reduce((t, c) => t + c.monthlyCents, 0);
+  await db.update(s.opportunities).set({ valueCents: monthly, updatedAt: new Date() }).where(eq(s.opportunities.id, cardId));
+}
+
+/**
+ * Garante o card da conta no funil Sucesso do Cliente. Já existe card aberto → devolve ele (a conta não ganha card novo).
+ * Não existe → cria em "Acionado": copiando a negociação de origem (histórico e atividades) ou do zero.
+ */
+export async function ensureAccountCard(db: DbOrTx, tenantId: string, actorId: string | null, input: { contactId: string; sourceOpportunityId: string | null; ownerId: string | null; reason: string }) {
+  const cs = await ensureCustomerSuccessPipeline(db, tenantId);
+  await ensurePlanningStage(db, tenantId, cs.id);
+  const found = await openAccountCard(db, tenantId, cs.id, input.contactId);
+  if (found) return { id: found.id, stage: found.stage, created: false, pipelineId: cs.id };
+  const [contact] = await db.select({ name: s.contacts.name, ownerId: s.contacts.ownerId }).from(s.contacts).where(eq(s.contacts.id, input.contactId)).limit(1);
+  let id: string;
+  if (input.sourceOpportunityId) {
+    const { duplicateOpportunity } = await import('./automations');
+    id = await duplicateOpportunity(db as never, tenantId, actorId, input.sourceOpportunityId, { tipo: 'duplicar', jornada: cs.key, etapa: 'acionado', responsavel: input.ownerId ?? 'mesmo' }, input.reason);
+  } else {
+    const ownerId = input.ownerId ?? contact?.ownerId ?? actorId;
+    if (!ownerId) throw unprocessable('Conta sem responsável para o card do Sucesso do Cliente.');
+    const [o] = await db.insert(s.opportunities).values({ tenantId, contactId: input.contactId, ownerId, title: `Conta · ${contact?.name ?? ''}`.slice(0, 160), pipelineId: cs.id, stage: 'acionado', createdBy: actorId, reasons: [] }).returning({ id: s.opportunities.id });
+    id = o!.id;
+    await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: id, type: 'created', actorId, toValue: 'acionado', rowVersion: 1, payload: { pipeline: cs.key, reason: input.reason } });
+  }
+  await db.update(s.opportunities).set({ title: `Conta · ${contact?.name ?? ''}`.slice(0, 160) }).where(eq(s.opportunities.id, id));
+  await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: id, type: 'conta_acionada', actorId, payload: { reason: input.reason } });
+  return { id, stage: 'acionado', created: true, pipelineId: cs.id };
+}
+
+/** Etapa do card já passou do gatilho da jornada? (contrato novo numa conta já em acompanhamento começa a jornada na hora) */
+async function pastTrigger(db: DbOrTx, pipelineId: string, stage: string, triggerStage: string) {
+  const st = await db.select({ key: s.pipelineStages.key, position: s.pipelineStages.position }).from(s.pipelineStages).where(eq(s.pipelineStages.pipelineId, pipelineId));
+  const pos = (k: string) => st.find((x) => x.key === k)?.position ?? Infinity;
+  return pos(stage) >= pos(triggerStage);
+}
+
+/** Gatilho: o card da conta entrou na etapa configurada → começa a jornada de cada contrato vigente da conta que ainda não tem (idempotente). */
 export async function csOnStage(db: DbOrTx, config: Config, tenantId: string, actorId: string | null, opportunityId: string, stage: string) {
   const { config: cfg } = await csConfigOf(db, tenantId);
   const t = cfg.trigger;
   if (stage !== t.stageKey) return null;
-  const [o] = await db.select({ id: s.opportunities.id, contactId: s.opportunities.contactId, duplicatedFromId: s.opportunities.duplicatedFromId, arpId: s.opportunities.arpId, pipelineKey: s.pipelines.key }).from(s.opportunities).innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId)).where(and(eq(s.opportunities.id, opportunityId), eq(s.opportunities.tenantId, tenantId))).limit(1);
+  const [o] = await db.select({ id: s.opportunities.id, contactId: s.opportunities.contactId, arpId: s.opportunities.arpId, pipelineKey: s.pipelines.key }).from(s.opportunities).innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId)).where(and(eq(s.opportunities.id, opportunityId), eq(s.opportunities.tenantId, tenantId))).limit(1);
   if (!o || o.pipelineKey !== t.pipelineKey || o.arpId) return null;
-  const c = await contractFor(db, o);
-  if (c && t.billingTypes.length && !t.billingTypes.includes(c.billingType)) return null;
-  if (c && t.kinds.length && !t.kinds.includes(c.kind)) return null;
-  if (t.customerType !== 'todos') {
-    const [prior] = await db.select({ n: sql<number>`count(*)::int` }).from(s.contracts).where(and(eq(s.contracts.tenantId, tenantId), eq(s.contracts.contactId, o.contactId), c ? sql`${s.contracts.id} <> ${c.id}` : sql`true`, sql`${s.contracts.validatedAt} is not null`));
-    const isNew = !prior?.n;
-    if ((t.customerType === 'novo') !== isNew) return null;
-  }
-  const r = await startJourney(db, config, tenantId, actorId, { contactId: o.contactId, contractId: c?.id ?? null, opportunityId: o.id, csmId: c?.csmId ?? t.defaultCsmId });
+  const list = (await accountContracts(db, tenantId, [o.contactId])).filter((c) => !c.arpId && contractMatches(t, c));
+  const out = [];
+  if (!list.length) out.push(await startJourney(db, config, tenantId, actorId, { contactId: o.contactId, contractId: null, opportunityId: o.id, csmId: t.defaultCsmId }));
+  for (const c of list) out.push(await startJourney(db, config, tenantId, actorId, { contactId: o.contactId, contractId: c.id, opportunityId: o.id, csmId: c.csmId ?? t.defaultCsmId }));
   await recomputeAccounts(db, tenantId, [o.contactId]);
-  return r;
+  return out[0] ?? null;
 }
 
-/** Contrato validado: entra no funil Sucesso do Cliente (uma negociação por contrato), sem mexer na negociação comercial. */
-export async function handoffContractToCs(db: DbOrTx, tenantId: string, actorId: string | null, contract: { id: string; opportunityId: string | null; arpId: string | null }) {
+function contractMatches(t: { billingTypes: string[]; kinds: string[] }, c: { billingType: string; kind: string }) {
+  return (!t.billingTypes.length || t.billingTypes.includes(c.billingType)) && (!t.kinds.length || t.kinds.includes(c.kind));
+}
+
+/**
+ * Contrato validado: vai, com as informações dele, para o card da CONTA no funil Sucesso do Cliente.
+ * Conta sem card aberto ganha um (em "Acionado"); conta com card recebe o contrato na lista e no histórico.
+ * Se o card já passou da etapa que inicia a jornada, a jornada deste contrato começa na hora.
+ */
+export async function handoffContractToCs(db: DbOrTx, tenantId: string, actorId: string | null, contract: { id: string; opportunityId: string | null; arpId: string | null }, config?: Config) {
   if (!(await tenantModuleOn(db, tenantId, 'crm'))) return null; // Etapa 1: Sucesso do Cliente é do CRM
   const { config: cfg } = await csConfigOf(db, tenantId);
-  if (!cfg.trigger.createOnContractValidation || !contract.opportunityId || contract.arpId) return null;
-  const cs = await ensureCustomerSuccessPipeline(db, tenantId);
-  await ensurePlanningStage(db, tenantId, cs.id);
-  const [exists] = await db.select({ id: s.opportunities.id }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, tenantId), eq(s.opportunities.pipelineId, cs.id), eq(s.opportunities.duplicatedFromId, contract.opportunityId))).limit(1);
-  if (exists) return exists.id;
-  const { duplicateOpportunity } = await import('./automations');
-  return duplicateOpportunity(db as never, tenantId, actorId, contract.opportunityId, { tipo: 'duplicar', jornada: cs.key, etapa: 'acionado', responsavel: 'mesmo' }, 'Contrato validado: entrada no Sucesso do Cliente');
+  if (!cfg.trigger.createOnContractValidation || contract.arpId) return null;
+  const [c] = await db.select({ contactId: s.contracts.contactId, csmId: s.contracts.csmId, kind: s.contracts.kind, billingType: s.contracts.billingType, number: s.contractVersions.number, object: s.contractVersions.object, monthlyCents: s.contractVersions.monthlyCents, endAt: s.contractVersions.endAt })
+    .from(s.contracts).innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion))).where(eq(s.contracts.id, contract.id)).limit(1);
+  if (!c) return null;
+  const card = await ensureAccountCard(db, tenantId, actorId, { contactId: c.contactId, sourceOpportunityId: contract.opportunityId, ownerId: null, reason: 'Contrato validado: entrada no Sucesso do Cliente' });
+  const [already] = await db.select({ id: s.opportunityEvents.id }).from(s.opportunityEvents).where(and(eq(s.opportunityEvents.opportunityId, card.id), eq(s.opportunityEvents.type, 'contrato_incluido'), sql`${s.opportunityEvents.payload} ->> 'contractId' = ${contract.id}`)).limit(1);
+  if (!already) {
+    await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: card.id, type: 'contrato_incluido', actorId, payload: { contractId: contract.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, endAt: c.endAt, opportunityId: contract.opportunityId } });
+    await db.insert(s.contractEvents).values({ tenantId, contractId: contract.id, type: 'cs_conta', actorId, summary: card.created ? 'Conta acionada no Sucesso do Cliente com este contrato.' : 'Contrato incluído no card da conta no Sucesso do Cliente.', payload: { opportunityId: card.id } });
+  }
+  await refreshCardValue(db, tenantId, card.id, c.contactId);
+  if (config && !card.created && contractMatches(cfg.trigger, c) && (await pastTrigger(db, card.pipelineId, card.stage, cfg.trigger.stageKey))) {
+    await startJourney(db, config, tenantId, actorId, { contactId: c.contactId, contractId: contract.id, opportunityId: card.id, csmId: c.csmId ?? cfg.trigger.defaultCsmId });
+  }
+  return card.id;
+}
+
+/**
+ * Um card por conta: contas com mais de um card aberto no funil Sucesso do Cliente ficam com o mais adiantado
+ * (empate: o mais antigo); os outros saem do quadro (histórico preservado e apontando para o card que ficou).
+ */
+export async function consolidateAccountCards(db: DbOrTx, tenantId: string) {
+  const [cs] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, CS_KEY))).limit(1);
+  if (!cs) return 0;
+  const rows = await db.execute<{ id: string; contact_id: string; pos: number; created_at: string }>(sql`
+    select o.id, o.contact_id, coalesce(ps.position, 0) pos, o.created_at from opportunities o left join pipeline_stages ps on ps.pipeline_id = o.pipeline_id and ps.key = o.stage
+     where o.tenant_id = ${tenantId} and o.pipeline_id = ${cs.id} and o.deleted_at is null and o.stage not in ('ganha','perdida')
+       and o.contact_id in (select contact_id from opportunities where tenant_id = ${tenantId} and pipeline_id = ${cs.id} and deleted_at is null and stage not in ('ganha','perdida') group by contact_id having count(*) > 1)`);
+  const by = new Map<string, typeof rows.rows>();
+  for (const r of rows.rows) by.set(r.contact_id, [...(by.get(r.contact_id) ?? []), r]);
+  let n = 0;
+  for (const list of by.values()) {
+    const keep = [...list].sort((a, b) => b.pos - a.pos || String(a.created_at).localeCompare(String(b.created_at)))[0]!;
+    for (const o of list) {
+      if (o.id === keep.id) continue;
+      // contratos do card que sai passam para o que fica
+      const evs = await db.select().from(s.opportunityEvents).where(and(eq(s.opportunityEvents.opportunityId, o.id), eq(s.opportunityEvents.type, 'contrato_incluido')));
+      for (const e of evs) await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: keep.id, type: 'contrato_incluido', actorId: e.actorId, payload: { ...(e.payload ?? {}), movedFrom: o.id }, occurredAt: e.occurredAt });
+      await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: o.id, type: 'consolidada_na_conta', actorId: null, payload: { into: keep.id } });
+      await db.insert(s.opportunityEvents).values({ tenantId, opportunityId: keep.id, type: 'card_consolidado', actorId: null, payload: { from: o.id } });
+      await db.update(s.opportunities).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(s.opportunities.id, o.id));
+      n++;
+    }
+  }
+  return n;
 }

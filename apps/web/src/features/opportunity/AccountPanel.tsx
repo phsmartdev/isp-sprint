@@ -65,6 +65,7 @@ export function AccountPanel({ opp, openMore, extra }: { opp: Opportunity; openM
           {c.data.planName ? ` · plano atual ${c.data.planName}` : ''}{c.data.contractStart ? ` · cliente desde ${fmtDate(c.data.contractStart)}` : ''}
         </p>
       )}
+      {opp.pipelineKey === 'sucesso_cliente' && <AccountContracts contactId={opp.contactId} />}
       {extra}
       <Button size="sm" variant="outline" className="mt-3 w-full" onClick={() => setMore(true)}>Saiba mais sobre a conta</Button>
       <AccountDrawer open={more} onClose={() => setMore(false)} opp={opp} detail={c.data} />
@@ -152,3 +153,26 @@ const Stat = ({ label, value }: { label: string; value: string }) => (
 const Block = ({ title, children }: { title: string; children: ReactNode }) => (
   <section aria-label={title}><h3 className="mb-2 text-sm font-bold text-ink">{title}</h3>{children}</section>
 );
+
+/** Sucesso do Cliente trabalha por conta: todos os contratos vigentes da conta, cada um levando à ficha. */
+function AccountContracts({ contactId }: { contactId: string }) {
+  const q = useQuery({ queryKey: ['contracts', 'account', contactId], queryFn: () => api<{ items: ContractRow[] }>(`/contracts${qs({ contactId, status: 'ativos', pageSize: 100 })}`) });
+  const items = q.data?.items ?? [];
+  return (
+    <div className="mt-3 border-t border-line pt-3" aria-label="Contratos da conta">
+      <p className="mb-1.5 text-sm font-semibold text-ink">Contratos da conta {q.data ? <span className="font-normal text-muted">({items.length})</span> : null}</p>
+      {q.isLoading ? <LoadingRows rows={2} /> : !items.length ? <p className="text-xs text-muted">Nenhum contrato vigente.</p> : (
+        <ul className="space-y-1.5">
+          {items.map((c) => (
+            <li key={c.id}>
+              <Link to={`/contracts/${c.id}`} className="block hover:text-primary">
+                <span className="flex items-baseline justify-between gap-2 text-sm"><span className="truncate font-semibold text-ink">{c.number}</span><span className="num shrink-0 text-xs text-muted">{c.billingType === 'recorrente' ? `${fmtBRL(c.monthlyCents)}/mês` : c.billingType === 'medicao' ? 'medição' : 'frequente'}</span></span>
+                <span className="block truncate text-xs text-muted" title={c.object}>{c.object}{c.endAt ? ` · até ${fmtDate(c.endAt)}` : ''}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

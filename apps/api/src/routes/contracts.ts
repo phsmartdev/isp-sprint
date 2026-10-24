@@ -694,7 +694,10 @@ export const contractRoutes = [
           await ev('provisionamento_solicitado', { emails: finMails });
           await ev('implantacao_notificada', { emails: opsMails });
           await ev('sucesso_cliente', {});
-          await handoffContractToCs(tx, auth.tenantId, auth.userId, { id: c.id, opportunityId: c.opportunityId, arpId: c.arpId });
+          await handoffContractToCs(tx, auth.tenantId, auth.userId, { id: c.id, opportunityId: c.opportunityId, arpId: c.arpId }, app.config);
+        } else if (!c.arpId) {
+          // contrato sem negociação de origem também vai para o card da conta no Sucesso do Cliente
+          await handoffContractToCs(tx, auth.tenantId, auth.userId, { id: c.id, opportunityId: null, arpId: null }, app.config);
         }
         return { erp: { status: 'pendente_integracao', tasks: erpTasks.length }, provisioning: { emails: finMails, tasks: finTasks.length }, delivery: { emails: opsMails, tasks: opsTasks.length } };
       });
