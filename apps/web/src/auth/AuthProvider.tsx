@@ -30,6 +30,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return await api<Me>('/me');
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) return null;
+        // acesso por IP liberado: sessão fora da rede autorizada volta para o login, que explica o motivo
+        if (e instanceof ApiError && e.status === 403 && e.problem.type === 'urn:isp:ip-bloqueado') return null;
         throw e;
       }
     },

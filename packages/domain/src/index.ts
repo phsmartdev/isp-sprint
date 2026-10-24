@@ -29,3 +29,4 @@ export * from './bids';
 export * from './eml';
 export * from './revenue';
 export * from './activation';
+export * from './ipAccess';

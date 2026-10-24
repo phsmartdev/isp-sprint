@@ -16,6 +16,8 @@ import { notifyUserAccess } from '../services/alerts';
 import { smtpConfig } from '../services/email';
 import { decodeImage } from '../services/images';
 import { hashPassword, verifyPassword } from '../auth/password';
+import { clientIp, forgetIpPolicy, ipPolicyOf } from '../services/ipAccess';
+import { ipAllowed, validateIpPolicy } from '@isp/domain';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
 const SlotParams = z.object({ slot: z.enum(BRAND_SLOTS) });
@@ -182,7 +184,7 @@ export const adminRoutes = [
     handler: async ({ app, auth }) => {
       const users = await app.db
         .select({
-          id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, phone: s.users.phone, active: s.users.active, lastLoginAt: s.users.lastLoginAt,
+          id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, phone: s.users.phone, active: s.users.active, ipBypass: s.users.ipBypass, lastLoginAt: s.users.lastLoginAt,
           goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, createdAt: s.users.createdAt,
           hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")`,
           profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'gerencia' then 0 when 'supervisor' then 1 else 2 end limit 1)`,
@@ -253,7 +255,7 @@ export const adminRoutes = [
         }
         await tx
           .update(s.users)
-          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, updatedAt: new Date() })
+          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, ipBypass: body.ipBypass, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, updatedAt: new Date() })
           .where(eq(s.users.id, u.id));
         if (body.active === false) await tx.update(s.sessions).set({ revokedAt: new Date() }).where(eq(s.sessions.userId, u.id));
         if (body.profile) {
@@ -266,7 +268,7 @@ export const adminRoutes = [
         const [role] = await tx.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, u.id)).limit(1);
         if ((body.profile ?? role?.key) === 'supervisor' && !leads.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
         if (body.teamIds || body.leadTeamIds) await setTeams(tx, auth, u.id, body.teamIds ?? current.map((c) => c.teamId), leads);
-        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active, sectors: body.sectors, ...(body.email && body.email !== u.email.toLowerCase() ? { emailFrom: u.email, emailTo: body.email } : {}) } });
+        await audit(tx, req, { action: 'user.update', entityType: 'user', entityId: u.id, metadata: { name: body.name ?? u.name, profile: body.profile, active: body.active, sectors: body.sectors, ipBypass: body.ipBypass, ...(body.email && body.email !== u.email.toLowerCase() ? { emailFrom: u.email, emailTo: body.email } : {}) } });
       });
       return { ok: true };
     },
@@ -372,6 +374,34 @@ export const adminRoutes = [
         await audit(tx, req, { action: 'security.update', entityType: 'access_policy', entityId: `${body.profile}:${body.module}`, metadata: { profile: body.profile, module: body.module, from: cur?.level ?? null, to: body.level } });
         return { profile: body.profile as ProfileKey, module: body.module as Module, level: body.level };
       });
+    },
+  }),
+
+  // ------------------------------------------------------------------ acesso por IP liberado
+  defineRoute({
+    method: 'GET', url: '/admin/ip-access', summary: 'Acesso por IP liberado: situação, endereços autorizados, seu IP atual e quem pode entrar de qualquer lugar', tag: 'Administração', ...ADMIN,
+    handler: async ({ app, auth, req }) => {
+      const p = await ipPolicyOf(app.db, auth.tenantId, true);
+      const bypass = await app.db.select({ id: s.users.id, name: s.users.name, email: s.users.email }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.ipBypass, true), eq(s.users.active, true)));
+      const blocked = await app.db.execute<{ n: number }>(sql`select count(*)::int n from audit_logs where tenant_id = ${auth.tenantId} and action = 'auth.ip_blocked' and created_at > now() - interval '7 days'`);
+      return { enabled: p?.enabled ?? false, rules: p?.rules ?? [], myIp: clientIp(req), meBypass: auth.ipBypass, bypassUsers: bypass, blocked7d: blocked.rows[0]?.n ?? 0 };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/admin/ip-access', summary: 'Liga/desliga o acesso por IP e define os endereços autorizados (não deixa você se trancar fora)', tag: 'Administração', ...ADMIN,
+    body: z.object({ enabled: z.boolean(), rules: z.array(z.object({ cidr: z.string().trim().min(3).max(60), label: z.string().trim().max(80).default('') })).max(100) }),
+    handler: async ({ app, auth, body, req }) => {
+      const policy = { enabled: body.enabled, rules: body.rules };
+      const e = validateIpPolicy(policy);
+      if (e.length) throw unprocessable(e[0]!, e.map((m) => ({ path: 'rules', message: m })));
+      const ip = clientIp(req);
+      if (body.enabled && !auth.ipBypass && !ipAllowed(ip, policy)) throw unprocessable(`Seu IP atual (${ip ?? 'desconhecido'}) não está na lista: ao ligar, você perderia o acesso. Inclua-o ou marque seu usuário para entrar de qualquer lugar.`);
+      const before = await ipPolicyOf(app.db, auth.tenantId, true);
+      await app.db.insert(s.tenantIpPolicies).values({ tenantId: auth.tenantId, enabled: body.enabled, rules: body.rules, updatedBy: auth.userId })
+        .onConflictDoUpdate({ target: s.tenantIpPolicies.tenantId, set: { enabled: body.enabled, rules: body.rules, updatedBy: auth.userId, updatedAt: new Date() } });
+      forgetIpPolicy(auth.tenantId);
+      await audit(app.db, req, { action: 'security.ip_access', entityType: 'tenant', entityId: auth.tenantId, metadata: { from: before, to: policy, ip } });
+      return { ok: true };
     },
   }),
 

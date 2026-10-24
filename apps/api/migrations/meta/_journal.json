@@ -498,6 +498,13 @@
       "when": 1792840283910,
       "tag": "0070_valores_ano_contrato",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792843453296,
+      "tag": "0071_acesso_por_ip",
+      "breakpoints": true
     }
   ]
 }

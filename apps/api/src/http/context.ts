@@ -34,6 +34,8 @@ export type AuthContext = {
   actions: Record<SensitiveAction, boolean>;
   /** Nível do perfil antes de desligar módulos (só para mostrar "módulo desligado" em vez de "sem acesso"). */
   profileAccess: Record<Module, AccessLevel>;
+  /** pode entrar de qualquer IP (exceção ao acesso por IP liberado) */
+  ipBypass: boolean;
 };
 
 declare module 'fastify' {
@@ -66,6 +68,7 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
       jobTitle: s.users.jobTitle,
       sectors: s.users.sectors,
       active: s.users.active,
+      ipBypass: s.users.ipBypass,
       timezone: s.tenants.timezone,
       tenantName: s.tenants.name,
       lastSeenAt: s.sessions.lastSeenAt,
@@ -83,12 +86,12 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
   return buildAuth(app.db, row);
 }
 
-type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; timezone: string; tenantName: string };
+type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; timezone: string; tenantName: string; ipBypass?: boolean };
 
 /** Contexto de acesso de qualquer usuário ativo (ex.: conferir se a pessoa mencionada vê a negociação). */
 export async function authForUser(db: DB, tenantId: string, userId: string): Promise<AuthContext | null> {
   const [row] = await db
-    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, active: s.users.active, timezone: s.tenants.timezone, tenantName: s.tenants.name })
+    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, active: s.users.active, ipBypass: s.users.ipBypass, timezone: s.tenants.timezone, tenantName: s.tenants.name })
     .from(s.users)
     .innerJoin(s.tenants, eq(s.tenants.id, s.users.tenantId))
     .where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId)))
@@ -146,6 +149,7 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     profiles: roleRows.map((r) => r.key),
     access: gateAccess(profileAccess, modules),
     profileAccess,
+    ipBypass: !!row.ipBypass,
     modules,
     moduleReasons: Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].reason])) as Record<BusinessModule, ModuleDecision['reason']>,
     disabledFeatures: [...new Set(tms.flatMap((x) => x.disabledFeatures))],

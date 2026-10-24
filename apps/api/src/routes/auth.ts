@@ -1,3 +1,4 @@
+import { ipCheck } from '../services/ipAccess';
 import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { LoginInput } from '@isp/shared';
@@ -35,6 +36,13 @@ async function hasAvatar(app: Parameters<typeof resolveSession>[0], userId: stri
 /** Cria a sessão em cookie (senha ou Google) e devolve o contexto. */
 export async function startSession(app: FastifyInstance, req: FastifyRequest, reply: FastifyReply, user: { id: string; tenantId: string }, via = 'senha') {
   const now = new Date();
+  // acesso por IP liberado: login fora da rede autorizada é recusado (e registrado)
+  const [u] = await app.db.select({ ipBypass: s.users.ipBypass }).from(s.users).where(eq(s.users.id, user.id)).limit(1);
+  const ip = await ipCheck(app.db, req, { tenantId: user.tenantId, ipBypass: !!u?.ipBypass });
+  if (!ip.ok) {
+    await audit(app.db, req, { action: 'auth.ip_blocked', tenantId: user.tenantId, actorId: user.id, metadata: { via, ip: ip.ip } });
+    throw new AppError(403, 'Acesso fora da rede autorizada', `A empresa só libera o acesso a partir dos endereços autorizados. Seu IP: ${ip.ip ?? 'desconhecido'}. Fale com a gerência.`);
+  }
   const token = newSessionToken();
   const expiresAt = new Date(now.getTime() + app.config.sessionTtlHours * 3_600_000);
   await app.db.insert(s.sessions).values({ userId: user.id, tenantId: user.tenantId, tokenHash: hashToken(token), expiresAt, userAgent: String(req.headers['user-agent'] ?? '').slice(0, 300) });

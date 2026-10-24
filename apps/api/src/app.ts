@@ -9,6 +9,8 @@ import type { Config } from './config';
 import type { DB } from './db/client';
 import { errorHandler, sendProblem } from './http/errors';
 import { resolveSession } from './http/context';
+import { clientIp, ipPolicyOf } from './services/ipAccess';
+import { ipAllowed } from '@isp/domain';
 import { registerRoutes, routeRegistry } from './http/route';
 import { buildOpenApi } from './http/openapi';
 import { authRoutes } from './routes/auth';
@@ -140,8 +142,16 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     }
   });
 
-  app.addHook('preHandler', async (req) => {
-    if (req.url.startsWith('/api/')) req.auth = await resolveSession(app, req);
+  app.addHook('preHandler', async (req, reply) => {
+    if (!req.url.startsWith('/api/')) return;
+    req.auth = await resolveSession(app, req);
+    // acesso por IP liberado: sessão aberta fora da rede autorizada não usa o sistema (sair continua permitido)
+    if (req.auth && !req.url.startsWith('/api/v1/auth/logout')) {
+      const policy = await ipPolicyOf(db, req.auth.tenantId);
+      if (!ipAllowed(clientIp(req), policy, req.auth.ipBypass)) {
+        return sendProblem(reply, req, { status: 403, type: 'urn:isp:ip-bloqueado', title: 'Acesso fora da rede autorizada', detail: `A empresa só libera o acesso a partir dos endereços autorizados. Seu IP: ${clientIp(req) ?? 'desconhecido'}. Fale com a gerência.` });
+      }
+    }
   });
 
   app.setErrorHandler(errorHandler);

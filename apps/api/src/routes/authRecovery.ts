@@ -113,7 +113,7 @@ export const authRecoveryRoutes = [
         return fail('google_outra_conta');
       }
       if (!user.googleSub) await app.db.update(s.users).set({ googleSub: info.sub }).where(eq(s.users.id, user.id));
-      await startSession(app, req, reply, user, 'google');
+      try { await startSession(app, req, reply, user, 'google'); } catch (e) { if ((e as { statusCode?: number }).statusCode === 403) return fail('ip_bloqueado'); throw e; }
       reply.clearCookie(STATE_COOKIE, { path: '/api/v1/auth/google' });
       return reply.redirect(st.next);
     },
