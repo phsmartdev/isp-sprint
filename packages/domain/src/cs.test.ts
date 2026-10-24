@@ -56,3 +56,26 @@ describe('Sucesso do Cliente', () => {
     expect(coverage([], 2).simple).toBeNull();
   });
 });
+
+import { accountAcv, tierOf as tierOf2, DEFAULT_CS_CONFIG as CFG2 } from './cs';
+describe('ACV consolidado e Tier', () => {
+  it('recorrente ×12 + medição + frequente; ganha sem contrato pelo valor; consumo de medição não soma', () => {
+    const r = accountAcv(
+      [{ id: 'c1', opportunityId: 'o1', billingType: 'recorrente', acvCents: 6_000_000 }, { id: 'c2', opportunityId: null, billingType: 'medicao', acvCents: 30_000_000 }, { id: 'c3', opportunityId: 'o3', billingType: 'frequente', acvCents: 2_000_000 }],
+      [
+        { id: 'o1', valueCents: 500_000, monthly: true, saleKind: null, consumesContract: false }, // já no contrato c1
+        { id: 'o4', valueCents: 1_000_000, monthly: true, saleKind: 'venda_consultiva', consumesContract: false }, // sem contrato: 12× mensal
+        { id: 'o5', valueCents: 4_000_000, monthly: false, saleKind: 'licitacao', consumesContract: false }, // sem contrato: valor global
+        { id: 'o6', valueCents: 9_000_000, monthly: false, saleKind: 'consumo_contrato', consumesContract: false },
+        { id: 'o7', valueCents: 3_000_000, monthly: false, saleKind: null, consumesContract: true },
+      ],
+    );
+    expect(r.parts).toEqual({ recorrente: 6_000_000, medicao: 30_000_000, frequente: 2_000_000, semContrato: 12_000_000 + 4_000_000 });
+    expect(r.acvCents).toBe(54_000_000);
+    expect(r.excluded).toEqual({ count: 2, cents: 12_000_000 });
+    expect(tierOf2(r.acvCents, CFG2.tierBands)).toBe('large');
+    expect(tierOf2(12_000_000, CFG2.tierBands)).toBe('small');
+    expect(tierOf2(12_000_100, CFG2.tierBands)).toBe('middle');
+    expect(tierOf2(50_000_000, CFG2.tierBands)).toBe('middle');
+  });
+});

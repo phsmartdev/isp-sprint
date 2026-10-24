@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
-  CS_ACTIVITY_LABELS, DEFAULT_CS_CONFIG, IPC_CRITERIA, cadenceDates, contractAcv, criticality, effectivePriority, healthScore, ipcScore, levelRank, ledgerTotals, monthsToIpc, policyFor, tierOf, tierToIpc,
+  CS_ACTIVITY_LABELS, DEFAULT_CS_CONFIG, accountAcv, IPC_CRITERIA, cadenceDates, contractAcv, criticality, effectivePriority, healthScore, ipcScore, levelRank, ledgerTotals, monthsToIpc, policyFor, tierOf, tierToIpc,
   type CsActivityKind, type CsConfig, type CsLevel, type IpcInput, type JourneyTpl, type Tier,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -34,6 +34,8 @@ export async function csConfigOf(db: DbOrTx, tenantId: string): Promise<{ config
 export type Snapshot = {
   computedAt: string; ruleVersion: number;
   acvCents: number; groupAcvCents: number; groupContacts: number; tier: Tier | null;
+  /** composição do valor anual consolidado (base do Tier) e o consumo de medição que ficou de fora */
+  acvParts?: { recorrente: number; medicao: number; frequente: number; semContrato: number }; acvExcluded?: { count: number; cents: number };
   contracts: { id: string; number: string; billingType: string; kind: string; stage: string; acvCents: number; startAt: string | null; endAt: string | null; consumption: null | { credited: number; consumed: number; share: number | null; elapsedShare: number | null; exhaustAt: string | null; lastConsumptionAt: string | null } }[];
   relationshipMonths: number | null;
   classKey: string | null;
@@ -90,6 +92,12 @@ export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: str
   const prev = await db.execute<{ contact_id: string; kind: string; level: string | null; score: number | null }>(sql`select distinct on (contact_id, kind) contact_id, kind, level, score from cs_assessments where tenant_id = ${tenantId} and kind in ('tier','saude','criticidade') order by contact_id, kind, created_at desc`);
   const prevOf = (cid: string, kind: string) => prev.rows.find((r) => r.contact_id === cid && r.kind === kind);
 
+  // oportunidades ganhas (fora do funil Sucesso do Cliente, que duplica), para o valor consolidado da conta
+  const won = await db.execute<{ id: string; contact_id: string; value_cents: string | null; plan_id: string | null; items: number; sale_kind: string | null; consumes: boolean }>(sql`
+    select o.id, o.contact_id, o.value_cents, o.plan_id, (select count(*)::int from opportunity_items i where i.opportunity_id = o.id) items, o.sale_kind,
+           exists (select 1 from contract_ledger l where l.opportunity_id = o.id and l.kind = 'consumo') consumes
+      from opportunities o join pipelines p on p.id = o.pipeline_id
+     where o.tenant_id = ${tenantId} and o.deleted_at is null and o.stage = 'ganha' and p.key <> 'sucesso_cliente'`);
   const acvOfContract = (x: (typeof allContracts)[number]) => contractAcv({ monthlyCents: x.v.monthlyCents, totalCents: x.v.totalCents, startAt: x.v.startAt, endAt: x.v.endAt });
   const activeOf = (cid: string) => allContracts.filter((x) => x.c.contactId === cid && x.c.stage !== 'encerramento' && (!x.v.endAt || x.v.endAt >= today));
   let n = 0;
@@ -101,9 +109,14 @@ export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: str
     const group = new Set([cid, ...links.filter((l) => l.contactId === cid || l.otherContactId === cid).flatMap((l) => [l.contactId, l.otherContactId]), ...(root ? contacts.filter((c) => rootOf(c.document) === root).map((c) => c.id) : [])]);
     const own = activeOf(cid);
     const groupContracts = new Map(allContracts.filter((x) => group.has(x.c.contactId) && x.c.stage !== 'encerramento' && (!x.v.endAt || x.v.endAt >= today)).map((x) => [x.c.id, x]));
-    const acv = own.reduce((t, x) => t + acvOfContract(x), 0);
-    const groupAcv = [...groupContracts.values()].reduce((t, x) => t + acvOfContract(x), 0);
-    const tier = groupContracts.size ? tierOf(groupAcv, cfg.tierBands) : null;
+    // valor anual consolidado: contratos vigentes (recorrente ×12, medição, frequente) + ganhas sem contrato; consumo de medição não soma
+    const toC = (x: (typeof allContracts)[number]) => ({ id: x.c.id, opportunityId: x.c.opportunityId, billingType: x.c.billingType, acvCents: acvOfContract(x) });
+    const toO = (o: (typeof won.rows)[number]) => ({ id: o.id, valueCents: o.value_cents === null ? null : Number(o.value_cents), monthly: !o.items && !!o.plan_id, saleKind: o.sale_kind, consumesContract: o.consumes });
+    const ownAcv = accountAcv(own.map(toC), won.rows.filter((o) => o.contact_id === cid).map(toO));
+    const groupCalc = accountAcv([...groupContracts.values()].map(toC), won.rows.filter((o) => group.has(o.contact_id)).map(toO));
+    const acv = ownAcv.acvCents;
+    const groupAcv = groupCalc.acvCents;
+    const tier = groupAcv > 0 ? tierOf(groupAcv, cfg.tierBands) : null;
     const contractsView = allContracts.filter((x) => x.c.contactId === cid).map((x) => {
       let consumption: Snapshot['contracts'][number]['consumption'] = null;
       if (x.c.billingType !== 'recorrente') {
@@ -171,7 +184,7 @@ export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: str
     const csmId = a?.csmId ?? own.find((x) => x.c.csmId)?.c.csmId ?? null;
     const snap: Snapshot = {
       computedAt: new Date().toISOString(), ruleVersion: version,
-      acvCents: acv, groupAcvCents: groupAcv, groupContacts: group.size, tier, contracts: contractsView, relationshipMonths: months, classKey: classOf.get(cid) ?? null,
+      acvCents: acv, groupAcvCents: groupAcv, acvParts: groupCalc.parts, acvExcluded: groupCalc.excluded, groupContacts: group.size, tier, contracts: contractsView, relationshipMonths: months, classKey: classOf.get(cid) ?? null,
       ipc: { total: ipc.total, partial: ipc.partial, pending: ipc.pending, levels, auto, assessedAt, reviewDue: !assessedAt || daysBetween(assessedAt, today) > cfg.ipcRevisionDays },
       satisfaction: { last: satLast, previous: satPrev, lastAt: sv[0]?.respondedAt ?? null, kind: sv[0]?.kind ?? null },
       financial: { available: false, reason: 'Aguardando integração de faturas do IXC/ERP' },

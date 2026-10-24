@@ -9,6 +9,7 @@ import { fmtPct } from '../../lib/format';
 export type Coverage = { planned: number; onTime: number; extra: number; simple: number | null; weighted: number | null };
 export type Snapshot = {
   computedAt: string; ruleVersion: number; acvCents: number; groupAcvCents: number; groupContacts: number; tier: Tier | null;
+  acvParts?: { recorrente: number; medicao: number; frequente: number; semContrato: number }; acvExcluded?: { count: number; cents: number };
   contracts: { id: string; number: string; billingType: string; kind: string; stage: string; acvCents: number; startAt: string | null; endAt: string | null; consumption: null | { credited: number; consumed: number; share: number | null; elapsedShare: number | null; exhaustAt: string | null; lastConsumptionAt: string | null } }[];
   relationshipMonths: number | null; classKey: string | null;
   ipc: { total: number | null; partial: number; pending: string[]; levels: Record<string, 'baixo' | 'medio' | 'alto' | null>; auto: string[]; assessedAt: string | null; reviewDue: boolean };

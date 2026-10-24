@@ -159,6 +159,29 @@ export function contractAcv(c: { monthlyCents: number | null; totalCents: number
   const days = c.startAt && c.endAt ? Math.max(1, (Date.parse(c.endAt) - Date.parse(c.startAt)) / 86_400_000) : 365;
   return Math.round(c.totalCents * Math.min(1, 365 / days));
 }
+/**
+ * Valor anual consolidado da conta, base do Tier: tudo que é recorrente (mensal × 12) + medições + frequentes.
+ * Contrato vigente vale pelo contrato; oportunidade ganha ainda sem contrato vale pelo próprio valor.
+ * Oportunidade que consome contrato por medição NÃO soma: o valor previsto já está no contrato (acompanha-se pelo consumo).
+ */
+export type AcvContract = { id: string; opportunityId: string | null; billingType: string; acvCents: number };
+export type AcvOpportunity = { id: string; valueCents: number | null; monthly: boolean; saleKind: string | null; consumesContract: boolean };
+export function accountAcv(contracts: AcvContract[], wonOpps: AcvOpportunity[]) {
+  const parts = { recorrente: 0, medicao: 0, frequente: 0, semContrato: 0 };
+  for (const c of contracts) {
+    const k = c.billingType === 'medicao' ? 'medicao' : c.billingType === 'frequente' ? 'frequente' : 'recorrente';
+    parts[k] += c.acvCents;
+  }
+  const withContract = new Set(contracts.map((c) => c.opportunityId).filter(Boolean));
+  let excludedCents = 0, excludedCount = 0;
+  for (const o of wonOpps) {
+    if (withContract.has(o.id) || !o.valueCents) continue;
+    if (o.consumesContract || o.saleKind === 'consumo_contrato') { excludedCents += o.valueCents; excludedCount++; continue; }
+    parts.semContrato += o.monthly ? o.valueCents * 12 : o.valueCents;
+  }
+  return { acvCents: parts.recorrente + parts.medicao + parts.frequente + parts.semContrato, parts, excluded: { count: excludedCount, cents: excludedCents } };
+}
+
 export function tierOf(acvCents: number, b: CsConfig['tierBands']): Tier {
   return acvCents >= b.largeFromCents ? 'large' : acvCents >= b.middleFromCents ? 'middle' : 'small';
 }
