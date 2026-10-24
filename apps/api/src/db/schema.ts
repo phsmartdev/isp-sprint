@@ -3766,6 +3766,8 @@ export const mailThreads = pgTable(
     contactId: uuid('contact_id').references(() => contacts.id),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     contractId: uuid('contract_id'),
+    /** Pasta da caixa (null = Entrada). */
+    folderId: uuid('folder_id'),
     linkSource: text('link_source'),
     linkAmbiguous: boolean('link_ambiguous').notNull().default(false),
     unread: boolean('unread').notNull().default(true),
@@ -3784,6 +3786,19 @@ export const mailThreads = pgTable(
 );
 
 /** Cada mensagem sincronizada (ou enviada pelo CRM). Imutável. */
+/** Pastas da caixa, com regra de armazenamento (as conversas novas que batem caem nela). */
+export const mailFolders = pgTable('mail_folders', {
+  id: id(),
+  tenantId: tenantId(),
+  mailboxId: uuid('mailbox_id').notNull().references(() => mailboxes.id),
+  name: text('name').notNull(),
+  position: integer('position').notNull().default(0),
+  def: jsonb('def').notNull().default(sql`'{"match":"todas","conditions":[]}'::jsonb`),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ boxIdx: index('mail_folders_box_idx').on(t.mailboxId, t.position) }));
+
 export const mailMessages = pgTable(
   'mail_messages',
   {

@@ -12,8 +12,8 @@
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
-  autoLinkContact, domainAllowed, evaluateRules, externalParticipants, parseAddresses, pickAssignee, statusAfterMessage,
-  type MailRule, type MailRuleDef, type RoutingMode, type ThreadStatus,
+  autoLinkContact, domainAllowed, evaluateRules, folderFor, externalParticipants, parseAddresses, pickAssignee, statusAfterMessage,
+  type FolderDef, type MailFolder, type MailRule, type MailRuleDef, type RoutingMode, type ThreadStatus,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -106,13 +106,15 @@ export function parseGmailMessage(m: GMessage) {
 
 // ------------------------------------------------------------------ entrada de mensagem
 
-type Ctx = { domains: string[]; rules: MailRule[]; queues: Map<string, typeof s.mailQueues.$inferSelect> };
+type Ctx = { domains: string[]; rules: MailRule[]; queues: Map<string, typeof s.mailQueues.$inferSelect>; folders: MailFolder[] };
 
 async function loadCtx(db: DbOrTx, tenantId: string): Promise<Ctx> {
   const [st] = await db.select().from(s.mailSettings).where(eq(s.mailSettings.tenantId, tenantId)).limit(1);
   const rules = await db.select().from(s.mailRules).where(eq(s.mailRules.tenantId, tenantId));
   const queues = await db.select().from(s.mailQueues).where(and(eq(s.mailQueues.tenantId, tenantId), eq(s.mailQueues.active, true)));
+  const folders = await db.select().from(s.mailFolders).where(and(eq(s.mailFolders.tenantId, tenantId), eq(s.mailFolders.active, true)));
   return {
+    folders: folders.map((f) => ({ id: f.id, mailboxId: f.mailboxId, position: f.position, active: f.active, def: f.def as FolderDef })),
     domains: st?.allowedDomains ?? [],
     rules: rules.map((r) => ({ id: r.id, name: r.name, position: r.position, active: r.active, mailboxId: r.mailboxId, def: r.def as MailRuleDef })),
     queues: new Map(queues.map((q) => [q.id, q])),
@@ -193,9 +195,11 @@ export async function ingestMessage(db: DbOrTx, box: Box, ctx: Ctx, m: GMessage,
     if (next !== t.status) { patch.status = next; events.push(ev(tenantId, t.id, 'situacao', { from: t.status, to: next, reason: direction === 'entrada' ? 'mensagem do cliente' : 'resposta enviada' })); }
   }
 
-  // primeira mensagem de uma conversa nova: regras, conta e fila
+  // primeira mensagem de uma conversa nova: pasta, regras, conta e fila
   if (isNewThread) {
     events.push(ev(tenantId, t.id, 'recebida', { direction }));
+    const folder = folderFor(ctx.folders, { from: fromEmail, to: p.to, subject: p.subject, text: p.text, mailboxId: box.id });
+    if (folder) { patch.folderId = folder.id; events.push(ev(tenantId, t.id, 'pasta', { folderId: folder.id, automatic: true })); }
     const ext = externalParticipants(participants, ctx.domains.length ? ctx.domains : [box.address.split('@')[1]!]);
     if (!t.contactId) {
       const link = autoLinkContact(await matchContacts(db, tenantId, ext));

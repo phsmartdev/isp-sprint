@@ -449,6 +449,13 @@
       "when": 1792811664328,
       "tag": "0063_gmail_senha_app",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1792813684485,
+      "tag": "0064_email_pastas",
+      "breakpoints": true
     }
   ]
 }
