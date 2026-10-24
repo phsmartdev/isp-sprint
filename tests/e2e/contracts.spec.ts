@@ -173,3 +173,35 @@ test('arte grande do modelo é reduzida no navegador e cabe no limite de envio d
   expect(sizes[0]).toBeLessThan(4_400_000);
   await expect(page.getByText(/Página 1|1 página|página 1/i).first()).toBeVisible({ timeout: 15_000 });
 });
+
+test('consumo e empenho: ritmo contra o tempo, esgotamento previsto e empenho com saldo', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  const api = page.request;
+  const today = new Date().toISOString().slice(0, 10);
+  const shift = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const lk = await (await api.get('/api/v1/meta/lookups')).json();
+  const o = await (await api.post('/api/v1/opportunities', { data: { newContact: { name: `Prefeitura E2E Consumo ${Date.now().toString(36)}`, segment: 'governamental' }, planId: lk.plans[0].id } })).json();
+  const cur = await (await api.get(`/api/v1/opportunities/${o.id}`)).json();
+  expect((await api.post(`/api/v1/opportunities/${o.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: cur.rowVersion } })).ok()).toBe(true);
+  const me = await (await api.get('/api/v1/me')).json();
+  const created = await api.post('/api/v1/contracts', { data: { opportunityId: o.id, billingType: 'medicao', kind: 'publico', legalRegime: 'lei_14133', initialBalanceCents: 1_200_000, commercialOwnerId: me.user.id, version: { number: `E2E-${Date.now().toString(36)}`, object: 'Medição pública', signedAt: shift(-185), startAt: shift(-180), termMonths: 12, monthlyCents: 0, items: [], publicTerms: { agency: 'Prefeitura E2E', processNumber: '1/2026', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } } });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).id;
+  expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
+  expect((await api.post(`/api/v1/contracts/${id}/ledger`, { data: { kind: 'consumo', amountCents: 900_000, occurredOn: today, description: 'Medição do mês' } })).status()).toBe(201);
+
+  await page.goto(`/contracts/${id}`);
+  await page.getByRole('tab', { name: 'Consumo e empenho' }).click();
+  const ind = page.getByRole('region', { name: 'Indicador de consumo' });
+  await expect(ind).toContainText('75%');
+  await expect(ind.getByRole('alert')).toContainText('antes do fim da vigência');
+  const emp = page.getByRole('region', { name: 'Empenhos' });
+  await emp.getByRole('button', { name: 'Registrar empenho' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Registrar empenho' });
+  await dlg.getByLabel('Número da nota de empenho').fill('2026NE000777');
+  await dlg.getByLabel('Valor (R$)').fill('10.000,00');
+  await dlg.getByRole('button', { name: 'Registrar' }).click();
+  await expect(emp).toContainText('2026NE000777');
+  await expect(emp).toContainText('R$ 10.000,00 de R$ 10.000,00');
+});

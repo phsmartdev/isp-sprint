@@ -463,6 +463,13 @@
       "when": 1792814193362,
       "tag": "0065_assinatura_email",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1792817326327,
+      "tag": "0066_empenhos",
+      "breakpoints": true
     }
   ]
 }

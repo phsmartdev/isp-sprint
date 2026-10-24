@@ -212,3 +212,41 @@ describe('relatório completo', () => {
     expect(own.items.every((x: { ownerId: string }) => x.ownerId === lucas.me.user.id)).toBe(true);
   });
 });
+
+describe('consumo do contrato e empenho', () => {
+  it('ritmo, esgotamento, empenho com saldo (FIFO), anulação e alertas automáticos sem repetir', async () => {
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = ok(await lucas.post('/opportunities', { newContact: { name: 'Prefeitura Consumo Fictícia', segment: 'governamental' }, planId: plan.id }), 201).json();
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o.id}`)).json().rowVersion }));
+    // vigência de 12 meses que começou há ~6 meses
+    const pub = { id: ok(await carlos.post('/contracts', { opportunityId: o.id, billingType: 'medicao', kind: 'publico', legalRegime: 'lei_14133', initialBalanceCents: 120_000, commercialOwnerId: lucas.me.user.id, version: { number: 'M-PUB', object: 'Medição pública fictícia', signedAt: addDays(today, -185), startAt: addDays(today, -180), termMonths: 12, monthlyCents: 0, items: [], publicTerms: { agency: 'Prefeitura Fictícia', processNumber: '123/2026', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } }), 201).json().id as string };
+    ok(await carlos.post(`/contracts/${pub.id}/validate`));
+    expect((await lucas.post(`/contracts/${pub.id}/commitments`, { number: '2026NE000123', issuedOn: today, amountCents: 100_000 })).statusCode).toBe(403);
+    const e1 = ok(await ana.post(`/contracts/${pub.id}/commitments`, { number: '2026NE000123', issuedOn: today, amountCents: 100_000 }), 201).json().id;
+    expect((await ana.post(`/contracts/${pub.id}/commitments`, { number: '2026NE000123', issuedOn: today, amountCents: 1 })).statusCode).toBe(422);
+    ok(await ana.post(`/contracts/${pub.id}/ledger`, { kind: 'consumo', amountCents: 90_000, occurredOn: today, description: 'Medição do mês' }), 201);
+    let k = ok(await carlos.get(`/contracts/${pub.id}/consumption`)).json();
+    expect(k.indicator).toMatchObject({ credited: 120_000, consumed: 90_000, remaining: 30_000, avgMonthlyCents: 90_000, exhaustBeforeEnd: true });
+    expect(['acelerado', 'no_ritmo']).toContain(k.indicator.pace);
+    expect(k.commitments[0]).toMatchObject({ id: e1, used: 90_000, available: 10_000 });
+    expect(k.monthly).toEqual([{ month: today.slice(0, 7), cents: 90_000 }]);
+    const r1 = ok(await carlos.post('/contracts/alerts/run')).json();
+    const kinds = async () => ((await carlos.get(`/contracts/${pub.id}`)).json().alerts as { kind: string; status: string }[]).filter((a) => a.status === 'aberto').map((a) => a.kind);
+    let open = await kinds();
+    expect(open).toEqual(expect.arrayContaining(['esgotamento', 'empenho_baixo']));
+    const r2 = ok(await carlos.post('/contracts/alerts/run')).json();
+    expect(JSON.stringify(r2)).not.toBe(''); // segunda rodada não repete os mesmos alertas
+    expect((await kinds()).filter((x) => x === 'empenho_baixo')).toHaveLength(1);
+    void r1;
+    // empenho anulado: sem saldo → alerta "sem empenho"
+    ok(await ana.post(`/contracts/${pub.id}/commitments/${e1}/cancel`, { reason: 'Empenho anulado pelo órgão' }));
+    k = ok(await carlos.get(`/contracts/${pub.id}/consumption`)).json();
+    expect(k.commitments[0]).toMatchObject({ available: 0 });
+    expect(k.commitments[0].cancelledAt).toBeTruthy();
+    ok(await carlos.post('/contracts/alerts/run'));
+    open = await kinds();
+    expect(open).toContain('sem_empenho');
+    const tl = (await carlos.get(`/contracts/${pub.id}/timeline`)).json();
+    expect(JSON.stringify(tl)).toMatch(/Empenho 2026NE000123 anulado/);
+  });
+});

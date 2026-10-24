@@ -15,11 +15,12 @@ import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { ContractForm, formFrom, payloadOf, type FormState } from '../../features/contracts/ContractForm';
 import { ProcessPanel } from '../../features/contracts/ProcessPanel';
 import { LedgerPanel } from '../../features/contracts/LedgerPanel';
+import { ConsumptionPanel } from '../../features/contracts/ConsumptionPanel';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'consumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -152,6 +153,7 @@ export function ContractDetailPage() {
         <div className="px-5 pt-2">
           <Tabs<Tab> label="Ficha do contrato" value={tab} onChange={setTab} tabs={[
             { key: 'resumo', label: 'Resumo' },
+            ...(c.billingType === 'medicao' || c.kind === 'publico' ? [{ key: 'consumo' as Tab, label: c.billingType === 'medicao' ? (c.kind === 'publico' ? 'Consumo e empenho' : 'Consumo') : 'Empenhos' }] : []),
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
             { key: 'documentos', label: 'Documentos' },
@@ -202,6 +204,7 @@ export function ContractDetailPage() {
               {!c.processes.length ? <EmptyState title="Nenhum processo" description={c.validatedAt ? 'Renovação, reajuste e encerramento abrem pelos alertas automáticos ou pelo botão Mover no funil.' : 'A implantação abre na validação do cadastro.'} /> : c.processes.map((p) => <ProcessPanel key={p.id} c={c} p={p} onUpload={(category, processId) => setUpload({ category, processId })} />)}
             </div>
           )}
+          {tab === 'consumo' && <ConsumptionPanel c={c} />}
           {tab === 'extrato' && <LedgerPanel c={c} />}
           {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} onGenerate={() => setGenerate(true)} onSign={setSign} />}
           {tab === 'versoes' && <VersionsPanel c={c} />}

@@ -6,8 +6,10 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { ALERT_LABELS, addDays, daysBetween, dueAlerts, fillSubject, type AlertKind, type ContractStage, type DueAlert } from '@isp/domain';
 import type { Config } from '../config';
+import { brl as brlOf } from './email';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { consumptionOf } from './contractLedger';
 import { addEvent, contractSettingsOf, contractSummary, createTask, mailTo, openProcess, sectorOwners, setStage, userById, type ContractRow } from './contracts';
 
 type Settings = Awaited<ReturnType<typeof contractSettingsOf>>;
@@ -22,6 +24,7 @@ async function inputFor(db: DbOrTx, c: ContractRow, today: string) {
   const ren = procs.find((p) => p.kind === 'renovacao');
   const asked = ren && (ren.steps.solicitar_aditivo ?? ren.steps.formalizacao);
   const signaturesOpen = ren && asked && (!ren.steps.assinatura_diretoria || !ren.steps.assinatura_cliente);
+  const cons = c.billingType === 'medicao' || c.kind === 'publico' ? await consumptionOf(db, c, { startAt: v!.startAt, endAt: v!.endAt }, today) : null;
   return {
     v: v!,
     input: {
@@ -38,7 +41,11 @@ async function inputFor(db: DbOrTx, c: ContractRow, today: string) {
       hasSignedContractDoc: !!doc || !!impl[0]?.steps.documento_assinado,
       provisioningDone: !impl[0] || !!impl[0].steps.provisionamento,
       openSignatureSince: signaturesOpen ? (asked as { doneAt: string }).doneAt : null,
+      consumption: cons?.indicator ?? null,
+      isPublic: c.kind === 'publico',
+      commitments: cons?.commitments ? cons.commitments.filter((x) => !x.cancelledAt).map((x) => ({ id: x.id, number: x.number, share: x.share, available: x.available })) : null,
     },
+    cons,
   };
 }
 
@@ -133,6 +140,37 @@ async function act(db: DbOrTx, config: Config, c: ContractRow, a: DueAlert, cfg:
       const fin = await sectorOwners(db, c.tenantId, ['financeiro'], [c.commercialOwnerId]);
       await taskFor(fin, `Provisionamento de faturamento pendente: ${client}`, sum.text, today, 'alta');
       detail = 'Provisionamento ainda não confirmado pelo Financeiro.';
+      break;
+    }
+    case 'consumo_acelerado':
+    case 'consumo_lento':
+    case 'saldo_baixo':
+    case 'esgotamento': {
+      const cons = await consumptionOf(db, c, { startAt: sum.v.startAt, endAt: sum.v.endAt }, today);
+      const k = cons.indicator;
+      const pct = (x: number | null) => (x === null ? '—' : `${Math.round(x * 100)}%`);
+      const facts = k ? `Consumido ${pct(k.share)} do saldo com ${pct(k.elapsedShare)} da vigência decorrida. Saldo restante: ${brlOf(k.remaining)}. Média mensal: ${k.avgMonthlyCents ? brlOf(k.avgMonthlyCents) : '—'}.${k.exhaustAt ? ` Projeção de esgotamento: ${k.exhaustAt}.` : ''}${k.unusedAtEndCents ? ` Sobra prevista no fim: ${brlOf(k.unusedAtEndCents)}.` : ''}` : '';
+      const what = a.kind === 'consumo_acelerado' ? 'Consumo acima do ritmo da vigência: avalie aditivo de acréscimo ou novo contrato antes do saldo acabar.'
+        : a.kind === 'consumo_lento' ? 'Consumo abaixo do ritmo: o saldo pode sobrar no fim da vigência (receita contratada sem faturamento). Converse com o cliente e o Sucesso do Cliente.'
+        : a.kind === 'saldo_baixo' ? 'Saldo baixo: prepare o aditivo de acréscimo ou a renovação.'
+        : 'Pelo ritmo atual, o saldo acaba antes do fim da vigência.';
+      const people = [ownerUser, csm].filter(Boolean) as { id: string; email: string }[];
+      const ic = await sectorOwners(db, c.tenantId, ['inteligencia_comercial'], [c.commercialOwnerId]);
+      await taskFor([...people, ...ic.filter((p) => !people.some((x) => x.id === p.id))], `${ALERT_LABELS[a.kind as AlertKind]}: contrato ${sum.v.number} – ${client}`, `${what}\n${facts}\n\n${sum.text}`, a.dueAt, a.kind === 'consumo_lento' ? 'media' : 'alta');
+      await mailPeople(people, 'contrato_consumo', `${ALERT_LABELS[a.kind as AlertKind]} – Contrato ${sum.v.number} – ${client}`, `${what}\n${facts}\n\n${sum.text}`);
+      detail = `${what} ${facts}`.slice(0, 900);
+      break;
+    }
+    case 'empenho_baixo':
+    case 'sem_empenho': {
+      const cons = await consumptionOf(db, c, { startAt: sum.v.startAt, endAt: sum.v.endAt }, today);
+      const e = a.kind === 'empenho_baixo' ? cons.commitments?.find((x) => x.id === a.cycleKey) : null;
+      const what = e ? `Empenho ${e.number} com ${Math.round((e.share ?? 0) * 100)}% usado; saldo ${brlOf(e.available)}. Peça reforço ou novo empenho ao órgão antes de faturar além do saldo.`
+        : `Contrato público vigente sem empenho com saldo em ${a.cycleKey}. Sem empenho, o órgão não paga: solicite a nota de empenho.`;
+      const fin = await sectorOwners(db, c.tenantId, ['financeiro', 'inteligencia_comercial'], [c.commercialOwnerId]);
+      await taskFor([...(ownerUser ? [ownerUser] : []), ...fin.filter((p) => p.id !== ownerUser?.id)], `${ALERT_LABELS[a.kind as AlertKind]}: contrato ${sum.v.number} – ${client}`, `${what}\n\n${sum.text}`, a.dueAt, 'alta');
+      if (ownerUser) await mailPeople([ownerUser], 'contrato_empenho', `${ALERT_LABELS[a.kind as AlertKind]} – Contrato ${sum.v.number} – ${client}`, `${what}\n\n${sum.text}`);
+      detail = what;
       break;
     }
     case 'implantacao': {
