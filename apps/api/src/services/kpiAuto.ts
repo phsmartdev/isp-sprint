@@ -9,7 +9,7 @@
  * Ativação de Contas-Alvo: contas-alvo em andamento com pelo menos uma interação qualificada no período.
  */
 import { sql } from 'drizzle-orm';
-import { addDays, addMonths, type IndicatorDef } from '@isp/domain';
+import { activationConfig, activationState, addDays, addMonths, type AbmTierKey, type ActivationConfig, type ActivationSignal, type IndicatorDef, type SignalHit } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 
 export type Auto = { months: Map<string, number | null>; quarters: Map<number, number | null>; annual?: number | null };
@@ -20,13 +20,6 @@ const BY_KEY: Record<string, KpiAutoKind> = {
   kpi_health_score: 'health', kpi_lead_time_viabilidade: 'lead_time', kpi_ativacao_de_contas_alvo: 'abm',
 };
 export const autoKindOf = (key: string, def: IndicatorDef) => (def.sheet as { auto?: KpiAutoKind } | undefined)?.auto ?? BY_KEY[key] ?? null;
-
-/** Interações que contam como engajamento da conta-alvo (podem ser desligadas na ficha). */
-export const ABM_INTERACTIONS = ['reuniao_visita', 'resposta_email', 'passo_play', 'play_sucesso'] as const;
-export const ABM_INTERACTION_LABELS: Record<(typeof ABM_INTERACTIONS)[number], string> = {
-  reuniao_visita: 'Reunião ou visita realizada com a conta', resposta_email: 'Resposta da conta (e-mail recebido)',
-  passo_play: 'Passo de Play concluído com contato com o cliente', play_sucesso: 'Play encerrado com sucesso',
-};
 
 const r1 = (v: number | null) => (v === null || !Number.isFinite(v) ? null : Math.round(v * 10) / 10);
 const pct = (a: number, b: number) => (b ? r1((a / b) * 100) : null);
@@ -113,41 +106,67 @@ async function leadTime(db: DbOrTx, t: string, year: number, today: string, cate
   return { months, quarters, annual: upToMonth ? await avg(`${year}-01-01`, ytdEnd) : null };
 }
 
-async function abmActivation(db: DbOrTx, t: string, year: number, today: string, kinds: string[]): Promise<Auto> {
-  const { upToMonth, upToQ, ytdEnd } = frame(year, today);
-  const on = (k: string) => kinds.includes(k);
-  const rate = async (from: string, to: string) => {
-    const base = await db.execute<{ contact_id: string }>(sql`
-      select contact_id from abm_accounts where tenant_id = ${t} and status in ('selecionada','em_planejamento','ativa','em_acompanhamento') and created_at::date <= ${to}`);
-    if (!base.rows.length) return null;
-    const ids = base.rows.map((r) => r.contact_id);
-    const parts = [
-      on('reuniao_visita') ? sql`select contact_id from activities where tenant_id = ${t} and deleted_at is null and type in ('reuniao','visita') and completed_at::date between ${from} and ${to}` : null,
-      on('resposta_email') ? sql`select th.contact_id from mail_messages m join mail_threads th on th.id = m.thread_id where th.tenant_id = ${t} and m.direction = 'entrada' and m.sent_at::date between ${from} and ${to}` : null,
-      on('passo_play') ? sql`select a.contact_id from abm_play_run_steps st join activities a on a.id = st.activity_id where st.tenant_id = ${t} and a.deleted_at is null and a.type in ('ligacao','reuniao','visita','whatsapp','email') and a.completed_at::date between ${from} and ${to}` : null,
-      on('play_sucesso') ? sql`select contact_id from abm_play_runs where tenant_id = ${t} and success_achieved = true and closed_at::date between ${from} and ${to}` : null,
-    ].filter((x): x is NonNullable<typeof x> => !!x);
-    if (!parts.length) return null;
-    const union = sql.join(parts, sql` union `);
-    const r = await db.execute<{ n: number }>(sql`select count(distinct x.contact_id)::int n from (${union}) x where x.contact_id in ${ids}`);
-    return pct(r.rows[0]!.n, ids.length);
-  };
+/** Sinais de mão dupla de cada conta-alvo (vindos da conta), com a pessoa quando se sabe quem foi. */
+export async function activationHits(db: DbOrTx, t: string, from: string, to: string, cfg: ActivationConfig) {
+  const hits = new Map<string, SignalHit[]>();
+  const add = (contact: string, kind: ActivationSignal, on: string, person: string | null) => { const l = hits.get(contact) ?? []; l.push({ kind, on, person }); hits.set(contact, l); };
+  const day = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  const r1q = await db.execute<{ contact_id: string; d: string; p: string | null }>(sql`select contact_id, completed_at::date d, stakeholder_ids[1]::text p from activities where tenant_id = ${t} and deleted_at is null and contact_id is not null and type in ('reuniao','visita') and completed_at::date between ${from} and ${to}`);
+  for (const r of r1q.rows) add(r.contact_id, 'reuniao_visita', day(r.d), r.p);
+  const r2 = await db.execute<{ contact_id: string; d: string }>(sql`select contact_id, created_at::date d from opportunities where tenant_id = ${t} and deleted_at is null and origin_mail_thread_id is not null and created_at::date between ${from} and ${to}`);
+  for (const r of r2.rows) add(r.contact_id, 'pedido_iniciativa', day(r.d), null);
+  const r3 = await db.execute<{ contact_id: string; d: string }>(sql`select contact_id, closed_at::date d from abm_play_runs where tenant_id = ${t} and success_achieved = true and closed_at::date between ${from} and ${to}`);
+  for (const r of r3.rows) add(r.contact_id, 'play_sucesso', day(r.d), null);
+  const r4 = await db.execute<{ contact_id: string; d: string; p: string }>(sql`select th.contact_id, m.sent_at::date d, lower(m.from_addr) p from mail_messages m join mail_threads th on th.id = m.thread_id where th.tenant_id = ${t} and th.contact_id is not null and m.direction = 'entrada' and m.sent_at::date between ${from} and ${to}`);
+  for (const r of r4.rows) add(r.contact_id, 'resposta_mensagem', day(r.d), r.p);
+  const r5 = await db.execute<{ contact_id: string; d: string; p: string | null }>(sql`select a.contact_id, a.completed_at::date d, a.stakeholder_ids[1]::text p from abm_play_run_steps st join activities a on a.id = st.activity_id where st.tenant_id = ${t} and a.deleted_at is null and a.contact_id is not null and a.type in ('ligacao','reuniao','visita','whatsapp','email') and a.completed_at::date between ${from} and ${to}`);
+  for (const r of r5.rows) add(r.contact_id, 'passo_play', day(r.d), r.p);
+  if (cfg.survey.surveyId) {
+    const r6 = await db.execute<{ contact_id: string; d: string; p: string | null; answers: Record<string, unknown> }>(sql`select contact_id, created_at::date d, stakeholder_id::text p, answers from survey_responses where tenant_id = ${t} and survey_id = ${cfg.survey.surveyId} and created_at::date between ${from} and ${to}`);
+    for (const r of r6.rows) {
+      add(r.contact_id, 'pesquisa_resposta', day(r.d), r.p);
+      const rel = cfg.survey.relevanceKey ? Number(r.answers[cfg.survey.relevanceKey]) : NaN;
+      const rec = cfg.survey.recommendKey ? r.answers[cfg.survey.recommendKey] : undefined;
+      if ((Number.isFinite(rel) && rel >= cfg.survey.minScore) || rec === true || rec === 'sim') add(r.contact_id, 'pesquisa_reconhecimento', day(r.d), r.p);
+    }
+  }
+  return hits;
+}
+
+/** Contas-alvo em andamento (com o tier) e o estado de ativação de cada uma numa data. */
+export async function activationAccounts(db: DbOrTx, t: string, at: string, cfg: ActivationConfig, hits?: Map<string, SignalHit[]>) {
+  const base = await db.execute<{ id: string; contact_id: string; tier: string; name: string; owner: string | null }>(sql`
+    select a.id, a.contact_id, a.tier, c.name, u.name owner from abm_accounts a join contacts c on c.id = a.contact_id left join users u on u.id = a.owner_id
+     where a.tenant_id = ${t} and a.status in ('selecionada','em_planejamento','ativa','em_acompanhamento') and a.created_at::date <= ${at}`);
+  const maxWin = Math.max(...Object.values(cfg.tiers).map((r) => r.windowDays)) * 2;
+  const h = hits ?? await activationHits(db, t, addDays(at, -maxWin), at, cfg);
+  return base.rows.map((a) => ({ abmId: a.id, contactId: a.contact_id, name: a.name, owner: a.owner, tier: a.tier as AbmTierKey, ...activationState(h.get(a.contact_id) ?? [], cfg, a.tier as AbmTierKey, at) }));
+}
+
+async function abmActivation(db: DbOrTx, t: string, year: number, today: string, cfg: ActivationConfig): Promise<Auto> {
+  const { upToMonth, upToQ } = frame(year, today);
+  if (!upToMonth) return { months: new Map(), quarters: new Map() };
+  const maxWin = Math.max(...Object.values(cfg.tiers).map((r) => r.windowDays)) * 2;
+  const end = upToMonth === Number(today.slice(5, 7)) && Number(today.slice(0, 4)) === year ? today : mEnd(year, upToMonth);
+  const hits = await activationHits(db, t, addDays(`${year}-01-01`, -maxWin), end, cfg);
+  const rate = async (at: string) => { const l = await activationAccounts(db, t, at, cfg, hits); return l.length ? pct(l.filter((x) => x.state === 'ativada').length, l.length) : null; };
+  const cap = (d: string) => (d > today ? today : d);
   const months = new Map<string, number | null>();
-  for (let m = 1; m <= 12; m++) months.set(`${year}-${String(m).padStart(2, '0')}`, m <= upToMonth ? await rate(mStart(year, m), mEnd(year, m)) : null);
+  for (let m = 1; m <= 12; m++) months.set(`${year}-${String(m).padStart(2, '0')}`, m <= upToMonth ? await rate(cap(mEnd(year, m))) : null);
   const quarters = new Map<number, number | null>();
-  for (let q = 1; q <= 4; q++) quarters.set(q, q <= upToQ ? await rate(qStart(year, q), qEnd(year, q)) : null);
-  return { months, quarters, annual: upToMonth ? await rate(`${year}-01-01`, ytdEnd) : null };
+  for (let q = 1; q <= 4; q++) quarters.set(q, q <= upToQ ? await rate(cap(qEnd(year, q))) : null);
+  return { months, quarters };
 }
 
 /** Valores calculados do indicador (null quando ele não é calculado do CRM). */
 export async function kpiAuto(db: DbOrTx, tenantId: string, key: string, def: IndicatorDef, year: number, today: string): Promise<{ kind: KpiAutoKind; auto: Auto } | null> {
   const kind = autoKindOf(key, def);
   if (!kind || kind === 'booking') return null;
-  const sh = (def.sheet ?? {}) as { taskCategories?: string[]; abmInteractions?: string[] };
+  const sh = (def.sheet ?? {}) as { taskCategories?: string[]; activation?: Partial<ActivationConfig> };
   const auto = kind === 'win_rate' ? await winRate(db, tenantId, year, today)
     : kind === 'conversao' ? await conversion(db, tenantId, year, today)
     : kind === 'health' ? await health(db, tenantId, year, today)
     : kind === 'lead_time' ? await leadTime(db, tenantId, year, today, sh.taskCategories ?? [])
-    : await abmActivation(db, tenantId, year, today, sh.abmInteractions ?? [...ABM_INTERACTIONS]);
+    : await abmActivation(db, tenantId, year, today, activationConfig(sh.activation));
   return { kind, auto };
 }

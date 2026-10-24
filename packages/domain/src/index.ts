@@ -28,3 +28,4 @@ export * from './items';
 export * from './bids';
 export * from './eml';
 export * from './revenue';
+export * from './activation';

@@ -454,8 +454,8 @@ export type KpiSheet = {
   auto?: 'booking' | 'win_rate' | 'conversao' | 'health' | 'lead_time' | 'abm' | null;
   /** Lead Time: categorias de tarefa que contam (ex.: viabilidade de engenharia e de infraestrutura) */
   taskCategories?: string[];
-  /** Ativação de contas-alvo: interações que contam como engajamento */
-  abmInteractions?: string[];
+  /** Ativação de contas-alvo: régua de sinais, pontos e janelas por tier (sugestão ajustável) */
+  activation?: Partial<import('./activation').ActivationConfig>;
 };
 export const KPI_STATUS = ['atingido', 'atencao', 'abaixo', 'sem_dado'] as const;
 export type KpiStatus = (typeof KPI_STATUS)[number];

@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { SEGMENT_LABELS, contractAcv, aggregate, kpiAttainment, kpiStatus, kpiTarget, parseKpiForm, type IndicatorDef, type KpiStatus } from '@isp/domain';
+import { activationConfig, validateActivation, type ActivationConfig, SEGMENT_LABELS, contractAcv, aggregate, kpiAttainment, kpiStatus, kpiTarget, parseKpiForm, type IndicatorDef, type KpiStatus } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -16,7 +16,7 @@ import { todayLocal } from '../services/projects';
 import { excelDate, readXlsx } from '../services/xlsx';
 import { clearKpiDemo, loadKpiDemo } from '../services/kpiDemo';
 import { revenueReport } from '../services/revenue';
-import { kpiAuto } from '../services/kpiAuto';
+import { activationAccounts, autoKindOf, kpiAuto } from '../services/kpiAuto';
 import type { AuthContext } from '../http/context';
 
 const canEnter = (auth: AuthContext) => level(auth, 'configuracoes') === 'total' || level(auth, 'inteligencia') === 'total' || auth.sectors.some((x) => x === 'inteligencia_comercial' || x === 'diretoria');
@@ -32,7 +32,7 @@ export const SheetSchema = z.object({
   impact: z.string().max(1000).nullable(), related: z.string().max(500).nullable(), startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(), notes: z.string().max(5000).nullable(),
   quarterTargets: z.array(z.number().nullable()).length(4), minAcceptable: z.number().nullable(), minOfTarget: z.number().min(0).max(1).nullable(), maxDesirable: z.number().nullable(),
   aggregation: z.enum(['media', 'ultimo', 'soma']), featured: z.boolean(), paused: z.boolean(), main: z.boolean().optional(),
-  auto: z.enum(['booking', 'win_rate', 'conversao', 'health', 'lead_time', 'abm']).nullable().optional(), taskCategories: z.array(z.string().trim().min(1).max(60)).max(20).optional(), abmInteractions: z.array(z.enum(['reuniao_visita', 'resposta_email', 'passo_play', 'play_sucesso'])).max(10).optional(),
+  auto: z.enum(['booking', 'win_rate', 'conversao', 'health', 'lead_time', 'abm']).nullable().optional(), taskCategories: z.array(z.string().trim().min(1).max(60)).max(20).optional(), activation: z.record(z.string(), z.unknown()).optional(),
 });
 const KpiDefSchema = z.object({
   name: z.string().trim().min(3).max(120), description: z.string().max(1000).optional(), category: z.string().max(40), calc: z.literal('informado'),
@@ -160,6 +160,59 @@ async function bookingContext(db: Parameters<typeof allIndicators>[0], tenantId:
 }
 
 export const kpiRoutes = [
+  defineRoute({
+    method: 'GET', url: '/intelligence/kpis/:id/calc', summary: 'Como o indicador é calculado do CRM e os parâmetros (com as opções para ajustar)', tag: 'Inteligência', module: 'inteligencia', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const d = await indicatorDef(app.db, auth.tenantId, params.id);
+      if (!d) throw notFound('Indicador não encontrado.');
+      const kind = autoKindOf(d.indicator.key, d.def);
+      const sh = (d.def.sheet ?? {}) as { taskCategories?: string[]; activation?: Partial<ActivationConfig> };
+      const cats = kind === 'lead_time' ? (await app.db.execute<{ category: string; n: number }>(sql`
+        select category, sum(n)::int n from (
+          select category, count(*) n from activities where tenant_id = ${auth.tenantId} and category is not null and category <> '' group by category
+          union all select category, 0 n from task_templates where tenant_id = ${auth.tenantId} and active and category is not null and category <> '') x
+         group by category order by category`)).rows : [];
+      const surveys = kind === 'abm' ? (await app.db.execute<{ id: string; name: string; definition: { questions: { key: string; type: string; text: string }[] } }>(sql`
+        select s.id, s.name, v.definition from surveys s join survey_versions v on v.survey_id = s.id and v.version = s.current_version where s.tenant_id = ${auth.tenantId} and s.active order by s.name`)).rows.map((x) => ({ id: x.id, name: x.name, questions: x.definition.questions.filter((q) => ['escala', 'csat', 'nps', 'sim_nao'].includes(q.type)).map((q) => ({ key: q.key, type: q.type, text: q.text })) })) : [];
+      return { kind, taskCategories: sh.taskCategories ?? [], activation: kind === 'abm' ? activationConfig(sh.activation) : null, options: { categories: cats, surveys }, canEdit: canImport(auth) };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/intelligence/kpis/:id/calc', summary: 'Ajusta os parâmetros do cálculo (gera nova versão da ficha do indicador)', tag: 'Inteligência', module: 'inteligencia', params: IdParams,
+    body: z.object({ taskCategories: z.array(z.string().trim().min(1).max(60)).max(20).optional(), activation: z.record(z.string(), z.unknown()).optional(), note: z.string().trim().max(300).optional() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      if (!canImport(auth)) throw forbidden('Ajustar o cálculo dos indicadores exige visão total em Configurações.');
+      const d = await indicatorDef(app.db, auth.tenantId, params.id);
+      if (!d || !d.def.sheet) throw notFound('Indicador não encontrado.');
+      const sheet = { ...d.def.sheet } as NonNullable<IndicatorDef['sheet']>;
+      if (body.taskCategories) sheet.taskCategories = [...new Set(body.taskCategories)];
+      if (body.activation) {
+        const cfg = activationConfig(body.activation as Partial<ActivationConfig>);
+        const e = validateActivation(cfg);
+        if (e.length) throw unprocessable(e[0]!, e.map((m) => ({ path: 'activation', message: m })));
+        sheet.activation = cfg;
+      }
+      const v = await app.db.transaction(async (tx) => {
+        const [i] = await tx.select().from(s.indicators).where(and(eq(s.indicators.id, params.id), eq(s.indicators.tenantId, auth.tenantId))).for('update').limit(1);
+        const next = i!.currentVersion + 1;
+        await tx.insert(s.indicatorVersions).values({ tenantId: auth.tenantId, indicatorId: i!.id, version: next, def: { ...d.def, sheet }, note: body.note || 'Parâmetros do cálculo ajustados', createdBy: auth.userId });
+        await tx.update(s.indicators).set({ currentVersion: next }).where(eq(s.indicators.id, i!.id));
+        return next;
+      });
+      await audit(app.db, req, { action: 'kpi.calc', entityType: 'indicator', entityId: params.id, metadata: { version: v } });
+      return { version: v };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/intelligence/kpis/activation/accounts', summary: 'Contas-alvo com o estado de ativação hoje (ativada, engajada, esfriando, não engajada), pontos e sinais', tag: 'Inteligência', module: 'inteligencia',
+    handler: async ({ app, auth }) => {
+      const all = await allIndicators(app.db, auth.tenantId);
+      const k = all.find((i) => autoKindOf(i.key, i.def) === 'abm');
+      const cfg = activationConfig((k?.def.sheet as { activation?: Partial<ActivationConfig> } | undefined)?.activation);
+      const list = await activationAccounts(app.db, auth.tenantId, todayLocal(auth), cfg);
+      return { items: list.sort((a, b) => b.points - a.points).map(({ rule: _r, ...x }) => x), config: cfg };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/intelligence/kpis/task-categories', summary: 'Categorias de tarefa em uso (para escolher as que entram no Lead Time de Viabilidade)', tag: 'Inteligência', module: 'inteligencia',
     handler: async ({ app, auth }) => {
