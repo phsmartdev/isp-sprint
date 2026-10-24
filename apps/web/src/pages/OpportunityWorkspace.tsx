@@ -544,7 +544,9 @@ function SavableSection({ id, title, summary, view, editable, startEditing, onSa
 }
 
 /** Etapas do funil acima da negociação: concluídas, atual (com dias) e próximas; clicar move (as exigências da etapa continuam valendo). */
-function StageStepper({ stages, current, daysInStage, disabled, onPick }: { stages: { key: string; name: string; kind?: string }[]; current: string; daysInStage: number; disabled: boolean; onPick: (key: string) => void }) {
+type StageTime = { key: string; days: number; visits: number; current: boolean };
+const fmtDays = (d: number) => (d < 1 ? 'menos de 1 dia' : `${Math.round(d)} dia${Math.round(d) === 1 ? '' : 's'}`);
+function StageStepper({ stages, current, daysInStage, times, disabled, onPick }: { stages: { key: string; name: string; kind?: string }[]; current: string; daysInStage: number; times?: StageTime[]; disabled: boolean; onPick: (key: string) => void }) {
   const open = stages.filter((st) => st.kind !== 'won' && st.kind !== 'lost');
   const closed = stages.find((st) => st.key === current && (st.kind === 'won' || st.kind === 'lost'));
   const list = closed ? [...open, closed] : open;
@@ -555,17 +557,19 @@ function StageStepper({ stages, current, daysInStage, disabled, onPick }: { stag
       <ol className="flex w-full min-w-max">
         {list.map((st, i) => {
           const state = i < idx ? 'feita' : i === idx ? 'atual' : 'proxima';
+          const t = times?.find((x) => x.key === st.key && st.kind !== 'won' && st.kind !== 'lost');
           const tone = state === 'atual' ? (closed?.kind === 'lost' ? 'bg-danger text-white' : closed ? 'bg-success text-white' : 'bg-primary text-white')
             : state === 'feita' ? 'bg-primary-soft text-primary hover:bg-primary hover:text-white' : 'bg-surface-2 text-muted hover:bg-primary-soft hover:text-primary';
           return (
             <li key={st.key} className={clsx('relative flex-1', i > 0 && '-ml-2')}>
               <button type="button" disabled={disabled || state === 'atual'} aria-current={state === 'atual' ? 'step' : undefined}
-                aria-label={`${st.name}${state === 'atual' ? ` · etapa atual há ${daysInStage} dia(s)` : state === 'feita' ? ' · concluída' : ' · mover para esta etapa'}`}
+                aria-label={`${st.name}${state === 'atual' ? ` · etapa atual há ${daysInStage} dia(s)` : state === 'feita' ? ` · concluída${t ? ` em ${fmtDays(t.days)}` : ''}` : ' · mover para esta etapa'}`}
+                title={t ? `${fmtDays(t.days)} nesta etapa${t.visits > 1 ? ` em ${t.visits} passagens` : ''}` : undefined}
                 onClick={() => onPick(st.key)}
                 style={{ clipPath: i === 0 ? 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%)' : 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)' }}
                 className={clsx('flex h-11 w-full min-w-[140px] flex-col items-start justify-center pr-6 text-left transition-colors disabled:cursor-default', i === 0 ? 'pl-4' : 'pl-6', tone, disabled && state !== 'atual' && 'opacity-60')}>
                 <span className="whitespace-nowrap text-sm font-semibold leading-tight">{st.name}</span>
-                <span className="whitespace-nowrap text-2xs leading-tight opacity-80">{state === 'atual' ? `há ${daysInStage} dia(s)` : state === 'feita' ? 'concluída' : 'avançar'}</span>
+                <span className="whitespace-nowrap text-2xs leading-tight opacity-80">{state === 'atual' ? `há ${daysInStage} dia(s)${t && t.visits > 1 ? ` · total ${fmtDays(t.days)}` : ''}` : state === 'feita' ? (t ? `${fmtDays(t.days)}${t.visits > 1 ? ` · ${t.visits}×` : ''}` : times && times.length > 1 ? 'pulada' : 'concluída') : t ? `já passou ${fmtDays(t.days)}` : 'avançar'}</span>
               </button>
             </li>
           );
@@ -584,6 +588,7 @@ export function OpportunityWorkspacePage() {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['opportunity', id], queryFn: () => api<Opportunity>(`/opportunities/${id}`), refetchOnWindowFocus: true });
+  const stageTimes = useQuery({ queryKey: ['stage-times', id, q.data?.stage, q.data?.rowVersion], enabled: !!q.data, queryFn: () => api<{ stages: StageTime[] }>(`/opportunities/${id}/stage-times`) });
   const acts = useQuery({ queryKey: ['activities', 'opp', id], enabled: !!q.data && can('atividades'), queryFn: () => api<Paged<Activity>>(`/activities${qs({ opportunityId: id, status: 'todas', scope: can('atividades', 'equipe') ? 'equipe' : 'minhas', pageSize: 50 })}`) });
   const a = useAutosave(q.data);
   const transition = useTransitionMutation();
@@ -836,7 +841,7 @@ export function OpportunityWorkspacePage() {
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? ' — mude a etapa para reabrir.' : '. Reabrir é com a supervisão.'}</span>}
       </div>
 
-      <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
+      <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
 
       <div className="mb-3 ws2:hidden">
         <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'cliente', label: 'Deal e conta' }, { key: 'conversa', label: 'Acompanhamento' }, { key: 'passo', label: unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat}` : 'Viabilidade e chat' }]} />
