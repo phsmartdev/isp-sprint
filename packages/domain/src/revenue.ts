@@ -20,15 +20,27 @@ export type RevContract = { id: string; billingType: string; archivedAt: string 
 export type RevLedger = { contractId: string; kind: string; amountCents: number; occurredOn: string };
 export type RevMonth = { month: string; recorrente: number; reajuste: number; medicao: number; frequente: number; total: number; comparavel: number };
 
-const monthEnd = (m: string) => addDays(addMonths(`${m}-01`, 1), -1);
+const monthCache = new Map<string, { end: string; windowStart: string }>();
+const monthInfo = (m: string) => {
+  let x = monthCache.get(m);
+  if (!x) { x = { end: addDays(addMonths(`${m}-01`, 1), -1), windowStart: addMonths(`${m}-01`, -11) }; monthCache.set(m, x); }
+  return x;
+};
 /** Desde quando a versão vale: a 1ª vale desde sempre; renovação pelo início; o resto pela data de vigência ou de registro. */
 export const effectiveOf = (v: RevVersion) => (v.version === 1 ? '0000-01-01' : v.effectiveFrom ?? (v.changeKind === 'renovacao' ? v.startAt : null) ?? v.createdAt.slice(0, 10));
 
 /** Mensal recorrente do contrato no mês e quanto dele veio de reajuste nos 12 meses anteriores. */
+const sortedCache = new WeakMap<RevVersion[], RevVersion[]>();
+const sortedVersions = (c: RevContract) => {
+  let v = sortedCache.get(c.versions);
+  if (!v) { v = [...c.versions].sort((a, b) => a.version - b.version); sortedCache.set(c.versions, v); }
+  return v;
+};
+
 export function recurringInMonth(c: RevContract, month: string) {
   if (c.billingType !== 'recorrente' || !c.versions.length) return { cents: 0, reajuste: 0 };
-  const vs = [...c.versions].sort((a, b) => a.version - b.version);
-  const end = monthEnd(month);
+  const vs = sortedVersions(c);
+  const { end, windowStart } = monthInfo(month);
   const first = `${month}-01`;
   const last = vs[vs.length - 1]!;
   const start = last.billingStartAt ?? vs.find((v) => v.billingStartAt)?.billingStartAt ?? last.activationAt ?? last.startAt;
@@ -36,11 +48,10 @@ export function recurringInMonth(c: RevContract, month: string) {
   if (!start || start > end || (stop && stop < first)) return { cents: 0, reajuste: 0 };
   const year = Number(month.slice(0, 4));
   const informed = c.yearValues.find((y) => y.year === year);
-  const inForce = vs.filter((v) => effectiveOf(v) <= end);
-  const v = inForce[inForce.length - 1] ?? vs[0]!;
+  let v = vs[0]!;
+  for (const x of vs) if (effectiveOf(x) <= end) v = x;
   const cents = informed ? informed.monthlyCents : v.monthlyCents;
   // reajustes registrados como versão, com vigência nos 12 meses até este mês
-  const windowStart = addMonths(first, -11);
   let reajuste = 0;
   vs.forEach((x, i) => {
     if (i === 0 || x.changeKind !== 'reajuste') return;
@@ -56,11 +67,14 @@ export function recurringInMonth(c: RevContract, month: string) {
 /** Receita de cada mês do ano. */
 export function revenueByMonth(contracts: RevContract[], ledger: RevLedger[], year: number): RevMonth[] {
   const type = new Map(contracts.map((c) => [c.id, c.billingType]));
+  const byMonth = new Map<string, RevLedger[]>();
+  for (const e of ledger) { const k = e.occurredOn.slice(0, 7); if (!k.startsWith(String(year))) continue; const a = byMonth.get(k); if (a) a.push(e); else byMonth.set(k, [e]); }
+  const recurring = contracts.filter((c) => c.billingType === 'recorrente' && c.versions.length);
   return Array.from({ length: 12 }, (_, i) => {
     const month = `${year}-${String(i + 1).padStart(2, '0')}`;
     let recorrente = 0, reajuste = 0;
-    for (const c of contracts) { const r = recurringInMonth(c, month); recorrente += r.cents; reajuste += r.reajuste; }
-    const inMonth = ledger.filter((e) => e.occurredOn.startsWith(month));
+    for (const c of recurring) { const r = recurringInMonth(c, month); recorrente += r.cents; reajuste += r.reajuste; }
+    const inMonth = byMonth.get(month) ?? [];
     const medicao = inMonth.filter((e) => type.get(e.contractId) === 'medicao').reduce((t, e) => t + (e.kind === 'consumo' ? e.amountCents : e.kind === 'estorno' ? -e.amountCents : 0), 0);
     const frequente = inMonth.filter((e) => type.get(e.contractId) === 'frequente' && e.kind === 'faturamento').reduce((t, e) => t + e.amountCents, 0);
     const total = recorrente + medicao + frequente;

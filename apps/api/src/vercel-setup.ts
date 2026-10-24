@@ -10,6 +10,7 @@ import { poolConfig } from './db/client';
 import { recoverAccess, RECOVER_MESSAGES } from './db/recover';
 import { createDb } from './db/client';
 import { loadKpiDemo, tenantsWithoutKpis } from './services/kpiDemo';
+import { loadOpsDemo, tenantsForOpsDemo } from './services/opsDemo';
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -27,6 +28,7 @@ async function main() {
   console.log('[setup] migrations aplicadas.');
   await seedDemo(url);
   await kpiDemo(url);
+  await opsDemo(url);
   const re = process.env.ADMIN_RESET_EMAIL, rp = process.env.ADMIN_RESET_PASSWORD;
   if (re && rp) {
     const r = await recoverAccess(url, re, rp);
@@ -43,6 +45,20 @@ async function kpiDemo(url: string) {
     for (const t of await tenantsWithoutKpis(db)) {
       const r = await loadKpiDemo(db, t, today);
       console.log(`[setup] indicadores principais na empresa ${t}: ${r.created} ficha(s), ${r.entries} resultado(s) de demonstração.`);
+    }
+  } finally { await pool.end(); }
+}
+
+/** Operação fictícia (jan/2025 até hoje) na empresa de demonstração (usuários @yepnet.test), uma vez só. OPS_DEMO=false desliga. */
+async function opsDemo(url: string) {
+  if (process.env.OPS_DEMO === 'false') return;
+  const { db, pool } = createDb(url);
+  try {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bahia' }).format(new Date());
+    for (const t of await tenantsForOpsDemo(db)) {
+      const t0 = Date.now();
+      const r = await loadOpsDemo(db, t, { today, scale: Number(process.env.OPS_DEMO_SCALE ?? 1) });
+      console.log(`[setup] operação fictícia na empresa ${t} em ${Math.round((Date.now() - t0) / 1000)}s: ${r.opportunities ?? 0} negociações, ${r.contracts ?? 0} contratos, ${r.activities ?? 0} atividades.`);
     }
   } finally { await pool.end(); }
 }
