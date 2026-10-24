@@ -33,3 +33,4 @@ export * from './ipAccess';
 export * from './execution';
 export * from './timeline';
 export * from './stageFunnel';
+export * from './budget';
