@@ -17,11 +17,12 @@ import { ProcessPanel } from '../../features/contracts/ProcessPanel';
 import { LedgerPanel } from '../../features/contracts/LedgerPanel';
 import { ConsumptionPanel } from '../../features/contracts/ConsumptionPanel';
 import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
+import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -156,7 +157,7 @@ export function ContractDetailPage() {
             { key: 'resumo', label: 'Resumo' },
             ...(c.billingType === 'medicao' || c.kind === 'publico' ? [{ key: 'consumo' as Tab, label: c.billingType === 'medicao' ? (c.kind === 'publico' ? 'Consumo e empenho' : 'Consumo') : 'Empenhos' }] : []),
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
-            ...(c.stage !== 'cadastro_validacao' ? [{ key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
+            ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
@@ -208,6 +209,7 @@ export function ContractDetailPage() {
           )}
           {tab === 'consumo' && <ConsumptionPanel c={c} />}
           {tab === 'aditivos' && <AmendmentsPanel c={c} />}
+          {tab === 'execucao' && <ExecutionPanel c={c} />}
           {tab === 'extrato' && <LedgerPanel c={c} />}
           {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} onGenerate={() => setGenerate(true)} onSign={setSign} />}
           {tab === 'versoes' && <VersionsPanel c={c} />}

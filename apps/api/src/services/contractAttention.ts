@@ -6,7 +6,7 @@ import { and, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
   ALERT_BASE_LEVEL, ALERT_LABELS, ATTENTION_LEVEL_LABELS, COMPANY_DOC_LABELS, PROCESS_LABELS, REQUIRED_PUBLIC_DOCS,
-  addDays, annualValueCents, attentionLevel, attentionScore, daysBetween, docStatus, revenueAtRisk,
+  addDays, annualValueCents, attentionLevel, certificateDue, attentionScore, daysBetween, docStatus, revenueAtRisk,
   type AlertKind, type AttentionLevel, type ProcessKind,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -17,8 +17,8 @@ import { brl, sendAlert, smtpConfig, tenantName } from './email';
 import { contractSettingsOf, usersBySector } from './contracts';
 import { currentCompanyDocs, publicContractsByBranch } from './companyDocs';
 
-export type AttentionSource = 'notificacao' | 'processo' | 'validacao' | 'habilitacao';
-export const SOURCE_LABELS: Record<AttentionSource, string> = { notificacao: 'Notificação', processo: 'Processo atrasado', validacao: 'Validação do cadastro', habilitacao: 'Habilitação' };
+export type AttentionSource = 'notificacao' | 'processo' | 'validacao' | 'habilitacao' | 'execucao';
+export const SOURCE_LABELS: Record<AttentionSource, string> = { notificacao: 'Notificação', processo: 'Processo atrasado', validacao: 'Validação do cadastro', habilitacao: 'Habilitação', execucao: 'Execução (SLA, ocorrências, cláusulas, atestados)' };
 export type AttentionItem = {
   key: string; source: AttentionSource; kind: string; kindLabel: string; level: AttentionLevel; score: number;
   title: string; detail: string | null; dueAt: string | null; daysLeft: number | null; valueCents: number;
@@ -78,6 +78,54 @@ export async function attentionItems(db: DbOrTx, tenantId: string, scope: SQL, t
         title: `${PROCESS_LABELS[kind]} atrasada: ${c.clientName}`, detail: 'Etapas do processo em aberto depois do prazo.', dueAt: p.dueAt,
         ownerId: p.ownerId ?? c.commercialOwnerId, ownerName: c.ownerName, alertId: null, href: `/contracts/${c.id}?aba=processos`, ...base(c),
       });
+    }
+    // execução: ocorrências abertas com prazo de resposta, SLA violado no último mês medido, cláusulas com prazo e atestado a pedir
+    const live = contracts.filter((x) => x.stage !== 'cadastro_validacao');
+    const liveIds = live.map((x) => x.id);
+    if (liveIds.length) {
+      const occ = await db.execute<{ id: string; contract_id: string; title: string; kind: string; response_due_at: string | null; owner_id: string | null; owner: string | null; status: string | null }>(sql`
+        select o.id, o.contract_id, o.title, o.kind, o.response_due_at, o.owner_id, u.name owner,
+               (select x.status from contract_occurrence_updates x where x.occurrence_id = o.id order by x.created_at desc limit 1) status
+          from contract_occurrences o left join users u on u.id = o.owner_id where o.contract_id in ${liveIds}`);
+      for (const o of occ.rows) {
+        const st = o.status ?? 'aberta';
+        if (!['aberta', 'defesa_enviada'].includes(st)) continue;
+        const c = byId.get(o.contract_id)!;
+        const due = o.response_due_at ? String(o.response_due_at).slice(0, 10) : null;
+        push({ key: `ocorrencia:${o.id}`, source: 'execucao', kind: 'ocorrencia', kindLabel: st === 'defesa_enviada' ? 'Ocorrência aguardando o órgão' : 'Ocorrência aberta', base: ['multa', 'glosa', 'notificacao_orgao'].includes(o.kind) && st === 'aberta' ? 'alta' : 'media',
+          title: `${o.title}: ${c.clientName}`, detail: due ? `Resposta ao órgão até ${due}.` : null, dueAt: due ?? today, ownerId: o.owner_id ?? c.commercialOwnerId, ownerName: o.owner ?? c.ownerName, alertId: null, href: `/contracts/${c.id}?aba=execucao`, ...base(c) });
+      }
+      const sla = await db.execute<{ contract_id: string; label: string; target: number; unit: string; direction: string; period: string; value: number }>(sql`
+        select distinct on (m.sla_id) m.contract_id, s.label, s.target, s.unit, s.direction, m.period, m.value
+          from contract_sla_measurements m join contract_slas s on s.id = m.sla_id
+         where m.contract_id in ${liveIds} and m.superseded_at is null and s.superseded_at is null order by m.sla_id, m.period desc`);
+      for (const m of sla.rows) {
+        const ok = m.direction === 'maior' ? Number(m.value) >= Number(m.target) : Number(m.value) <= Number(m.target);
+        if (ok) continue;
+        const c = byId.get(m.contract_id)!;
+        push({ key: `sla:${m.contract_id}:${m.label}:${m.period}`, source: 'execucao', kind: 'sla_violado', kindLabel: 'SLA violado', base: 'alta', title: `SLA ${m.label} violado em ${m.period}: ${c.clientName}`,
+          detail: `Realizado ${m.value}${m.unit}, meta ${m.direction === 'maior' ? '≥' : '≤'} ${m.target}${m.unit}. Verifique multa/glosa e o plano de ação.`, dueAt: addDays(today, 7), ownerId: c.commercialOwnerId, ownerName: c.ownerName, alertId: null, href: `/contracts/${c.id}?aba=execucao`, ...base(c) });
+      }
+      const cl = await db.execute<{ id: string; contract_id: string; title: string; reference: string | null; deadline: string; remind_days: number }>(sql`
+        select id, contract_id, title, reference, deadline, remind_days from contract_clauses where contract_id in ${liveIds} and superseded_at is null and deadline is not null and deadline - remind_days <= ${today}::date and deadline >= ${addDays(today, -30)}::date`);
+      for (const x of cl.rows) {
+        const c = byId.get(x.contract_id)!;
+        const due = String(x.deadline).slice(0, 10);
+        push({ key: `clausula:${x.id}`, source: 'execucao', kind: 'clausula', kindLabel: 'Prazo de cláusula', base: 'media', title: `${x.reference ? `${x.reference} · ` : ''}${x.title}: ${c.clientName}`, detail: `Prazo da cláusula em ${due}.`, dueAt: due, ownerId: c.commercialOwnerId, ownerName: c.ownerName, alertId: null, href: `/contracts/${c.id}?aba=execucao`, ...base(c) });
+      }
+      const certs = await db.execute<{ contract_id: string; start_at: string | null; end_at: string | null; received: boolean; requested: boolean }>(sql`
+        select c.id contract_id, v.start_at, v.end_at,
+               exists (select 1 from technical_certificates t where t.contract_id = c.id and t.status = 'recebido') received,
+               exists (select 1 from technical_certificates t where t.contract_id = c.id and t.status = 'solicitado' and t.superseded_at is null) requested
+          from contracts c join contract_versions v on v.contract_id = c.id and v.version = c.current_version where c.id in ${liveIds}`);
+      for (const r of certs.rows) {
+        const due = certificateDue({ startAt: r.start_at ? String(r.start_at).slice(0, 10) : null, endAt: r.end_at ? String(r.end_at).slice(0, 10) : null, hasReceived: r.received, hasRequested: r.requested }, today);
+        if (!due) continue;
+        const c = byId.get(r.contract_id)!;
+        push({ key: `atestado:${c.id}`, source: 'execucao', kind: 'atestado', kindLabel: r.requested ? 'Atestado pedido, sem retorno' : 'Pedir atestado de capacidade técnica', base: due.stage === 'fim' ? 'alta' : 'media',
+          title: `Atestado de capacidade técnica: ${c.clientName}`, detail: r.requested ? 'Atestado já pedido ao cliente; cobre o retorno.' : due.stage === 'fim' ? 'Contrato perto do fim sem atestado: peça antes do encerramento.' : 'Metade da vigência cumprida: já dá para pedir o atestado.', dueAt: due.dueAt,
+          ownerId: c.commercialOwnerId, ownerName: c.ownerName, alertId: null, href: `/contracts/${c.id}?aba=execucao`, ...base(c) });
+      }
     }
     for (const c of contracts.filter((x) => x.stage === 'cadastro_validacao')) {
       const created = c.createdAt.toISOString().slice(0, 10);

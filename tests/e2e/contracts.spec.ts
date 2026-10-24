@@ -309,3 +309,68 @@ test('central de atenção: fila por gravidade, filtros, resolver na fila e vis�
   await expect(ex.getByText('Dependência dos maiores clientes')).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-executivo.png', fullPage: true });
 });
+
+test('execução do contrato: SLA, ocorrência com multa, fiscal, cláusula e atestado no acervo', async ({ page }) => {
+  test.setTimeout(150_000);
+  await login(page, 'carlos@yepnet.test');
+  const api = page.request;
+  const shift = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const lk = await (await api.get('/api/v1/meta/lookups')).json();
+  const me = await (await api.get('/api/v1/me')).json();
+  const name = `Órgão E2E Execução ${Date.now().toString(36)}`;
+  const o = await (await api.post('/api/v1/opportunities', { data: { newContact: { name, segment: 'governamental' }, planId: lk.plans[0].id } })).json();
+  const cur = await (await api.get(`/api/v1/opportunities/${o.id}`)).json();
+  expect((await api.post(`/api/v1/opportunities/${o.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: cur.rowVersion } })).ok()).toBe(true);
+  const created = await api.post('/api/v1/contracts', { data: { opportunityId: o.id, billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: me.user.id, version: { number: `EX-${Date.now().toString(36)}`, object: 'Link', signedAt: shift(-200), startAt: shift(-195), termMonths: 12, monthlyCents: 200_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 200_000 }], publicTerms: { agency: 'Órgão E2E', processNumber: '9/2026', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } } });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).id;
+  expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
+
+  await page.goto(`/contracts/${id}?aba=execucao`);
+  await expect(page.getByRole('tab', { name: 'Execução' })).toHaveAttribute('aria-selected', 'true');
+  const sla = page.getByRole('region', { name: 'SLA contratado e realizado' });
+  await sla.getByRole('button', { name: 'Cadastrar SLA' }).click();
+  let dlg = page.getByRole('dialog', { name: 'Cadastrar SLA' });
+  await dlg.getByLabel(/Meta \(mínimo/).fill('99,5');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(sla).toContainText('até 3,6 h fora do ar por mês');
+  await sla.getByRole('button', { name: 'Registrar mês' }).click();
+  dlg = page.getByRole('dialog', { name: /Registrar mês/ });
+  await dlg.getByLabel(/Realizado/).fill('99,1');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(sla.getByText(/99,1%/)).toBeVisible();
+
+  const occ = page.getByRole('region', { name: 'Ocorrências e penalidades' });
+  await occ.getByRole('button', { name: 'Registrar ocorrência' }).click();
+  dlg = page.getByRole('dialog', { name: 'Registrar ocorrência' });
+  await dlg.getByLabel('Tipo').selectOption('multa');
+  await dlg.getByLabel('Resumo').fill('Multa por indisponibilidade em setembro');
+  await expect(dlg.getByRole('button', { name: 'Salvar' })).toBeDisabled();
+  await dlg.getByLabel('Valor (obrigatório)').fill('1500');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(occ).toContainText('Multa por indisponibilidade em setembro');
+  await expect(page.getByLabel('Resumo da execução')).toContainText('1.500,00');
+
+  const parties = page.getByRole('region', { name: 'Fiscal e gestor do órgão' });
+  await parties.getByRole('listitem').filter({ hasText: 'Fiscal técnico' }).getByRole('button', { name: 'Definir' }).click();
+  dlg = page.getByRole('dialog', { name: 'Fiscal técnico' });
+  await dlg.getByLabel('Nome').fill('Fiscal Fictício');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(parties).toContainText('Fiscal Fictício');
+
+  const certs = page.getByRole('region', { name: 'Atestados de capacidade técnica' });
+  await expect(certs).toContainText('Metade da vigência cumprida');
+  await certs.getByRole('button', { name: 'Registrar atestado' }).click();
+  dlg = page.getByRole('dialog', { name: 'Atestado de capacidade técnica' });
+  await dlg.getByLabel('Situação').selectOption('recebido');
+  await dlg.getByLabel('Emitente (órgão/empresa)').fill('Órgão E2E');
+  await dlg.getByLabel('Serviços atestados').fill('Link dedicado de 1 Gbps fictício');
+  await dlg.locator('input[type="file"]').setInputFiles({ name: 'atestado.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF') });
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(certs.getByText('Recebido').first()).toBeVisible();
+  await page.screenshot({ path: 'test-results/contracts-execucao.png', fullPage: true });
+
+  await page.goto('/contracts?t=atestados');
+  await page.getByLabel('Buscar atestados').fill('1 Gbps fictício');
+  await expect(page.getByRole('cell', { name: new RegExp(name) })).toBeVisible();
+});

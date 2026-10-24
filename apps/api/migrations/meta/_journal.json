@@ -512,6 +512,13 @@
       "when": 1792850830793,
       "tag": "0072_resumo_contratos",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792851471159,
+      "tag": "0073_execucao_contrato",
+      "breakpoints": true
     }
   ]
 }

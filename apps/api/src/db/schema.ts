@@ -4166,3 +4166,116 @@ export const contractDigests = pgTable('contract_digests', {
   status: text('status').notNull(),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('contract_digests_uq').on(t.tenantId, t.userId, t.day) }));
+
+// ---------------------------------------------------------------- Contratos fase 5: execução
+/** SLA contratado (meta por métrica). Só INSERT: mudar a meta substitui e guarda a anterior. */
+export const contractSlas = pgTable('contract_slas', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  metric: text('metric').notNull(),
+  label: text('label').notNull(),
+  target: doublePrecision('target').notNull(),
+  unit: text('unit').notNull().default(''),
+  direction: text('direction').notNull(),
+  penaltyNote: text('penalty_note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('contract_slas_idx').on(t.tenantId, t.contractId), dirCk: check('contract_slas_dir_ck', inList('direction', ['maior', 'menor'])) }));
+
+/** SLA realizado no mês (informado ou de integração). Só INSERT: corrigir substitui. */
+export const contractSlaMeasurements = pgTable('contract_sla_measurements', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  slaId: uuid('sla_id').notNull().references(() => contractSlas.id),
+  period: text('period').notNull(),
+  value: doublePrecision('value').notNull(),
+  note: text('note'),
+  source: text('source').notNull().default('informado'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('contract_sla_meas_idx').on(t.tenantId, t.contractId, t.period) }));
+
+/** Ocorrências e penalidades (só INSERT); a situação muda por atualizações registradas. */
+export const contractOccurrences = pgTable('contract_occurrences', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  kind: text('kind').notNull(),
+  occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+  title: text('title').notNull(),
+  description: text('description'),
+  amountCents: bigint('amount_cents', { mode: 'number' }),
+  /** prazo para defesa/resposta ao órgão */
+  responseDueAt: date('response_due_at', { mode: 'string' }),
+  reference: text('reference'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('contract_occurrences_idx').on(t.tenantId, t.contractId) }));
+export const contractOccurrenceUpdates = pgTable('contract_occurrence_updates', {
+  id: id(),
+  tenantId: tenantId(),
+  occurrenceId: uuid('occurrence_id').notNull().references(() => contractOccurrences.id),
+  status: text('status').notNull(),
+  note: text('note').notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('contract_occurrence_upd_idx').on(t.occurrenceId, t.createdAt) }));
+
+/** Fiscal, gestor do órgão e preposto (substituir guarda o anterior). */
+export const contractParties = pgTable('contract_parties', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  role: text('role').notNull(),
+  name: text('name').notNull(),
+  email: text('email'),
+  phone: text('phone'),
+  appointment: text('appointment'),
+  since: date('since', { mode: 'string' }),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('contract_parties_idx').on(t.tenantId, t.contractId) }));
+
+/** Cláusulas críticas com prazo e aviso (substituir guarda a anterior). */
+export const contractClauses = pgTable('contract_clauses', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  kind: text('kind').notNull(),
+  reference: text('reference'),
+  title: text('title').notNull(),
+  excerpt: text('excerpt'),
+  deadline: date('deadline', { mode: 'string' }),
+  remindDays: integer('remind_days').notNull().default(15),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('contract_clauses_idx').on(t.tenantId, t.contractId) }));
+
+/** Atestados de capacidade técnica (pedido e recebimento, com o arquivo). Só INSERT: nova situação substitui. */
+export const technicalCertificates = pgTable('technical_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').references(() => contracts.id),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  status: text('status').notNull(),
+  issuer: text('issuer'),
+  issuedOn: date('issued_on', { mode: 'string' }),
+  services: text('services'),
+  quantities: text('quantities'),
+  note: text('note'),
+  filename: text('filename'),
+  mime: text('mime'),
+  size: integer('size'),
+  data: bytea('data'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  supersededAt: ts('superseded_at'),
+}, (t) => ({ idx: index('technical_certificates_idx').on(t.tenantId, t.contactId), statusCk: check('technical_certificates_status_ck', inList('status', ['a_solicitar', 'solicitado', 'recebido', 'recusado'])) }));
