@@ -396,3 +396,21 @@ export function commitmentBalances(commitments: { id: string; amountCents: numbe
     return { id: c.id, used, available, share: c.amountCents > 0 ? used / c.amountCents : null };
   });
 }
+
+// ------------------------------------------------------------------ habilitação (certidões da empresa, por filial)
+export const COMPANY_DOC_KINDS = ['cnd_federal', 'crf_fgts', 'cndt', 'cnd_estadual', 'cnd_municipal', 'alvara', 'falencia', 'outro'] as const;
+export type CompanyDocKind = (typeof COMPANY_DOC_KINDS)[number];
+export const COMPANY_DOC_LABELS: Record<CompanyDocKind, string> = {
+  cnd_federal: 'CND Federal (Receita/PGFN)', crf_fgts: 'CRF do FGTS', cndt: 'CNDT (débitos trabalhistas)', cnd_estadual: 'CND Estadual', cnd_municipal: 'CND Municipal',
+  alvara: 'Alvará de funcionamento', falencia: 'Certidão de falência e recuperação judicial', outro: 'Outro documento',
+};
+/** Exigidas para manter contrato público (regularidade fiscal e trabalhista). */
+export const REQUIRED_PUBLIC_DOCS: CompanyDocKind[] = ['cnd_federal', 'crf_fgts', 'cndt', 'cnd_estadual', 'cnd_municipal'];
+export type DocStatus = 'valida' | 'vence_30' | 'vence_15' | 'vence_7' | 'vencida' | 'falta';
+export const DOC_STATUS_LABELS: Record<DocStatus, string> = { valida: 'Válida', vence_30: 'Vence em até 30 dias', vence_15: 'Vence em até 15 dias', vence_7: 'Vence em até 7 dias', vencida: 'Vencida', falta: 'Não cadastrada' };
+/** Situação pela validade (o último dia da validade ainda vale). */
+export function docStatus(expiresOn: string | null | undefined, today: string): { status: DocStatus; days: number | null } {
+  if (!expiresOn) return { status: 'falta', days: null };
+  const days = daysBetween(today, expiresOn);
+  return { status: days < 0 ? 'vencida' : days <= 7 ? 'vence_7' : days <= 15 ? 'vence_15' : days <= 30 ? 'vence_30' : 'valida', days };
+}

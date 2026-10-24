@@ -205,3 +205,22 @@ test('consumo e empenho: ritmo contra o tempo, esgotamento previsto e empenho co
   await expect(emp).toContainText('2026NE000777');
   await expect(emp).toContainText('R$ 10.000,00 de R$ 10.000,00');
 });
+
+test('habilitação: quadro de certidões por filial, envio e aviso do que precisa de atenção', async ({ page }) => {
+  test.setTimeout(90_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/contracts?t=habilitacao');
+  const quadro = page.getByRole('region', { name: 'Quadro de certidões por filial' });
+  await expect(quadro.getByRole('columnheader', { name: 'CRF do FGTS' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cadastrar documento' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Cadastrar documento' });
+  await dlg.getByLabel('Documento').selectOption({ label: 'CNDT (débitos trabalhistas)' });
+  const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+  await dlg.getByLabel('Validade').fill(soon);
+  await dlg.locator('#hb-f').setInputFiles({ name: 'cndt.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
+  await dlg.getByRole('button', { name: 'Enviar documento' }).click();
+  await expect(page.getByText('Documento cadastrado')).toBeVisible();
+  const att = page.getByRole('list', { name: 'O que precisa de atenção' });
+  await expect(att.getByText('CNDT (débitos trabalhistas)').first()).toBeVisible();
+  await expect(att).toContainText('Vence em até 7 dias');
+});
