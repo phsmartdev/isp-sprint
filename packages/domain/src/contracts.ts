@@ -94,6 +94,8 @@ export const DEFAULT_CONTRACT_SETTINGS = {
   ccEmail: 'contratos@bktele.com.br',
   renewalSubject: 'Ofício de Renovação Contratual – Contrato [Nº] – Cliente [Nome]',
   closureSubject: 'Encerramento Contratual Imediato – Contrato [Nº]',
+  /** Resumo diário por e-mail da central de atenção (pessoas com itens e gestão de contratos). */
+  dailyDigest: true,
 };
 export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail: string | null; deliveryEmail: string | null; oficioTemplate: string };
 
@@ -471,4 +473,79 @@ export function adjustmentWindow(anniversary: string) {
 export function accumulatedPct(monthly: number[]) {
   const f = monthly.reduce((t, v) => t * (1 + v / 100), 1);
   return Math.round((f - 1) * 1_000_000) / 10_000;
+}
+
+// ------------------------------------------------------------------ central de atenção e painel executivo
+export const ATTENTION_LEVELS = ['critica', 'alta', 'media'] as const;
+export type AttentionLevel = (typeof ATTENTION_LEVELS)[number];
+export const ATTENTION_LEVEL_LABELS: Record<AttentionLevel, string> = { critica: 'Crítico', alta: 'Alto', media: 'Atenção' };
+/** Gravidade de cada notificação antes do prazo. Vencida sobe um nível. */
+export const ALERT_BASE_LEVEL: Record<AlertKind, AttentionLevel> = {
+  renovacao: 'alta', reajuste: 'media', garantia: 'alta', documento_pendente: 'media', assinatura: 'alta', provisionamento: 'alta', implantacao: 'alta',
+  encerramento_90: 'alta', encerramento_30: 'critica', consumo_acelerado: 'alta', consumo_lento: 'media', saldo_baixo: 'alta', esgotamento: 'critica', empenho_baixo: 'alta', sem_empenho: 'critica',
+};
+const up = (l: AttentionLevel): AttentionLevel => (l === 'media' ? 'alta' : 'critica');
+/** Nível final: vencido sobe um nível; a 3 dias do prazo, "atenção" vira "alto". */
+export function attentionLevel(base: AttentionLevel, dueAt: string | null, today: string): AttentionLevel {
+  if (!dueAt) return base;
+  const d = daysBetween(today, dueAt);
+  if (d < 0) return up(base);
+  if (d <= 3 && base === 'media') return 'alta';
+  return base;
+}
+/**
+ * Prioridade para ordenar a central: gravidade primeiro, depois atraso, proximidade do prazo e valor em jogo.
+ * Um crítico sempre vem antes de um alto, que vem antes de "atenção".
+ */
+export function attentionScore(level: AttentionLevel, dueAt: string | null, today: string, valueCents: number) {
+  const w = level === 'critica' ? 30_000 : level === 'alta' ? 20_000 : 10_000;
+  const d = dueAt ? daysBetween(today, dueAt) : 30;
+  const time = d < 0 ? 300 + Math.min(60, -d) * 5 : Math.max(0, 30 - d) * 5;
+  const money = valueCents > 0 ? Math.min(400, Math.round(Math.log10(valueCents / 100 + 1) * 60)) : 0;
+  return w + time + money;
+}
+
+/** Valor anual de um contrato para concentração e risco: mensal × 12; sem mensal, o global proporcional a 12 meses. */
+export function annualValueCents(r: { monthlyCents: number; totalCents: number | null; termMonths: number | null }) {
+  if (r.monthlyCents > 0) return r.monthlyCents * 12;
+  if (r.totalCents) return Math.round((r.totalCents / Math.max(1, r.termMonths ?? 12)) * 12);
+  return 0;
+}
+/**
+ * Backlog: o que ainda falta faturar do contratado.
+ * Recorrente = mensal × meses restantes; medição = saldo disponível; frequente = global − faturado.
+ */
+export function backlogCents(r: { billingType: string; monthlyCents: number; totalCents: number | null; endAt: string | null }, today: string, ledger: { available: number; billed: number }) {
+  if (r.billingType === 'medicao') return Math.max(0, ledger.available);
+  if (r.billingType === 'frequente') return r.totalCents ? Math.max(0, r.totalCents - ledger.billed) : 0;
+  if (!r.endAt || r.endAt < today) return 0;
+  const months = Math.max(0, Math.round((daysBetween(today, r.endAt) / 30.4) * 10) / 10);
+  return Math.round(r.monthlyCents * months);
+}
+/**
+ * Receita em risco por janela: contratos que terminam dentro da janela sem renovação concluída,
+ * ou com encerramento previsto (data de encerramento, ou término, dentro da janela).
+ */
+export function revenueAtRisk(list: { endAt: string | null; closureExpected: boolean; closureAt: string | null; renewed: boolean; annualCents: number; monthlyCents: number }[], today: string, windows = [30, 60, 90, 180]) {
+  return windows.map((days) => {
+    const limit = addDays(today, days);
+    const hit = list.filter((r) => {
+      const when = r.closureExpected ? (r.closureAt ?? r.endAt) : r.renewed ? null : r.endAt;
+      return !!when && when <= limit && (when >= today || r.closureExpected);
+    });
+    return { days, n: hit.length, monthlyCents: hit.reduce((t, r) => t + r.monthlyCents, 0), annualCents: hit.reduce((t, r) => t + r.annualCents, 0) };
+  });
+}
+/** Concentração da carteira por cliente: participação do maior, dos 5 maiores e o índice HHI (0 a 10.000). */
+export function concentration(values: { key: string; name: string; cents: number }[]) {
+  const total = values.reduce((t, v) => t + v.cents, 0);
+  const sorted = [...values].filter((v) => v.cents > 0).sort((a, b) => b.cents - a.cents);
+  if (!total) return { totalCents: 0, top1: null, top1Share: null, top5Share: null, hhi: null, level: null as 'baixa' | 'moderada' | 'alta' | null };
+  const share = (v: number) => v / total;
+  const hhi = Math.round(sorted.reduce((t, v) => t + (share(v.cents) * 100) ** 2, 0));
+  return {
+    totalCents: total, top1: sorted[0] ? { key: sorted[0].key, name: sorted[0].name, cents: sorted[0].cents } : null,
+    top1Share: share(sorted[0]?.cents ?? 0), top5Share: share(sorted.slice(0, 5).reduce((t, v) => t + v.cents, 0)), hhi,
+    level: (hhi >= 2500 ? 'alta' : hhi >= 1500 ? 'moderada' : 'baixa') as 'baixa' | 'moderada' | 'alta',
+  };
 }

@@ -5,7 +5,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS,
-  SEGMENT_LABELS, addDays, daysBetween, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, type AlertKind, type Segment,
+  SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, type AlertKind, type Segment,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -275,8 +275,23 @@ export const contractRoutes = [
       const clientMap = new Map<string, { contactId: string; name: string; contracts: number; monthlyCents: number; billedCents: number }>();
       for (const r of withBilling) { const c = clientMap.get(r.contactId) ?? { contactId: r.contactId, name: r.clientName, contracts: 0, monthlyCents: 0, billedCents: 0 }; if (r.stage !== 'arquivado') { c.contracts++; c.monthlyCents += r.monthlyCents; } c.billedCents += r.billedCents; clientMap.set(r.contactId, c); }
       const totalBilled = byType.reduce((a, t) => a + t.billedCents, 0);
+      // painel executivo: carteira anual, backlog (o que falta faturar), receita em risco por janela e concentração
+      const live = withBilling.filter((r) => r.stage !== 'arquivado' && r.validatedAt);
+      const annual = (r: (typeof live)[number]) => annualValueCents(r);
+      const backlogOf = (r: (typeof live)[number]) => backlogCents(r, today, r.ledger);
+      const perClient = new Map<string, { key: string; name: string; cents: number }>();
+      for (const r of live) { const c = perClient.get(r.contactId) ?? { key: r.contactId, name: r.clientName, cents: 0 }; c.cents += annual(r); perClient.set(r.contactId, c); }
+      const executive = {
+        contractedAnnualCents: live.reduce((t, r) => t + annual(r), 0),
+        backlogCents: live.reduce((t, r) => t + backlogOf(r), 0),
+        backlogByType: BILLING_TYPES.map((t) => ({ type: t, label: BILLING_TYPE_LABELS[t], cents: live.filter((r) => r.billingType === t).reduce((a, r) => a + backlogOf(r), 0) })),
+        risk: revenueAtRisk(live.map((r) => ({ endAt: r.endAt, closureExpected: r.closureExpected, closureAt: r.closureAt, monthlyCents: r.monthlyCents, annualCents: annual(r), renewed: renewOpen.some((p) => p.contractId === r.id && p.cycleKey === r.endAt && p.status === 'concluido') })), today),
+        concentration: concentration([...perClient.values()]),
+        publicAnnualCents: live.filter((r) => r.kind === 'publico').reduce((t, r) => t + annual(r), 0),
+      };
       return {
         period: { from, to, prevFrom, prevTo },
+        executive,
         billing: { totalCents: totalBilled, prevTotalCents: byType.reduce((a, t) => a + t.billedPrevCents, 0), byType, note: 'Faturamento registrado no CRM: recorrente pela mensalidade dos meses faturáveis (previsto), frequente pelos lançamentos e medição pelos consumos. O faturado no ERP entra com a integração.' },
         byBillingType: sumBy((r) => r.billingType as (typeof BILLING_TYPES)[number], (k) => BILLING_TYPE_LABELS[k]),
         byKind: sumBy((r) => r.kind, (k) => (k === 'publico' ? 'Público' : 'Privado')),
@@ -740,7 +755,7 @@ export const contractRoutes = [
       provisioningSlaDays: z.number().int().min(1).max(90), implantationSlaDays: z.number().int().min(1).max(365), signatureSlaDays: z.number().int().min(1).max(90),
       ccEmail: z.string().trim().email().max(200), financeEmail: z.string().trim().email().max(200).nullable(), deliveryEmail: z.string().trim().email().max(200).nullable(),
       renewalSubject: z.string().trim().min(5).max(200), closureSubject: z.string().trim().min(5).max(200),
-      oficioTemplate: z.string().trim().min(20).max(20_000), oficioTemplateId: uuid.nullable(),
+      oficioTemplate: z.string().trim().min(20).max(20_000), oficioTemplateId: uuid.nullable(), dailyDigest: z.boolean().default(true),
     }),
     handler: async ({ app, auth, body, req }) => {
       if (body.closureFinalDays >= body.closureNoticeDays) throw unprocessable('O segundo aviso de encerramento precisa ser mais perto da data que o primeiro.');

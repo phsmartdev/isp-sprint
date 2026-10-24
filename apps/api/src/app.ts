@@ -59,6 +59,7 @@ import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
 import { contractAmendmentRoutes } from './routes/contractAmendments';
 import { kpiRoutes } from './routes/kpis';
+import { contractAttentionRoutes } from './routes/contractAttention';
 import { activityScriptRoutes } from './routes/activityScripts';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
@@ -220,6 +221,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractHabilitationRoutes,
     ...contractAmendmentRoutes,
     ...kpiRoutes,
+    ...contractAttentionRoutes,
     ...activityScriptRoutes,
     ...abmIntelRoutes,
     ...abmFollowupRoutes,

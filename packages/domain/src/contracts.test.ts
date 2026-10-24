@@ -116,3 +116,41 @@ describe('aditivos e reajuste', () => {
     expect(accumulatedPct(Array(12).fill(0.4))).toBe(4.9070);
   });
 });
+
+import { attentionLevel, attentionScore, backlogCents, concentration, revenueAtRisk, annualValueCents } from './contracts';
+describe('central de atenção e painel executivo', () => {
+  const today = '2026-10-24';
+  it('vencido sobe um nível; perto do prazo "atenção" vira alto', () => {
+    expect(attentionLevel('media', '2026-10-20', today)).toBe('alta');
+    expect(attentionLevel('alta', '2026-10-20', today)).toBe('critica');
+    expect(attentionLevel('media', '2026-10-26', today)).toBe('alta');
+    expect(attentionLevel('media', '2026-11-20', today)).toBe('media');
+  });
+  it('crítico sempre antes de alto, e atraso e valor desempatam', () => {
+    expect(attentionScore('critica', '2026-12-30', today, 0)).toBeGreaterThan(attentionScore('alta', '2026-08-01', today, 10_000_000_00));
+    expect(attentionScore('alta', '2026-10-10', today, 0)).toBeGreaterThan(attentionScore('alta', '2026-10-30', today, 0));
+    expect(attentionScore('alta', '2026-10-30', today, 5_000_000)).toBeGreaterThan(attentionScore('alta', '2026-10-30', today, 10_000));
+  });
+  it('backlog por tipo', () => {
+    expect(backlogCents({ billingType: 'recorrente', monthlyCents: 100_000, totalCents: null, endAt: '2027-10-24' }, today, { available: 0, billed: 0 })).toBe(1_200_000);
+    expect(backlogCents({ billingType: 'medicao', monthlyCents: 0, totalCents: null, endAt: '2027-01-01' }, today, { available: 345, billed: 0 })).toBe(345);
+    expect(backlogCents({ billingType: 'frequente', monthlyCents: 0, totalCents: 1000, endAt: null }, today, { available: 0, billed: 400 })).toBe(600);
+    expect(backlogCents({ billingType: 'recorrente', monthlyCents: 100, totalCents: null, endAt: '2026-01-01' }, today, { available: 0, billed: 0 })).toBe(0);
+  });
+  it('receita em risco: sem renovação dentro da janela e encerramento previsto', () => {
+    const r = revenueAtRisk([
+      { endAt: '2026-11-10', closureExpected: false, closureAt: null, renewed: false, monthlyCents: 100, annualCents: 1200 },
+      { endAt: '2026-11-10', closureExpected: false, closureAt: null, renewed: true, monthlyCents: 999, annualCents: 9999 },
+      { endAt: '2027-03-01', closureExpected: false, closureAt: null, renewed: false, monthlyCents: 50, annualCents: 600 },
+      { endAt: '2027-09-01', closureExpected: true, closureAt: '2026-12-01', renewed: false, monthlyCents: 10, annualCents: 120 },
+    ], today);
+    expect(r.map((x) => x.n)).toEqual([1, 2, 2, 3]);
+    expect(r[3]).toMatchObject({ monthlyCents: 160, annualCents: 1920 });
+  });
+  it('concentração: HHI e participação', () => {
+    const c = concentration([{ key: 'a', name: 'A', cents: 50 }, { key: 'b', name: 'B', cents: 30 }, { key: 'c', name: 'C', cents: 20 }]);
+    expect(c).toMatchObject({ top1Share: 0.5, top5Share: 1, hhi: 3800, level: 'alta', top1: { name: 'A' } });
+    expect(concentration([]).hhi).toBeNull();
+    expect(annualValueCents({ monthlyCents: 0, totalCents: 2400, termMonths: 24 })).toBe(1200);
+  });
+});
