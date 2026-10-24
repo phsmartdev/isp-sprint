@@ -374,3 +374,47 @@ test('execução do contrato: SLA, ocorrência com multa, fiscal, cláusula e at
   await page.getByLabel('Buscar atestados').fill('1 Gbps fictício');
   await expect(page.getByRole('cell', { name: new RegExp(name) })).toBeVisible();
 });
+
+test('linha do tempo única: próximos prazos, filtro por assunto, só críticos e busca', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  const api = page.request;
+  const shift = (d: number) => new Date(Date.now() + d * 86_400_000).toISOString().slice(0, 10);
+  const lk = await (await api.get('/api/v1/meta/lookups')).json();
+  const me = await (await api.get('/api/v1/me')).json();
+  const o = await (await api.post('/api/v1/opportunities', { data: { newContact: { name: `Órgão E2E Linha ${Date.now().toString(36)}`, segment: 'governamental' }, planId: lk.plans[0].id } })).json();
+  const cur = await (await api.get(`/api/v1/opportunities/${o.id}`)).json();
+  expect((await api.post(`/api/v1/opportunities/${o.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: cur.rowVersion } })).ok()).toBe(true);
+  const created = await api.post('/api/v1/contracts', { data: { opportunityId: o.id, billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: me.user.id, version: { number: `LT-${Date.now().toString(36)}`, object: 'Link', signedAt: shift(-100), startAt: shift(-95), termMonths: 12, monthlyCents: 150_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 150_000 }], publicTerms: { agency: 'Órgão E2E', processNumber: '11/2026', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } } } });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).id;
+  expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
+  expect((await api.post(`/api/v1/contracts/${id}/occurrences`, { data: { kind: 'glosa', occurredOn: shift(0), title: 'Glosa fictícia de outubro', amountCents: 80_000, responseDueAt: shift(3) } })).status()).toBe(201);
+  expect((await api.post(`/api/v1/contracts/${id}/clauses`, { data: { kind: 'obrigacao', reference: 'Cláusula 9.1', title: 'Entrega do relatório trimestral', deadline: shift(20) } })).status()).toBe(201);
+  expect((await api.post(`/api/v1/contracts/${id}/parties`, { data: { role: 'gestor', name: 'Gestor Fictício da Linha' } })).status()).toBe(201);
+
+  await page.goto(`/contracts/${id}?aba=historico`);
+  const up = page.getByRole('region', { name: 'Próximos prazos' });
+  await expect(up).toContainText('Responder ocorrência: Glosa fictícia de outubro');
+  await expect(up).toContainText('em 3 dias');
+  await expect(up).toContainText('Cláusula 9.1: Entrega do relatório trimestral');
+  const list = page.locator('li[data-critical]');
+  await expect(list.filter({ hasText: 'Glosa fictícia de outubro' })).toBeVisible();
+
+  const filters = page.getByRole('group', { name: 'Filtrar linha do tempo por assunto' });
+  await filters.getByRole('button', { name: /^Execução/ }).click();
+  await expect(page.getByText('Gestor Fictício da Linha', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('Cadastro validado', { exact: true })).toHaveCount(0);
+  await filters.getByRole('button', { name: /^Tudo/ }).click();
+  await expect(page.getByText('Cadastro validado', { exact: true })).toBeVisible();
+
+  await page.getByLabel(/Só críticos/).check();
+  await expect(page.getByText('Cadastro validado', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/Glosa fictícia de outubro \(R\$/)).toBeVisible();
+  await page.getByLabel(/Só críticos/).uncheck();
+  await page.getByLabel('Buscar na linha do tempo').fill('9.1');
+  await expect(page.getByText(/Cláusula crítica Cláusula 9.1/)).toBeVisible();
+  await expect(page.getByText('Cadastro validado', { exact: true })).toHaveCount(0);
+  await page.getByLabel('Buscar na linha do tempo').fill('');
+  await page.screenshot({ path: 'test-results/contracts-linha-do-tempo.png', fullPage: true });
+});

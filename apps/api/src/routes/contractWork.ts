@@ -4,8 +4,8 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  DOC_TYPES, PROCESS_LABELS, SECTORS, SECTOR_LABELS, adjustedCents, documentName, endFromTerm, fillSubject, fillTemplate,
-  type ProcessKind, type StepDef,
+  ALERT_LABELS, DOC_TYPES, PROCESS_LABELS, TIMELINE_CATEGORIES, timelineCategory, timelineCritical, upcomingOf, SECTORS, SECTOR_LABELS, adjustedCents, documentName, endFromTerm, fillSubject, fillTemplate,
+  type AlertKind, type ProcessKind, type StepDef, type Upcoming,
 } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -456,16 +456,46 @@ export const contractWorkRoutes = [
   defineRoute({
     method: 'GET',
     url: '/contracts/:id/timeline',
-    summary: 'Linha do tempo: alterações, versões, processos, notificações, e-mails, documentos e tarefas',
+    summary: 'Linha do tempo única do contrato: tudo o que aconteceu, por assunto, com críticos em destaque e próximos prazos',
     tag: 'Contratos',
     module: 'contratos',
     params: z.object({ id: z.string().uuid() }),
     handler: async ({ app, auth, params }) => {
       const c = await loadContract(app.db, auth, params.id);
-      const events = await app.db.select({ id: s.contractEvents.id, type: s.contractEvents.type, summary: s.contractEvents.summary, at: s.contractEvents.occurredAt, actor: s.users.name }).from(s.contractEvents).leftJoin(s.users, eq(s.users.id, s.contractEvents.actorId)).where(eq(s.contractEvents.contractId, c.id)).orderBy(desc(s.contractEvents.occurredAt)).limit(500);
-      const emails = await app.db.select({ id: s.emailMessages.id, kind: s.emailMessages.kind, to: s.emailMessages.toAddress, cc: s.emailMessages.ccAddress, subject: s.emailMessages.subject, status: s.emailMessages.status, error: s.emailMessages.error, at: s.emailMessages.createdAt }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, auth.tenantId), eq(s.emailMessages.contractId, c.id))).orderBy(desc(s.emailMessages.createdAt)).limit(200);
-      const tasks = await app.db.select({ id: s.activities.id, title: s.activities.title, dueAt: s.activities.dueAt, completedAt: s.activities.completedAt, owner: s.users.name }).from(s.activities).leftJoin(s.users, eq(s.users.id, s.activities.ownerId)).where(and(eq(s.activities.tenantId, auth.tenantId), eq(s.activities.contractId, c.id), isNull(s.activities.deletedAt))).orderBy(desc(s.activities.createdAt)).limit(200);
-      return { events, emails, tasks };
+      const today = new Date().toISOString().slice(0, 10);
+      const T = auth.tenantId;
+      const events = await app.db.select({ id: s.contractEvents.id, type: s.contractEvents.type, summary: s.contractEvents.summary, payload: s.contractEvents.payload, at: s.contractEvents.occurredAt, actor: s.users.name }).from(s.contractEvents).leftJoin(s.users, eq(s.users.id, s.contractEvents.actorId)).where(and(eq(s.contractEvents.tenantId, T), eq(s.contractEvents.contractId, c.id))).orderBy(desc(s.contractEvents.occurredAt)).limit(1000);
+      const emails = await app.db.select({ id: s.emailMessages.id, kind: s.emailMessages.kind, to: s.emailMessages.toAddress, cc: s.emailMessages.ccAddress, subject: s.emailMessages.subject, status: s.emailMessages.status, error: s.emailMessages.error, at: s.emailMessages.createdAt }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, T), eq(s.emailMessages.contractId, c.id))).orderBy(desc(s.emailMessages.createdAt)).limit(300);
+      const tasks = await app.db.select({ id: s.activities.id, title: s.activities.title, dueAt: s.activities.dueAt, completedAt: s.activities.completedAt, createdAt: s.activities.createdAt, owner: s.users.name }).from(s.activities).leftJoin(s.users, eq(s.users.id, s.activities.ownerId)).where(and(eq(s.activities.tenantId, T), eq(s.activities.contractId, c.id), isNull(s.activities.deletedAt))).orderBy(desc(s.activities.createdAt)).limit(300);
+      const iso = (d: Date | string | null) => (d ? (typeof d === 'string' ? d : d.toISOString()) : null);
+      const items = [
+        ...events.map((e) => ({ id: `ev-${e.id}`, at: iso(e.at)!, category: timelineCategory(e.type), type: e.type, title: e.summary, sub: e.actor ?? 'Sistema', critical: timelineCritical(e.type, e.payload) })),
+        ...emails.map((e) => ({ id: `em-${e.id}`, at: iso(e.at)!, category: 'emails' as const, type: 'email', title: `E-mail “${e.subject}” para ${e.to}${e.cc ? ` (cópia ${e.cc})` : ''}`, sub: e.status === 'enviado' ? 'Enviado' : e.status === 'ignorado' ? 'Não enviado: SMTP não configurado' : `Falhou: ${e.error ?? ''}`, critical: e.status === 'erro' })),
+        ...tasks.map((t) => {
+          const late = !t.completedAt && !!t.dueAt && iso(t.dueAt)!.slice(0, 10) < today;
+          return { id: `ta-${t.id}`, at: iso(t.completedAt) ?? iso(t.createdAt)!, category: 'tarefas' as const, type: 'tarefa', title: `Tarefa: ${t.title}`, sub: `${t.owner ?? ''}${t.dueAt ? ` · prazo ${iso(t.dueAt)!.slice(0, 10).split('-').reverse().join('/')}` : ''}${t.completedAt ? ' · concluída' : late ? ' · atrasada' : ' · aberta'}`, critical: late };
+        }),
+      ].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+      const counts = Object.fromEntries(TIMELINE_CATEGORIES.map((k) => [k, items.filter((x) => x.category === k).length]));
+
+      // próximos prazos do contrato
+      const v = await currentVersion(app.db, c);
+      const up: Upcoming[] = [];
+      if (!c.archivedAt) {
+        if (v?.endAt) up.push({ kind: 'termino', on: v.endAt, title: `Término da vigência (versão ${v.version})` });
+        if (v?.renewalAt) up.push({ kind: 'renovacao', on: v.renewalAt, title: 'Data de renovação' });
+      }
+      const alerts = await app.db.select({ kind: s.contractAlerts.kind, dueAt: s.contractAlerts.dueAt }).from(s.contractAlerts).where(and(eq(s.contractAlerts.tenantId, T), eq(s.contractAlerts.contractId, c.id), eq(s.contractAlerts.status, 'aberto')));
+      for (const a of alerts) if (a.dueAt) up.push({ kind: 'alerta', on: a.dueAt, title: `Alerta: ${ALERT_LABELS[a.kind as AlertKind] ?? a.kind}` });
+      const procs = await app.db.select({ kind: s.contractProcesses.kind, dueAt: s.contractProcesses.dueAt }).from(s.contractProcesses).where(and(eq(s.contractProcesses.tenantId, T), eq(s.contractProcesses.contractId, c.id), eq(s.contractProcesses.status, 'aberto')));
+      for (const p of procs) if (p.dueAt) up.push({ kind: 'processo', on: p.dueAt, title: `Processo de ${PROCESS_LABELS[p.kind as ProcessKind]?.toLowerCase() ?? p.kind}` });
+      const clauses = await app.db.select({ title: s.contractClauses.title, reference: s.contractClauses.reference, deadline: s.contractClauses.deadline }).from(s.contractClauses).where(and(eq(s.contractClauses.tenantId, T), eq(s.contractClauses.contractId, c.id), isNull(s.contractClauses.supersededAt)));
+      for (const k of clauses) if (k.deadline && k.deadline >= today) up.push({ kind: 'clausula', on: k.deadline, title: `${k.reference ? (/^cl[aá]usula/i.test(k.reference) ? k.reference : `Cláusula ${k.reference}`) : 'Cláusula'}: ${k.title}` });
+      const occ = await app.db.select({ id: s.contractOccurrences.id, title: s.contractOccurrences.title, due: s.contractOccurrences.responseDueAt, last: sql<string | null>`(select u.status from contract_occurrence_updates u where u.occurrence_id = "contract_occurrences"."id" order by u.created_at desc limit 1)` }).from(s.contractOccurrences).where(and(eq(s.contractOccurrences.tenantId, T), eq(s.contractOccurrences.contractId, c.id)));
+      for (const o of occ) if (o.due && (!o.last || o.last === 'aberta' || o.last === 'defesa_enviada')) up.push({ kind: 'ocorrencia', on: o.due, title: `Responder ocorrência: ${o.title}` });
+      for (const t of tasks) if (!t.completedAt && t.dueAt) up.push({ kind: 'tarefa', on: iso(t.dueAt)!.slice(0, 10), title: t.title });
+      const upcoming = upcomingOf(up, today).slice(0, 12);
+      return { items, counts, upcoming, today, events, emails, tasks };
     },
   }),
 ];

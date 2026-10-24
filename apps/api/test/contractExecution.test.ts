@@ -43,6 +43,18 @@ describe('execução do contrato', () => {
     expect(ex.parties.current.find((p: { role: string }) => p.role === 'fiscal_tecnico')).toMatchObject({ person: { name: 'Fiscal Fictício Dois' }, history: 1 });
     expect(ex.certificateDue).toMatchObject({ stage: 'meio', requested: false });
 
+    // linha do tempo única: assuntos, críticos em destaque e próximos prazos
+    const tl0 = ok(await lucas.get(`/contracts/${id}/timeline`)).json();
+    const crit = tl0.items.filter((x: { critical: boolean }) => x.critical).map((x: { title: string }) => x.title).join(' | ');
+    expect(crit).toMatch(/VIOLADO/);
+    expect(crit).toMatch(/Multa por indisponibilidade/);
+    expect(tl0.items.find((x: { title: string }) => /Fiscal Fictício Dois/.test(x.title))).toMatchObject({ category: 'execucao', critical: false });
+    expect(tl0.counts.execucao).toBeGreaterThanOrEqual(5);
+    expect(tl0.counts.contrato).toBeGreaterThan(0);
+    expect(tl0.upcoming.map((u: { kind: string }) => u.kind)).toEqual(expect.arrayContaining(['ocorrencia', 'clausula']));
+    expect(tl0.upcoming.find((u: { kind: string }) => u.kind === 'ocorrencia')).toMatchObject({ days: 2, title: 'Responder ocorrência: Multa por indisponibilidade' });
+    expect(tl0.upcoming.some((u: { kind: string }) => u.kind === 'termino')).toBe(false); // termina daqui a ~5 meses, fora do horizonte
+
     // central de atenção mostra a execução
     const att = ok(await carlos.get('/contracts/attention')).json().items.filter((x: { contractId: string; source: string }) => x.contractId === id && x.source === 'execucao').map((x: { kind: string }) => x.kind).sort();
     expect(att).toEqual(['atestado', 'clausula', 'ocorrencia', 'sla_violado']);
@@ -60,5 +72,7 @@ describe('execução do contrato', () => {
     expect(dl.statusCode).toBe(200);
     const tl = ok(await carlos.get(`/contracts/${id}/timeline`)).json();
     expect(JSON.stringify(tl)).toMatch(/Atestado de capacidade técnica: Recebido/);
+    expect(tl.upcoming.some((u: { kind: string }) => u.kind === 'ocorrencia')).toBe(false); // revertida não pede mais resposta
+    expect((await ctx.app.inject({ method: 'GET', url: `/api/v1/contracts/${id}/timeline` })).statusCode).toBe(401);
   });
 });

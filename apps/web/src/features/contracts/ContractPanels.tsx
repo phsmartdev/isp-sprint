@@ -202,30 +202,4 @@ export function AlertList({ alerts, onResolve, showContract }: { alerts: Alert[]
   );
 }
 
-type Timeline = { events: { id: string; type: string; summary: string; at: string; actor: string | null }[]; emails: { id: string; kind: string; to: string; cc: string | null; subject: string; status: string; error: string | null; at: string }[]; tasks: { id: string; title: string; dueAt: string | null; completedAt: string | null; owner: string | null }[] };
-export function TimelinePanel({ c }: { c: ContractDetail }) {
-  const q = useQuery({ queryKey: ['contract-timeline', c.id, c.currentVersion, c.stage], queryFn: () => api<Timeline>(`/contracts/${c.id}/timeline`) });
-  const [f, setF] = useState<'tudo' | 'emails' | 'tarefas'>('tudo');
-  if (q.isLoading || !q.data) return <LoadingRows rows={5} />;
-  const items = [
-    ...q.data.events.map((e) => ({ id: e.id, at: e.at, kind: 'evento', title: e.summary, sub: e.actor ?? 'Sistema' })),
-    ...(f !== 'tarefas' ? q.data.emails.map((e) => ({ id: e.id, at: e.at, kind: 'email', title: `E-mail “${e.subject}” para ${e.to}${e.cc ? ` (cópia ${e.cc})` : ''}`, sub: e.status === 'enviado' ? 'Enviado' : e.status === 'ignorado' ? 'Não enviado: SMTP não configurado' : `Falhou: ${e.error ?? ''}` })) : []),
-    ...(f !== 'emails' ? q.data.tasks.map((t) => ({ id: t.id, at: t.dueAt ?? '', kind: 'tarefa', title: `Tarefa: ${t.title}`, sub: `${t.owner ?? ''}${t.dueAt ? ` · prazo ${fmtDate(t.dueAt)}` : ''}${t.completedAt ? ' · concluída' : ' · aberta'}` })) : []),
-  ].filter((x) => f === 'tudo' || (f === 'emails' ? x.kind === 'email' : x.kind === 'tarefa')).sort((a, b) => (a.at < b.at ? 1 : -1));
-  return (
-    <div>
-      <div className="mb-3 flex gap-2" role="group" aria-label="Filtrar linha do tempo">
-        {(['tudo', 'emails', 'tarefas'] as const).map((k) => <button key={k} aria-pressed={f === k} onClick={() => setF(k)} className={clsx('rounded-full border px-3 py-1 text-sm font-semibold', f === k ? 'border-primary bg-primary text-white' : 'border-line text-ink')}>{k === 'tudo' ? 'Tudo' : k === 'emails' ? 'E-mails' : 'Tarefas'}</button>)}
-      </div>
-      <ol className="relative space-y-3 border-l-2 border-line pl-5">
-        {items.map((x) => (
-          <li key={`${x.kind}-${x.id}`} className="relative">
-            <span className={clsx('absolute -left-[27px] top-1 h-3 w-3 rounded-circle border-2 border-surface', x.kind === 'email' ? 'bg-purple' : x.kind === 'tarefa' ? 'bg-warning' : 'bg-primary')} aria-hidden />
-            <p className="text-sm text-ink">{x.title}</p>
-            <p className="text-xs text-muted">{x.at ? fmtDateTime(x.at) : ''} · {x.sub}</p>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
+export { TimelinePanel } from './ContractTimeline';
