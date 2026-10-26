@@ -13,10 +13,10 @@
  */
 import type { AccessLevel, Module } from './access';
 
-export const BUSINESS_MODULES = ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios'] as const;
+export const BUSINESS_MODULES = ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento'] as const;
 export type BusinessModule = (typeof BUSINESS_MODULES)[number];
 export const BUSINESS_MODULE_LABELS: Record<BusinessModule, string> = {
-  crm: 'CRM', marketing: 'Marketing', produto: 'Produto', gestao_time: 'Gestão de Time', contratos: 'Contratos', projetos: 'Projetos', relatorios: 'Relatórios',
+  crm: 'CRM', marketing: 'Marketing', produto: 'Produto', gestao_time: 'Gestão de Time', contratos: 'Contratos', projetos: 'Projetos', relatorios: 'Relatórios', orcamento: 'Recursos e Orçamento',
 };
 export const BUSINESS_MODULE_HINTS: Record<BusinessModule, string> = {
   crm: 'Oportunidades, propostas, aprovações, contas, atividades, Sucesso do Cliente e e-mail.',
@@ -26,6 +26,7 @@ export const BUSINESS_MODULE_HINTS: Record<BusinessModule, string> = {
   contratos: 'Contratos, processos por setor, renovações, reajustes, atas e modelos.',
   projetos: 'Projetos, marcos e o quadro de tarefas.',
   relatorios: 'Relatórios e Inteligência; cada seção depende do módulo de origem estar ligado.',
+  orcamento: 'Planejamento orçamentário por centro de custo, gastos, Budget Guardião, ferramentas, softwares, contratos, compras e indicadores de custo.',
 };
 
 /** Dono de negócio de cada módulo técnico. 'fundacao' = cadastro ou serviço compartilhado, nunca desligado. */
@@ -38,6 +39,7 @@ export const MODULE_OWNER: Record<Module, BusinessModule | 'fundacao'> = {
   contratos: 'contratos', projetos: 'projetos',
   desempenho: 'gestao_time', resultados: 'gestao_time',
   relatorios: 'relatorios', inteligencia: 'relatorios',
+  orcamento: 'orcamento',
 };
 
 // ------------------------------------------------------------------ funcionalidades
@@ -66,6 +68,8 @@ export const FEATURES = [
   { key: 'projetos.tarefas', module: 'projetos', label: 'Quadro de tarefas' },
   { key: 'relatorios.comercial', module: 'relatorios', label: 'Relatórios e inteligência comercial', requires: ['crm'] },
   { key: 'relatorios.contratos', module: 'relatorios', label: 'Inteligência de contratos', requires: ['contratos'] },
+  { key: 'orcamento.planejamento', module: 'orcamento', label: 'Planejamento, gastos, Budget Guardião e indicadores de custo' },
+  { key: 'orcamento.recursos', module: 'orcamento', label: 'Ferramentas, softwares, contratos, assinaturas, compras e fornecedores' },
 ] as const satisfies readonly FeatureDef[];
 export type FeatureKey = (typeof FEATURES)[number]['key'];
 export const featureDef = (k: FeatureKey): FeatureDef => FEATURES.find((f) => f.key === k)!;
@@ -114,6 +118,11 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/intelligence/contracts', feature: 'relatorios.contratos' },
   { prefix: '/intelligence', feature: 'relatorios.comercial' },
   { prefix: '/reports', feature: 'relatorios.comercial' },
+  // Recursos e Orçamento
+  { prefix: '/budget/assets', feature: 'orcamento.recursos' },
+  { prefix: '/budget/resources', feature: 'orcamento.recursos' },
+  { prefix: '/budget/purchases', feature: 'orcamento.recursos' },
+  { prefix: '/budget', feature: 'orcamento.planejamento' },
 ];
 
 export function routeFeature(method: string, url: string): FeatureKey | null {

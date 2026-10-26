@@ -40,7 +40,7 @@ describe('Etapa 1: módulos de negócio', () => {
     expect(Object.keys(me.modules).sort()).toEqual([...BUSINESS_MODULES].sort());
     expect(me.actions).toMatchObject({ ver_financeiro: true, exportar: true });
     expect((await lucas.get('/admin/modules')).statusCode).toBe(403);
-    expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(7);
+    expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(8);
   });
 
   it('perfil Implantação: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {

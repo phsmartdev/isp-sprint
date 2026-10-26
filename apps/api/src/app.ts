@@ -22,6 +22,8 @@ import { homeRoutes } from './routes/home';
 import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
 import { stageFunnelRoutes } from './routes/stageFunnel';
+import { budgetRoutes } from './routes/budget';
+import { budgetResourceRoutes } from './routes/budgetResources';
 import { insightsRoutes } from './routes/insights';
 import { integrationRoutes } from './routes/integrations';
 import { customFieldRoutes } from './routes/customFields';
@@ -185,6 +187,8 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...reportRoutes,
     ...intelligenceRoutes,
     ...stageFunnelRoutes,
+    ...budgetRoutes,
+    ...budgetResourceRoutes,
     ...insightsRoutes,
     ...integrationRoutes,
     ...customFieldRoutes,

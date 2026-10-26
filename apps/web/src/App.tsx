@@ -30,6 +30,9 @@ import { HomePage } from './pages/Home';
 import { LeadsPage } from './pages/Leads';
 import { OpportunitiesPage } from './pages/Opportunities';
 import { NewOpportunityPage, OpportunityWorkspacePage } from './pages/OpportunityWorkspace';
+import { BudgetPlanningPage } from './pages/budget/Planning';
+import { BudgetAssetsPage, BudgetContractsPage, BudgetPurchasesPage, BudgetSoftwarePage } from './pages/budget/Resources';
+import { BudgetIndicatorsPage } from './pages/budget/Indicators';
 import { CustomersPage } from './pages/Customers';
 import { CustomerDetailPage } from './pages/CustomerDetail';
 import { ActivitiesPage } from './pages/Activities';
@@ -123,6 +126,12 @@ export function App() {
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />
         <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
         <Route path="contracts" element={<Gate module="contratos"><ContractsPage /></Gate>} />
+        <Route path="orcamento" element={<Gate module="orcamento" feature="orcamento.planejamento"><BudgetPlanningPage /></Gate>} />
+        <Route path="orcamento/ferramentas" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetAssetsPage /></Gate>} />
+        <Route path="orcamento/softwares" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetSoftwarePage /></Gate>} />
+        <Route path="orcamento/contratos" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetContractsPage /></Gate>} />
+        <Route path="orcamento/compras" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetPurchasesPage /></Gate>} />
+        <Route path="orcamento/indicadores" element={<Gate module="orcamento" feature="orcamento.planejamento"><BudgetIndicatorsPage /></Gate>} />
         <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />
         <Route path="contracts/atas/:id" element={<Gate module="contratos" feature="contratos.atas"><ArpDetailPage /></Gate>} />
         <Route path="contracts/:id" element={<Gate module="contratos"><ContractDetailPage /></Gate>} />

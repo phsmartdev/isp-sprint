@@ -92,7 +92,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'orcamento', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -3958,7 +3958,7 @@ export const tenantModules = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.module] }),
-    moduleCk: check('tenant_modules_module_ck', inList('module', ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios'])),
+    moduleCk: check('tenant_modules_module_ck', inList('module', ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento'])),
     modeCk: check('tenant_modules_mode_ck', inList('mode', ['todos', 'liberados'])),
   }),
 );
@@ -4279,3 +4279,256 @@ export const technicalCertificates = pgTable('technical_certificates', {
   createdAt: createdAt(),
   supersededAt: ts('superseded_at'),
 }, (t) => ({ idx: index('technical_certificates_idx').on(t.tenantId, t.contactId), statusCk: check('technical_certificates_status_ck', inList('status', ['a_solicitar', 'solicitado', 'recebido', 'recusado'])) }));
+
+// =============================================================== Recursos e Orçamento (Política de Orçamento — Anexo I)
+/** Plano de contas analítico (hierarquia por conta-mãe e código 3 › 3.1 › 3.1.02). Despesa aparece negativa. */
+export const budgetAccounts = pgTable('budget_accounts', {
+  id: id(),
+  tenantId: tenantId(),
+  parentId: uuid('parent_id'),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  nature: text('nature').notNull().default('despesa'),
+  description: text('description'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('budget_accounts_uq').on(t.tenantId, t.code), natureCk: check('budget_accounts_nature_ck', inList('nature', ['despesa', 'receita'])) }));
+
+/** Centros de custo: o líder (e quem ele indicar) planeja e consome o orçamento do centro. */
+export const costCenters = pgTable('cost_centers', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  leaderId: uuid('leader_id').references(() => users.id),
+  memberIds: uuid('member_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('cost_centers_uq').on(t.tenantId, t.code) }));
+
+/** Planejamento trimestral de um centro de custo (validado pela Diretoria). */
+export const budgetPlans = pgTable('budget_plans', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  year: integer('year').notNull(),
+  quarter: integer('quarter').notNull(),
+  status: text('status').notNull().default('rascunho'),
+  note: text('note'),
+  submittedAt: ts('submitted_at'),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  rowVersion: rowVersion(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('budget_plans_uq').on(t.costCenterId, t.year, t.quarter), statusCk: check('budget_plans_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'devolvido'])), qCk: check('budget_plans_q_ck', sql`quarter between 1 and 4`) }));
+
+/** Item planejado: o quê, como e quando (mês), em qual conta e quanto. Aprovado um a um ou pelo total do centro. */
+export const budgetLines = pgTable('budget_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  planId: uuid('plan_id').notNull().references(() => budgetPlans.id),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  accountId: uuid('account_id').notNull().references(() => budgetAccounts.id),
+  what: text('what').notNull(),
+  how: text('how'),
+  month: text('month').notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  itemType: text('item_type').notNull().default('outro'),
+  supplierId: uuid('supplier_id'),
+  resourceId: uuid('resource_id'),
+  status: text('status').notNull().default('rascunho'),
+  decisionNote: text('decision_note'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  deletedAt: ts('deleted_at'),
+}, (t) => ({ idx: index('budget_lines_idx').on(t.tenantId, t.costCenterId, t.month), statusCk: check('budget_lines_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'])), amountCk: check('budget_lines_amount_ck', sql`amount_cents > 0`) }));
+
+/** Budget Guardião: ajuste dentro do trimestre (até 15% com justificativa; acima, Diretoria). A decisão fica também no histórico (budget_events). */
+export const budgetAdjustments = pgTable('budget_adjustments', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  year: integer('year').notNull(),
+  quarter: integer('quarter').notNull(),
+  accountId: uuid('account_id').notNull().references(() => budgetAccounts.id),
+  month: text('month').notNull(),
+  deltaCents: bigint('delta_cents', { mode: 'number' }).notNull(),
+  justification: text('justification').notNull(),
+  pct: doublePrecision('pct'),
+  status: text('status').notNull(),
+  requestedBy: uuid('requested_by').references(() => users.id),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_adjustments_idx').on(t.tenantId, t.costCenterId, t.year, t.quarter), statusCk: check('budget_adjustments_status_ck', inList('status', ['registrado', 'pendente', 'aprovado', 'recusado'])) }));
+
+/** Gasto realizado (consumo do orçamento), com comprovante. Cancelamento exige motivo e fica registrado. */
+export const budgetExpenses = pgTable('budget_expenses', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  accountId: uuid('account_id').notNull().references(() => budgetAccounts.id),
+  lineId: uuid('line_id').references(() => budgetLines.id),
+  occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+  description: text('description').notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  supplierId: uuid('supplier_id'),
+  paymentMethod: text('payment_method'),
+  financeCheck: boolean('finance_check').notNull().default(false),
+  docName: text('doc_name'),
+  docMime: text('doc_mime'),
+  docSize: integer('doc_size'),
+  docData: bytea('doc_data'),
+  resourceId: uuid('resource_id'),
+  assetId: uuid('asset_id'),
+  purchaseId: uuid('purchase_id'),
+  status: text('status').notNull().default('valido'),
+  cancelReason: text('cancel_reason'),
+  cancelledAt: ts('cancelled_at'),
+  cancelledBy: uuid('cancelled_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_expenses_idx').on(t.tenantId, t.costCenterId, t.occurredOn), statusCk: check('budget_expenses_status_ck', inList('status', ['valido', 'cancelado'])), amountCk: check('budget_expenses_amount_ck', sql`amount_cents > 0`) }));
+
+/** Revisão mensal: justificativa de desvio por categoria (append-only; vale a última). */
+export const budgetReviews = pgTable('budget_reviews', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  month: text('month').notNull(),
+  accountId: uuid('account_id').notNull().references(() => budgetAccounts.id),
+  plannedCents: bigint('planned_cents', { mode: 'number' }).notNull(),
+  realizedCents: bigint('realized_cents', { mode: 'number' }).notNull(),
+  justification: text('justification').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_reviews_idx').on(t.tenantId, t.costCenterId, t.month) }));
+
+/** Histórico do módulo (append-only): tudo o que foi planejado, aprovado, ajustado e gasto, para reportar à Diretoria. */
+export const budgetEvents = pgTable('budget_events', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id'),
+  entity: text('entity').notNull(),
+  entityId: uuid('entity_id'),
+  action: text('action').notNull(),
+  summary: text('summary').notNull(),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_events_idx').on(t.tenantId, t.createdAt) }));
+
+export const suppliers = pgTable('suppliers', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  document: text('document'),
+  category: text('category'),
+  email: text('email'),
+  phone: text('phone'),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ idx: index('suppliers_idx').on(t.tenantId, t.name) }));
+
+/** Ferramentas e equipamentos do comercial (patrimônio), com responsável e depreciação linear. */
+export const resourceAssets = pgTable('resource_assets', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  accountId: uuid('account_id').references(() => budgetAccounts.id),
+  name: text('name').notNull(),
+  tag: text('tag'),
+  serial: text('serial'),
+  category: text('category').notNull().default('outro'),
+  holderId: uuid('holder_id').references(() => users.id),
+  supplierId: uuid('supplier_id'),
+  acquiredOn: date('acquired_on', { mode: 'string' }).notNull(),
+  valueCents: bigint('value_cents', { mode: 'number' }).notNull(),
+  usefulLifeMonths: integer('useful_life_months'),
+  status: text('status').notNull().default('em_uso'),
+  notes: text('notes'),
+  expenseId: uuid('expense_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ idx: index('resource_assets_idx').on(t.tenantId, t.costCenterId), statusCk: check('resource_assets_status_ck', inList('status', ['em_uso', 'estoque', 'manutencao', 'baixado'])) }));
+
+/** Softwares e licenças, contratos de serviço e assinaturas. Credenciais ficam só no cofre (Vault): aqui, a referência. */
+export const resourceContracts = pgTable('resource_contracts', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  accountId: uuid('account_id').references(() => budgetAccounts.id),
+  supplierId: uuid('supplier_id'),
+  name: text('name').notNull(),
+  object: text('object'),
+  seats: integer('seats'),
+  currency: text('currency').notNull().default('BRL'),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  fxRate: doublePrecision('fx_rate'),
+  period: text('period').notNull().default('mensal'),
+  startOn: date('start_on', { mode: 'string' }).notNull(),
+  endOn: date('end_on', { mode: 'string' }),
+  renewalOn: date('renewal_on', { mode: 'string' }),
+  paymentDay: integer('payment_day'),
+  paymentMethod: text('payment_method'),
+  vaultRegistered: boolean('vault_registered').notNull().default(false),
+  vaultRef: text('vault_ref'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  legalReviewed: boolean('legal_reviewed').notNull().default(false),
+  directorSigned: boolean('director_signed').notNull().default(false),
+  status: text('status').notNull().default('ativo'),
+  reviewOn: date('review_on', { mode: 'string' }),
+  notes: text('notes'),
+  cancelReason: text('cancel_reason'),
+  cancelledAt: ts('cancelled_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('resource_contracts_idx').on(t.tenantId, t.kind, t.costCenterId),
+  kindCk: check('resource_contracts_kind_ck', inList('kind', ['software', 'contrato', 'assinatura'])),
+  statusCk: check('resource_contracts_status_ck', inList('status', ['ativo', 'suspenso', 'cancelado'])),
+  curCk: check('resource_contracts_currency_ck', inList('currency', ['BRL', 'USD'])),
+  periodCk: check('resource_contracts_period_ck', inList('period', ['mensal', 'trimestral', 'anual', 'unico'])),
+}));
+
+/** Compras: bens de consumo (Compras cota) ou específicas/grande escala (negociação, Jurídico e assinatura da Diretoria). */
+export const purchaseRequests = pgTable('purchase_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  accountId: uuid('account_id').references(() => budgetAccounts.id),
+  lineId: uuid('line_id').references(() => budgetLines.id),
+  title: text('title').notNull(),
+  specification: text('specification').notNull(),
+  kind: text('kind').notNull().default('consumo'),
+  estimatedCents: bigint('estimated_cents', { mode: 'number' }).notNull(),
+  neededBy: date('needed_by', { mode: 'string' }),
+  quotes: jsonb('quotes').$type<{ supplier: string; amountCents: number; deliveryDays: number | null; note: string | null; chosen: boolean }[]>().notNull().default([]),
+  supplierId: uuid('supplier_id'),
+  status: text('status').notNull().default('solicitado'),
+  financeCheck: boolean('finance_check').notNull().default(false),
+  legalReview: boolean('legal_review').notNull().default(false),
+  directorSigned: boolean('director_signed').notNull().default(false),
+  directorRelease: text('director_release'),
+  expenseId: uuid('expense_id'),
+  requestedBy: uuid('requested_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('purchase_requests_idx').on(t.tenantId, t.costCenterId, t.status),
+  kindCk: check('purchase_requests_kind_ck', inList('kind', ['consumo', 'especifica'])),
+  statusCk: check('purchase_requests_status_ck', inList('status', ['solicitado', 'em_cotacao', 'aprovado', 'comprado', 'recebido', 'cancelado'])),
+}));
