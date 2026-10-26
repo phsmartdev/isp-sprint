@@ -60,6 +60,15 @@ describe('jornada automática e kickoff', () => {
     const board = ok(await carlos.get(`/pipeline?pipelineId=${pipeId.pipeline_id}`)).json();
     const card = board.stages.flatMap((st: { cards: { id: string }[] }) => st.cards).find((c: { id: string }) => c.id === csOppId);
     expect(card.accountContracts.map((c: { number: string }) => c.number).sort()).toEqual(['CS-1', 'CS-2']);
+    // troca o CS só do contrato novo: a conta e o outro contrato mantêm o CSM
+    const before = ok(await carlos.get(`/cs/accounts/${contactId}/contracts`)).json();
+    ok(await carlos.patch(`/cs/contracts/${c2}/csm`, { csmId: lucas.me.user.id, justification: 'Especialista em Wi-Fi' }));
+    const after = ok(await carlos.get(`/cs/accounts/${contactId}/contracts`)).json();
+    expect(after.accountCsm.id).toBe(before.accountCsm.id);
+    expect(after.items.find((x: { number: string }) => x.number === 'CS-2')).toMatchObject({ csmId: lucas.me.user.id, ownCsm: true });
+    expect(after.items.find((x: { number: string }) => x.number === 'CS-1').ownCsm).toBe(false);
+    expect(ok(await carlos.get(`/cs/journeys?contractId=${c2}`)).json().items[0].csmId).toBe(lucas.me.user.id);
+    expect((await lucas.patch(`/cs/contracts/${c2}/csm`, { csmId: null })).statusCode).toBeGreaterThanOrEqual(403);
     expect(card.valueCents).toBe(1_800_000);
   });
 

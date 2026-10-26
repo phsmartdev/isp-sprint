@@ -273,14 +273,26 @@ test('Sucesso do Cliente por conta: o card da conta lista os contratos e um cont
   };
   const contactId = await sell('CC-A', 500_000);
   await sell('CC-B', 200_000, contactId);
-  const pipe = lk.pipelines.find((p: { key: string }) => p.key === 'sucesso_cliente');
+  const pipe = (await api('get', '/meta/lookups')).pipelines.find((p: { key: string }) => p.key === 'sucesso_cliente');
   await page.goto(`/opportunities?pipelineId=${pipe.id}&q=${encodeURIComponent(name)}`);
   const list = page.getByLabel(`Contratos de ${name}`);
   await expect(list).toHaveCount(1); // um card por conta
   await expect(list).toContainText('2 contratos vigentes');
   await expect(list).toContainText('CC-A');
   await expect(list).toContainText('CC-B');
-  await list.getByRole('link', { name: /CC-B/ }).click();
+  // dentro do card da conta: troca o CS só do contrato CC-B
+  const card = (await api('get', `/opportunities?pipelineId=${pipe.id}&q=${encodeURIComponent(name)}`)).items[0];
+  await page.goto(`/opportunities/${card.id}`);
+  const box = page.getByLabel('Contratos da conta');
+  await expect(box).toContainText('CC-A');
+  await box.getByRole('button', { name: 'Trocar CS do contrato CC-B' }).click();
+  const dlg = page.getByRole('dialog', { name: 'CS do contrato CC-B' });
+  await dlg.getByLabel('CS responsável deste contrato').selectOption({ label: 'Lucas Lima' });
+  await dlg.getByLabel('Motivo (opcional)').fill('Especialista no serviço');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(box.getByRole('listitem').filter({ hasText: 'CC-B' })).toContainText('CS: Lucas Lima (só este contrato)');
+  await expect(box.getByRole('listitem').filter({ hasText: 'CC-A' })).not.toContainText('só este contrato');
+  await box.getByRole('link', { name: /CC-B/ }).click();
   await expect(page).toHaveURL(/\/contracts\//);
   await expect(page.getByRole('heading', { name: /Contrato CC-B/ })).toBeVisible();
 });

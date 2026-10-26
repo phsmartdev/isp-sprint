@@ -23,6 +23,7 @@ import { reportRoutes } from './routes/reports';
 import { intelligenceRoutes } from './routes/intelligence';
 import { stageFunnelRoutes } from './routes/stageFunnel';
 import { budgetRoutes } from './routes/budget';
+import { csContractRoutes } from './routes/csContracts';
 import { budgetResourceRoutes } from './routes/budgetResources';
 import { insightsRoutes } from './routes/insights';
 import { integrationRoutes } from './routes/integrations';
@@ -188,6 +189,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...intelligenceRoutes,
     ...stageFunnelRoutes,
     ...budgetRoutes,
+    ...csContractRoutes,
     ...budgetResourceRoutes,
     ...insightsRoutes,
     ...integrationRoutes,
