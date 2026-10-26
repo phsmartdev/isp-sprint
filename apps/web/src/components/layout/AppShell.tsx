@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail } from 'lucide-react';
+  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet } from 'lucide-react';
 import type { FeatureKey, Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -48,6 +48,14 @@ const NAV: NavEntry[] = [
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
     { to: '/projetos', label: 'Projetos', module: 'projetos' },
     { to: '/tarefas', label: 'Tarefas', module: 'atividades', feature: 'projetos.tarefas' },
+  ] },
+  { key: 'orcamento', label: 'Recursos e Orçamento', icon: <Wallet className={ICON} />, children: [
+    { to: '/orcamento', label: 'Planejamento orçamentário', module: 'orcamento', feature: 'orcamento.planejamento' },
+    { to: '/orcamento/ferramentas', label: 'Ferramentas e equipamentos', module: 'orcamento', feature: 'orcamento.recursos' },
+    { to: '/orcamento/softwares', label: 'Softwares e licenças', module: 'orcamento', feature: 'orcamento.recursos' },
+    { to: '/orcamento/contratos', label: 'Contratos e assinaturas', module: 'orcamento', feature: 'orcamento.recursos' },
+    { to: '/orcamento/compras', label: 'Compras e fornecedores', module: 'orcamento', feature: 'orcamento.recursos' },
+    { to: '/orcamento/indicadores', label: 'Custos e indicadores', module: 'orcamento', feature: 'orcamento.planejamento' },
   ] },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios', feature: 'relatorios.comercial' },
   { to: '/intelligence', label: 'Inteligência', icon: <Lightbulb className={ICON} />, module: 'inteligencia' },

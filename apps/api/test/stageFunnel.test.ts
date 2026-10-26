@@ -1,6 +1,7 @@
 /** Bloco 4: dias em cada etapa da negociação e conversão por etapa e do funil. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { addDays } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -39,7 +40,8 @@ describe('tempo por etapa e conversão do funil', () => {
     expect(Math.round(t[0].days)).toBe(4); // 3 + 1
     expect(Math.round(t[1].days)).toBe(3); // 2 + 1 (até agora)
 
-    const f = ok(await carlos.get(`/intelligence/stage-funnel?from=${today}&to=${today}`)).json();
+    const pipelineId = ok(await carlos.get(`/opportunities/${o.id}`)).json().pipelineId;
+    const f = ok(await carlos.get(`/intelligence/stage-funnel?from=${addDays(today, -1)}&to=${addDays(today, 1)}&pipelineId=${pipelineId}`)).json();
     expect(f.pipelines.length).toBeGreaterThan(0);
     expect(f.total).toBeGreaterThanOrEqual(1);
     const row = f.rows.find((r: { key: string }) => r.key === 'proposta');
