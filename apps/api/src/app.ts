@@ -166,6 +166,8 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
 
   // healthchecks fora do prefixo versionado
   app.get('/health/live', async () => ({ status: 'ok' }));
+  // versão no ar (commit do deploy da Vercel), para conferir se uma mudança já foi publicada
+  app.get('/health/version', async () => ({ commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null, env: process.env.VERCEL_ENV ?? null }));
   app.get('/health/ready', async (_req, reply) => {
     try {
       await db.execute(sql`select 1`);

@@ -47,9 +47,11 @@ function IntegrationCard({ item }: { item: Item }) {
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [showSnippet, setShowSnippet] = useState(false);
   const Icon = ICONS[item.kind];
+  // resultado do último teste fica no cartão (a mensagem é longa e o aviso some sozinho)
+  const [lastTest, setLastTest] = useState<{ ok: boolean; message: string; ip?: string | null; at: Date } | null>(null);
   const test = useMutation({
-    mutationFn: () => api<{ ok: boolean; message: string }>(`/admin/integrations/${item.kind}/test`, { method: 'POST' }),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: r.ok ? 'success' : 'error', message: `${KIND_NAME[item.kind] ?? item.name}: ${r.message}` }); },
+    mutationFn: () => api<{ ok: boolean; message: string; ip?: string | null }>(`/admin/integrations/${item.kind}/test`, { method: 'POST' }),
+    onSuccess: (r) => { setLastTest({ ...r, at: new Date() }); qc.invalidateQueries({ queryKey: ['admin', 'integrations'] }); toast({ tone: r.ok ? 'success' : 'error', message: `${KIND_NAME[item.kind] ?? item.name}: ${r.ok ? 'conectado' : 'falhou'} (detalhes no cartão)` }); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
   });
   const save = useMutation({
@@ -119,6 +121,16 @@ function IntegrationCard({ item }: { item: Item }) {
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+      {lastTest && (
+        <div role="status" className={`mt-4 border p-3 text-sm ${lastTest.ok ? 'border-success/40 bg-success-soft' : 'border-danger/40 bg-danger-soft'}`}>
+          <p className="font-semibold text-ink">{lastTest.ok ? 'Conexão funcionando' : 'Falha no teste'} <span className="font-normal text-muted">· {lastTest.at.toLocaleTimeString('pt-BR')}</span></p>
+          <p className="mt-1 break-words text-text">{lastTest.message}</p>
+          {lastTest.ip && (
+            <p className="mt-2 flex flex-wrap items-center gap-2"><span className="text-muted">IP de saída do servidor:</span><b className="num text-md text-ink">{lastTest.ip}</b>
+              <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => { void navigator.clipboard?.writeText(lastTest.ip!); toast({ tone: 'success', message: 'IP copiado' }); }}>Copiar</button></p>
           )}
         </div>
       )}

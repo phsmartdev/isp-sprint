@@ -32,7 +32,7 @@ export const ixcRoutes = [
       try { c = (await ixcConfig(app.db, auth.tenantId, { requireEnabled: false }))!; } catch (e) { return { ok: false, message: (e as Error).message }; }
       // IP por onde o servidor saiu neste teste (para conferir a liberação no IXC; sem proxy, ele muda)
       const ip = await egressIp(c);
-      const ipText = ip ? ` IP de saída neste teste: ${ip}${c.proxyUrl ? ' (proxy de IP fixo)' : ' (sem proxy, pode mudar na próxima consulta)'}.` : '';
+      const ipText = ip ? ` IP de saída neste teste: ${ip}${c.proxyUrl ? ' (proxy de IP fixo)' : ' (sem proxy, pode mudar na próxima consulta)'}.` : ' IP de saída: não foi possível identificar neste teste.';
       try {
         const r = await ixcList(c, 'cliente', { qtype: 'cliente.id', query: '0', oper: '>', rp: 1 });
         const message = `Conectado (somente leitura). O IXC tem ${r.total.toLocaleString('pt-BR')} cliente(s) cadastrados.${ipText}`;
