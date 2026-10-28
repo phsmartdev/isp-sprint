@@ -1,5 +1,6 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
+import { freshSnapshot } from '../services/cs';
 import { groupBy } from '../services/group';
 import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
@@ -282,10 +283,12 @@ export const opportunityRoutes = [
     params: IdParams,
     body: OpportunityTransition,
     handler: async ({ app, auth, params, body, req }) => {
+      let wasWon = false;
       await app.db.transaction(async (tx) => {
         const cur = await loadOpportunity(tx, auth, params.id);
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
         const from = cur.stage as OpportunityStage;
+        wasWon = from === 'ganha';
         // reabrir venda fechada ou perdida exige nível Equipe (supervisão) ou superior
         const pipes = await pipelinesOf(tx, auth.tenantId);
         const pipe = pipes.find((p) => p.id === cur.pipelineId);
@@ -357,6 +360,8 @@ export const opportunityRoutes = [
       await runAutomations(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage === 'ganha' ? { type: 'ganha' } : body.toStage === 'perdida' ? { type: 'perdida' } : { type: 'entrou_na_etapa', stage: body.toStage });
       await csOnStage(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage).catch((e) => req.log.error(e, 'jornada CS'));
       const dto = opportunityDto(await loadOpportunity(app.db, auth, params.id));
+      // ganhar (ou reabrir uma ganha) muda o valor anual consolidado da conta: Tier e IPC recalculam na hora
+      if (body.toStage === 'ganha' || wasWon) await freshSnapshot(app.db, auth.tenantId, dto.contactId).catch((e) => req.log.error(e, 'tier da conta'));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
       return dto;
     },

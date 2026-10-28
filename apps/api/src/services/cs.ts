@@ -215,6 +215,28 @@ export async function snapshotOf(db: DbOrTx, tenantId: string, contactId: string
   return (a?.snapshot as Snapshot | undefined) ?? null;
 }
 
+/**
+ * Snapshot atualizado: recalcula a conta quando uma oportunidade ou um contrato dela mudou depois do último cálculo
+ * (ganho, valor, aditivo, reajuste, etapa). Assim o Tier e o IPC acompanham o valor anual sem esperar a rotina diária.
+ */
+export async function freshSnapshot(db: DbOrTx, tenantId: string, contactId: string): Promise<Snapshot | null> {
+  const current = await snapshotOf(db, tenantId, contactId);
+  const [{ at } = { at: null }] = await db.execute<{ at: string | Date | null }>(sql`
+    select greatest(
+      (select max(updated_at) from opportunities where tenant_id = ${tenantId} and contact_id = ${contactId}),
+      (select max(updated_at) from contracts where tenant_id = ${tenantId} and contact_id = ${contactId})
+    ) as at`).then((r) => r.rows);
+  if (current && (!at || new Date(at).getTime() <= new Date(current.computedAt).getTime())) return current;
+  // prospect sem venda ganha nem contrato não vira conta do Sucesso do Cliente só por ter a ficha aberta
+  if (!current) {
+    const r = await db.execute<{ n: number }>(sql`
+      select (select count(*) from contracts where tenant_id = ${tenantId} and contact_id = ${contactId} and stage <> 'arquivado')
+           + (select count(*) from opportunities where tenant_id = ${tenantId} and contact_id = ${contactId} and stage = 'ganha') as n`);
+    if (!Number(r.rows[0]?.n)) return null;
+  }
+  return snapshotOf(db, tenantId, contactId, true);
+}
+
 /** Motivo da prioridade em uma frase (explicabilidade). */
 export function explain(sn: Snapshot) {
   const parts = [sn.criticality.reasons.slice(0, 3).map((r) => r.reason).join(', ')];

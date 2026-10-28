@@ -79,3 +79,26 @@ describe('ACV consolidado e Tier', () => {
     expect(tierOf2(50_000_000, CFG2.tierBands)).toBe('middle');
   });
 });
+
+import { distributeAccounts } from './cs';
+describe('distribuição da carteira entre CSMs', () => {
+  const accs = [
+    { id: 'a', acvCents: 600_000_00, csmId: null }, { id: 'b', acvCents: 300_000_00, csmId: null }, { id: 'c', acvCents: 250_000_00, csmId: null },
+    { id: 'd', acvCents: 50_000_00, csmId: null }, { id: 'e', acvCents: 0, csmId: null }, { id: 'f', acvCents: 0, csmId: null },
+  ];
+  it('equilibra o valor anual e, no empate, a quantidade', () => {
+    const r = distributeAccounts(accs, ['luiz', 'paulo'], false);
+    expect(r.assign.size).toBe(6);
+    const [l, p] = [r.load.get('luiz')!, r.load.get('paulo')!];
+    expect(Math.abs(l.acvCents - p.acvCents)).toBeLessThanOrEqual(50_000_00);
+    expect(l.count + p.count).toBe(6);
+    expect(r.assign.get('a')).toBe('luiz');
+    expect(r.assign.get('b')).toBe('paulo');
+  });
+  it('mantém quem já tem um dos CSMs escolhidos quando pedido', () => {
+    const r = distributeAccounts([{ ...accs[0]!, csmId: 'paulo' }, ...accs.slice(1)], ['luiz', 'paulo'], true);
+    expect(r.assign.has('a')).toBe(false);
+    expect(r.load.get('paulo')!.acvCents).toBeGreaterThanOrEqual(600_000_00);
+    expect(r.assign.get('b')).toBe('luiz');
+  });
+});

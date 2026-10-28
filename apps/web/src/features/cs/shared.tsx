@@ -112,3 +112,6 @@ export function PrintDeck({ slides, client }: { slides: Slide[]; client?: string
     </div>
   );
 }
+
+/** CSMs = usuários com o setor Sucesso do Cliente no cadastro (só eles aparecem nas listas de CSM). */
+export const csmsOf = <U extends { sectors?: string[] }>(users: U[] | undefined) => (users ?? []).filter((u) => u.sectors?.includes('sucesso_cliente'));

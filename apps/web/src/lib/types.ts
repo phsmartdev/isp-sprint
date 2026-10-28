@@ -19,7 +19,7 @@ export type Me = {
 export type Paged<T> = { items: T[]; page: number; pageSize: number; total: number };
 
 export type Lookups = {
-  users: { id: string; name: string; hasAvatar: boolean }[];
+  users: { id: string; name: string; hasAvatar: boolean; sectors: string[] }[];
   sources: { id: string; name: string }[];
   campaigns: { id: string; name: string; sourceId: string | null }[];
   pipelines: LookupPipeline[];

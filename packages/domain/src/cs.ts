@@ -186,6 +186,24 @@ export function tierOf(acvCents: number, b: CsConfig['tierBands']): Tier {
   return acvCents >= b.largeFromCents ? 'large' : acvCents >= b.middleFromCents ? 'middle' : 'small';
 }
 
+/**
+ * Distribui contas entre CSMs equilibrando o valor anual (ACV) e a quantidade: as maiores primeiro, cada uma para quem
+ * está com menos valor somado (empate: menos contas). Quem já tem CSM fica com ele quando `keep` está ligado.
+ */
+export function distributeAccounts(accounts: { id: string; acvCents: number; csmId: string | null }[], csmIds: string[], keep: boolean) {
+  const load = new Map(csmIds.map((id) => [id, { acvCents: 0, count: 0 }]));
+  const out = new Map<string, string>();
+  const fixed = keep ? accounts.filter((a) => a.csmId && load.has(a.csmId)) : [];
+  for (const a of fixed) { const l = load.get(a.csmId!)!; l.acvCents += a.acvCents; l.count++; }
+  const free = accounts.filter((a) => !fixed.includes(a)).sort((x, y) => y.acvCents - x.acvCents || x.id.localeCompare(y.id));
+  for (const a of free) {
+    const [to] = [...load.entries()].sort(([ia, la], [ib, lb]) => la.acvCents - lb.acvCents || la.count - lb.count || csmIds.indexOf(ia) - csmIds.indexOf(ib))[0]!;
+    const l = load.get(to)!; l.acvCents += a.acvCents; l.count++;
+    out.set(a.id, to);
+  }
+  return { assign: out, load };
+}
+
 // ------------------------------------------------------------------ IPC
 export type IpcInput = Partial<Record<IpcCriterion, IpcLevel | null>>;
 export function ipcScore(input: IpcInput, cfg: CsConfig) {
