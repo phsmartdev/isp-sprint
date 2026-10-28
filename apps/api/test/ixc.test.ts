@@ -3,15 +3,17 @@
  * POST /webservice/v1/<tabela>, Basic usuário:token, cabeçalho ixcsoft: listar → { page, total, registros }.
  * O simulado registra TODA requisição: nenhuma pode sair sem `listar` ou para tabela fora da lista.
  */
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { createServer, request as httpRequest, type Server } from 'node:http';
+import { connect as netConnect, type AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client;
-let server: Server, url = '';
+let server: Server, proxy: Server, url = '', proxyUrl = '';
+let blockIp = false;
+const viaProxy: string[] = [];
 const seen: { path: string; ixcsoft: string | undefined; method: string; auth: string | undefined; body: Record<string, string> }[] = [];
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const DOC = '12.345.678/0001-90';
@@ -30,7 +32,10 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
       const body = b ? JSON.parse(b) as Record<string, string> : {};
+      if (req.url === '/ip') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ip: '203.0.113.7' })); }
       seen.push({ path: req.url ?? '', ixcsoft: req.headers.ixcsoft as string | undefined, method: req.method ?? '', auth: req.headers.authorization, body });
+      // como o IXC real: texto UTF-8 que chega reinterpretado como Latin-1
+      if (blockIp) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ type: 'error', message: Buffer.from('Seu IP não está liberado para efetuar login!', 'utf8').toString('latin1') })); }
       if (req.headers.authorization !== `Basic ${Buffer.from('6:token-ixc').toString('base64')}`) { res.writeHead(401, { 'www-authenticate': 'Basic realm="Acesso restrito"' }); return res.end(); }
       const table = (req.url ?? '').replace('/webservice/v1/', '');
       const field = (body.qtype ?? '').split('.')[1]!;
@@ -41,10 +46,26 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/app/login`;
+  process.env.IXC_IP_ECHO_URL = url.replace('/app/login', '/ip');
+  // proxy HTTP simples (encaminha a URL absoluta), para conferir que a consulta sai por ele
+  proxy = createServer((req, res) => {
+    viaProxy.push(req.url ?? '');
+    const up = httpRequest(req.url!, { method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode ?? 502, r.headers); r.pipe(res); });
+    req.pipe(up);
+  });
+  // túnel CONNECT (é como o undici fala com proxy, inclusive para http)
+  proxy.on('connect', (req, client, head) => {
+    viaProxy.push(req.url ?? '');
+    const [host, port] = (req.url ?? '').split(':');
+    const up = netConnect(Number(port), host, () => { client.write('HTTP/1.1 200 Connection Established\r\n\r\n'); up.write(head); up.pipe(client); client.pipe(up); });
+    up.on('error', () => client.end());
+  });
+  await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
+  proxyUrl = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
   ctx = await makeApp();
   [carlos, lucas] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test')]);
 });
-afterAll(async () => { await ctx.db.execute(sql`update integrations set enabled = false where kind = 'ixc'`); server.close(); await ctx.close(); });
+afterAll(async () => { delete process.env.IXC_IP_ECHO_URL; await ctx.db.execute(sql`update integrations set enabled = false where kind = 'ixc'`); server.close(); proxy.close(); await ctx.close(); });
 
 describe('IXC somente leitura', () => {
   it('teste de conexão, faturas e OS da conta pelo CNPJ; nada além de listar', async () => {
@@ -56,7 +77,7 @@ describe('IXC somente leitura', () => {
     ok(await carlos.put('/admin/integrations/ixc', { enabled: true, config: { baseUrl: url, user: '6' }, secrets: { token: 'errado' } }));
     expect(ok(await carlos.post('/admin/integrations/ixc/test')).json()).toMatchObject({ ok: false, message: expect.stringMatching(/401/) });
     ok(await carlos.put('/admin/integrations/ixc', { enabled: true, config: { baseUrl: url, user: '6' }, secrets: { token: 'token-ixc' } }));
-    expect(ok(await carlos.post('/admin/integrations/ixc/test')).json()).toMatchObject({ ok: true, message: expect.stringMatching(/1 cliente/) });
+    expect(ok(await carlos.post('/admin/integrations/ixc/test')).json()).toMatchObject({ ok: true, ip: '203.0.113.7', message: expect.stringMatching(/1 cliente.*IP de saída neste teste: 203\.0\.113\.7.*pode mudar/) });
 
     const fin = ok(await carlos.get(`/contacts/${o.contactId}/ixc/financeiro`)).json();
     expect(fin.client).toMatchObject({ id: '77', via: 'documento' });
@@ -95,6 +116,20 @@ describe('IXC somente leitura', () => {
     TABLES.cliente!.push({ id: '88', razao: 'Outra Fictícia', cnpj_cpf: '98.765.432/0001-10' });
     expect(ok(await carlos.get(`/contacts/${c.id}/ixc/financeiro`)).json().client).toMatchObject({ id: '88', via: 'documento' });
     ok(await carlos.patch(`/contacts/${c.id}/document`, { document: null }));
+  });
+
+  it('IP recusado pelo IXC: mensagem legível com o caminho; com proxy de saída a consulta sai por ele', async () => {
+    blockIp = true;
+    const r = ok(await carlos.post('/admin/integrations/ixc/test')).json();
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('Seu IP não está liberado para efetuar login!');
+    expect(r.message).toMatch(/proxy de saída/);
+    blockIp = false;
+    ok(await carlos.put('/admin/integrations/ixc', { enabled: true, config: { baseUrl: url, user: '' }, secrets: { token: '6:token-ixc', proxyUrl } }));
+    const p = ok(await carlos.post('/admin/integrations/ixc/test')).json();
+    expect(p).toMatchObject({ ok: true, message: expect.stringMatching(/proxy de IP fixo/) });
+    expect(viaProxy.some((u) => u === new URL(url).host || u.endsWith('/webservice/v1/cliente'))).toBe(true);
+    ok(await carlos.put('/admin/integrations/ixc', { enabled: true, config: { baseUrl: url, user: '6' }, secrets: { token: 'token-ixc', proxyUrl: '' } }));
   });
 
   it('faturas exigem ver valores financeiros; conta fora da carteira não aparece', async () => {

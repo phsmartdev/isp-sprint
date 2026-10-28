@@ -5,6 +5,7 @@
  * o do cadastro da conta ou, se vazio, o de um campo personalizado de cliente chamado CPF/CNPJ (ou CPF, CNPJ, documento).
  */
 import { isIP } from 'node:net';
+import { ProxyAgent, fetch as proxiedFetch } from 'undici';
 import { and, eq, ilike } from 'drizzle-orm';
 import { ixcDocumentVariants, ixcListRequest, ixcOrigin, type IxcQuery, type IxcTable } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
@@ -13,7 +14,7 @@ import { decryptSecret } from './email';
 import { integrationRow } from './integrations';
 import { unprocessable } from '../http/errors';
 
-export type IxcCfg = { tenantId: string; baseUrl: string; user: string; token: string };
+export type IxcCfg = { tenantId: string; baseUrl: string; user: string; token: string; proxyUrl: string | null };
 export class IxcError extends Error {
   constructor(message: string, public readonly status = 502) { super(message); }
 }
@@ -43,7 +44,9 @@ export async function ixcConfig(db: DbOrTx, tenantId: string, opts: { requireEna
     if (opts.requireEnabled === false) throw unprocessable('Integração com o IXC incompleta: informe endereço, usuário e token em Configurações → Integrações.');
     return null;
   }
-  return { tenantId, baseUrl: assertIxcUrl(r.config.baseUrl), user: (r.config.user ?? '').trim(), token: token.trim() };
+  const proxyUrl = r.secrets.proxyUrl ? (decryptSecret(r.secrets.proxyUrl) ?? '').trim() : null;
+  if (proxyUrl) { try { if (!/^https?:$/.test(new URL(proxyUrl).protocol)) throw new Error(); } catch { throw unprocessable('Proxy de saída inválido: use o endereço completo, ex.: http://usuario:senha@host:porta.'); } }
+  return { tenantId, baseUrl: assertIxcUrl(r.config.baseUrl), user: (r.config.user ?? '').trim(), token: token.trim(), proxyUrl: proxyUrl || null };
 }
 
 /** Uma página de uma tabela liberada. */
@@ -52,16 +55,27 @@ export async function ixcList(c: IxcCfg, table: IxcTable, q: Partial<IxcQuery> &
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 20_000);
   let res: Response;
-  try { res = await fetch(req.url, { ...req.init, redirect: 'manual', signal: ctl.signal }); }
-  catch (e) { throw new IxcError((e as Error).name === 'AbortError' ? 'O IXC não respondeu a tempo.' : 'Não foi possível falar com o IXC (endereço fora do ar ou bloqueado para o servidor).'); }
+  try {
+    // com proxy de IP fixo, a consulta sai pelo proxy (o IXC vê o IP dele, que é o liberado lá)
+    res = c.proxyUrl
+      ? (await proxiedFetch(req.url, { ...req.init, redirect: 'manual', signal: ctl.signal, dispatcher: proxyAgent(c.proxyUrl) })) as unknown as Response
+      : await fetch(req.url, { ...req.init, redirect: 'manual', signal: ctl.signal });
+  } catch (e) {
+    throw new IxcError((e as Error).name === 'AbortError' ? 'O IXC não respondeu a tempo.' : c.proxyUrl ? 'Não foi possível falar com o IXC pelo proxy de saída (confira o endereço, usuário e senha do proxy).' : 'Não foi possível falar com o IXC (endereço fora do ar ou bloqueado para o servidor).');
+  }
   finally { clearTimeout(t); }
   if (res.status === 401) throw new IxcError('O IXC recusou o usuário/token (401). Confira: o Usuário/ID é o número do usuário do webservice (não o login); o token foi copiado inteiro do cadastro desse usuário; e o usuário tem “Permite acesso ao webservice” marcado.', 502);
+  if (res.status === 407) throw new IxcError('O proxy de saída recusou o usuário/senha (407). Confira o endereço do proxy em Configurações → Integrações.', 502);
   if (res.status === 404) throw new IxcError('A API do IXC não foi encontrada (404). Confira o endereço ou a liberação do webservice no servidor do IXC.', 502);
   if (!res.ok) throw new IxcError(`O IXC respondeu ${res.status}.`);
   const text = await res.text();
   let j: { total?: string | number; registros?: Record<string, unknown>[]; type?: string; message?: string };
   try { j = JSON.parse(text); } catch { throw new IxcError('O IXC respondeu algo que não é JSON (confira se o endereço aponta para o IXC).'); }
-  if (j.type === 'error') throw new IxcError(`O IXC recusou a consulta: ${String(j.message ?? '').slice(0, 200)}`);
+  if (j.type === 'error') {
+    const msg = fixMojibake(String(j.message ?? '')).slice(0, 200);
+    if (/ip/i.test(msg) && /liberad|autoriz/i.test(msg)) throw new IxcError(`O IXC recusou o IP do servidor: “${msg}”. O servidor não tem IP fixo: peça ao suporte do IXC para liberar o usuário do webservice de qualquer IP ou use um proxy de saída com IP fixo (campo nesta integração).`);
+    throw new IxcError(`O IXC recusou a consulta: ${msg}`);
+  }
   return { total: Number(j.total ?? 0), registros: j.registros ?? [] };
 }
 
@@ -92,4 +106,26 @@ async function documentsOf(db: DbOrTx, tenantId: string, ct: { document: string 
   const fields = await db.select({ key: s.customerFields.key, label: s.customerFields.label }).from(s.customerFields).where(eq(s.customerFields.tenantId, tenantId));
   const docFields = fields.filter((f) => /cpf|cnpj|documento/i.test(`${f.label} ${f.key}`));
   return [ct.document, ...docFields.map((f) => ct.custom?.[f.key])].map((v) => (typeof v === 'number' ? String(v) : v)).filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+}
+
+const agents = new Map<string, ProxyAgent>();
+const proxyAgent = (url: string) => { let a = agents.get(url); if (!a) { a = new ProxyAgent(url); agents.set(url, a); } return a; };
+
+/** O IXC às vezes manda texto UTF-8 reinterpretado como Latin-1 ("nÃ£o"): desfaz quando é o caso. */
+export function fixMojibake(t: string) {
+  if (!/Ã[\u0080-\u00BF]|Â[\u0080-\u00BF]/.test(t)) return t;
+  const fixed = Buffer.from(t, 'latin1').toString('utf8');
+  return fixed.includes('\uFFFD') ? t : fixed;
+}
+
+/** IP público por onde o servidor sai agora (pelo proxy, se houver). Serve para conferência: sem proxy, muda entre consultas. */
+export async function egressIp(c: IxcCfg): Promise<string | null> {
+  const url = process.env.IXC_IP_ECHO_URL ?? 'https://api.ipify.org?format=json';
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 4_000);
+  try {
+    const res = c.proxyUrl ? await proxiedFetch(url, { signal: ctl.signal, dispatcher: proxyAgent(c.proxyUrl) }) : await fetch(url, { signal: ctl.signal });
+    const j = (await res.json()) as { ip?: string };
+    return typeof j.ip === 'string' && j.ip.length <= 45 ? j.ip : null;
+  } catch { return null; } finally { clearTimeout(t); }
 }
