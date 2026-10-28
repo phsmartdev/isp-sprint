@@ -156,13 +156,13 @@ describe('central de atenção e painel executivo', () => {
 });
 
 describe('abas e painel de contratos', () => {
-  it('aba liberada se qualquer perfil libera; administração vê todas', () => {
+  it('aba liberada se qualquer perfil libera, inclusive para a administração', () => {
     const d = { vendedor: ['painel' as const, 'relatorios' as const], implantacao: ['painel' as const] };
-    expect(allowedContractTabs(d, ['vendedor'], false)).not.toContain('painel');
-    expect(allowedContractTabs(d, ['vendedor', 'supervisor'], false)).toContain('painel');
-    expect(allowedContractTabs(d, ['vendedor', 'implantacao'], false)).toContain('relatorios');
-    expect(allowedContractTabs(d, ['vendedor', 'implantacao'], false)).not.toContain('painel');
-    expect(allowedContractTabs(d, ['vendedor'], true)).toEqual([...CONTRACT_TABS]);
+    expect(allowedContractTabs(d, ['vendedor'])).not.toContain('painel');
+    expect(allowedContractTabs(d, ['vendedor', 'supervisor'])).toContain('painel');
+    expect(allowedContractTabs(d, ['vendedor', 'implantacao'])).toContain('relatorios');
+    expect(allowedContractTabs(d, ['vendedor', 'implantacao'])).not.toContain('painel');
+    expect(allowedContractTabs(d, [])).toEqual([...CONTRACT_TABS]);
     expect(CONTRACT_TABS.indexOf('funil')).toBe(CONTRACT_TABS.indexOf('painel') + 1);
   });
   it('painel: completa seções que faltam e ignora as desconhecidas', () => {

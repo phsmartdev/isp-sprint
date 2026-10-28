@@ -37,7 +37,7 @@ const TABS = [
   { to: '/settings/modelos?aba=emails', label: 'E-mail e alertas' },
   { to: '/settings/integrations', label: 'Integrações' },
   { to: '/settings/fields', label: 'Campos personalizados' },
-  { to: '/settings/contracts', label: 'Contratos' },
+  { to: '/settings/modulos?cfg=contratos', label: 'Contratos' },
   { to: '/settings/approvals', label: 'Aprovações e alçadas' },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente' },
   { to: '/settings/desempenho', label: 'Gestão de desempenho' },

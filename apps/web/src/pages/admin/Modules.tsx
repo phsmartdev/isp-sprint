@@ -3,7 +3,8 @@
  * (todos os perfis com acesso ou só equipes e pessoas liberadas), desliga funcionalidades, registra liberações e
  * bloqueios com motivo e validade, ajusta ações sensíveis por perfil e mostra a prévia do acesso de um usuário.
  */
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, RELEASE_MODES, RELEASE_MODE_LABELS, type BusinessModule, type Module, type ReleaseMode } from '@isp/domain';
 import { api } from '../../lib/api';
@@ -12,6 +13,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
+import { AdminContractSettings } from './ContractSettings';
 
 type Grant = { id: string; subjectType: 'equipe' | 'usuario'; subjectId: string; subjectName: string; effect: 'liberar' | 'bloquear'; reason: string; validUntil: string | null; expired: boolean };
 type ModuleRow = { key: BusinessModule; label: string; hint: string; enabled: boolean; mode: ReleaseMode; disabledFeatures: string[]; saved: boolean; technical: Module[]; features: { key: string; label: string; requires: BusinessModule[] }[]; grants: Grant[] };
@@ -29,12 +31,34 @@ export function AdminModules() {
       <div><h1 className="text-xl font-bold text-ink">Módulos e liberação</h1><p className="text-sm text-muted">Os sete módulos de negócio sobre a mesma base. Ligar um módulo não dá acesso a tudo: o nível de cada perfil (Segurança), as funcionalidades e as ações sensíveis continuam valendo.</p></div>
       <Notice>A fundação (usuários, contas e pessoas, catálogo, auditoria, notificações, integrações) está sempre ligada. Desligar um módulo esconde telas e rotas, mas não apaga nada: ao religar, o histórico está inteiro.</Notice>
       {q.isLoading ? <div className="card"><LoadingRows rows={6} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
-        <div className="grid gap-4 xl:grid-cols-2">{q.data!.items.map((m) => <ModuleCard key={m.key} m={m} />)}</div>
+        <div className="grid gap-4 xl:grid-cols-2">{q.data!.items.map((m) => (
+          <Fragment key={m.key}>
+            <ModuleCard m={m} />
+            {/* configuração própria do módulo, logo abaixo do cartão, na largura toda */}
+            {MODULE_SETTINGS[m.key] && <ModuleSettings module={m.key} label={m.label}>{MODULE_SETTINGS[m.key]}</ModuleSettings>}
+          </Fragment>
+        ))}</div>
       )}
       <ActionsMatrix />
       <AccessPreview />
     </div>
   );
+}
+
+/** Módulos com configuração própria, que abre dentro de Módulos e liberação (?cfg=<módulo> abre direto). */
+const MODULE_SETTINGS: Partial<Record<BusinessModule, ReactNode>> = { contratos: <AdminContractSettings /> };
+const useModuleCfg = (module: string) => {
+  const [search, setSearch] = useSearchParams();
+  const open = search.get('cfg') === module;
+  const toggle = () => { const n = new URLSearchParams(search); if (open) n.delete('cfg'); else n.set('cfg', module); setSearch(n, { replace: true }); };
+  return { open, toggle };
+};
+
+function ModuleSettings({ module, label, children }: { module: string; label: string; children: ReactNode }) {
+  const { open } = useModuleCfg(module);
+  useEffect(() => { if (open) document.getElementById(`cfg-${module}`)?.scrollIntoView({ block: 'start' }); }, [open, module]);
+  if (!open) return null;
+  return <section id={`cfg-${module}`} aria-label={`Configuração do módulo ${label}`} className="space-y-4 xl:col-span-2">{children}</section>;
 }
 
 function ModuleCard({ m }: { m: ModuleRow }) {
@@ -44,6 +68,7 @@ function ModuleCard({ m }: { m: ModuleRow }) {
   const [note, setNote] = useState('');
   const [adding, setAdding] = useState(false);
   const [revoking, setRevoking] = useState<Grant | null>(null);
+  const cfg = useModuleCfg(m.key);
   useEffect(() => { setV({ enabled: m.enabled, mode: m.mode, disabledFeatures: m.disabledFeatures }); }, [m.enabled, m.mode, m.disabledFeatures]);
   const changed = v.enabled !== m.enabled || v.mode !== m.mode || [...v.disabledFeatures].sort().join() !== [...m.disabledFeatures].sort().join();
   const save = useMutation({
@@ -58,6 +83,7 @@ function ModuleCard({ m }: { m: ModuleRow }) {
         <div className="min-w-0"><h2 className="text-lg font-bold text-ink">{m.label}</h2><p className="text-sm text-muted">{m.hint}</p></div>
         <Chip tone={state.tone} className="shrink-0">{state.text}</Chip>
       </div>
+      {MODULE_SETTINGS[m.key] && <Button size="sm" variant={cfg.open ? 'secondary' : 'primary'} aria-expanded={cfg.open} aria-controls={`cfg-${m.key}`} onClick={cfg.toggle}>{cfg.open ? 'Fechar configurações do módulo' : 'Configurações do módulo'}</Button>}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex items-center gap-2 text-sm font-semibold text-ink"><input type="checkbox" className="h-4 w-4 accent-primary" checked={v.enabled} onChange={(e) => setV({ ...v, enabled: e.target.checked })} />Ligado na empresa</label>
         <FormField label="Quem recebe" htmlFor={`md-${m.key}`}><Select id={`md-${m.key}`} disabled={!v.enabled} value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value as ReleaseMode })}>{RELEASE_MODES.map((x) => <option key={x} value={x}>{RELEASE_MODE_LABELS[x]}</option>)}</Select></FormField>

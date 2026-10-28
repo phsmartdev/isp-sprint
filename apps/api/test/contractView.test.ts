@@ -1,5 +1,6 @@
 /** Abas da Gestão de Contratos como permissão por perfil e configuração do Painel. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { DEFAULT_DASHBOARD } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
 
@@ -18,6 +19,7 @@ describe('abas e painel de contratos', () => {
     expect(v.tabs.indexOf('funil')).toBe(v.tabs.indexOf('painel') + 1);
     expect(v.tabs).toContain('modelos');
     expect(v.tabs).not.toContain('habilitacao');
+    for (const gone of ['renovacoes', 'reajustes', 'encerramentos', 'notificacoes']) expect(v.tabs).not.toContain(gone);
     expect(v.dashboard).toEqual(DEFAULT_DASHBOARD);
   });
 
@@ -35,9 +37,20 @@ describe('abas e painel de contratos', () => {
     ok(await lucas.get('/contracts/attention'), 403);
     ok(await lucas.get('/contracts/reports/expiring'), 403);
     ok(await lucas.get('/contracts'));
-    // carlos (gerência, administração) continua vendo tudo
+    // carlos (gerência) tem tudo liberado no perfil dele
     ok(await carlos.get('/contracts/dashboard'));
     expect(ok(await carlos.get('/contracts/view')).json().tabs).toContain('painel');
+
+    // a regra vale também para a administração (antes ela via tudo e a tabela parecia não funcionar)
+    ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'], gerencia: ['painel'] }, dashboard }));
+    expect(ok(await carlos.get('/contracts/view')).json().tabs).not.toContain('painel');
+    ok(await carlos.get('/contracts/dashboard'), 403);
+    ok(await carlos.get('/admin/contract-view')); // a configuração continua acessível
+    ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'] }, dashboard }));
+
+    // abas removidas do sistema que ficaram gravadas não quebram a configuração
+    await ctx.db.execute(sql`update contract_settings set settings = jsonb_set(settings, '{tabAccess,supervisor}', '["renovacoes", "lista"]') where tenant_id = ${carlos.me.tenant.id}`);
+    expect(ok(await carlos.get('/admin/contract-view')).json().tabAccess.supervisor).toEqual(['lista']);
 
     // salvar os parâmetros de contratos mescla, sem perder abas e painel
     const settings = ok(await carlos.get('/admin/contract-settings')).json();

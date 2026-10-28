@@ -149,7 +149,7 @@ function OficioActions({ c, p }: { c: ContractDetail; p: Process }) {
       <Modal open={open === 'gerar'} onClose={() => setOpen(null)} title="Gerar ofício de renovação" size="sm" footer={<><Button onClick={() => setOpen(null)}>Cancelar</Button><Button variant="primary" loading={gen.isPending} disabled={!num.trim()} onClick={() => gen.mutate()}>Gerar e anexar</Button></>}>
         <div className="space-y-3">
           {error && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-          <p className="text-sm text-muted">Usa o modelo institucional de Configurações → Contratos e anexa o PDF ao contrato com o nome padrão.</p>
+          <p className="text-sm text-muted">Usa o modelo institucional de Configurações → Módulos e liberação → Contratos e anexa o PDF ao contrato com o nome padrão.</p>
           <FormField label="Número do ofício" htmlFor="of-num" required><Input id="of-num" value={num} onChange={(e) => setNum(e.target.value)} placeholder="12/2026" /></FormField>
           <FormField label="Renovar por (meses)" htmlFor="of-months"><Input id="of-months" inputMode="numeric" value={months} onChange={(e) => setMonths(e.target.value.replace(/\D/g, ''))} /></FormField>
         </div>
