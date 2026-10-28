@@ -62,6 +62,15 @@ describe('viabilidade econômica', () => {
     await expect(ctx.db.execute(sql`update opportunity_economics_snapshots set reason = 'x' where opportunity_id = ${o.id}`)).rejects.toThrow(/append-only/);
     const h = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().history;
     expect(h.length).toBe(2);
+
+    // Inteligência: fluxo consolidado (em andamento começa neste mês; mês 0 = investimento)
+    const intel = ok(await carlos.get('/intelligence/economics?status=andamento')).json();
+    const mine = intel.items.find((i: { id: string }) => i.id === o.id);
+    expect(mine.investmentCents).toBe(6_000_000);
+    expect(mine.months).toBe(24);
+    expect(intel.flow.outflow[0]).toBeLessThanOrEqual(-6_000_000);
+    expect(intel.totals.investmentCents).toBeGreaterThanOrEqual(6_000_000);
+    expect(ok(await carlos.get('/intelligence/economics?status=ganhas')).json().items.some((i: { id: string }) => i.id === o.id)).toBe(false);
   });
 
   it('filial aceita só os tipos de venda liberados; documento fiscal só em tipo liberado', async () => {

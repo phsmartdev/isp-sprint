@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ECON_SETTINGS as S, annuityFactor, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem } from './finance';
+import { DEFAULT_ECON_SETTINGS as S, shiftMonth, annuityFactor, consolidateCashflow, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem } from './finance';
 
 const doc = (percentBp: number, fixedCents = 0) => ({ name: 'Doc', percentBp, fixedCents, complete: true });
 const items = (...x: [number, number][]) => x.map(([rev, bp]) => ({ description: `Item ${bp}`, revenueCents: rev, doc: doc(bp) })) as EconItem[];
@@ -85,5 +85,21 @@ describe('fluxo de caixa', () => {
     expect(irr([-100, 110])).toBeCloseTo(0.1, 6);
     expect(irr([10, 10])).toBeNull();
     expect(annuityFactor(0, 6)).toBe(6);
+  });
+});
+
+describe('fluxo de caixa consolidado', () => {
+  it('alinha cada oportunidade no seu mês e acumula', () => {
+    const c = consolidateCashflow([
+      { startMonth: '2026-11', flows: [-1000, 300, 300, 300, 300] },
+      { startMonth: '2027-01', flows: [-500, 200, 200] },
+    ]);
+    expect(c.months).toEqual(['2026-11', '2026-12', '2027-01', '2027-02', '2027-03']);
+    expect(c.net).toEqual([-1000, 300, -200, 500, 500]);
+    expect(c.outflow[2]).toBe(-500);
+    expect(c.inflow[2]).toBe(300);
+    expect(c.cumulative.at(-1)).toBe(100);
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+    expect(consolidateCashflow([]).months).toEqual([]);
   });
 });
