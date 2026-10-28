@@ -10,7 +10,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 
 type Commission = { kind: 'percent' | 'fixo'; value: number } | null;
 type Product = { name: string; qty: number; unitPriceCents: number; commissionAtiva: Commission; commissionReceptiva: Commission; partnerId?: string | null; partnerCostCents?: number | null };
-type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; invoiceServiceName: string | null; products: Product[]; partnerCosts: Record<string, number>; active: boolean; sourceSystem: string };
+type Plan = { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; invoiceServiceName: string | null; products: Product[]; partnerCosts: Record<string, number>; active: boolean; sourceSystem: string; fiscalDocCode?: string | null };
 
 /** Linha do formulário: valores digitados como texto ("79,90", "50"). */
 type ProductRow = { name: string; qty: string; unit: string; aKind: 'percent' | 'fixo' | ''; aValue: string; rKind: 'percent' | 'fixo' | ''; rValue: string; partnerId: string; partnerCost: string };
@@ -43,12 +43,15 @@ export function AdminPlans() {
   const q = useQuery({ queryKey: ['admin', 'plans'], queryFn: () => api<{ items: Plan[] }>('/admin/plans') });
   const viab = useQuery({ queryKey: ['admin', 'viability'], queryFn: () => api<{ partners: { id: string; name: string; kind: string }[] }>('/admin/viability') });
   const partners = viab.data?.partners ?? [];
+  const docsQ = useQuery({ queryKey: ['admin', 'fiscal-docs'], queryFn: () => api<{ items: { code: string; name: string; active: boolean }[] }>('/admin/fiscal-docs') });
+  /** Mesmo código em várias filiais/tipos de venda: o item usa o documento daquele código na filial da oportunidade. */
+  const docCodes = [...new Map((docsQ.data?.items ?? []).filter((d) => d.active).map((d) => [d.code, d.name])).entries()];
   const [editing, setEditing] = useState<Plan | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
-  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', active: true, products: [] as ProductRow[] };
+  const empty = { name: '', line: '', segment: 'residencial' as Segment, price: '', speed: '', invoice: '', doc: '', active: true, products: [] as ProductRow[] };
   const [form, setForm] = useState(empty);
   const open = (p: Plan | 'new') => {
     setEditing(p);
-    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', active: p.active, products: (p.products ?? []).map(toRow) });
+    setForm(p === 'new' ? empty : { name: p.name, line: p.line ?? '', segment: p.segment, price: dec(p.priceCents), speed: p.speedMbps ? String(p.speedMbps) : '', invoice: p.invoiceServiceName ?? '', doc: p.fiscalDocCode ?? '', active: p.active, products: (p.products ?? []).map(toRow) });
   };
   const setRow = (i: number, v: Partial<ProductRow>) => setForm((f) => ({ ...f, products: f.products.map((r, j) => (j === i ? { ...r, ...v } : r)) }));
   const total = form.products.reduce((a, r) => a + rowUnit(r) * rowQty(r), 0);
@@ -64,7 +67,7 @@ export function AdminPlans() {
       const products: Product[] = form.products.map((r) => ({ name: r.name.trim(), qty: rowQty(r), unitPriceCents: rowUnit(r), commissionAtiva: commissionOf(r.aKind, r.aValue), commissionReceptiva: commissionOf(r.rKind, r.rValue), partnerId: r.partnerId || null, partnerCostCents: r.partnerId && r.partnerCost.trim() ? toCents(r.partnerCost) : null }));
       const priceCents = hasProducts ? total : toCents(form.price);
       if (priceCents === null) throw new Error('Informe o preço no formato 99,90 ou cadastre os produtos.');
-      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, products, active: form.active };
+      const body = { name: form.name, line: form.line || null, segment: form.segment, priceCents, speedMbps: form.speed ? Number(form.speed) : null, invoiceServiceName: form.invoice.trim() || null, fiscalDocCode: form.doc || null, products, active: form.active };
       return editing === 'new' ? api('/admin/plans', { method: 'POST', body }) : api(`/admin/plans/${(editing as Plan).id}`, { method: 'PATCH', body });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); setEditing(null); const sw = (r as { partnersSwitched?: string[] }).partnersSwitched ?? []; toast({ tone: 'success', message: sw.length ? `Plano salvo. ${sw.join(', ')} agora é cobrado pelos produtos de cada plano.` : 'Plano salvo' }); },
@@ -108,6 +111,13 @@ export function AdminPlans() {
             <FormField label="Velocidade (Mbps)" htmlFor="pl-speed" hint="Usada nas regras de viabilidade"><Input id="pl-speed" type="number" min={1} value={form.speed} onChange={(e) => setForm({ ...form, speed: e.target.value })} placeholder="350" /></FormField>
             <FormField label="Preço mensal (R$)" htmlFor="pl-price" required={!hasProducts} hint={hasProducts ? 'Soma dos produtos' : undefined}>
               <Input id="pl-price" inputMode="decimal" disabled={hasProducts} value={hasProducts ? dec(total) : form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99,90" />
+            </FormField>
+            <FormField label="Documento fiscal padrão" htmlFor="pl-doc" hint="Já vem marcado no item da oportunidade e define os tributos. Cadastre em Filiais, tipos de venda e documentos fiscais.">
+              <Select id="pl-doc" value={form.doc} onChange={(e) => setForm({ ...form, doc: e.target.value })}>
+                <option value="">Nenhum (escolher na oportunidade)</option>
+                {form.doc && !docCodes.some(([c]) => c === form.doc) && <option value={form.doc}>{form.doc} (inativo)</option>}
+                {docCodes.map(([c, n]) => <option key={c} value={c}>{c} · {n}</option>)}
+              </Select>
             </FormField>
           </div>
 

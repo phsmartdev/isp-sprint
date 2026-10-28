@@ -22,6 +22,7 @@ import { sendZapiText, waPhone } from '../services/whatsapp';
 import { level, ownerScope } from '../services/scope';
 import { chatOf } from '../services/negotiation';
 import { loadOpportunity } from '../services/opportunities';
+import { computeEconomics, economicsContext } from '../services/economics';
 import {
   approvalLevelOf, approvalSettingsOf, buildAnalysis, classificationHistory, financialSummary, latestProposal, loadForAnalysis, requestsOf, timelines, type Analysis, type RequestView,
 } from '../services/approvals';
@@ -147,6 +148,17 @@ export const approvalRoutes = [
     handler: async ({ app, auth, params, body, req, reply }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
       if (opp.stage === 'perdida') throw unprocessable('Oportunidade perdida: reabra antes de pedir aprovação.');
+      // trava de segmento do motor financeiro: com a viabilidade econômica preenchida, retorno fora da política não vai para aprovação
+      const [econ] = await app.db.select({ opportunityId: s.opportunityEconomics.opportunityId }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
+      if (econ) {
+        const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
+        const er = computeEconomics(ctx);
+        if (ctx.settings.blockOutsidePolicy && (er.withinPolicy === false || er.verdict === 'inviavel')) {
+          throw unprocessable(er.verdict === 'inviavel'
+            ? 'Viabilidade econômica: tributos, comissão e perdas consomem a receita. Revise antes de pedir aprovação.'
+            : `Viabilidade econômica fora da política: o investimento volta em ${er.kpi?.paybackMonths == null ? 'mais que a vigência' : `${er.kpi.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses`} e o limite para ${ctx.publicSector ? 'setor público' : 'setor privado'} é ${er.term.Dalvo}. Ajuste preço, investimento ou vigência.`);
+        }
+      }
       const a = await buildAnalysis(app.db, auth, opp, { proposedMonthlyCents: body.proposedMonthlyCents, activationFeeCents: body.activationFeeCents, replacesMonthlyCents: body.replacesMonthlyCents, negotiationType: body.negotiationType });
       const prop = await latestProposal(app.db, auth.tenantId, opp.id);
       const created = await app.db.transaction(async (tx) => {

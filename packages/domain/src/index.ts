@@ -35,3 +35,4 @@ export * from './timeline';
 export * from './stageFunnel';
 export * from './budget';
 export * from './ixc';
+export * from './finance';

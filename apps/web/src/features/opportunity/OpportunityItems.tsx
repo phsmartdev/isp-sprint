@@ -9,20 +9,22 @@ import { ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, parseItemsTable, parseMoney, p
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import type { Opportunity } from '../../lib/types';
+import { useLookups } from '../../lib/hooks';
 import { Button, Input, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 
-type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null };
+type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null };
+type Doc = { id: string; branchId: string; saleKind: string; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean };
-type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string };
+type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string };
 
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
-const blank = (): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '' });
-const fromSaved = (i: Saved | ItemInput): Row => ({ key: `n${++seq}`, description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
-const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null });
+const blank = (doc = ''): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc });
+const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
+const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null });
 
 export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
@@ -52,6 +54,12 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const bidTotal = bid ? (bidMode === 'global' ? parseMoney(bidGlobal) : parsed.reduce((t, i) => t + (i.qtyMilli && i.bidUnitCents != null ? Math.round((i.qtyMilli * i.bidUnitCents) / 1000) : 0), 0)) : null;
   const editable = !!q.data?.editable;
   const set = (k: string, patch: Partial<Row>) => setRows(cur.map((r) => (r.key === k ? { ...r, ...patch } : r)));
+  // documentos fiscais da filial e do tipo de venda da oportunidade; o produto do catálogo sugere o seu documento padrão
+  const docsQ = useQuery({ queryKey: ['fiscal-docs'], queryFn: () => api<{ items: Doc[] }>('/fiscal-docs'), staleTime: 60_000 });
+  const docs = (docsQ.data?.items ?? []).filter((d) => (!opp.branchId || d.branchId === opp.branchId) && (!opp.saleKind || d.saleKind === opp.saleKind));
+  const plans = useLookups().data?.plans ?? [];
+  const docForPlan = (name: string) => { const code = plans.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())?.fiscalDocCode; return code ? docs.find((d) => d.code === code.toUpperCase())?.id ?? '' : ''; };
+  const docLabel = (d: Doc) => `${d.code} · ${(d.rates.percentBp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%${d.rates.fixedCents ? ` + ${fmtBRL(d.rates.fixedCents)}` : ''}`;
 
   const save = useMutation({
     mutationFn: () => {
@@ -59,7 +67,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       if (bad >= 0) throw new Error(`Confira o item ${bad + 1}: produto, quantidade e valores.`);
       return api<Opportunity>(`/opportunities/${opp.id}/items`, { method: 'PUT', body: { rowVersion: opp.rowVersion, items: parsed, ...(bid ? { bidMode, bidGlobalCents: bidMode === 'global' ? parseMoney(bidGlobal) : null } : {}) } });
     },
-    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); setRows(null); void qc.invalidateQueries({ queryKey: ['opp-items', opp.id] }); void qc.invalidateQueries({ queryKey: ['timeline', opp.id] }); toast({ tone: 'success', message: 'Produtos e serviços salvos' }); },
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); setRows(null); void qc.invalidateQueries({ queryKey: ['opp-items', opp.id] }); void qc.invalidateQueries({ queryKey: ['economics', opp.id] }); void qc.invalidateQueries({ queryKey: ['timeline', opp.id] }); toast({ tone: 'success', message: 'Produtos e serviços salvos' }); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'A oportunidade mudou enquanto você editava. Aguarde salvar os outros campos e tente de novo.' : errMsg(e) }),
   });
 
@@ -103,13 +111,20 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       ) : (
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
                 const lt = lineTotal(parsed[i]!);
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
-                    <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => set(r.key, { description: e.target.value })} /></td>
+                    <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => { const doc = !r.doc ? docForPlan(e.target.value) : ''; set(r.key, { description: e.target.value, ...(doc ? { doc } : {}) }); }} /></td>
+                    <td className="px-1.5 py-1.5">
+                      <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
+                        <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
+                        {docs.map((d) => <option key={d.id} value={d.id}>{docLabel(d)}</option>)}
+                        {r.doc && !docs.some((d) => d.id === r.doc) && <option value={r.doc}>Documento de outra filial</option>}
+                      </Select>
+                    </td>
                     <td className="px-1.5 py-1.5"><Select aria-label={`Medida ${i + 1}`} className="h-9 w-[88px] min-w-[88px]" value={r.unit} disabled={!editable} onChange={(e) => set(r.key, { unit: e.target.value as ItemUnit })}>{ITEM_UNITS.map((u) => <option key={u} value={u}>{ITEM_UNIT_LABELS[u]}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Quantidade ${i + 1}`} inputMode="decimal" className="num h-9 w-[72px]" value={r.qty} disabled={!editable} onChange={(e) => set(r.key, { qty: e.target.value })} /></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Valor ${i + 1}`} inputMode="decimal" className="num h-9 w-[104px]" value={r.unit$} disabled={!editable} onChange={(e) => set(r.key, { unit$: e.target.value })} placeholder="0,00" /></td>
@@ -126,6 +141,8 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
           </table>
         </div>
       )}
+      <datalist id="items-catalog">{plans.map((p) => <option key={p.id} value={p.name} />)}</datalist>
+      {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais para este tipo de venda. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
       {bid && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md bg-surface-2 p-3 text-sm" role="radiogroup" aria-label="Lance da licitação">
           <span className="font-semibold text-ink">Lance</span>

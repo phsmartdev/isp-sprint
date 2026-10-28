@@ -1,6 +1,7 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
 import { freshSnapshot } from '../services/cs';
+import { snapshotEconomicsOnWon } from '../services/economics';
 import { groupBy } from '../services/group';
 import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
@@ -216,7 +217,10 @@ export const opportunityRoutes = [
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
         if (body.ownerId && body.ownerId !== cur.ownerId) await assertAssignableUser(tx, auth, 'oportunidades', body.ownerId);
         await assertTenantRefs(tx, auth, { sourceId: body.sourceId, campaignId: body.campaignId });
-        if (body.branchId) await assertBranch(tx, auth.tenantId, body.branchId);
+        {
+          const branchId = body.branchId === undefined ? cur.branchId : body.branchId;
+          if (branchId && (body.branchId || body.saleKind !== undefined)) await assertBranch(tx, auth.tenantId, branchId, body.saleKind === undefined ? cur.saleKind : body.saleKind);
+        }
         const plan = body.planId === undefined ? undefined : await planPrice(tx, auth, body.planId);
         let pipelineChange: { pipelineId: string; stage: string } | undefined;
         if (body.pipelineId && body.pipelineId !== cur.pipelineId) {
@@ -357,6 +361,8 @@ export const opportunityRoutes = [
         }
       });
       if (body.toStage === 'ganha') await storeViability(app.db, auth.tenantId, params.id);
+      // fotografia da viabilidade econômica no dia do fechamento
+      if (body.toStage === 'ganha') { const o = await loadOpportunity(app.db, auth, params.id); await snapshotEconomicsOnWon(app.db, { ...o, tenantId: auth.tenantId }, auth.userId).catch((e) => req.log.error(e, 'viabilidade econômica')); }
       await runAutomations(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage === 'ganha' ? { type: 'ganha' } : body.toStage === 'perdida' ? { type: 'perdida' } : { type: 'entrou_na_etapa', stage: body.toStage });
       await csOnStage(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage).catch((e) => req.log.error(e, 'jornada CS'));
       const dto = opportunityDto(await loadOpportunity(app.db, auth, params.id));
