@@ -120,12 +120,17 @@ export function fixMojibake(t: string) {
 
 /** IP público por onde o servidor sai agora (pelo proxy, se houver). Serve para conferência: sem proxy, muda entre consultas. */
 export async function egressIp(c: IxcCfg): Promise<string | null> {
-  const url = process.env.IXC_IP_ECHO_URL ?? 'https://api.ipify.org?format=json';
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 4_000);
-  try {
-    const res = c.proxyUrl ? await proxiedFetch(url, { signal: ctl.signal, dispatcher: proxyAgent(c.proxyUrl) }) : await fetch(url, { signal: ctl.signal });
-    const j = (await res.json()) as { ip?: string };
-    return typeof j.ip === 'string' && j.ip.length <= 45 ? j.ip : null;
-  } catch { return null; } finally { clearTimeout(t); }
+  const urls = process.env.IXC_IP_ECHO_URL ? [process.env.IXC_IP_ECHO_URL] : ['https://api.ipify.org?format=json', 'https://checkip.amazonaws.com', 'https://ifconfig.me/ip'];
+  for (const url of urls) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6_000);
+    try {
+      const res = c.proxyUrl ? await proxiedFetch(url, { signal: ctl.signal, dispatcher: proxyAgent(c.proxyUrl) }) : await fetch(url, { signal: ctl.signal });
+      const text = (await res.text()).trim();
+      // JSON ({"ip": "..."}) ou texto puro com o IP
+      const ip = text.startsWith('{') ? String((JSON.parse(text) as { ip?: string }).ip ?? '') : text;
+      if (isIP(ip)) return ip;
+    } catch { /* tenta o próximo serviço */ } finally { clearTimeout(t); }
+  }
+  return null;
 }
