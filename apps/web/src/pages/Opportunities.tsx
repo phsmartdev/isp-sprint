@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core';
-import { BarChart3, CheckCircle2, ClipboardList, Clock3, Columns3, List, MoreVertical, Plus, Search, Send, SlidersHorizontal, UserRound } from 'lucide-react';
+import { BarChart3, CheckCircle2, ClipboardList, Clock3, Columns3, List, Maximize2, Minimize2, MoreVertical, Plus, Search, Send, SlidersHorizontal, UserRound } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtRelativeShort } from '../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../lib/hooks';
@@ -45,7 +45,7 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
   );
 }
 
-function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[] }) {
+function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
   const nav = useNavigate();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
@@ -63,8 +63,24 @@ function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: 
         if (e.key === 'Enter' && !isDragging) nav(`/opportunities/${opp.id}`);
       }}
       onClick={() => nav(`/opportunities/${opp.id}`)}
-      className={clsx('cursor-pointer rounded-md bg-surface p-3 shadow-card ring-1 ring-line/70 hover:ring-line-strong', isDragging && 'z-30 opacity-90 shadow-overlay')}
+      className={clsx('cursor-pointer rounded-md bg-surface shadow-card ring-1 ring-line/70 hover:ring-line-strong', compact ? 'p-2' : 'p-3', isDragging && 'z-30 opacity-90 shadow-overlay')}
     >
+      {compact ? (
+        // ajustado à tela: nome, valor, responsável e próxima ação, sem o resto
+        <>
+          <div className="flex items-start gap-1.5">
+            <p className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-bold leading-tight text-ink" title={opp.contactName}>{opp.contactName}</p>
+            <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={20} />
+            {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
+          </div>
+          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2">
+            <span className="num text-xs font-bold text-ink">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : <span className="font-medium text-muted">Sem plano</span>}</span>
+            <span className={clsx('ml-auto whitespace-nowrap text-2xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
+          </div>
+          {tag && <div className="mt-1"><Chip tone={tag.tone}>{tag.label}</Chip></div>}
+          {!!opp.accountContracts?.length && <p className="mt-1 text-2xs text-muted">{opp.accountContracts.length} contrato(s) vigente(s)</p>}
+        </>
+      ) : (<>
       <div className="flex items-start gap-2">
         <Avatar name={opp.contactName} size={34} tone={0} />
         <div className="min-w-0 flex-1">
@@ -95,24 +111,25 @@ function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: 
         {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
         <span className={clsx('ml-auto shrink-0 whitespace-nowrap text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
       </div>
+      </>)}
     </li>
   );
 }
 
-function Column({ stage, children, onAdd, index }: { stage: PipelineStage; children: React.ReactNode; onAdd: () => void; index: number }) {
+function Column({ stage, children, onAdd, index, compact }: { stage: PipelineStage; children: React.ReactNode; onAdd: () => void; index: number; compact?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.key });
   const c = stageColor(stage.key, stage.color, index);
   return (
-    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} style={{ background: `${c}14` }} className={clsx('flex min-w-[214px] flex-1 basis-0 flex-col rounded-lg p-2.5', isOver && 'ring-2 ring-primary')}>
-      <header className="mb-3 px-1">
-        <div className="flex items-center justify-between">
-          <h2 id={`col-${stage.key}`} className="flex items-center gap-2 text-lg font-bold text-ink">
-            {stage.name}
-            <span className="num inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold text-white" style={{ background: c }}>{stage.count}</span>
+    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} style={{ background: `${c}14` }} className={clsx('flex flex-1 basis-0 flex-col rounded-lg', compact ? 'min-w-[128px] p-1.5' : 'min-w-[214px] p-2.5', isOver && 'ring-2 ring-primary')}>
+      <header className={clsx('px-1', compact ? 'mb-2' : 'mb-3')}>
+        <div className="flex items-center justify-between gap-1">
+          <h2 id={`col-${stage.key}`} className={clsx('flex min-w-0 items-center gap-1.5 font-bold text-ink', compact ? 'text-sm' : 'text-lg')}>
+            <span className="truncate" title={stage.name}>{stage.name}</span>
+            <span className={clsx('num inline-flex shrink-0 items-center justify-center rounded-full font-bold text-white', compact ? 'h-5 min-w-5 px-1 text-2xs' : 'h-6 min-w-6 px-1.5 text-xs')} style={{ background: c }}>{stage.count}</span>
           </h2>
-          <button onClick={onAdd} className="rounded-sm p-1 hover:bg-white/60" style={{ color: inkOf(c) }} aria-label={`Nova oportunidade (${stage.name})`}><Plus className="h-5 w-5" /></button>
+          <button onClick={onAdd} className="shrink-0 rounded-sm p-1 hover:bg-white/60" style={{ color: inkOf(c) }} aria-label={`Nova oportunidade (${stage.name})`}><Plus className={compact ? 'h-4 w-4' : 'h-5 w-5'} /></button>
         </div>
-        <p className="num mt-1 text-md text-muted">{fmtBRL(stage.valueCents)}</p>
+        <p className={clsx('num mt-0.5 truncate text-muted', compact ? 'text-xs' : 'mt-1 text-md')}>{fmtBRL(stage.valueCents)}</p>
       </header>
       {children}
     </section>
@@ -129,6 +146,9 @@ export function OpportunitiesPage() {
   const dq = useDebounced(search);
   useEffect(() => { if (dq !== f.q) setF({ q: dq }); }, [dq]); // eslint-disable-line react-hooks/exhaustive-deps
   const kanban = f.view === 'kanban';
+  // Kanban ajustado à tela (todas as etapas visíveis): padrão ligado, escolha lembrada neste navegador
+  const [fit, setFit] = useState(() => { try { return localStorage.getItem('isp:kanban-fit') !== '0'; } catch { return true; } });
+  const setFitPersist = (v: boolean) => { setFit(v); try { localStorage.setItem('isp:kanban-fit', v ? '1' : '0'); } catch { /* sem armazenamento */ } };
   const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId, pipelineId: f.pipelineId };
   const summary = useQuery({ queryKey: ['opportunities', 'summary'], queryFn: () => api<{ kpis: Kpi[] }>('/opportunities/summary') });
   const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
@@ -203,6 +223,7 @@ export function OpportunitiesPage() {
           <button aria-pressed={kanban} onClick={() => setF({ view: 'kanban' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><Columns3 className="h-5 w-5" />Kanban</button>
           <button aria-pressed={!kanban} onClick={() => setF({ view: 'lista' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', !kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><List className="h-5 w-5" />Lista</button>
         </div>
+        {kanban && <Button size="lg" aria-pressed={fit} icon={fit ? <Maximize2 className="h-5 w-5" /> : <Minimize2 className="h-5 w-5" />} onClick={() => setFitPersist(!fit)} title={fit ? 'Voltar às colunas largas (rolagem para o lado)' : 'Todas as etapas numa tela só'}>{fit ? 'Colunas largas' : 'Ajustar à tela'}</Button>}
         <div className="relative min-w-[220px] flex-1 lg:max-w-[250px]">
           <label htmlFor="op-q" className="sr-only">Buscar oportunidades</label>
           <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-muted" aria-hidden />
@@ -236,11 +257,11 @@ export function OpportunitiesPage() {
       {kanban ? (
         pipe.isLoading ? <div className="card"><LoadingRows /></div> : pipe.isError ? <ErrorState error={pipe.error} onRetry={() => pipe.refetch()} /> : (
           <DndContext sensors={sensors} onDragEnd={onDragEnd} accessibility={{ announcements, screenReaderInstructions: { draggable: 'Pressione espaço para pegar o cartão, use as setas para escolher a coluna e espaço para soltar. Esc cancela. Também é possível usar o menu do cartão.' } }}>
-            <div className="scroll-thin -mx-4 flex gap-3 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6">
+            <div className={clsx('scroll-thin -mx-4 flex overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6', fit ? 'gap-1.5' : 'gap-3')}>
               {stages.map((s, i) => (
-                <Column key={s.key} stage={s} index={i} onAdd={() => nav(`/opportunities/new${qs({ pipelineId: currentPipelineId })}`)}>
-                  <ul className="flex min-h-[120px] flex-col gap-3">
-                    {s.cards.map((c) => <Card key={c.id} opp={c} onMove={requestMove} canMove={can('oportunidades')} stages={stageList(c.pipelineId)} />)}
+                <Column key={s.key} stage={s} index={i} compact={fit} onAdd={() => nav(`/opportunities/new${qs({ pipelineId: currentPipelineId })}`)}>
+                  <ul className={clsx('flex min-h-[120px] flex-col', fit ? 'gap-1.5' : 'gap-3')}>
+                    {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={requestMove} canMove={can('oportunidades')} stages={stageList(c.pipelineId)} />)}
                     {s.cards.length === 0 && <li className="rounded-md border border-dashed border-line-strong/60 px-3 py-6 text-center text-sm text-muted">Nenhuma oportunidade</li>}
                   </ul>
                 </Column>
