@@ -3,7 +3,7 @@
  * e o resultado na hora — preço mínimo, recomendado, margem, payback, VPL e TIR — numa leitura rápida para o time.
  * O cálculo da tela usa o mesmo motor do servidor; ao salvar, o servidor recalcula e guarda a fotografia auditável.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, Plus, Trash2 } from 'lucide-react';
@@ -123,28 +123,52 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
   );
 }
 
-function CostLines({ title, hint, lines, setLines, perMonth, disabled }: { title: string; hint: string; lines: Line[]; setLines: (l: Line[]) => void; perMonth?: boolean; disabled: boolean }) {
-  const total = fromLines(lines).reduce((t, l) => t + (l.unitCents >= 0 && l.qtyMilli > 0 ? costLineTotal(l) : 0), 0);
-  const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
+/** Bloco numerado do formulário: passo, título, explicação curta e o total do bloco à direita. */
+function Step({ n, title, hint, total, children }: { n: number; title: string; hint: string; total?: ReactNode; children: ReactNode }) {
   return (
-    <fieldset className="min-w-0">
-      <legend className="text-sm font-semibold text-ink">{title}</legend>
-      <p className="mb-2 text-xs text-muted">{hint}</p>
-      {lines.length > 0 && (
-        <ul className="space-y-1.5">{lines.map((l, i) => (
-          <li key={l.key} className="flex flex-wrap items-center gap-1.5">
-            <Input aria-label={`${title}: descrição ${i + 1}`} className="h-9 min-w-[150px] flex-1" placeholder="Ex.: roteador, obra, licença" value={l.description} disabled={disabled} onChange={(e) => set(l.key, { description: e.target.value })} />
-            <Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 w-[64px]" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />
-            <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9 w-[110px]" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
-            {!disabled && <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button>}
-          </li>
-        ))}</ul>
-      )}
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        {!disabled ? <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={() => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }])}>Adicionar</Button> : <span />}
-        <span className="num text-sm text-muted">Total <b className="text-ink">{fmtBRL(total)}</b>{perMonth ? '/mês' : ''}</span>
+    <section className="border border-line p-4" aria-labelledby={`ec-step-${n}`}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 gap-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary text-xs font-bold text-white" aria-hidden>{n}</span>
+          <div className="min-w-0">
+            <h3 id={`ec-step-${n}`} className="text-sm font-semibold text-ink">{title}</h3>
+            <p className="text-xs text-muted">{hint}</p>
+          </div>
+        </div>
+        {total && <span className="num text-sm text-muted">{total}</span>}
       </div>
-    </fieldset>
+      {children}
+    </section>
+  );
+}
+
+const linesTotal = (lines: Line[]) => fromLines(lines).reduce((t, l) => t + (l.unitCents >= 0 && l.qtyMilli > 0 ? costLineTotal(l) : 0), 0);
+
+function CostLines({ title, example, lines, setLines, disabled }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean }) {
+  const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
+  const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
+  const cols = 'grid grid-cols-[minmax(0,1fr)_64px_120px_28px] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_64px_120px_110px_28px]';
+  return (
+    <div>
+      {lines.length > 0 && (
+        <>
+          <div className={clsx(cols, 'mb-1 text-2xs font-medium text-muted')}><span>Descrição</span><span>Qtd.</span><span>Valor unitário</span><span className="hidden text-right sm:block">Total</span><span /></div>
+          <ul className="space-y-1.5">{lines.map((l, i) => {
+            const one = fromLines([l])[0];
+            return (
+              <li key={l.key} className={cols}>
+                <Input aria-label={`${title}: descrição ${i + 1}`} className="h-9" placeholder={example} value={l.description} disabled={disabled} onChange={(e) => set(l.key, { description: e.target.value })} />
+                <Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />
+                <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
+                <span className="num hidden text-right text-sm text-text sm:block">{one && one.unitCents >= 0 && one.qtyMilli > 0 ? fmtBRL(costLineTotal(one)) : '—'}</span>
+                {!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />}
+              </li>
+            );
+          })}</ul>
+        </>
+      )}
+      {!disabled && <Button size="sm" variant="ghost" className="mt-1.5" icon={<Plus className="h-4 w-4" />} onClick={add}>{lines.length ? 'Adicionar outro' : `Adicionar ${title.toLowerCase()}`}</Button>}
+    </div>
   );
 }
 
@@ -177,48 +201,74 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const st = d.settings;
   const dis = !d.editable;
   const set = (p: Partial<NonNullable<typeof f>>) => setF({ ...f, ...p });
+  const itemsTotal = d.items.reduce((t, i) => t + i.revenueCents, 0);
+  const capexTotal = linesTotal(f.capex);
+  const opexTotal = linesTotal(f.opex);
+  const customized = [f.commission, f.loss, f.margin].some((v) => v.trim() !== '');
+  const shown = (v: string, def: number) => (v.trim() ? v : bpText(def));
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2>
-          <p className="max-w-2xl text-sm text-muted">Informe tudo o que a venda e a entrega custam. Os tributos saem do documento fiscal de cada produto (aba Produtos). O resultado aparece abaixo e no painel Viabilidade da venda.</p>
+          <p className="max-w-2xl text-sm text-muted">Preencha os passos abaixo; o resultado se atualiza na hora. Os tributos saem do documento fiscal de cada produto (aba Produtos).</p>
         </div>
         {d.saved && <p className="text-xs text-muted">Salvo em {fmtDateTime(d.saved.updatedAt)}</p>}
       </div>
 
       {live ? <EconomicsResult r={live} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <div className="space-y-4">
-          <fieldset>
-            <legend className="mb-1.5 text-sm font-semibold text-ink">Tipo de venda</legend>
-            <div className="flex flex-wrap gap-2" role="radiogroup">
-              {(['recorrente', 'pontual'] as const).map((m) => (
-                <label key={m} className={clsx('flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm', f.mode === m ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line')}>
-                  <input type="radio" className="accent-primary" checked={f.mode === m} disabled={dis} onChange={() => set({ mode: m })} />{m === 'recorrente' ? 'Contrato recorrente' : 'Venda pontual'}
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-3">
+        <Step n={1} title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">
+          <div className="space-y-3">
+            <fieldset>
+              <legend className="mb-1.5 text-sm font-medium text-ink">Tipo de receita</legend>
+              <div className="flex flex-wrap gap-2" role="radiogroup">
+                {(['recorrente', 'pontual'] as const).map((m) => (
+                  <label key={m} className={clsx('flex h-10 cursor-pointer items-center gap-2 border px-3 text-sm', f.mode === m ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line')}>
+                    <input type="radio" className="accent-primary" checked={f.mode === m} disabled={dis} onChange={() => set({ mode: m })} />{m === 'recorrente' ? 'Mensal (contrato)' : 'Pagamento único'}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="grid grid-cols-2 gap-3">
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
-              : <FormField label="Mês do recebimento" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
-            <FormField label={`Preço avaliado${f.mode === 'recorrente' ? ' (mês)' : ''}`} htmlFor="ec-price" hint={`Em branco: total dos produtos (${fmtBRL(d.items.reduce((t, i) => t + i.revenueCents, 0))})`}><Input id="ec-price" inputMode="decimal" placeholder="0,00" value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} /></FormField>
+              : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
+            <FormField label={f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`Total dos produtos: ${fmtBRL(itemsTotal)}`}><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} /></FormField>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <FormField label="Comissão %" htmlFor="ec-com"><Input id="ec-com" inputMode="decimal" placeholder={bpText(st.commissionBp)} value={f.commission} disabled={dis} invalid={Number.isNaN(parseBp(f.commission))} onChange={(e) => set({ commission: e.target.value })} /></FormField>
-            <FormField label="Perda/glosa %" htmlFor="ec-loss"><Input id="ec-loss" inputMode="decimal" placeholder={bpText(st.lossBp)} value={f.loss} disabled={dis} invalid={Number.isNaN(parseBp(f.loss))} onChange={(e) => set({ loss: e.target.value })} /></FormField>
-            <FormField label="Margem alvo %" htmlFor="ec-mar"><Input id="ec-mar" inputMode="decimal" placeholder={bpText(st.marginTargetBp)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin))} onChange={(e) => set({ margin: e.target.value })} /></FormField>
+        </Step>
+
+        <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
+          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} />
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            <label htmlFor="ec-extra" className="text-sm text-text">Frete, mobilização e taxas (valor único)</label>
+            <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
           </div>
-          <p className="text-xs text-muted">Em branco vale o padrão da empresa. TMA de {bpText(st.tmaMonthlyBp)}% ao mês · payback máximo {st.paybackMaxPrivate} meses (privado) e {st.paybackMaxPublic} (público) · esta conta é do setor {d.publicSector ? 'público' : 'privado'}.</p>
-        </div>
-        <div className="space-y-4">
-          <CostLines title="Investimento inicial (CAPEX)" hint="Pago antes de começar: equipamentos, obra, instalação, projeto." lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} />
-          <FormField label="Outros custos iniciais" htmlFor="ec-extra" hint="Frete, mobilização, taxas (valor único)"><Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="w-[160px]" value={f.extra} disabled={dis} onChange={(e) => set({ extra: e.target.value })} /></FormField>
-          {f.mode === 'recorrente' && <CostLines title="Custos mensais (operação)" hint="Todo mês para manter o serviço: trânsito, links de terceiros, licenças, suporte." lines={f.opex} setLines={(l) => set({ opex: l })} perMonth disabled={dis} />}
-        </div>
+        </Step>
+
+        {f.mode === 'recorrente' && (
+          <Step n={3} title="Custos mensais para manter o serviço" hint="Todo mês enquanto o contrato durar: trânsito, link de terceiro, licenças, suporte." total={<>Total <b className="text-ink">{fmtBRL(opexTotal)}</b>/mês</>}>
+            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} />
+          </Step>
+        )}
+
+        <details className="border border-line p-4" open={customized}>
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2.5">
+              <span className="grid h-6 w-6 place-items-center rounded-full bg-surface-2 text-xs font-bold text-muted" aria-hidden>{f.mode === 'recorrente' ? 4 : 3}</span>
+              <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Comissão {shown(f.commission, st.commissionBp)}% · perda {shown(f.loss, st.lossBp)}% · margem alvo {shown(f.margin, st.marginTargetBp)}%{customized ? '' : ' — padrão da empresa'}</span></span>
+            </span>
+            <span className="text-xs font-semibold text-primary">Alterar</span>
+          </summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <FormField label="Comissão (%)" htmlFor="ec-com" hint="Sobre o preço"><Input id="ec-com" inputMode="decimal" placeholder={bpText(st.commissionBp)} value={f.commission} disabled={dis} invalid={Number.isNaN(parseBp(f.commission))} onChange={(e) => set({ commission: e.target.value })} /></FormField>
+            <FormField label="Perda / glosa (%)" htmlFor="ec-loss" hint="Inadimplência, glosas, descontos"><Input id="ec-loss" inputMode="decimal" placeholder={bpText(st.lossBp)} value={f.loss} disabled={dis} invalid={Number.isNaN(parseBp(f.loss))} onChange={(e) => set({ loss: e.target.value })} /></FormField>
+            <FormField label="Margem alvo (%)" htmlFor="ec-mar" hint="Define o preço recomendado"><Input id="ec-mar" inputMode="decimal" placeholder={bpText(st.marginTargetBp)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin))} onChange={(e) => set({ margin: e.target.value })} /></FormField>
+          </div>
+          <p className="mt-2 text-xs text-muted">Em branco vale o padrão da empresa. TMA de {bpText(st.tmaMonthlyBp)}% ao mês · payback máximo de {d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate} meses (esta conta é do setor {d.publicSector ? 'público' : 'privado'}).</p>
+        </details>
       </div>
 
       {d.editable && <div className="flex justify-end"><Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button></div>}
