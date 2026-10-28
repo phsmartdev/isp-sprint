@@ -16,7 +16,7 @@ import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
 type NavLeaf = {
-  to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: boolean | 'approvals'; also?: string[];
+  to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: 'approvals'; also?: string[];
   /** aba da Gestão de Contratos que o item abre (segue a permissão da aba por perfil) */ contractTab?: ContractTab;
 };
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
@@ -30,7 +30,7 @@ const NAV: NavEntry[] = [
     { to: '/opportunities', label: 'Oportunidades', module: 'oportunidades' },
     { to: '/customers', label: 'Contas', module: 'clientes', feature: 'crm.contas' },
     { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
-    { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades', badge: true },
+    { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades' },
   ] },
   { key: 'contratos', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, children: [
     { to: '/contracts', label: 'Contratos', module: 'contratos' },
@@ -123,8 +123,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
     if (c.to === '/contracts') return loc.pathname.startsWith('/contracts/') || (loc.pathname === '/contracts' && !(CONTRACT_MENU_TABS as readonly string[]).includes(currentTab ?? ''));
     return loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`);
   };
-  const counts = useOpenActivities().data?.counts;
-  const badge = counts ? counts.today + counts.overdue : 0;
   const approvals = useApprovalCount().data?.toDecide ?? 0;
   const inSettings = loc.pathname.startsWith('/settings');
   // grupos abertos/fechados lembrados neste navegador (conveniência; sem armazenamento, segue a página atual)
@@ -159,7 +157,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                             const cls = (on: boolean) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', on ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5');
                             const inner = <>
                               <span className="min-w-0 flex-1">{c.label}</span>
-                              {c.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{badge}</span>}
                               {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
                             </>;
                             // submenus de Contratos: a aba (?t=) decide qual está ativo, não só o caminho
