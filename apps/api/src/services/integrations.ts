@@ -1,7 +1,6 @@
 /**
  * Integrações: configuração (segredos cifrados) e recebimento de leads por webhook.
- * IXC fica com as credenciais guardadas; a leitura de clientes, contratos e faturas entra na Fase 4,
- * com os endpoints conferidos na documentação e na instância (nada inventado aqui).
+ * IXC: leitura de faturas e ordens de serviço (somente leitura, ver services/ixc.ts).
  */
 import { randomBytes } from 'node:crypto';
 import { and, eq, ilike, notInArray, or, sql } from 'drizzle-orm';
@@ -17,9 +16,9 @@ type Field = { key: string; label: string; secret?: boolean; hint?: string; type
 export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; description: string; fields: Field[]; receivesLeads: boolean; status: string; webhook?: boolean }> = {
   ixc: {
     name: 'IXC Provedor',
-    description: 'Clientes, contratos, planos, cobertura e faturas. Credenciais guardadas cifradas; a leitura automática é ativada na Fase 4, depois de conferir os endpoints na sua instância.',
+    description: 'Faturas (contas a receber) e ordens de serviço de cada conta, em SOMENTE LEITURA: o sistema só faz consultas de listagem e recusa qualquer inclusão, alteração ou exclusão. Crie no IXC um usuário com “Permite acesso ao webservice” e informe aqui o número do usuário e o token. A conta é encontrada pelo código do IXC ou pelo CPF/CNPJ.',
     receivesLeads: false,
-    status: 'Credenciais guardadas · leitura na Fase 4',
+    status: 'Somente leitura · faturas e ordens de serviço',
     fields: [
       { key: 'baseUrl', label: 'Endereço do IXC', hint: 'Ex.: https://ixc.suaempresa.com.br' },
       { key: 'user', label: 'Usuário/ID do token', hint: 'Número do usuário dono do token no IXC' },

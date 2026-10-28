@@ -55,6 +55,7 @@ import { mailRoutes } from './routes/mail';
 import { moduleRoutes } from './routes/modules';
 import { projectGovernanceRoutes } from './routes/projectGovernance';
 import { glpiRoutes } from './routes/glpi';
+import { ixcRoutes } from './routes/ixc';
 import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
 import { opportunityItemRoutes } from './routes/opportunityItems';
@@ -221,6 +222,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...moduleRoutes,
     ...projectGovernanceRoutes,
     ...glpiRoutes,
+    ...ixcRoutes,
     ...opportunityContactRoutes,
     ...salesBranchRoutes,
     ...opportunityItemRoutes,

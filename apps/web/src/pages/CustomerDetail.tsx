@@ -16,6 +16,7 @@ import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, LoadingRows, 
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
+import { IxcFinance, IxcOrders } from '../features/ixc/IxcPanels';
 
 type Detail = {
   id: string;
@@ -110,14 +111,12 @@ function CustomerCustomFields({ contactId, initial }: { contactId: string; initi
 }
 
 const FUTURE_TABS: Record<string, string> = {
-  contratos: 'Contratos chegam com a importação do IXC (Fases 3 e 4), preservando o histórico de cada mudança.',
-  financeiro: 'Faturas, pagamentos e estornos chegam na Fase 4, com acesso restrito.',
-  atendimentos: 'Atendimentos e ordens de serviço chegam na Fase 4, conforme o que o IXC disponibilizar.',
+  contratos: 'Os contratos desta conta estão na Gestão de Contratos (busque pelo nome da conta na Lista).',
 };
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams();
-  const { can, feature } = useAuth();
+  const { can, feature, action } = useAuth();
   const nav = useNavigate();
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('t') ?? 'resumo');
   const q = useQuery({ queryKey: ['contact', id], queryFn: () => api<Detail>(`/contacts/${id}`) });
@@ -218,6 +217,8 @@ export function CustomerDetailPage() {
             </ul>
           ))}
           {tab === 'atividades' && (!can('atividades') ? <p className="text-sm text-muted">Seu perfil não tem acesso ao módulo Atividades.</p> : acts.isLoading ? <LoadingRows rows={3} /> : acts.data?.items.length ? <ul className="divide-y divide-line">{acts.data.items.map((a) => <ActivityRow key={a.id} a={a} showOwner compact />)}</ul> : <EmptyState title="Nenhuma interação registrada" />)}
+          {tab === 'financeiro' && (action('ver_financeiro') ? <IxcFinance contactId={c.id} /> : <EmptyState title="Sem acesso aos valores financeiros" description="Seu perfil não vê valores financeiros. Fale com a administração." />)}
+          {tab === 'atendimentos' && <IxcOrders contactId={c.id} />}
           {FUTURE_TABS[tab] && <EmptyState title="Ainda sem dados" description={FUTURE_TABS[tab]} />}
         </div>
       </div>
