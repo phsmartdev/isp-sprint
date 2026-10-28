@@ -45,11 +45,6 @@ import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
-/** Tipos de venda que a filial aceita (lista vazia na filial = todos). */
-const kindsOfBranch = (branches: { id: string; saleKinds?: string[] }[] | undefined, branchId: string | null | undefined): SaleTypeKey[] => {
-  const b = branches?.find((x) => x.id === branchId);
-  return b?.saleKinds?.length ? SALE_TYPE_KEYS.filter((k) => b.saleKinds!.includes(k)) : [...SALE_TYPE_KEYS];
-};
 
 function Panel({ title, icon, children, className }: { title: string; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -182,7 +177,7 @@ export function NewOpportunityPage() {
               <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
                 <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {kindsOfBranch(lookups.data?.branches, branchId).map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -194,7 +189,7 @@ export function NewOpportunityPage() {
                 </FormField>
               )}
               <FormField label="Filial" htmlFor="no-branch" required error={errors.branchId}>
-                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => { setBranchId(e.target.value); if (saleKind && !kindsOfBranch(lookups.data?.branches, e.target.value).includes(saleKind)) setSaleKind(''); }}>
+                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => setBranchId(e.target.value)}>
                   <option value="">Escolha a filial</option>
                   {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Select>
@@ -710,7 +705,7 @@ export function OpportunityWorkspacePage() {
               <FormField label="Tipo de venda" htmlFor="ws-kind" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
                 <Select id="ws-kind" value={opp.saleKind ?? ''} disabled={!editable || setKind.isPending || a.dirty} onChange={(e) => setKind.mutate(e.target.value)}>
                   <option value="">Não informado</option>
-                  {kindsOfBranch(lookups.data?.branches, opp.branchId).map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
             )}

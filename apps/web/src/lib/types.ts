@@ -28,7 +28,7 @@ export type Lookups = {
   teams: { id: string; name: string }[];
   plans: { id: string; name: string; line: string | null; segment: Segment; priceCents: number; speedMbps: number | null; fiscalDocCode?: string | null }[];
   /** Filiais ativas da venda (BKT Soluções, UPNET…). */
-  branches: { id: string; name: string; saleKinds: string[] }[];
+  branches: { id: string; name: string; fiscalKinds: string[] }[];
   /** roteiro de cada tipo de tarefa (Configurações → Modelos) */
   activityScripts?: Partial<Record<string, string>>;
 };

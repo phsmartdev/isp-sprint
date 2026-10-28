@@ -2,7 +2,7 @@
 import { and, eq, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { ECON_MODES, econInputErrors, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
-import { SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -45,19 +45,19 @@ export const economicsRoutes = [
     handler: async ({ app, auth }) => ({ items: await fiscalDocsOf(app.db, auth.tenantId) }),
   }),
   defineRoute({
-    method: 'PUT', url: '/admin/fiscal-docs/:id', summary: 'Salva os documentos fiscais de uma filial por tipo de venda (incluir, alterar, desativar); o código é único no tipo de venda da filial', tag: 'Configurações', ...ADMIN, params: IdParams,
-    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), saleKind: z.enum(SALE_TYPE_KEYS), code: z.string().trim().min(1).max(30), name: z.string().trim().min(2).max(80), active: z.boolean(), taxes: z.array(Tax).max(20) })).max(30) }),
+    method: 'PUT', url: '/admin/fiscal-docs/:id', summary: 'Salva os documentos fiscais de uma filial por tipo fiscal (venda, prestação de serviço, aluguel); o código é único no tipo fiscal da filial', tag: 'Configurações', ...ADMIN, params: IdParams,
+    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), fiscalKind: z.enum(FISCAL_KINDS), code: z.string().trim().min(1).max(30), name: z.string().trim().min(2).max(80), active: z.boolean(), taxes: z.array(Tax).max(20) })).max(30) }),
     handler: async ({ app, auth, params, body, req }) => app.db.transaction(async (tx) => {
-      const [br] = await tx.select({ id: s.salesBranches.id, name: s.salesBranches.name, saleKinds: s.salesBranches.saleKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.id, params.id), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
+      const [br] = await tx.select({ id: s.salesBranches.id, name: s.salesBranches.name, fiscalKinds: s.salesBranches.fiscalKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.id, params.id), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
       if (!br) throw notFound('Filial não encontrada.');
-      const codes = body.items.map((i) => `${i.saleKind}|${i.code.toUpperCase()}`);
-      if (new Set(codes).size !== codes.length) throw unprocessable('Há documentos com o mesmo código no mesmo tipo de venda.');
-      const notAllowed = br.saleKinds.length ? body.items.filter((i) => i.active && !br.saleKinds.includes(i.saleKind)) : [];
-      if (notAllowed.length) throw unprocessable(`A filial ${br.name} não aceita ${[...new Set(notAllowed.map((i) => SALE_TYPE_LABELS[i.saleKind as SaleTypeKey]))].join(', ')}: libere o tipo de venda na filial antes.`);
+      const codes = body.items.map((i) => `${i.fiscalKind}|${i.code.toUpperCase()}`);
+      if (new Set(codes).size !== codes.length) throw unprocessable('Há documentos com o mesmo código no mesmo tipo fiscal.');
+      const notAllowed = br.fiscalKinds.length ? body.items.filter((i) => i.active && !br.fiscalKinds.includes(i.fiscalKind)) : [];
+      if (notAllowed.length) throw unprocessable(`A filial ${br.name} não aceita ${[...new Set(notAllowed.map((i) => FISCAL_KIND_LABELS[i.fiscalKind]))].join(', ')}: libere o tipo fiscal na filial antes.`);
       for (const [i, d] of body.items.entries()) { const e = fiscalDocErrors(d); if (e.length) throw unprocessable(`Documento ${i + 1}: ${e.join(' ')}`); }
       const kept: string[] = [];
       for (const [position, d] of body.items.entries()) {
-        const values = { saleKind: d.saleKind, code: d.code.toUpperCase(), name: d.name, active: d.active, taxes: d.taxes, position, updatedBy: auth.userId, updatedAt: new Date() };
+        const values = { fiscalKind: d.fiscalKind, code: d.code.toUpperCase(), name: d.name, active: d.active, taxes: d.taxes, position, updatedBy: auth.userId, updatedAt: new Date() };
         if (d.id) {
           const [u] = await tx.update(s.fiscalDocTypes).set(values).where(and(eq(s.fiscalDocTypes.id, d.id), eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id))).returning({ id: s.fiscalDocTypes.id });
           if (!u) throw unprocessable('Documento não pertence a esta filial.');
@@ -70,7 +70,7 @@ export const economicsRoutes = [
       // documento tirado da lista só é desativado: itens antigos continuam apontando para ele
       await tx.update(s.fiscalDocTypes).set({ active: false, updatedBy: auth.userId, updatedAt: new Date() })
         .where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id), ...(kept.length ? [notInArray(s.fiscalDocTypes.id, kept)] : [])));
-      await audit(tx, req, { action: 'fiscal_docs.update', entityType: 'sales_branch', entityId: br.id, metadata: { branch: br.name, items: body.items.map((d) => ({ saleKind: d.saleKind, code: d.code, active: d.active, taxes: d.taxes.map((t) => `${t.name} ${t.percentBp / 100}%${t.fixedCents ? ` + R$ ${t.fixedCents / 100}` : ''}${t.active ? '' : ' (inativo)'}`) })) } });
+      await audit(tx, req, { action: 'fiscal_docs.update', entityType: 'sales_branch', entityId: br.id, metadata: { branch: br.name, items: body.items.map((d) => ({ fiscalKind: d.fiscalKind, code: d.code, active: d.active, taxes: d.taxes.map((t) => `${t.name} ${t.percentBp / 100}%${t.fixedCents ? ` + R$ ${t.fixedCents / 100}` : ''}${t.active ? '' : ' (inativo)'}`) })) } });
       return { items: await fiscalDocsOf(tx, auth.tenantId, br.id) };
     }),
   }),
