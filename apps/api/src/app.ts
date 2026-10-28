@@ -56,6 +56,7 @@ import { moduleRoutes } from './routes/modules';
 import { projectGovernanceRoutes } from './routes/projectGovernance';
 import { glpiRoutes } from './routes/glpi';
 import { ixcRoutes } from './routes/ixc';
+import { economicsRoutes } from './routes/economics';
 import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
 import { opportunityItemRoutes } from './routes/opportunityItems';
@@ -225,6 +226,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...projectGovernanceRoutes,
     ...glpiRoutes,
     ...ixcRoutes,
+    ...economicsRoutes,
     ...opportunityContactRoutes,
     ...salesBranchRoutes,
     ...opportunityItemRoutes,

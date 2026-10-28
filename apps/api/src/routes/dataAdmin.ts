@@ -136,6 +136,8 @@ export const dataAdminRoutes = [
           await tx.delete(s.approvalRequests).where(eq(s.approvalRequests.tenantId, t));
           await tx.delete(s.opportunityAnswers).where(inArray(s.opportunityAnswers.opportunityId, opps));
           await tx.delete(s.opportunityAttachments).where(inArray(s.opportunityAttachments.opportunityId, opps));
+          await tx.delete(s.opportunityEconomicsSnapshots).where(eq(s.opportunityEconomicsSnapshots.tenantId, t));
+          await tx.delete(s.opportunityEconomics).where(eq(s.opportunityEconomics.tenantId, t));
           await tx.delete(s.opportunityItems).where(eq(s.opportunityItems.tenantId, t));
           await tx.delete(s.bidParticipants).where(eq(s.bidParticipants.tenantId, t));
           await tx.delete(s.bidActions).where(eq(s.bidActions.tenantId, t));

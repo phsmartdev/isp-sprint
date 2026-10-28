@@ -2,7 +2,7 @@
  * Produtos e serviços da oportunidade: a lista inteira é salva de uma vez (conferida no servidor), o total vira o
  * valor da oportunidade e cada mudança entra no histórico. Licitação guarda o lance por item ou global.
  */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES } from '@isp/domain';
 import { defineRoute } from '../http/route';
@@ -16,6 +16,7 @@ const cents = z.number().int().min(0).max(100_000_000_000);
 const ItemBody = z.object({
   description: z.string().trim().min(2).max(300), unit: z.enum(ITEM_UNITS), qtyMilli: z.number().int().min(1).max(1_000_000_000),
   unitCents: cents, discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(),
+  /** documento fiscal do item (tributos da viabilidade econômica) */ fiscalDocTypeId: z.string().uuid().nullable().optional(),
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
@@ -53,6 +54,11 @@ export const opportunityItemRoutes = [
           const err = itemErrors({ ...it, notes: it.notes ?? null, bidUnitCents: it.bidUnitCents ?? null });
           if (err) throw unprocessable(`Item ${i + 1}: ${err}`, [{ path: `items.${i}`, message: err }]);
         }
+        const docIds = [...new Set(body.items.map((i) => i.fiscalDocTypeId).filter(Boolean) as string[])];
+        if (docIds.length) {
+          const found = await tx.select({ id: s.fiscalDocTypes.id }).from(s.fiscalDocTypes).where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), inArray(s.fiscalDocTypes.id, docIds)));
+          if (found.length !== docIds.length) throw unprocessable('Documento fiscal inválido em algum item.');
+        }
         const bid = await isBid(tx, auth.tenantId, opp);
         const before = await tx.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, opp.id));
         const beforeTotals = itemsTotals(before);
@@ -60,7 +66,7 @@ export const opportunityItemRoutes = [
         if (body.items.length) {
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
-            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, createdBy: auth.userId,
+            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, createdBy: auth.userId,
           })));
         }
         const totals = itemsTotals(body.items.map((i) => ({ ...i, bidUnitCents: bid ? i.bidUnitCents ?? null : null })));

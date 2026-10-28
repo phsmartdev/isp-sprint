@@ -49,7 +49,7 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   const ownerId = input.ownerId ?? auth.userId;
   await assertAssignableUser(tx, auth, 'oportunidades', ownerId);
   await assertTenantRefs(tx, auth, { sourceId: input.sourceId, campaignId: input.campaignId });
-  if (input.branchId) await assertBranch(tx, auth.tenantId, input.branchId);
+  if (input.branchId) await assertBranch(tx, auth.tenantId, input.branchId, input.saleKind);
   const plan = await planPrice(tx, auth, input.planId);
 
   let contactId = input.contactId ?? null;
@@ -329,9 +329,11 @@ export async function detailsPatch(tx: DbOrTx, auth: AuthContext, d: Partial<Opp
 }
 
 /** A filial precisa ser desta empresa e estar ativa. */
-export async function assertBranch(db: DbOrTx, tenantId: string, branchId: string) {
-  const [b] = await db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(and(eq(s.salesBranches.id, branchId), eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.active, true))).limit(1);
+/** Filial ativa da empresa; com tipo de venda, ele precisa estar entre os que a filial aceita (lista vazia = todos). */
+export async function assertBranch(db: DbOrTx, tenantId: string, branchId: string, saleKind?: string | null) {
+  const [b] = await db.select({ id: s.salesBranches.id, name: s.salesBranches.name, saleKinds: s.salesBranches.saleKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.id, branchId), eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.active, true))).limit(1);
   if (!b) throw unprocessable('Filial inválida.', [{ path: 'branchId', message: 'Filial inexistente ou desativada' }]);
+  if (saleKind && b.saleKinds.length && !b.saleKinds.includes(saleKind)) throw unprocessable(`A filial ${b.name} não aceita este tipo de venda.`, [{ path: 'saleKind', message: 'Tipo de venda não permitido nesta filial' }]);
 }
 
 /** Empresas sem filial cadastrada ganham as filiais iniciais (BKT Soluções e UPNET). */

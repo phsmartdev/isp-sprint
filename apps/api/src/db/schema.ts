@@ -134,6 +134,8 @@ export const plans = pgTable(
     speedMbps: integer('speed_mbps'),
     /** Nome do serviço como sai na fatura. */
     invoiceServiceName: text('invoice_service_name'),
+    /** Documento fiscal padrão do produto (código, ex.: NFS-e); cada filial define os tributos do seu documento com esse código. */
+    fiscalDocCode: text('fiscal_doc_code'),
     /** Custo mensal de parceiros cobrados por plano (ex.: PlayHub), por id do parceiro, em centavos. Só residencial. */
     partnerCosts: jsonb('partner_costs').$type<Record<string, number>>().notNull().default({}),
     /** Produtos que compõem o plano: nome, quantidade, valor unitário e comissão por tipo de venda. */
@@ -458,8 +460,27 @@ export const salesBranches = pgTable('sales_branches', {
   name: text('name').notNull(),
   active: boolean('active').notNull().default(true),
   position: integer('position').notNull().default(0),
+  /** Tipos de venda que a filial aceita (vazio = todos). */
+  saleKinds: text('sale_kinds').array().notNull().default(sql`'{}'::text[]`),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name) }));
+
+/** Documento fiscal por filial e tipo de venda (ex.: NFS-e, NFCom) com os tributos que ele gera: alíquota e/ou valor fixo, ativo e vigência. */
+export const fiscalDocTypes = pgTable('fiscal_doc_types', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id),
+  /** Tipo de venda em que o documento vale (Licitação, Adesão à Ata, Consumo de Contrato, Venda Consultiva). */
+  saleKind: text('sale_kind').notNull(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  taxes: jsonb('taxes').$type<{ name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  position: integer('position').notNull().default(0),
+  updatedBy: uuid('updated_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('fiscal_doc_types_uq').on(t.tenantId, t.branchId, t.saleKind, t.code) }));
 
 export const opportunities = pgTable(
   'opportunities',
@@ -578,6 +599,8 @@ export const opportunityItems = pgTable('opportunity_items', {
   notes: text('notes'),
   /** Licitação: valor do lance por unidade deste item. */
   bidUnitCents: bigint('bid_unit_cents', { mode: 'number' }),
+  /** Documento fiscal do item (da filial da oportunidade): define os tributos na viabilidade econômica. */
+  fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`) }));
@@ -1097,6 +1120,8 @@ export const viabilitySettings = pgTable('viability_settings', {
   ltvMinSample: integer('ltv_min_sample').notNull().default(30),
   maxPaybackMonths: integer('max_payback_months'),
   defaultActivationFeeCents: bigint('default_activation_fee_cents', { mode: 'number' }),
+  /** Parâmetros do motor financeiro da viabilidade econômica (margem alvo, TMA, comissão, perda, payback por segmento). */
+  econ: jsonb('econ').$type<Record<string, unknown>>().notNull().default({}),
   /** Limite de autonomia da operação (acima: viabilidade da engenharia). */
   autonomyMaxMeters: integer('autonomy_max_meters').default(100),
   autonomyMaxMbps: integer('autonomy_max_mbps').default(500),
@@ -4532,3 +4557,26 @@ export const purchaseRequests = pgTable('purchase_requests', {
   kindCk: check('purchase_requests_kind_ck', inList('kind', ['consumo', 'especifica'])),
   statusCk: check('purchase_requests_status_ck', inList('status', ['solicitado', 'em_cotacao', 'aprovado', 'comprado', 'recebido', 'cancelado'])),
 }));
+
+// ------------------------------------------------------------------ viabilidade econômica (motor financeiro)
+/** Entradas e o último resultado da viabilidade econômica de cada oportunidade. */
+export const opportunityEconomics = pgTable('opportunity_economics', {
+  opportunityId: uuid('opportunity_id').primaryKey().references(() => opportunities.id),
+  tenantId: tenantId(),
+  input: jsonb('input').$type<Record<string, unknown>>().notNull(),
+  result: jsonb('result').$type<Record<string, unknown>>().notNull(),
+  updatedBy: uuid('updated_by'),
+  updatedAt: updatedAt(),
+});
+/** Fotografia auditável de cada cálculo salvo (append-only): entradas, parâmetros, tributos e avisos da época. */
+export const opportunityEconomicsSnapshots = pgTable('opportunity_economics_snapshots', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  input: jsonb('input').$type<Record<string, unknown>>().notNull(),
+  settings: jsonb('settings').$type<Record<string, unknown>>().notNull(),
+  result: jsonb('result').$type<Record<string, unknown>>().notNull(),
+  reason: text('reason').notNull().default('salvo'),
+  actorId: uuid('actor_id'),
+  createdAt: createdAt(),
+}, (t) => ({ oppIdx: index('opp_econ_snap_idx').on(t.opportunityId, t.createdAt) }));

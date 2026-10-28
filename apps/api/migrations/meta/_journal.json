@@ -526,6 +526,13 @@
       "when": 1792863548849,
       "tag": "0074_orcamento",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793216206670,
+      "tag": "0075_viabilidade_economica",
+      "breakpoints": true
     }
   ]
 }

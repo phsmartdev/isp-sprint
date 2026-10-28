@@ -5,6 +5,7 @@ import { LinkedProjects } from '../features/projects/shared';
 import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel';
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
+import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economics';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
@@ -43,6 +44,12 @@ import { ProposalGenerator } from '../features/ProposalGenerator';
 import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
+
+/** Tipos de venda que a filial aceita (lista vazia na filial = todos). */
+const kindsOfBranch = (branches: { id: string; saleKinds?: string[] }[] | undefined, branchId: string | null | undefined): SaleTypeKey[] => {
+  const b = branches?.find((x) => x.id === branchId);
+  return b?.saleKinds?.length ? SALE_TYPE_KEYS.filter((k) => b.saleKinds!.includes(k)) : [...SALE_TYPE_KEYS];
+};
 
 function Panel({ title, icon, children, className }: { title: string; icon?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -175,7 +182,7 @@ export function NewOpportunityPage() {
               <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
                 <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {kindsOfBranch(lookups.data?.branches, branchId).map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -187,7 +194,7 @@ export function NewOpportunityPage() {
                 </FormField>
               )}
               <FormField label="Filial" htmlFor="no-branch" required error={errors.branchId}>
-                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => setBranchId(e.target.value)}>
+                <Select id="no-branch" value={branchId} invalid={!!errors.branchId} onChange={(e) => { setBranchId(e.target.value); if (saleKind && !kindsOfBranch(lookups.data?.branches, e.target.value).includes(saleKind)) setSaleKind(''); }}>
                   <option value="">Escolha a filial</option>
                   {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </Select>
@@ -606,7 +613,8 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
-  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const econ = useQuery({ queryKey: ['economics', id], enabled: !!id, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
@@ -702,7 +710,7 @@ export function OpportunityWorkspacePage() {
               <FormField label="Tipo de venda" htmlFor="ws-kind" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
                 <Select id="ws-kind" value={opp.saleKind ?? ''} disabled={!editable || setKind.isPending || a.dirty} onChange={(e) => setKind.mutate(e.target.value)}>
                   <option value="">Não informado</option>
-                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {kindsOfBranch(lookups.data?.branches, opp.branchId).map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
             )}
@@ -756,6 +764,7 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
+            { key: 'viabilidade', label: 'Viabilidade econômica' },
             ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(origin.data?.thread ? [{ key: 'email' as const, label: 'E-mail' }] : []),
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
@@ -767,6 +776,7 @@ export function OpportunityWorkspacePage() {
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
+          {centerTab === 'viabilidade' && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
@@ -794,7 +804,8 @@ export function OpportunityWorkspacePage() {
 
   const right = (
     <div className="space-y-4">
-      <ViabilityPanel v={opp.viability} loading={a.status === 'saving'} title={opp.stage === 'ganha' ? 'Viabilidade no fechamento' : 'Viabilidade da venda'} />
+      {/* viabilidade econômica salva: o resultado do motor financeiro; senão, a viabilidade do plano (residencial) */}
+      {econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : <ViabilityPanel v={opp.viability} loading={a.status === 'saving'} title={opp.stage === 'ganha' ? 'Viabilidade no fechamento' : 'Viabilidade da venda'} />}
       <EngineeringPanel opp={opp} planName={selectedPlan?.name ?? opp.planName ?? null} speedMbps={selectedPlan?.speedMbps ?? null} notes={f.notes} value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} />
       <section id="ws-chat" className="card scroll-mt-4">
         <NegotiationChat oppId={opp.id} className="max-h-[560px]" />

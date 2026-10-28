@@ -301,6 +301,8 @@ export const PlanUpsert = z.object({
   speedMbps: z.number().int().min(1).max(100_000).optional().nullable(),
   /** Nome do serviço como sai na fatura do cliente. */
   invoiceServiceName: optText(120),
+  /** Documento fiscal padrão (código, ex.: NFS-e): os tributos vêm do documento com esse código na filial da venda. */
+  fiscalDocCode: optText(30),
   products: z.array(PlanProductItem).max(30).default([]),
   /** Valor mensal dos parceiros cobrados por plano (ex.: PlayHub), por id do parceiro. Só planos residenciais. */
   partnerCosts: z.record(uuid, z.number().int().min(0).max(100_000_00)).default({}),

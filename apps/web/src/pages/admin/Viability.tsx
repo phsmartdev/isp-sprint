@@ -308,6 +308,44 @@ function Simulator() {
   );
 }
 
+type Econ = { marginTargetBp: number; tmaMonthlyBp: number; commissionBp: number; lossBp: number; paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
+
+/** Motor financeiro da aba Viabilidade econômica (B2B: CAPEX, custos mensais, tributos por documento fiscal). */
+function EconEngine() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['admin', 'viability-econ'], queryFn: () => api<Econ>('/admin/viability/econ') });
+  const [e, setE] = useState<Econ | null>(null);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => { if (q.data) { setE(q.data); setDirty(false); } }, [q.data]);
+  const m = useMutation({
+    mutationFn: () => api('/admin/viability/econ', { method: 'PUT', body: e }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Motor financeiro salvo' }); },
+    onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
+  });
+  if (!e) return <section className="card p-5"><LoadingRows /></section>;
+  const set = (v: Partial<Econ>) => { setE({ ...e, ...v }); setDirty(true); };
+  const pct = (k: 'marginTargetBp' | 'tmaMonthlyBp' | 'commissionBp' | 'lossBp', label: string, hint: string) => (
+    <FormField label={label} htmlFor={`ec-${k}`} hint={hint}><NumInput label={label} value={e[k]} suffix="%" onChange={(v) => set({ [k]: v ?? 0 } as Partial<Econ>)} /></FormField>
+  );
+  return (
+    <section className="card p-5">
+      <h3 className="text-md font-bold text-ink">Motor financeiro (aba Viabilidade econômica)</h3>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Usado nas vendas B2B com custos de entrega. Os tributos vêm do documento fiscal de cada item (Filiais, tipos de venda e documentos fiscais). Piso = maior entre o preço que cobre o caixa e o que cobre o custo do dinheiro (TMA); recomendado = preço que entrega a margem alvo.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {pct('marginTargetBp', 'Margem alvo', 'Margem de contribuição desejada sobre o preço')}
+        {pct('tmaMonthlyBp', 'TMA mensal', 'Custo do dinheiro: corrige o investimento no prazo')}
+        {pct('commissionBp', 'Comissão padrão', 'Sobre o preço; o vendedor pode ajustar na oportunidade')}
+        {pct('lossBp', 'Perda / glosa', 'Inadimplência, glosas e descontos esperados')}
+        <FormField label="Payback máximo, setor privado" htmlFor="ec-pbp"><NumInput label="Payback máximo, setor privado" int value={e.paybackMaxPrivate} suffix="meses" onChange={(v) => set({ paybackMaxPrivate: Math.max(1, v ?? 1) })} /></FormField>
+        <FormField label="Payback máximo, setor público" htmlFor="ec-pbg" hint="Conta governamental, natureza pública ou licitação"><NumInput label="Payback máximo, setor público" int value={e.paybackMaxPublic} suffix="meses" onChange={(v) => set({ paybackMaxPublic: Math.max(1, v ?? 1) })} /></FormField>
+      </div>
+      <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={e.blockOutsidePolicy} onChange={(ev) => set({ blockOutsidePolicy: ev.target.checked })} />Bloquear o pedido de aprovação quando a venda estiver fora da política (payback acima do limite ou inviável)</label>
+      <div className="mt-3 flex justify-end"><Button size="sm" variant="primary" loading={m.isPending} disabled={!dirty} onClick={() => m.mutate()}>Salvar</Button></div>
+    </section>
+  );
+}
+
 export function AdminViability() {
   const q = useQuery({ queryKey: ['admin', 'viability'], queryFn: () => api<Data>('/admin/viability') });
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
@@ -319,6 +357,7 @@ export function AdminViability() {
         <h2 className="text-lg font-bold text-ink">Viabilidade da venda</h2>
         <p className="max-w-3xl text-sm text-muted">Margem mensal = mensalidade − tributos − parceiros − custo mensal do caminho. CAC = comissão + cabo + instalação + equipamentos − taxa de ativação. Payback = CAC ÷ margem mensal. O vendedor vê tudo isso na negociação, comparado com o LTV histórico. Vendas fechadas guardam o cálculo do dia do fechamento.</p>
       </section>
+      <EconEngine />
       <Simulator />
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
         <Deductions title="Tributos" desc="Impostos sobre a mensalidade, em % ou valor fixo por mês. Um tributo em % pode ser calculado sobre o que sobra depois de tirar um parceiro (ex.: ISS sobre a mensalidade menos a UPNET)." url="/admin/viability/taxes" initial={d.taxes} routes={d.routes} partners={d.partners} />
