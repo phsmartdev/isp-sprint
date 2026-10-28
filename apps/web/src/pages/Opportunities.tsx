@@ -66,19 +66,24 @@ function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onM
       className={clsx('cursor-pointer rounded-md bg-surface shadow-card ring-1 ring-line/70 hover:ring-line-strong', compact ? 'p-2' : 'p-3', isDragging && 'z-30 opacity-90 shadow-overlay')}
     >
       {compact ? (
-        // ajustado à tela: nome, valor, responsável e próxima ação, sem o resto
+        // ajustado à tela (como no RD Station): negociação, responsável, valor, tempo em aberto e a tarefa
         <>
-          <div className="flex items-start gap-1.5">
-            <p className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-bold leading-tight text-ink" title={opp.contactName}>{opp.contactName}</p>
-            <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={20} />
+          <div className="flex items-start gap-1">
+            <p className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-semibold leading-snug text-ink" title={opp.title}>{opp.title || opp.contactName}</p>
             {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
           </div>
-          <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2">
-            <span className="num text-xs font-bold text-ink">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : <span className="font-medium text-muted">Sem plano</span>}</span>
-            <span className={clsx('ml-auto whitespace-nowrap text-2xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
+          {opp.title && opp.title !== opp.contactName && <p className="truncate text-2xs text-muted" title={opp.contactName}>{opp.contactName}</p>}
+          <div className="mt-1.5 flex items-center gap-1.5 text-2xs text-muted">
+            <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={18} />
+            <span className="num min-w-0 truncate text-xs text-text">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : 'Sem valor'}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-0.5" title={`Aberta há ${opp.ageDays} dia(s) · ${opp.daysInStage} dia(s) nesta etapa`}><Clock3 className="h-3 w-3" aria-hidden />{opp.ageDays}d</span>
+          </div>
+          <div className={clsx('mt-1.5 flex items-center gap-1 border-t border-line pt-1.5 text-2xs', opp.overdue ? 'text-danger' : opp.missingNextAction ? 'text-[#C2610C]' : 'text-muted')}>
+            <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate" title={opp.nextAction ?? undefined}>{opp.nextAction ?? 'Sem tarefa'}</span>
+            {opp.nextActionAt && <span className="num shrink-0 whitespace-nowrap">{fmtRelativeShort(opp.nextActionAt)}</span>}
           </div>
           {tag && <div className="mt-1"><Chip tone={tag.tone}>{tag.label}</Chip></div>}
-          {!!opp.accountContracts?.length && <p className="mt-1 text-2xs text-muted">{opp.accountContracts.length} contrato(s) vigente(s)</p>}
         </>
       ) : (<>
       <div className="flex items-start gap-2">
