@@ -5,8 +5,8 @@
 import { and, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
-  ALERT_BASE_LEVEL, ALERT_LABELS, ATTENTION_LEVEL_LABELS, COMPANY_DOC_LABELS, PROCESS_LABELS, REQUIRED_PUBLIC_DOCS,
-  addDays, annualValueCents, attentionLevel, certificateDue, attentionScore, daysBetween, docStatus, revenueAtRisk,
+  ALERT_BASE_LEVEL, ALERT_LABELS, ATTENTION_LEVEL_LABELS, PROCESS_LABELS,
+  addDays, annualValueCents, attentionLevel, certificateDue, attentionScore, daysBetween, revenueAtRisk,
   type AlertKind, type AttentionLevel, type ProcessKind,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -15,10 +15,9 @@ import * as s from '../db/schema';
 import { publicLink } from './alerts';
 import { brl, sendAlert, smtpConfig, tenantName } from './email';
 import { contractSettingsOf, usersBySector } from './contracts';
-import { currentCompanyDocs, publicContractsByBranch } from './companyDocs';
 
-export type AttentionSource = 'notificacao' | 'processo' | 'validacao' | 'habilitacao' | 'execucao';
-export const SOURCE_LABELS: Record<AttentionSource, string> = { notificacao: 'Notificação', processo: 'Processo atrasado', validacao: 'Validação do cadastro', habilitacao: 'Habilitação', execucao: 'Execução (SLA, ocorrências, cláusulas, atestados)' };
+export type AttentionSource = 'notificacao' | 'processo' | 'validacao' | 'execucao';
+export const SOURCE_LABELS: Record<AttentionSource, string> = { notificacao: 'Notificação', processo: 'Processo atrasado', validacao: 'Validação do cadastro', execucao: 'Execução (SLA, ocorrências, cláusulas, atestados)' };
 export type AttentionItem = {
   key: string; source: AttentionSource; kind: string; kindLabel: string; level: AttentionLevel; score: number;
   title: string; detail: string | null; dueAt: string | null; daysLeft: number | null; valueCents: number;
@@ -34,7 +33,7 @@ const PROCESS_ALERT: Record<ProcessKind, AlertKind[]> = { renovacao: ['renovacao
 const v = s.contractVersions;
 const commercial = alias(s.users, 'att_commercial');
 
-export async function attentionItems(db: DbOrTx, tenantId: string, scope: SQL, today: string, opts: { company: boolean }) {
+export async function attentionItems(db: DbOrTx, tenantId: string, scope: SQL, today: string) {
   const contracts = await db
     .select({ id: s.contracts.id, code: s.contracts.code, stage: s.contracts.stage, kind: s.contracts.kind, createdAt: s.contracts.createdAt, commercialOwnerId: s.contracts.commercialOwnerId, ownerName: commercial.name, number: v.number, monthlyCents: v.monthlyCents, totalCents: v.totalCents, termMonths: v.termMonths, clientName: s.contacts.name })
     .from(s.contracts)
@@ -139,38 +138,6 @@ export async function attentionItems(db: DbOrTx, tenantId: string, scope: SQL, t
     }
   }
 
-  if (opts.company) {
-    const docs = (await currentCompanyDocs(db, tenantId)).map((d) => ({ ...d, ...docStatus(d.expiresOn, today) }));
-    const branches = await db.select({ id: s.salesBranches.id, name: s.salesBranches.name }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.active, true)));
-    const pubs = await publicContractsByBranch(db, tenantId);
-    const groups = new Map<string, { kind: string; doc: (typeof docs)[number] | null; branches: string[]; contracts: number }>();
-    for (const b of branches) {
-      const n = pubs.filter((p) => p.branch_id === b.id || p.branch_id === null).reduce((t, p) => t + p.n, 0);
-      if (!n) continue;
-      for (const k of REQUIRED_PUBLIC_DOCS) {
-        const d = docs.find((x) => x.kind === k && x.branchId === b.id) ?? docs.find((x) => x.kind === k && !x.branchId) ?? null;
-        const st = d ? d.status : 'falta';
-        if (st === 'valida') continue;
-        const key = d ? `doc:${d.id}` : `falta:${k}`;
-        const g = groups.get(key) ?? { kind: k, doc: d, branches: [], contracts: 0 };
-        g.branches.push(b.name); g.contracts = Math.max(g.contracts, n);
-        groups.set(key, g);
-      }
-    }
-    for (const [key, g] of groups) {
-      const label = COMPANY_DOC_LABELS[g.kind as keyof typeof COMPANY_DOC_LABELS] ?? g.kind;
-      const st = g.doc?.status ?? 'falta';
-      const where = g.branches.length === branches.length && branches.length > 1 ? 'todas as filiais' : g.branches.join(', ');
-      push({
-        key: `habilitacao:${key}`, source: 'habilitacao', kind: `certidao_${st}`, kindLabel: st === 'falta' ? 'Certidão não cadastrada' : st === 'vencida' ? 'Certidão vencida' : 'Certidão vencendo',
-        base: st === 'falta' || st === 'vencida' || st === 'vence_7' ? 'critica' : st === 'vence_15' ? 'alta' : 'media',
-        title: `${label} ${st === 'falta' ? 'não cadastrada' : st === 'vencida' ? 'vencida' : 'vencendo'} (${where})`,
-        detail: `${g.contracts} contrato(s) público(s) dependem da habilitação em dia para faturar e renovar.`, dueAt: g.doc?.expiresOn ?? today,
-        valueCents: 0, contractId: null, contractCode: null, contractNumber: null, clientName: null, commercialOwnerId: null,
-        ownerId: g.doc?.createdBy ?? null, ownerName: null, alertId: null, href: '/contracts?t=habilitacao',
-      });
-    }
-  }
   return items.sort((a, b) => b.score - a.score);
 }
 
@@ -204,7 +171,7 @@ export async function sendContractDigests(db: DbOrTx, config: Config, opts: { te
   for (const t of tenants) {
     const cfg = await contractSettingsOf(db, t.id);
     if (cfg.dailyDigest === false || !(await smtpConfig(db, t.id))) continue;
-    const items = await attentionItems(db, t.id, eq(s.contracts.tenantId, t.id), today, { company: true });
+    const items = await attentionItems(db, t.id, eq(s.contracts.tenantId, t.id), today);
     if (!items.length) continue;
     const managers = await usersBySector(db, t.id, PORTFOLIO_SECTORS);
     const users = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email }).from(s.users).where(and(eq(s.users.tenantId, t.id), eq(s.users.active, true)));
@@ -212,7 +179,7 @@ export async function sendContractDigests(db: DbOrTx, config: Config, opts: { te
     const company = await tenantName(db, t.id);
     for (const u of users) {
       const manager = managers.some((m) => m.id === u.id);
-      const mine = items.filter((x) => x.ownerId === u.id || (x.source !== 'habilitacao' && x.commercialOwnerId === u.id));
+      const mine = items.filter((x) => x.ownerId === u.id || x.commercialOwnerId === u.id);
       const list = manager ? items : mine;
       if (!list.length) continue;
       const [slot] = await db.insert(s.contractDigests).values({ tenantId: t.id, userId: u.id, day: today, items: list.length, status: 'enviando' }).onConflictDoNothing().returning({ id: s.contractDigests.id });

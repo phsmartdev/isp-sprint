@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONTRACT_SETTINGS as C, adjustedCents, documentName, dueAlerts, endFromTerm, fillSubject, nextAnniversary, type AlertInput } from './contracts';
+import { CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS as C, adjustedCents, allowedContractTabs, normalizeDashboard, documentName, dueAlerts, endFromTerm, fillSubject, nextAnniversary, type AlertInput } from './contracts';
 
 const base: AlertInput = { today: '2026-10-19', stage: 'vigente', endAt: null, closureExpected: false, closureAt: null, guaranteeExpiresAt: null, adjustmentBaseDate: null, signedAt: '2025-01-10', activationAt: '2025-02-01', validatedAt: null, hasSignedContractDoc: true, provisioningDone: true, openSignatureSince: null };
 const kinds = (i: Partial<AlertInput>) => dueAlerts({ ...base, ...i }, C).map((a) => a.kind);
@@ -152,5 +152,25 @@ describe('central de atenção e painel executivo', () => {
     expect(c).toMatchObject({ top1Share: 0.5, top5Share: 1, hhi: 3800, level: 'alta', top1: { name: 'A' } });
     expect(concentration([]).hhi).toBeNull();
     expect(annualValueCents({ monthlyCents: 0, totalCents: 2400, termMonths: 24 })).toBe(1200);
+  });
+});
+
+describe('abas e painel de contratos', () => {
+  it('aba liberada se qualquer perfil libera; administração vê todas', () => {
+    const d = { vendedor: ['painel' as const, 'relatorios' as const], implantacao: ['painel' as const] };
+    expect(allowedContractTabs(d, ['vendedor'], false)).not.toContain('painel');
+    expect(allowedContractTabs(d, ['vendedor', 'supervisor'], false)).toContain('painel');
+    expect(allowedContractTabs(d, ['vendedor', 'implantacao'], false)).toContain('relatorios');
+    expect(allowedContractTabs(d, ['vendedor', 'implantacao'], false)).not.toContain('painel');
+    expect(allowedContractTabs(d, ['vendedor'], true)).toEqual([...CONTRACT_TABS]);
+    expect(CONTRACT_TABS.indexOf('funil')).toBe(CONTRACT_TABS.indexOf('painel') + 1);
+  });
+  it('painel: completa seções que faltam e ignora as desconhecidas', () => {
+    const n = normalizeDashboard({ order: ['executivo', 'xpto', 'executivo'], hidden: ['perfil', 'nada'], compactValues: false });
+    expect(n.order[0]).toBe('executivo');
+    expect([...n.order].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
+    expect(n.hidden).toEqual(['perfil']);
+    expect(n.compactValues).toBe(false);
+    expect(normalizeDashboard(null).order.slice(-2)).toEqual(['faturamento', 'executivo']);
   });
 });

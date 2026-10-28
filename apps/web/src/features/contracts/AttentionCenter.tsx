@@ -1,6 +1,6 @@
 /**
  * Central de atenção dos contratos: uma fila só com tudo o que pede ação (notificações, processos atrasados,
- * cadastros sem validação e habilitação), do mais grave ao menos grave.
+ * cadastros sem validação e execução), do mais grave ao menos grave.
  */
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -17,7 +17,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from './shared';
 
 type Item = {
-  key: string; source: 'notificacao' | 'processo' | 'validacao' | 'habilitacao'; kind: string; kindLabel: string; level: AttentionLevel; score: number;
+  key: string; source: 'notificacao' | 'processo' | 'validacao' | 'execucao'; kind: string; kindLabel: string; level: AttentionLevel; score: number;
   title: string; detail: string | null; dueAt: string | null; daysLeft: number | null; valueCents: number;
   contractId: string | null; contractCode: number | null; contractNumber: string | null; clientName: string | null; ownerId: string | null; ownerName: string | null; alertId: string | null; href: string;
 };
@@ -78,7 +78,7 @@ export function AttentionCenter() {
       </div>
 
       {!items.length ? (
-        <div className="card"><EmptyState icon={<CheckCircle2 className="h-10 w-10" />} title={d.items.length ? 'Nada com esse filtro' : 'Nada pedindo ação agora'} description={d.items.length ? 'Tire o filtro para ver o resto da fila.' : 'Vencimentos, saldos, empenhos, certidões e processos estão em dia.'} /></div>
+        <div className="card"><EmptyState icon={<CheckCircle2 className="h-10 w-10" />} title={d.items.length ? 'Nada com esse filtro' : 'Nada pedindo ação agora'} description={d.items.length ? 'Tire o filtro para ver o resto da fila.' : 'Vencimentos, saldos, empenhos e processos estão em dia.'} /></div>
       ) : (
         <ol aria-label="Itens que pedem ação" className="space-y-2">
           {items.map((x) => (

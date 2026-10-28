@@ -1,12 +1,15 @@
 import { MoneyToggle } from '../../lib/privacy';
-/** Painel da Gestão de Contratos: faturamento por tipo no período e carteira estratificada. */
+/**
+ * Painel da Gestão de Contratos: carteira estratificada, vencimentos, faturamento por tipo no período e visão executiva.
+ * A ordem e as seções visíveis vêm de Configurações → Contratos (padrão: faturamento e visão executiva no fim).
+ */
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AlertTriangle, CalendarDays, FileSignature, Wallet } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_HINTS, type BillingType, type ContractStage } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, DEFAULT_DASHBOARD, type BillingType, type ContractStage, type DashboardConfig, type DashboardSection } from '@isp/domain';
 import { api, qs } from '../../lib/api';
-import { fmtBRL, fmtDate, fmtInt, fmtPct } from '../../lib/format';
+import { fmtBRL, fmtBRLCompact, fmtDate, fmtInt, fmtPct } from '../../lib/format';
 import { useUrlState } from '../../lib/hooks';
 import { ErrorState, LoadingRows } from '../../components/ui/primitives';
 import { DateRange } from '../../components/ui/DateRange';
@@ -24,7 +27,9 @@ const CONC_LABEL = { baixa: 'Concentração baixa', moderada: 'Concentração mo
 const CONC_TONE = { baixa: 'text-success', moderada: 'text-[#C2610C]', alta: 'text-danger' } as const;
 
 /** Visão executiva: carteira, backlog, receita em risco por janela e dependência dos maiores clientes. */
-function Executive({ e }: { e: Exec }) {
+type Money = (cents?: number | null) => string;
+
+function Executive({ e, money }: { e: Exec; money: Money }) {
   const maxRisk = Math.max(1, ...e.risk.map((r) => r.monthlyCents));
   const c = e.concentration;
   return (
@@ -32,19 +37,19 @@ function Executive({ e }: { e: Exec }) {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="card p-4">
           <p className="text-sm text-muted">Carteira contratada (12 meses)</p>
-          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(e.contractedAnnualCents)}</FitText>
+          <FitText className="num text-2xl font-extrabold text-ink" title={fmtBRL(e.contractedAnnualCents)}>{money(e.contractedAnnualCents)}</FitText>
           <p className="text-xs text-muted">{e.contractedAnnualCents ? `${fmtPct(e.publicAnnualCents / e.contractedAnnualCents)} em contratos públicos` : 'Sem contratos ativos'}</p>
         </div>
         <div className="card p-4">
           <p className="text-sm text-muted">Backlog: falta faturar do contratado</p>
-          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(e.backlogCents)}</FitText>
+          <FitText className="num text-2xl font-extrabold text-ink" title={fmtBRL(e.backlogCents)}>{money(e.backlogCents)}</FitText>
           <div className="mt-2 flex h-2 w-full overflow-hidden bg-surface-2" aria-hidden>{e.backlogByType.map((t) => t.cents ? <div key={t.type} style={{ width: `${(t.cents / Math.max(1, e.backlogCents)) * 100}%`, background: TYPE_COLOR[t.type] }} /> : null)}</div>
-          <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted">{e.backlogByType.map((t) => <span key={t.type}>{t.label} <span className="num">{fmtBRL(t.cents)}</span></span>)}</p>
+          <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted">{e.backlogByType.map((t) => <span key={t.type} title={fmtBRL(t.cents)}>{t.label} <span className="num">{money(t.cents)}</span></span>)}</p>
         </div>
         <div className="card p-4">
           <p className="text-sm text-muted">Dependência dos maiores clientes</p>
           {!c.top1 ? <p className="mt-2 text-sm text-muted">Sem dados.</p> : <>
-            <p className="num text-2xl font-extrabold text-ink">{fmtPct(c.top1Share)} <span className="text-sm font-semibold text-muted">no maior cliente</span></p>
+            <p className="num flex flex-wrap items-baseline gap-x-2 text-2xl font-extrabold text-ink">{fmtPct(c.top1Share)} <span className="text-sm font-semibold text-muted">no maior cliente</span></p>
             <p className="truncate text-xs text-muted" title={c.top1.name}>{c.top1.name} · 5 maiores somam {fmtPct(c.top5Share)}</p>
             {c.level && <p className={clsx('mt-1 text-xs font-semibold', CONC_TONE[c.level])}>{CONC_LABEL[c.level]} (HHI {fmtInt(c.hhi ?? 0)})</p>}
           </>}
@@ -57,10 +62,10 @@ function Executive({ e }: { e: Exec }) {
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {e.risk.map((r) => (
-            <div key={r.days} className="border border-line p-3">
+            <div key={r.days} className="min-w-0 border border-line p-3">
               <p className="text-xs font-semibold text-muted">Em {r.days} dias</p>
-              <p className="num text-lg font-extrabold text-ink">{fmtBRL(r.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></p>
-              <p className="num text-xs text-muted">{r.n} contrato(s) · {fmtBRL(r.annualCents)}/ano</p>
+              <FitText className="num text-lg font-extrabold text-ink" title={`${fmtBRL(r.monthlyCents)}/mês`}>{money(r.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></FitText>
+              <p className="num text-xs text-muted" title={`${fmtBRL(r.annualCents)}/ano`}>{r.n} contrato(s) · {money(r.annualCents)}/ano</p>
               <div className="mt-2 h-1.5 bg-surface-2" aria-hidden><div className="h-1.5 bg-danger" style={{ width: `${(r.monthlyCents / maxRisk) * 100}%`, opacity: 0.45 + 0.55 * (1 - r.days / 180) }} /></div>
             </div>
           ))}
@@ -92,11 +97,11 @@ function Delta({ cur, prev }: { cur: number; prev: number }) {
   const d = (cur - prev) / prev;
   return <span className={clsx('text-xs font-semibold', d >= 0 ? 'text-success' : 'text-danger')}>{d >= 0 ? '▲' : '▼'} {fmtPct(Math.abs(d))} vs. período anterior</span>;
 }
-function Stat({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub?: React.ReactNode; tone: string }) {
+function Stat({ icon, label, value, full, sub, tone }: { icon: React.ReactNode; label: string; value: string; full?: string; sub?: React.ReactNode; tone: string }) {
   return (
-    <div className="card flex items-center gap-4 p-4">
+    <div className="card flex min-w-0 items-center gap-4 p-4">
       <span className={clsx('flex h-12 w-12 shrink-0 items-center justify-center rounded-circle', tone)}>{icon}</span>
-      <div className="min-w-0"><p className="text-sm text-muted">{label}</p><FitText className="num truncate text-xl font-extrabold text-ink">{value}</FitText>{sub && <div className="text-xs text-muted">{sub}</div>}</div>
+      <div className="min-w-0 flex-1"><p className="text-sm text-muted">{label}</p><FitText className="num text-xl font-extrabold text-ink" title={full}>{value}</FitText>{sub && <div className="break-words text-xs text-muted">{sub}</div>}</div>
     </div>
   );
 }
@@ -125,55 +130,62 @@ export function ContractsDashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const [f, setF] = useUrlState({ from: `${today.slice(0, 7)}-01`, to: today });
   const q = useQuery({ queryKey: ['contracts', 'dashboard', f.from, f.to], queryFn: () => api<Dash>(`/contracts/dashboard${qs({ from: f.from, to: f.to })}`) });
-  if (q.isLoading) return <div className="card"><LoadingRows /></div>;
+  const view = useQuery({ queryKey: ['contracts', 'view'], queryFn: () => api<{ dashboard: DashboardConfig }>('/contracts/view'), staleTime: 60_000 });
+  if (q.isLoading || view.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
+  const cfg = view.data?.dashboard ?? DEFAULT_DASHBOARD;
+  // valores dos cartões na medida do tamanho (mil, mi, bi); o valor inteiro fica no title
+  const money: Money = cfg.compactValues ? fmtBRLCompact : fmtBRL;
   const months = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
   const maxExp = Math.max(1, ...d.expiringByMonth.map((m) => BILLING_TYPES.reduce((a, t) => a + m[t], 0)));
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+  const sections: Record<DashboardSection, () => React.ReactNode> = {
+    faturamento: () => (
+      <div className="space-y-3">
         <p className="text-sm text-muted">Faturamento de {fmtDate(d.period.from)} a {fmtDate(d.period.to)}, comparado com {fmtDate(d.period.prevFrom)} a {fmtDate(d.period.prevTo)}.</p>
-        <div className="flex flex-wrap items-center gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
-      </div>
-
-      <section aria-label="Faturamento por tipo de contrato" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <div className="card border-l-4 border-l-ink p-4">
-          <p className="text-sm text-muted">Faturamento total no período</p>
-          <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(d.billing.totalCents)}</FitText>
-          <Delta cur={d.billing.totalCents} prev={d.billing.prevTotalCents} />
-        </div>
-        {d.billing.byType.map((t) => (
-          <div key={t.type} className="card border-l-4 p-4" style={{ borderLeftColor: TYPE_COLOR[t.type] }}>
-            <p className="text-sm text-muted">{t.label} <span className="text-xs">· {t.active} ativo(s)</span></p>
-            <FitText className="num text-2xl font-extrabold text-ink">{fmtBRL(t.billedCents)}</FitText>
-            <Delta cur={t.billedCents} prev={t.billedPrevCents} />
-            <p className="mt-1 text-xs text-muted">{t.type === 'medicao' && t.balance ? `Saldo disponível ${fmtBRL(t.balance.available)} de ${fmtBRL(t.balance.credited)}` : t.type === 'recorrente' ? `${fmtBRL(t.monthlyCents)}/mês contratado` : BILLING_TYPE_HINTS[t.type]}</p>
+        <section aria-label="Faturamento por tipo de contrato" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="card min-w-0 border-l-4 border-l-ink p-4">
+            <p className="text-sm text-muted">Faturamento total no período</p>
+            <FitText className="num text-2xl font-extrabold text-ink" title={fmtBRL(d.billing.totalCents)}>{money(d.billing.totalCents)}</FitText>
+            <Delta cur={d.billing.totalCents} prev={d.billing.prevTotalCents} />
           </div>
-        ))}
-      </section>
-      <p className="-mt-2 text-xs text-muted">{d.billing.note}</p>
-      <Executive e={d.executive} />
-
+          {d.billing.byType.map((t) => (
+            <div key={t.type} className="card min-w-0 border-l-4 p-4" style={{ borderLeftColor: TYPE_COLOR[t.type] }}>
+              <p className="text-sm text-muted">{t.label} <span className="text-xs">· {t.active} ativo(s)</span></p>
+              <FitText className="num text-2xl font-extrabold text-ink" title={fmtBRL(t.billedCents)}>{money(t.billedCents)}</FitText>
+              <Delta cur={t.billedCents} prev={t.billedPrevCents} />
+              <p className="mt-1 text-xs text-muted">{t.type === 'medicao' && t.balance ? `Saldo disponível ${money(t.balance.available)} de ${money(t.balance.credited)}` : t.type === 'recorrente' ? `${money(t.monthlyCents)}/mês contratado` : BILLING_TYPE_HINTS[t.type]}</p>
+            </div>
+          ))}
+        </section>
+        <p className="text-xs text-muted">{d.billing.note}</p>
+      </div>
+    ),
+    executivo: () => <Executive e={d.executive} money={money} />,
+    indicadores: () => (
       <section aria-label="Indicadores da carteira" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat icon={<FileSignature className="h-6 w-6" />} tone="bg-primary-soft text-primary" label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} />
-        <Stat icon={<Wallet className="h-6 w-6" />} tone="bg-success-soft text-success" label="Receita mensal contratada" value={fmtBRL(d.monthlyCents)} sub={`Global ${fmtBRL(d.globalCents)} · ticket médio ${fmtBRL(d.portfolio.avgTicketCents)}`} />
-        <Stat icon={<CalendarDays className="h-6 w-6" />} tone="bg-warning-soft text-[#C2610C]" label="Vencem em 30 / 60 / 90 dias" value={`${d.expiring.d30} / ${d.expiring.d60} / ${d.expiring.d90}`} sub={`${fmtBRL(d.portfolio.renewalPipelineCents)}/mês a renovar em 90 dias`} />
-        <Stat icon={<AlertTriangle className="h-6 w-6" />} tone="bg-danger-soft text-danger" label="Receita em risco (90 dias)" value={fmtBRL(d.atRisk.monthlyCents)} sub={`${d.atRisk.n} contrato(s) · ${d.alerts.open} notificação(ões), ${d.alerts.overdue} atrasada(s)`} />
+        <Stat icon={<Wallet className="h-6 w-6" />} tone="bg-success-soft text-success" label="Receita mensal contratada" value={money(d.monthlyCents)} full={fmtBRL(d.monthlyCents)} sub={`Global ${money(d.globalCents)} · ticket médio ${money(d.portfolio.avgTicketCents)}`} />
+        <Stat icon={<CalendarDays className="h-6 w-6" />} tone="bg-warning-soft text-[#C2610C]" label="Vencem em 30 / 60 / 90 dias" value={`${d.expiring.d30} / ${d.expiring.d60} / ${d.expiring.d90}`} sub={`${money(d.portfolio.renewalPipelineCents)}/mês a renovar em 90 dias`} />
+        <Stat icon={<AlertTriangle className="h-6 w-6" />} tone="bg-danger-soft text-danger" label="Receita em risco (90 dias)" value={money(d.atRisk.monthlyCents)} full={fmtBRL(d.atRisk.monthlyCents)} sub={`${d.atRisk.n} contrato(s) · ${d.alerts.open} notificação(ões), ${d.alerts.overdue} atrasada(s)`} />
       </section>
+    ),
+    perfil: () => (
       <section aria-label="Perfil da carteira" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[['Idade média dos contratos', d.portfolio.avgAgeMonths === null ? 'N/D' : `${d.portfolio.avgAgeMonths} meses`], ['Vigência restante média', d.portfolio.avgRemainingMonths === null ? 'N/D' : `${d.portfolio.avgRemainingMonths} meses`], ['Contratos públicos', fmtPct(d.portfolio.publicShare)], ['Contratos por medição', fmtInt(d.measurement.contracts)]].map(([l, v]) => (
           <div key={l} className="card p-4"><p className="text-sm text-muted">{l}</p><p className="num text-lg font-extrabold text-ink">{v}</p></div>
         ))}
       </section>
-
+    ),
+    estratificacao: () => (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <StratCard title="Por tipo de contrato" items={d.byBillingType} colorOf={(k) => TYPE_COLOR[k as BillingType]} />
         <StratCard title="Por responsável" items={d.byOwner} />
         <StratCard title="Por categoria de cliente" items={d.bySegment} colorOf={() => '#7C3AED'} />
         <StratCard title="Público e privado" items={d.byKind} colorOf={(k) => (k === 'publico' ? '#0E7490' : '#2F5986')} />
       </div>
-
+    ),
+    vencimentos: () => (
       <section className="card p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-bold text-ink">Vencimentos nos próximos 12 meses por tipo</h3>
@@ -194,7 +206,8 @@ export function ContractsDashboard() {
           })}
         </div>
       </section>
-
+    ),
+    clientes: () => (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <section className="card p-5 xl:col-span-2">
           <h3 className="mb-2 font-bold text-ink">Maiores clientes</h3>
@@ -216,7 +229,8 @@ export function ContractsDashboard() {
           )}
         </section>
       </div>
-
+    ),
+    etapas: () => (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <section className="card p-5">
           <h3 className="mb-3 font-bold text-ink">Contratos por etapa</h3>
@@ -234,6 +248,12 @@ export function ContractsDashboard() {
           {d.attention.length > 0 && <><h4 className="mb-1 mt-4 text-sm font-semibold text-danger">Com prazo vencido</h4><ul className="space-y-1 text-sm">{d.attention.map((r) => <li key={r.id}><Link className="link" to={`/contracts/${r.id}`}>{r.clientName}</Link> <span className="text-muted">· {r.number}</span></li>)}</ul></>}
         </section>
       </div>
+    ),
+  };
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-end gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
+      {cfg.order.filter((k) => !cfg.hidden.includes(k)).map((k) => <div key={k}>{sections[k]()}</div>)}
     </div>
   );
 }

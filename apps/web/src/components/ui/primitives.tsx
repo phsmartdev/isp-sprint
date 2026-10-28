@@ -2,7 +2,7 @@ import { forwardRef, useId, useState, type ButtonHTMLAttributes, type InputHTMLA
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { AlertTriangle, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, CircleHelp, Info, Loader2 } from 'lucide-react';
-import { fmtBRL, fmtInt, fmtPct } from '../../lib/format';
+import { fmtBRL, fmtBRLCompact, fmtInt, fmtPct } from '../../lib/format';
 import type { Kpi } from '../../lib/types';
 import { FitText } from './FitText';
 
@@ -137,9 +137,10 @@ const kpiTone: Record<KpiTone, string> = {
   yellow: 'bg-[#FFF3CC] text-[#E5A100]',
 };
 
-export function formatKpi(k: Pick<Kpi, 'unit' | 'value'>) {
+/** Valor do indicador no cartão: R$ na medida do tamanho (mil, mi, bi); `full` traz o valor inteiro (title). */
+export function formatKpi(k: Pick<Kpi, 'unit' | 'value'>, full = false) {
   if (k.value === null || k.value === undefined) return 'N/D';
-  if (k.unit === 'brl_cents') return fmtBRL(k.value);
+  if (k.unit === 'brl_cents') return full ? fmtBRL(k.value) : fmtBRLCompact(k.value);
   if (k.unit === 'ratio') return fmtPct(k.value);
   if (k.unit === 'days') return `${k.value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`;
   return fmtInt(k.value);
@@ -152,7 +153,9 @@ export function Delta({ k, compact }: { k: Pick<Kpi, 'delta' | 'deltaAbs' | 'low
   const v = d ?? abs!;
   const up = v > 0;
   const good = v === 0 ? null : up !== !!k.lowerIsBetter;
-  const label = d !== null ? `${Math.abs(Math.round(d * 100))}%` : `${Math.abs(abs!)}`;
+  // variação acima de 999% (base quase zero) não cabe nem informa: mostra o teto
+  const pct = d !== null ? Math.abs(Math.round(d * 100)) : 0;
+  const label = d !== null ? (pct > 999 ? '>999%' : `${pct}%`) : `${Math.abs(abs!)}`;
   return (
     <span className={clsx('inline-flex items-center gap-0.5 text-sm font-semibold', good === null ? 'text-muted' : good ? 'text-success' : 'text-danger', compact && 'text-xs')}>
       {up ? <ArrowUp className="h-3.5 w-3.5" aria-hidden /> : v < 0 ? <ArrowDown className="h-3.5 w-3.5" aria-hidden /> : null}
@@ -168,7 +171,7 @@ export function KpiCard({ k, icon, tone, compare = 'vs. mês anterior', layout =
     <div className="card group relative flex items-center gap-3.5 p-4">
       <span className={clsx('flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-circle', kpiTone[tone])}>{icon}</span>
       <div className="min-w-0 flex-1">
-        <FitText className="num whitespace-nowrap text-xl font-extrabold leading-tight text-ink">{formatKpi(k)}</FitText>
+        <FitText className="num whitespace-nowrap text-xl font-extrabold leading-tight text-ink" title={formatKpi(k, true)}>{formatKpi(k)}</FitText>
         <p className="text-sm leading-snug text-muted">{k.label}</p>
         {(k.delta !== null || (k.deltaAbs ?? null) !== null) ? (
           <p className={clsx('mt-0.5 flex flex-wrap items-center gap-x-1', layout === 'stack' && 'mt-1')}><Delta k={k} compact /><span className="text-2xs text-faint">{compare}</span></p>

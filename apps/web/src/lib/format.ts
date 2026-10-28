@@ -31,6 +31,22 @@ let financeRestricted = false;
 /** Perfil sem "ver valores financeiros": o servidor já manda os valores ocultos; aqui as somas feitas na tela também somem. */
 export const setFinanceRestricted = (v: boolean) => { financeRestricted = v; };
 export const fmtBRL = (cents?: number | null) => (financeRestricted ? '—' : moneyHidden() && cents !== null && cents !== undefined ? MASK : formatBRL(cents ?? null));
+/**
+ * Valor de indicador em R$ com a medida pelo tamanho: até R$ 9.999,99 inteiro; depois "mil", "mi" e "bi"
+ * (R$ 151,1 mil · R$ 30,05 mi · R$ 1,2 bi). O valor completo vai no title de quem usa (fmtBRL).
+ */
+export function fmtBRLCompact(cents?: number | null) {
+  if (financeRestricted) return '—';
+  if (cents === null || cents === undefined) return formatBRL(null);
+  if (moneyHidden()) return MASK;
+  const v = cents / 100;
+  const a = Math.abs(v);
+  const unit = a >= 1e9 ? [1e9, 'bi'] as const : a >= 1e6 ? [1e6, 'mi'] as const : a >= 1e4 ? [1e3, 'mil'] as const : null;
+  if (!unit) return formatBRL(cents);
+  const n = v / unit[0];
+  const digits = Math.abs(n) >= 100 ? 1 : 2;
+  return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: digits })} ${unit[1]}`;
+}
 export const fmtPct = (r?: number | null) => (r === null || r === undefined ? 'N/D' : `${(r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
 export const fmtInt = (n?: number | null) => (n === null || n === undefined ? 'N/D' : n.toLocaleString('pt-BR'));
 export function fmtDuration(seconds: number) {

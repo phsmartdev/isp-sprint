@@ -26,7 +26,7 @@ async function contract(name: string, version: object, extra: object = {}, valid
 }
 
 describe('central de atenção', () => {
-  it('junta notificações, validação e habilitação numa fila por gravidade; painel executivo; resumo diário uma vez por dia', async () => {
+  it('junta notificações e validação numa fila por gravidade; painel executivo; resumo diário uma vez por dia', async () => {
     const pub = await contract('Prefeitura Atenção Fictícia', { publicTerms: { agency: 'Prefeitura', processNumber: '7/2025', modality: 'pregao', commitmentNote: null, budgetLine: null, extensionMaxMonths: 120 } }, { kind: 'publico', legalRegime: 'lei_14133' });
     const priv = await contract('Empresa Atenção Fictícia', { monthlyCents: 50_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 50_000 }] });
     const pending = await contract('Loja Validação Fictícia', {}, {}, false);
@@ -38,7 +38,7 @@ describe('central de atenção', () => {
     expect(keys).toContain(`notificacao:sem_empenho:${pub}`);
     expect(keys).toContain(`notificacao:renovacao:${priv}`);
     expect(keys).toContain(`validacao:validacao:${pending}`);
-    expect(r.items.some((x: { source: string; title: string }) => x.source === 'habilitacao' && /CND|Certidão|FGTS|CNDT/i.test(x.title))).toBe(true);
+    expect(r.items.some((x: { source: string }) => x.source === 'habilitacao')).toBe(false); // certidões saíram da central (aba virou Modelos)
     // ordenação: todos os críticos antes dos altos, que vêm antes dos de atenção
     const order = r.items.map((x: { level: string }) => ({ critica: 0, alta: 1, media: 2 })[x.level as 'critica']);
     expect([...order].sort()).toEqual(order);
@@ -48,10 +48,10 @@ describe('central de atenção', () => {
     const validation = r.items.find((x: { source: string }) => x.source === 'validacao');
     expect(validation.level).toBe('alta'); // passou do prazo de 2 dias: sobe de "atenção" para "alto"
 
-    // "só os meus": lucas é o comercial dos contratos; habilitação fica com a gestão
+    // "só os meus": lucas é o comercial dos contratos
     const mine = ok(await lucas.get('/contracts/attention?mine=1')).json();
     expect(mine.items.length).toBeGreaterThan(0);
-    expect(mine.items.every((x: { source: string }) => x.source !== 'habilitacao')).toBe(true);
+    expect(mine.items.every((x: { ownerId: string | null; commercialOwnerId: string | null }) => !!x.ownerId || !!x.commercialOwnerId)).toBe(true);
 
     const dash = ok(await carlos.get('/contracts/dashboard')).json();
     expect(dash.executive.risk.map((x: { days: number }) => x.days)).toEqual([30, 60, 90, 180]);
