@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ixcCents, ixcDate, ixcDocumentVariants, ixcInvoice, ixcInvoiceSummary, ixcListRequest, ixcOrder, ixcOrigin } from './ixc';
+import { ixcCents, ixcCredential, ixcDate, ixcDocumentVariants, ixcInvoice, ixcInvoiceSummary, ixcListRequest, ixcOrder, ixcOrigin } from './ixc';
 
 const q = { qtype: 'fn_areceber.id_cliente', query: '10', oper: '=' as const, page: 1, rp: 50, sortname: 'fn_areceber.data_vencimento', sortorder: 'desc' as const };
 
@@ -11,6 +11,12 @@ describe('IXC: trava de leitura', () => {
     expect(r.init.headers.ixcsoft).toBe('listar');
     expect(r.init.headers.authorization).toBe(`Basic ${btoa('6:abc')}`);
     expect(JSON.parse(r.init.body)).toMatchObject({ qtype: 'fn_areceber.id_cliente', page: '1', rp: '50' });
+  });
+  it('token colado como o IXC mostra ("6:código") ou só o código', () => {
+    expect(ixcCredential('6', '6:abc')).toBe('6:abc');
+    expect(ixcCredential('6', 'abc')).toBe('6:abc');
+    expect(ixcCredential(' 6 ', ' 6:abc\n')).toBe('6:abc');
+    expect(ixcListRequest('https://x', '6', '6:abc', 'cliente', { ...q, qtype: 'cliente.id', sortname: 'cliente.id' }).init.headers.authorization).toBe(`Basic ${btoa('6:abc')}`);
   });
   it('recusa tabela, campo, operador e paginação fora da lista', () => {
     expect(() => ixcListRequest('https://x', '1', 't', 'usuarios', { ...q, qtype: 'usuarios.id', sortname: 'usuarios.id' })).toThrow(/não liberada/);

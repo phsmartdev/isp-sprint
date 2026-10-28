@@ -3,7 +3,7 @@
  *
  * Conferido na documentação oficial (wikiapiprovedor.ixcsoft.com.br, 28/10/2026) e na instância (401 Basic em /webservice/v1):
  *   POST https://HOST/webservice/v1/<tabela>
- *   Authorization: Basic base64("<id do usuário>:<token>")
+ *   Authorization: Basic base64("<id do usuário>:<token>")   (o token exibido no IXC já vem como "<id>:<código>")
  *   ixcsoft: listar            ← SEM este cabeçalho o mesmo POST INSERE um registro
  *   corpo: { qtype, query, oper, page, rp, sortname, sortorder }  → { page, total, registros: [...] }
  *
@@ -17,6 +17,16 @@ export const IXC_OPERS = ['=', '>', '<', '>=', '<=', '!='] as const;
 export type IxcOper = (typeof IXC_OPERS)[number];
 export type IxcQuery = { qtype: string; query: string; oper: IxcOper; page: number; rp: number; sortname: string; sortorder: 'asc' | 'desc' };
 
+/**
+ * Credencial do Basic: o IXC mostra o token já com o número do usuário na frente ("6:4dacdb8e…", como na documentação).
+ * Token colado assim vale como está; token só com o código ganha o número do usuário; espaços e quebras de linha saem.
+ */
+export function ixcCredential(user: string, token: string) {
+  const t = token.replace(/\s+/g, '');
+  const u = user.replace(/\s+/g, '');
+  return /^\d+:/.test(t) ? t : `${u}:${t}`;
+}
+
 /** Monta a requisição de leitura; recusa qualquer tabela, campo ou operador fora da lista. */
 export function ixcListRequest(baseUrl: string, user: string, token: string, table: string, q: IxcQuery) {
   if (!(IXC_READ_TABLES as readonly string[]).includes(table)) throw new Error(`Tabela do IXC não liberada para leitura: ${table}`);
@@ -27,7 +37,7 @@ export function ixcListRequest(baseUrl: string, user: string, token: string, tab
     url: `${baseUrl.replace(/\/+$/, '')}/webservice/v1/${table}`,
     init: {
       method: 'POST' as const,
-      headers: { 'content-type': 'application/json', ixcsoft: 'listar', authorization: `Basic ${btoa(`${user}:${token}`)}` },
+      headers: { 'content-type': 'application/json', ixcsoft: 'listar', authorization: `Basic ${btoa(ixcCredential(user, token))}` },
       body: JSON.stringify({ ...q, page: String(q.page), rp: String(q.rp) }),
     },
   };

@@ -21,8 +21,8 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
     status: 'Somente leitura · faturas e ordens de serviço',
     fields: [
       { key: 'baseUrl', label: 'Endereço do IXC', hint: 'Ex.: https://ixc.suaempresa.com.br' },
-      { key: 'user', label: 'Usuário/ID do token', hint: 'Número do usuário dono do token no IXC' },
-      { key: 'token', label: 'Token da API', secret: true },
+      { key: 'user', label: 'Usuário/ID do token', hint: 'Número (ID) do usuário do webservice no IXC, ex.: 6. Não é o login nem o e-mail.' },
+      { key: 'token', label: 'Token da API', secret: true, hint: 'Cole como aparece no cadastro do usuário no IXC (ex.: 6:4dacdb8e…). Com ou sem o número na frente.' },
     ],
   },
   zapi: {

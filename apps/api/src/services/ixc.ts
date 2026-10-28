@@ -38,11 +38,12 @@ export async function ixcConfig(db: DbOrTx, tenantId: string, opts: { requireEna
   const r = await integrationRow(db, tenantId, 'ixc');
   if ((opts.requireEnabled ?? true) && !r.enabled) return null;
   const token = r.secrets.token ? decryptSecret(r.secrets.token) : null;
-  if (!r.config.baseUrl || !r.config.user || !token) {
+  // com o token no formato do IXC ("6:código") o número do usuário já vem nele
+  if (!r.config.baseUrl || !token || (!r.config.user && !/^\s*\d+:/.test(token))) {
     if (opts.requireEnabled === false) throw unprocessable('Integração com o IXC incompleta: informe endereço, usuário e token em Configurações → Integrações.');
     return null;
   }
-  return { tenantId, baseUrl: assertIxcUrl(r.config.baseUrl), user: r.config.user.trim(), token: token.trim() };
+  return { tenantId, baseUrl: assertIxcUrl(r.config.baseUrl), user: (r.config.user ?? '').trim(), token: token.trim() };
 }
 
 /** Uma página de uma tabela liberada. */
@@ -54,7 +55,7 @@ export async function ixcList(c: IxcCfg, table: IxcTable, q: Partial<IxcQuery> &
   try { res = await fetch(req.url, { ...req.init, redirect: 'manual', signal: ctl.signal }); }
   catch (e) { throw new IxcError((e as Error).name === 'AbortError' ? 'O IXC não respondeu a tempo.' : 'Não foi possível falar com o IXC (endereço fora do ar ou bloqueado para o servidor).'); }
   finally { clearTimeout(t); }
-  if (res.status === 401) throw new IxcError('O IXC recusou o usuário/token (401). Confira o número do usuário e o token em Configurações → Integrações.', 502);
+  if (res.status === 401) throw new IxcError('O IXC recusou o usuário/token (401). Confira: o Usuário/ID é o número do usuário do webservice (não o login); o token foi copiado inteiro do cadastro desse usuário; e o usuário tem “Permite acesso ao webservice” marcado.', 502);
   if (res.status === 404) throw new IxcError('A API do IXC não foi encontrada (404). Confira o endereço ou a liberação do webservice no servidor do IXC.', 502);
   if (!res.ok) throw new IxcError(`O IXC respondeu ${res.status}.`);
   const text = await res.text();

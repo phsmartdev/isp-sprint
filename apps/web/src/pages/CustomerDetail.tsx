@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Mail, MapPin, Phone, RefreshCw, UserRound } from 'lucide-react';
-import { TIER_LABELS, type CustomerLifecycle, type Segment, type Tier } from '@isp/domain';
+import { TIER_LABELS, ixcDocumentVariants, type CustomerLifecycle, type Segment, type Tier } from '@isp/domain';
 import { api, ApiError, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime, fmtRelative } from '../lib/format';
 import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
@@ -12,7 +12,7 @@ import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
 import { Account360 } from '../features/cs/Account360';
 import { AddToAbmButton } from '../features/abm/shared';
-import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
+import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, Input, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
@@ -21,6 +21,8 @@ import { IxcFinance, IxcOrders } from '../features/ixc/IxcPanels';
 type Detail = {
   id: string;
   name: string;
+  document: string | null;
+  contactSource: string;
   phone: string | null;
   email: string | null;
   segment: Segment;
@@ -53,6 +55,35 @@ type Detail = {
 };
 
 const TIER_TONE: Record<Tier, 'neutral' | 'blue' | 'green'> = { small: 'neutral', middle: 'blue', large: 'green' };
+
+/** CNPJ/CPF da conta no Resumo, com edição (conta vinda de integração mantém o da origem). */
+function DocumentField({ c }: { c: Detail }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { can } = useAuth();
+  const [edit, setEdit] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => api<{ document: string | null }>(`/contacts/${c.id}/document`, { method: 'PATCH', body: { document: edit?.trim() || null } }),
+    onSuccess: () => { setEdit(null); void qc.invalidateQueries({ queryKey: ['contact', c.id] }); void qc.invalidateQueries({ queryKey: ['ixc'] }); toast({ tone: 'success', message: 'CNPJ/CPF salvo' }); },
+    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
+  });
+  const editable = c.contactSource === 'crm' && can('clientes');
+  const shown = c.document ? ixcDocumentVariants(c.document)[0] ?? c.document : null;
+  return (
+    <div>
+      <dt className="text-sm text-muted"><label htmlFor="ct-doc">CNPJ/CPF</label></dt>
+      {edit === null ? (
+        <dd className="num flex items-center gap-2 text-ink">{shown ?? <span className="text-muted">Não informado</span>}{editable && <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setEdit(c.document ?? '')}>{c.document ? 'Editar' : 'Informar'}</button>}</dd>
+      ) : (
+        <dd className="mt-1 flex flex-wrap items-center gap-2">
+          <Input id="ct-doc" inputMode="numeric" className="h-9 w-48" value={edit} placeholder="00.000.000/0000-00" onChange={(e) => setEdit(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save.mutate()} />
+          <Button size="sm" variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>
+          <Button size="sm" variant="ghost" onClick={() => setEdit(null)}>Cancelar</Button>
+        </dd>
+      )}
+    </div>
+  );
+}
 
 /** Tier, valor anual consolidado e IPC no resumo da conta, ao lado da classe estratégica. */
 function StrategicSummary({ st }: { st: NonNullable<Detail['strategic']> }) {
@@ -177,6 +208,7 @@ export function CustomerDetailPage() {
           {tab === 'resumo' && c.strategic && <StrategicSummary st={c.strategic} />}
           {tab === 'resumo' && (
             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
+              <DocumentField c={c} />
               <div><dt className="text-sm text-muted">Telefone</dt><dd className="num flex items-center gap-2 text-ink"><Phone className="h-4 w-4 text-success" aria-hidden />{c.phone ?? '—'}</dd></div>
               <div><dt className="text-sm text-muted">E-mail</dt><dd className="flex items-center gap-2 break-all text-ink"><Mail className="h-4 w-4 text-primary" aria-hidden />{c.email ?? '—'}</dd></div>
               <div><dt className="text-sm text-muted">Cidade</dt><dd className="flex items-center gap-2 text-ink"><MapPin className="h-4 w-4 text-purple" aria-hidden />{c.city ?? '—'}</dd></div>
