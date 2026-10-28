@@ -1,7 +1,8 @@
 /**
  * IXC Provedor — conector de LEITURA (regras e trava em packages/domain/src/ixc.ts).
  * Nunca insere, altera ou apaga: toda chamada passa por ixcListRequest (só `ixcsoft: listar`, só tabelas liberadas).
- * A conta do CRM encontra o cliente no IXC pelo código já ligado (IDs externos do sistema IXC) ou pelo CPF/CNPJ.
+ * A conta do CRM encontra o cliente no IXC pelo código já ligado (IDs externos do sistema IXC) ou pelo CPF/CNPJ:
+ * o do cadastro da conta ou, se vazio, o de um campo personalizado de cliente chamado CPF/CNPJ (ou CPF, CNPJ, documento).
  */
 import { isIP } from 'node:net';
 import { and, eq, ilike } from 'drizzle-orm';
@@ -65,7 +66,7 @@ export async function ixcList(c: IxcCfg, table: IxcTable, q: Partial<IxcQuery> &
 
 /** Cliente do IXC ligado à conta: código já registrado (IDs externos do sistema IXC) ou busca pelo CPF/CNPJ. */
 export async function ixcClientFor(db: DbOrTx, c: IxcCfg, contactId: string): Promise<{ id: string; name: string; via: 'codigo' | 'documento' } | null> {
-  const [ct] = await db.select({ document: s.contacts.document, customerId: s.customers.id, externalId: s.customers.externalId, sourceSystem: s.customers.sourceSystem })
+  const [ct] = await db.select({ document: s.contacts.document, custom: s.contacts.custom, customerId: s.customers.id, externalId: s.customers.externalId, sourceSystem: s.customers.sourceSystem })
     .from(s.contacts).leftJoin(s.customers, eq(s.customers.contactId, s.contacts.id)).where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, c.tenantId))).limit(1);
   if (!ct) return null;
   const linked = ct.customerId
@@ -77,10 +78,17 @@ export async function ixcClientFor(db: DbOrTx, c: IxcCfg, contactId: string): Pr
     const x = r.registros[0];
     if (x) return { id: String(x.id), name: String(x.razao ?? x.fantasia ?? ''), via: 'codigo' };
   }
-  for (const doc of ixcDocumentVariants(ct.document)) {
+  for (const doc of [...new Set((await documentsOf(db, c.tenantId, ct)).flatMap(ixcDocumentVariants))]) {
     const r = await ixcList(c, 'cliente', { qtype: 'cliente.cnpj_cpf', query: doc, rp: 2 });
     const x = r.registros[0];
     if (x) return { id: String(x.id), name: String(x.razao ?? x.fantasia ?? ''), via: 'documento' };
   }
   return null;
+}
+
+/** CPF/CNPJ da conta: o do cadastro e, depois, o de campos personalizados de cliente com CPF, CNPJ ou documento no nome. */
+async function documentsOf(db: DbOrTx, tenantId: string, ct: { document: string | null; custom: Record<string, unknown> | null }) {
+  const fields = await db.select({ key: s.customerFields.key, label: s.customerFields.label }).from(s.customerFields).where(eq(s.customerFields.tenantId, tenantId));
+  const docFields = fields.filter((f) => /cpf|cnpj|documento/i.test(`${f.label} ${f.key}`));
+  return [ct.document, ...docFields.map((f) => ct.custom?.[f.key])].map((v) => (typeof v === 'number' ? String(v) : v)).filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
 }
