@@ -2,8 +2,9 @@ import { and, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import { ContactCreate, CustomerListQuery } from '@isp/shared';
+import { onlyDigits } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
-import { notFound } from '../http/errors';
+import { notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
@@ -150,6 +151,8 @@ export const contactRoutes = [
         .select({
           id: s.contacts.id,
           name: s.contacts.name,
+          document: s.contacts.document,
+          contactSource: s.contacts.sourceSystem,
           phone: s.contacts.phone,
           email: s.contacts.email,
           segment: s.contacts.segment,
@@ -206,5 +209,32 @@ export const contactRoutes = [
         strategic,
       };
     },
+  }),
+
+  defineRoute({
+    method: 'PATCH',
+    url: '/contacts/:id/document',
+    summary: 'CNPJ/CPF da conta (11 ou 14 dígitos; duplicado é recusado; auditado)',
+    tag: 'Clientes',
+    module: 'clientes',
+    params: IdParams,
+    body: z.object({ document: z.string().trim().max(30).nullable() }),
+    handler: async ({ app, auth, params, body, req }) => app.db.transaction(async (tx) => {
+      const [c] = await tx.select({ id: s.contacts.id, document: s.contacts.document, sourceSystem: s.contacts.sourceSystem }).from(s.contacts).where(and(eq(s.contacts.id, params.id), scope(auth))).limit(1).for('update');
+      if (!c) throw notFound('Cliente não encontrado.');
+      if (c.sourceSystem !== 'crm') throw unprocessable('Conta vinda de integração: o CNPJ/CPF é mantido pelo sistema de origem.');
+      const d = body.document ? onlyDigits(body.document) : '';
+      if (body.document && d.length !== 11 && d.length !== 14) throw unprocessable('CNPJ/CPF incompleto.', [{ path: 'document', message: 'Informe 11 (CPF) ou 14 (CNPJ) dígitos' }]);
+      if (d) {
+        const [dup] = await tx.select({ name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.tenantId, auth.tenantId), sql`${s.contacts.id} <> ${c.id}`, isNull(s.contacts.deletedAt), sql`regexp_replace(coalesce(${s.contacts.document}, ''), '[^0-9]', '', 'g') = ${d}`)).limit(1);
+        if (dup) throw unprocessable(`Este CNPJ/CPF já pertence à conta ${dup.name}. Unir cadastros exige revisão.`, [{ path: 'document', message: 'Duplicado' }]);
+      }
+      const document = body.document?.trim() || null;
+      if (document !== c.document) {
+        await tx.update(s.contacts).set({ document, updatedAt: new Date(), rowVersion: sql`${s.contacts.rowVersion} + 1` }).where(eq(s.contacts.id, c.id));
+        await audit(tx, req, { action: 'contact.update', entityType: 'contact', entityId: c.id, metadata: { from: { document: c.document }, to: { document } } });
+      }
+      return { document };
+    }),
   }),
 ];

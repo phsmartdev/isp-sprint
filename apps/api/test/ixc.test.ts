@@ -86,6 +86,17 @@ describe('IXC somente leitura', () => {
     ok(await carlos.put('/admin/customer-fields', { fields: [] }));
   });
 
+  it('CNPJ/CPF editado na ficha da conta: valida, recusa duplicado e passa a achar o cliente no IXC', async () => {
+    const c = ok(await carlos.post('/contacts', { name: 'Conta CNPJ Ficha Fictícia', phone: '79 98888-3333', segment: 'empresarial' }), 201).json();
+    ok(await carlos.patch(`/contacts/${c.id}/document`, { document: '123' }), 422);
+    expect((await carlos.patch(`/contacts/${c.id}/document`, { document: '12.345.678/0001-90' })).json().detail).toMatch(/já pertence/); // a conta do 1º teste
+    ok(await carlos.patch(`/contacts/${c.id}/document`, { document: '98.765.432/0001-10' }));
+    expect(ok(await carlos.get(`/contacts/${c.id}`)).json().document).toBe('98.765.432/0001-10');
+    TABLES.cliente!.push({ id: '88', razao: 'Outra Fictícia', cnpj_cpf: '98.765.432/0001-10' });
+    expect(ok(await carlos.get(`/contacts/${c.id}/ixc/financeiro`)).json().client).toMatchObject({ id: '88', via: 'documento' });
+    ok(await carlos.patch(`/contacts/${c.id}/document`, { document: null }));
+  });
+
   it('faturas exigem ver valores financeiros; conta fora da carteira não aparece', async () => {
     const other = (await ctx.db.execute<{ id: string }>(sql`select id from contacts where owner_id <> ${lucas.me.user.id} and deleted_at is null limit 1`)).rows[0]!.id;
     expect((await lucas.get(`/contacts/${other}/ixc/financeiro`)).statusCode).toBe(404);
