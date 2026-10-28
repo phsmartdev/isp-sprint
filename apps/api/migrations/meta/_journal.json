@@ -533,6 +533,20 @@
       "when": 1793216206670,
       "tag": "0075_viabilidade_economica",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1793219869531,
+      "tag": "0076_tipos_fiscais",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793219884308,
+      "tag": "0077_tipos_fiscais_limpeza",
+      "breakpoints": true
     }
   ]
 }

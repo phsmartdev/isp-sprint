@@ -331,7 +331,7 @@ function EconEngine() {
   return (
     <section className="card p-5">
       <h3 className="text-md font-bold text-ink">Motor financeiro (aba Viabilidade econômica)</h3>
-      <p className="mb-3 max-w-3xl text-sm text-muted">Usado nas vendas B2B com custos de entrega. Os tributos vêm do documento fiscal de cada item (Filiais, tipos de venda e documentos fiscais). Piso = maior entre o preço que cobre o caixa e o que cobre o custo do dinheiro (TMA); recomendado = preço que entrega a margem alvo.</p>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Usado nas vendas B2B com custos de entrega. Os tributos vêm do documento fiscal de cada item (Filiais e documentos fiscais). Piso = maior entre o preço que cobre o caixa e o que cobre o custo do dinheiro (TMA); recomendado = preço que entrega a margem alvo.</p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {pct('marginTargetBp', 'Margem alvo', 'Margem de contribuição desejada sobre o preço')}
         {pct('tmaMonthlyBp', 'TMA mensal', 'Custo do dinheiro: corrige o investimento no prazo')}

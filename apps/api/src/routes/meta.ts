@@ -19,7 +19,7 @@ export const metaRoutes = [
       await ensureSaleTypeForm(app.db, t);
       await ensureRetiredSaleFields(app.db, t);
       await ensureSalesBranches(app.db, t);
-      const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, saleKinds: s.salesBranches.saleKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
+      const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, fiscalKinds: s.salesBranches.fiscalKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
       const [users, sources, campaigns, pipes, teams, plans] = await Promise.all([
         app.db
           .select({ id: s.users.id, name: s.users.name, sectors: s.users.sectors, hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")` })

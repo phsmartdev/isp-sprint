@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardPaste, FileSpreadsheet, Package, Plus, Trash2 } from 'lucide-react';
+import { FISCAL_KINDS, FISCAL_KIND_LABELS, type FiscalKind } from '@isp/shared';
 import { ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
@@ -15,7 +16,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 
 type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null };
-type Doc = { id: string; branchId: string; saleKind: string; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
+type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean };
 type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string };
 
@@ -54,9 +55,9 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const bidTotal = bid ? (bidMode === 'global' ? parseMoney(bidGlobal) : parsed.reduce((t, i) => t + (i.qtyMilli && i.bidUnitCents != null ? Math.round((i.qtyMilli * i.bidUnitCents) / 1000) : 0), 0)) : null;
   const editable = !!q.data?.editable;
   const set = (k: string, patch: Partial<Row>) => setRows(cur.map((r) => (r.key === k ? { ...r, ...patch } : r)));
-  // documentos fiscais da filial e do tipo de venda da oportunidade; o produto do catálogo sugere o seu documento padrão
+  // documentos fiscais da filial da oportunidade (agrupados por tipo fiscal); o produto do catálogo sugere o seu documento padrão
   const docsQ = useQuery({ queryKey: ['fiscal-docs'], queryFn: () => api<{ items: Doc[] }>('/fiscal-docs'), staleTime: 60_000 });
-  const docs = (docsQ.data?.items ?? []).filter((d) => (!opp.branchId || d.branchId === opp.branchId) && (!opp.saleKind || d.saleKind === opp.saleKind));
+  const docs = (docsQ.data?.items ?? []).filter((d) => (!opp.branchId || d.branchId === opp.branchId));
   const plans = useLookups().data?.plans ?? [];
   const docForPlan = (name: string) => { const code = plans.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())?.fiscalDocCode; return code ? docs.find((d) => d.code === code.toUpperCase())?.id ?? '' : ''; };
   const docLabel = (d: Doc) => `${d.code} · ${(d.rates.percentBp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%${d.rates.fixedCents ? ` + ${fmtBRL(d.rates.fixedCents)}` : ''}`;
@@ -121,7 +122,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
                         <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
-                        {docs.map((d) => <option key={d.id} value={d.id}>{docLabel(d)}</option>)}
+                        {FISCAL_KINDS.filter((k) => docs.some((d) => d.fiscalKind === k)).map((k) => <optgroup key={k} label={FISCAL_KIND_LABELS[k]}>{docs.filter((d) => d.fiscalKind === k).map((d) => <option key={d.id} value={d.id}>{docLabel(d)}</option>)}</optgroup>)}
                         {r.doc && !docs.some((d) => d.id === r.doc) && <option value={r.doc}>Documento de outra filial</option>}
                       </Select>
                     </td>
@@ -142,7 +143,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
         </div>
       )}
       <datalist id="items-catalog">{plans.map((p) => <option key={p.id} value={p.name} />)}</datalist>
-      {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais para este tipo de venda. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
+      {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
       {bid && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md bg-surface-2 p-3 text-sm" role="radiogroup" aria-label="Lance da licitação">
           <span className="font-semibold text-ink">Lance</span>

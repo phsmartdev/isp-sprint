@@ -23,7 +23,7 @@ export async function fiscalDocsOf(db: DbOrTx, tenantId: string, branchId?: stri
     .where(branchId ? and(eq(s.fiscalDocTypes.tenantId, tenantId), eq(s.fiscalDocTypes.branchId, branchId)) : eq(s.fiscalDocTypes.tenantId, tenantId))
     .orderBy(asc(s.fiscalDocTypes.position), asc(s.fiscalDocTypes.code));
   const t = today();
-  return rows.map((d) => ({ id: d.id, branchId: d.branchId, saleKind: d.saleKind, code: d.code, name: d.name, active: d.active, taxes: d.taxes as FiscalTax[], rates: fiscalDocRates({ active: d.active, taxes: d.taxes as FiscalTax[] }, t) }));
+  return rows.map((d) => ({ id: d.id, branchId: d.branchId, fiscalKind: d.fiscalKind, code: d.code, name: d.name, active: d.active, taxes: d.taxes as FiscalTax[], rates: fiscalDocRates({ active: d.active, taxes: d.taxes as FiscalTax[] }, t) }));
 }
 
 type Opp = { id: string; tenantId: string; contactId: string; branchId: string | null; saleKind: string | null };
@@ -43,7 +43,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     return { description: i.description, revenueCents: itemTotal(i), doc: d ? { name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
-  return { settings, items: econItems, publicSector, input, saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId) && (!opp.saleKind || d.saleKind === opp.saleKind)) };
+  return { settings, items: econItems, publicSector, input, saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)) };
 }
 
 export const computeEconomics = (ctx: Awaited<ReturnType<typeof economicsContext>>, input?: EconInput) =>

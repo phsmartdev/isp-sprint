@@ -461,17 +461,18 @@ export const salesBranches = pgTable('sales_branches', {
   active: boolean('active').notNull().default(true),
   position: integer('position').notNull().default(0),
   /** Tipos de venda que a filial aceita (vazio = todos). */
-  saleKinds: text('sale_kinds').array().notNull().default(sql`'{}'::text[]`),
+  /** Tipos fiscais que a filial emite (venda, prestação de serviço, aluguel); vazio = todos. */
+  fiscalKinds: text('fiscal_kinds').array().notNull().default(sql`'{}'::text[]`),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name) }));
 
-/** Documento fiscal por filial e tipo de venda (ex.: NFS-e, NFCom) com os tributos que ele gera: alíquota e/ou valor fixo, ativo e vigência. */
+/** Documento fiscal por filial e tipo fiscal (ex.: NFS-e na prestação de serviço, NF-e na venda) com os tributos que ele gera: alíquota e/ou valor fixo, ativo e vigência. */
 export const fiscalDocTypes = pgTable('fiscal_doc_types', {
   id: id(),
   tenantId: tenantId(),
   branchId: uuid('branch_id').notNull().references(() => salesBranches.id),
-  /** Tipo de venda em que o documento vale (Licitação, Adesão à Ata, Consumo de Contrato, Venda Consultiva). */
-  saleKind: text('sale_kind').notNull(),
+  /** Tipo fiscal da operação: venda (mercadoria), serviço (prestação de serviço) ou locação (aluguel). */
+  fiscalKind: text('fiscal_kind').notNull().default('servico'),
   code: text('code').notNull(),
   name: text('name').notNull(),
   taxes: jsonb('taxes').$type<{ name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[]>().notNull().default([]),
@@ -480,7 +481,7 @@ export const fiscalDocTypes = pgTable('fiscal_doc_types', {
   updatedBy: uuid('updated_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => ({ uq: uniqueIndex('fiscal_doc_types_uq').on(t.tenantId, t.branchId, t.saleKind, t.code) }));
+}, (t) => ({ uq: uniqueIndex('fiscal_doc_types_uq').on(t.tenantId, t.branchId, t.fiscalKind, t.code), kindCk: check('fiscal_doc_types_kind_ck', inList('fiscal_kind', ['venda', 'servico', 'locacao'])) }));
 
 export const opportunities = pgTable(
   'opportunities',

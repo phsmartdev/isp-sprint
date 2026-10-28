@@ -18,10 +18,10 @@ describe('viabilidade econômica', () => {
     // documentos fiscais na filial
     const lk = ok(await carlos.get('/meta/lookups')).json();
     const branch = lk.branches[0].id;
-    ok(await carlos.put(`/admin/fiscal-docs/${branch}`, { items: [{ id: null, saleKind: 'venda_consultiva', code: 'x', name: 'Duplicado', active: true, taxes: [] }, { id: null, saleKind: 'venda_consultiva', code: 'X', name: 'Duplicado', active: true, taxes: [] }] }), 422);
+    ok(await carlos.put(`/admin/fiscal-docs/${branch}`, { items: [{ id: null, fiscalKind: 'servico', code: 'x', name: 'Duplicado', active: true, taxes: [] }, { id: null, fiscalKind: 'servico', code: 'X', name: 'Duplicado', active: true, taxes: [] }] }), 422);
     const docs = ok(await carlos.put(`/admin/fiscal-docs/${branch}`, { items: [
-      { id: null, saleKind: 'venda_consultiva', code: 'nfs-e', name: 'Nota de serviço', active: true, taxes: [{ name: 'ISS', percentBp: 500, fixedCents: 0, active: true }, { name: 'PIS/COFINS', percentBp: 365, fixedCents: 0, active: true }] },
-      { id: null, saleKind: 'venda_consultiva', code: 'NFCOM', name: 'Nota de comunicação', active: true, taxes: [{ name: 'ICMS', percentBp: 2000, fixedCents: 0, active: true }] },
+      { id: null, fiscalKind: 'servico', code: 'nfs-e', name: 'Nota de serviço', active: true, taxes: [{ name: 'ISS', percentBp: 500, fixedCents: 0, active: true }, { name: 'PIS/COFINS', percentBp: 365, fixedCents: 0, active: true }] },
+      { id: null, fiscalKind: 'servico', code: 'NFCOM', name: 'Nota de comunicação', active: true, taxes: [{ name: 'ICMS', percentBp: 2000, fixedCents: 0, active: true }] },
     ] })).json().items;
     const nfse = docs.find((d: { code: string }) => d.code === 'NFS-E');
     const nfcom = docs.find((d: { code: string }) => d.code === 'NFCOM');
@@ -73,21 +73,23 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get('/intelligence/economics?status=ganhas')).json().items.some((i: { id: string }) => i.id === o.id)).toBe(false);
   });
 
-  it('filial aceita só os tipos de venda liberados; documento fiscal só em tipo liberado', async () => {
+  it('filial emite só os tipos fiscais liberados; tipo de venda da oportunidade não depende da filial', async () => {
     const lk = ok(await carlos.get('/meta/lookups')).json();
     const all = ok(await carlos.get('/admin/sales-branches')).json().items;
     const br = all[1];
-    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: { id: string; name: string; active: boolean }) => ({ id: b.id, name: b.name, active: b.active, saleKinds: b.id === br.id ? ['licitacao'] : [] })) }));
+    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: { id: string; name: string; active: boolean }) => ({ id: b.id, name: b.name, active: b.active, fiscalKinds: b.id === br.id ? ['servico', 'locacao'] : [] })) }));
+    expect(ok(await carlos.get('/meta/lookups')).json().branches.find((b: { id: string }) => b.id === br.id).fiscalKinds).toEqual(['servico', 'locacao']);
     const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
-    const r = await carlos.post('/opportunities', { newContact: { name: `Filial Tipo ${Date.now()}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: br.id, saleKind: 'venda_consultiva' });
-    expect(r.statusCode).toBe(422);
-    expect(r.json().detail).toMatch(/não aceita este tipo de venda/);
-    ok(await carlos.post('/opportunities', { newContact: { name: `Filial Tipo OK ${Date.now()}`, segment: 'governamental' }, pipelineId: corp.id, branchId: br.id, saleKind: 'licitacao' }), 201);
-    const d = await carlos.put(`/admin/fiscal-docs/${br.id}`, { items: [{ id: null, saleKind: 'venda_consultiva', code: 'NFSE', name: 'Nota', active: true, taxes: [] }] });
+    ok(await carlos.post('/opportunities', { newContact: { name: `Filial Tipo OK ${Date.now()}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: br.id, saleKind: 'venda_consultiva' }), 201);
+    const d = await carlos.put(`/admin/fiscal-docs/${br.id}`, { items: [{ id: null, fiscalKind: 'venda', code: 'NFE', name: 'Nota de venda', active: true, taxes: [] }] });
     expect(d.statusCode).toBe(422);
-    expect(d.json().detail).toMatch(/não aceita Venda Consultiva/);
-    ok(await carlos.put(`/admin/fiscal-docs/${br.id}`, { items: [{ id: null, saleKind: 'licitacao', code: 'NFSE', name: 'Nota de serviço', active: true, taxes: [{ name: 'ISS', percentBp: 200, fixedCents: 0, active: true }] }] }));
-    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: { id: string; name: string; active: boolean }) => ({ id: b.id, name: b.name, active: b.active, saleKinds: [] })) }));
+    expect(d.json().detail).toMatch(/não aceita Venda/);
+    const saved = ok(await carlos.put(`/admin/fiscal-docs/${br.id}`, { items: [
+      { id: null, fiscalKind: 'servico', code: 'NFSE', name: 'Nota de serviço', active: true, taxes: [{ name: 'ISS', percentBp: 200, fixedCents: 0, active: true }] },
+      { id: null, fiscalKind: 'locacao', code: 'NFSE', name: 'Fatura de locação', active: true, taxes: [] },
+    ] })).json();
+    expect(saved.items.map((x: { fiscalKind: string }) => x.fiscalKind).sort()).toEqual(['locacao', 'servico']);
+    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: { id: string; name: string; active: boolean }) => ({ id: b.id, name: b.name, active: b.active, fiscalKinds: [] })) }));
   });
 
   it('item sem documento fiscal: calcula com ressalvas', async () => {

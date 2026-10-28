@@ -219,7 +219,7 @@ export const opportunityRoutes = [
         await assertTenantRefs(tx, auth, { sourceId: body.sourceId, campaignId: body.campaignId });
         {
           const branchId = body.branchId === undefined ? cur.branchId : body.branchId;
-          if (branchId && (body.branchId || body.saleKind !== undefined)) await assertBranch(tx, auth.tenantId, branchId, body.saleKind === undefined ? cur.saleKind : body.saleKind);
+          if (body.branchId) await assertBranch(tx, auth.tenantId, body.branchId);
         }
         const plan = body.planId === undefined ? undefined : await planPrice(tx, auth, body.planId);
         let pipelineChange: { pipelineId: string; stage: string } | undefined;

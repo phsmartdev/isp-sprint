@@ -73,6 +73,10 @@ export const StageSchema = z.object({
 export const FIELD_TYPES = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'] as const;
 export const FIELD_TYPE_LABELS: Record<(typeof FIELD_TYPES)[number], string> = { texto: 'Texto', texto_longo: 'Texto longo', numero: 'Número', moeda: 'Valor (R$)', data: 'Data', lista: 'Lista de opções', sim_nao: 'Sim/Não' };
 /** Tipos de venda: opções de formulário dentro do funil (não são funis). Cada campo pode valer para alguns tipos. */
+/** Tipo fiscal da operação (define o documento fiscal e os tributos): venda de mercadoria, prestação de serviço ou aluguel. */
+export const FISCAL_KINDS = ['venda', 'servico', 'locacao'] as const;
+export type FiscalKind = (typeof FISCAL_KINDS)[number];
+export const FISCAL_KIND_LABELS: Record<FiscalKind, string> = { venda: 'Venda', servico: 'Prestação de serviço', locacao: 'Aluguel' };
 export const SALE_TYPE_KEYS = ['licitacao', 'adesao_ata', 'consumo_contrato', 'venda_consultiva'] as const;
 export type SaleTypeKey = (typeof SALE_TYPE_KEYS)[number];
 export const SALE_TYPE_LABELS: Record<SaleTypeKey, string> = { licitacao: 'Licitação', adesao_ata: 'Adesão à Ata', consumo_contrato: 'Consumo de Contrato', venda_consultiva: 'Venda Consultiva' };

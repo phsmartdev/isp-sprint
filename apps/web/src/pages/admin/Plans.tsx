@@ -112,7 +112,7 @@ export function AdminPlans() {
             <FormField label="Preço mensal (R$)" htmlFor="pl-price" required={!hasProducts} hint={hasProducts ? 'Soma dos produtos' : undefined}>
               <Input id="pl-price" inputMode="decimal" disabled={hasProducts} value={hasProducts ? dec(total) : form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="99,90" />
             </FormField>
-            <FormField label="Documento fiscal padrão" htmlFor="pl-doc" hint="Já vem marcado no item da oportunidade e define os tributos. Cadastre em Filiais, tipos de venda e documentos fiscais.">
+            <FormField label="Documento fiscal padrão" htmlFor="pl-doc" hint="Já vem marcado no item da oportunidade e define os tributos. Cadastre em Filiais e documentos fiscais.">
               <Select id="pl-doc" value={form.doc} onChange={(e) => setForm({ ...form, doc: e.target.value })}>
                 <option value="">Nenhum (escolher na oportunidade)</option>
                 {form.doc && !docCodes.some(([c]) => c === form.doc) && <option value={form.doc}>{form.doc} (inativo)</option>}
