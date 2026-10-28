@@ -183,7 +183,7 @@ export function HomePage() {
                 const c = stageColor(p.stage, p.color, d.pipeline.indexOf(p));
                 return (
                   <li key={p.stage} className="grid grid-cols-[100px_1fr_auto] items-center gap-3 py-3.5">
-                    <span className="truncate text-md font-medium" style={{ color: d.pipeline.indexOf(p) === 0 ? undefined : inkOf(c) }}>{p.name}</span>
+                    <span className="stage-ink truncate text-md font-medium" style={{ color: d.pipeline.indexOf(p) === 0 ? undefined : inkOf(c) }}>{p.name}</span>
                     <span className="relative flex h-7 items-center rounded-full" style={{ background: `${c}33` }}>
                       <span className="block h-7 rounded-full" style={{ width: `${Math.max(14, (p.count / max) * 55)}%`, background: c }} />
                       <span className="num absolute right-3 text-sm font-semibold text-primary">{p.count}</span>

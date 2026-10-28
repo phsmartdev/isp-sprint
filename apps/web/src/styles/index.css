@@ -53,3 +53,21 @@
   .trail-stop { animation: none; opacity: 1; }
   .trail-pulse { animation: none; opacity: 0; }
 }
+
+/*
+ * Tema escuro: cores fixas que algumas telas usam direto no lugar dos tokens (laranja, verde e amarelos de status,
+ * fundos claros de destaque e o branco). Assim nada fica claro demais ou sem contraste sobre o grafite.
+ */
+:root[data-theme='dark'] {
+  .bg-white:not(iframe) { background-color: rgb(var(--surface)); }
+  .text-\[\#C2610C\], .text-\[\#B45309\], .text-\[\#9A4B07\], .text-\[\#9A4B00\], .text-\[\#EA580C\] { color: #F5A35C; }
+  .text-\[\#15803D\] { color: #4ADE80; }
+  .text-\[\#9A5B00\], .text-\[\#9A6B00\], .text-\[\#E5A100\] { color: #F5C451; }
+  .text-\[\#1F7DB8\] { color: #7CC4F5; }
+  .bg-\[\#FFF6D6\], .bg-\[\#FFF3CC\], .bg-\[\#FFF9E6\], .bg-\[\#FEF7DC\], .bg-\[\#FFE58A\] { background-color: #3A3115; }
+  .bg-\[\#FFECEC\] { background-color: rgb(var(--danger-soft)); }
+  .bg-\[\#EEF1F3\] { background-color: rgb(var(--surface-2)); }
+  .bg-\[\#F3F7FE\], .bg-\[\#EEF2F9\], .bg-\[\#EDF1F8\] { background-color: rgb(var(--surface-2)); }
+  /* nomes de etapa escurecidos para fundo claro: no escuro ficam no tom do texto */
+  .stage-ink { color: rgb(var(--ink)) !important; }
+}

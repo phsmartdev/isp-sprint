@@ -46,3 +46,45 @@
   --shadow-card: 0 1px 2px rgb(45 51 57 / 0.05), 0 2px 8px rgb(45 51 57 / 0.05);
   --shadow-overlay: 0 16px 40px rgb(45 51 57 / 0.22);
 }
+
+/*
+ * Tema escuro (escolhido no menu da conta: Claro, Escuro ou Automático pelo sistema).
+ * Mesmos nomes de token; grafite profundo de fundo, superfícies um tom acima e o azul BKT clareado para links e botões.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: 20 23 27;               /* #14171B */
+  --surface: 30 34 40;          /* #1E2228 */
+  --surface-2: 38 43 50;        /* #262B32 */
+  --line: 52 58 66;             /* #343A42 */
+  --line-strong: 74 81 90;      /* #4A515A */
+  --ink: 236 239 242;           /* #ECEFF2 títulos */
+  --text: 211 216 222;          /* #D3D8DE texto corrido */
+  --muted: 160 169 179;         /* #A0A9B3 secundário (AA sobre surface) */
+  --faint: 134 143 153;         /* #868F99 */
+
+  --navy: 16 19 23;             /* menu um tom abaixo do fundo */
+  --navy-2: 11 13 16;
+  --navy-active: 47 89 134;
+  --lime: 79 187 255;
+  --lime-ink: 125 190 245;
+  --primary: 77 141 205;        /* #4D8DCD azul BKT clareado: contraste AA com texto branco e sobre o fundo */
+  --primary-hover: 99 158 217;
+  --primary-soft: 33 50 70;     /* #213246 */
+
+  --success: 52 199 110;
+  --success-soft: 22 52 36;
+  --warning: 245 151 58;
+  --warning-soft: 58 40 20;
+  --danger: 244 98 98;
+  --danger-soft: 62 28 30;
+  --purple: 160 172 182;
+  --purple-soft: 44 50 56;
+  --sky: 96 165 235;
+  --sky-soft: 28 44 64;
+  --yellow: 245 190 40;
+  --focus: 96 165 235;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-overlay: 0 16px 40px rgb(0 0 0 / 0.55);
+}

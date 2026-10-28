@@ -7,6 +7,15 @@
     <link rel="icon" type="image/png" href="/brand/bkt-symbol.png" />
     <meta name="theme-color" content="#2D3339" />
     <title>BKT · RevOps</title>
+    <script>
+      // tema escolhido no menu da conta, aplicado antes da primeira pintura (sem piscar claro)
+      try {
+        var t = localStorage.getItem('isp:theme');
+        var dark = t === 'escuro' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        if (dark) document.querySelector('meta[name="color-scheme"]').setAttribute('content', 'dark');
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
