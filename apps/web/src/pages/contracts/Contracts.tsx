@@ -1,12 +1,12 @@
 import { TvArea, TvBar, TvButton, useTvMode } from '../../features/TvMode';
-/** Gestão de Contratos: painel, funil, lista, modelos, calendário, renovações, reajustes, encerramentos, notificações e relatórios. */
+/** Gestão de Contratos: central de atenção, lista e modelos; painel, funil, atestados, atas, calendário e relatórios entram como submenus. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, RefreshCw, Search, TrendingUp, Wallet } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, CONTRACT_TAB_LABELS, PROCESS_LABELS, processSteps, type ContractStage, type ContractTab } from '@isp/domain';
+import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, Search, TrendingUp, Wallet } from 'lucide-react';
+import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_MENU_TABS, CONTRACT_TABS, CONTRACT_TAB_LABELS, type ContractStage, type ContractTab } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../../lib/hooks';
@@ -14,14 +14,13 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Pagination, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { AlertList } from '../../features/contracts/ContractPanels';
 import { ContractsDashboard } from '../../features/contracts/Dashboard';
 import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
 import { ModelsTab } from '../../features/contracts/ModelsTab';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
-import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
+import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type ContractRow } from '../../features/contracts/shared';
 
 type View = ContractTab;
 /** Ordem do menu definida no domínio (Funil logo depois do Painel); cada aba é uma permissão por perfil. */
@@ -214,68 +213,7 @@ function Calendario() {
   );
 }
 
-// ------------------------------------------------------------------ processos (renovações, reajustes, encerramentos)
-type ProcRow = Process & { contractId: string; contractKind: 'publico' | 'privado'; code: number; number: string; clientName: string; monthlyCents: number; endAt: string | null; ownerName: string | null };
-function Processos({ kind, intro }: { kind: 'renovacao' | 'reajuste' | 'encerramento'; intro: string }) {
-  const [status, setStatus] = useState<'aberto' | 'concluido' | 'todos'>('aberto');
-  const q = useQuery({ queryKey: ['contracts', 'processes', kind, status], queryFn: () => api<{ items: ProcRow[] }>(`/contracts/processes${qs({ kind, status })}`) });
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="max-w-3xl text-sm text-muted">{intro}</p>
-        <Select aria-label="Situação" className="w-auto" value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option value="aberto">Em andamento</option><option value="concluido">Concluídos</option><option value="todos">Todos</option></Select>
-      </div>
-      {q.isLoading ? <div className="card"><LoadingRows /></div> : !q.data?.items.length ? <div className="card"><EmptyState title={`Nenhum processo de ${PROCESS_LABELS[kind].toLowerCase()}`} /></div> : (
-        <div className="card overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="bg-surface-2 text-xs text-muted"><tr>{['Contrato', 'Cliente', 'Prazo', 'Progresso', 'Próxima etapa', kind === 'reajuste' ? 'Valor atual → novo' : 'Valor mensal', 'Situação'].map((h) => <th key={h} className="px-4 py-2.5 font-medium">{h}</th>)}</tr></thead>
-            <tbody>
-              {q.data.items.map((p) => {
-                const defs = processSteps(p.kind, p.contractKind);
-                const done = defs.filter((d) => p.steps[d.key]).length;
-                const next = defs.find((d) => !p.steps[d.key]);
-                const data = p.data as { currentCents?: number; newCents?: number };
-                return (
-                  <tr key={p.id} className="border-t border-line">
-                    <td className="px-4 py-3"><Link className="font-semibold text-ink hover:underline" to={`/contracts/${p.contractId}`}>{p.number}</Link><span className="block text-xs text-muted">{KIND_LABEL[p.contractKind]}</span></td>
-                    <td className="px-4 py-3">{p.clientName}</td>
-                    <td className="num px-4 py-3">{fmtDate(p.dueAt ?? p.endAt)}</td>
-                    <td className="px-4 py-3"><div className="flex items-center gap-2"><div className="h-2 w-24 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-primary" style={{ width: `${(done / defs.length) * 100}%` }} /></div><span className="num text-xs text-muted">{done}/{defs.length}</span></div></td>
-                    <td className="px-4 py-3">{p.status === 'aberto' ? next?.label ?? '—' : '—'}</td>
-                    <td className="num px-4 py-3">{kind === 'reajuste' ? `${fmtBRL(data.currentCents ?? p.monthlyCents)}${data.newCents ? ` → ${fmtBRL(data.newCents)}` : ''}` : fmtBRL(p.monthlyCents)}</td>
-                    <td className="px-4 py-3"><Chip tone={p.status === 'aberto' ? 'blue' : p.status === 'concluido' ? (p.outcome === 'nao_renovado' ? 'red' : 'green') : 'neutral'}>{p.status === 'aberto' ? 'Em andamento' : p.status === 'concluido' ? (p.outcome === 'nao_renovado' ? 'Não renovado' : 'Concluído') : 'Cancelado'}</Chip></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ notificações e relatórios
-function Notificacoes() {
-  const { can } = useAuth();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [status, setStatus] = useState<'aberto' | 'concluido' | 'todos'>('aberto');
-  const q = useQuery({ queryKey: ['contracts', 'alerts', status], queryFn: () => api<{ items: Alert[] }>(`/contracts/alerts${qs({ status })}`) });
-  const run = useMutation({ mutationFn: () => api<{ contractAlerts: number; contractAlertsResolved: number }>('/contracts/alerts/run', { method: 'POST' }), onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['contracts'] }); toast({ tone: 'success', message: `${r.contractAlerts} nova(s) notificação(ões), ${r.contractAlertsResolved} resolvida(s)` }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="max-w-3xl text-sm text-muted">O monitoramento roda todo dia: renovação ({'60'} dias antes), reajuste, garantias, documentos, assinaturas, provisionamento, implantação e encerramento (90 e 30 dias). Cada aviso existe uma vez por contrato e ciclo, com responsável, prazo e tarefas.</p>
-        <div className="flex gap-2">
-          <Select aria-label="Situação" className="w-auto" value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option value="aberto">Abertas</option><option value="concluido">Concluídas</option><option value="todos">Todas</option></Select>
-          {can('contratos', 'total') && <Button icon={<RefreshCw className="h-4 w-4" />} loading={run.isPending} onClick={() => run.mutate()}>Verificar agora</Button>}
-        </div>
-      </div>
-      {q.isLoading ? <div className="card"><LoadingRows /></div> : !q.data?.items.length ? <div className="card"><EmptyState title="Nenhuma notificação" /></div> : <div className="card p-2"><AlertList alerts={q.data.items} showContract /></div>}
-    </div>
-  );
-}
+// ------------------------------------------------------------------ relatórios
 function Relatorios() {
   const next = (() => { const n = new Date(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + 1, 1)).toISOString().slice(0, 7); })();
   const [month, setMonth] = useState(next);
@@ -316,10 +254,13 @@ export function ContractsPage() {
   const allowed = cfg.data?.tabs;
   const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'modelos' || feature('contratos.modelos')) && (t.key !== 'atas' || feature('contratos.atas')));
   const [f, setF] = useUrlState({ t: 'atencao' });
-  const view = (tabs.some((t) => t.key === f.t) ? f.t : tabs[0]?.key) as View | undefined;
+  // submenus da barra lateral (Painel, Funil…) abrem sozinhos; o item "Contratos" fica com as demais abas
+  const isMenu = (t: View) => (CONTRACT_MENU_TABS as readonly View[]).includes(t);
+  const mainTabs = tabs.filter((t) => !isMenu(t.key));
+  const view = (tabs.some((t) => t.key === f.t) ? f.t : (mainTabs[0] ?? tabs[0])?.key) as View | undefined;
   const att = useQuery({ queryKey: ['contracts', 'attention', 'todos'], enabled: !!allowed?.includes('atencao'), queryFn: () => api<{ summary: { critica: number; alta: number } }>('/contracts/attention'), staleTime: 60_000 });
   const urgent = att.data ? att.data.summary.critica + att.data.summary.alta : undefined;
-  const shownTabs = tabs.map((t) => (t.key === 'atencao' && urgent ? { ...t, count: urgent } : t));
+  const shownTabs = mainTabs.map((t) => (t.key === 'atencao' && urgent ? { ...t, count: urgent } : t));
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
   const TV_TABS = tabs.filter((t) => ['atencao', 'painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
@@ -328,14 +269,15 @@ export function ContractsPage() {
       <PageHeader
         icon={<FileSignature className="h-9 w-9" strokeWidth={2.2} />}
         title="Gestão de Contratos"
-        subtitle="Vigências, renovações, reajustes e encerramentos com histórico e responsáveis."
+        subtitle="Vigências, carteira, atas e modelos com histórico e responsáveis."
         actions={<><TvButton onClick={() => void tv.enter()} /><Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button></>}
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
       {tv.active && view && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
       {cfg.isLoading ? <div className="card"><LoadingRows /></div> : cfg.isError ? <ErrorState error={cfg.error} onRetry={() => cfg.refetch()} /> : !view ? (
-        <div className="card"><EmptyState title="Nenhuma aba liberada" description="Seu perfil não tem acesso a nenhuma aba da Gestão de Contratos. Fale com a administração (Configurações → Contratos)." /></div>
-      ) : <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} />}
+        <div className="card"><EmptyState title="Nenhuma aba liberada" description="Seu perfil não tem acesso a nenhuma aba da Gestão de Contratos. Fale com a administração (Configurações → Módulos e liberação → Contratos)." /></div>
+      ) : isMenu(view) ? <h2 className="mb-4 text-xl font-bold text-ink">{CONTRACT_TAB_LABELS[view]}</h2>
+        : shownTabs.length > 1 ? <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} /> : null}
       {view === 'atencao' && <AttentionCenter />}
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
@@ -343,10 +285,6 @@ export function ContractsPage() {
       {view === 'atas' && <AtasTab />}
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
-      {view === 'renovacoes' && <Processos kind="renovacao" intro="Renovações abertas automaticamente 60 dias antes do término (ou manualmente). Contratos públicos seguem o roteiro com ofício, aditivo e assinaturas; privados, proposta de continuidade e formalização." />}
-      {view === 'reajustes' && <Processos kind="reajuste" intro="Fluxo independente da renovação: data-base, índice, cálculo, aprovação, comunicação, aplicação e ERP. Cada reajuste aplicado vira uma nova versão com o histórico de valores." />}
-      {view === 'encerramentos' && <Processos kind="encerramento" intro="Encerramentos previstos (sem renovação, limite legal ou decisão registrada): avisos de 90 e 30 dias, validação com Sucesso do Cliente, desmobilização, faturamento final, baixas e arquivamento." />}
-      {view === 'notificacoes' && <Notificacoes />}
       {view === 'relatorios' && <Relatorios />}
       {view === 'modelos' && <ModelsTab />}
       </TvArea>

@@ -1,4 +1,4 @@
-/** Configurações → Contratos: abas por perfil, Painel, prazos dos alertas, e-mails, assuntos e modelo institucional do ofício. */
+/** Configurações → Módulos e liberação → Contratos: abas por perfil, Painel, prazos dos alertas, e-mails, assuntos e modelo institucional do ofício. */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -98,11 +98,18 @@ function ContractViewSettings() {
   const setDash = (p: Partial<DashboardConfig>) => setV({ ...v, dashboard: { ...dash, ...p } });
   const move = (i: number, by: -1 | 1) => { const o = [...dash.order]; [o[i], o[i + by]] = [o[i + by]!, o[i]!]; setDash({ order: o }); };
   const changed = JSON.stringify(v) !== JSON.stringify(q.data);
+  const saveBar = (
+    <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+      {changed && <span className="mr-auto text-sm font-semibold text-[#C2610C]">Alterações não salvas</span>}
+      {changed && <Button onClick={() => setV(q.data!)}>Desfazer</Button>}
+      <Button variant="primary" disabled={!changed} loading={save.isPending} onClick={() => save.mutate()}>Salvar abas e painel</Button>
+    </div>
+  );
   return (
     <>
       <section className="card p-5" aria-label="Abas por perfil">
         <h2 className="text-lg font-bold text-ink">Abas da Gestão de Contratos por perfil</h2>
-        <p className="mb-3 max-w-3xl text-sm text-muted">Cada aba é uma permissão. Quem tem mais de um perfil vê a aba se qualquer um deles liberar. A administração vê todas. O Painel, a Central de atenção e os Relatórios também recusam os dados na API para quem não tem a aba.</p>
+        <p className="mb-3 max-w-3xl text-sm text-muted">Cada aba é uma permissão. Quem tem mais de um perfil vê a aba se qualquer um deles liberar. Vale para todos os perfis, inclusive a administração; aba desmarcada some do menu e da tela. O Painel, a Central de atenção e os Relatórios também recusam os dados na API para quem não tem a aba.</p>
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead><tr className="border-b border-line text-left text-muted"><th className="py-2 pr-3 font-semibold">Aba</th>{PROFILE_KEYS.map((p) => <th key={p} className="px-2 py-2 text-center font-semibold">{PROFILE_LABELS[p]}</th>)}</tr></thead>
@@ -114,6 +121,7 @@ function ContractViewSettings() {
             ))}</tbody>
           </table>
         </div>
+        {saveBar}
       </section>
       <section className="card p-5" aria-label="Configuração do painel">
         <h2 className="text-lg font-bold text-ink">Painel</h2>
@@ -127,10 +135,7 @@ function ContractViewSettings() {
           </li>
         ))}</ol>
         <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={dash.compactValues} onChange={(e) => setDash({ compactValues: e.target.checked })} /><span><b className="text-ink">Valores resumidos nos cartões</b><span className="block text-muted">A partir de R$ 10 mil, o valor aparece em mil, mi ou bi (R$ 151,1 mil · R$ 1,77 mi). O valor completo aparece ao passar o mouse.</span></span></label>
-        <div className="mt-4 flex justify-end gap-2">
-          {changed && <Button onClick={() => setV(q.data!)}>Desfazer</Button>}
-          <Button variant="primary" disabled={!changed} loading={save.isPending} onClick={() => save.mutate()}>Salvar abas e painel</Button>
-        </div>
+        {saveBar}
       </section>
     </>
   );

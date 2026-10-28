@@ -5,7 +5,7 @@
  */
 import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import {
-  CONTRACT_TAB_LABELS, DEFAULT_CONTRACT_SETTINGS, DEFAULT_OFICIO, SECTOR_LABELS, allowedContractTabs, normalizeDashboard, processSteps,
+  CONTRACT_TAB_LABELS, DEFAULT_CONTRACT_SETTINGS, DEFAULT_OFICIO, SECTOR_LABELS, allowedContractTabs, isContractTab, normalizeDashboard, processSteps,
   type ContractKind, type ContractSettings, type ContractTab, type ContractTabAccess, type ProcessKind, type Sector, type StepDef,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -31,10 +31,12 @@ export async function contractSettingsOf(db: DbOrTx, tenantId: string): Promise<
 export async function contractViewOf(db: DbOrTx, tenantId: string) {
   const [r] = await db.select({ settings: s.contractSettings.settings }).from(s.contractSettings).where(eq(s.contractSettings.tenantId, tenantId)).limit(1);
   const v = (r?.settings ?? {}) as { tabAccess?: ContractTabAccess; dashboard?: unknown };
-  return { tabAccess: v.tabAccess ?? {}, dashboard: normalizeDashboard(v.dashboard) };
+  // abas que saíram do sistema (renovações, reajustes, encerramentos, notificações) somem da configuração gravada
+  const tabAccess = Object.fromEntries(Object.entries(v.tabAccess ?? {}).map(([p, ts]) => [p, (ts ?? []).filter(isContractTab)])) as ContractTabAccess;
+  return { tabAccess, dashboard: normalizeDashboard(v.dashboard) };
 }
 export async function contractTabsOf(db: DbOrTx, auth: AuthContext) {
-  return allowedContractTabs((await contractViewOf(db, auth.tenantId)).tabAccess, auth.profiles, isAdmin(auth));
+  return allowedContractTabs((await contractViewOf(db, auth.tenantId)).tabAccess, auth.profiles);
 }
 /** Rotas que só servem a uma aba respeitam a permissão da aba (não só a tela). */
 export async function requireContractTab(db: DbOrTx, auth: AuthContext, tab: ContractTab) {

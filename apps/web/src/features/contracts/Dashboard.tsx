@@ -1,7 +1,7 @@
 import { MoneyToggle } from '../../lib/privacy';
 /**
  * Painel da Gestão de Contratos: carteira estratificada, vencimentos, faturamento por tipo no período e visão executiva.
- * A ordem e as seções visíveis vêm de Configurações → Contratos (padrão: faturamento e visão executiva no fim).
+ * A ordem e as seções visíveis vêm de Configurações → Módulos e liberação → Contratos (padrão: faturamento e visão executiva no fim).
  */
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';

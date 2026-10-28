@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Package, Settings, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet } from 'lucide-react';
-import type { FeatureKey, Module } from '@isp/domain';
+import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
 import { useAuth } from '../../auth/AuthProvider';
@@ -15,7 +15,10 @@ import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 
-type NavLeaf = { to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: boolean | 'approvals'; also?: string[] };
+type NavLeaf = {
+  to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: boolean | 'approvals'; also?: string[];
+  /** aba da Gestão de Contratos que o item abre (segue a permissão da aba por perfil) */ contractTab?: ContractTab;
+};
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
 type NavEntry = NavLeaf | NavGroup;
 const ICON = 'h-[22px] w-[22px] shrink-0';
@@ -29,7 +32,15 @@ const NAV: NavEntry[] = [
     { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
     { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades', badge: true },
   ] },
-  { to: '/contracts', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, module: 'contratos' },
+  { key: 'contratos', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, children: [
+    { to: '/contracts', label: 'Contratos', module: 'contratos' },
+    { to: '/contracts?t=painel', label: 'Painel', module: 'contratos', contractTab: 'painel' },
+    { to: '/contracts?t=funil', label: 'Funil', module: 'contratos', contractTab: 'funil' },
+    { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados' },
+    { to: '/contracts?t=atas', label: 'Atas de Registro de Preço', module: 'contratos', contractTab: 'atas', feature: 'contratos.atas' },
+    { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
+    { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
+  ] },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
@@ -79,7 +90,6 @@ export const SETTINGS_NAV: { to: string; label: string; admin: boolean; group?: 
   { to: '/settings/integrations', label: 'Integrações', admin: true },
   { to: '/settings/fields', label: 'Campos personalizados', admin: true },
   { to: '/settings/filiais', label: 'Filiais da venda', admin: true },
-  { to: '/settings/contracts', label: 'Contratos', admin: true },
   { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
   { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
   { to: '/settings/desempenho', label: 'Gestão de desempenho', admin: true },
@@ -102,8 +112,17 @@ function useOpenActivities() {
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { can, feature } = useAuth();
-  const show = (n: NavLeaf) => can(n.module) && (!n.feature || feature(n.feature));
+  const contractTabs = useQuery({ queryKey: ['contracts', 'view'], enabled: can('contratos'), queryFn: () => api<{ tabs: ContractTab[] }>('/contracts/view'), staleTime: 60_000 }).data?.tabs;
+  const show = (n: NavLeaf) => can(n.module) && (!n.feature || feature(n.feature)) && (!n.contractTab || !contractTabs || contractTabs.includes(n.contractTab));
   const loc = useLocation();
+  // itens com ?t= (submenus de Contratos) comparam também a aba; "Contratos" vale para as demais abas e para as fichas
+  const currentTab = new URLSearchParams(loc.search).get('t');
+  const leafActive = (c: NavLeaf) => {
+    const [path, query] = c.to.split('?');
+    if (query) return loc.pathname === path && currentTab === new URLSearchParams(query).get('t');
+    if (c.to === '/contracts') return loc.pathname.startsWith('/contracts/') || (loc.pathname === '/contracts' && !(CONTRACT_MENU_TABS as readonly string[]).includes(currentTab ?? ''));
+    return loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`);
+  };
   const counts = useOpenActivities().data?.counts;
   const badge = counts ? counts.today + counts.overdue : 0;
   const approvals = useApprovalCount().data?.toDecide ?? 0;
@@ -123,7 +142,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             if (isGroup(n)) {
               const kids = n.children.filter((c) => show(c));
               if (!kids.length) return null;
-              const active = kids.some((c) => loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`));
+              const active = kids.some(leafActive);
               const open = openGroups[n.key] ?? active;
               const total = kids.reduce((a, c) => a + (c.badge === true ? badge : c.badge === 'approvals' ? approvals : 0), 0);
               return (
@@ -138,11 +157,17 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                     <ul className="mb-1 mt-0.5 space-y-0.5 pl-9">
                       {kids.map((c) => (
                         <li key={c.to}>
-                          <NavLink to={c.to} end={kids.some((o) => o !== c && o.to.startsWith(`${c.to}/`))} onClick={onNavigate} className={({ isActive }) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5')}>
-                            <span className="min-w-0 flex-1">{c.label}</span>
-                            {c.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{badge}</span>}
-                            {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
-                          </NavLink>
+                          {(() => {
+                            const cls = (on: boolean) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', on ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5');
+                            const inner = <>
+                              <span className="min-w-0 flex-1">{c.label}</span>
+                              {c.badge === true && badge > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{badge}</span>}
+                              {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
+                            </>;
+                            // submenus de Contratos: a aba (?t=) decide qual está ativo, não só o caminho
+                            if (n.key === 'contratos') { const on = leafActive(c); return <Link to={c.to} onClick={onNavigate} aria-current={on ? 'page' : undefined} className={cls(on)}>{inner}</Link>; }
+                            return <NavLink to={c.to} end={kids.some((o) => o !== c && o.to.startsWith(`${c.to}/`))} onClick={onNavigate} className={({ isActive }) => cls(isActive)}>{inner}</NavLink>;
+                          })()}
                         </li>
                       ))}
                     </ul>

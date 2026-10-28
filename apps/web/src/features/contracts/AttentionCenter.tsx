@@ -38,7 +38,7 @@ export function AttentionCenter() {
   const [resolving, setResolving] = useState<Item | null>(null);
   const digest = useMutation({
     mutationFn: () => api<{ sent: number; skipped: number }>('/contracts/digest/run', { method: 'POST' }),
-    onSuccess: (r) => toast({ tone: 'success', message: r.sent ? `Resumo enviado para ${r.sent} pessoa(s)` : r.skipped ? 'O resumo de hoje já foi enviado' : 'Nenhum resumo enviado: confira o SMTP e o resumo diário em Configurações → Contratos' }),
+    onSuccess: (r) => toast({ tone: 'success', message: r.sent ? `Resumo enviado para ${r.sent} pessoa(s)` : r.skipped ? 'O resumo de hoje já foi enviado' : 'Nenhum resumo enviado: confira o SMTP e o resumo diário em Configurações → Módulos e liberação → Contratos' }),
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;

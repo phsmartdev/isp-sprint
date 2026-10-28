@@ -59,7 +59,6 @@ import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Jou
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
 import { AdminCsSettings } from './pages/admin/CsSettings';
-import { AdminContractSettings } from './pages/admin/ContractSettings';
 import { KpiBoardPage } from './pages/KpiBoardPage';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -149,7 +148,7 @@ export function App() {
           <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="data" element={<AdminData />} />
           <Route path="fields" element={<AdminCustomFields />} />
-          <Route path="contracts" element={<AdminContractSettings />} />
+          <Route path="contracts" element={<Navigate to="/settings/modulos?cfg=contratos" replace />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
           <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
