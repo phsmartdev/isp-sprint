@@ -75,6 +75,17 @@ describe('IXC somente leitura', () => {
     }
   });
 
+  it('conta sem CPF/CNPJ no cadastro usa o campo personalizado "CPF/CNPJ"', async () => {
+    ok(await carlos.put('/admin/customer-fields', { fields: [{ rotulo: 'CPF/CNPJ', tipo: 'texto' }] }));
+    const c = ok(await carlos.post('/contacts', { name: 'Conta Sem Documento Fictícia', phone: '79 98888-2222', segment: 'governamental' }), 201).json();
+    expect(ok(await carlos.get(`/contacts/${c.id}/ixc/financeiro`)).json()).toMatchObject({ enabled: true, client: null });
+    ok(await carlos.patch(`/contacts/${c.id}/custom`, { custom: { cpf_cnpj: '12345678000190' } }));
+    const fin = ok(await carlos.get(`/contacts/${c.id}/ixc/financeiro`)).json();
+    expect(fin.client).toMatchObject({ id: '77', via: 'documento' });
+    expect(fin.invoices).toHaveLength(3);
+    ok(await carlos.put('/admin/customer-fields', { fields: [] }));
+  });
+
   it('faturas exigem ver valores financeiros; conta fora da carteira não aparece', async () => {
     const other = (await ctx.db.execute<{ id: string }>(sql`select id from contacts where owner_id <> ${lucas.me.user.id} and deleted_at is null limit 1`)).rows[0]!.id;
     expect((await lucas.get(`/contacts/${other}/ixc/financeiro`)).statusCode).toBe(404);
