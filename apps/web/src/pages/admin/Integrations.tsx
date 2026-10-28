@@ -123,7 +123,7 @@ function IntegrationCard({ item }: { item: Item }) {
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
-        {(item.kind === 'zapi' || item.kind === 'glpi') && <Button icon={<PlugZap className="h-4 w-4" />} loading={test.isPending} onClick={() => test.mutate()}>Testar conexão</Button>}
+        {(item.kind === 'zapi' || item.kind === 'glpi' || item.kind === 'ixc') && <Button icon={<PlugZap className="h-4 w-4" />} loading={test.isPending} onClick={() => test.mutate()}>Testar conexão</Button>}
         <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button>
       </div>
     </section>
