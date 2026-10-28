@@ -9,7 +9,7 @@ import * as s from '../db/schema';
 import { ownerScope } from '../services/scope';
 import { requireAction } from '../services/modules';
 import { logEvent } from '../services/integrations';
-import { IxcError, ixcClientFor, ixcConfig, ixcList } from '../services/ixc';
+import { IxcError, egressIp, ixcClientFor, ixcConfig, ixcList } from '../services/ixc';
 
 async function via<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } catch (e) {
@@ -30,14 +30,17 @@ export const ixcRoutes = [
     handler: async ({ app, auth }) => {
       let c;
       try { c = (await ixcConfig(app.db, auth.tenantId, { requireEnabled: false }))!; } catch (e) { return { ok: false, message: (e as Error).message }; }
+      // IP por onde o servidor saiu neste teste (para conferir a liberação no IXC; sem proxy, ele muda)
+      const ip = await egressIp(c);
+      const ipText = ip ? ` IP de saída neste teste: ${ip}${c.proxyUrl ? ' (proxy de IP fixo)' : ' (sem proxy, pode mudar na próxima consulta)'}.` : '';
       try {
         const r = await ixcList(c, 'cliente', { qtype: 'cliente.id', query: '0', oper: '>', rp: 1 });
-        const message = `Conectado (somente leitura). O IXC tem ${r.total.toLocaleString('pt-BR')} cliente(s) cadastrados.`;
+        const message = `Conectado (somente leitura). O IXC tem ${r.total.toLocaleString('pt-BR')} cliente(s) cadastrados.${ipText}`;
         await logEvent(app.db, auth.tenantId, 'ixc', 'recebido', `Teste de conexão: ${message}`);
-        return { ok: true, message };
+        return { ok: true, message, ip };
       } catch (e) {
-        await logEvent(app.db, auth.tenantId, 'ixc', 'erro', `Teste de conexão: ${(e as Error).message}`);
-        return { ok: false, message: (e as Error).message };
+        await logEvent(app.db, auth.tenantId, 'ixc', 'erro', `Teste de conexão: ${(e as Error).message}${ipText}`);
+        return { ok: false, message: `${(e as Error).message}${ipText}`, ip };
       }
     },
   }),
