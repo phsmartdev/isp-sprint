@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql, type 
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
-  BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS,
+  BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, type AlertKind, type Segment,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -19,8 +19,8 @@ import { level } from '../services/scope';
 import { oppVisibility } from '../services/opportunities';
 import { brl } from '../services/email';
 import {
-  addEvent, contractScope, contractSettingsOf, contractSummary, createTask, currentVersion, hasSector, isAdmin, loadContract, mailTo,
-  newVersion, openPendencies, openProcess, sectorOwners, setStage, userById, type ContractRow, type VersionPatch,
+  addEvent, contractScope, contractSettingsOf, contractSummary, contractTabsOf, contractViewOf, createTask, currentVersion, hasSector, isAdmin, loadContract, mailTo,
+  newVersion, openPendencies, openProcess, requireContractTab, sectorOwners, setStage, userById, type ContractRow, type VersionPatch,
 } from '../services/contracts';
 import { runContractAlerts } from '../services/contractAlerts';
 import { ledgerOf } from '../services/contractLedger';
@@ -234,6 +234,7 @@ export const contractRoutes = [
       const today = new Date().toISOString().slice(0, 10);
       const from = query.from ?? `${today.slice(0, 7)}-01`;
       const to = query.to ?? today;
+      await requireContractTab(app.db, auth, 'painel');
       if (to < from || daysBetween(from, to) > 1100) throw unprocessable('Período inválido (até 3 anos).');
       const span = daysBetween(from, to) + 1;
       const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(span - 1));
@@ -362,6 +363,7 @@ export const contractRoutes = [
     module: 'contratos',
     query: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional(), format: z.enum(['json', 'csv']).default('json') }),
     handler: async ({ app, auth, query, reply }) => {
+      await requireContractTab(app.db, auth, 'relatorios');
       if (query.format === 'csv') { requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.'); }
       const now = new Date();
       const month = query.month ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
@@ -391,6 +393,7 @@ export const contractRoutes = [
     module: 'contratos',
     query: z.object({ from: day.optional(), to: day.optional(), status: z.enum(['ativos', 'encerrados', 'todos']).default('todos'), billingType: z.enum(BILLING_TYPES).optional(), kind: z.enum(CONTRACT_KINDS).optional(), stage: z.enum(CONTRACT_STAGES).optional(), ownerId: uuid.optional(), format: z.enum(['json', 'csv']).default('json') }),
     handler: async ({ app, auth, query, reply }) => {
+      await requireContractTab(app.db, auth, 'relatorios');
       if (query.format === 'csv') { requireAction(auth, 'exportar'); requireAction(auth, 'ver_financeiro', 'A planilha inclui valores financeiros que seu perfil não vê.'); }
       const today = new Date().toISOString().slice(0, 10);
       const from = query.from ?? `${today.slice(0, 4)}-01-01`, to = query.to ?? today;
@@ -772,9 +775,46 @@ export const contractRoutes = [
         const [t] = await app.db.select({ id: s.proposalTemplates.id }).from(s.proposalTemplates).where(and(eq(s.proposalTemplates.id, body.oficioTemplateId), eq(s.proposalTemplates.tenantId, auth.tenantId))).limit(1);
         if (!t) throw unprocessable('Modelo institucional não encontrado.');
       }
-      await app.db.insert(s.contractSettings).values({ tenantId: auth.tenantId, settings: body, updatedBy: auth.userId }).onConflictDoUpdate({ target: s.contractSettings.tenantId, set: { settings: body, updatedBy: auth.userId, updatedAt: new Date() } });
+      // mescla: abas por perfil e Painel ficam na mesma linha e têm rota própria
+      await app.db.insert(s.contractSettings).values({ tenantId: auth.tenantId, settings: body, updatedBy: auth.userId }).onConflictDoUpdate({ target: s.contractSettings.tenantId, set: { settings: sql`${s.contractSettings.settings} || ${JSON.stringify(body)}::jsonb`, updatedBy: auth.userId, updatedAt: new Date() } });
       await audit(app.db, req, { action: 'contract.settings', entityType: 'tenant', entityId: auth.tenantId, metadata: { renewalAlertDays: body.renewalAlertDays, closureNoticeDays: body.closureNoticeDays } });
       return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'GET',
+    url: '/contracts/view',
+    summary: 'Abas da Gestão de Contratos liberadas para a pessoa (por perfil) e a configuração do Painel',
+    tag: 'Contratos',
+    module: 'contratos',
+    handler: async ({ app, auth }) => ({ tabs: await contractTabsOf(app.db, auth), dashboard: (await contractViewOf(app.db, auth.tenantId)).dashboard }),
+  }),
+  defineRoute({
+    method: 'GET',
+    url: '/admin/contract-view',
+    summary: 'Abas negadas por perfil e configuração do Painel de contratos',
+    tag: 'Contratos',
+    module: 'configuracoes',
+    min: 'total',
+    handler: async ({ app, auth }) => contractViewOf(app.db, auth.tenantId),
+  }),
+  defineRoute({
+    method: 'PUT',
+    url: '/admin/contract-view',
+    summary: 'Salva as abas por perfil e a configuração do Painel de contratos (auditado)',
+    tag: 'Contratos',
+    module: 'configuracoes',
+    min: 'total',
+    body: z.object({
+      tabAccess: z.record(z.enum(PROFILE_KEYS), z.array(z.enum(CONTRACT_TABS)).max(CONTRACT_TABS.length)),
+      dashboard: z.object({ order: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), hidden: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), compactValues: z.boolean() }),
+    }),
+    handler: async ({ app, auth, body, req }) => {
+      const before = await contractViewOf(app.db, auth.tenantId);
+      const patch = { tabAccess: body.tabAccess, dashboard: body.dashboard };
+      await app.db.insert(s.contractSettings).values({ tenantId: auth.tenantId, settings: patch, updatedBy: auth.userId }).onConflictDoUpdate({ target: s.contractSettings.tenantId, set: { settings: sql`${s.contractSettings.settings} || ${JSON.stringify(patch)}::jsonb`, updatedBy: auth.userId, updatedAt: new Date() } });
+      await audit(app.db, req, { action: 'contract.view', entityType: 'tenant', entityId: auth.tenantId, metadata: { from: before, to: patch } });
+      return contractViewOf(app.db, auth.tenantId);
     },
   }),
 ];

@@ -99,6 +99,54 @@ export const DEFAULT_CONTRACT_SETTINGS = {
 };
 export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail: string | null; deliveryEmail: string | null; oficioTemplate: string };
 
+// ------------------------------------------------------------------ abas e painel
+/** Abas da Gestão de Contratos, na ordem do menu. Cada aba é uma permissão por perfil (Configurações → Contratos). */
+export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'calendario', 'renovacoes', 'reajustes', 'encerramentos', 'notificacoes', 'relatorios'] as const;
+export type ContractTab = (typeof CONTRACT_TABS)[number];
+export const CONTRACT_TAB_LABELS: Record<ContractTab, string> = {
+  atencao: 'Central de atenção', painel: 'Painel', funil: 'Funil', lista: 'Lista', modelos: 'Modelos de contratos e propostas', atestados: 'Atestados',
+  atas: 'Atas de registro de preços', calendario: 'Calendário', renovacoes: 'Renovações', reajustes: 'Reajustes', encerramentos: 'Encerramentos',
+  notificacoes: 'Notificações', relatorios: 'Relatórios',
+};
+/** Abas negadas por perfil (chave = perfil). Sem registro = todas liberadas, como antes. */
+export type ContractTabAccess = Partial<Record<string, ContractTab[]>>;
+/**
+ * Abas que a pessoa vê: liberada se QUALQUER perfil dela libera (mesma regra do maior nível na matriz).
+ * Administração (Configurações total) vê todas, para nunca ficar sem acesso à própria configuração.
+ */
+export function allowedContractTabs(denied: ContractTabAccess, profiles: string[], admin: boolean): ContractTab[] {
+  if (admin || !profiles.length) return [...CONTRACT_TABS];
+  return CONTRACT_TABS.filter((t) => profiles.some((p) => !(denied[p] ?? []).includes(t)));
+}
+
+/** Seções do Painel de contratos, configuráveis (ordem e visibilidade) em Configurações → Contratos. */
+export const DASHBOARD_SECTIONS = ['indicadores', 'perfil', 'estratificacao', 'vencimentos', 'clientes', 'etapas', 'faturamento', 'executivo'] as const;
+export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
+export const DASHBOARD_SECTION_LABELS: Record<DashboardSection, string> = {
+  indicadores: 'Indicadores da carteira (ativos, receita mensal, vencimentos, risco)',
+  perfil: 'Perfil da carteira (idade, vigência restante, públicos, medição)',
+  estratificacao: 'Estratificação (tipo, responsável, categoria, público e privado)',
+  vencimentos: 'Vencimentos nos próximos 12 meses',
+  clientes: 'Maiores clientes e medição com saldo baixo',
+  etapas: 'Etapas, próximos vencimentos e notificações',
+  faturamento: 'Faturamento por tipo no período',
+  executivo: 'Visão executiva (carteira, backlog, dependência e receita em risco)',
+};
+export type DashboardConfig = { order: DashboardSection[]; hidden: DashboardSection[]; compactValues: boolean };
+/** Padrão: faturamento e visão executiva no fim do painel. */
+export const DEFAULT_DASHBOARD: DashboardConfig = { order: [...DASHBOARD_SECTIONS], hidden: [], compactValues: true };
+/** Lê a configuração gravada: ignora seções desconhecidas e acrescenta no fim as que faltarem (seções novas). */
+export function normalizeDashboard(v: unknown): DashboardConfig {
+  const x = (v && typeof v === 'object' ? v : {}) as Partial<Record<keyof DashboardConfig, unknown>>;
+  const known = (a: unknown) => (Array.isArray(a) ? a.filter((k): k is DashboardSection => DASHBOARD_SECTIONS.includes(k as DashboardSection)) : []);
+  const order = [...new Set(known(x.order))];
+  return {
+    order: [...order, ...DASHBOARD_SECTIONS.filter((k) => !order.includes(k))],
+    hidden: [...new Set(known(x.hidden))],
+    compactValues: typeof x.compactValues === 'boolean' ? x.compactValues : DEFAULT_DASHBOARD.compactValues,
+  };
+}
+
 export const ALERT_KINDS = ['renovacao', 'reajuste', 'garantia', 'documento_pendente', 'assinatura', 'provisionamento', 'implantacao', 'encerramento_90', 'encerramento_30', 'consumo_acelerado', 'consumo_lento', 'saldo_baixo', 'esgotamento', 'empenho_baixo', 'sem_empenho'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const ALERT_LABELS: Record<AlertKind, string> = {

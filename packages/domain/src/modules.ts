@@ -63,7 +63,7 @@ export const FEATURES = [
   { key: 'gestao_time.times', module: 'gestao_time', label: 'Apuração, intervenções e rituais' },
   { key: 'contratos.contratos', module: 'contratos', label: 'Contratos' },
   { key: 'contratos.atas', module: 'contratos', label: 'Atas de registro de preços' },
-  { key: 'contratos.modelos', module: 'contratos', label: 'Modelos de contrato' },
+  { key: 'contratos.modelos', module: 'contratos', label: 'Modelos de contratos e propostas' },
   { key: 'projetos.projetos', module: 'projetos', label: 'Projetos e marcos' },
   { key: 'projetos.tarefas', module: 'projetos', label: 'Quadro de tarefas' },
   { key: 'relatorios.comercial', module: 'relatorios', label: 'Relatórios e inteligência comercial', requires: ['crm'] },

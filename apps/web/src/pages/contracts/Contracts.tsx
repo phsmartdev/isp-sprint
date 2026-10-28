@@ -1,12 +1,12 @@
 import { TvArea, TvBar, TvButton, useTvMode } from '../../features/TvMode';
-/** Gestão de Contratos: painel, lista, funil, calendário, renovações, reajustes, encerramentos, notificações e relatórios. */
+/** Gestão de Contratos: painel, funil, lista, modelos, calendário, renovações, reajustes, encerramentos, notificações e relatórios. */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
 import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, RefreshCw, Search, TrendingUp, Wallet } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, PROCESS_LABELS, processSteps, type ContractStage } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, CONTRACT_TAB_LABELS, PROCESS_LABELS, processSteps, type ContractStage, type ContractTab } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../../lib/hooks';
@@ -19,17 +19,13 @@ import { ContractsDashboard } from '../../features/contracts/Dashboard';
 import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
-import { HabilitationTab } from '../../features/contracts/Habilitation';
+import { ModelsTab } from '../../features/contracts/ModelsTab';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
-import { TemplatesManager } from '../../features/contracts/SignaturePanels';
-import { AdminContractTemplates } from '../admin/ProposalTemplates';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type Alert, type ContractRow, type Process } from '../../features/contracts/shared';
 
-type View = 'atencao' | 'painel' | 'lista' | 'habilitacao' | 'atestados' | 'atas' | 'funil' | 'calendario' | 'renovacoes' | 'reajustes' | 'encerramentos' | 'notificacoes' | 'relatorios' | 'modelos';
-const TABS: { key: View; label: string }[] = [
-  { key: 'atencao', label: 'Central de atenção' }, { key: 'painel', label: 'Painel' }, { key: 'lista', label: 'Lista' }, { key: 'habilitacao', label: 'Habilitação' }, { key: 'atestados', label: 'Atestados' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'funil', label: 'Funil' }, { key: 'calendario', label: 'Calendário' },
-  { key: 'renovacoes', label: 'Renovações' }, { key: 'reajustes', label: 'Reajustes' }, { key: 'encerramentos', label: 'Encerramentos' }, { key: 'notificacoes', label: 'Notificações' }, { key: 'relatorios', label: 'Relatórios' }, { key: 'modelos', label: 'Modelos' },
-];
+type View = ContractTab;
+/** Ordem do menu definida no domínio (Funil logo depois do Painel); cada aba é uma permissão por perfil. */
+const TABS: { key: View; label: string }[] = CONTRACT_TABS.map((key) => ({ key, label: key === 'modelos' ? 'Modelos' : CONTRACT_TAB_LABELS[key] }));
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
 
 // ------------------------------------------------------------------ lista
@@ -315,11 +311,13 @@ function Relatorios() {
 
 export function ContractsPage() {
   const nav = useNavigate();
-  const { can, feature } = useAuth();
-  const tabs = TABS.filter((t) => (t.key !== 'modelos' || (can('configuracoes', 'total') && feature('contratos.modelos'))) && (t.key !== 'atas' || feature('contratos.atas')));
+  const { feature } = useAuth();
+  const cfg = useQuery({ queryKey: ['contracts', 'view'], queryFn: () => api<{ tabs: View[] }>('/contracts/view'), staleTime: 60_000 });
+  const allowed = cfg.data?.tabs;
+  const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'modelos' || feature('contratos.modelos')) && (t.key !== 'atas' || feature('contratos.atas')));
   const [f, setF] = useUrlState({ t: 'atencao' });
-  const view = (tabs.some((t) => t.key === f.t) ? f.t : 'atencao') as View;
-  const att = useQuery({ queryKey: ['contracts', 'attention', 'todos'], queryFn: () => api<{ summary: { critica: number; alta: number } }>('/contracts/attention'), staleTime: 60_000 });
+  const view = (tabs.some((t) => t.key === f.t) ? f.t : tabs[0]?.key) as View | undefined;
+  const att = useQuery({ queryKey: ['contracts', 'attention', 'todos'], enabled: !!allowed?.includes('atencao'), queryFn: () => api<{ summary: { critica: number; alta: number } }>('/contracts/attention'), staleTime: 60_000 });
   const urgent = att.data ? att.data.summary.critica + att.data.summary.alta : undefined;
   const shownTabs = tabs.map((t) => (t.key === 'atencao' && urgent ? { ...t, count: urgent } : t));
   const tvRef = useRef<HTMLDivElement>(null);
@@ -334,12 +332,13 @@ export function ContractsPage() {
         actions={<><TvButton onClick={() => void tv.enter()} /><Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button></>}
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
-      {tv.active && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
-      <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} />
+      {tv.active && view && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
+      {cfg.isLoading ? <div className="card"><LoadingRows /></div> : cfg.isError ? <ErrorState error={cfg.error} onRetry={() => cfg.refetch()} /> : !view ? (
+        <div className="card"><EmptyState title="Nenhuma aba liberada" description="Seu perfil não tem acesso a nenhuma aba da Gestão de Contratos. Fale com a administração (Configurações → Contratos)." /></div>
+      ) : <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} />}
       {view === 'atencao' && <AttentionCenter />}
       {view === 'painel' && <ContractsDashboard />}
       {view === 'lista' && <Lista />}
-      {view === 'habilitacao' && <HabilitationTab />}
       {view === 'atestados' && <CertificatesLibrary />}
       {view === 'atas' && <AtasTab />}
       {view === 'funil' && <Funil />}
@@ -349,7 +348,7 @@ export function ContractsPage() {
       {view === 'encerramentos' && <Processos kind="encerramento" intro="Encerramentos previstos (sem renovação, limite legal ou decisão registrada): avisos de 90 e 30 dias, validação com Sucesso do Cliente, desmobilização, faturamento final, baixas e arquivamento." />}
       {view === 'notificacoes' && <Notificacoes />}
       {view === 'relatorios' && <Relatorios />}
-      {view === 'modelos' && <div className="space-y-4"><AdminContractTemplates /><TemplatesManager /></div>}
+      {view === 'modelos' && <ModelsTab />}
       </TvArea>
     </div>
   );

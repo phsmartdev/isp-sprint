@@ -1,7 +1,12 @@
-/** Configurações → Contratos: prazos dos alertas, e-mails, assuntos e modelo institucional do ofício. */
+/** Configurações → Contratos: abas por perfil, Painel, prazos dos alertas, e-mails, assuntos e modelo institucional do ofício. */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import {
+  CONTRACT_TABS, CONTRACT_TAB_LABELS, DASHBOARD_SECTION_LABELS, PROFILE_KEYS, PROFILE_LABELS,
+  type ContractTab, type ContractTabAccess, type DashboardConfig,
+} from '@isp/domain';
 import { api } from '../../lib/api';
 import { Button, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
@@ -37,6 +42,7 @@ export function AdminContractSettings() {
   const set = (p: Partial<S>) => setF({ ...f, ...p });
   return (
     <div className="space-y-4">
+      <ContractViewSettings />
       <section className="card p-5">
         <h2 className="text-lg font-bold text-ink">Contratos</h2>
         <p className="mb-4 max-w-3xl text-sm text-muted">Prazos dos alertas automáticos, destinatários e textos. Quem recebe as tarefas de cada etapa sai dos <Link className="link" to="/settings/users">setores dos usuários</Link> (Comercial, Inteligência Comercial, Financeiro, Jurídico, Sucesso do Cliente, Diretoria, Administração e Implantação).</p>
@@ -67,5 +73,65 @@ export function AdminContractSettings() {
       <Notice>A integração automática com o ERP não está configurada: as etapas de ERP viram tarefas e pedem o código informado por uma pessoa.</Notice>
       <div className="flex justify-end"><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar parâmetros</Button></div>
     </div>
+  );
+}
+
+type View = { tabAccess: ContractTabAccess; dashboard: DashboardConfig };
+
+/** Cada aba da Gestão de Contratos é uma permissão por perfil; e a ordem e as seções do Painel. Salvos juntos, com auditoria. */
+function ContractViewSettings() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['admin', 'contract-view'], queryFn: () => api<View>('/admin/contract-view') });
+  const [v, setV] = useState<View | null>(null);
+  useEffect(() => { if (q.data && !v) setV(q.data); }, [q.data, v]);
+  const save = useMutation({
+    mutationFn: () => api<View>('/admin/contract-view', { method: 'PUT', body: v }),
+    onSuccess: (r) => { setV(r); qc.setQueryData(['admin', 'contract-view'], r); void qc.invalidateQueries({ queryKey: ['contracts', 'view'] }); toast({ tone: 'success', message: 'Abas e painel salvos' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
+  if (!v) return <div className="card"><LoadingRows rows={4} /></div>;
+  const denied = (p: string) => v.tabAccess[p] ?? [];
+  const toggleTab = (p: string, t: ContractTab, on: boolean) => setV({ ...v, tabAccess: { ...v.tabAccess, [p]: on ? denied(p).filter((x) => x !== t) : [...denied(p), t] } });
+  const dash = v.dashboard;
+  const setDash = (p: Partial<DashboardConfig>) => setV({ ...v, dashboard: { ...dash, ...p } });
+  const move = (i: number, by: -1 | 1) => { const o = [...dash.order]; [o[i], o[i + by]] = [o[i + by]!, o[i]!]; setDash({ order: o }); };
+  const changed = JSON.stringify(v) !== JSON.stringify(q.data);
+  return (
+    <>
+      <section className="card p-5" aria-label="Abas por perfil">
+        <h2 className="text-lg font-bold text-ink">Abas da Gestão de Contratos por perfil</h2>
+        <p className="mb-3 max-w-3xl text-sm text-muted">Cada aba é uma permissão. Quem tem mais de um perfil vê a aba se qualquer um deles liberar. A administração vê todas. O Painel, a Central de atenção e os Relatórios também recusam os dados na API para quem não tem a aba.</p>
+        <div className="scroll-thin overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead><tr className="border-b border-line text-left text-muted"><th className="py-2 pr-3 font-semibold">Aba</th>{PROFILE_KEYS.map((p) => <th key={p} className="px-2 py-2 text-center font-semibold">{PROFILE_LABELS[p]}</th>)}</tr></thead>
+            <tbody>{CONTRACT_TABS.map((t) => (
+              <tr key={t} className="border-b border-line last:border-0">
+                <td className="py-2 pr-3 text-ink">{CONTRACT_TAB_LABELS[t]}</td>
+                {PROFILE_KEYS.map((p) => <td key={p} className="px-2 py-2 text-center"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`${CONTRACT_TAB_LABELS[t]} para ${PROFILE_LABELS[p]}`} checked={!denied(p).includes(t)} onChange={(e) => toggleTab(p, t, e.target.checked)} /></td>)}
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </section>
+      <section className="card p-5" aria-label="Configuração do painel">
+        <h2 className="text-lg font-bold text-ink">Painel</h2>
+        <p className="mb-3 max-w-3xl text-sm text-muted">Ordem e seções do Painel de contratos para toda a empresa. Desmarque para esconder; use as setas para mudar a posição.</p>
+        <ol className="divide-y divide-line rounded-md border border-line">{dash.order.map((k, i) => (
+          <li key={k} className="flex items-center gap-3 px-3 py-2">
+            <input type="checkbox" className="h-4 w-4 shrink-0 accent-primary" aria-label={`Mostrar ${DASHBOARD_SECTION_LABELS[k]}`} checked={!dash.hidden.includes(k)} onChange={(e) => setDash({ hidden: e.target.checked ? dash.hidden.filter((x) => x !== k) : [...dash.hidden, k] })} />
+            <span className={`min-w-0 flex-1 text-sm ${dash.hidden.includes(k) ? 'text-muted line-through' : 'text-ink'}`}>{DASHBOARD_SECTION_LABELS[k]}</span>
+            <Button size="sm" variant="ghost" aria-label={`Subir ${DASHBOARD_SECTION_LABELS[k]}`} disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp className="h-4 w-4" /></Button>
+            <Button size="sm" variant="ghost" aria-label={`Descer ${DASHBOARD_SECTION_LABELS[k]}`} disabled={i === dash.order.length - 1} onClick={() => move(i, 1)}><ArrowDown className="h-4 w-4" /></Button>
+          </li>
+        ))}</ol>
+        <label className="mt-3 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={dash.compactValues} onChange={(e) => setDash({ compactValues: e.target.checked })} /><span><b className="text-ink">Valores resumidos nos cartões</b><span className="block text-muted">A partir de R$ 10 mil, o valor aparece em mil, mi ou bi (R$ 151,1 mil · R$ 1,77 mi). O valor completo aparece ao passar o mouse.</span></span></label>
+        <div className="mt-4 flex justify-end gap-2">
+          {changed && <Button onClick={() => setV(q.data!)}>Desfazer</Button>}
+          <Button variant="primary" disabled={!changed} loading={save.isPending} onClick={() => save.mutate()}>Salvar abas e painel</Button>
+        </div>
+      </section>
+    </>
   );
 }

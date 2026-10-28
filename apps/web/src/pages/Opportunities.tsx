@@ -91,9 +91,9 @@ function Card({ opp, onMove, canMove, stages }: { opp: Opportunity; onMove: (o: 
           {opp.accountContracts.length > 4 && <p className="mt-1 text-2xs text-muted">+{opp.accountContracts.length - 4} contrato(s)</p>}
         </div>
       )}
-      <div className="mt-3 flex items-center justify-between gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
-        <span className={clsx('text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
+        <span className={clsx('ml-auto shrink-0 whitespace-nowrap text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
       </div>
     </li>
   );

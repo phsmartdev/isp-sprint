@@ -2,20 +2,18 @@
 import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { audit } from '../services/audit';
-import { contractScope, hasSector } from '../services/contracts';
+import { contractScope, requireContractTab } from '../services/contracts';
 import { attentionItems, attentionSummary, sendContractDigests } from '../services/contractAttention';
-
-const COMPANY_SECTORS = ['administracao', 'inteligencia_comercial', 'diretoria', 'juridico', 'financeiro'] as const;
 
 export const contractAttentionRoutes = [
   defineRoute({
-    method: 'GET', url: '/contracts/attention', summary: 'Central de atenção: notificações, processos atrasados, validações e habilitação numa fila por gravidade, prazo e valor', tag: 'Contratos', module: 'contratos',
+    method: 'GET', url: '/contracts/attention', summary: 'Central de atenção: notificações, processos atrasados, validações e execução numa fila por gravidade, prazo e valor', tag: 'Contratos', module: 'contratos',
     query: z.object({ mine: z.enum(['0', '1']).default('0') }),
     handler: async ({ app, auth, query }) => {
       const today = new Date().toISOString().slice(0, 10);
-      const company = hasSector(auth, COMPANY_SECTORS);
-      let items = await attentionItems(app.db, auth.tenantId, contractScope(auth), today, { company });
-      if (query.mine === '1') items = items.filter((x) => x.ownerId === auth.userId || (x.source !== 'habilitacao' && x.commercialOwnerId === auth.userId) || (x.source === 'habilitacao' && company));
+      await requireContractTab(app.db, auth, 'atencao');
+      let items = await attentionItems(app.db, auth.tenantId, contractScope(auth), today);
+      if (query.mine === '1') items = items.filter((x) => x.ownerId === auth.userId || x.commercialOwnerId === auth.userId);
       return { items: items.slice(0, 500), summary: attentionSummary(items), today };
     },
   }),
