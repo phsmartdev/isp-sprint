@@ -144,13 +144,11 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               if (!kids.length) return null;
               const active = kids.some(leafActive);
               const open = openGroups[n.key] ?? active;
-              const total = kids.reduce((a, c) => a + (c.badge === true ? badge : c.badge === 'approvals' ? approvals : 0), 0);
               return (
                 <li key={n.key}>
                   <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx('relative flex h-12 w-full items-center gap-3.5 rounded-md px-4 text-left text-md transition-colors', active && !open ? 'bg-navy-active font-semibold text-lime' : 'text-white/95 hover:bg-white/5')}>
                     {n.icon}
                     <span className="min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                    {!open && total > 0 && <span className="num rounded-full bg-lime px-2 py-0.5 text-xs font-bold text-navy">{total}</span>}
                     <ChevronDown className={clsx('h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} aria-hidden />
                   </button>
                   {open && (
