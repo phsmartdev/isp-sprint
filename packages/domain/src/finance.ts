@@ -247,3 +247,30 @@ export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) 
   const sobra = rs.mode === 'recorrente' ? `sobram ${fmt(k.contributionCents)} por mês (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e custos` : `o resultado é ${fmt(k.contributionCents - rs.initialCents)} (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e investimento`;
   return `Com ${fmt(rs.priceCents)}${per}, ${sobra}; ${pb}.`;
 }
+
+/** Soma `n` meses a 'AAAA-MM'. */
+export function shiftMonth(month: string, n: number) {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Fluxo de caixa consolidado: cada oportunidade começa no seu mês (mês 0 = investimento) e os fluxos
+ * caem no calendário. Devolve entradas, saídas, saldo do mês e acumulado, até `maxMonths` meses.
+ */
+export function consolidateCashflow(entries: { startMonth: string; flows: number[] }[], maxMonths = 60) {
+  if (!entries.length) return { months: [] as string[], inflow: [] as number[], outflow: [] as number[], net: [] as number[], cumulative: [] as number[] };
+  const first = entries.map((e) => e.startMonth).sort()[0]!;
+  const offset = (m: string) => { const [a, b] = first.split('-').map(Number) as [number, number]; const [c, d] = m.split('-').map(Number) as [number, number]; return (c * 12 + d) - (a * 12 + b); };
+  const len = Math.min(maxMonths, Math.max(...entries.map((e) => offset(e.startMonth) + e.flows.length)));
+  const inflow = Array.from({ length: len }, () => 0), outflow = Array.from({ length: len }, () => 0);
+  for (const e of entries) {
+    const o = offset(e.startMonth);
+    e.flows.forEach((f, t) => { const k = o + t; if (k >= len) return; if (f >= 0) inflow[k]! += f; else outflow[k]! += f; });
+  }
+  const net = inflow.map((v, i) => v + outflow[i]!);
+  let acc = 0;
+  const cumulative = net.map((v) => (acc += v));
+  return { months: Array.from({ length: len }, (_, i) => shiftMonth(first, i)), inflow, outflow, net, cumulative };
+}

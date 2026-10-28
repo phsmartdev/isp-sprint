@@ -45,6 +45,8 @@
   --radius-lg: 0;
   --shadow-card: 0 1px 2px rgb(45 51 57 / 0.05), 0 2px 8px rgb(45 51 57 / 0.05);
   --shadow-overlay: 0 16px 40px rgb(45 51 57 / 0.22);
+  --chart-in: 56 133 211;      /* #3885D3 entradas de caixa */
+  --chart-out: 212 117 44;     /* #D4752C saídas de caixa (azul × laranja: seguro para daltonismo) */
 }
 
 /*
@@ -87,4 +89,6 @@
 
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.25);
   --shadow-overlay: 0 16px 40px rgb(0 0 0 / 0.55);
+  --chart-in: 77 141 205;      /* #4D8DCD entradas de caixa */
+  --chart-out: 212 117 44;     /* #D4752C saídas de caixa (validado CVD contra a superfície escura) */
 }

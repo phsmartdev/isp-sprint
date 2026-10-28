@@ -15,6 +15,7 @@ import { api } from '../../lib/api';
 import { fmtBRL, fmtDateTime } from '../../lib/format';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
+import { CashflowChart, flowSeries } from '../../components/charts/Cashflow';
 import { errMsg } from '../contracts/shared';
 
 type Data = {
@@ -69,6 +70,48 @@ function PriceRuler({ r }: { r: EconResult }) {
   );
 }
 
+type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; total: number; strong?: boolean; tone?: boolean; note?: string };
+
+/** DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro. */
+function Dre({ r }: { r: EconResult }) {
+  const k = r.kpi!, P = r.priceCents!;
+  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
+  const liquid = P - k.taxCents;
+  const result = k.contributionCents * N - r.initialCents;
+  const rows: DreRow[] = [
+    { sign: '+', label: 'Receita bruta', month: P, total: P * N },
+    { sign: '−', label: `Tributos (${pct(r.rates.a * 100, 2)}${r.fixedTaxCents ? ` + ${fmtBRL(r.fixedTaxCents)}` : ''})`, month: -k.taxCents, total: -k.taxCents * N },
+    { sign: '=', label: 'Receita líquida', month: liquid, total: liquid * N, strong: true },
+    { sign: '−', label: `Comissão (${pct(r.rates.c * 100, 2)})`, month: -k.commissionCents, total: -k.commissionCents * N },
+    ...(k.lossCents > 0 ? [{ sign: '−' as const, label: `Perda / glosa (${pct(r.rates.g * 100, 2)})`, month: -k.lossCents, total: -k.lossCents * N }] : []),
+    ...(r.monthlyCostCents > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -r.monthlyCostCents, total: -r.monthlyCostCents * N }] : []),
+    { sign: '=', label: 'Margem de contribuição', month: k.contributionCents, total: k.contributionCents * N, strong: true, note: `${pct(k.marginPct)} da receita` },
+    { sign: '−', label: 'Investimento inicial', month: null, total: -r.initialCents },
+    { sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: result, strong: true, tone: true, note: result >= 0 ? 'lucro' : 'prejuízo' },
+  ];
+  const money = (v: number) => (v < 0 ? `− ${fmtBRL(-v)}` : fmtBRL(Math.abs(v)));
+  const signCls = { '+': 'text-[rgb(var(--chart-in))]', '−': 'text-[rgb(var(--chart-out))]', '=': 'text-muted' };
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[420px] text-sm">
+        <caption className="mb-1 text-left text-xs font-semibold text-muted">DRE da oportunidade</caption>
+        <thead className="text-2xs text-muted"><tr><th className="w-6" /><th className="py-1 text-left font-medium" />{rec && <th className="py-1 text-right font-medium">Por mês</th>}<th className="py-1 text-right font-medium">{rec ? `No contrato (${N} meses)` : 'Na venda'}</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label} className={clsx(row.sign === '=' && 'border-t border-line', row.strong && 'font-semibold text-ink', row.tone && 'bg-surface-2')}>
+              <td className={clsx('py-1 pl-1 text-center font-bold', signCls[row.sign])} aria-label={row.sign === '+' ? 'soma' : row.sign === '−' ? 'dedução' : 'resultado'}>{row.sign}</td>
+              <td className="py-1">{row.label}{row.note && <span className="ml-1.5 text-2xs font-normal text-muted">{row.note}</span>}</td>
+              {rec && <td className="num py-1 text-right">{row.month == null ? <span className="text-muted">—</span> : money(row.month)}</td>}
+              <td className={clsx('num py-1 pr-1 text-right', row.tone && (row.total < 0 ? 'text-danger' : 'text-success'))}>{money(row.total)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {k.npvCents != null && <p className="mt-1 text-xs text-muted">Em valor de hoje, descontando a TMA de {pct(r.rates.r * 100, 2)} ao mês, o resultado é <b className="num text-ink">{money(k.npvCents)}</b> (VPL).</p>}
+    </div>
+  );
+}
+
 /** Leitura rápida do resultado: veredito, uma frase e quatro números. Detalhes só para quem abrir. */
 export function EconomicsResult({ r, compact = false }: { r: EconResult; compact?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -87,28 +130,15 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : r.priceSource === 'itens' ? 'dos produtos' : 'recomendado'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">alvo {pct(r.rates.m * 100, 0)}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback</dt><dd className={clsx('num font-bold', r.withinPolicy === false ? 'text-danger' : 'text-ink')}>{months(k?.paybackMonths)}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}</dd></div>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : pct(k.irrAnnual * 100)} ao ano</dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
       <PriceRuler r={r} />
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
-        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />Como chegamos nesses números
+        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />DRE e memória de cálculo
       </button>
       {open && (
         <div className="mt-2 space-y-3 text-sm">
-          {k && r.priceCents != null && (
-            <table className="w-full max-w-md">
-              <caption className="mb-1 text-left text-xs font-semibold text-muted">{r.mode === 'recorrente' ? 'Cada mês' : 'Na venda'}</caption>
-              <tbody className="[&_td]:py-0.5">
-                <tr><td>Receita</td><td className="num text-right">{fmtBRL(r.priceCents)}</td></tr>
-                <tr><td>Tributos ({pct(r.rates.a * 100, 2)}{r.fixedTaxCents ? ` + ${fmtBRL(r.fixedTaxCents)}` : ''})</td><td className="num text-right">−{fmtBRL(k.taxCents)}</td></tr>
-                <tr><td>Comissão ({pct(r.rates.c * 100, 2)})</td><td className="num text-right">−{fmtBRL(k.commissionCents)}</td></tr>
-                {k.lossCents > 0 && <tr><td>Perda/glosa ({pct(r.rates.g * 100, 2)})</td><td className="num text-right">−{fmtBRL(k.lossCents)}</td></tr>}
-                {r.monthlyCostCents > 0 && <tr><td>Custos operacionais</td><td className="num text-right">−{fmtBRL(r.monthlyCostCents)}</td></tr>}
-                <tr className="border-t border-line font-semibold"><td>{r.mode === 'recorrente' ? 'Sobra por mês' : 'Sobra antes do investimento'}</td><td className="num text-right">{fmtBRL(k.contributionCents)}</td></tr>
-                {r.initialCents > 0 && <tr><td>Investimento inicial</td><td className="num text-right">{fmtBRL(r.initialCents)}</td></tr>}
-              </tbody>
-            </table>
-          )}
+          {k && r.priceCents != null && <Dre r={r} />}
           <p className="text-xs text-muted">Preço mínimo = cobre custos, tributos e o investimento em {r.mode === 'recorrente' ? `${r.term.D} meses` : 'uma venda'}, com a TMA de {pct(r.rates.r * 100, 2)} ao mês (caixa {fmtBRL(r.floor.cashCents)}, econômico {fmtBRL(r.floor.economicCents)}). Recomendado = entrega a margem alvo de {pct(r.rates.m * 100, 0)} sobre a receita.</p>
           {!!r.items.length && (
             <table className="w-full text-xs">
@@ -217,6 +247,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>
 
       {live ? <EconomicsResult r={live} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
+      {live && live.cashflow.length > 1 && live.cashflow.some((v) => v !== 0) && (
+        <section className="border border-line p-4" aria-labelledby="ec-flow">
+          <h3 id="ec-flow" className="text-sm font-semibold text-ink">Fluxo de caixa</h3>
+          <p className="mb-3 text-xs text-muted">Início = investimento; depois, o que sobra a cada mês. A linha mostra quanto já voltou para o caixa.</p>
+          <CashflowChart labels={live.cashflow.map((_, i) => (i === 0 ? 'Início' : `M${i}`))} {...flowSeries(live.cashflow)} ariaLabel="Fluxo de caixa mensal da oportunidade" height={220} />
+        </section>
+      )}
 
       <div className="space-y-3">
         <Step n={1} title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">

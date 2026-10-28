@@ -1,5 +1,7 @@
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { PeriodQuery } from '@isp/shared';
+import { consolidateCashflow, type EconResult } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ownerScope, visibleUserIds } from '../services/scope';
@@ -16,6 +18,47 @@ const pct = (x: number | null) => (x === null ? 'N/D' : `${Math.round(x * 100)}%
  * Correlação não é apresentada como causa.
  */
 export const intelligenceRoutes = [
+  defineRoute({
+    method: 'GET',
+    url: '/intelligence/economics',
+    summary: 'Fluxo de caixa consolidado das oportunidades com viabilidade econômica salva (ganhas no mês do fechamento, em andamento a partir deste mês)',
+    tag: 'Inteligência',
+    module: 'inteligencia',
+    query: z.object({ status: z.enum(['todas', 'ganhas', 'andamento']).default('todas') }),
+    handler: async ({ app, auth, query }) => {
+      const month = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).format(d);
+      const rows = await app.db
+        .select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage, wonAt: s.opportunities.wonAt, account: s.contacts.name, result: s.opportunityEconomics.result })
+        .from(s.opportunityEconomics)
+        .innerJoin(s.opportunities, eq(s.opportunities.id, s.opportunityEconomics.opportunityId))
+        .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
+        .where(and(oppScopeFor(auth, 'inteligencia'), eq(s.opportunityEconomics.tenantId, auth.tenantId), ne(s.opportunities.stage, 'perdida'),
+          ...(query.status === 'ganhas' ? [eq(s.opportunities.stage, 'ganha')] : query.status === 'andamento' ? [ne(s.opportunities.stage, 'ganha')] : [])));
+      const now = month(new Date());
+      const items = rows.map((r) => {
+        const e = r.result as unknown as EconResult;
+        return {
+          id: r.id, code: r.code, title: r.title, account: r.account, won: r.stage === 'ganha', startMonth: r.wonAt ? month(r.wonAt) : now,
+          verdict: e.verdict, mode: e.mode, investmentCents: Math.max(0, -(e.cashflow?.[0] ?? 0)), contributionCents: e.kpi?.contributionCents ?? null,
+          npvCents: e.kpi?.npvCents ?? null, paybackMonths: e.kpi?.paybackMonths ?? null, months: Math.max(0, (e.cashflow?.length ?? 1) - 1), cashflow: e.cashflow ?? [],
+        };
+      });
+      const flow = consolidateCashflow(items.map((i) => ({ startMonth: i.startMonth, flows: i.cashflow })));
+      const firstPositive = flow.cumulative.findIndex((v, k) => v >= 0 && flow.cumulative.slice(0, k).some((x) => x < 0));
+      return {
+        flow,
+        totals: {
+          n: items.length,
+          investmentCents: items.reduce((t, i) => t + i.investmentCents, 0),
+          npvCents: items.reduce((t, i) => t + (i.npvCents ?? 0), 0),
+          resultCents: flow.cumulative.at(-1) ?? 0,
+          lowestCents: Math.min(0, ...flow.cumulative),
+          breakEvenMonth: firstPositive >= 0 ? flow.months[firstPositive] : null,
+        },
+        items: items.map(({ cashflow: _c, ...i }) => i).sort((a, b) => (b.npvCents ?? 0) - (a.npvCents ?? 0)),
+      };
+    },
+  }),
   defineRoute({
     method: 'GET',
     url: '/intelligence/overview',
