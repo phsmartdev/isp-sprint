@@ -2,7 +2,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  CS_ACTIVITY_KINDS, CS_LEVELS, IPC_CRITERIA, coverage, levelRank, validateCsConfig, type CsConfig, type CsLevel,
+  CS_ACTIVITY_KINDS, CS_LEVELS, IPC_CRITERIA, coverage, distributeAccounts, levelRank, validateCsConfig, type CsConfig, type CsLevel,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { AppError, forbidden, notFound, unprocessable } from '../http/errors';
@@ -14,7 +14,7 @@ import { level, ownerScope } from '../services/scope';
 import { atLeast, milestoneChanges } from '@isp/domain';
 import { logMilestone } from '../services/journeyTrail';
 import {
-  addDays, alertsFor, csConfigOf, explain, generateCadence, hashToken, newShareToken, openMilestoneTasks, recomputeAccounts, regenerateKickoff, runCsDaily, snapshotOf, startJourney, syncAlerts, todayIso, type Snapshot,
+  accountIds, addDays, alertsFor, csConfigOf, explain, generateCadence, hashToken, newShareToken, openMilestoneTasks, recomputeAccounts, regenerateKickoff, runCsDaily, snapshotOf, startJourney, syncAlerts, todayIso, type Snapshot,
 } from '../services/cs';
 
 export const manager = (a: AuthContext) => atLeast(level(a, 'clientes'), 'equipe') || a.sectors.includes('diretoria');
@@ -230,6 +230,54 @@ export const csRoutes = [
       }
       if (!manager(auth)) throw forbidden('Recalcular a carteira inteira é com a gestão.');
       return runCsDaily(app.db, app.config, auth.tenantId);
+    },
+  }),
+
+  defineRoute({
+    method: 'POST', url: '/cs/distribute', summary: 'Distribui a carteira entre CSMs equilibrando valor anual e quantidade (prévia com dryRun; auditado)', tag: 'Sucesso do Cliente', module: 'clientes',
+    body: z.object({
+      csmIds: z.array(z.string().uuid()).min(1).max(20),
+      scope: z.enum(['sem_csm', 'todas']).default('todas'),
+      keep: z.boolean().default(true),
+      dryRun: z.boolean().default(true),
+      justification: z.string().trim().max(500).default(''),
+    }),
+    handler: async ({ app, auth, body, req }) => {
+      if (!manager(auth)) throw forbidden('Distribuir a carteira é com a gestão.');
+      const csmIds = [...new Set(body.csmIds)];
+      const users = await app.db.select({ id: s.users.id, name: s.users.name, sectors: s.users.sectors }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), inArray(s.users.id, csmIds)));
+      if (users.length !== csmIds.length) throw unprocessable('Escolha só usuários ativos da empresa.');
+      const notCsm = users.filter((u) => !u.sectors.includes('sucesso_cliente'));
+      if (notCsm.length) throw unprocessable(`${notCsm.map((u) => u.name).join(', ')} não tem o setor Sucesso do Cliente no cadastro: só CSMs recebem carteira.`);
+      // contas do Sucesso do Cliente (com contrato, jornada ou acompanhamento); quem ainda não tem fotografia é calculado antes
+      const ids = await accountIds(app.db, auth.tenantId);
+      const load0 = () => (ids.length ? app.db.select({ contactId: s.csAccounts.contactId, csmId: s.csAccounts.csmId, snapshot: s.csAccounts.snapshot }).from(s.csAccounts).where(and(eq(s.csAccounts.tenantId, auth.tenantId), inArray(s.csAccounts.contactId, ids))) : Promise.resolve([]));
+      let rows = await load0();
+      const missing = ids.filter((id) => !rows.some((r) => r.contactId === id && r.snapshot));
+      if (missing.length) { await recomputeAccounts(app.db, auth.tenantId, missing); rows = await load0(); }
+      const acc = ids.map((id) => { const r = rows.find((x) => x.contactId === id); return { id, csmId: r?.csmId ?? null, acvCents: (r?.snapshot as Snapshot | null)?.groupAcvCents ?? 0 }; });
+      const pool = body.scope === 'sem_csm' ? acc.filter((a) => !a.csmId) : acc;
+      const { assign, load } = distributeAccounts(pool, csmIds, body.keep);
+      const moves = [...assign.entries()].filter(([id, to]) => acc.find((a) => a.id === id)?.csmId !== to);
+      const preview = {
+        accounts: pool.length, changes: moves.length,
+        csms: users.map((u) => ({ id: u.id, name: u.name, accounts: load.get(u.id)!.count, acvCents: load.get(u.id)!.acvCents })),
+        outside: acc.length - pool.length,
+      };
+      if (body.dryRun) return { ...preview, applied: false };
+      if (body.justification.length < 10) throw unprocessable('Explique o motivo da distribuição (pelo menos 10 caracteres).');
+      for (const [contactId, to] of moves) {
+        const from = acc.find((a) => a.id === contactId)?.csmId ?? null;
+        await app.db.insert(s.csAccounts).values({ tenantId: auth.tenantId, contactId, csmId: to })
+          .onConflictDoUpdate({ target: [s.csAccounts.tenantId, s.csAccounts.contactId], set: { csmId: to, updatedAt: new Date() } });
+        await app.db.insert(s.csAssessments).values({ tenantId: auth.tenantId, contactId, kind: 'csm', data: { from, to, via: 'distribuicao' }, justification: body.justification, actorId: auth.userId });
+        // acompanhamentos em aberto passam para o novo CSM (como na troca individual)
+        await app.db.update(s.activities).set({ ownerId: to, updatedAt: new Date() }).where(and(eq(s.activities.tenantId, auth.tenantId), eq(s.activities.contactId, contactId), isNotNull(s.activities.csKind), isNull(s.activities.completedAt), isNull(s.activities.deletedAt)));
+      }
+      const changed = moves.map(([id]) => id);
+      if (changed.length) { await recomputeAccounts(app.db, auth.tenantId, changed); await generateCadence(app.db, auth.tenantId, changed); }
+      await audit(app.db, req, { action: 'cs.distribute', entityType: 'tenant', entityId: auth.tenantId, metadata: { csmIds, scope: body.scope, keep: body.keep, changes: changed.length, justification: body.justification } });
+      return { ...preview, applied: true };
     },
   }),
 

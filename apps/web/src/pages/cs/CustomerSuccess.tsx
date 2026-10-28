@@ -1,7 +1,7 @@
 /** Sucesso do Cliente: Minha Carteira, Contas que precisam de atenção, Cobertura, Gestão (capacidade e scorecards) e Jornadas. */
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AlertTriangle, HeartHandshake } from 'lucide-react';
 import { CS_LEVELS, CS_LEVEL_LABELS, TIER_LABELS, type CsLevel, type Tier } from '@isp/domain';
@@ -9,12 +9,14 @@ import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtPct } from '../../lib/format';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { useAuth } from '../../auth/AuthProvider';
-import { EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs } from '../../components/ui/primitives';
+import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs } from '../../components/ui/primitives';
+import { Modal, useToast } from '../../components/ui/overlay';
+import { errMsg } from '../../features/contracts/shared';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { SurveysTab } from './Surveys';
 import { MoneyToggle } from '../../lib/privacy';
 import { FollowUpDialog, PlanDialog, VisitDialog } from '../../features/cs/Account360';
-import { HealthBadge, LevelChip, TierChip, covText, type Coverage } from '../../features/cs/shared';
+import { HealthBadge, LevelChip, TierChip, covText, csmsOf, type Coverage } from '../../features/cs/shared';
 import { FitText } from '../../components/ui/FitText';
 
 type Acc = {
@@ -149,7 +151,57 @@ type TeamRow = {
   satisfaction: number | null; renewals: number; newBusiness: number; additionalCents: number; openExpansionCents: number; capacity: { demandHours: number; capacityHours: number; load: number | null };
   scorecard: { operacional: number | null; comercial: number | null; qualidade: number | null; risco: number | null; total: number | null; weights: Record<string, number> }; gamification: { points: number; rule: string };
 };
+type DistPreview = { accounts: number; changes: number; outside: number; applied: boolean; csms: { id: string; name: string; accounts: number; acvCents: number }[] };
+
+/** Divide a carteira entre os CSMs escolhidos, equilibrando o valor anual e a quantidade. Sempre mostra a prévia antes. */
+function DistributeDialog({ onClose }: { onClose: () => void }) {
+  const users = csmsOf(useLookups().data?.users);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [v, setV] = useState({ csmIds: [] as string[], scope: 'todas' as 'todas' | 'sem_csm', keep: true, justification: '' });
+  const [preview, setPreview] = useState<DistPreview | null>(null);
+  const body = (dryRun: boolean) => ({ ...v, dryRun });
+  const prev = useMutation({ mutationFn: () => api<DistPreview>('/cs/distribute', { method: 'POST', body: body(true) }), onSuccess: setPreview, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const apply = useMutation({
+    mutationFn: () => api<DistPreview>('/cs/distribute', { method: 'POST', body: body(false) }),
+    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['cs-team'] }); void qc.invalidateQueries({ queryKey: ['cs-portfolio'] }); toast({ tone: 'success', message: `Carteira distribuída: ${r.changes} conta(s) mudaram de CSM` }); onClose(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const set = (p: Partial<typeof v>) => { setV({ ...v, ...p }); setPreview(null); };
+  return (
+    <Modal open onClose={onClose} title="Distribuir carteira" size="md" footer={<>
+      <Button onClick={onClose}>Cancelar</Button>
+      <Button disabled={!v.csmIds.length} loading={prev.isPending} onClick={() => prev.mutate()}>Ver prévia</Button>
+      <Button variant="primary" disabled={!preview || v.justification.trim().length < 10} loading={apply.isPending} onClick={() => apply.mutate()}>Distribuir</Button>
+    </>}>
+      <div className="space-y-4">
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold text-ink">CSMs que recebem as contas</legend>
+          {!users.length && <p className="text-sm text-muted">Nenhum usuário com o setor Sucesso do Cliente. Marque o setor no cadastro em Configurações → Usuários.</p>}
+          <div className="scroll-thin grid max-h-48 grid-cols-1 gap-1 overflow-y-auto rounded-md border border-line p-2 sm:grid-cols-2">{users.map((u) => (
+            <label key={u.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={v.csmIds.includes(u.id)} onChange={(e) => set({ csmIds: e.target.checked ? [...v.csmIds, u.id] : v.csmIds.filter((x) => x !== u.id) })} />{u.name}</label>
+          ))}</div>
+        </fieldset>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FormField label="Quais contas" htmlFor="ds-scope"><Select id="ds-scope" value={v.scope} onChange={(e) => set({ scope: e.target.value as typeof v.scope })}><option value="todas">Toda a carteira</option><option value="sem_csm">Só as contas sem CSM</option></Select></FormField>
+          <label className="flex items-start gap-2 pt-6 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={v.keep} onChange={(e) => set({ keep: e.target.checked })} /><span>Manter as contas que já estão com um dos CSMs escolhidos</span></label>
+        </div>
+        {preview && (
+          <div className="rounded-md border border-line p-3">
+            <p className="mb-2 text-sm text-ink"><b>{preview.changes}</b> de {preview.accounts} conta(s) mudam de CSM{preview.outside ? ` · ${preview.outside} já com CSM ficam como estão` : ''}.</p>
+            <table className="w-full text-sm"><thead className="text-xs text-muted"><tr><th className="py-1 text-left font-medium">CSM</th><th className="py-1 text-right font-medium">Contas</th><th className="py-1 text-right font-medium">Valor anual</th></tr></thead>
+              <tbody>{preview.csms.map((c) => <tr key={c.id} className="border-t border-line"><td className="py-1.5">{c.name}</td><td className="num py-1.5 text-right">{c.accounts}</td><td className="num py-1.5 text-right">{fmtBRL(c.acvCents)}</td></tr>)}</tbody></table>
+          </div>
+        )}
+        <FormField label="Motivo" htmlFor="ds-why" required><Input id="ds-why" value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} placeholder="Ex.: carteira dividida entre os dois executivos de Sucesso do Cliente" /></FormField>
+        <Notice>As maiores contas são distribuídas primeiro, sempre para quem está com menos valor anual somado. Os acompanhamentos em aberto passam para o novo CSM e tudo fica no histórico da conta.</Notice>
+      </div>
+    </Modal>
+  );
+}
+
 function Gestao() {
+  const [distributing, setDistributing] = useState(false);
   const [f, setF] = useState({ from: monthStart(), to: new Date().toISOString().slice(0, 10) });
   const q = useQuery({ queryKey: ['cs-team', f], placeholderData: keepPreviousData, queryFn: () => api<{ csms: TeamRow[]; note: string }>(`/cs/team${qs(f)}`) });
   const pct = (v: number | null) => (v === null ? '—' : fmtPct(v));
@@ -158,7 +210,9 @@ function Gestao() {
       <div className="flex flex-wrap items-end gap-3">
         <FormField label="De" htmlFor="tm-from"><Input id="tm-from" type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} /></FormField>
         <FormField label="Até" htmlFor="tm-to"><Input id="tm-to" type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} /></FormField>
+        <Button variant="primary" className="ml-auto" onClick={() => setDistributing(true)}>Distribuir carteira</Button>
       </div>
+      {distributing && <DistributeDialog onClose={() => setDistributing(false)} />}
       {q.isLoading ? <div className="card"><LoadingRows /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (<>
         <section className="card overflow-hidden" aria-labelledby="cap-title">
           <h2 id="cap-title" className="px-5 pt-4 text-lg font-bold text-ink">Carteiras e capacidade</h2>
@@ -219,7 +273,7 @@ export function CustomerSuccessPage() {
     <div className="w-full">
       <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} actions={<MoneyToggle />} />
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
+        {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{csmsOf(lookups.data?.users).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
         <FormField label="Tier" htmlFor="cs-f-tier"><Select id="cs-f-tier" value={f.tier} onChange={(e) => setF({ tier: e.target.value })}><option value="">Todos</option>{(['small', 'middle', 'large'] as Tier[]).map((t) => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}</Select></FormField>
         <FormField label="Criticidade" htmlFor="cs-f-level"><Select id="cs-f-level" value={f.level} onChange={(e) => setF({ level: e.target.value })}><option value="">Todas</option>{CS_LEVELS.map((l) => <option key={l} value={l}>{CS_LEVEL_LABELS[l]}</option>)}</Select></FormField>
         {tab === 'carteira' && <><FormField label="Cobertura de" htmlFor="cs-f-from"><Input id="cs-f-from" type="date" value={f.from || monthStart()} onChange={(e) => setF({ from: e.target.value })} /></FormField><FormField label="até" htmlFor="cs-f-to"><Input id="cs-f-to" type="date" value={f.to || new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ to: e.target.value })} /></FormField></>}

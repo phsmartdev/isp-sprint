@@ -10,6 +10,7 @@ import { audit } from '../services/audit';
 import { assertAssignableUser, ownerScope } from '../services/scope';
 import { opportunityDto, opportunityQuery, oppVisibility } from '../services/opportunities';
 import { ratio } from '../services/metrics';
+import { freshSnapshot } from '../services/cs';
 
 const like = (q: string) => `%${q.replace(/[%_\\]/g, '\\$&')}%`;
 const owner = alias(s.users, 'cust_owner');
@@ -187,6 +188,13 @@ export const contactRoutes = [
         .where(and(eq(s.addresses.tenantId, auth.tenantId), or(eq(s.addresses.contactId, params.id), c.customerId ? eq(s.addresses.customerId, c.customerId) : undefined)))
         .orderBy(desc(s.addresses.validFrom));
       const staleHours = c.ingestedAt ? (Date.now() - c.ingestedAt.getTime()) / 3_600_000 : null;
+      // Tier e IPC do Sucesso do Cliente, recalculados se algo mudou depois do último cálculo
+      const sn = await freshSnapshot(app.db, auth.tenantId, params.id).catch((e) => { req.log.error(e, 'tier da conta'); return null; });
+      const strategic = sn ? {
+        tier: sn.tier, acvCents: sn.groupAcvCents, ownAcvCents: sn.acvCents, groupContacts: sn.groupContacts,
+        acvParts: sn.acvParts ?? null, acvExcluded: sn.acvExcluded ?? null, classKey: sn.classKey,
+        ipc: { total: sn.ipc.total, partial: sn.ipc.partial, pending: sn.ipc.pending.length }, computedAt: sn.computedAt,
+      } : null;
       await audit(app.db, req, { action: 'customer.view', entityType: 'contact', entityId: params.id });
       return {
         ...c,
@@ -195,6 +203,7 @@ export const contactRoutes = [
         addresses,
         freshness: c.ingestedAt ? { ingestedAt: c.ingestedAt, stale: (staleHours ?? 0) > 24, staleHours } : null,
         opportunities: opps.map((o) => opportunityDto(o)),
+        strategic,
       };
     },
   }),

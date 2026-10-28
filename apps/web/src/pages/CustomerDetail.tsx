@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Mail, MapPin, Phone, RefreshCw, UserRound } from 'lucide-react';
-import type { CustomerLifecycle, Segment } from '@isp/domain';
+import { TIER_LABELS, type CustomerLifecycle, type Segment, type Tier } from '@isp/domain';
 import { api, ApiError, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime, fmtRelative } from '../lib/format';
 import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
@@ -12,7 +12,7 @@ import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
 import { Account360 } from '../features/cs/Account360';
 import { AddToAbmButton } from '../features/abm/shared';
-import { Avatar, Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
+import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
@@ -42,7 +42,46 @@ type Detail = {
   addresses: { id: string; street: string | null; number: string | null; district: string | null; city: string | null; state: string | null; validFrom: string; validTo: string | null }[];
   freshness: { ingestedAt: string; stale: boolean } | null;
   opportunities: Opportunity[];
+  /** Tier pelo valor anual consolidado (ACV) e Score IPC, calculados pelo Sucesso do Cliente. null = ainda não é conta (sem venda ganha nem contrato). */
+  strategic: null | {
+    tier: Tier | null; acvCents: number | null; ownAcvCents: number | null; groupContacts: number;
+    acvParts: { recorrente: number; medicao: number; frequente: number; semContrato: number } | null;
+    acvExcluded: { count: number; cents: number } | null; classKey: string | null;
+    ipc: { total: number | null; partial: number; pending: number }; computedAt: string;
+  };
 };
+
+const TIER_TONE: Record<Tier, 'neutral' | 'blue' | 'green'> = { small: 'neutral', middle: 'blue', large: 'green' };
+
+/** Tier, valor anual consolidado e IPC no resumo da conta, ao lado da classe estratégica. */
+function StrategicSummary({ st }: { st: NonNullable<Detail['strategic']> }) {
+  const p = st.acvParts;
+  const parts = p ? [['Recorrente', p.recorrente], ['Medição', p.medicao], ['Frequente', p.frequente], ['Ganha sem contrato', p.semContrato]].filter(([, v]) => (v as number) > 0) as [string, number][] : [];
+  return (
+    <section aria-labelledby="tier-h" className="mb-5 border-b border-line pb-5">
+      <h2 id="tier-h" className="mb-3 font-bold text-ink">Tier e potencial da conta</h2>
+      <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div><dt className="text-sm text-muted">Tier</dt><dd className="mt-0.5">{st.tier ? <Chip tone={TIER_TONE[st.tier]}>{TIER_LABELS[st.tier]}</Chip> : '—'}</dd></div>
+        <div>
+          <dt className="text-sm text-muted">Valor anual consolidado (ACV)</dt>
+          <dd className="num font-semibold text-ink">{fmtBRL(st.acvCents)}<span className="font-normal text-muted">/ano</span></dd>
+          {st.groupContacts > 1 && <dd className="text-xs text-muted">Grupo econômico: {st.groupContacts} contas somadas</dd>}
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Composição</dt>
+          <dd className="text-sm text-ink">{parts.length ? parts.map(([l, v]) => <span key={l} className="mr-3 inline-block">{l} <span className="num font-semibold">{fmtBRL(v)}</span></span>) : '—'}</dd>
+          {!!st.acvExcluded?.count && <dd className="text-xs text-muted">Fora da soma: {st.acvExcluded.count} oportunidade(s) de consumo de medição (<span className="num">{fmtBRL(st.acvExcluded.cents)}</span>), já previstas no contrato.</dd>}
+        </div>
+        <div>
+          <dt className="text-sm text-muted">Score IPC</dt>
+          <dd className="num font-semibold text-ink">{st.ipc.total !== null ? `${st.ipc.total} de 100` : `${st.ipc.partial} parcial`}</dd>
+          {st.ipc.total === null && st.ipc.pending > 0 && <dd className="text-xs text-muted">{st.ipc.pending} critério(s) a avaliar no Sucesso do Cliente</dd>}
+        </div>
+      </dl>
+      <p className="mt-3 text-xs text-muted">Small até R$ 120 mil/ano · Middle de R$ 120 mil a R$ 500 mil · Large acima de R$ 500 mil. Calculado em {fmtDateTime(st.computedAt)}.</p>
+    </section>
+  );
+}
 
 function CustomerCustomFields({ contactId, initial }: { contactId: string; initial: CustomValues }) {
   const qc = useQueryClient();
@@ -136,6 +175,7 @@ export function CustomerDetailPage() {
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
+          {tab === 'resumo' && c.strategic && <StrategicSummary st={c.strategic} />}
           {tab === 'resumo' && (
             <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
               <div><dt className="text-sm text-muted">Telefone</dt><dd className="num flex items-center gap-2 text-ink"><Phone className="h-4 w-4 text-success" aria-hidden />{c.phone ?? '—'}</dd></div>
