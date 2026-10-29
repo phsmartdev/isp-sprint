@@ -37,6 +37,7 @@ import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from 
 import { useTransitionMutation } from '../features/useTransition';
 import { AddressFields, CustomFieldsEditor, emptyAddress, type AddressValue, type CustomValues, type KitValue } from '../features/DealFields';
 import { MeasurementBox } from '../features/MeasurementBox';
+import { ContractItemsBox } from '../features/ContractItemsBox';
 import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
@@ -742,7 +743,7 @@ export function OpportunityWorkspacePage() {
         </div>
       </section>
       <OpportunityContacts oppId={opp.id} editable={editable} />
-      <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={<MeasurementBox opp={opp} />} />
+      <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={<><MeasurementBox opp={opp} /><ContractItemsBox opp={opp} /></>} />
     </div>
   );
 

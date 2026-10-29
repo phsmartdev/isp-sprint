@@ -4,6 +4,7 @@ import { freshSnapshot } from '../services/cs';
 import { snapshotEconomicsOnWon } from '../services/economics';
 import { groupBy } from '../services/group';
 import { onArpOpportunityWon, releaseOpportunity } from '../services/arpOpportunity';
+import { onContractItemsLost, onContractItemsReopened, onContractItemsWon } from './commitmentControl';
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, OpportunityUpdate } from '@isp/shared';
@@ -342,6 +343,10 @@ export const opportunityRoutes = [
         if (reopening && from === 'ganha') await reverseForOpportunity(tx, auth.tenantId, auth.userId, cur);
         // ata de registro de preços: ganho não consome saldo (exige formalização documental); perda libera as reservas
         if (target.kind === 'won' && cur.arpId) await onArpOpportunityWon(tx, auth, cur.id);
+        // controle de empenhos: itens reservados do contrato viram medição na venda; perda libera; reabrir cancela a medição em aberto
+        if (target.kind === 'won') await onContractItemsWon(tx, auth, { id: cur.id, code: cur.code, title: cur.title ?? '' });
+        if (target.kind === 'lost') await onContractItemsLost(tx, cur.id);
+        if (reopening && from === 'ganha') await onContractItemsReopened(tx, cur.id);
         if (target.kind === 'lost' && cur.arpId) await releaseOpportunity(tx, auth, cur.id, 'Oportunidade perdida');
         await tx.insert(s.opportunityEvents).values({
           tenantId: auth.tenantId,

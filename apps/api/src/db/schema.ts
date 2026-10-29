@@ -1271,6 +1271,8 @@ export const contracts = pgTable(
     /** Limite total de vigência informado e validado por uma pessoa (sugestão pelo regime). */
     legalLimitAt: date('legal_limit_at', { mode: 'string' }),
     closedAt: ts('closed_at'),
+    /** Controle de Empenhos: bloquear medição acima do saldo de empenho (padrão: permitir com pendência) */
+    commitmentBlock: boolean('commitment_block').notNull().default(false),
     archivedAt: ts('archived_at'),
     archiveLocation: text('archive_location'),
     archiveResponsibleId: uuid('archive_responsible_id').references(() => users.id),
@@ -1502,12 +1504,125 @@ export const contractCommitments = pgTable('contract_commitments', {
   fiscalYear: integer('fiscal_year').notNull(),
   amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
   notes: text('notes'),
+  /** fonte de receita do cliente que custeia a NE */
+  source: text('source'),
+  /** NE que esta substitui (virada de exercício: NE antiga → NE nova) */
+  replacesId: uuid('replaces_id'),
   cancelledAt: ts('cancelled_at'),
   cancelledBy: uuid('cancelled_by').references(() => users.id),
   cancelReason: text('cancel_reason'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ ctIdx: index('contract_commitments_ct_idx').on(t.contractId, t.issuedOn), uq: uniqueIndex('contract_commitments_uq').on(t.contractId, t.number), amountCk: check('contract_commitments_amount_ck', sql`amount_cents > 0`) }));
+
+// --------------------------------------------------------------- Controle de Empenhos (itens, NE, medições)
+/** Item do contrato (item do órgão + item da ARP): quantidade e preço com 4 casas (×10.000). Único por contrato + itens. */
+export const contractLines = pgTable('contract_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  position: integer('position').notNull().default(0),
+  itemNumber: text('item_number').notNull(),
+  arpItemNumber: text('arp_item_number'),
+  arpItemId: uuid('arp_item_id'),
+  description: text('description').notNull(),
+  unit: text('unit').notNull(),
+  classification: text('classification').notNull().default('demanda'),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  price4: bigint('price4', { mode: 'number' }).notNull().default(0),
+  monthlyQty4: bigint('monthly_qty4', { mode: 'number' }),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  uq: uniqueIndex('contract_lines_uq').on(t.contractId, t.itemNumber, sql`coalesce(${t.arpItemNumber}, '')`),
+  classCk: check('contract_lines_class_ck', inList('classification', ['demanda', 'fornecimento', 'recorrente'])),
+  qtyCk: check('contract_lines_qty_ck', sql`qty4 >= 0 and price4 >= 0`),
+}));
+
+/** Item de empenho: parcela de um item do contrato coberta por uma NE, com o código do item na nota. */
+export const contractCommitmentItems = pgTable('contract_commitment_items', {
+  id: id(),
+  tenantId: tenantId(),
+  commitmentId: uuid('commitment_id').notNull().references(() => contractCommitments.id),
+  lineId: uuid('line_id').notNull().references(() => contractLines.id),
+  itemNumber: text('item_number'),
+  code: text('code'),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_commitment_items_uq').on(t.commitmentId, t.lineId), qtyCk: check('contract_commitment_items_qty_ck', sql`qty4 > 0`) }));
+
+/** Reforço e anulação parcial de item de empenho (movimentação formal com motivo; append-only). */
+export const contractCommitmentMoves = pgTable('contract_commitment_moves', {
+  id: id(),
+  tenantId: tenantId(),
+  commitmentItemId: uuid('commitment_item_id').notNull().references(() => contractCommitmentItems.id),
+  kind: text('kind').notNull(),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+  reason: text('reason').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ kindCk: check('contract_commitment_moves_kind_ck', inList('kind', ['reforco', 'anulacao'])), qtyCk: check('contract_commitment_moves_qty_ck', sql`qty4 > 0`) }));
+
+/** Medição (evento de consumo). Revisão cria nova versão (mesmo grupo) e a anterior fica como substituída. */
+export const contractMeasurements = pgTable('contract_measurements', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  groupId: uuid('group_id').notNull(),
+  version: integer('version').notNull().default(1),
+  superseded: boolean('superseded').notNull().default(false),
+  competence: text('competence').notNull(),
+  kind: text('kind').notNull().default('avulsa'),
+  title: text('title').notNull(),
+  status: text('status').notNull().default('elaboracao'),
+  opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+  revisionReason: text('revision_reason'),
+  revisionNote: text('revision_note'),
+  invoiceNumber: text('invoice_number'),
+  invoiceDate: date('invoice_date', { mode: 'string' }),
+  invoiceCents: bigint('invoice_cents', { mode: 'number' }),
+  attestedAt: ts('attested_at'),
+  notes: text('notes'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('contract_measurements_idx').on(t.contractId, t.competence),
+  grpUq: uniqueIndex('contract_measurements_grp_uq').on(t.groupId, t.version),
+  statusCk: check('contract_measurements_status_ck', inList('status', ['elaboracao', 'enviada', 'atestada', 'faturada', 'cancelada'])),
+  kindCk: check('contract_measurements_kind_ck', inList('kind', ['mensal', 'avulsa', 'evento'])),
+}));
+
+/** Item de medição: quantidade, preço vigente e a baixa nos itens de empenho (FIFO); o descoberto é pendência. */
+export const contractMeasurementItems = pgTable('contract_measurement_items', {
+  id: id(),
+  tenantId: tenantId(),
+  measurementId: uuid('measurement_id').notNull().references(() => contractMeasurements.id),
+  lineId: uuid('line_id').notNull().references(() => contractLines.id),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  price4: bigint('price4', { mode: 'number' }).notNull(),
+  allocations: jsonb('allocations').$type<{ commitmentItemId: string; qty4: number }[]>().notNull().default([]),
+  uncovered4: bigint('uncovered4', { mode: 'number' }).notNull().default(0),
+}, (t) => ({ uq: uniqueIndex('contract_measurement_items_uq').on(t.measurementId, t.lineId), qtyCk: check('contract_measurement_items_qty_ck', sql`qty4 > 0`) }));
+
+/** Itens do contrato pedidos numa oportunidade da pipeline: reservam saldo; na venda ganha viram medição. */
+export const contractOpportunityLines = pgTable('contract_opportunity_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  lineId: uuid('line_id').notNull().references(() => contractLines.id),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('reservada'),
+  measurementId: uuid('measurement_id'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  uq: uniqueIndex('contract_opp_lines_uq').on(t.opportunityId, t.lineId),
+  statusCk: check('contract_opp_lines_status_ck', inList('status', ['reservada', 'medida', 'liberada'])),
+}));
 
 /** Habilitação da empresa (certidões e alvarás) por filial, com validade e arquivo. Nova certidão substitui a anterior, que fica no histórico. */
 export const companyDocuments = pgTable('company_documents', {

@@ -582,6 +582,13 @@
       "when": 1793307184708,
       "tag": "0082_financial_studio",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1793309652586,
+      "tag": "0083_controle_empenhos",
+      "breakpoints": true
     }
   ]
 }
