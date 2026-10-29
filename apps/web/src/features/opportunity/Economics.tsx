@@ -55,9 +55,6 @@ function PriceRuler({ r }: { r: EconResult }) {
   const top = Math.max(rec, p ?? 0, min) * 1.15 || 1;
   const pc = (v: number) => Math.min(100, (v / top) * 100);
   const at = (v: number) => `${pc(v)}%`;
-  /** Rótulo não sai da régua: perto das pontas alinha pela borda. */
-  const lbl = (v: number) => clsx('absolute whitespace-nowrap', pc(v) < 12 ? 'text-left' : pc(v) > 88 ? '-translate-x-full text-right' : '-translate-x-1/2 text-center');
-  const together = pc(rec) - pc(min) < 24;
   return (
     <div className="mt-3" aria-label="Preço proposto comparado ao mínimo e ao recomendado">
       <div className="relative h-2.5 bg-surface-2">
@@ -66,15 +63,11 @@ function PriceRuler({ r }: { r: EconResult }) {
         <div className="absolute inset-y-0 right-0 bg-success/25" style={{ left: at(rec) }} />
         {p != null && <div className="absolute -top-1 h-4.5 w-1 bg-ink" style={{ left: at(p), height: 18 }} title={`Proposto ${fmtBRL(p)}`} />}
       </div>
-      <div className="relative mt-1 h-8 text-2xs text-muted">
-        {together ? (
-          <span className={lbl(rec)} style={{ left: at(rec) }}>Mínimo <b className="num text-ink">{fmtBRL(min)}</b><br />Margem mínima <b className="num text-ink">{fmtBRL(rec)}</b></span>
-        ) : (
-          <>
-            <span className={lbl(min)} style={{ left: at(min) }}>Mínimo<br /><b className="num text-ink">{fmtBRL(min)}</b></span>
-            <span className={lbl(rec)} style={{ left: at(rec) }}>Margem mínima<br /><b className="num text-ink">{fmtBRL(rec)}</b></span>
-          </>
-        )}
+      {/* legenda na borda direita, alinhada aos números do quadro (não acompanha a posição na régua para não vazar) */}
+      <div className="mt-1.5 flex flex-wrap justify-end gap-x-4 gap-y-0.5 text-2xs text-muted">
+        <span className="flex items-center gap-1"><span className="h-2 w-2 bg-danger/40" aria-hidden />Mínimo <b className="num text-ink">{fmtBRL(min)}</b></span>
+        <span className="flex items-center gap-1"><span className="h-2 w-2 bg-success/40" aria-hidden />Margem mínima <b className="num text-ink">{fmtBRL(rec)}</b></span>
+        {p != null && <span className="flex items-center gap-1"><span className="h-2.5 w-1 bg-ink" aria-hidden />Proposto <b className="num text-ink">{fmtBRL(p)}</b></span>}
       </div>
     </div>
   );
@@ -130,7 +123,7 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
       </dl>
       <PriceRuler r={r} />
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
-        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />DRE e memória de cálculo
+        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />Memória de cálculo
       </button>
       {open && (
         <div className="mt-2 space-y-3 text-sm">
