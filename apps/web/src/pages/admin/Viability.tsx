@@ -28,14 +28,14 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
   );
 }
 
-const ECON_KEYS = ['marginTargetBp', 'tmaMonthlyBp', 'commissionBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp'] as const;
+const ECON_KEYS = ['marginTargetBp', 'tmaMonthlyBp', 'commissionBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
 type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; blockOutsidePolicy: boolean; validFrom: string };
 type EconVersion = Record<EconKey, number | undefined> & { paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
 type EconData = { current: (EconVersion & { id: string; validFrom: string }) | null; versions: { id: string; validFrom: string; createdAt: string; createdByName: string | null; values: EconVersion }[]; today: string };
 
 /** Campos em grupos, na ordem em que o cálculo os usa. */
-type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic'; label: string; hint: string; months?: boolean };
+type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic'; label: string; hint: string; months?: boolean; factor?: boolean; optional?: boolean };
 const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   { title: 'Deduções da receita', desc: 'Saem do preço antes da margem de contribuição. Os tributos vêm do documento fiscal de cada item.', fields: [
     { key: 'commissionBp', label: 'Comissão padrão', hint: 'Sobre o preço; o vendedor pode ajustar na oportunidade' },
@@ -52,6 +52,10 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   ] },
   { title: 'Custo do dinheiro', desc: 'Corrige o investimento no preço mínimo e desconta o payback.', fields: [
     { key: 'tmaMonthlyBp', label: 'TMA mensal', hint: 'Taxa mínima de atratividade, ao mês' },
+  ] },
+  { title: 'Comparativo com o modelo histórico', desc: 'Opcional. A memória de cálculo mostra o preço pela regra antiga e a margem real que ela deixa. Não entra na decisão.', fields: [
+    { key: 'legacyOneTimeX100', label: 'Fator da venda pontual', hint: 'Sobre o investimento (ex.: 2,5)', factor: true, optional: true },
+    { key: 'legacyRecurringX100', label: 'Fator da recorrente', hint: 'Sobre o custo mensal (ex.: 3,2)', factor: true, optional: true },
   ] },
   { title: 'Política de aprovação', desc: 'Abaixo da margem mínima ou com payback descontado acima do limite, a venda sai da política.', fields: [
     { key: 'marginTargetBp', label: 'Margem de contribuição mínima', hint: 'Sobre o preço' },
@@ -98,7 +102,7 @@ function EconEngine() {
   });
   if (!e || !q.data) return <section className="card p-5"><LoadingRows /></section>;
   const set = (v: Partial<EconForm>) => { setE({ ...e, ...v }); setDirty(true); };
-  const missing = GROUPS.flatMap((g) => g.fields).filter((f) => e[f.key] == null).map((f) => f.label);
+  const missing = GROUPS.flatMap((g) => g.fields).filter((f) => !f.optional && e[f.key] == null).map((f) => f.label);
   const cur = q.data.current;
   const p2 = (v: number | undefined) => (v == null ? '—' : `${(v / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`);
   return (
@@ -121,7 +125,7 @@ function EconEngine() {
           <Group key={g.title} title={g.title} desc={g.desc}>
             {g.fields.map((f) => (
               <FormField key={f.key} label={f.label} htmlFor={`ec-${f.key}`} hint={f.key === 'tmaMonthlyBp' ? tmaHint(e.tmaMonthlyBp, f.hint) : f.hint}>
-                <NumInput id={`ec-${f.key}`} label={f.label} int={f.months} value={e[f.key]} suffix={f.months ? 'meses' : '%'} onChange={(v) => set({ [f.key]: v } as Partial<EconForm>)} />
+                <NumInput id={`ec-${f.key}`} label={f.label} int={f.months} value={e[f.key]} suffix={f.months ? 'meses' : f.factor ? '× o custo' : '%'} onChange={(v) => set({ [f.key]: v } as Partial<EconForm>)} />
               </FormField>
             ))}
             {g.title === 'Política de aprovação' && (

@@ -57,10 +57,16 @@ export type EconSettings = {
   /** Trava: venda fora da política não vai para aprovação */ blockOutsidePolicy: boolean;
   /** despesas fixas rateadas (estrutura, administrativo) em % da receita bruta → margem operacional; ausente em versões antigas */ overheadBp?: number | null;
   /** IR/CSLL sobre o resultado operacional positivo → margem líquida; ausente em versões antigas */ incomeTaxBp?: number | null;
+  /**
+   * Comparativo com o modelo histórico da empresa (só informativo, não entra na decisão): fator × 100 sobre o
+   * investimento na venda pontual (ex.: 250 = ×2,5) e sobre o custo mensal na recorrente (ex.: 320 = ×3,2). Ausente = não mostra.
+   */
+  legacyOneTimeX100?: number | null; legacyRecurringX100?: number | null;
 };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
   for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Fator histórico da venda pontual', s.legacyOneTimeX100], ['Fator histórico da recorrente', s.legacyRecurringX100]] as const) if (v != null && (!Number.isInteger(v) || v < 100 || v > 2000)) e.push(`${k} entre ×1 e ×20.`);
   if (!(s.paybackMaxPrivate >= 1 && s.paybackMaxPrivate <= 120) || !(s.paybackMaxPublic >= 1 && s.paybackMaxPublic <= 120)) e.push('Payback máximo entre 1 e 120 meses.');
   return e;
 }
@@ -444,4 +450,122 @@ export function consolidateCashflow(entries: { startMonth: string; flows: number
   let acc = 0;
   const cumulative = net.map((v) => (acc += v));
   return { months: Array.from({ length: len }, (_, i) => shiftMonth(first, i)), inflow, outflow, net, cumulative };
+}
+
+// ------------------------------------------------------------------ memória de cálculo
+
+export type MemoryRow = { label: string; formula?: string; value: string; strong?: boolean; ok?: boolean | null };
+export type MemoryStep = { key: 'entradas' | 'preco' | 'historico' | 'fluxo' | 'decisao'; title: string; desc: string; rows: MemoryRow[]; note?: string };
+
+/** Preço → margem de contribuição no mesmo modelo do motor (usado no comparativo histórico). */
+function marginAt(r: EconResult, P: number) {
+  const contribution = P - (P * r.rates.a + r.fixedTaxCents) - r.rates.c * P - r.rates.g * P - (r.mode === 'recorrente' ? r.monthlyCostCents : 0);
+  return ((r.mode === 'pontual' ? contribution - r.initialCents : contribution) / P) * 100;
+}
+
+/**
+ * Memória de cálculo do resultado salvo, em passos (entradas → preço → comparativo histórico → fluxo de caixa → decisão),
+ * com cada fórmula e os números que entraram nela. Só lê o resultado: nada é recalculado na regra, e a mesma função
+ * alimenta a tela, o CSV e o PDF.
+ */
+export function econMemory(r: EconResult, fmt: (c: number) => string, opts: { legacy?: { oneTimeX100?: number | null; recurringX100?: number | null } } = {}): MemoryStep[] {
+  const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
+  const num = (v: number, d = 2) => v.toLocaleString('pt-BR', { maximumFractionDigits: d });
+  const money = (c: number | null | undefined) => (c == null ? '—' : c < 0 ? `-${fmt(-c)}` : fmt(c));
+  const rec = r.mode === 'recorrente';
+  const { a, c, g, m, b } = r.rates, rt = r.rates.r;
+  const I = r.initialCents, O = r.monthlyCostCents, F = r.fixedTaxCents;
+  const capexBase = r.capexBaseCents ?? I, opexBase = r.opexBaseCents ?? O;
+  const { N, D, d, Dalvo } = r.term;
+  const k = r.kpi;
+  const steps: MemoryStep[] = [];
+
+  // 1. entradas: o que veio da oportunidade e dos parâmetros
+  const taxParts = r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
+  steps.push({
+    key: 'entradas', title: 'Entradas', desc: 'Custos da oportunidade, tributos dos documentos fiscais e parâmetros vigentes do motor.',
+    rows: [
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}` : undefined, value: money(I), strong: true },
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}` : undefined, value: money(O), strong: true }] : []),
+      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `peso na receita × alíquota: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
+      ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
+      { label: 'Comissão (c)', value: pc(c * 100) },
+      { label: `Glosa e inadimplência (g), setor ${r.publicSector ? 'público' : 'privado'}`, value: pc(g * 100) },
+      { label: 'Margem de contribuição mínima (m)', value: pc(m * 100) },
+      { label: 'TMA (r)', formula: `${pc(rt * 100)} ao mês ≈ ${pc(((1 + rt) ** 12 - 1) * 100, 1)} ao ano`, value: `${pc(rt * 100)} a.m.` },
+      rec ? { label: 'Prazo', formula: `vigência N = ${N} meses · limite de payback ${Dalvo} meses · investimento diluído em D = menor dos dois = ${D}`, value: `${N} meses` }
+        : { label: 'Recebimento', value: d ? `mês ${d}` : 'à vista' },
+    ],
+  });
+
+  // 2. preço: markup divisor (custos em R$ no numerador, percentuais no denominador)
+  const A = rec ? annuityFactor(rt, D) : 0;
+  const prices: MemoryRow[] = [{ label: 'Base líquida (b)', formula: `1 - a - c - g = 1 - ${pc(a * 100)} - ${pc(c * 100)} - ${pc(g * 100)}`, value: pc(b * 100) }];
+  if (b > 0) {
+    if (rec) {
+      prices.push(
+        { label: 'Preço que cobre o caixa', formula: `(O + F + I ÷ D) ÷ b = (${money(O)} + ${money(F)} + ${money(I)} ÷ ${D}) ÷ ${pc(b * 100)}`, value: money(r.floor.cashCents) },
+        { label: 'Preço que cobre a TMA', formula: `(O + F + I ÷ A) ÷ b, A = fator de anuidade de ${D} meses a ${pc(rt * 100)} = ${num(A, 4)}`, value: money(r.floor.economicCents) },
+        { label: 'Preço mínimo', formula: 'maior dos dois', value: money(r.floor.minCents), strong: true },
+        { label: 'Preço da margem mínima', formula: `(O + F) ÷ (b - m) = (${money(O)} + ${money(F)}) ÷ ${pc((b - m) * 100)}`, value: money(r.marginPriceCents) },
+      );
+    } else {
+      prices.push(
+        { label: 'Preço que cobre o caixa', formula: `(I + F) ÷ b = (${money(I)} + ${money(F)}) ÷ ${pc(b * 100)}`, value: money(r.floor.cashCents) },
+        { label: 'Preço que cobre a TMA', formula: `(I × (1 + r)^${d} + F) ÷ b`, value: money(r.floor.economicCents) },
+        { label: 'Preço mínimo', formula: 'maior dos dois', value: money(r.floor.minCents), strong: true },
+        { label: 'Preço da margem mínima', formula: `(I + F) ÷ (b - m) = (${money(I)} + ${money(F)}) ÷ ${pc((b - m) * 100)}`, value: money(r.marginPriceCents) },
+      );
+    }
+    if (r.operatingFloorCents != null) prices.push({ label: 'Preço da margem operacional zero', formula: rec ? '(O + F + I ÷ N) ÷ (b - despesas fixas)' : '(I + F) ÷ (b - despesas fixas)', value: money(r.operatingFloorCents) });
+    if (r.suggestedMinCents != null) prices.push({ label: 'Preço mínimo sugerido', formula: 'maior entre o preço mínimo, o da margem mínima e o da margem operacional zero', value: money(r.suggestedMinCents), strong: true });
+  }
+  prices.push({ label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : 'total dos produtos', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true });
+  steps.push({ key: 'preco', title: 'Preço (markup divisor)', desc: 'Valores em R$ ficam no numerador; tributos, comissão, glosa e margem, que variam com o preço, no denominador.', rows: prices });
+
+  // 3. comparativo com o modelo histórico (informativo)
+  const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
+  const base = rec ? opexBase : capexBase;
+  if (fx && base > 0) {
+    const f = fx / 100, Pl = Math.round(base * f), sb = (1 - 1 / f) * 100, ml = marginAt(r, Pl);
+    steps.push({
+      key: 'historico', title: 'Comparativo com o modelo histórico', desc: `Regra antiga da empresa: ${rec ? 'custo mensal' : 'investimento'} × ${num(f)}. Só informativo; não entra na decisão.`,
+      rows: [
+        { label: 'Preço pelo modelo histórico', formula: `${money(base)} × ${num(f)}`, value: `${money(Pl)}${rec ? '/mês' : ''}`, strong: true },
+        { label: 'Sobra bruta teórica', formula: `1 - 1 ÷ ${num(f)}`, value: pc(sb) },
+        { label: 'Margem efetiva real nesse preço', formula: rec ? '(preço - tributos - comissão - glosa - custos mensais) ÷ preço' : '(preço - tributos - comissão - glosa - investimento) ÷ preço', value: pc(ml, 1), ok: ml >= m * 100 - 1e-9 },
+        ...(r.priceCents != null ? [{ label: 'Diferença para o preço avaliado', formula: 'histórico - avaliado', value: money(Pl - r.priceCents) }] : []),
+      ],
+      note: `No modelo histórico (×${num(f)}) o preço seria ${money(Pl)}, com margem efetiva real de ${pc(ml, 1)} depois dos tributos.${r.recommendedCents != null ? ` No modelo exato, para a margem mínima de ${pc(m * 100, 0)}, o preço é ${money(r.recommendedCents)}.` : ''}`,
+    });
+  }
+
+  // 4. fluxo de caixa e indicadores
+  if (k && r.priceCents != null) {
+    const P = r.priceCents, flows = r.cashflow;
+    const inflow = flows.slice(1).reduce((s, x) => s + x, 0);
+    const roi = I > 0 ? ((inflow - I) / I) * 100 : null;
+    steps.push({
+      key: 'fluxo', title: 'Fluxo de caixa e indicadores', desc: rec ? `Mês 0 = investimento; meses 1 a ${N} = o que sobra da mensalidade.` : `Mês 0 = investimento; o preço entra no mês ${d}.`,
+      rows: [
+        { label: 'Mês 0 (FC0)', formula: '- investimento inicial', value: money(-I) },
+        { label: rec ? 'Cada mês (FCt)' : `Mês ${d}`, formula: `P - tributos - comissão - glosa${rec ? ' - custos' : ''} = ${money(P)} - ${money(k.taxCents)} - ${money(k.commissionCents)} - ${money(k.lossCents)}${rec ? ` - ${money(O)}` : ''}`, value: money(k.contributionCents), strong: true },
+        { label: 'VPL', formula: `soma de FCt ÷ (1 + ${pc(rt * 100)})^t`, value: money(k.npvCents), ok: k.npvCents >= 0 },
+        { label: 'TIR', formula: 'taxa que zera o VPL', value: k.irrMonthly == null ? 'não se aplica' : `${pc(k.irrMonthly * 100, 1)} a.m. · ${k.irrAnnual! > 10 ? 'acima de 1.000%' : pc(k.irrAnnual! * 100, 1)} a.a.`, ok: k.irrMonthly == null ? null : k.irrMonthly >= rt },
+        { label: 'Payback descontado', formula: `mês em que a soma dos fluxos descontados pela TMA fica positiva (simples: ${k.simplePaybackMonths == null ? 'não se paga' : `${num(k.simplePaybackMonths, 1)} meses`})`, value: k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses` },
+        ...(roi != null ? [{ label: 'ROI', formula: `(soma dos fluxos - investimento) ÷ investimento = (${money(inflow)} - ${money(I)}) ÷ ${money(I)}`, value: pc(roi, 1), ok: roi >= 0 }] : []),
+      ],
+    });
+
+    // 5. decisão
+    const decisions: MemoryRow[] = [
+      { label: 'Preço avaliado cobre o preço mínimo', formula: `${money(P)} ≥ ${money(r.floor.minCents)}`, value: r.floor.minCents == null ? '—' : P >= Math.round(r.floor.minCents) ? 'sim' : 'não', ok: r.floor.minCents == null ? null : P >= Math.round(r.floor.minCents) },
+      { label: 'Margem efetiva atinge a mínima', formula: `${pc(k.marginPct, 1)} ≥ ${pc(m * 100, 1)}`, value: r.marginOk ? 'sim' : 'não', ok: r.marginOk },
+      ...(rec ? [{ label: 'Payback descontado dentro do limite', formula: `${k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses`} ≤ ${Dalvo} meses`, value: r.paybackOk ? 'sim' : 'não', ok: r.paybackOk }] : []),
+      { label: 'Tributos de todos os produtos informados', value: r.withReservations ? 'não' : 'sim', ok: !r.withReservations },
+      { label: 'Resultado', value: ECON_VERDICT_LABELS[r.verdict], strong: true, ok: r.verdict === 'viavel' },
+    ];
+    steps.push({ key: 'decisao', title: 'Decisão', desc: 'Regras da política aplicadas ao preço avaliado.', rows: decisions });
+  }
+  return steps;
 }

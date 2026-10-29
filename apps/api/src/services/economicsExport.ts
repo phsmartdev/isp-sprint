@@ -4,13 +4,15 @@
  * Com timbrado na filial, cada página é desenhada sobre ele, dentro das margens configuradas.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
-import { ECON_VERDICT_LABELS, econDre, econHeadline, type EconResult } from '@isp/domain';
+import { ECON_VERDICT_LABELS, econDre, econHeadline, econMemory, type EconResult } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { brl } from './email';
 import { safeText, wrap } from './proposals';
 import type { economicsRun } from './economics';
 
 type Run = NonNullable<Awaited<ReturnType<typeof economicsRun>>>;
+/** Memória de cálculo com os fatores históricos da fotografia (os parâmetros da época do cálculo). */
+const memoryOf = (run: Run) => { const st = run.settings as { legacyOneTimeX100?: number | null; legacyRecurringX100?: number | null }; return econMemory(run.result, money, { legacy: { oneTimeX100: st.legacyOneTimeX100, recurringX100: st.legacyRecurringX100 } }); };
 export type RunHeader = { code: number; title: string; account: string };
 export type Letterhead = { mime: string; data: Buffer; topMm: number; bottomMm: number; sideMm: number };
 type Emitter = { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null } | null;
@@ -41,7 +43,7 @@ function summary(run: Run, h: RunHeader) {
       ['Preço', r.priceCents == null ? '—' : `${money(r.priceCents)}${r.mode === 'recorrente' ? '/mês' : ''}`],
       ['Preço mínimo', r.floor.minCents == null ? '—' : money(r.floor.minCents)],
       ['Preço mínimo sugerido', r.suggestedMinCents == null ? '—' : money(r.suggestedMinCents)],
-      ['Preço da margem mínima', r.recommendedCents == null ? '—' : money(r.recommendedCents)],
+      ['Preço da margem mínima', r.marginPriceCents == null ? '—' : money(r.marginPriceCents)],
       ['Margem efetiva', k ? `${pct(k.marginPct, 1)} (mínima ${pct(r.rates.m * 100, 1)})` : '—'],
       ...(k?.margins ? ([['Margem de contribuição', k.margins.contributionPct], ['Margem operacional', k.margins.operatingPct], ['Margem líquida', k.margins.netPct]] as const).map(([l, v]) => [l, v == null ? 'parâmetro não informado' : pct(v, 1)]) : []),
       ['Payback descontado', k ? `${months(k.paybackMonths)} (limite ${r.term.Dalvo}; simples ${months(k.simplePaybackMonths)})` : '—'],
@@ -61,6 +63,9 @@ export function buildEconCsv(run: Run, h: RunHeader) {
   const sm = summary(run, h);
   const rows: (string | number | null)[][] = [
     ['Viabilidade econômica'], ...sm.head, [], ...sm.kpis, [],
+    ['Memória de cálculo', 'Fórmula', 'Valor'],
+    ...memoryOf(run).flatMap((st, n) => [[`${n + 1}. ${st.title}`], ...st.rows.map((x) => [x.label, x.formula ?? '', x.value]), ...(st.note ? [[st.note]] : [])]),
+    [],
     ['Desdobramento financeiro', 'Por mês (R$)', r.mode === 'recorrente' ? `No contrato, ${r.term.N} meses (R$)` : 'Na venda (R$)'],
     ...econDre(r, money).map((d) => [`${d.sign} ${d.label}`, cents(d.month), cents(d.total)]),
     [], ['Produto', 'Documento fiscal', 'Versão dos tributos', 'Peso na receita', 'Tributos %', 'Tributo fixo (R$)'],
@@ -132,6 +137,27 @@ export async function buildEconPdf(run: Run, h: RunHeader, letterhead?: Letterhe
       y -= 5;
     });
   }
+
+  // memória de cálculo: passo, linha, fórmula (miúda) e valor à direita
+  section('Memória de cálculo');
+  const pdfSafe = (s: string) => s.replace(/≈/g, '~').replace(/≥/g, '>=').replace(/≤/g, '<=').replace(/−/g, '-');
+  memoryOf(run).forEach((st, n) => {
+    need(34);
+    text(`${n + 1}. ${st.title}`, M, 10.5, bold); y -= 12;
+    for (const l of wrap(font, st.desc, 8, W - 2 * M)) { need(10); text(l, M, 8, font, muted); y -= 10; }
+    y -= 2;
+    for (const row of st.rows) {
+      const valW = 150, fl = row.formula ? wrap(font, pdfSafe(row.formula), 7.5, W - 2 * M - valW - 20) : [];
+      need(13 + fl.length * 9);
+      text(pdfSafe(row.label), M + 8, 9.5, row.strong ? bold : font);
+      right(pdfSafe(row.value), W - M, 9.5, row.strong ? bold : font, row.ok === true ? rgb(0.1, 0.55, 0.3) : row.ok === false ? rgb(0.82, 0.2, 0.2) : ink);
+      y -= 11;
+      for (const l of fl) { text(l, M + 8, 7.5, font, muted); y -= 9; }
+      y -= 4;
+    }
+    if (st.note) for (const l of wrap(font, pdfSafe(st.note), 8.5, W - 2 * M - 8)) { need(11); text(l, M + 8, 8.5, font, rgb(0.55, 0.33, 0.05)); y -= 11; }
+    y -= 6;
+  });
 
   const dre = econDre(r, money);
   if (dre.length) {
