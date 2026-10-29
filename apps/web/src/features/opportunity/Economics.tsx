@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
+import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
@@ -226,6 +226,44 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
   const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
   const [pasting, setPasting] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [view, setView] = useState<'tabela' | 'lista'>(() => { try { return localStorage.getItem('econ-cost-view') === 'lista' ? 'lista' : 'tabela'; } catch { return 'tabela'; } });
+  const pickView = (v: 'tabela' | 'lista') => { setView(v); try { localStorage.setItem('econ-cost-view', v); } catch { /* sem armazenamento: vale só nesta tela */ } };
+  const lineTotal = (l: Line) => { const one = fromLines([l])[0]; return one && one.unitCents >= 0 && one.qtyMilli > 0 ? costLineTotal(one) : null; };
+  const nameInput = (l: Line, i: number, cls: string) => (
+    <span className="relative block min-w-0">
+      <Input aria-label={`${title}: descrição ${i + 1}`} className={clsx(cls, origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
+      {origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
+    </span>
+  );
+  const [wide, setWide] = useState(false);
+  // tabela: na coluna da oportunidade cabe sem rolar (colunas fixas); "Ampliar" abre a mesma tabela larga
+  const costTable = (big: boolean) => (
+    <div className={clsx('border border-line', big && 'overflow-x-auto')}>
+      <table className={clsx('w-full text-sm', big ? 'min-w-[820px]' : 'table-fixed')}>
+        <colgroup><col className={big ? 'w-10' : 'w-5'} /><col /><col className={big ? 'w-[90px]' : 'w-[42px]'} /><col className={big ? 'w-[120px]' : 'w-[56px]'} /><col className={big ? 'w-[140px]' : 'w-[68px]'} /><col className={big ? 'w-[150px]' : 'w-[88px]'} /><col className="w-8" /></colgroup>
+        <thead className="bg-surface-2 text-2xs uppercase text-muted">
+          <tr><th className="px-1.5 py-1.5 text-left font-semibold">{big ? 'Item' : '#'}</th><th className="px-1.5 py-1.5 text-left font-semibold">Descrição</th><th className="px-1.5 py-1.5 text-left font-semibold">{big ? 'Unidade' : 'Un.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Quantidade' : 'Qtd.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Valor unitário' : 'Unit.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Valor total' : 'Total'}</th><th /></tr>
+        </thead>
+        <tbody>{lines.map((l, i) => {
+          const tot = lineTotal(l);
+          const cell = clsx('h-8 w-full', !big && 'px-1.5 text-xs');
+          return (
+            <tr key={l.key} className="border-t border-line">
+              <td className="num px-1.5 py-1 text-xs text-muted">{i + 1}</td>
+              <td className="px-0.5 py-1">{nameInput(l, i, cell)}</td>
+              <td className="px-0.5 py-1"><Input aria-label={`${title}: unidade ${i + 1}`} className={cell} placeholder="un" value={l.measure ?? ''} disabled={disabled} onChange={(e) => set(l.key, { measure: e.target.value.slice(0, 12) || null })} /></td>
+              <td className="px-0.5 py-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} /></td>
+              <td className="px-0.5 py-1"><Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} /></td>
+              <td className={clsx('num truncate px-1.5 py-1 text-right text-text', !big && 'text-xs')} title={tot != null ? fmtBRL(tot) : undefined}>{tot != null ? fmtBRL(tot) : '—'}</td>
+              <td className="py-1">{removeBtn(l, i)}</td>
+            </tr>
+          );
+        })}</tbody>
+        <tfoot><tr className="border-t border-line-strong bg-surface-2 font-semibold"><td colSpan={5} className="px-1.5 py-1.5 text-right text-ink">Total</td><td className={clsx('num px-1.5 py-1.5 text-right text-ink', !big && 'text-xs')}>{fmtBRL(lines.reduce((s, l) => s + (lineTotal(l) ?? 0), 0))}</td><td /></tr></tfoot>
+      </table>
+    </div>
+  );
+  const removeBtn = (l: Line, i: number) => (!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />);
   const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
   // tabela colada ou importada: entra no fim (as linhas vazias saem); nome igual ao do catálogo liga a linha ao item
   const addTable = (table: (string | number | null)[][], from: string) => {
@@ -257,22 +295,29 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
     <div>
       {lines.length > 0 && (
         <>
-          <p className="mb-1 text-2xs font-medium text-muted">Cada custo: descrição; embaixo, quantidade × valor unitário = total</p>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-2xs font-medium text-muted">{view === 'tabela' ? `${lines.length} custo(s)` : 'Cada custo: descrição; embaixo, quantidade × valor unitário = total'}</p>
+            <div className="flex items-center gap-1.5">
+            {view === 'tabela' && <button type="button" className="inline-flex items-center gap-1 px-1.5 py-1 text-2xs font-semibold text-primary hover:underline" onClick={() => setWide(true)}><Maximize2 className="h-3.5 w-3.5" aria-hidden />Ampliar</button>}
+            <div className="flex border border-line text-2xs font-semibold" role="group" aria-label={`Ver ${title.toLowerCase()} como`}>
+              {(['tabela', 'lista'] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => pickView(v)} className={clsx('px-2 py-1', view === v ? 'bg-primary text-white' : 'text-ink hover:bg-surface-2')}>{v === 'tabela' ? 'Tabela' : 'Lista'}</button>)}
+            </div>
+            </div>
+          </div>
+          {view === 'tabela' ? costTable(false) : (
           <ul className="space-y-1.5">{lines.map((l, i) => {
-            const one = fromLines([l])[0];
+            const tot = lineTotal(l);
             return (
               <li key={l.key} className={clsx(cols, 'border-l-2 border-line pl-2')}>
-                <span className="relative col-span-4 block min-w-0">
-                  <Input aria-label={`${title}: descrição ${i + 1}`} className={clsx('h-9 w-full', origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
-                  {origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
-                </span>
+                <span className="col-span-4 block min-w-0">{nameInput(l, i, 'h-9 w-full')}</span>
                 <span className="flex items-center gap-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 min-w-0" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />{l.measure && <span className="shrink-0 text-2xs text-muted">{l.measure}</span>}</span>
                 <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
-                <span className="num text-right text-sm text-text">{one && one.unitCents >= 0 && one.qtyMilli > 0 ? fmtBRL(costLineTotal(one)) : '—'}</span>
-                {!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />}
+                <span className="num text-right text-sm text-text">{tot != null ? fmtBRL(tot) : '—'}</span>
+                {removeBtn(l, i)}
               </li>
             );
           })}</ul>
+          )}
         </>
       )}
       <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${fmtBRL(c.unitCents)} / ${c.unit}` : 'sem preço'}</option>)}</datalist>
@@ -287,6 +332,10 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
         </div>
       )}
       {msg && <p className={clsx('mt-1 text-xs', msg.bad ? 'text-[#C2610C]' : 'text-success')}>{msg.text}</p>}
+      <Modal open={wide} onClose={() => setWide(false)} title={title} size="xl" footer={<Button variant="primary" onClick={() => setWide(false)}>Fechar</Button>}>
+        {costTable(true)}
+        <p className="mt-2 text-xs text-muted">As mudanças valem na viabilidade; salve depois de fechar.</p>
+      </Modal>
       <Modal open={pasting} onClose={() => setPasting(false)} title={`Colar do Excel: ${title.toLowerCase()}`} size="lg"
         footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!pasteText.trim()} onClick={() => { addTable(pasteText.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); setPasteText(''); }}>Incluir itens</Button></>}>
         <p className="mb-2 text-sm text-muted">Copie as linhas da planilha (com ou sem a linha de títulos) e cole aqui. Colunas aceitas: Item, Descrição, Unidade, Quantidade, Valor unitário, Valor total. Sem valor unitário, ele vem do total ÷ quantidade.</p>

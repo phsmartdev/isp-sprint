@@ -573,7 +573,7 @@ function StageStepper({ stages, current, daysInStage, times, disabled, onPick }:
 
 export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
-  const { can, feature } = useAuth();
+  const { can, feature, level } = useAuth();
   const [outcome, setOutcome] = useState<Outcome>(null);
   const nav = useNavigate();
   const lookups = useLookups();
@@ -608,6 +608,11 @@ export function OpportunityWorkspacePage() {
   const setBranch = useMutation({
     mutationFn: (branchId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { branchId: branchId || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); toast({ tone: 'success', message: 'Filial alterada' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const setOwner = useMutation({
+    mutationFn: (ownerId: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { ownerId, rowVersion: (a.base ?? q.data)!.rowVersion } }),
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['timeline', o.id] }); qc.invalidateQueries({ queryKey: ['pipeline'] }); toast({ tone: 'success', message: `Responsável: ${o.ownerName}` }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const setKind = useMutation({
@@ -689,7 +694,7 @@ export function OpportunityWorkspacePage() {
         {/* coluna estreita: as grades internas dos formulários viram uma coluna só */}
         <div className="mt-4 space-y-3 [&_.grid>*]:!col-span-1 [&_.grid]:!grid-cols-1">
           <SavableSection id="dados" title="Dados do deal" summary={f.title} editable={editable} startEditing={!f.title.trim()} onSave={a.save}
-            view={[['Nome', f.title || 'Não informado'], ['Tipo de venda', kindLabel ?? 'Não informado'], ['Filial', lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'], ['Canal', lookups.data?.sources.find((x) => x.id === f.sourceId)?.name ?? 'Não informado'], ['Campanha', lookups.data?.campaigns.find((x) => x.id === f.campaignId)?.name ?? 'Nenhuma']]}>
+            view={[['Nome', f.title || 'Não informado'], ['Tipo de venda', kindLabel ?? 'Não informado'], ['Filial', lookups.data?.branches.find((b) => b.id === opp.branchId)?.name ?? 'Não informada'], ['Responsável', opp.ownerName ?? '—'], ['Canal', lookups.data?.sources.find((x) => x.id === f.sourceId)?.name ?? 'Não informado'], ['Campanha', lookups.data?.campaigns.find((x) => x.id === f.campaignId)?.name ?? 'Nenhuma']]}>
             <FormField label="Nome do deal" htmlFor="ws-title"><Input id="ws-title" value={f.title} disabled={!editable} onChange={(e) => set('title', e.target.value)} /></FormField>
             {pipeline?.key === 'empresarial' && (
               <FormField label="Tipo de venda" htmlFor="ws-kind" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
@@ -705,6 +710,14 @@ export function OpportunityWorkspacePage() {
                 {lookups.data?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </Select>
             </FormField>
+            {level('oportunidades') !== 'proprio' && (
+              <FormField label="Responsável" htmlFor="ws-owner" hint={a.dirty ? 'Aguarde salvar para trocar' : 'A conta do cliente acompanha o novo responsável'}>
+                <Select id="ws-owner" value={opp.ownerId} disabled={!editable || setOwner.isPending || a.dirty} onChange={(e) => e.target.value && setOwner.mutate(e.target.value)}>
+                  {!lookups.data?.users.some((u) => u.id === opp.ownerId) && <option value={opp.ownerId}>{opp.ownerName}</option>}
+                  {lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </Select>
+              </FormField>
+            )}
             <FormField label="Canal de entrada" htmlFor="ws-source">
               <Select id="ws-source" value={f.sourceId} disabled={!editable} onChange={(e) => set('sourceId', e.target.value)}>
                 <option value="">Não informado</option>
