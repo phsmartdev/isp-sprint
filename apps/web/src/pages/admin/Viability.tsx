@@ -5,7 +5,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { toCents } from '@isp/domain';
+import { COST_IMPACTS, COST_IMPACT_LABELS, toCents, type CostImpact } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
@@ -28,48 +28,54 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
   );
 }
 
-const ECON_KEYS = ['marginTargetBp', 'tmaMonthlyBp', 'commissionBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
+const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
-type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; blockOutsidePolicy: boolean; validFrom: string };
-type EconVersion = Record<EconKey, number | undefined> & { paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
+type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; blockOutsidePolicy: boolean; validFrom: string };
+type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; blockOutsidePolicy: boolean };
 type EconData = { current: (EconVersion & { id: string; validFrom: string }) | null; versions: { id: string; validFrom: string; createdAt: string; createdByName: string | null; values: EconVersion }[]; today: string };
 
 /** Campos em grupos, na ordem em que o cálculo os usa. */
-type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic'; label: string; hint: string; months?: boolean; factor?: boolean; optional?: boolean };
+type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic' | 'horizonMaxMonths'; label: string; hint: string; months?: boolean; factor?: boolean; optional?: boolean };
 const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   { title: 'Deduções da receita', desc: 'Saem do preço antes da margem de contribuição. Os tributos vêm do documento fiscal de cada item.', fields: [
     { key: 'commissionBp', label: 'Comissão padrão', hint: 'Sobre o preço; o vendedor pode ajustar na oportunidade' },
-    { key: 'lossPrivateBp', label: 'Glosa, setor privado', hint: 'Inadimplência, glosas e descontos esperados' },
+    { key: 'lossPrivateBp', label: 'Glosa, setor privado', hint: 'Retenção ou não aceite parcial das faturas (SLA, disputas)' },
     { key: 'lossPublicBp', label: 'Glosa, setor público', hint: 'Conta governamental, natureza pública ou licitação' },
+    { key: 'badDebtBp', label: 'Inadimplência', hint: 'Perda ou atraso esperado sobre o faturamento' },
   ] },
   { title: 'Contingências', desc: 'Folga somada aos custos informados na oportunidade.', fields: [
     { key: 'contingencyCapexBp', label: 'Sobre o investimento', hint: 'Somada ao investimento inicial (CAPEX)' },
     { key: 'contingencyOpexBp', label: 'Sobre os custos mensais', hint: 'Somada aos custos operacionais (OPEX)' },
   ] },
-  { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem a amortização do investimento na vigência e as despesas fixas; do resultado positivo, o IR/CSLL.', fields: [
+  { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa, inadimplência e despesas fixas; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [
     { key: 'overheadBp', label: 'Despesas fixas rateadas', hint: 'Estrutura e administrativo, em % da receita' },
     { key: 'incomeTaxBp', label: 'IR/CSLL', hint: 'Sobre a margem operacional positiva' },
   ] },
-  { title: 'Custo do dinheiro', desc: 'Corrige o investimento no preço mínimo e desconta o payback.', fields: [
-    { key: 'tmaMonthlyBp', label: 'TMA mensal', hint: 'Taxa mínima de atratividade, ao mês' },
+  { title: 'Premissas da projeção de caixa', desc: 'Alimentam o fluxo de caixa: VPL, TIR e payback descontado.', fields: [
+    { key: 'tmaAnnualBp', label: 'TMA anual', hint: 'Custo de capital; a mensal é (1 + anual)^(1/12) − 1' },
+    { key: 'inflationAnnualBp', label: 'Inflação anual (reajuste)', hint: 'IPCA/IGP-M; a receita sobe a partir do 13º mês' },
+    { key: 'horizonMaxMonths', label: 'Prazo máximo de previsão', hint: 'Horizonte da projeção (ex.: 24, 36 ou 60)', months: true },
   ] },
   { title: 'Comparativo com o modelo histórico', desc: 'Opcional. A memória de cálculo mostra o preço pela regra antiga e a margem real que ela deixa. Não entra na decisão.', fields: [
     { key: 'legacyOneTimeX100', label: 'Fator da venda pontual', hint: 'Sobre o investimento (ex.: 2,5)', factor: true, optional: true },
     { key: 'legacyRecurringX100', label: 'Fator da recorrente', hint: 'Sobre o custo mensal (ex.: 3,2)', factor: true, optional: true },
   ] },
-  { title: 'Política de aprovação', desc: 'Abaixo da margem mínima ou com payback descontado acima do limite, a venda sai da política.', fields: [
-    { key: 'marginTargetBp', label: 'Margem de contribuição mínima', hint: 'Sobre o preço' },
-    { key: 'paybackMaxPrivate', label: 'Payback máximo, privado', hint: 'Payback descontado', months: true },
-    { key: 'paybackMaxPublic', label: 'Payback máximo, público', hint: 'Payback descontado', months: true },
+  { title: 'Política de aprovação', desc: 'Aprovação automática com VPL positivo, TIR acima da TMA, margem no piso ou acima e payback descontado dentro do teto; senão, alçada superior.', fields: [
+    { key: 'marginTargetBp', label: 'Piso da margem de contribuição', hint: 'Abaixo dele, só com a alçada superior' },
+    { key: 'marginSuggestedBp', label: 'Sugestão de margem', hint: 'Valor inicial na tela do vendedor' },
+    { key: 'marginMaxBp', label: 'Teto da margem', hint: 'Máximo que o vendedor pode escolher' },
+    { key: 'paybackMaxPrivate', label: 'Teto de payback, privado', hint: 'O vendedor escolhe até aqui (ex.: 6)', months: true },
+    { key: 'paybackMaxPublic', label: 'Teto de payback, público', hint: 'O vendedor escolhe até aqui (ex.: 12 a 18)', months: true },
   ] },
 ];
 
 /** TMA é ao mês: mostra o equivalente anual e avisa valores que costumam ser digitados como anuais. */
+/** TMA é anual: mostra a mensal equivalente e avisa valores que parecem mensais digitados como anuais ou vice-versa. */
 const tmaHint = (bp: number | null, base: string) => {
   if (bp == null) return base;
-  const annual = ((1 + bp / 10_000) ** 12 - 1) * 100;
-  const a = `${annual.toLocaleString('pt-BR', { maximumFractionDigits: annual >= 100 ? 0 : 1 })}% ao ano`;
-  return bp > 500 ? `Atenção: ${(bp / 100).toLocaleString('pt-BR')}% AO MÊS equivale a ${a}. Se o número é anual, informe o mensal (ex.: 18% ao ano ≈ 1,39% ao mês).` : `Equivale a ${a}.`;
+  const m = ((1 + bp / 10_000) ** (1 / 12) - 1) * 100;
+  const txt = `Equivale a ${m.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}% ao mês.`;
+  return bp > 10_000 ? `Atenção: ${(bp / 100).toLocaleString('pt-BR')}% ao ano é muito alto. ${txt}` : bp > 0 && bp < 300 ? `${txt} Confira: TMA anual costuma ficar acima de 3%.` : txt;
 };
 
 function Group({ title, desc, children }: { title: string; desc: string; children: ReactNode }) {
@@ -92,7 +98,7 @@ function EconEngine() {
   useEffect(() => {
     if (!q.data) return;
     const c = q.data.current;
-    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
+    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
@@ -117,14 +123,14 @@ function EconEngine() {
       {!cur && <div className="mt-3"><Notice tone="warning">A viabilidade econômica não calcula até você preencher e publicar.</Notice></div>}
 
       <p className="mt-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-text" aria-label="Como o cálculo usa os parâmetros">
-        Receita − tributos − comissão − glosa − custos mensais = <b>margem de contribuição</b> − amortização do investimento − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
+        Preço exato = (investimento ÷ payback + custos mensais + tributo fixo) ÷ (1 − tributos − comissão − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         {GROUPS.map((g) => (
           <Group key={g.title} title={g.title} desc={g.desc}>
             {g.fields.map((f) => (
-              <FormField key={f.key} label={f.label} htmlFor={`ec-${f.key}`} hint={f.key === 'tmaMonthlyBp' ? tmaHint(e.tmaMonthlyBp, f.hint) : f.hint}>
+              <FormField key={f.key} label={f.label} htmlFor={`ec-${f.key}`} hint={f.key === 'tmaAnnualBp' ? tmaHint(e.tmaAnnualBp, f.hint) : f.hint}>
                 <NumInput id={`ec-${f.key}`} label={f.label} int={f.months} value={e[f.key]} suffix={f.months ? 'meses' : f.factor ? '× o custo' : '%'} onChange={(v) => set({ [f.key]: v } as Partial<EconForm>)} />
               </FormField>
             ))}
@@ -148,14 +154,14 @@ function EconEngine() {
           <summary className="cursor-pointer font-semibold text-ink">Histórico de publicações ({q.data.versions.length})</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[960px] text-xs">
-              <thead className="text-muted"><tr>{['Vigência', 'Margem mín.', 'TMA', 'Comissão', 'Glosa priv./púb.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Comissão', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{q.data.versions.map((v) => (
                 <tr key={v.id} className="border-t border-line">
                   <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>
-                  <td className="num py-1 pr-3">{p2(v.values.marginTargetBp)}</td>
-                  <td className="num py-1 pr-3">{p2(v.values.tmaMonthlyBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.marginTargetBp)} / {p2(v.values.marginSuggestedBp)} / {p2(v.values.marginMaxBp)}</td>
+                  <td className="num py-1 pr-3">{v.values.tmaAnnualBp != null ? `${p2(v.values.tmaAnnualBp)} a.a.` : `${p2(v.values.tmaMonthlyBp)} a.m.`}</td>
                   <td className="num py-1 pr-3">{p2(v.values.commissionBp)}</td>
-                  <td className="num py-1 pr-3">{p2(v.values.lossPrivateBp)} / {p2(v.values.lossPublicBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.lossPrivateBp)} / {p2(v.values.lossPublicBp)} · {p2(v.values.badDebtBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.contingencyCapexBp)} / {p2(v.values.contingencyOpexBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.overheadBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.incomeTaxBp)}</td>
@@ -171,7 +177,7 @@ function EconEngine() {
   );
 }
 
-type CostItem = { id: string | null; name: string; kind: 'investimento' | 'mensal'; unit: string; active: boolean; unitCents?: number | null; priceFrom?: string | null; prices?: { id: string; unitCents: number; validFrom: string; createdAt: string; createdByName: string | null }[] };
+type CostItem = { id: string | null; name: string; kind: 'investimento' | 'mensal'; unit: string; impact?: CostImpact | null; active: boolean; unitCents?: number | null; priceFrom?: string | null; prices?: { id: string; unitCents: number; validFrom: string; createdAt: string; createdByName: string | null }[] };
 
 /** Catálogo de custos: itens de investimento e mensais com preço de custo por vigência (o histórico fica guardado). */
 function CostCatalog() {
@@ -184,7 +190,7 @@ function CostCatalog() {
   useEffect(() => { if (q.data) { setRows(q.data.items); setDirty(false); } }, [q.data]);
   const done = (msg: string) => { qc.invalidateQueries({ queryKey: ['admin', 'cost-items'] }); qc.invalidateQueries({ queryKey: ['cost-items'] }); toast({ tone: 'success', message: msg }); };
   const save = useMutation({
-    mutationFn: () => api('/admin/cost-items', { method: 'PUT', body: { items: rows.filter((r) => r.name.trim()).map(({ id, name, kind, unit, active }) => ({ id, name: name.trim(), kind, unit: unit.trim() || 'un', active })) } }),
+    mutationFn: () => api('/admin/cost-items', { method: 'PUT', body: { items: rows.filter((r) => r.name.trim()).map(({ id, name, kind, unit, impact, active }) => ({ id, name: name.trim(), kind, unit: unit.trim() || 'un', impact: kind === 'mensal' ? 'operacional' : impact ?? null, active })) } }),
     onSuccess: () => done('Catálogo salvo'), onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
   });
   const publish = useMutation({
@@ -196,16 +202,22 @@ function CostCatalog() {
   return (
     <section className="card p-5">
       <h3 className="text-md font-bold text-ink">Catálogo de custos</h3>
-      <p className="mb-3 max-w-3xl text-sm text-muted">Materiais, equipamentos e serviços que entram no investimento ou nos custos mensais da viabilidade. Na oportunidade, o vendedor escolhe pelo nome e o preço vigente vem junto; se ele mudar o valor, a linha fica marcada como alterada. Preço novo vale a partir da data escolhida.</p>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Materiais, equipamentos e serviços que entram no investimento ou nos custos mensais da viabilidade. O item é identificado pela descrição + unidade. Na oportunidade, item conhecido já vem com o impacto e o preço da última cotação; item novo entra aqui sozinho quando o vendedor salva, e a nova cotação passa a ser o preço vigente. Mesma descrição com outra unidade é outro item. Preço publicado aqui vale a partir da data escolhida.</p>
       {!!rows.length && (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead className="text-xs text-muted"><tr>{['Item', 'Tipo', 'Unidade', 'Preço vigente', 'Novo preço', 'Ativo'].map((h) => <th key={h} className="py-1 pr-2 text-left font-medium">{h}</th>)}</tr></thead>
+          <table className="w-full min-w-[1060px] text-sm">
+            <thead className="text-xs text-muted"><tr>{['Item', 'Tipo', 'Unidade', 'Impacta o quê?', 'Preço vigente', 'Novo preço', 'Ativo'].map((h) => <th key={h} className="py-1 pr-2 text-left font-medium">{h}</th>)}</tr></thead>
             <tbody>{rows.map((r, i) => (
               <tr key={r.id ?? `n${i}`} className="border-t border-line align-middle">
                 <td className="py-1.5 pr-2"><Input aria-label={`Item ${i + 1}`} className="h-9 min-w-[200px]" value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Ex.: Roteador corporativo" /></td>
                 <td className="py-1.5 pr-2"><Select aria-label={`Tipo do item ${i + 1}`} className="h-9 w-[140px]" value={r.kind} onChange={(e) => set(i, { kind: e.target.value as CostItem['kind'] })}><option value="investimento">Investimento</option><option value="mensal">Mensal</option></Select></td>
                 <td className="py-1.5 pr-2"><Input aria-label={`Unidade do item ${i + 1}`} className="h-9 w-[80px]" value={r.unit} onChange={(e) => set(i, { unit: e.target.value })} /></td>
+                <td className="py-1.5 pr-2">{r.kind === 'mensal' ? <span className="text-xs text-muted">Custo operacional</span> : (
+                  <Select aria-label={`Impacto do item ${i + 1}`} className="h-9 w-[170px]" value={r.impact ?? ''} onChange={(e) => set(i, { impact: (e.target.value || null) as CostImpact | null })}>
+                    <option value="">A classificar</option>
+                    {COST_IMPACTS.filter((x) => x !== 'operacional').map((x) => <option key={x} value={x}>{COST_IMPACT_LABELS[x]}</option>)}
+                  </Select>
+                )}</td>
                 <td className="num py-1.5 pr-2" title={(r.prices ?? []).map((p) => `${fmtDate(p.validFrom)}: ${fmtBRL(p.unitCents)} (${p.createdByName ?? '—'})`).join('\n') || undefined}>{r.unitCents != null ? <>{fmtBRL(r.unitCents)}<span className="block text-2xs text-muted">desde {fmtDate(r.priceFrom)}{(r.prices?.length ?? 0) > 1 ? ` · ${r.prices!.length} preços` : ''}</span></> : <span className="text-[#C2610C]">sem preço</span>}</td>
                 <td className="py-1.5 pr-2">{r.id ? (
                   <span className="flex items-center gap-1">

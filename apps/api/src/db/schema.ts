@@ -4646,11 +4646,15 @@ export const costItems = pgTable('cost_items', {
   name: text('name').notNull(),
   kind: text('kind').notNull(),
   unit: text('unit').notNull().default('un'),
+  /** "Impacta o quê?" (material, serviço, custo operacional, entrega, taxa fixa de venda): o motor aprende pela descrição + unidade */
+  impact: text('impact'),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => ({
-  uq: uniqueIndex('cost_items_uq').on(t.tenantId, t.kind, t.name),
+  /** chave do item: descrição + unidade (mesma descrição em outra unidade é outro item) */
+  uq: uniqueIndex('cost_items_uq').on(t.tenantId, t.kind, sql`lower(${t.name})`, sql`lower(${t.unit})`),
+  impactCk: check('cost_items_impact_ck', sql`impact is null or impact in ('material','servico','operacional','entrega','taxa_venda')`),
   kindCk: check('cost_items_kind_ck', inList('kind', ['investimento', 'mensal'])),
 }));
 

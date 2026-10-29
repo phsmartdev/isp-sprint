@@ -8,8 +8,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
-  ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  COST_IMPACTS, COST_IMPACT_LABELS, ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -32,8 +32,8 @@ type Data = {
 };
 type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
 /** Linha do formulário: `unit` = valor unitário digitado; `measure` = unidade de medida (m, und, hh…). */
-type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; costItemId?: string | null };
-type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; unitCents: number | null };
+type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; impact?: CostImpact | null; costItemId?: string | null };
+type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; impact?: CostImpact | null; unitCents: number | null };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
   viavel: { bar: 'border-success bg-success-soft', chip: 'green' }, abaixo_recomendado: { bar: 'border-primary bg-primary-soft', chip: 'blue' },
@@ -48,8 +48,8 @@ const money = (c: number | null) => (c == null ? '' : (c / 100).toLocaleString('
 let seq = 0;
 /** Quantidade sem separador de milhar ("8400", "2,5"): o ponto seria lido como decimal. */
 const qtyText = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 3 });
-const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, costItemId: x.costItemId ?? null }));
-const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, costItemId: x.costItemId ?? null }));
+const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null }));
+const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null }));
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 /** Contribuição → operacional → líquida, em % da receita e R$ do período. */
@@ -245,13 +245,30 @@ function Step({ n, title, hint, total, children }: { n: number; title: string; h
 const linesTotal = (lines: Line[]) => fromLines(lines).reduce((t, l) => t + (l.unitCents >= 0 && l.qtyMilli > 0 ? costLineTotal(l) : 0), 0);
 
 /** Linhas de custo; o nome puxa do catálogo (preço vigente) e a linha mostra se veio do catálogo ou foi alterada. */
-function CostLines({ title, example, lines, setLines, disabled, catalog }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[] }) {
+/** Catálogo pela chave Descrição + Unidade (sem unidade, o primeiro com a descrição). */
+const findCat = (catalog: CatalogItem[], name: string, unit?: string | null) => {
+  const n = name.trim().toLowerCase(), u = (unit ?? '').trim().toLowerCase();
+  return catalog.find((c) => c.name.toLowerCase() === n && (!u || c.unit.toLowerCase() === u)) ?? (u ? undefined : catalog.find((c) => c.name.toLowerCase() === n));
+};
+
+/** Custos da planilha; `impacts` liga a coluna "Impacta o quê?"; `onOther` recebe as linhas coladas da outra frequência. */
+function CostLines({ title, example, lines, setLines, disabled, catalog, impacts, frequency, onOther }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void }) {
   const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
   const listId = `cat-${title.replace(/\W/g, '')}`;
-  const onName = (l: Line, v: string) => {
-    const hit = catalog.find((c) => c.name.toLowerCase() === v.trim().toLowerCase());
-    set(l.key, { description: v, costItemId: hit?.id ?? null, ...(hit && hit.unitCents != null && l.costItemId !== hit.id ? { unit: money(hit.unitCents) } : {}) });
+  // auto-preenchimento: descrição + unidade já conhecidas trazem o impacto e o preço da última cotação
+  const fill = (l: Line, p: Partial<Line>) => {
+    const next = { ...l, ...p };
+    const hit = findCat(catalog, next.description, next.measure);
+    set(l.key, { ...p, costItemId: hit?.id ?? null, ...(hit && l.costItemId !== hit.id ? { ...(hit.unitCents != null ? { unit: money(hit.unitCents) } : {}), ...(hit.impact && !next.impact ? { impact: hit.impact } : {}), ...(!next.measure ? { measure: hit.unit } : {}) } : {}) });
   };
+  const onName = (l: Line, v: string) => fill(l, { description: v });
+  const impactSel = (l: Line, i: number, cls: string) => impacts ? (
+    <select aria-label={`${title}: impacta o quê ${i + 1}`} disabled={disabled} value={l.impact ?? ''} onChange={(e) => set(l.key, { impact: (e.target.value || null) as CostImpact | null })}
+      className={clsx('field-input', cls, !l.impact && l.description.trim() && !l.costItemId && 'border-warning text-[#C2610C]')}>
+      <option value="">Impacta o quê?</option>
+      {COST_IMPACTS.filter((x) => x !== 'operacional').map((x) => <option key={x} value={x}>{COST_IMPACT_LABELS[x]}</option>)}
+    </select>
+  ) : null;
   const origin = (l: Line) => { const c = l.costItemId ? catalog.find((x) => x.id === l.costItemId) : null; return !c ? null : c.unitCents === parseMoney(l.unit) ? 'catálogo' : 'alterado'; };
   const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
   const [pasting, setPasting] = useState(false);
@@ -259,12 +276,13 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
   const [view, setView] = useState<'tabela' | 'lista'>(() => { try { return localStorage.getItem('econ-cost-view') === 'lista' ? 'lista' : 'tabela'; } catch { return 'tabela'; } });
   const pickView = (v: 'tabela' | 'lista') => { setView(v); try { localStorage.setItem('econ-cost-view', v); } catch { /* sem armazenamento: vale só nesta tela */ } };
   const lineTotal = (l: Line) => { const one = fromLines([l])[0]; return one && one.unitCents >= 0 && one.qtyMilli > 0 ? costLineTotal(one) : null; };
-  const nameInput = (l: Line, i: number, cls: string) => (
+  const nameInput = (l: Line, i: number, cls: string, overlay = true) => (
     <span className="relative block min-w-0">
-      <Input aria-label={`${title}: descrição ${i + 1}`} className={clsx(cls, origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
-      {origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
+      <Input aria-label={`${title}: descrição ${i + 1}`} title={l.description || undefined} className={clsx(cls, overlay && origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
+      {overlay && origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
     </span>
   );
+  const originTag = (l: Line) => origin(l) && <span className={clsx('block text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>;
   const [wide, setWide] = useState(false);
   // tabela: na coluna da oportunidade cabe sem rolar (colunas fixas); "Ampliar" abre a mesma tabela larga
   const costTable = (big: boolean) => (
@@ -280,8 +298,8 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
           return (
             <tr key={l.key} className="border-t border-line">
               <td className="num px-1.5 py-1 text-xs text-muted">{i + 1}</td>
-              <td className="px-0.5 py-1">{nameInput(l, i, cell)}</td>
-              <td className="px-0.5 py-1"><Input aria-label={`${title}: unidade ${i + 1}`} className={cell} placeholder="un" value={l.measure ?? ''} disabled={disabled} onChange={(e) => set(l.key, { measure: e.target.value.slice(0, 12) || null })} /></td>
+              <td className="px-0.5 py-1">{nameInput(l, i, cell, big)}{impacts && <div className="mt-0.5">{impactSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{!big && originTag(l)}</td>
+              <td className="px-0.5 py-1 align-top"><Input aria-label={`${title}: unidade ${i + 1}`} className={cell} placeholder="un" value={l.measure ?? ''} disabled={disabled} onChange={(e) => fill(l, { measure: e.target.value.slice(0, 12) || null })} /></td>
               <td className="px-0.5 py-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} /></td>
               <td className="px-0.5 py-1"><Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} /></td>
               <td className={clsx('num truncate px-1.5 py-1 text-right text-text', !big && 'text-xs')} title={tot != null ? fmtBRL(tot) : undefined}>{tot != null ? fmtBRL(tot) : '—'}</td>
@@ -299,12 +317,16 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
   const addTable = (table: (string | number | null)[][], from: string) => {
     const r = parseCostTable(table);
     if (r.missing.length) { setMsg({ text: `${from}: não encontrei as colunas ${r.missing.join(', ')}. Use os títulos Descrição, Quantidade e Valor unitário (Unidade e Valor total são opcionais).`, bad: true }); return; }
-    const added: Line[] = r.lines.map((x) => {
-      const hit = catalog.find((c) => c.name.toLowerCase() === x.description.toLowerCase());
-      return { key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? hit?.unit ?? null, costItemId: hit?.id ?? null };
-    });
+    const toLine = (x: (typeof r.lines)[number]): Line => {
+      const hit = findCat(catalog, x.description, x.unit);
+      return { key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? hit?.unit ?? null, impact: x.impact && x.impact !== 'operacional' ? x.impact : hit?.impact ?? null, costItemId: hit?.id ?? null };
+    };
+    // a coluna Frequência manda: o que é da outra frequência vai para a outra lista
+    const mine = r.lines.filter((x) => !x.frequency || x.frequency === frequency || !onOther), other = r.lines.filter((x) => x.frequency && x.frequency !== frequency && onOther);
+    const added = mine.map(toLine);
     setLines([...lines.filter((x) => x.description.trim() || x.unit.trim()), ...added]);
-    setMsg({ text: `${from}: ${added.length} custo(s) incluído(s), total ${fmtBRL(r.lines.reduce((t, x) => t + costLineTotal(x), 0))}${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira e salve.`, bad: r.errors.length > 0 });
+    if (other.length) onOther!(other.map(toLine));
+    setMsg({ text: `${from}: ${added.length} custo(s) incluído(s)${other.length ? ` e ${other.length} enviado(s) para ${frequency === 'unico' ? 'os custos mensais' : 'o investimento'}` : ''}, total ${fmtBRL(mine.reduce((t, x) => t + costLineTotal(x), 0))}${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira e salve.`, bad: r.errors.length > 0 });
   };
   const onFile = async (f: File) => {
     try {
@@ -340,6 +362,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
             return (
               <li key={l.key} className={clsx(cols, 'border-l-2 border-line pl-2')}>
                 <span className="col-span-4 block min-w-0">{nameInput(l, i, 'h-9 w-full')}</span>
+                {impacts && <span className="col-span-4 block">{impactSel(l, i, 'h-8 w-full text-xs')}</span>}
                 <span className="flex items-center gap-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 min-w-0" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />{l.measure && <span className="shrink-0 text-2xs text-muted">{l.measure}</span>}</span>
                 <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
                 <span className="num text-right text-sm text-text">{tot != null ? fmtBRL(tot) : '—'}</span>
@@ -368,7 +391,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
       </Modal>
       <Modal open={pasting} onClose={() => setPasting(false)} title={`Colar do Excel: ${title.toLowerCase()}`} size="lg"
         footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!pasteText.trim()} onClick={() => { addTable(pasteText.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); setPasteText(''); }}>Incluir itens</Button></>}>
-        <p className="mb-2 text-sm text-muted">Copie as linhas da planilha (com ou sem a linha de títulos) e cole aqui. Colunas aceitas: Item, Descrição, Unidade, Quantidade, Valor unitário, Valor total. Sem valor unitário, ele vem do total ÷ quantidade.</p>
+        <p className="mb-2 text-sm text-muted">Copie as linhas da planilha (com ou sem a linha de títulos) e cole aqui. Colunas aceitas: Item, Descrição, Unidade, Quantidade, Valor unitário (ou Custo unit.), Valor total, Frequência do custo (Único ou Mensal) e Impacta o quê? (Material/Equipamento, Serviço/Mão de obra, Custo operacional, Despesa de entrega, Taxa fixa de venda). Sem valor unitário, ele vem do total ÷ quantidade. Item já usado (mesma descrição e unidade) vem classificado.</p>
         <textarea aria-label="Itens colados" rows={10} className="field-input w-full font-mono text-xs" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={'ITEM\tDESCRIÇÃO\tUNIDADE\tQUANTIDADE\tVALOR UNITÁRIO\tVALOR TOTAL\n1\tCabo 01FO\tm\t8400\tR$ 1,50\tR$ 12.600,00'} data-autofocus />
       </Modal>
     </div>
@@ -415,7 +438,7 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
   const toast = useToast();
   const [reason, setReason] = useState<string | null>(null);
   const done = (msg: string) => { setReason(null); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); void qc.invalidateQueries({ queryKey: ['econ-pending'] }); toast({ tone: 'success', message: msg }); };
-  const submit = useMutation({ mutationFn: () => api(`/opportunities/${oppId}/economics/submit`, { method: 'POST', body: {} }), onSuccess: () => done('Enviada para decisão da gestão'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const submit = useMutation({ mutationFn: () => api<{ status: string; autoApproved?: boolean }>(`/opportunities/${oppId}/economics/submit`, { method: 'POST', body: {} }), onSuccess: (r) => done(r.autoApproved ? 'Aprovada automaticamente: VPL positivo, TIR acima da TMA, margem e payback na política' : 'Fora das regras automáticas: enviada para a alçada superior'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const decide = useMutation({
     mutationFn: (body: { decision: 'aprovar' | 'devolver'; reason?: string }) => api(`/opportunities/${oppId}/economics/decision`, { method: 'POST', body }),
     onSuccess: (_r, v) => done(v.decision === 'aprovar' ? 'Viabilidade aprovada' : 'Viabilidade devolvida'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
@@ -455,13 +478,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
   const catalog = catQ.data?.items ?? [];
-  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; price: string } | null>(null);
+  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
     if (q.data?.input && !f) {
       const i = q.data.input;
-      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), price: money(i.priceCents) };
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents) };
       setF(init);
       setBase(formKey(init));
     }
@@ -469,7 +492,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const input = useMemo<EconInput | null>(() => (f ? {
     ...emptyEconInput(), mode: f.mode, termMonths: Number(f.term) || 0, receiveMonth: Number(f.receive) || 0,
     capex: fromLines(f.capex), extraInitialCents: parseMoney(f.extra) ?? -1, opex: fromLines(f.opex),
-    commissionBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), priceCents: f.price.trim() ? parseMoney(f.price) : null,
+    commissionBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
   } : null), [f]);
   const invalid = !input || [input.commissionBp, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector }) : null), [q.data, input, invalid]);
@@ -492,7 +515,11 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const itemsTotal = d.items.reduce((t, i) => t + i.revenueCents, 0);
   const capexTotal = linesTotal(f.capex);
   const opexTotal = linesTotal(f.opex);
-  const customized = [f.commission, f.loss, f.margin].some((v) => v.trim() !== '');
+  const customized = [f.commission, f.loss].some((v) => v.trim() !== '');
+  const teto = d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
+  const mPiso = st.marginTargetBp, mTeto = st.marginMaxBp ?? null, mSug = st.marginSuggestedBp ?? st.marginTargetBp;
+  const mNow = parseBp(f.margin) ?? mSug;
+  const tmaText = st.tmaAnnualBp != null ? `TMA de ${bpText(st.tmaAnnualBp)}% ao ano` : `TMA de ${bpText(st.tmaMonthlyBp)}% ao mês`;
   const shown = (v: string, def: number) => (v.trim() ? v : bpText(def));
   const segLoss = d.publicSector ? st.lossPublicBp : st.lossPrivateBp;
   return (
@@ -537,22 +564,26 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
               : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
+            {f.mode === 'recorrente' && <FormField label="Payback (meses)" htmlFor="ec-pb" hint={`Até ${teto} meses (teto do setor ${d.publicSector ? 'público' : 'privado'}); o investimento é diluído nesse prazo`}><Input id="ec-pb" inputMode="numeric" placeholder={String(teto)} value={f.payback} disabled={dis} invalid={!!f.payback && (Number(f.payback) < 1 || Number(f.payback) > teto)} onChange={(e) => set({ payback: e.target.value.replace(/\D/g, '').slice(0, 3) })} /></FormField>}
+            <FormField label={`Margem de contribuição: ${bpText(mNow)}%`} htmlFor="ec-mar" hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%`}>
+              <input id="ec-mar" type="range" className="w-full accent-[rgb(var(--primary))]" min={mPiso / 100} max={(mTeto ?? Math.min(9_000, mPiso + 5_000)) / 100} step={0.5} value={mNow / 100} disabled={dis} onChange={(e) => set({ margin: String(e.target.value).replace('.', ',') })} />
+            </FormField>
             <FormField label={f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`Total dos produtos: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{shownResult?.suggestedMinCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money(shownResult.suggestedMinCents!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.suggestedMinCents)})</button>}</></FormField>
             </div>
           </div>
         </Step>
 
         <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
-          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} />
+          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={f.mode === 'recorrente' ? (l) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null }))] } : x)) : undefined} />
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <label htmlFor="ec-extra" className="text-sm text-text">Frete, mobilização e taxas (valor único)</label>
+            <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
             <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
           </div>
         </Step>
 
         {f.mode === 'recorrente' && (
           <Step n={3} title="Custos mensais para manter o serviço" hint="Todo mês enquanto o contrato durar: trânsito, link de terceiro, licenças, suporte." total={<>Total <b className="text-ink">{fmtBRL(opexTotal)}</b>/mês</>}>
-            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} />
+            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
           </Step>
         )}
 
@@ -560,16 +591,15 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
           <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2.5">
               <span className="grid h-6 w-6 place-items-center rounded-full bg-surface-2 text-xs font-bold text-muted" aria-hidden>{f.mode === 'recorrente' ? 4 : 3}</span>
-              <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Comissão {shown(f.commission, st.commissionBp)}% · glosa {shown(f.loss, segLoss)}% · margem mínima {shown(f.margin, st.marginTargetBp)}%{customized ? '' : ' — padrão da empresa'}</span></span>
+              <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Comissão {shown(f.commission, st.commissionBp)}% · glosa {shown(f.loss, segLoss)}%{customized ? '' : ' — padrão da empresa'}</span></span>
             </span>
             <span className="text-xs font-semibold text-primary">Alterar</span>
           </summary>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField label="Comissão (%)" htmlFor="ec-com" hint="Sobre o preço"><Input id="ec-com" inputMode="decimal" placeholder={bpText(st.commissionBp)} value={f.commission} disabled={dis} invalid={Number.isNaN(parseBp(f.commission))} onChange={(e) => set({ commission: e.target.value })} /></FormField>
             <FormField label="Perda / glosa (%)" htmlFor="ec-loss" hint="Inadimplência, glosas, descontos"><Input id="ec-loss" inputMode="decimal" placeholder={bpText(segLoss)} value={f.loss} disabled={dis} invalid={Number.isNaN(parseBp(f.loss))} onChange={(e) => set({ loss: e.target.value })} /></FormField>
-            <FormField label="Margem mínima (%)" htmlFor="ec-mar" hint="Abaixo dela a venda sai da política"><Input id="ec-mar" inputMode="decimal" placeholder={bpText(st.marginTargetBp)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin))} onChange={(e) => set({ margin: e.target.value })} /></FormField>
           </div>
-          <p className="mt-2 text-xs text-muted">Em branco vale o padrão da empresa. TMA de {bpText(st.tmaMonthlyBp)}% ao mês · payback máximo de {d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate} meses (esta conta é do setor {d.publicSector ? 'público' : 'privado'}).</p>
+          <p className="mt-2 text-xs text-muted">Em branco vale o padrão da empresa. {tmaText}{st.badDebtBp != null ? ` · inadimplência ${bpText(st.badDebtBp)}%` : ''}{st.inflationAnnualBp != null ? ` · reajuste ${bpText(st.inflationAnnualBp)}% ao ano` : ''}{st.horizonMaxMonths != null ? ` · projeção até ${st.horizonMaxMonths} meses` : ''} · payback máximo de {teto} meses (esta conta é do setor {d.publicSector ? 'público' : 'privado'}).</p>
         </details>
       </div>
 

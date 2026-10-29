@@ -41,15 +41,20 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-1.4/isp-2';
+export const ENGINE_VERSION = 'FINANCE-2.0/isp-3';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
  * Não há valor padrão no código: sem parâmetros vigentes a viabilidade não calcula.
  */
 export type EconSettings = {
-  /** m: margem de contribuição MÍNIMA sobre a receita bruta (abaixo dela a venda sai da política) */ marginTargetBp: number;
-  /** r: TMA mensal */ tmaMonthlyBp: number;
+  /** piso da margem de contribuição (abaixo dele a venda sai da política) */ marginTargetBp: number;
+  /** teto e sugestão da margem que o vendedor escolhe (a sugestão inicia a tela); ausentes em versões antigas */ marginMaxBp?: number | null; marginSuggestedBp?: number | null;
+  /** TMA mensal (derivada da anual nas versões novas) */ tmaMonthlyBp: number;
+  /** TMA anual (custo de capital); a mensal é (1 + anual)^(1/12) − 1 */ tmaAnnualBp?: number | null;
+  /** reajuste anual esperado (IPCA/IGP-M): a receita sobe a partir do 13º mês */ inflationAnnualBp?: number | null;
+  /** horizonte máximo da projeção de caixa (meses) */ horizonMaxMonths?: number | null;
+  /** inadimplência esperada sobre o faturamento (a glosa é por segmento) */ badDebtBp?: number | null;
   /** c: comissão padrão sobre a receita bruta */ commissionBp: number;
   /** g: perda esperada / glosa padrão por segmento */ lossPrivateBp: number; lossPublicBp: number;
   /** contingência sobre o investimento inicial e sobre os custos mensais */ contingencyCapexBp: number; contingencyOpexBp: number;
@@ -66,6 +71,10 @@ export type EconSettings = {
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
   for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Teto da margem', s.marginMaxBp], ['Sugestão de margem', s.marginSuggestedBp], ['TMA anual', s.tmaAnnualBp], ['Inflação anual', s.inflationAnnualBp], ['Inadimplência', s.badDebtBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 100_000)) e.push(`${k} inválida.`);
+  if (s.marginMaxBp != null && s.marginMaxBp < s.marginTargetBp) e.push('O teto da margem precisa ser maior ou igual ao piso.');
+  if (s.marginSuggestedBp != null && (s.marginSuggestedBp < s.marginTargetBp || (s.marginMaxBp != null && s.marginSuggestedBp > s.marginMaxBp))) e.push('A sugestão de margem precisa ficar entre o piso e o teto.');
+  if (s.horizonMaxMonths != null && !(Number.isInteger(s.horizonMaxMonths) && s.horizonMaxMonths >= 1 && s.horizonMaxMonths <= 240)) e.push('Prazo máximo de previsão entre 1 e 240 meses.');
   for (const [k, v] of [['Fator histórico da venda pontual', s.legacyOneTimeX100], ['Fator histórico da recorrente', s.legacyRecurringX100]] as const) if (v != null && (!Number.isInteger(v) || v < 100 || v > 2000)) e.push(`${k} entre ×1 e ×20.`);
   if (!(s.paybackMaxPrivate >= 1 && s.paybackMaxPrivate <= 120) || !(s.paybackMaxPublic >= 1 && s.paybackMaxPublic <= 120)) e.push('Payback máximo entre 1 e 120 meses.');
   return e;
@@ -74,8 +83,14 @@ export function econSettingsErrors(s: EconSettings) {
 export const ECON_MODES = ['recorrente', 'pontual'] as const;
 export type EconMode = (typeof ECON_MODES)[number];
 export const ECON_MODE_LABELS: Record<EconMode, string> = { recorrente: 'Contrato recorrente (mensalidade)', pontual: 'Venda pontual (valor único)' };
+/** "Impacta o quê?" de cada custo da planilha: define onde ele entra no cálculo. */
+export const COST_IMPACTS = ['material', 'servico', 'operacional', 'entrega', 'taxa_venda'] as const;
+export type CostImpact = (typeof COST_IMPACTS)[number];
+export const COST_IMPACT_LABELS: Record<CostImpact, string> = { material: 'Material/Equipamento', servico: 'Serviço/Mão de obra', operacional: 'Custo operacional', entrega: 'Despesa de entrega', taxa_venda: 'Taxa fixa de venda' };
+/** Despesa de entrega e taxa fixa de venda são despesas variáveis em R$: entram no preço, mas fora do investimento (sem contingência). */
+export const isVariableFixed = (impact?: CostImpact | null) => impact === 'entrega' || impact === 'taxa_venda';
 /** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo. */
-export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; costItemId?: string | null; priceId?: string | null; manual?: boolean };
+export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean };
 export type EconInput = {
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
@@ -83,10 +98,11 @@ export type EconInput = {
   /** I: itens de investimento inicial (CAPEX) */ capex: CostLine[];
   /** adicional inicial do CAPEX (frete, projeto, mobilização…) */ extraInitialCents: number;
   /** O: custos operacionais mensais */ opex: CostLine[];
-  /** sobrescritas da negociação; null = padrão da empresa */ commissionBp: number | null; lossBp: number | null; marginTargetBp: number | null;
+  /** sobrescritas da negociação; null = padrão da empresa (margem: a sugestão, limitada ao piso e ao teto) */ commissionBp: number | null; lossBp: number | null; marginTargetBp: number | null;
+  /** payback que o vendedor define (meses), até o teto do segmento; null = o teto */ paybackMonths?: number | null;
   /** P informado; null = itens da oportunidade */ priceCents: number | null;
 };
-export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null });
+export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
 export const costLineTotal = (l: CostLine) => Math.round((l.qtyMilli * l.unitCents) / 1000);
 export function econInputErrors(i: EconInput) {
   const e: string[] = [];
@@ -100,6 +116,8 @@ export function econInputErrors(i: EconInput) {
   for (const [k, v] of [['Comissão', i.commissionBp], ['Perda/glosa', i.lossBp], ['Margem mínima', i.marginTargetBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 10_000)) e.push(`${k} inválida.`);
   if (i.priceCents != null && (!Number.isInteger(i.priceCents) || i.priceCents < 0)) e.push('Preço informado inválido.');
   if (!Number.isInteger(i.extraInitialCents) || i.extraInitialCents < 0) e.push('Adicional inicial inválido.');
+  if (i.paybackMonths != null && !(Number.isInteger(i.paybackMonths) && i.paybackMonths >= 1 && i.paybackMonths <= 240)) e.push('Payback entre 1 e 240 meses.');
+  for (const l of i.capex) if (l.impact && !(COST_IMPACTS as readonly string[]).includes(l.impact)) e.push(`Impacto inválido em ${l.description}.`);
   return e;
 }
 
@@ -152,21 +170,34 @@ export function paybackMonths(flows: number[], r = 0): number | null {
   return null;
 }
 
+/** Valores de um período do desdobramento (mês 1 ou o contrato inteiro). */
+export type EconStatement = { revenue: number; tax: number; commission: number; opex: number; amortization: number; contribution: number; risk: number; overhead: number | null; operating: number | null; incomeTax: number | null; net: number | null };
+
 export type EconResult = {
   engineVersion: string;
   mode: EconMode; publicSector: boolean;
-  /** P = preço informado; sem ele, o total dos produtos; sem produtos, nenhum (não se inventa preço) */
-  revenueCents: number; priceCents: number | null; priceSource: 'itens' | 'informado';
-  rates: { a: number; c: number; g: number; m: number; r: number; b: number };
+  /** P = preço informado; sem ele, o total dos produtos; sem produtos, o preço exato do motor */
+  revenueCents: number; priceCents: number | null; priceSource: 'itens' | 'informado' | 'motor';
+  /**
+   * a tributos ponderados · c comissão · g glosa e inadimplência (risco) · m margem escolhida (entre piso e teto) ·
+   * r TMA mensal · b base líquida de caixa (1 − a − c − g) · (v2) glosa e inadimplência separadas, base do markup e limites da margem
+   */
+  rates: { a: number; c: number; g: number; m: number; r: number; b: number; glosa?: number; badDebt?: number; bMarkup?: number; mMin?: number; mMax?: number | null; inflationMonthly?: number; tmaAnnual?: number | null };
   /** F: tributo fixo, contado uma vez por documento fiscal (por fatura) */
   fixedTaxCents: number;
-  /** I e O já com contingência; as bases e as contingências vêm separadas para o DRE */
+  /** I (investimento) e O (custo mensal) já com contingência; as bases e as contingências vêm separadas */
   initialCents: number; monthlyCostCents: number;
   capexBaseCents: number; capexContingencyCents: number; opexBaseCents: number; opexContingencyCents: number;
-  term: { N: number; Dalvo: number; D: number; d: number };
+  /** (v2) despesas variáveis em R$ de valor único (entrega, taxa fixa de venda): sem contingência; investimento total = I + E */
+  variableFixedCents?: number; investmentCents?: number;
+  /** N meses projetados (vigência limitada ao horizonte máximo) · Dalvo teto de payback · D payback do vendedor · d mês do recebimento */
+  term: { N: number; Dalvo: number; D: number; d: number; termMonths?: number; horizon?: number | null; paybackAsked?: number | null };
   items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; docVersion?: number | null; pending: boolean }[];
   floor: { cashCents: number | null; economicCents: number | null; minCents: number | null };
+  /** preço da margem mínima (piso) e recomendado (preço exato na margem escolhida, nunca abaixo do mínimo) */
   marginPriceCents: number | null; recommendedCents: number | null;
+  /** (v2) preço exato pelo markup divisor na margem escolhida */
+  markupPriceCents?: number | null;
   /** preço em que a margem operacional zera (cobre amortização e despesas fixas); null sem o parâmetro de despesas fixas */
   operatingFloorCents?: number | null;
   /** sugestão de preço mínimo de venda: o maior entre caixa/TMA, margem mínima e margem operacional zero */
@@ -174,22 +205,28 @@ export type EconResult = {
   /** indicadores no preço avaliado (P); paybackMonths = descontado pela TMA (é o que a política usa) */
   kpi: null | { taxCents: number; commissionCents: number; lossCents: number; contributionCents: number; marginPct: number; npvCents: number; irrMonthly: number | null; irrAnnual: number | null; paybackMonths: number | null; simplePaybackMonths: number | null;
     /**
-     * cadeia de margens (por mês na recorrente, na venda na pontual): contribuição → operacional (− amortização do investimento
-     * na vigência − despesas fixas rateadas) → líquida (− IR/CSLL sobre o operacional positivo). null = parâmetro não informado.
+     * cadeia de margens (por mês na recorrente, na venda na pontual): contribuição → operacional → líquida (− IR/CSLL
+     * sobre o operacional positivo). null = parâmetro não informado.
      */
     margins?: { contributionPct: number; amortizationCents: number; overheadCents: number | null; operatingCents: number | null; operatingPct: number | null; incomeTaxCents: number | null; netCents: number | null; netPct: number | null };
+    /** (v2) fluxo do 1º mês, amortização do investimento no payback e ROI */
+    cashMonthlyCents?: number; amortizationCents?: number; roiPct?: number | null;
   };
   cashflow: number[];
+  /** (v2) desdobramento: 1º mês e contrato inteiro (com o reajuste) */
+  statement?: { month: EconStatement; total: EconStatement };
   /** política: margem mínima atingida e payback descontado dentro do limite do segmento */
   marginOk: boolean | null; paybackOk: boolean | null;
   verdict: EconVerdict; withinPolicy: boolean | null; withReservations: boolean; warnings: string[];
+  /** (v2) aprovação automática: VPL > 0, TIR > TMA, payback e margem na política; senão vai para a alçada */
+  autoApproval?: { ok: boolean; checks: { label: string; ok: boolean }[] };
 };
 
 /** Contribuição → operacional → líquida, no mesmo período da contribuição (mês na recorrente). */
-export function marginChain(P: number, contribution: number, amortization: number, st: Pick<EconSettings, 'overheadBp' | 'incomeTaxBp'>) {
+export function marginChain(P: number, contribution: number, amortization: number, st: Pick<EconSettings, 'overheadBp' | 'incomeTaxBp'>, risk = 0) {
   const pct = (v: number) => (v / P) * 100;
   const overhead = st.overheadBp != null ? (P * st.overheadBp) / 10_000 : null;
-  const operating = overhead != null ? contribution - amortization - overhead : null;
+  const operating = overhead != null ? contribution - amortization - risk - overhead : null;
   const tax = operating != null && st.incomeTaxBp != null ? (Math.max(0, operating) * st.incomeTaxBp) / 10_000 : null;
   const net = operating != null && tax != null ? operating - tax : null;
   const r0 = (v: number | null) => (v == null ? null : Math.round(v));
@@ -197,19 +234,33 @@ export function marginChain(P: number, contribution: number, amortization: numbe
 }
 
 const round = (v: number | null) => (v == null || !Number.isFinite(v) ? null : Math.round(v));
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+/** TMA mensal: da anual quando informada, senão a mensal das versões antigas. */
+export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'>) => (st.tmaAnnualBp != null ? (1 + st.tmaAnnualBp / 10_000) ** (1 / 12) - 1 : st.tmaMonthlyBp / 10_000);
 
+/**
+ * Motor financeiro (FINANCE-2.0), conforme a especificação do motor:
+ * 1. entradas: investimento (com contingência), despesas variáveis em R$, custo mensal, tributos ponderados por item;
+ * 2. preço exato pelo markup divisor: (custos em R$) ÷ (1 − tributos − despesas variáveis − margem), com o investimento
+ *    amortizado no payback definido pelo vendedor (até o teto do segmento) e a margem entre o piso e o teto;
+ * 3. fluxo de caixa no horizonte (vigência limitada ao prazo máximo): receita reajustada após o 12º mês, menos glosa,
+ *    inadimplência, tributos, comissão e custos; VPL e payback pela TMA (anual → mensal), TIR e ROI;
+ * 4. decisão: preço mínimo, margem e payback; aprovação automática quando VPL > 0 e TIR > TMA, senão alçada.
+ */
 export function financeEngine(args: { input: EconInput; items: EconItem[]; settings: EconSettings; publicSector: boolean }): EconResult {
   const { input: inp, settings: st, publicSector } = args;
   const warnings: string[] = [];
   const bp = (v: number) => v / 10_000;
-  // 1. entradas & escopo (contingência sobre investimento e custo mensal)
+  const rec = inp.mode === 'recorrente';
+  // 1. entradas: investimento com contingência; entrega e taxa fixa de venda sem contingência
   const revenue = args.items.reduce((s, i) => s + Math.max(0, i.revenueCents), 0);
-  const capexBase = inp.capex.reduce((s, l) => s + costLineTotal(l), 0) + inp.extraInitialCents;
-  const opexBase = inp.mode === 'recorrente' ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
+  const capexBase = inp.capex.filter((l) => !isVariableFixed(l.impact)).reduce((s, l) => s + costLineTotal(l), 0);
+  const E = inp.capex.filter((l) => isVariableFixed(l.impact)).reduce((s, l) => s + costLineTotal(l), 0) + inp.extraInitialCents;
+  const opexBase = rec ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
   const capexCont = capexBase * bp(st.contingencyCapexBp), opexCont = opexBase * bp(st.contingencyOpexBp);
-  const I = capexBase + capexCont, O = opexBase + opexCont;
-  if (inp.mode === 'pontual' && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
-  // 2. resolução fiscal por item e ponderação pela receita; tributo fixo uma vez por documento (fatura)
+  const I = capexBase + capexCont, O = opexBase + opexCont, Inv = I + E;
+  if (!rec && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
+  // tributos por item, ponderados pela receita; tributo fixo uma vez por documento (fatura)
   const n = args.items.length;
   const items = args.items.map((i) => {
     const w = revenue > 0 ? Math.max(0, i.revenueCents) / revenue : n ? 1 / n : 0;
@@ -221,63 +272,112 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   args.items.forEach((i, k) => { if (i.doc) perDoc.set(i.doc.id ?? `item-${k}`, i.doc.fixedCents); });
   const F = [...perDoc.values()].reduce((s, v) => s + v, 0);
   const pendingItems = items.filter((i) => i.pending);
-  if (!n) warnings.push('Sem produtos na oportunidade: sem tributos por item e sem preço pelos itens.');
+  if (!n) warnings.push('Sem produtos na oportunidade: sem tributos por item; o preço avaliado é o preço exato do motor.');
   if (pendingItems.length) warnings.push(`${pendingItems.length} item(ns) sem documento fiscal ou sem tributos vigentes (${pendingItems.slice(0, 3).map((i) => i.description).join(', ')}${pendingItems.length > 3 ? '…' : ''}): calculado sem esses tributos.`);
+  // parâmetros
   const c = bp(inp.commissionBp ?? st.commissionBp);
-  const g = bp(inp.lossBp ?? (publicSector ? st.lossPublicBp : st.lossPrivateBp));
-  const m = bp(inp.marginTargetBp ?? st.marginTargetBp);
-  const r = bp(st.tmaMonthlyBp);
-  const b = 1 - a - c - g;
+  const glosa = bp(inp.lossBp ?? (publicSector ? st.lossPublicBp : st.lossPrivateBp));
+  const badDebt = st.badDebtBp != null ? bp(st.badDebtBp) : 0;
+  if (st.badDebtBp == null) warnings.push('Inadimplência não informada em Configurações → Viabilidade: só a glosa entra no risco.');
+  const g = glosa + badDebt;
+  const mMin = bp(st.marginTargetBp), mMax = st.marginMaxBp != null ? bp(st.marginMaxBp) : null;
+  const mAsk = inp.marginTargetBp != null ? bp(inp.marginTargetBp) : bp(st.marginSuggestedBp ?? st.marginTargetBp);
+  const m = clamp(mAsk, mMin, mMax ?? 1);
+  if (inp.marginTargetBp != null && m !== mAsk) warnings.push(`Margem pedida (${(mAsk * 100).toLocaleString('pt-BR')}%) fora dos limites da Direção: ajustada para ${(m * 100).toLocaleString('pt-BR')}%.`);
+  const r = monthlyTma(st);
+  const inflM = st.inflationAnnualBp != null ? (1 + bp(st.inflationAnnualBp)) ** (1 / 12) - 1 : 0;
   const Dalvo = publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
-  const N = inp.mode === 'recorrente' ? inp.termMonths : 0;
-  const D = inp.mode === 'recorrente' ? Math.min(N, Dalvo) : 0;
-  const d = inp.mode === 'pontual' ? inp.receiveMonth : 0;
+  const horizon = st.horizonMaxMonths ?? null;
+  const N = rec ? Math.min(inp.termMonths, horizon ?? inp.termMonths) : 0;
+  if (rec && horizon != null && inp.termMonths > horizon) warnings.push(`Vigência de ${inp.termMonths} meses acima do prazo máximo de previsão: a projeção vai até ${horizon} meses.`);
+  const pbAsk = inp.paybackMonths ?? null;
+  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, Dalvo, N || 1)) : 0;
+  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback pedido (${pbAsk} meses) acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): ajustado para ${Math.min(Dalvo, N)}.`);
+  else if (rec && (pbAsk ?? Dalvo) > N && Inv > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
+  const d = rec ? 0 : inp.receiveMonth;
 
-  // 3. piso mínimo e 4. preço pela margem mínima
-  let cash: number | null = null, eco: number | null = null, marginPrice: number | null = null;
+  // 2. preço: pisos de caixa (com o risco) e preço exato pelo markup divisor (tributos, comissão e margem)
+  const b = 1 - a - c - g, bMk = 1 - a - c;
+  const costR = rec ? O + F + Inv / D : Inv + F; // numerador em R$ do período
+  let cash: number | null = null, eco: number | null = null;
   if (b > 0) {
-    if (inp.mode === 'pontual') {
-      cash = (I + F) / b;
-      eco = (I * (1 + r) ** d + F) / b;
-      marginPrice = b - m > 0 ? (I + F) / (b - m) : null;
-    } else {
-      cash = (O + F + (D ? I / D : 0)) / b;
-      const A = annuityFactor(r, D);
-      eco = (O + F + (A ? I / A : 0)) / b;
-      marginPrice = b - m > 0 ? (O + F) / (b - m) : null;
-    }
-    if (marginPrice === null) warnings.push('A margem mínima é maior que a base líquida: não há preço que entregue essa margem.');
-  } else warnings.push('Tributos, comissão e perdas somam 100% ou mais da receita: nenhum preço cobre os custos.');
+    if (rec) { cash = costR / b; const A = annuityFactor(r, D); eco = (O + F + (A ? Inv / A : 0)) / b; }
+    else { cash = costR / b; eco = (Inv * (1 + r) ** d + F) / b; }
+  } else warnings.push('Tributos, comissão, glosa e inadimplência somam 100% ou mais da receita: nenhum preço cobre os custos.');
+  const markupAt = (x: number) => (bMk - x > 0 ? costR / (bMk - x) : null);
+  const marginPrice = markupAt(mMin), markupPrice = markupAt(m);
+  if (b > 0 && markupPrice === null) warnings.push('A margem escolhida é maior que a base do markup: não há preço que entregue essa margem.');
   const minP = cash !== null && eco !== null ? Math.max(cash, eco) : null;
-  const recP = minP !== null && marginPrice !== null ? Math.max(minP, marginPrice) : null;
-  // margem operacional zero: P·(b − o) = custos fixos do período (O + F + amortização; na pontual, I + F)
+  const recP = minP !== null && markupPrice !== null ? Math.max(minP, markupPrice) : markupPrice;
   const o = st.overheadBp != null ? bp(st.overheadBp) : null;
-  const opFloor = o !== null && b - o > 0 ? (inp.mode === 'pontual' ? I + F : O + F + (N ? I / N : 0)) / (b - o) : null;
-  const suggested = [minP, marginPrice, opFloor].some((v) => v !== null) ? Math.max(...([minP, marginPrice, opFloor].filter((v) => v !== null) as number[])) : null;
+  const opFloor = o !== null && bMk - g - o > 0 ? costR / (bMk - g - o) : null;
+  const floors = [minP, marginPrice, opFloor].filter((v): v is number => v !== null);
+  const suggested = floors.length ? Math.max(...floors) : null;
 
-  // 5. preço avaliado (informado, senão o dos produtos) e indicadores
-  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : 'itens';
-  const P = inp.priceCents ?? (revenue > 0 ? revenue : null);
+  // 3. preço avaliado (informado; senão o dos produtos; senão o preço exato) e fluxo de caixa no horizonte
+  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : revenue > 0 ? 'itens' : 'motor';
+  const P0 = inp.priceCents ?? (revenue > 0 ? revenue : recP);
+  const P = P0 != null && Number.isFinite(P0) ? P0 : null;
   let kpi: EconResult['kpi'] = null;
   let flows: number[] = [];
+  let statement: EconResult['statement'];
   if (P != null && P > 0) {
-    const T = P * a + F, comm = c * P, loss = g * P;
-    const contribution = P - T - comm - loss - O;
-    if (inp.mode === 'recorrente') flows = [-I, ...Array.from({ length: N }, () => contribution)];
-    else { flows = Array.from({ length: d + 1 }, () => 0); flows[0] = -I; flows[d] = flows[d]! + contribution; }
+    const T = P * a + F, comm = c * P, risk = g * P;
+    const amort = rec ? Inv / D : Inv;
+    const MC = P - T - comm - (rec ? O : 0) - amort; // margem de contribuição (precificação)
+    const cash1 = P - risk - T - comm - (rec ? O : 0);
+    const tot = { revenue: 0, tax: 0, commission: 0, risk: 0 };
+    if (rec) {
+      flows = [-Inv];
+      for (let t = 1; t <= N; t++) {
+        const Pt = P * (1 + inflM) ** Math.max(0, t - 12);
+        const Tt = Pt * a + F, ct = c * Pt, rt = g * Pt;
+        flows.push(Pt - rt - Tt - ct - O);
+        tot.revenue += Pt; tot.tax += Tt; tot.commission += ct; tot.risk += rt;
+      }
+    } else {
+      flows = Array.from({ length: d + 1 }, () => 0); flows[0] = -Inv; flows[d] = flows[d]! + cash1;
+      Object.assign(tot, { revenue: P, tax: T, commission: comm, risk });
+    }
     const ir = irr(flows);
+    const inflow = flows.slice(1).reduce((s, x) => s + x, 0);
+    const chain = marginChain(P, MC + amort, amort, st, risk);
+    const periods = rec ? N : 1;
+    const totContribution = tot.revenue - tot.tax - tot.commission - (rec ? O * N : 0) - Inv;
+    const totOverhead = o != null ? tot.revenue * o : null;
+    const totOperating = totOverhead != null ? totContribution - tot.risk - totOverhead : null;
+    // IR/CSLL mês a mês sobre o operacional positivo (com o reajuste, a base muda)
+    let totTax: number | null = null;
+    if (totOperating != null && st.incomeTaxBp != null) {
+      totTax = 0;
+      for (let t = 1; t <= periods; t++) {
+        const Pt = rec ? P * (1 + inflM) ** Math.max(0, t - 12) : P;
+        const opT = Pt - (Pt * a + F) - c * Pt - (rec ? O + (t <= D ? Inv / D : 0) : Inv) - g * Pt - Pt * o!;
+        totTax += Math.max(0, opT) * bp(st.incomeTaxBp);
+      }
+    }
+    const R = (v: number) => Math.round(v);
+    const R0 = (v: number | null) => (v == null ? null : Math.round(v));
+    statement = {
+      month: { revenue: R(P), tax: R(T), commission: R(comm), opex: R(rec ? O : 0), amortization: R(amort), contribution: R(MC), risk: R(risk), overhead: chain.overheadCents, operating: chain.operatingCents, incomeTax: chain.incomeTaxCents, net: chain.netCents },
+      total: { revenue: R(tot.revenue), tax: R(tot.tax), commission: R(tot.commission), opex: R(rec ? O * N : 0), amortization: R(Inv), contribution: R(totContribution), risk: R(tot.risk), overhead: R0(totOverhead), operating: R0(totOperating), incomeTax: R0(totTax), net: totOperating != null && totTax != null ? R(totOperating - totTax) : null },
+    };
     kpi = {
-      taxCents: Math.round(T), commissionCents: Math.round(comm), lossCents: Math.round(loss), contributionCents: Math.round(contribution),
-      marginPct: (inp.mode === 'pontual' ? (contribution - I) / P : contribution / P) * 100,
-      npvCents: Math.round(npv(flows, r)), irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1,
+      taxCents: R(T), commissionCents: R(comm), lossCents: R(risk), contributionCents: R(MC),
+      marginPct: (MC / P) * 100,
+      npvCents: R(npv(flows, r)), irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1,
       paybackMonths: paybackMonths(flows, r), simplePaybackMonths: paybackMonths(flows),
-      margins: marginChain(P, contribution, inp.mode === 'recorrente' ? (N ? I / N : I) : I, st),
+      margins: { ...chain, contributionPct: (MC / P) * 100 },
+      cashMonthlyCents: R(cash1), amortizationCents: R(amort), roiPct: Inv > 0 ? ((inflow - Inv) / Inv) * 100 : null,
     };
   }
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
+  if (st.inflationAnnualBp == null && rec && N > 12) warnings.push('Inflação anual não informada: a receita não é reajustada depois do 12º mês.');
+
+  // 4. decisão
   const pb = kpi?.paybackMonths ?? null;
-  const paybackOk = inp.mode === 'recorrente' && kpi ? I === 0 || (pb !== null && pb <= Dalvo) : null;
-  const marginOk = kpi ? kpi.marginPct >= m * 100 - 1e-9 : null;
+  const paybackOk = rec && kpi ? Inv === 0 || (pb !== null && pb <= Dalvo) : null;
+  const marginOk = kpi ? kpi.marginPct >= mMin * 100 - 1e-9 : null;
   const withinPolicy = kpi ? paybackOk !== false && marginOk === true : null;
   let verdict: EconVerdict;
   if (b <= 0) verdict = 'inviavel';
@@ -286,28 +386,45 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   else if (paybackOk === false) verdict = 'fora_politica';
   else if (!marginOk) verdict = 'abaixo_recomendado';
   else verdict = 'viavel';
-  if (inp.mode === 'recorrente' && N < Dalvo && I > 0) warnings.push(`Vigência de ${N} meses menor que o limite de payback (${Dalvo}): o investimento é amortizado na vigência.`);
+  const withReservations = pendingItems.length > 0 || !n;
+  const irrOk = kpi ? (kpi.irrMonthly == null ? Inv === 0 && kpi.npvCents > 0 : kpi.irrMonthly > r) : false;
+  const checks = [
+    { label: 'VPL positivo', ok: !!kpi && kpi.npvCents > 0 },
+    { label: 'TIR acima da TMA', ok: irrOk },
+    { label: rec ? 'Payback descontado dentro do teto' : 'Preço cobre o investimento', ok: rec ? paybackOk === true : verdict !== 'abaixo_minimo' },
+    { label: 'Margem no piso ou acima', ok: marginOk === true },
+    { label: 'Preço no mínimo ou acima', ok: verdict !== 'abaixo_minimo' && verdict !== 'inviavel' && verdict !== 'sem_preco' },
+    { label: 'Tributos de todos os produtos', ok: !withReservations },
+  ];
 
   return {
     engineVersion: ENGINE_VERSION,
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
-    rates: { a, c, g, m, r, b }, fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
+    rates: { a, c, g, m, r, b, glosa, badDebt, bMarkup: bMk, mMin, mMax, inflationMonthly: inflM, tmaAnnual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null },
+    fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
     capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
-    term: { N, Dalvo, D, d }, items,
+    variableFixedCents: E, investmentCents: Math.round(Inv),
+    term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items,
     floor: { cashCents: round(cash), economicCents: round(eco), minCents: round(minP) },
-    marginPriceCents: round(marginPrice), recommendedCents: round(recP), operatingFloorCents: round(opFloor), suggestedMinCents: round(suggested), kpi, cashflow: flows.map(Math.round),
-    marginOk, paybackOk, verdict, withinPolicy, withReservations: pendingItems.length > 0 || !n, warnings,
+    marginPriceCents: round(marginPrice), recommendedCents: round(recP), markupPriceCents: round(markupPrice), operatingFloorCents: round(opFloor), suggestedMinCents: round(suggested),
+    kpi, cashflow: flows.map(Math.round), statement,
+    marginOk, paybackOk, verdict, withinPolicy, withReservations, warnings,
+    autoApproval: { ok: checks.every((x) => x.ok), checks },
   };
 }
 
 const norm = (v: unknown) => String(v ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
 const COST_COLS = {
-  description: ['descricao', 'produto', 'servico', 'produto/servico', 'material', 'custo', 'item'],
-  unit: ['unidade', 'medida', 'un', 'und'],
-  qty: ['quantidade', 'qtd', 'qtde', 'quant'],
-  unitValue: ['valor unitario', 'valor unit', 'valor unit.', 'preco unitario', 'preco', 'valor', 'custo unitario'],
+  description: ['descricao', 'item / descricao', 'item/descricao', 'produto', 'servico', 'produto/servico', 'material', 'custo', 'item'],
+  unit: ['unidade', 'unid.', 'unid', 'medida', 'un', 'und'],
+  qty: ['quantidade', 'qtd', 'qtd.', 'qtde', 'qtde.', 'quant', 'quant.'],
+  unitValue: ['valor unitario', 'valor unit', 'valor unit.', 'preco unitario', 'preco', 'valor', 'custo unitario', 'custo unit.', 'custo unit'],
   total: ['valor total', 'total'],
+  frequency: ['frequencia do custo', 'frequencia', 'periodicidade', 'recorrencia'],
+  impact: ['impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
 };
+const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
+const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
 /** Quantidade de planilha ou digitada: "8400", "8.400" (milhar), "2,5", 21 → milésimos. */
 export function costQty(raw: unknown): number | null {
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 1000) : null;
@@ -330,26 +447,27 @@ function costMoney(raw: unknown): number | null {
  * Item, Descrição, Unidade, Quantidade, Valor unitário, Valor total — ou Descrição, Quantidade, Valor unitário.
  * Sem valor unitário, usa Valor total ÷ Quantidade. Linhas recusadas voltam com o motivo; nada é inventado.
  */
-export function parseCostTable(rows: (string | number | null | undefined)[][]): { lines: CostLine[]; errors: { row: number; message: string }[]; missing: string[] } {
+export function parseCostTable(rows: (string | number | null | undefined)[][]): { lines: (CostLine & { frequency?: 'unico' | 'mensal' | null })[]; errors: { row: number; message: string }[]; missing: string[] } {
   // guarda o número da linha na planilha (as linhas em branco contam)
   const clean = rows.map((r, i) => ({ r, n: i + 1 })).filter(({ r }) => r.some((c) => String(c ?? '').trim()));
   if (!clean.length) return { lines: [], errors: [], missing: ['Descrição', 'Quantidade', 'Valor unitário'] };
   const head = clean[0]!.r.map(norm);
   const find = (names: string[]) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
-  let idx = { description: find(COST_COLS.description.filter((x) => x !== 'item')), unit: find(COST_COLS.unit), qty: find(COST_COLS.qty), unitValue: find(COST_COLS.unitValue), total: find(COST_COLS.total) };
+  let idx = { description: find(COST_COLS.description.filter((x) => x !== 'item')), unit: find(COST_COLS.unit), qty: find(COST_COLS.qty), unitValue: find(COST_COLS.unitValue), total: find(COST_COLS.total), frequency: find(COST_COLS.frequency), impact: find(COST_COLS.impact) };
   if (idx.description < 0) idx.description = find(['item']);
   let body = clean.slice(1);
   if (idx.description < 0 || idx.qty < 0 || (idx.unitValue < 0 && idx.total < 0)) {
     // sem títulos: pela posição
     const w = clean[0]!.r.length;
-    if (w >= 6) idx = { description: 1, unit: 2, qty: 3, unitValue: 4, total: 5 };
-    else if (w === 5) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: 4 };
-    else if (w === 4) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: -1 };
-    else if (w === 3) idx = { description: 0, unit: -1, qty: 1, unitValue: 2, total: -1 };
+    const none = { frequency: -1, impact: -1 };
+    if (w >= 6) idx = { description: 1, unit: 2, qty: 3, unitValue: 4, total: 5, ...none };
+    else if (w === 5) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: 4, ...none };
+    else if (w === 4) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: -1, ...none };
+    else if (w === 3) idx = { description: 0, unit: -1, qty: 1, unitValue: 2, total: -1, ...none };
     else return { lines: [], errors: [], missing: ['Descrição', 'Quantidade', 'Valor unitário'] };
     body = clean;
   }
-  const lines: CostLine[] = [];
+  const lines: (CostLine & { frequency?: 'unico' | 'mensal' | null })[] = [];
   const errors: { row: number; message: string }[] = [];
   body.forEach(({ r, n: row }) => {
     const description = String(r[idx.description] ?? '').trim();
@@ -360,7 +478,8 @@ export function parseCostTable(rows: (string | number | null | undefined)[][]): 
     if (qtyMilli == null) return errors.push({ row, message: `quantidade inválida em ${description}` });
     if (unitCents == null) return errors.push({ row, message: `valor inválido em ${description}` });
     const unit = idx.unit >= 0 ? String(r[idx.unit] ?? '').trim().slice(0, 12) || null : null;
-    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit });
+    const frequency = idx.frequency >= 0 ? freqOf(r[idx.frequency]) : null, impact = idx.impact >= 0 ? impactOf(r[idx.impact]) : null;
+    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit, ...(frequency ? { frequency } : {}), ...(impact ? { impact } : {}) });
   });
   return { lines, errors, missing: [] };
 }
@@ -371,7 +490,45 @@ export type DreRow = { sign: '+' | '−' | '='; label: string; month: number | n
  * DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro.
  * Mesma conta na tela e na exportação. `fmt` formata o tributo fixo no rótulo.
  */
+/**
+ * Desdobramento financeiro: o que entra (+), o que sai (−) e os resultados (=), no 1º mês e no contrato inteiro
+ * (com o reajuste). Cálculos de versões anteriores do motor usam o desdobramento da época.
+ */
 export function econDre(r: EconResult, fmt: (c: number) => string): DreRow[] {
+  const s = r.statement;
+  if (!s || !r.kpi || r.priceCents == null) return econDreV1(r, fmt);
+  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
+  const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
+  const per = (x: number | null, P = r.priceCents!) => (x == null ? '' : `${pc((x / P) * 100, 1)} da receita`);
+  const M = (v: number | null) => (rec ? v : null);
+  const opexBase = r.opexBaseCents, opexCont = r.opexContingencyCents;
+  const rows: DreRow[] = [
+    { sign: '+', label: 'Receita bruta', month: M(s.month.revenue), total: s.total.revenue, note: rec && r.rates.inflationMonthly ? 'reajuste após o 12º mês' : undefined },
+    { sign: '−', label: `Tributos (${pc(r.rates.a * 100)}${r.fixedTaxCents ? ` + ${fmt(r.fixedTaxCents)}` : ''})`, month: M(-s.month.tax), total: -s.total.tax },
+    { sign: '−', label: `Comissão (${pc(r.rates.c * 100)})`, month: M(-s.month.commission), total: -s.total.commission },
+    ...(rec && opexBase > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -opexBase, total: -opexBase * N }] : []),
+    ...(rec && opexCont > 0 ? [{ sign: '−' as const, label: 'Contingência dos custos mensais', month: -opexCont, total: -opexCont * N }] : []),
+    ...((r.investmentCents ?? 0) > 0 ? [{ sign: '−' as const, label: rec ? `Investimento amortizado no payback (${fmt(r.investmentCents!)} em ${r.term.D} meses)` : 'Investimento e despesas de entrega', month: M(-s.month.amortization), total: -s.total.amortization }] : []),
+    { sign: '=', label: 'Margem de contribuição', month: M(s.month.contribution), total: s.total.contribution, strong: true, note: per(s.month.contribution) },
+    ...(s.month.risk > 0 ? [{ sign: '−' as const, label: `Glosa e inadimplência (${pc(r.rates.g * 100)})`, month: M(-s.month.risk), total: -s.total.risk }] : []),
+  ];
+  if (s.month.operating != null && s.total.operating != null) {
+    rows.push(
+      { sign: '−', label: 'Despesas fixas rateadas', month: M(-(s.month.overhead ?? 0)), total: -(s.total.overhead ?? 0) },
+      { sign: '=', label: 'Margem operacional', month: M(s.month.operating), total: s.total.operating, strong: true, note: per(s.month.operating) },
+    );
+    if (s.month.incomeTax != null && s.total.incomeTax != null && s.total.net != null) rows.push(
+      { sign: '−', label: 'IR/CSLL', month: M(-s.month.incomeTax), total: -s.total.incomeTax },
+      { sign: '=', label: 'Margem líquida', month: M(s.month.net), total: s.total.net, strong: true, tone: true, note: `${per(s.month.net)} · ${s.total.net >= 0 ? 'lucro' : 'prejuízo'}` },
+    );
+  } else {
+    const res = s.total.contribution - s.total.risk;
+    rows.push({ sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: res, strong: true, tone: true, note: `${res >= 0 ? 'lucro' : 'prejuízo'} · sem despesas fixas e IR/CSLL (não informados)` });
+  }
+  return rows;
+}
+
+function econDreV1(r: EconResult, fmt: (c: number) => string): DreRow[] {
   const k = r.kpi;
   if (!k || r.priceCents == null) return [];
   const P = r.priceCents;
@@ -421,6 +578,13 @@ export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) 
     ? (k.simplePaybackMonths != null && k.simplePaybackMonths > 0
       ? `com a TMA de ${tma}% ao mês o investimento não se paga na vigência (sem descontar a TMA, voltaria em ${k.simplePaybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses)`
       : 'não se paga na vigência') : k.paybackMonths === 0 ? 'sem investimento a recuperar' : `o investimento volta em ${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses, já descontada a TMA (limite ${rs.term.Dalvo})`;
+  if (rs.statement) {
+    const pctm = k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+    const sobra2 = rs.mode === 'recorrente'
+      ? `a margem de contribuição é ${pctm}% (${fmt(k.contributionCents)} por mês, já com o investimento amortizado em ${rs.term.D} meses) e o caixa do mês, depois de glosa e inadimplência, é ${fmt(k.cashMonthlyCents ?? k.contributionCents)}`
+      : `a margem de contribuição é ${pctm}% (${fmt(k.contributionCents)}) depois de tributos, comissão e investimento`;
+    return `Com ${fmt(rs.priceCents)}${per}, ${sobra2}; ${pb}.${rs.autoApproval?.ok ? ' Dentro das regras de aprovação automática.' : ''}`;
+  }
   const sobra = rs.mode === 'recorrente' ? `sobram ${fmt(k.contributionCents)} por mês (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e custos` : `o resultado é ${fmt(k.contributionCents - rs.initialCents)} (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e investimento`;
   return `Com ${fmt(rs.priceCents)}${per}, ${sobra}; ${pb}.`;
 }
@@ -455,6 +619,7 @@ export function consolidateCashflow(entries: { startMonth: string; flows: number
 // ------------------------------------------------------------------ memória de cálculo
 
 export type MemoryRow = { label: string; formula?: string; value: string; strong?: boolean; ok?: boolean | null };
+export type MemoryOpts = { legacy?: { oneTimeX100?: number | null; recurringX100?: number | null } };
 export type MemoryStep = { key: 'entradas' | 'preco' | 'historico' | 'fluxo' | 'decisao'; title: string; desc: string; rows: MemoryRow[]; note?: string };
 
 /** Preço → margem de contribuição no mesmo modelo do motor (usado no comparativo histórico). */
@@ -468,7 +633,98 @@ function marginAt(r: EconResult, P: number) {
  * com cada fórmula e os números que entraram nela. Só lê o resultado: nada é recalculado na regra, e a mesma função
  * alimenta a tela, o CSV e o PDF.
  */
-export function econMemory(r: EconResult, fmt: (c: number) => string, opts: { legacy?: { oneTimeX100?: number | null; recurringX100?: number | null } } = {}): MemoryStep[] {
+/** Memória de cálculo (FINANCE-2.0): passos com fórmula e números; cálculos anteriores usam a memória da época. */
+export function econMemory(r: EconResult, fmt: (c: number) => string, opts: MemoryOpts = {}): MemoryStep[] {
+  if (!r.statement) return econMemoryV1(r, fmt, opts);
+  const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
+  const num = (v: number, d = 2) => v.toLocaleString('pt-BR', { maximumFractionDigits: d });
+  const money = (c: number | null | undefined) => (c == null ? '—' : c < 0 ? `-${fmt(-c)}` : fmt(c));
+  const rec = r.mode === 'recorrente';
+  const { a, c, g, m, b } = r.rates, rt = r.rates.r;
+  const glosa = r.rates.glosa ?? g, bad = r.rates.badDebt ?? 0, bMk = r.rates.bMarkup ?? 1 - a - c, mMin = r.rates.mMin ?? m;
+  const I = r.initialCents, O = r.monthlyCostCents, F = r.fixedTaxCents, E = r.variableFixedCents ?? 0, Inv = r.investmentCents ?? I;
+  const { N, D, d, Dalvo } = r.term;
+  const k = r.kpi;
+  const steps: MemoryStep[] = [];
+  const taxParts = r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
+  steps.push({
+    key: 'entradas', title: 'Entradas', desc: 'Planilha de custos classificada (frequência e impacto), tributos do documento fiscal e parâmetros da Direção.',
+    rows: [
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
+      ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
+      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `peso na receita × alíquota: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
+      ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
+      { label: 'Comissão (c)', value: pc(c * 100) },
+      { label: `Glosa, setor ${r.publicSector ? 'público' : 'privado'}`, value: pc(glosa * 100) },
+      { label: 'Inadimplência', value: pc(bad * 100) },
+      { label: 'Margem de contribuição (m)', formula: `escolhida entre o piso ${pc(mMin * 100)}${r.rates.mMax != null ? ` e o teto ${pc(r.rates.mMax * 100)}` : ''}`, value: pc(m * 100) },
+      { label: 'TMA (k)', formula: r.rates.tmaAnnual != null ? `(1 + ${pc(r.rates.tmaAnnual * 100)})^(1/12) - 1` : 'mensal informada', value: `${pc(rt * 100, 3)} a.m.` },
+      ...(rec && r.rates.inflationMonthly ? [{ label: 'Reajuste (inflação)', formula: `${pc(((1 + r.rates.inflationMonthly) ** 12 - 1) * 100)} ao ano, aplicado a partir do 13º mês`, value: `${pc(r.rates.inflationMonthly * 100, 3)} a.m.` }] : []),
+      rec ? { label: 'Prazos', formula: `vigência ${r.term.termMonths ?? N} meses${r.term.horizon != null ? `, prazo máximo de previsão ${r.term.horizon}` : ''} · payback ${r.term.paybackAsked ?? 'no teto'} (teto ${Dalvo})`, value: `N = ${N} · D = ${D}` }
+        : { label: 'Recebimento', value: d ? `mês ${d}` : 'à vista' },
+    ],
+  });
+  const costTxt = rec ? `I + E ÷ D + O + F = ${money(Inv)} ÷ ${D} + ${money(O)} + ${money(F)}` : `I + E + F = ${money(Inv)} + ${money(F)}`;
+  const prices: MemoryRow[] = [
+    ...(rec ? [{ label: 'Custo mensal amortizado (C)', formula: `(I + E) ÷ payback + O = ${money(Inv)} ÷ ${D} + ${money(O)}`, value: money(Inv / D + O) }] : []),
+    { label: 'Preço exato (markup divisor)', formula: `(${costTxt}) ÷ (1 - a - c - m) = ÷ (1 - ${pc(a * 100)} - ${pc(c * 100)} - ${pc(m * 100)})`, value: money(r.markupPriceCents), strong: true },
+    { label: 'Preço na margem mínima (piso)', formula: `mesmo numerador ÷ (1 - a - c - ${pc(mMin * 100)})`, value: money(r.marginPriceCents) },
+    { label: 'Base líquida de caixa (b)', formula: `1 - a - c - glosa - inadimplência = ${pc(b * 100)}`, value: pc(b * 100) },
+    { label: 'Preço que cobre o caixa', formula: `(${rec ? 'C + F' : 'I + E + F'}) ÷ b`, value: money(r.floor.cashCents) },
+    { label: 'Preço que cobre a TMA', formula: rec ? `(O + F + (I + E) ÷ A) ÷ b, A = anuidade de ${D} meses a ${pc(rt * 100, 3)} = ${num(annuityFactor(rt, D), 4)}` : `((I + E) × (1 + k)^${d} + F) ÷ b`, value: money(r.floor.economicCents) },
+    { label: 'Preço mínimo', formula: 'maior dos dois', value: money(r.floor.minCents), strong: true },
+    ...(r.operatingFloorCents != null ? [{ label: 'Preço da margem operacional zero', formula: '(mesmo numerador) ÷ (1 - a - c - glosa - inadimplência - despesas fixas)', value: money(r.operatingFloorCents) }] : []),
+    ...(r.suggestedMinCents != null ? [{ label: 'Preço mínimo sugerido', formula: 'maior entre o mínimo, o do piso de margem e o da margem operacional zero', value: money(r.suggestedMinCents), strong: true }] : []),
+    { label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : r.priceSource === 'itens' ? 'total dos produtos' : 'preço exato do motor', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true },
+  ];
+  void bMk;
+  steps.push({ key: 'preco', title: 'Precificação exata (markup divisor)', desc: 'Valores em R$ no numerador; tributos, despesas variáveis (comissão) e margem, que variam com o preço, no denominador. IR/CSLL não entram na nota: ficam cobertos pela margem.', rows: prices });
+
+  const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
+  const base = rec ? r.opexBaseCents : r.capexBaseCents;
+  if (fx && base > 0) {
+    const f = fx / 100, Pl = Math.round(base * f), sb = (1 - 1 / f) * 100;
+    const ml = (sb / 100 - a - c) * 100;
+    steps.push({
+      key: 'historico', title: 'Comparativo com o modelo histórico', desc: `Regra antiga da empresa: ${rec ? 'custo mensal' : 'investimento'} × ${num(f)}. Só informativo; não entra na decisão.`,
+      rows: [
+        { label: 'Preço pelo modelo histórico', formula: `${money(base)} × ${num(f)}`, value: `${money(Pl)}${rec ? '/mês' : ''}`, strong: true },
+        { label: 'Sobra bruta teórica (SB)', formula: `1 - 1 ÷ ${num(f)}`, value: pc(sb) },
+        { label: 'Margem efetiva real', formula: `SB - tributos - despesas variáveis = ${pc(sb)} - ${pc(a * 100)} - ${pc(c * 100)}`, value: pc(ml), ok: ml >= mMin * 100 - 1e-9 },
+        ...(r.markupPriceCents != null ? [{ label: 'Diferença para o preço exato', formula: 'histórico - exato', value: money(Pl - r.markupPriceCents) }] : []),
+      ],
+      note: `Se for usado o modelo histórico (×${num(f)}), o valor cobrado seria ${money(Pl)}, gerando uma margem de contribuição efetiva real de ${pc(ml)} após os tributos da nota fiscal. No modelo exato (markup divisor), para garantir a margem de ${pc(m * 100)}, o valor correto é ${money(r.markupPriceCents)}.`,
+    });
+  }
+
+  if (k && r.priceCents != null) {
+    const P = r.priceCents, flows = r.cashflow;
+    const inflow = flows.slice(1).reduce((s, x) => s + x, 0);
+    steps.push({
+      key: 'fluxo', title: 'Fluxo de caixa projetado e indicadores', desc: rec ? `Mês 0 = investimento; meses 1 a ${N} = receita (reajustada após o 12º mês) menos glosa, inadimplência, tributos, comissão e custos.` : `Mês 0 = investimento; o preço entra no mês ${d}.`,
+      rows: [
+        { label: 'Mês 0 (FC0)', formula: '- (I + E)', value: money(-Inv) },
+        { label: rec ? '1º mês (FC1)' : `Mês ${d}`, formula: `P - glosa e inadimplência - tributos - comissão${rec ? ' - custos' : ''} = ${money(P)} - ${money(k.lossCents)} - ${money(k.taxCents)} - ${money(k.commissionCents)}${rec ? ` - ${money(O)}` : ''}`, value: money(k.cashMonthlyCents ?? null), strong: true },
+        { label: 'VPL', formula: `FC0 + soma de FCt ÷ (1 + ${pc(rt * 100, 3)})^t`, value: money(k.npvCents), ok: k.npvCents > 0 },
+        { label: 'TIR', formula: 'taxa que zera o VPL (comparada à TMA)', value: k.irrMonthly == null ? 'não se aplica' : `${pc(k.irrMonthly * 100, 1)} a.m. · ${k.irrAnnual! > 10 ? 'acima de 1.000%' : pc(k.irrAnnual! * 100, 1)} a.a.`, ok: k.irrMonthly == null ? null : k.irrMonthly > rt },
+        { label: 'Payback descontado', formula: `(p - 1) + saldo a recuperar ÷ FCp descontado (simples: ${k.simplePaybackMonths == null ? 'não se paga' : `${num(k.simplePaybackMonths, 1)} meses`})`, value: k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses` },
+        ...(k.roiPct != null ? [{ label: 'ROI', formula: `(soma dos fluxos - investimento) ÷ investimento = (${money(inflow)} - ${money(Inv)}) ÷ ${money(Inv)}`, value: pc(k.roiPct, 1), ok: k.roiPct >= 0 }] : []),
+      ],
+    });
+    const aa = r.autoApproval;
+    steps.push({
+      key: 'decisao', title: 'Decisão', desc: 'Aprovação automática quando todas as regras passam; senão a oportunidade vai para a alçada superior.',
+      rows: [
+        ...(aa?.checks ?? []).map((x) => ({ label: x.label, value: x.ok ? 'sim' : 'não', ok: x.ok })),
+        { label: 'Resultado', value: aa?.ok ? 'Aprovação automática' : `${ECON_VERDICT_LABELS[r.verdict]} · alçada superior`, strong: true, ok: aa?.ok ?? null },
+      ],
+    });
+  }
+  return steps;
+}
+
+function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpts = {}): MemoryStep[] {
   const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
   const num = (v: number, d = 2) => v.toLocaleString('pt-BR', { maximumFractionDigits: d });
   const money = (c: number | null | undefined) => (c == null ? '—' : c < 0 ? `-${fmt(-c)}` : fmt(c));
