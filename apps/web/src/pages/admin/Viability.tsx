@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Calculator, Plus, Trash2 } from 'lucide-react';
 import { COMMISSION_KINDS, COMMISSION_KIND_LABELS, SALE_TYPES, SALE_TYPE_LABELS, toCents, type ViabilityResult } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
-import { fmtBRL, fmtInt } from '../../lib/format';
+import { fmtBRL, fmtDate, fmtDateTime, fmtInt } from '../../lib/format';
 import { useDebounced, useLookups } from '../../lib/hooks';
 import { Button, ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
@@ -308,40 +308,81 @@ function Simulator() {
   );
 }
 
-type Econ = { marginTargetBp: number; tmaMonthlyBp: number; commissionBp: number; lossBp: number; paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
+const ECON_PCT = [
+  ['marginTargetBp', 'Margem mínima', 'Margem de contribuição mínima sobre o preço; abaixo dela a venda sai da política'],
+  ['tmaMonthlyBp', 'TMA mensal', 'Custo do dinheiro: corrige o investimento e desconta o payback'],
+  ['commissionBp', 'Comissão padrão', 'Sobre o preço; o vendedor pode ajustar na oportunidade'],
+  ['lossPrivateBp', 'Glosa, setor privado', 'Inadimplência, glosas e descontos esperados'],
+  ['lossPublicBp', 'Glosa, setor público', 'Conta governamental, natureza pública ou licitação'],
+  ['contingencyCapexBp', 'Contingência do investimento', 'Somada ao investimento inicial (CAPEX)'],
+  ['contingencyOpexBp', 'Contingência dos custos mensais', 'Somada aos custos operacionais (OPEX)'],
+] as const;
+type EconKey = (typeof ECON_PCT)[number][0];
+type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; blockOutsidePolicy: boolean; validFrom: string };
+type EconVersion = Record<EconKey, number> & { paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
+type EconData = { current: (EconVersion & { id: string; validFrom: string }) | null; versions: { id: string; validFrom: string; createdAt: string; createdByName: string | null; values: EconVersion }[]; today: string };
 
-/** Motor financeiro da aba Viabilidade econômica (B2B: CAPEX, custos mensais, tributos por documento fiscal). */
+/** Motor financeiro da aba Viabilidade econômica: parâmetros publicados com data de vigência; o histórico fica guardado. */
 function EconEngine() {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['admin', 'viability-econ'], queryFn: () => api<Econ>('/admin/viability/econ') });
-  const [e, setE] = useState<Econ | null>(null);
+  const q = useQuery({ queryKey: ['admin', 'viability-econ'], queryFn: () => api<EconData>('/admin/viability/econ') });
+  const [e, setE] = useState<EconForm | null>(null);
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { if (q.data) { setE(q.data); setDirty(false); } }, [q.data]);
+  useEffect(() => {
+    if (!q.data) return;
+    const c = q.data.current;
+    setE({ ...(Object.fromEntries(ECON_PCT.map(([k]) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
+    setDirty(false);
+  }, [q.data]);
   const m = useMutation({
-    mutationFn: () => api('/admin/viability/econ', { method: 'PUT', body: e }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Motor financeiro salvo' }); },
+    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: e }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Parâmetros publicados' }); },
     onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
   });
-  if (!e) return <section className="card p-5"><LoadingRows /></section>;
-  const set = (v: Partial<Econ>) => { setE({ ...e, ...v }); setDirty(true); };
-  const pct = (k: 'marginTargetBp' | 'tmaMonthlyBp' | 'commissionBp' | 'lossBp', label: string, hint: string) => (
-    <FormField label={label} htmlFor={`ec-${k}`} hint={hint}><NumInput label={label} value={e[k]} suffix="%" onChange={(v) => set({ [k]: v ?? 0 } as Partial<Econ>)} /></FormField>
-  );
+  if (!e || !q.data) return <section className="card p-5"><LoadingRows /></section>;
+  const set = (v: Partial<EconForm>) => { setE({ ...e, ...v }); setDirty(true); };
+  const missing = [...ECON_PCT.map(([k]) => e[k]), e.paybackMaxPrivate, e.paybackMaxPublic].some((v) => v == null);
+  const cur = q.data.current;
+  const p2 = (v: number) => `${(v / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
   return (
     <section className="card p-5">
       <h3 className="text-md font-bold text-ink">Motor financeiro (aba Viabilidade econômica)</h3>
-      <p className="mb-3 max-w-3xl text-sm text-muted">Usado nas vendas B2B com custos de entrega. Os tributos vêm do documento fiscal de cada item (Filiais e documentos fiscais). Piso = maior entre o preço que cobre o caixa e o que cobre o custo do dinheiro (TMA); recomendado = preço que entrega a margem alvo.</p>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Os tributos vêm do documento fiscal de cada item (Filiais e documentos fiscais). Preço mínimo = maior entre o que cobre o caixa e o que cobre a TMA; abaixo da margem mínima ou com payback descontado acima do limite, a venda sai da política. Cada publicação vale a partir da data escolhida e fica no histórico.</p>
+      {cur ? <p className="mb-3 text-sm text-text">Em vigor desde {fmtDate(cur.validFrom)}.</p> : <Notice tone="warning">Nenhum parâmetro publicado: a viabilidade econômica não calcula até você preencher e publicar.</Notice>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {pct('marginTargetBp', 'Margem alvo', 'Margem de contribuição desejada sobre o preço')}
-        {pct('tmaMonthlyBp', 'TMA mensal', 'Custo do dinheiro: corrige o investimento no prazo')}
-        {pct('commissionBp', 'Comissão padrão', 'Sobre o preço; o vendedor pode ajustar na oportunidade')}
-        {pct('lossBp', 'Perda / glosa', 'Inadimplência, glosas e descontos esperados')}
-        <FormField label="Payback máximo, setor privado" htmlFor="ec-pbp"><NumInput label="Payback máximo, setor privado" int value={e.paybackMaxPrivate} suffix="meses" onChange={(v) => set({ paybackMaxPrivate: Math.max(1, v ?? 1) })} /></FormField>
-        <FormField label="Payback máximo, setor público" htmlFor="ec-pbg" hint="Conta governamental, natureza pública ou licitação"><NumInput label="Payback máximo, setor público" int value={e.paybackMaxPublic} suffix="meses" onChange={(v) => set({ paybackMaxPublic: Math.max(1, v ?? 1) })} /></FormField>
+        {ECON_PCT.map(([k, label, hint]) => <FormField key={k} label={label} htmlFor={`ec-${k}`} hint={hint}><NumInput label={label} value={e[k]} suffix="%" onChange={(v) => set({ [k]: v } as Partial<EconForm>)} /></FormField>)}
+        <FormField label="Payback máximo, setor privado" htmlFor="ec-pbp" hint="Comparado ao payback descontado"><NumInput label="Payback máximo, setor privado" int value={e.paybackMaxPrivate} suffix="meses" onChange={(v) => set({ paybackMaxPrivate: v })} /></FormField>
+        <FormField label="Payback máximo, setor público" htmlFor="ec-pbg" hint="Comparado ao payback descontado"><NumInput label="Payback máximo, setor público" int value={e.paybackMaxPublic} suffix="meses" onChange={(v) => set({ paybackMaxPublic: v })} /></FormField>
+        <FormField label="Vale a partir de" htmlFor="ec-from" hint="Hoje ou uma data futura"><Input id="ec-from" type="date" min={q.data.today} value={e.validFrom} onChange={(ev) => set({ validFrom: ev.target.value })} /></FormField>
       </div>
-      <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={e.blockOutsidePolicy} onChange={(ev) => set({ blockOutsidePolicy: ev.target.checked })} />Bloquear o pedido de aprovação quando a venda estiver fora da política (payback acima do limite ou inviável)</label>
-      <div className="mt-3 flex justify-end"><Button size="sm" variant="primary" loading={m.isPending} disabled={!dirty} onClick={() => m.mutate()}>Salvar</Button></div>
+      <label className="mt-3 flex items-center gap-2 text-sm"><input type="checkbox" checked={e.blockOutsidePolicy} onChange={(ev) => set({ blockOutsidePolicy: ev.target.checked })} />Bloquear o pedido de aprovação quando a venda estiver fora da política (abaixo do preço mínimo ou da margem mínima, payback acima do limite ou inviável)</label>
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-3">
+        {missing && <span className="text-xs text-[#C2610C]">Preencha todos os campos (0 é um valor válido).</span>}
+        <Button size="sm" variant="primary" loading={m.isPending} disabled={!dirty || missing} onClick={() => m.mutate()}>Publicar</Button>
+      </div>
+      {!!q.data.versions.length && (
+        <details className="mt-4 text-sm">
+          <summary className="cursor-pointer font-semibold text-ink">Histórico de parâmetros ({q.data.versions.length})</summary>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[820px] text-xs">
+              <thead className="text-muted"><tr>{['Vigência', 'Margem mín.', 'TMA', 'Comissão', 'Glosa priv./púb.', 'Contingência inv./mensal', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <tbody>{q.data.versions.map((v) => (
+                <tr key={v.id} className="border-t border-line">
+                  <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.marginTargetBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.tmaMonthlyBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.commissionBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.lossPrivateBp)} / {p2(v.values.lossPublicBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.contingencyCapexBp)} / {p2(v.values.contingencyOpexBp)}</td>
+                  <td className="num py-1 pr-3">{v.values.paybackMaxPrivate} / {v.values.paybackMaxPublic} meses</td>
+                  <td className="py-1 pr-3">{v.createdByName ?? '—'} · {fmtDateTime(v.createdAt)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </section>
   );
 }

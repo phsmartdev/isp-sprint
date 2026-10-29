@@ -182,7 +182,7 @@ export function grantErrors(g: { effect: string; reason: string; validUntil: str
 }
 
 // ------------------------------------------------------------------ ações sensíveis
-export const SENSITIVE_ACTIONS = ['ver_financeiro', 'exportar', 'validar_contrato', 'editar_valores_contrato', 'arquivar'] as const;
+export const SENSITIVE_ACTIONS = ['ver_financeiro', 'exportar', 'validar_contrato', 'editar_valores_contrato', 'arquivar', 'aprovar_viabilidade'] as const;
 export type SensitiveAction = (typeof SENSITIVE_ACTIONS)[number];
 export const SENSITIVE_ACTION_LABELS: Record<SensitiveAction, string> = {
   ver_financeiro: 'Ver valores financeiros (R$, faturamento, margem, comissão)',
@@ -190,15 +190,16 @@ export const SENSITIVE_ACTION_LABELS: Record<SensitiveAction, string> = {
   validar_contrato: 'Validar cadastro de contrato',
   editar_valores_contrato: 'Alterar valores de contrato',
   arquivar: 'Arquivar e excluir registros',
+  aprovar_viabilidade: 'Aprovar ou devolver a viabilidade econômica (gestão e diretoria)',
 };
 
 /** Padrão por perfil. Os perfis anteriores à Etapa 1 mantêm tudo (nenhuma mudança de comportamento). */
 export const DEFAULT_ACTIONS: Record<string, Record<SensitiveAction, boolean>> = {
-  vendedor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true },
-  supervisor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true },
-  gerencia: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true },
-  gestao_contratos: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true },
-  implantacao: { ver_financeiro: false, exportar: false, validar_contrato: false, editar_valores_contrato: false, arquivar: false },
+  vendedor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
+  supervisor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
+  gerencia: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: true },
+  gestao_contratos: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
+  implantacao: { ver_financeiro: false, exportar: false, validar_contrato: false, editar_valores_contrato: false, arquivar: false, aprovar_viabilidade: false },
 };
 /** Vários perfis: vale a permissão se QUALQUER perfil permitir (mesma regra do maior nível na matriz). */
 export function mergeActions(rows: { action: string; allowed: boolean }[]): Record<SensitiveAction, boolean> {

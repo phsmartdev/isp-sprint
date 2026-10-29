@@ -19,12 +19,16 @@ import { CashflowChart, flowSeries } from '../../components/charts/Cashflow';
 import { errMsg } from '../contracts/shared';
 
 type Data = {
-  settings: EconSettings; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
+  settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
   /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
   result: EconResult | null; stale: boolean; editable: boolean;
+  /** parâmetros vigentes; null = a empresa ainda não informou em Configurações → Viabilidade */
+  settingsVersion: { id: string; validFrom: string } | null;
+  status: EconStatus; canDecide: boolean; decisions: { id: string; snapshotId: string; action: 'enviada' | 'aprovada' | 'devolvida'; reason: string | null; actorName: string | null; createdAt: string }[];
   /** sem "ver financeiro" a API manda só o veredito */
   financeHidden: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null }[];
 };
+type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
 type Line = { key: string; description: string; qty: string; unit: string };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
@@ -61,11 +65,11 @@ function PriceRuler({ r }: { r: EconResult }) {
       </div>
       <div className="relative mt-1 h-8 text-2xs text-muted">
         {together ? (
-          <span className={lbl(rec)} style={{ left: at(rec) }}>Mínimo <b className="num text-ink">{fmtBRL(min)}</b><br />Recomendado <b className="num text-ink">{fmtBRL(rec)}</b></span>
+          <span className={lbl(rec)} style={{ left: at(rec) }}>Mínimo <b className="num text-ink">{fmtBRL(min)}</b><br />Margem mínima <b className="num text-ink">{fmtBRL(rec)}</b></span>
         ) : (
           <>
             <span className={lbl(min)} style={{ left: at(min) }}>Mínimo<br /><b className="num text-ink">{fmtBRL(min)}</b></span>
-            <span className={lbl(rec)} style={{ left: at(rec) }}>Recomendado<br /><b className="num text-ink">{fmtBRL(rec)}</b></span>
+            <span className={lbl(rec)} style={{ left: at(rec) }}>Margem mínima<br /><b className="num text-ink">{fmtBRL(rec)}</b></span>
           </>
         )}
       </div>
@@ -81,15 +85,20 @@ function Dre({ r }: { r: EconResult }) {
   const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
   const liquid = P - k.taxCents;
   const result = k.contributionCents * N - r.initialCents;
+  // resultados salvos antes da contingência não têm as bases separadas
+  const opexBase = r.opexBaseCents ?? r.monthlyCostCents, opexCont = r.opexContingencyCents ?? 0;
+  const capexBase = r.capexBaseCents ?? r.initialCents, capexCont = r.capexContingencyCents ?? 0;
   const rows: DreRow[] = [
     { sign: '+', label: 'Receita bruta', month: P, total: P * N },
     { sign: '−', label: `Tributos (${pct(r.rates.a * 100, 2)}${r.fixedTaxCents ? ` + ${fmtBRL(r.fixedTaxCents)}` : ''})`, month: -k.taxCents, total: -k.taxCents * N },
     { sign: '=', label: 'Receita líquida', month: liquid, total: liquid * N, strong: true },
     { sign: '−', label: `Comissão (${pct(r.rates.c * 100, 2)})`, month: -k.commissionCents, total: -k.commissionCents * N },
     ...(k.lossCents > 0 ? [{ sign: '−' as const, label: `Perda / glosa (${pct(r.rates.g * 100, 2)})`, month: -k.lossCents, total: -k.lossCents * N }] : []),
-    ...(r.monthlyCostCents > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -r.monthlyCostCents, total: -r.monthlyCostCents * N }] : []),
+    ...(opexBase > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -opexBase, total: -opexBase * N }] : []),
+    ...(opexCont > 0 ? [{ sign: '−' as const, label: 'Contingência dos custos mensais', month: -opexCont, total: -opexCont * N }] : []),
     { sign: '=', label: 'Margem de contribuição', month: k.contributionCents, total: k.contributionCents * N, strong: true, note: `${pct(k.marginPct)} da receita` },
-    { sign: '−', label: 'Investimento inicial', month: null, total: -r.initialCents },
+    { sign: '−', label: 'Investimento inicial', month: null, total: -capexBase },
+    ...(capexCont > 0 ? [{ sign: '−' as const, label: 'Contingência do investimento', month: null, total: -capexCont }] : []),
     { sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: result, strong: true, tone: true, note: result >= 0 ? 'lucro' : 'prejuízo' },
   ];
   const money = (v: number) => (v < 0 ? `− ${fmtBRL(-v)}` : fmtBRL(Math.abs(v)));
@@ -130,9 +139,9 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
       </div>
       <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : r.priceSource === 'itens' ? 'dos produtos' : 'recomendado'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">alvo {pct(r.rates.m * 100, 0)}</dd></div>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback</dt><dd className={clsx('num font-bold', r.withinPolicy === false ? 'text-danger' : 'text-ink')}>{months(k?.paybackMonths)}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}</dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : 'dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{months(k?.paybackMonths)}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
       <PriceRuler r={r} />
@@ -142,7 +151,7 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
       {open && (
         <div className="mt-2 space-y-3 text-sm">
           {k && r.priceCents != null && <Dre r={r} />}
-          <p className="text-xs text-muted">Preço mínimo = cobre custos, tributos e o investimento em {r.mode === 'recorrente' ? `${r.term.D} meses` : 'uma venda'}, com a TMA de {pct(r.rates.r * 100, 2)} ao mês (caixa {fmtBRL(r.floor.cashCents)}, econômico {fmtBRL(r.floor.economicCents)}). Recomendado = entrega a margem alvo de {pct(r.rates.m * 100, 0)} sobre a receita.</p>
+          <p className="text-xs text-muted">Preço mínimo = cobre custos, tributos e o investimento em {r.mode === 'recorrente' ? `${r.term.D} meses` : 'uma venda'}, com a TMA de {pct(r.rates.r * 100, 2)} ao mês (caixa {fmtBRL(r.floor.cashCents)}, econômico {fmtBRL(r.floor.economicCents)}). Preço da margem mínima = entrega {pct(r.rates.m * 100, 0)} de margem sobre a receita; abaixo dele a venda sai da política. Payback descontado pela TMA; tributo fixo contado uma vez por documento fiscal (fatura). Motor {r.engineVersion ?? 'anterior'}.</p>
           {!!r.items.length && (
             <table className="w-full text-xs">
               <thead className="text-muted"><tr><th className="py-1 text-left font-medium">Produto</th><th className="py-1 text-left font-medium">Documento fiscal</th><th className="py-1 text-right font-medium">Peso na receita</th><th className="py-1 text-right font-medium">Tributos</th></tr></thead>
@@ -230,6 +239,52 @@ function HiddenEconomics({ d }: { d: Data }) {
   );
 }
 
+const STATUS_LOOK: Record<EconStatus, { label: string; tone: 'neutral' | 'blue' | 'yellow' | 'green' | 'red' }> = {
+  rascunho: { label: 'Não salva', tone: 'neutral' }, calculada: { label: 'Calculada', tone: 'blue' }, em_decisao: { label: 'Em decisão da gestão', tone: 'yellow' },
+  aprovada: { label: 'Aprovada pela gestão', tone: 'green' }, devolvida: { label: 'Devolvida', tone: 'red' },
+};
+const ACTION_LABEL = { enviada: 'Enviada para decisão', aprovada: 'Aprovada', devolvida: 'Devolvida' } as const;
+
+/** Situação da decisão: enviar (quem preenche), aprovar ou devolver com motivo (gestão e diretoria) e o histórico. */
+function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmit: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [reason, setReason] = useState<string | null>(null);
+  const done = (msg: string) => { setReason(null); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); void qc.invalidateQueries({ queryKey: ['econ-pending'] }); toast({ tone: 'success', message: msg }); };
+  const submit = useMutation({ mutationFn: () => api(`/opportunities/${oppId}/economics/submit`, { method: 'POST', body: {} }), onSuccess: () => done('Enviada para decisão da gestão'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const decide = useMutation({
+    mutationFn: (body: { decision: 'aprovar' | 'devolver'; reason?: string }) => api(`/opportunities/${oppId}/economics/decision`, { method: 'POST', body }),
+    onSuccess: (_r, v) => done(v.decision === 'aprovar' ? 'Viabilidade aprovada' : 'Viabilidade devolvida'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const look = STATUS_LOOK[d.status];
+  const lastReturn = d.status === 'devolvida' ? d.decisions.find((x) => x.action === 'devolvida') : undefined;
+  return (
+    <section className="border border-line p-3" aria-label="Decisão da viabilidade">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-sm"><span className="text-muted">Decisão:</span><Chip tone={look.tone}>{look.label}</Chip></div>
+        <div className="flex flex-wrap gap-2">
+          {(d.status === 'calculada' || d.status === 'devolvida') && <Button size="sm" variant="primary" disabled={!canSubmit} loading={submit.isPending} title={canSubmit ? undefined : 'Salve o cálculo atualizado antes de enviar'} onClick={() => submit.mutate()}>Enviar para decisão da gestão</Button>}
+          {d.canDecide && reason === null && <><Button size="sm" variant="primary" loading={decide.isPending} onClick={() => decide.mutate({ decision: 'aprovar' })}>Aprovar</Button><Button size="sm" onClick={() => setReason('')}>Devolver</Button></>}
+        </div>
+      </div>
+      {lastReturn?.reason && <p className="mt-2 text-sm text-text">Motivo da devolução ({lastReturn.actorName ?? 'gestão'}): {lastReturn.reason}</p>}
+      {reason !== null && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Input aria-label="Motivo da devolução" className="h-9 min-w-[240px] flex-1" placeholder="O que precisa mudar?" value={reason} onChange={(e) => setReason(e.target.value)} data-autofocus />
+          <Button size="sm" variant="primary" disabled={reason.trim().length < 5} loading={decide.isPending} onClick={() => decide.mutate({ decision: 'devolver', reason: reason.trim() })}>Devolver</Button>
+          <Button size="sm" variant="ghost" onClick={() => setReason(null)}>Cancelar</Button>
+        </div>
+      )}
+      {!!d.decisions.length && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-muted">Histórico de decisões ({d.decisions.length})</summary>
+          <ul className="mt-1 divide-y divide-line">{d.decisions.map((x) => <li key={x.id} className="flex flex-wrap justify-between gap-2 py-1"><span>{fmtDateTime(x.createdAt)} · {x.actorName ?? 'sistema'} · {ACTION_LABEL[x.action]}{x.reason ? ` — ${x.reason}` : ''}</span></li>)}</ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
 export function EconomicsTab({ oppId }: { oppId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -261,6 +316,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   if (q.data?.financeHidden) return <HiddenEconomics d={q.data} />;
   if (q.isLoading || !f) return <LoadingRows rows={5} />;
   const d = q.data!;
+  if (!d.settings) return <div className="space-y-3"><h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2><Notice tone="warning">A empresa ainda não informou os parâmetros da viabilidade (margem mínima, TMA, glosa, contingências e payback). Quem administra preenche em Configurações → Viabilidade.</Notice></div>;
   const st = d.settings;
   // salvo e sem mudanças no formulário = o cálculo oficial; senão, a simulação ao vivo
   const official = !!d.saved && !!d.result && formKey(f) === base;
@@ -272,6 +328,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const opexTotal = linesTotal(f.opex);
   const customized = [f.commission, f.loss, f.margin].some((v) => v.trim() !== '');
   const shown = (v: string, def: number) => (v.trim() ? v : bpText(def));
+  const segLoss = d.publicSector ? st.lossPublicBp : st.lossPrivateBp;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -282,6 +339,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
         {official ? <Chip tone="green">Salvo em {fmtDateTime(d.saved!.updatedAt)}</Chip> : <Chip tone="yellow">Simulação — ainda não salva</Chip>}
       </div>
 
+      <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable} />
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
       {shownResult ? <EconomicsResult r={shownResult} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
       {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
@@ -332,14 +390,14 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
           <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2.5">
               <span className="grid h-6 w-6 place-items-center rounded-full bg-surface-2 text-xs font-bold text-muted" aria-hidden>{f.mode === 'recorrente' ? 4 : 3}</span>
-              <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Comissão {shown(f.commission, st.commissionBp)}% · perda {shown(f.loss, st.lossBp)}% · margem alvo {shown(f.margin, st.marginTargetBp)}%{customized ? '' : ' — padrão da empresa'}</span></span>
+              <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Comissão {shown(f.commission, st.commissionBp)}% · glosa {shown(f.loss, segLoss)}% · margem mínima {shown(f.margin, st.marginTargetBp)}%{customized ? '' : ' — padrão da empresa'}</span></span>
             </span>
             <span className="text-xs font-semibold text-primary">Alterar</span>
           </summary>
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <FormField label="Comissão (%)" htmlFor="ec-com" hint="Sobre o preço"><Input id="ec-com" inputMode="decimal" placeholder={bpText(st.commissionBp)} value={f.commission} disabled={dis} invalid={Number.isNaN(parseBp(f.commission))} onChange={(e) => set({ commission: e.target.value })} /></FormField>
-            <FormField label="Perda / glosa (%)" htmlFor="ec-loss" hint="Inadimplência, glosas, descontos"><Input id="ec-loss" inputMode="decimal" placeholder={bpText(st.lossBp)} value={f.loss} disabled={dis} invalid={Number.isNaN(parseBp(f.loss))} onChange={(e) => set({ loss: e.target.value })} /></FormField>
-            <FormField label="Margem alvo (%)" htmlFor="ec-mar" hint="Define o preço recomendado"><Input id="ec-mar" inputMode="decimal" placeholder={bpText(st.marginTargetBp)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin))} onChange={(e) => set({ margin: e.target.value })} /></FormField>
+            <FormField label="Perda / glosa (%)" htmlFor="ec-loss" hint="Inadimplência, glosas, descontos"><Input id="ec-loss" inputMode="decimal" placeholder={bpText(segLoss)} value={f.loss} disabled={dis} invalid={Number.isNaN(parseBp(f.loss))} onChange={(e) => set({ loss: e.target.value })} /></FormField>
+            <FormField label="Margem mínima (%)" htmlFor="ec-mar" hint="Abaixo dela a venda sai da política"><Input id="ec-mar" inputMode="decimal" placeholder={bpText(st.marginTargetBp)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin))} onChange={(e) => set({ margin: e.target.value })} /></FormField>
           </div>
           <p className="mt-2 text-xs text-muted">Em branco vale o padrão da empresa. TMA de {bpText(st.tmaMonthlyBp)}% ao mês · payback máximo de {d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate} meses (esta conta é do setor {d.publicSector ? 'público' : 'privado'}).</p>
         </details>
@@ -365,7 +423,7 @@ export function EconomicsSummary({ oppId, onOpen }: { oppId: string; onOpen: () 
   return (
     <section className="card p-4" aria-labelledby="econ-sum">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 id="econ-sum" className="flex items-center gap-2 font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade da venda</h2>
+        <h2 id="econ-sum" className="flex items-center gap-2 font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade da venda <Chip tone={STATUS_LOOK[d.status].tone}>{STATUS_LOOK[d.status].label}</Chip></h2>
         <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={onOpen}>Abrir</button>
       </div>
       {d.stale && <Notice tone="warning">Desatualizada: produtos, tributos ou parâmetros mudaram depois de salva.</Notice>}
