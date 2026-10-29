@@ -1,5 +1,5 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
-import { and, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
@@ -8,13 +8,15 @@ import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
-import { computeEconomics, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, saveEconomics, today, type EconContext } from '../services/economics';
+import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
+import { buildEconCsv, buildEconPdf } from '../services/economicsExport';
 
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
+const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
-const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000) });
+const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
 const EconBody = z.object({
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(100), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(100),
@@ -73,9 +75,11 @@ export const economicsRoutes = [
           const [u] = await tx.update(s.fiscalDocTypes).set(values).where(and(eq(s.fiscalDocTypes.id, d.id), eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id))).returning({ id: s.fiscalDocTypes.id });
           if (!u) throw unprocessable('Documento não pertence a esta filial.');
           kept.push(u.id);
+          await recordFiscalDocVersion(tx, auth.tenantId, u.id, d.taxes, auth.userId);
         } else {
           const [n] = await tx.insert(s.fiscalDocTypes).values({ tenantId: auth.tenantId, branchId: br.id, ...values }).returning({ id: s.fiscalDocTypes.id });
           kept.push(n!.id);
+          await recordFiscalDocVersion(tx, auth.tenantId, n!.id, d.taxes, auth.userId);
         }
       }
       // documento tirado da lista só é desativado: itens antigos continuam apontando para ele
@@ -88,6 +92,49 @@ export const economicsRoutes = [
   defineRoute({
     method: 'GET', url: '/fiscal-docs', summary: 'Documentos fiscais ativos (para escolher no item e no produto)', tag: 'Oportunidades', module: 'oportunidades',
     handler: async ({ app, auth }) => ({ items: (await fiscalDocsOf(app.db, auth.tenantId)).filter((d) => d.active) }),
+  }),
+
+  // ------------------------------------------------------------------ catálogo de custos (Configurações → Viabilidade)
+  defineRoute({
+    method: 'GET', url: '/admin/cost-items', summary: 'Catálogo de custos: itens de investimento e mensais, preço vigente e histórico de preços', tag: 'Viabilidade', ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const items = await costItemsOf(app.db, auth.tenantId);
+      const prices = items.length ? await app.db.select({ id: s.costItemPrices.id, itemId: s.costItemPrices.itemId, unitCents: s.costItemPrices.unitCents, validFrom: s.costItemPrices.validFrom, createdAt: s.costItemPrices.createdAt, createdByName: s.users.name })
+        .from(s.costItemPrices).leftJoin(s.users, eq(s.users.id, s.costItemPrices.createdBy)).where(eq(s.costItemPrices.tenantId, auth.tenantId)).orderBy(desc(s.costItemPrices.validFrom), desc(s.costItemPrices.createdAt)) : [];
+      return { items: items.map((i) => ({ ...i, prices: prices.filter((p) => p.itemId === i.id).slice(0, 20) })), today: today() };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/admin/cost-items', summary: 'Salva os itens do catálogo de custos (incluir, renomear, desativar); o preço tem rota própria com vigência', tag: 'Viabilidade', ...ADMIN,
+    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), name: z.string().trim().min(2).max(120), kind: z.enum(['investimento', 'mensal']), unit: z.string().trim().min(1).max(12), active: z.boolean() })).max(500) }),
+    handler: async ({ app, auth, body, req }) => app.db.transaction(async (tx) => {
+      const keys = body.items.map((i) => `${i.kind}|${i.name.toLowerCase()}`);
+      if (new Set(keys).size !== keys.length) throw unprocessable('Há itens com o mesmo nome no mesmo tipo.');
+      for (const it of body.items) {
+        const v = { name: it.name, kind: it.kind, unit: it.unit, active: it.active, updatedAt: new Date() };
+        if (it.id) await tx.update(s.costItems).set(v).where(and(eq(s.costItems.id, it.id), eq(s.costItems.tenantId, auth.tenantId)));
+        else await tx.insert(s.costItems).values({ tenantId: auth.tenantId, ...v });
+      }
+      await audit(tx, req, { action: 'cost_items.update', entityType: 'tenant', entityId: auth.tenantId, metadata: { items: body.items.map((i) => `${i.name} (${i.kind}${i.active ? '' : ', inativo'})`) } });
+      return { items: await costItemsOf(tx, auth.tenantId) };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/cost-items/:id/prices', summary: 'Publica o preço de custo de um item com data de vigência (hoje ou futura); os anteriores ficam no histórico', tag: 'Viabilidade', ...ADMIN, params: IdParams,
+    body: z.object({ unitCents: z.number().int().min(0).max(10_000_000_000), validFrom: z.string().date() }),
+    handler: async ({ app, auth, params, body, req, reply }) => {
+      const [it] = await app.db.select({ id: s.costItems.id, name: s.costItems.name }).from(s.costItems).where(and(eq(s.costItems.id, params.id), eq(s.costItems.tenantId, auth.tenantId))).limit(1);
+      if (!it) throw notFound('Item do catálogo não encontrado.');
+      if (body.validFrom < today()) throw unprocessable('A vigência começa hoje ou numa data futura: cálculos já salvos não mudam de preço.');
+      const [p] = await app.db.insert(s.costItemPrices).values({ tenantId: auth.tenantId, itemId: it.id, unitCents: body.unitCents, validFrom: body.validFrom, createdBy: auth.userId }).returning({ id: s.costItemPrices.id });
+      await audit(app.db, req, { action: 'cost_items.price', entityType: 'cost_item', entityId: it.id, metadata: { name: it.name, unitCents: body.unitCents, validFrom: body.validFrom } });
+      reply.code(201);
+      return { id: p!.id };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/cost-items', summary: 'Catálogo de custos ativo com o preço vigente (para lançar na viabilidade)', tag: 'Oportunidades', module: 'oportunidades',
+    handler: async ({ app, auth }) => ({ items: (await costItemsOf(app.db, auth.tenantId)).filter((i) => i.active) }),
   }),
 
   // ------------------------------------------------------------------ viabilidade econômica da oportunidade
@@ -117,13 +164,40 @@ export const economicsRoutes = [
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
-      const input = body as EconInput;
+      const input = await resolveCostLines(app.db, auth.tenantId, body as EconInput);
       const e = econInputErrors(input);
       if (e.length) throw unprocessable(e.join(' '));
       const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
       await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
       return { result, history: await economicsHistory(app.db, auth.tenantId, opp.id) };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/economics/runs/:runId', summary: 'Um cálculo salvo exatamente como foi gravado (sem recalcular), com a conferência do hash; runId "ultimo" = o mais recente', tag: 'Oportunidades', module: 'oportunidades', params: RunParams,
+    handler: async ({ app, auth, params }) => {
+      requireAction(auth, 'ver_financeiro', 'O cálculo mostra valores financeiros que seu perfil não vê.');
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const run = await economicsRun(app.db, auth.tenantId, opp.id, params.runId);
+      if (!run) throw notFound('Cálculo não encontrado.');
+      return run;
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/economics/runs/:runId/export', summary: 'Exporta um cálculo salvo em CSV ou PDF (DRE, indicadores, custos, tributos, fluxo de caixa, hash); nada é recalculado', tag: 'Oportunidades', module: 'oportunidades', params: RunParams,
+    query: z.object({ format: z.enum(['csv', 'pdf']).default('pdf') }),
+    handler: async ({ app, auth, params, query, reply, req }) => {
+      requireAction(auth, 'exportar');
+      requireAction(auth, 'ver_financeiro', 'A exportação traz valores financeiros que seu perfil não vê.');
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const run = await economicsRun(app.db, auth.tenantId, opp.id, params.runId);
+      if (!run) throw notFound('Cálculo não encontrado.');
+      const [acc] = await app.db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1);
+      const h = { code: opp.code, title: opp.title ?? '', account: acc?.name ?? '' };
+      const name = `viabilidade-OP-${opp.code}-${run.createdAt.toISOString().slice(0, 10)}`;
+      await audit(app.db, req, { action: 'opportunity.economics_export', entityType: 'opportunity', entityId: opp.id, metadata: { runId: run.id, format: query.format } });
+      if (query.format === 'csv') return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${name}.csv"`).send(buildEconCsv(run, h));
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${name}.pdf"`).send(await buildEconPdf(run, h));
     },
   }),
   defineRoute({
