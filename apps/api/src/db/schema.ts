@@ -1273,6 +1273,15 @@ export const contracts = pgTable(
     closedAt: ts('closed_at'),
     /** Controle de Empenhos: bloquear medição acima do saldo de empenho (padrão: permitir com pendência) */
     commitmentBlock: boolean('commitment_block').notNull().default(false),
+    /** RN09: ordem de baixa entre empenhos do mesmo item. FIFO é o padrão; rateio pelas fontes exige confirmação explícita */
+    commitmentAllocation: text('commitment_allocation').notNull().default('fifo'),
+    commitmentAllocationBy: uuid('commitment_allocation_by'),
+    commitmentAllocationAt: ts('commitment_allocation_at'),
+    /** PF06/RN16: alertas parametrizáveis por contrato */
+    commitmentAgingDays: integer('commitment_aging_days').notNull().default(60),
+    commitmentToCommitPct: integer('commitment_to_commit_pct'),
+    /** PF07: janela (meses) da média de consumo */
+    commitmentWindowMonths: integer('commitment_window_months').notNull().default(3),
     archivedAt: ts('archived_at'),
     archiveLocation: text('archive_location'),
     archiveResponsibleId: uuid('archive_responsible_id').references(() => users.id),
@@ -1504,8 +1513,9 @@ export const contractCommitments = pgTable('contract_commitments', {
   fiscalYear: integer('fiscal_year').notNull(),
   amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
   notes: text('notes'),
-  /** fonte de receita do cliente que custeia a NE */
+  /** fonte de receita do cliente que custeia a NE (texto livre da fase 1; a fonte cadastrada fica em sourceId) */
   source: text('source'),
+  sourceId: uuid('source_id').references(() => contractRevenueSources.id),
   /** NE que esta substitui (virada de exercício: NE antiga → NE nova) */
   replacesId: uuid('replaces_id'),
   cancelledAt: ts('cancelled_at'),
@@ -1561,9 +1571,97 @@ export const contractCommitmentMoves = pgTable('contract_commitment_moves', {
   qty4: bigint('qty4', { mode: 'number' }).notNull(),
   occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
   reason: text('reason').notNull(),
+  /** virada de exercício (RN10): NE nova que reempenha o saldo suprimido */
+  linkedCommitmentId: uuid('linked_commitment_id'),
   createdBy: uuid('created_by'),
   createdAt: createdAt(),
-}, (t) => ({ kindCk: check('contract_commitment_moves_kind_ck', inList('kind', ['reforco', 'anulacao'])), qtyCk: check('contract_commitment_moves_qty_ck', sql`qty4 > 0`) }));
+}, (t) => ({ kindCk: check('contract_commitment_moves_kind_ck', inList('kind', ['reforco', 'anulacao', 'supressao'])), qtyCk: check('contract_commitment_moves_qty_ck', sql`qty4 > 0`) }));
+
+/** Fonte de receita do cliente (RN09-a): ex. educação estadual e municipal, cada uma com empenhos próprios. */
+export const contractRevenueSources = pgTable('contract_revenue_sources', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  name: text('name').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_revenue_sources_uq').on(t.contractId, sql`lower(${t.name})`) }));
+
+/** Proporção entre as fontes, versionada: quem definiu (cliente ou sugestão da BK), a partir de qual competência e o histórico. */
+export const contractSourceShares = pgTable('contract_source_shares', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  version: integer('version').notNull(),
+  validFrom: text('valid_from').notNull(),
+  definedBy: text('defined_by').notNull(),
+  shares: jsonb('shares').$type<{ sourceId: string; ppm: number }[]>().notNull(),
+  note: text('note'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_source_shares_uq').on(t.contractId, t.version), byCk: check('contract_source_shares_by_ck', inList('defined_by', ['cliente', 'bk'])) }));
+
+/** Aditivo de quantidade de um item (acréscimo ou supressão), com data de efeito e referência do termo. */
+export const contractLineMoves = pgTable('contract_line_moves', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  lineId: uuid('line_id').notNull().references(() => contractLines.id),
+  kind: text('kind').notNull(),
+  qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  effectiveOn: date('effective_on', { mode: 'string' }).notNull(),
+  reason: text('reason').notNull(),
+  reference: text('reference'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ kindCk: check('contract_line_moves_kind_ck', inList('kind', ['acrescimo', 'supressao'])), qtyCk: check('contract_line_moves_qty_ck', sql`qty4 > 0`) }));
+
+/** Reajuste por índice (PF08): fator ×10⁸, data-base e competência de início. Gera a tabela de preços e o retroativo. */
+export const contractAdjustments = pgTable('contract_adjustments', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  indexName: text('index_name').notNull(),
+  mode: text('mode').notNull(),
+  inputText: text('input_text').notNull(),
+  factor8: bigint('factor8', { mode: 'number' }).notNull(),
+  baseDate: date('base_date', { mode: 'string' }).notNull(),
+  startCompetence: text('start_competence').notNull(),
+  note: text('note'),
+  /** medições não faturadas que passaram ao preço novo (RN08) */
+  repriced: jsonb('repriced').$type<{ measurementId: string; lineId: string; oldPrice4: number; newPrice4: number }[]>().notNull().default([]),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ modeCk: check('contract_adjustments_mode_ck', inList('mode', ['fator', 'percentual'])), factorCk: check('contract_adjustments_factor_ck', sql`factor8 > 0`) }));
+
+/** Tabela de preço reajustada por item, com a janela de vigência a partir da competência de início. */
+export const contractLinePrices = pgTable('contract_line_prices', {
+  id: id(),
+  tenantId: tenantId(),
+  adjustmentId: uuid('adjustment_id').notNull().references(() => contractAdjustments.id),
+  lineId: uuid('line_id').notNull().references(() => contractLines.id),
+  fromCompetence: text('from_competence').notNull(),
+  previousPrice4: bigint('previous_price4', { mode: 'number' }).notNull(),
+  price4: bigint('price4', { mode: 'number' }).notNull(),
+}, (t) => ({ uq: uniqueIndex('contract_line_prices_uq').on(t.adjustmentId, t.lineId) }));
+
+/** Retroativo do reajuste por medição já faturada: pendência até a NF complementar. */
+export const contractAdjustmentRetros = pgTable('contract_adjustment_retros', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  adjustmentId: uuid('adjustment_id').notNull().references(() => contractAdjustments.id),
+  measurementId: uuid('measurement_id').notNull().references(() => contractMeasurements.id),
+  items: jsonb('items').$type<{ lineId: string; qty4: number; oldPrice4: number; newPrice4: number; diffV4: number }[]>().notNull(),
+  diffV4: bigint('diff_v4', { mode: 'number' }).notNull(),
+  status: text('status').notNull().default('pendente'),
+  invoiceNumber: text('invoice_number'),
+  invoiceDate: date('invoice_date', { mode: 'string' }),
+  invoiceCents: bigint('invoice_cents', { mode: 'number' }),
+  invoicedBy: uuid('invoiced_by'),
+  invoicedAt: ts('invoiced_at'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_adjustment_retros_uq').on(t.adjustmentId, t.measurementId), statusCk: check('contract_adjustment_retros_status_ck', inList('status', ['pendente', 'faturado'])) }));
 
 /** Medição (evento de consumo). Revisão cria nova versão (mesmo grupo) e a anterior fica como substituída. */
 export const contractMeasurements = pgTable('contract_measurements', {

@@ -188,3 +188,58 @@ export function Progress({ value, className, color = '#5B9BFF' }: { value: numbe
     </span>
   );
 }
+
+/** Linhas (várias séries no mesmo eixo), com legenda, tooltip por mês e tabela para leitor de tela. */
+export function LineChart({ categories, series, format, ariaLabel, height = 240, tooltipTitle }: {
+  categories: string[];
+  series: (Series & { dashed?: boolean })[];
+  format: (v: number) => string;
+  ariaLabel: string;
+  height?: number;
+  tooltipTitle: (i: number) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 640, H = height, padL = 84, padR = 16, padT = 16, padB = 28;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = niceMax(Math.max(...series.flatMap((s) => s.values), 0));
+  const step = categories.length > 1 ? innerW / (categories.length - 1) : 0;
+  const x = (i: number) => padL + (categories.length > 1 ? step * i : innerW / 2);
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
+  const every = Math.max(1, Math.ceil(categories.length / 12));
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(max * t)} y2={y(max * t)} stroke="#E8EDF5" />
+            <text x={padL - 10} y={y(max * t) + 4} textAnchor="end" fontSize="11" fill="#5C6A8A">{format(max * t)}</text>
+          </g>
+        ))}
+        {categories.map((c, i) => (
+          <g key={c} onMouseEnter={() => setHover(i)}>
+            <rect x={x(i) - Math.max(step, 8) / 2} y={padT} width={Math.max(step, 8)} height={innerH} fill="transparent" />
+            {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="#5C6A8A">{c}</text>}
+          </g>
+        ))}
+        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + innerH} stroke="#C9D3E3" pointerEvents="none" />}
+        {series.map((s) => (
+          <g key={s.key} pointerEvents="none">
+            <polyline points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={s.color} strokeWidth="2.5" strokeDasharray={s.dashed ? '6 4' : undefined} strokeLinejoin="round" />
+            {hover !== null && <circle cx={x(hover)} cy={y(s.values[hover] ?? 0)} r="4" fill={s.color} stroke="#fff" strokeWidth="1.5" />}
+          </g>
+        ))}
+      </svg>
+      {hover !== null && (
+        <div className="pointer-events-none absolute top-2 z-10 min-w-[190px] rounded-md border border-line bg-surface px-3.5 py-2.5 shadow-overlay" style={{ left: `min(${((x(hover) + 14) / W) * 100}%, calc(100% - 210px))` }}>
+          <p className="mb-1 font-semibold text-ink">{tooltipTitle(hover)}</p>
+          {series.map((s) => <p key={s.key} className="flex items-center gap-2 text-sm text-text"><span className="h-3 w-3 rounded-circle" style={{ background: s.color }} />{s.label}: <b className="num">{format(s.values[hover] ?? 0)}</b></p>)}
+        </div>
+      )}
+      <div className="sr-only"><table>
+        <caption>{ariaLabel}</caption>
+        <thead><tr><th>Mês</th>{series.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead>
+        <tbody>{categories.map((c, i) => <tr key={c}><td>{c}</td>{series.map((s) => <td key={s.key}>{format(s.values[i] ?? 0)}</td>)}</tr>)}</tbody>
+      </table></div>
+    </div>
+  );
+}
