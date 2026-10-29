@@ -1,14 +1,14 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
-import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
+import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
@@ -16,11 +16,11 @@ const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
-const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
+const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
 const EconBody = z.object({
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
-  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(),
+  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(),
 });
 
 export const economicsRoutes = [
@@ -35,13 +35,15 @@ export const economicsRoutes = [
   defineRoute({
     method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
     body: z.object({
-      marginTargetBp: bp, tmaMonthlyBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp,
+      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp,
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean(),
       validFrom: z.string().date(),
     }),
     handler: async ({ app, auth, body, req, reply }) => {
-      const { validFrom, ...values } = body;
+      const { validFrom, ...rest } = body;
+      // a TMA é informada ao ano; a mensal equivalente fica guardada junto (compatível com os cálculos anteriores)
+      const values = { ...rest, tmaMonthlyBp: Math.round(((1 + rest.tmaAnnualBp / 10_000) ** (1 / 12) - 1) * 10_000) };
       const e = econSettingsErrors(values);
       if (e.length) throw unprocessable(e.join(' '));
       if (validFrom < today()) throw unprocessable('A vigência começa hoje ou numa data futura: cálculos já salvos não mudam de regra.');
@@ -160,12 +162,12 @@ export const economicsRoutes = [
   }),
   defineRoute({
     method: 'PUT', url: '/admin/cost-items', summary: 'Salva os itens do catálogo de custos (incluir, renomear, desativar); o preço tem rota própria com vigência', tag: 'Viabilidade', ...ADMIN,
-    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), name: z.string().trim().min(2).max(120), kind: z.enum(['investimento', 'mensal']), unit: z.string().trim().min(1).max(12), active: z.boolean() })).max(500) }),
+    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), name: z.string().trim().min(2).max(120), kind: z.enum(['investimento', 'mensal']), unit: z.string().trim().min(1).max(12), impact: z.enum(COST_IMPACTS).nullable().optional(), active: z.boolean() })).max(500) }),
     handler: async ({ app, auth, body, req }) => app.db.transaction(async (tx) => {
-      const keys = body.items.map((i) => `${i.kind}|${i.name.toLowerCase()}`);
-      if (new Set(keys).size !== keys.length) throw unprocessable('Há itens com o mesmo nome no mesmo tipo.');
+      const keys = body.items.map((i) => `${i.kind}|${i.name.toLowerCase()}|${i.unit.toLowerCase()}`);
+      if (new Set(keys).size !== keys.length) throw unprocessable('Há itens com a mesma descrição e unidade no mesmo tipo.');
       for (const it of body.items) {
-        const v = { name: it.name, kind: it.kind, unit: it.unit, active: it.active, updatedAt: new Date() };
+        const v = { name: it.name, kind: it.kind, unit: it.unit, impact: it.kind === 'mensal' ? 'operacional' : it.impact ?? null, active: it.active, updatedAt: new Date() };
         if (it.id) await tx.update(s.costItems).set(v).where(and(eq(s.costItems.id, it.id), eq(s.costItems.tenantId, auth.tenantId)));
         else await tx.insert(s.costItems).values({ tenantId: auth.tenantId, ...v });
       }
@@ -218,9 +220,10 @@ export const economicsRoutes = [
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
-      const input = await resolveCostLines(app.db, auth.tenantId, body as EconInput);
-      const e = econInputErrors(input);
+      const e = econInputErrors(body as EconInput);
       if (e.length) throw unprocessable(e.join(' '));
+      // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
+      const input = await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));
       const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
       await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
@@ -268,8 +271,11 @@ export const economicsRoutes = [
       if (st.status === 'em_decisao') throw unprocessable('Esta viabilidade já está em decisão.');
       if (st.status === 'aprovada') throw unprocessable('Esta viabilidade já foi aprovada. Para mudar, salve de novo e envie a nova versão.');
       await app.db.insert(s.opportunityEconDecisions).values({ tenantId: auth.tenantId, opportunityId: opp.id, snapshotId: st.snapshotId!, action: 'enviada', actorId: auth.userId });
-      await audit(app.db, req, { action: 'opportunity.economics_submit', entityType: 'opportunity', entityId: opp.id, metadata: { snapshotId: st.snapshotId, verdict: ctx.savedResult.verdict } });
-      return econStatus(app.db, auth.tenantId, opp.id).then((x) => ({ status: x.status }));
+      // dentro de todas as regras (VPL > 0, TIR > TMA, payback e margem na política): aprovação automática; senão, alçada superior
+      const auto = ctx.savedResult.autoApproval?.ok === true;
+      if (auto) await app.db.insert(s.opportunityEconDecisions).values({ tenantId: auth.tenantId, opportunityId: opp.id, snapshotId: st.snapshotId!, action: 'aprovada', reason: 'Aprovação automática: VPL positivo, TIR acima da TMA, payback e margem dentro da política.', actorId: null });
+      await audit(app.db, req, { action: 'opportunity.economics_submit', entityType: 'opportunity', entityId: opp.id, metadata: { snapshotId: st.snapshotId, verdict: ctx.savedResult.verdict, autoApproved: auto } });
+      return econStatus(app.db, auth.tenantId, opp.id).then((x) => ({ status: x.status, autoApproved: auto }));
     },
   }),
   defineRoute({

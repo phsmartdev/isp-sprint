@@ -27,19 +27,20 @@ describe('resolução fiscal', () => {
 });
 
 describe('piso, preço recomendado e indicadores', () => {
-  it('venda pontual: P_caixa = (I+F)/b, P_eco com TMA e mês de recebimento, P_margem = (I+F)/(b−m)', () => {
+  it('venda pontual: pisos com o risco e preço exato pelo markup divisor (I + F) ÷ (1 − a − c − m); sem produtos, o preço é o do motor', () => {
     const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 2, capex: [{ description: 'Equipamento', qtyMilli: 1000, unitCents: 85_000 }] };
     const r = financeEngine({ input, items: items([0, 1500]), settings: { ...S, tmaMonthlyBp: 100, marginTargetBp: 2000 }, publicSector: false });
-    // b = 1 − 0,15 = 0,85
+    // b = 1 − 0,15 = 0,85; margem = piso (sem sugestão) = 20%
     near(r.floor.cashCents, 85_000 / 0.85);
     near(r.floor.economicCents, (85_000 * 1.01 ** 2) / 0.85);
-    near(r.marginPriceCents, 85_000 / 0.65);
+    near(r.markupPriceCents!, 85_000 / 0.65);
     near(r.recommendedCents, 85_000 / 0.65);
-    // sem preço informado e sem receita nos produtos: não se inventa preço
-    expect(r.priceCents).toBeNull();
-    expect(r.verdict).toBe('sem_preco');
+    expect(r.priceSource).toBe('motor');
+    near(r.priceCents, 85_000 / 0.65);
+    expect(r.kpi!.marginPct).toBeCloseTo(20, 4);
+    expect(r.verdict).toBe('viavel');
   });
-  it('recorrente: D = min(N, D_alvo), anuidade, preço mínimo e recomendado; MC, VPL, TIR e payback no preço dos itens', () => {
+  it('recorrente: C = (I + E) ÷ payback + O; M = (C + F) ÷ (1 − a − c − m); fluxo com glosa e inadimplência; aprovação automática', () => {
     const input = { ...emptyEconInput(), termMonths: 24, capex: [{ description: 'Roteador', qtyMilli: 2000, unitCents: 150_000 }], opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 40_000 }] };
     const st = { ...S, tmaMonthlyBp: 150, marginTargetBp: 3500, commissionBp: 500, lossPrivateBp: 200 };
     const r = financeEngine({ input, items: items([200_000, 1000]), settings: st, publicSector: false });
@@ -47,19 +48,56 @@ describe('piso, preço recomendado e indicadores', () => {
     expect(r.term).toMatchObject({ N: 24, Dalvo: 6, D: 6 });
     near(r.floor.cashCents, (40_000 + 300_000 / 6) / b);
     near(r.floor.economicCents, (40_000 + 300_000 / annuityFactor(0.015, 6)) / b);
-    near(r.marginPriceCents, 40_000 / (b - 0.35));
+    near(r.marginPriceCents, (300_000 / 6 + 40_000) / (0.85 - 0.35));
     const P = 200_000;
-    const mc = P - P * 0.1 - P * 0.05 - P * 0.02 - 40_000;
-    near(r.kpi!.contributionCents, mc);
-    expect(r.kpi!.marginPct).toBeCloseTo((mc / P) * 100, 6);
-    const flows = [-300_000, ...Array.from({ length: 24 }, () => mc)];
+    // MC (precificação) = P − tributos − comissão − custo − amortização no payback
+    expect(r.kpi!.contributionCents).toBe(P - 20_000 - 10_000 - 40_000 - 50_000);
+    expect(r.kpi!.marginPct).toBeCloseTo(40, 6);
+    // FC mensal = P − glosa − tributos − comissão − custos
+    const fc = P - 4_000 - 20_000 - 10_000 - 40_000;
+    expect(r.kpi!.cashMonthlyCents).toBe(fc);
+    const flows = [-300_000, ...Array.from({ length: 24 }, () => fc)];
     near(r.kpi!.npvCents, npv(flows, 0.015));
-    expect(r.kpi!.simplePaybackMonths).toBeCloseTo(300_000 / mc, 6);
     expect(r.kpi!.paybackMonths).toBeCloseTo(paybackMonths(flows, 0.015)!, 6);
-    expect(r.kpi!.paybackMonths!).toBeGreaterThan(r.kpi!.simplePaybackMonths!);
     expect(npv(flows, r.kpi!.irrMonthly!)).toBeCloseTo(0, 2);
+    expect(r.kpi!.roiPct).toBeCloseTo(((fc * 24 - 300_000) / 300_000) * 100, 6);
     expect(r.verdict).toBe('viavel');
-    expect(econHeadline(r, (c) => `R$ ${(c ?? 0) / 100}`)).toMatch(/volta em .* meses, já descontada a TMA \(limite 6\)/);
+    expect(r.autoApproval!.ok).toBe(true);
+    // payback do vendedor: 3 meses dobra a amortização; acima do teto é ajustado ao teto
+    expect(financeEngine({ input: { ...input, paybackMonths: 3 }, items: items([200_000, 1000]), settings: st, publicSector: false }).term.D).toBe(3);
+    const over = financeEngine({ input: { ...input, paybackMonths: 10 }, items: items([200_000, 1000]), settings: st, publicSector: false });
+    expect(over.term.D).toBe(6);
+    expect(over.warnings.join(' ')).toMatch(/acima do teto/);
+  });
+  it('margem do vendedor fica entre o piso e o teto; sem escolha, vale a sugestão', () => {
+    const input = { ...emptyEconInput(), opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 50_000 }] };
+    const st = { ...S, marginTargetBp: 2000, marginSuggestedBp: 3000, marginMaxBp: 4500 };
+    expect(financeEngine({ input, items: items([100_000, 0]), settings: st, publicSector: false }).rates.m).toBeCloseTo(0.3, 9);
+    const hi = financeEngine({ input: { ...input, marginTargetBp: 6000 }, items: items([100_000, 0]), settings: st, publicSector: false });
+    expect(hi.rates.m).toBeCloseTo(0.45, 9);
+    expect(hi.warnings.join(' ')).toMatch(/ajustada para 45%/);
+    expect(financeEngine({ input: { ...input, marginTargetBp: 1000 }, items: items([100_000, 0]), settings: st, publicSector: false }).rates.m).toBeCloseTo(0.2, 9);
+  });
+  it('TMA anual vira mensal, inflação reajusta a receita depois do 12º mês e o horizonte limita a projeção', () => {
+    const input = { ...emptyEconInput(), termMonths: 60, capex: [{ description: 'Obra', qtyMilli: 1000, unitCents: 100_000 }] };
+    const st = { ...S, marginTargetBp: 0, tmaAnnualBp: 1200, inflationAnnualBp: 500, horizonMaxMonths: 36, badDebtBp: 100, lossPrivateBp: 200 };
+    const r = financeEngine({ input, items: items([100_000, 0]), settings: st, publicSector: false });
+    expect(r.rates.r).toBeCloseTo(1.12 ** (1 / 12) - 1, 12);
+    expect(r.term.N).toBe(36);
+    expect(r.cashflow).toHaveLength(37);
+    const im = 1.05 ** (1 / 12) - 1;
+    near(r.cashflow[12]!, 100_000 * (1 - 0.03));
+    near(r.cashflow[13]!, 100_000 * (1 + im) * (1 - 0.03));
+    expect(r.rates.g).toBeCloseTo(0.03, 12); // glosa 2% + inadimplência 1%
+    expect(r.warnings.join(' ')).toMatch(/prazo máximo de previsão/);
+  });
+  it('entrega e taxa fixa de venda entram no preço sem contingência', () => {
+    const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 1, capex: [{ description: 'Cabo', qtyMilli: 1000, unitCents: 100_000, impact: 'material' as const }, { description: 'Frete', qtyMilli: 1000, unitCents: 50_000, impact: 'entrega' as const }] };
+    const r = financeEngine({ input, items: items([0, 0]), settings: { ...S, contingencyCapexBp: 1000, marginTargetBp: 0 }, publicSector: false });
+    expect(r.initialCents).toBe(110_000);
+    expect(r.variableFixedCents).toBe(50_000);
+    expect(r.investmentCents).toBe(160_000);
+    expect(r.cashflow[0]).toBe(-160_000);
   });
   it('trava de segmento: payback acima de 6 meses no privado fica fora da política; no público o limite é 12', () => {
     const input = { ...emptyEconInput(), termMonths: 36, capex: [{ description: 'Obra', qtyMilli: 1000, unitCents: 900_000 }] };
@@ -86,23 +124,23 @@ describe('piso, preço recomendado e indicadores', () => {
 
 describe('decisões da diretoria (29/10)', () => {
   const rec = (over: Partial<ReturnType<typeof emptyEconInput>> = {}) => ({ ...emptyEconInput(), termMonths: 24, capex: [{ description: 'Obra', qtyMilli: 1000, unitCents: 500_000 }], ...over });
-  it('margem é mínima: abaixo dela a venda sai da política', () => {
+  it('margem é mínima: abaixo dela a venda sai da política (margem já com o investimento amortizado no payback)', () => {
     const it1 = items([100_000, 0]);
-    // MC = 100.000 − 70.000 = 30.000 → margem 30% < 35%
+    // MC = 100.000 − 70.000 − 60.000 ÷ 6 = 20.000 → 20% < 35%
     const r = financeEngine({ input: rec({ capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 60_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 70_000 }] }), items: it1, settings: { ...S, tmaMonthlyBp: 0 }, publicSector: false });
-    expect(r.kpi!.marginPct).toBeCloseTo(30, 6);
+    expect(r.kpi!.marginPct).toBeCloseTo(20, 6);
     expect(r.marginOk).toBe(false);
-    expect(r.withinPolicy).toBe(false);
     expect(r.verdict).toBe('abaixo_recomendado');
-    const ok = financeEngine({ input: rec({ capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 60_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 60_000 }] }), items: it1, settings: { ...S, tmaMonthlyBp: 0 }, publicSector: false });
+    expect(r.autoApproval!.ok).toBe(false);
+    const ok = financeEngine({ input: rec({ capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 60_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 50_000 }] }), items: it1, settings: { ...S, tmaMonthlyBp: 0 }, publicSector: false });
     expect(ok.marginOk).toBe(true);
     expect(ok.verdict).toBe('viavel');
   });
-  it('preço sem informar = total dos produtos; sem produtos, sem preço', () => {
+  it('preço sem informar = total dos produtos; sem produtos, o preço exato do motor', () => {
     expect(financeEngine({ input: rec(), items: items([80_000, 0]), settings: S, publicSector: false }).priceCents).toBe(80_000);
     const none = financeEngine({ input: rec(), items: [], settings: S, publicSector: false });
-    expect(none.priceCents).toBeNull();
-    expect(none.verdict).toBe('sem_preco');
+    expect(none.priceSource).toBe('motor');
+    expect(none.priceCents).toBe(none.recommendedCents);
   });
   it('a trava usa o payback descontado: 5,9 meses simples passa de 6 com TMA de 3%', () => {
     // I = 500.000, MC = 85.000/mês → simples 5,88; descontado a 3% passa de 6
@@ -199,24 +237,20 @@ describe('TMA alta (caso real de 29/10: 50% ao mês)', () => {
 
 describe('cadeia de margens', () => {
   const rec = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 120_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 20_000 }] };
-  it('contribuição → operacional (− amortização − despesas fixas) → líquida (− IR/CSLL)', () => {
-    // P = 100.000, tributos 10%, comissão 5% → MC = 100.000 − 10.000 − 5.000 − 20.000 = 65.000
+  it('contribuição (com a amortização no payback) → operacional (− glosa − despesas fixas) → líquida (− IR/CSLL)', () => {
+    // P = 100.000, tributos 10%, comissão 5%, custo 20.000, investimento 120.000 em 6 meses → MC = 45.000
     const r = financeEngine({ input: rec, items: items([100_000, 1000]), settings: { ...S, commissionBp: 500, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
     const m = r.kpi!.margins!;
-    expect(r.kpi!.contributionCents).toBe(65_000);
-    expect(m.amortizationCents).toBe(10_000); // 120.000 ÷ 12
+    expect(r.kpi!.contributionCents).toBe(45_000);
+    expect(m.amortizationCents).toBe(20_000);
     expect(m.overheadCents).toBe(10_000);
-    expect(m.operatingCents).toBe(45_000);
-    expect(m.incomeTaxCents).toBe(15_300); // 34% de 45.000
-    expect(m.netCents).toBe(29_700);
-    near(m.netPct, 29.7, 1e-9);
-    // margem operacional zero: (20.000 + 10.000) ÷ (1 − 0,10 − 0,05 − 0,10) = 40.000; a margem mínima (35%) pede mais
-    near(r.operatingFloorCents!, 40_000);
-    near(r.marginPriceCents, 20_000 / (0.85 - 0.35));
-    expect(r.suggestedMinCents).toBe(Math.max(r.floor.minCents!, r.marginPriceCents!, r.operatingFloorCents!));
+    expect(m.operatingCents).toBe(35_000);
+    expect(m.incomeTaxCents).toBe(11_900);
+    expect(m.netCents).toBe(23_100);
     const dre = econDre(r, String);
     expect(dre.map((x) => x.label)).toEqual(expect.arrayContaining(['Margem de contribuição', 'Margem operacional', 'IR/CSLL', 'Margem líquida']));
-    expect(dre.find((x) => x.label === 'Margem líquida')!.total).toBe(65_000 * 12 - 120_000 - 10_000 * 12 - 15_300 * 12);
+    // no contrato: o investimento sai uma vez; IR mês a mês (meses 1–6 com amortização, 7–12 sem)
+    expect(dre.find((x) => x.label === 'Margem líquida')!.total).toBe(12 * 65_000 - 120_000 - 12 * 10_000 - (6 * 11_900 + 6 * 18_700));
   });
   it('IR/CSLL só sobre resultado operacional positivo', () => {
     const r = financeEngine({ input: rec, items: items([30_000, 1000]), settings: { ...S, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
@@ -242,13 +276,27 @@ describe('memória de cálculo', () => {
     const hist = steps.find((s) => s.key === 'historico')!;
     expect(hist.rows[0]!.value).toBe('R$ 10240.00/mês');
     expect(hist.rows[1]!.value).toBe('68,75%');
-    expect(hist.rows[2]!.value).toBe('36,8%'); // 36,75% arredondado a 1 casa
+    expect(hist.rows[2]!.value).toBe('36,75%'); // SB − tributos − comissão (documento)
     const fluxo = steps.find((s) => s.key === 'fluxo')!;
     const roi = fluxo.rows.find((x) => x.label === 'ROI')!;
-    const k = r.kpi!;
-    expect(roi.value).toBe(`${(((k.contributionCents * 12 - 600_000) / 600_000) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
-    expect(steps.at(-1)!.rows.at(-1)).toMatchObject({ label: 'Resultado', ok: true });
+    expect(roi.value).toBe(`${r.kpi!.roiPct!.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
+    expect(steps.at(-1)!.rows.at(-1)!.label).toBe('Resultado');
     // sem fator configurado, o comparativo não aparece
     expect(econMemory(r, String).some((s) => s.key === 'historico')).toBe(false);
+  });
+});
+
+describe('planilha de materiais (BOM) com frequência e impacto', () => {
+  it('lê as colunas do documento e classifica cada linha', () => {
+    const r = parseCostTable([
+      ['Item / Descrição', 'Unid.', 'Qtd.', 'Custo Unit.', 'Frequência do Custo', 'Impacta o Quê?'],
+      ['Cabo Fibra Óptica', 'Metro', '1.000', 'R$ 5,00', 'Único (Setup)', 'Material/Equipamento'],
+      ['Mão de Obra (HH)', 'HH', '40', 'R$ 50,00', 'Único (Setup)', 'Serviço/Mão de Obra'],
+      ['Aluguel de Poste', 'Unid.', '10', 'R$ 12,00', 'Mensal (Recorrente)', 'Custo Operacional'],
+      ['Frete do Material', 'Unid.', '1', 'R$ 500,00', 'Único (Setup)', 'Despesa de Entrega'],
+    ]);
+    expect(r.errors).toEqual([]);
+    expect(r.lines.map((l) => [l.frequency, l.impact])).toEqual([['unico', 'material'], ['unico', 'servico'], ['mensal', 'operacional'], ['unico', 'entrega']]);
+    expect(r.lines[0]).toMatchObject({ qtyMilli: 1_000_000, unitCents: 500, unit: 'Metro' });
   });
 });

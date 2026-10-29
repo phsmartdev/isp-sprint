@@ -7,7 +7,7 @@ import { login, makeApp, type Client } from './helpers';
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-const ECON = { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 0, incomeTaxBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
+const ECON = { marginTargetBp: 3500, marginSuggestedBp: 3500, marginMaxBp: 6000, tmaAnnualBp: 0, inflationAnnualBp: 0, horizonMaxMonths: 120, badDebtBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 0, incomeTaxBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test'), login(ctx.app, 'rafael@yepnet.test')]); });
 afterAll(async () => ctx.close());
@@ -48,20 +48,22 @@ describe('viabilidade econômica', () => {
     expect(g.saved).toBeNull();
     expect(g.result).toBeNull(); // nada salvo: consultar não inventa resultado
 
-    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 3_000_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 200_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
+    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', impact: 'material', qtyMilli: 1000, unitCents: 3_000_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 200_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
     ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, termMonths: 0 }), 422);
     const saved = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
     // a = 0,5×20% + 0,5×8,65% = 14,325%
     expect(saved.result.rates.a).toBeCloseTo(0.14325, 8);
     expect(saved.result.withReservations).toBe(false);
-    // P = 10.000; MC = 10.000 − 1.432,50 − 500 − 2.000 = 6.067,50; payback = 30.000 ÷ 6.067,50 ≈ 4,9 meses (≤ 6)
-    expect(saved.result.kpi.contributionCents).toBe(606_750);
+    // P = 10.000; caixa do mês = 10.000 − 1.432,50 − 500 − 2.000 = 6.067,50; payback = 30.000 ÷ 6.067,50 ≈ 4,9 meses (≤ 6)
+    // margem de contribuição (precificação) desconta também o investimento no payback: 6.067,50 − 30.000 ÷ 6 = 1.067,50
+    expect(saved.result.kpi.cashMonthlyCents).toBe(606_750);
+    expect(saved.result.kpi.contributionCents).toBe(106_750);
     expect(saved.result.kpi.paybackMonths).toBeCloseTo(3_000_000 / 606_750, 4);
     expect(saved.result.verdict).not.toBe('fora_politica');
     expect(saved.history).toHaveLength(1);
 
     // investimento maior: payback passa de 6 meses no privado → não vai para aprovação
-    ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, capex: [{ description: 'Obra de rede', qtyMilli: 1000, unitCents: 6_000_000 }] }));
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, capex: [{ description: 'Obra de rede', impact: 'material', qtyMilli: 1000, unitCents: 6_000_000 }] }));
     const ap = await carlos.post(`/opportunities/${o.id}/approval/requests`, { negotiationType: 'novo_servico', proposedMonthlyCents: 1_000_000, activationFeeCents: 0, justification: 'Pedido de teste da trava' });
     expect(ap.statusCode, ap.body).toBe(422);
     expect(ap.json().detail).toMatch(/abaixo do preço mínimo/);
@@ -83,7 +85,7 @@ describe('viabilidade econômica', () => {
     // consultar não recalcula: parâmetro mudou → continua o salvo, marcado como desatualizado, e a aprovação pede para salvar de novo
     const before = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(before.stale).toBe(false);
-    ok(await carlos.post('/admin/viability/econ', { ...ECON, tmaMonthlyBp: 300 }), 201);
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, tmaAnnualBp: 4258 }), 201);
     const after = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(after.stale).toBe(true);
     expect(after.result).toEqual(before.result);
@@ -149,27 +151,32 @@ describe('viabilidade econômica', () => {
     const doc = ok(await rafael.get('/fiscal-docs')).json().items.find((d: { branchId: string; code: string }) => d.branchId === branch && d.code === 'NFS-E');
     const o = ok(await rafael.post('/opportunities', { newContact: { name: `Empresa Decisão ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: branch, saleKind: 'venda_consultiva' }), 201).json();
     ok(await rafael.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link dedicado', unit: 'un', qtyMilli: 1000, unitCents: 500_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: doc.id }] }));
-    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 300_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 50_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
+    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', impact: 'material', qtyMilli: 1000, unitCents: 300_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 50_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
     ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}), 422); // nada salvo
+    // dentro de todas as regras: aprovação automática no envio
     expect(ok(await rafael.put(`/opportunities/${o.id}/economics`, input)).json().result.verdict).toBe('viavel');
     expect(ok(await rafael.get(`/opportunities/${o.id}/economics`)).json().status).toBe('calculada');
-    expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json().status).toBe('em_decisao');
+    expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json()).toMatchObject({ status: 'aprovada', autoApproved: true });
+    // margem abaixo do piso: vai para a alçada superior
+    const input2 = { ...input, opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 250_000 }] };
+    expect(ok(await rafael.put(`/opportunities/${o.id}/economics`, input2)).json().result.verdict).toBe('abaixo_recomendado');
+    expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json()).toMatchObject({ status: 'em_decisao', autoApproved: false });
     ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}), 422);
     // vendedor não aprova; a gestão vê na fila
     ok(await rafael.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' }), 403);
     expect(ok(await rafael.get('/economics/pending')).json().items).toEqual([]);
     const pend = ok(await carlos.get('/economics/pending')).json().items;
-    expect(pend.find((p: { opportunityId: string }) => p.opportunityId === o.id)).toMatchObject({ verdict: 'viavel', submittedByName: 'Rafael Mendes' });
+    expect(pend.find((p: { opportunityId: string }) => p.opportunityId === o.id)).toMatchObject({ verdict: 'abaixo_recomendado', submittedByName: 'Rafael Mendes' });
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().canDecide).toBe(true);
     ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver' }), 422); // sem motivo
     expect(ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver', reason: 'Revisar o custo do trânsito' })).json().status).toBe('devolvida');
     ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}));
     expect(ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' })).json().status).toBe('aprovada');
     // salvar de novo gera outra fotografia: volta a "calculada" e a aprovação fica no histórico
-    ok(await rafael.put(`/opportunities/${o.id}/economics`, { ...input, termMonths: 36 }));
+    ok(await rafael.put(`/opportunities/${o.id}/economics`, { ...input2, termMonths: 36 }));
     const after = ok(await rafael.get(`/opportunities/${o.id}/economics`)).json();
     expect(after.status).toBe('calculada');
-    expect(after.decisions.map((d: { action: string }) => d.action)).toEqual(['aprovada', 'enviada', 'devolvida', 'enviada']);
+    expect(after.decisions.map((d: { action: string }) => d.action)).toEqual(['aprovada', 'enviada', 'devolvida', 'enviada', 'aprovada', 'enviada']);
     await expect(ctx.db.execute(sql`update opportunity_econ_decisions set reason = 'x' where opportunity_id = ${o.id}`)).rejects.toThrow(/append-only/);
     // quem envia não decide, nem sendo da gestão
     ok(await carlos.post(`/opportunities/${o.id}/economics/submit`, {}));
@@ -196,7 +203,7 @@ describe('viabilidade econômica', () => {
 
     // etapa 6: catálogo com preço por vigência
     ok(await lucas.put('/admin/cost-items', { items: [] }), 403);
-    const cat = ok(await carlos.put('/admin/cost-items', { items: [{ id: null, name: 'Roteador corporativo', kind: 'investimento', unit: 'un', active: true }, { id: null, name: 'Trânsito IP 1G', kind: 'mensal', unit: 'mes', active: true }] })).json().items;
+    const cat = ok(await carlos.put('/admin/cost-items', { items: [{ id: null, name: 'Roteador corporativo', kind: 'investimento', unit: 'un', impact: 'material', active: true }, { id: null, name: 'Trânsito IP 1G', kind: 'mensal', unit: 'mes', active: true }] })).json().items;
     const router = cat.find((c: { name: string }) => c.name === 'Roteador corporativo');
     const transit = cat.find((c: { name: string }) => c.name === 'Trânsito IP 1G');
     ok(await carlos.post(`/admin/cost-items/${router.id}/prices`, { unitCents: 200_000, validFrom: '2020-01-01' }), 422);
@@ -208,15 +215,25 @@ describe('viabilidade econômica', () => {
     const o = ok(await carlos.post('/opportunities', { newContact: { name: `Empresa Etapas ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: br.id, saleKind: 'venda_consultiva' }), 201).json();
     ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link dedicado', unit: 'un', qtyMilli: 1000, unitCents: 600_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: nfse0.id }] }));
     const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, extraInitialCents: 0, commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null,
-      capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 200_000, unit: 'und', costItemId: router.id }, { description: 'Obra', qtyMilli: 1000, unitCents: 150_000, costItemId: transit.id }],
-      opex: [{ description: 'Trânsito IP 1G', qtyMilli: 1000, unitCents: 55_000, costItemId: transit.id }] };
+      capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 200_000, unit: 'un', costItemId: router.id }, { description: 'Obra', impact: 'material', qtyMilli: 1000, unitCents: 150_000, costItemId: transit.id }],
+      opex: [{ description: 'Trânsito IP 1G', qtyMilli: 1000, unitCents: 55_000, unit: 'mes', costItemId: transit.id }] };
     ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     const g = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(g.emitter).toMatchObject({ cnpj: '11222333000181', taxRegime: 'lucro_presumido', city: 'Aracaju' });
-    expect(g.input.capex[0]).toMatchObject({ costItemId: router.id, manual: false, unit: 'und' });
+    // auto-aprendizado (descrição + unidade): o item conhecido preenche o impacto; o novo entra no catálogo; a cotação nova vira o preço
+    expect(g.input.capex[0]).toMatchObject({ costItemId: router.id, manual: false, unit: 'un' });
     expect(g.input.capex[0].priceId).toBeTruthy();
-    expect(g.input.capex[1]).toMatchObject({ costItemId: null, manual: true }); // item mensal não serve para investimento
-    expect(g.input.opex[0]).toMatchObject({ costItemId: transit.id, manual: true }); // valor diferente do catálogo
+    expect(g.input.capex[1].costItemId).not.toBe(transit.id); // item mensal não serve para investimento: vira item novo
+    expect(g.input.opex[0]).toMatchObject({ costItemId: transit.id, manual: false, impact: 'operacional' });
+    const learned = ok(await carlos.get('/admin/cost-items')).json().items;
+    expect(learned.find((c: { id: string }) => c.id === transit.id).unitCents).toBe(55_000);
+    expect(learned.find((c: { name: string; kind: string }) => c.name === 'Obra' && c.kind === 'investimento')).toMatchObject({ impact: 'material', unitCents: 150_000 });
+    // mesma descrição em outra unidade é outro item e exige classificar o impacto
+    const und = { ...input, capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 210_000, unit: 'cx' }] };
+    expect(ok(await carlos.put(`/opportunities/${o.id}/economics`, und), 422).json().detail).toMatch(/Classifique/);
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...und, capex: [{ ...und.capex[0], impact: 'material' }] }));
+    expect(ok(await carlos.get('/admin/cost-items')).json().items.filter((c: { name: string }) => c.name === 'Roteador corporativo')).toHaveLength(2);
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     expect(g.result.items[0].docVersion).toBe(nfse0.version + 1);
 
     // etapa 4: cálculo assinado, lido sem recalcular

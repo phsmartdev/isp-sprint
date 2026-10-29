@@ -6,9 +6,10 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { emptyEconInput, financeEngine, fiscalDocRates, itemTotal, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
+import { emptyEconInput, financeEngine, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { unprocessable } from '../http/errors';
 
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 
@@ -181,7 +182,7 @@ export async function pendingDecisions(db: DbOrTx, tenantId: string, opportunity
 }
 
 // ------------------------------------------------------------------ catálogo de custos
-export type CostItemRow = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; active: boolean; unitCents: number | null; priceId: string | null; priceFrom: string | null };
+export type CostItemRow = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; impact: CostImpact | null; active: boolean; unitCents: number | null; priceId: string | null; priceFrom: string | null };
 
 /** Itens do catálogo com o preço vigente na data (o de maior vigência até ela; empate, o mais recente). */
 export async function costItemsOf(db: DbOrTx, tenantId: string, on = today()): Promise<CostItemRow[]> {
@@ -190,7 +191,7 @@ export async function costItemsOf(db: DbOrTx, tenantId: string, on = today()): P
   const prices = await db.selectDistinctOn([s.costItemPrices.itemId], { itemId: s.costItemPrices.itemId, id: s.costItemPrices.id, unitCents: s.costItemPrices.unitCents, validFrom: s.costItemPrices.validFrom })
     .from(s.costItemPrices).where(and(inArray(s.costItemPrices.itemId, items.map((i) => i.id)), lte(s.costItemPrices.validFrom, on)))
     .orderBy(s.costItemPrices.itemId, desc(s.costItemPrices.validFrom), desc(s.costItemPrices.createdAt));
-  return items.map((i) => { const p = prices.find((x) => x.itemId === i.id); return { id: i.id, name: i.name, kind: i.kind as CostItemRow['kind'], unit: i.unit, active: i.active, unitCents: p?.unitCents ?? null, priceId: p?.id ?? null, priceFrom: p?.validFrom ?? null }; });
+  return items.map((i) => { const p = prices.find((x) => x.itemId === i.id); return { id: i.id, name: i.name, kind: i.kind as CostItemRow['kind'], unit: i.unit, impact: (i.impact as CostImpact | null) ?? null, active: i.active, unitCents: p?.unitCents ?? null, priceId: p?.id ?? null, priceFrom: p?.validFrom ?? null }; });
 }
 
 /**
@@ -208,4 +209,40 @@ export async function resolveCostLines(db: DbOrTx, tenantId: string, input: Econ
     return { ...line, costItemId: it.id, priceId: it.priceId, manual: it.unitCents == null || it.unitCents !== line.unitCents };
   };
   return { ...input, capex: input.capex.map(fix('investimento')), opex: input.opex.map(fix('mensal')) };
+}
+
+const keyOf = (name: string, unit: string | null | undefined) => `${name.trim().toLowerCase()}|${(unit ?? 'un').trim().toLowerCase() || 'un'}`;
+
+/**
+ * Auto-aprendizado da planilha (chave Descrição + Unidade): item conhecido preenche o impacto e passa a valer o preço
+ * da nova cotação; item novo (ou mesma descrição em outra unidade) entra no catálogo e exige o impacto na primeira vez.
+ * Investimento sem impacto e sem histórico é recusado com o nome do item.
+ */
+export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: string | null, input: EconInput): Promise<EconInput> {
+  const cat = await costItemsOf(db, tenantId);
+  const on = today();
+  const missing: string[] = [];
+  const learn = async (kind: CostItemRow['kind'], l: CostLine): Promise<CostLine> => {
+    const unit = (l.unit ?? '').trim() || 'un';
+    let it = cat.find((c) => c.kind === kind && keyOf(c.name, c.unit) === keyOf(l.description, unit));
+    const impact: CostImpact | null = kind === 'mensal' ? 'operacional' : (l.impact ?? it?.impact ?? null);
+    if (!impact) { missing.push(l.description); return l; }
+    if (!it) {
+      const [n] = await db.insert(s.costItems).values({ tenantId, name: l.description.trim().slice(0, 120), kind, unit, impact }).onConflictDoNothing().returning();
+      if (!n) return { ...l, impact };
+      it = { id: n.id, name: n.name, kind, unit: n.unit, impact, active: true, unitCents: null, priceId: null, priceFrom: null };
+      cat.push(it);
+    } else if (!it.impact || (l.impact && l.impact !== it.impact)) await db.update(s.costItems).set({ impact, updatedAt: new Date() }).where(eq(s.costItems.id, it.id));
+    let priceId = it.priceId;
+    if (it.unitCents !== l.unitCents) {
+      const [p] = await db.insert(s.costItemPrices).values({ tenantId, itemId: it.id, unitCents: l.unitCents, validFrom: on, createdBy: actorId }).returning({ id: s.costItemPrices.id });
+      priceId = p!.id; it.unitCents = l.unitCents; it.priceId = priceId;
+    }
+    return { ...l, unit, impact, costItemId: it.id, priceId, manual: false };
+  };
+  const capex: CostLine[] = [], opex: CostLine[] = [];
+  for (const l of input.capex) capex.push(await learn('investimento', l));
+  for (const l of input.opex) opex.push(await learn('mensal', l));
+  if (missing.length) throw unprocessable(`Classifique o que cada item novo impacta (material, serviço, entrega ou taxa fixa de venda): ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}.`, [{ path: 'capex', message: 'impacto' }]);
+  return { ...input, capex, opex };
 }
