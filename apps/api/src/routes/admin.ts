@@ -123,17 +123,6 @@ function withProductPrice<T extends { priceCents?: number; partnerCosts?: Record
   return b.products.length ? { ...b, partnerCosts, priceCents: b.products.reduce((a, i) => a + i.qty * i.unitPriceCents, 0) } : { ...b, partnerCosts };
 }
 
-/** Parceiros ligados a produtos passam a ser cobrados pelos produtos do plano (não mais valor fixo). */
-async function partnersToPerPlan(db: DbOrTx, tenantId: string, products?: PlanProduct[]) {
-  const ids = [...new Set((products ?? []).map((p) => p.partnerId).filter(Boolean) as string[])];
-  if (!ids.length) return [];
-  const found = await db.select({ id: s.viabilityDeductions.id, name: s.viabilityDeductions.name, kind: s.viabilityDeductions.kind }).from(s.viabilityDeductions).where(and(eq(s.viabilityDeductions.tenantId, tenantId), eq(s.viabilityDeductions.category, 'parceiro'), inArray(s.viabilityDeductions.id, ids)));
-  if (found.length !== ids.length) throw unprocessable('Parceiro inválido no produto.', [{ path: 'products', message: 'Parceiro não encontrado' }]);
-  const switched = found.filter((f) => f.kind !== 'per_plan');
-  if (switched.length) await db.update(s.viabilityDeductions).set({ kind: 'per_plan' }).where(inArray(s.viabilityDeductions.id, switched.map((x) => x.id)));
-  return switched.map((x) => x.name);
-}
-
 export const adminRoutes = [
   // ------------------------------------------------------------------ visão geral
   defineRoute({
@@ -422,11 +411,10 @@ export const adminRoutes = [
     ...ADMIN,
     body: PlanUpsert,
     handler: async ({ app, auth, body, req, reply }) => {
-      const switched = await partnersToPerPlan(app.db, auth.tenantId, body.products);
       const [p] = await app.db.insert(s.plans).values({ tenantId: auth.tenantId, ...withProductPrice(body) }).returning();
       await audit(app.db, req, { action: 'plan.create', entityType: 'plan', entityId: p!.id, metadata: { name: p!.name, priceCents: p!.priceCents } });
       reply.code(201);
-      return { ...p!, partnersSwitched: switched };
+      return p!;
     },
   }),
   defineRoute({
@@ -438,11 +426,10 @@ export const adminRoutes = [
     params: IdParams,
     body: PlanUpsert.partial(),
     handler: async ({ app, auth, params, body, req }) => {
-      const switched = await partnersToPerPlan(app.db, auth.tenantId, body.products);
       const [p] = await app.db.update(s.plans).set({ ...withProductPrice(body), updatedAt: new Date() }).where(and(eq(s.plans.id, params.id), eq(s.plans.tenantId, auth.tenantId))).returning();
       if (!p) throw notFound('Plano não encontrado.');
       await audit(app.db, req, { action: 'plan.update', entityType: 'plan', entityId: p.id, metadata: { name: p.name, priceCents: p.priceCents } });
-      return { ...p, partnersSwitched: switched };
+      return p;
     },
   }),
   defineRoute({

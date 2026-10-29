@@ -77,7 +77,7 @@ describe('parecer', () => {
       kind: 'base', customerName: 'Cliente', lifecycle: 'ativo', relationshipMonths: 30, activeContracts: 3, margin,
       classification: { classKey: 'Classe A', payerProfile: 'Pontual', risk: 'Baixo', potential: null, classifiedAt: '01/10/2026', classifiedBy: 'Carlos' },
       required: requiredApproval(DEFAULT_APPROVAL_POLICY, margin.discount.bp, margin.after.marginBp), paymentsAvailable: false,
-      viability: { complete: true, missing: [], engineeringRequired: false, engineeringStatus: 'nao_necessaria', alerts: [] }, coverageStatus: 'elegivel',
+      viability: { complete: true, missing: [] }, coverageStatus: 'elegivel',
       justification: 'Ampliação da filial', risks: null, leadSource: null, negotiationLabel: 'Novo serviço',
     });
     expect(o.summary).toContain('Cliente da base classificado como Classe A, perfil pagador pontual, 3 contrato(s) ativo(s).');

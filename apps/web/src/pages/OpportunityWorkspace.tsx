@@ -17,7 +17,7 @@ import clsx from 'clsx';
 import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
-  type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment, type ViabilityResult,
+  type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
 } from '@isp/domain';
 import { api, ApiError, qs } from '../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime, isoToLocalInput, localInputToIso } from '../lib/format';
@@ -35,13 +35,12 @@ import { ActivityComposer } from '../features/ActivityComposer';
 import { ActivityRow } from '../features/ActivityRow';
 import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
-import { AddressFields, CustomFieldsEditor, EquipmentOverride, ViabilityInputs, ViabilityPanel, emptyAddress, useViabilityMeta, viabilityPayload, type AddressValue, type CustomValues, type KitValue, type ViabilityValue } from '../features/DealFields';
+import { AddressFields, CustomFieldsEditor, emptyAddress, type AddressValue, type CustomValues, type KitValue } from '../features/DealFields';
 import { MeasurementBox } from '../features/MeasurementBox';
 import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
-import { EngineeringPanel } from '../features/Engineering';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
@@ -62,7 +61,6 @@ type ContactHit = { id: string; name: string; phone: string | null; segment: Seg
 export function NewOpportunityPage() {
   const { level } = useAuth();
   const lookups = useLookups();
-  const vmeta = useViabilityMeta();
   const nav = useNavigate();
   const toast = useToast();
   const qc = useQueryClient();
@@ -87,13 +85,8 @@ export function NewOpportunityPage() {
   const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
-  const [vb, setVb] = useState<ViabilityValue>({ saleType: '', cableMeters: '', activationFee: '' });
   const [custom, setCustom] = useState<CustomValues>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  useEffect(() => {
-    const fee = vmeta.data?.defaultActivationFeeCents;
-    if (fee !== null && fee !== undefined) setVb((v) => (v.activationFee === '' ? { ...v, activationFee: toReais(fee) } : v));
-  }, [vmeta.data]);
   const dq = useDebounced(search.trim(), 250);
   const hits = useQuery({ queryKey: ['contacts', dq], enabled: mode === 'existente' && dq.length >= 2, queryFn: () => api<{ items: ContactHit[] }>(`/contacts${qs({ q: dq })}`) });
   const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : segment;
@@ -103,9 +96,6 @@ export function NewOpportunityPage() {
   const kindFields = (journey?.fields ?? []).filter((f) => !f.saleKinds?.length || (!!saleKind && f.saleKinds.includes(saleKind)));
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
-
-  const simInput = useDebounced(JSON.stringify({ planId: planId || null, ...viabilityPayload(vb), location: address.condominiumId ? 'condominio' : address.installStreet ? 'rua' : null }), 350);
-  const sim = useQuery({ queryKey: ['simulate', simInput], enabled: !!planId || vb.cableMeters !== '', queryFn: () => api<ViabilityResult>('/viability/simulate', { method: 'POST', body: JSON.parse(simInput) }), placeholderData: (p) => p });
 
   const isBase = mode === 'existente' && !!contact?.lifecycle && contact.lifecycle !== 'prospect';
   const create = useMutation({
@@ -799,9 +789,14 @@ export function OpportunityWorkspacePage() {
 
   const right = (
     <div className="space-y-4">
-      {/* viabilidade econômica salva: o resultado do motor financeiro; senão, a viabilidade do plano (residencial) */}
-      {econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : <ViabilityPanel v={opp.viability} loading={a.status === 'saving'} title={opp.stage === 'ganha' ? 'Viabilidade no fechamento' : 'Viabilidade da venda'} />}
-      <EngineeringPanel opp={opp} planName={selectedPlan?.name ?? opp.planName ?? null} speedMbps={selectedPlan?.speedMbps ?? null} notes={f.notes} value={f} disabled={!editable} onChange={(v) => a.setFields((x) => (x ? { ...x, ...v } : x))} />
+      {/* resultado do motor financeiro salvo; sem ele, o atalho para a aba */}
+      {econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
+        <section className="card p-5">
+          <h2 className="text-md font-bold text-ink">Viabilidade econômica</h2>
+          <p className="mt-1 text-sm text-muted">Ainda não calculada. Informe investimento, custos e prazo na aba Viabilidade econômica.</p>
+          <Button size="sm" className="mt-3" onClick={() => setCenterTab('viabilidade')}>Abrir viabilidade econômica</Button>
+        </section>
+      )}
       <section id="ws-chat" className="card scroll-mt-4">
         <NegotiationChat oppId={opp.id} className="max-h-[560px]" />
       </section>

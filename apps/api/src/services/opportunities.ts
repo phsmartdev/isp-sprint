@@ -11,7 +11,6 @@ import { notFound, unprocessable } from '../http/errors';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './scope';
 import { audit } from './audit';
 import { resolvePipeline } from './instructions';
-import { storeViability } from './viability';
 import { assertPortAvailable } from './ports';
 
 export type CreateOpportunityInput = Partial<OpportunityDetails> & {
@@ -145,7 +144,6 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     payload: { pipeline: pipeline.key, reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
   });
   await audit(tx, req, { action: 'opportunity.create', entityType: 'opportunity', entityId: opp!.id });
-  await storeViability(tx, auth.tenantId, opp!.id);
   // campo obrigatório só vale para o tipo de venda escolhido (ou para todos, se não tiver tipo)
   const missing = pipeline.fields.filter((f) => (!f.saleKinds?.length || (input.saleKind && f.saleKinds.includes(input.saleKind))) && f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
   if (missing.length) throw unprocessable(`Preencha: ${missing.map((f) => f.label).join(', ')}.`, missing.map((f) => ({ path: `custom.${f.key}`, message: 'Obrigatório' })));

@@ -1,5 +1,5 @@
 /**
- * Análise e aprovação da negociação: junta Cliente 360, Gestão de Contratos, viabilidade e histórico
+ * Análise e aprovação da negociação: junta Cliente 360, Gestão de Contratos, viabilidade econômica e histórico
  * numa leitura só (sem base financeira paralela). Pagamentos, inadimplência e pontualidade dependem
  * da leitura do IXC, que ainda não existe: aparecem como "Aguardando IXC", nunca estimados.
  */
@@ -15,7 +15,7 @@ import type { AuthContext } from '../http/context';
 import { notFound } from '../http/errors';
 import { level } from './scope';
 import { loadOpportunity, opportunityQuery, type OpportunityRow } from './opportunities';
-import { viabilityFor } from './viability';
+import { computeEconomics, economicsContext } from './economics';
 
 const ACTIVE_CONTRACT = ['implantacao', 'vigente', 'renovacao', 'reajuste', 'encerramento'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -229,18 +229,22 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
   };
   const [planRow] = opp.planId ? await db.select({ priceCents: s.plans.priceCents, name: s.plans.name }).from(s.plans).where(eq(s.plans.id, opp.planId)).limit(1) : [];
   const listMonthly = planRow?.priceCents ?? opp.valueCents ?? null;
-  const viab = terms.proposedMonthlyCents !== null
-    ? (await viabilityFor(db, t, { valueCents: terms.proposedMonthlyCents, planId: opp.planId, cableMeters: opp.cableMeters, activationFeeCents: terms.activationFeeCents, saleType: opp.saleType, equipment: opp.equipment, routeId: opp.routeId, condominiumId: opp.condominiumId, installStreet: opp.installStreet })).result
-    : null;
-  const newCost = viab && terms.proposedMonthlyCents !== null && viab.revenue.monthlyCents > 0 ? terms.proposedMonthlyCents - viab.marginMonthlyCents : null;
+  // viabilidade econômica da oportunidade recalculada no preço proposto (mensal = contribuição do motor financeiro)
+  const ectx = await economicsContext(db, { ...opp, tenantId: t });
+  const fin = terms.proposedMonthlyCents !== null ? computeEconomics(ectx, { ...ectx.input, priceCents: terms.proposedMonthlyCents }) : null;
+  const finKpi = fin?.kpi ?? null;
+  const recurring = ectx.input.mode === 'recorrente';
+  const newCost = finKpi && recurring && terms.proposedMonthlyCents !== null ? terms.proposedMonthlyCents - finKpi.contributionCents : null;
+  const newMarginCents = finKpi && recurring ? finKpi.contributionCents : null;
+  const econMissing = [!ectx.settings ? 'parâmetros do motor financeiro' : null, !ectx.savedResult ? 'viabilidade econômica salva' : null, fin?.withReservations ? 'tributos do documento fiscal' : null].filter(Boolean) as string[];
   const margin = negotiationMargin(services, {
     listMonthlyCents: listMonthly,
     proposedMonthlyCents: terms.proposedMonthlyCents,
     monthlyCostCents: newCost,
-    investmentCents: viab ? viab.cacCents : null,
+    investmentCents: fin ? fin.initialCents : null,
     replacesMonthlyCents: terms.replacesMonthlyCents,
   });
-  const required = requiredApproval(settings.policy, margin.discount.bp, margin.after.marginBp ?? (services.length === 0 && viab && terms.proposedMonthlyCents ? Math.round((viab.marginMonthlyCents * 10_000) / Math.max(1, terms.proposedMonthlyCents)) : null));
+  const required = requiredApproval(settings.policy, margin.discount.bp, margin.after.marginBp ?? (services.length === 0 && newMarginCents !== null && terms.proposedMonthlyCents ? Math.round((newMarginCents * 10_000) / Math.max(1, terms.proposedMonthlyCents)) : null));
 
   // classificação
   const classHist = await classificationHistory(db, t, opp.contactId);
@@ -258,14 +262,14 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
     : [];
   const cacKnown = won.filter((o) => o.cacCents !== null);
   const cacHistorical = cacKnown.length ? cacKnown.reduce((a, o) => a + (o.cacCents ?? 0), 0) : null;
-  const ltvMonths = viab?.ltv.months ?? null;
+  const ltvMonths = fin && recurring ? fin.term.N : null;
   const currentMargin = margin.current.marginCents;
 
   const fingerprint: AnalysisFingerprint = {
     proposedMonthlyCents: terms.proposedMonthlyCents,
     listMonthlyCents: listMonthly,
-    investmentCents: viab?.cacCents ?? null,
-    newServiceMarginCents: viab?.marginMonthlyCents ?? null,
+    investmentCents: fin?.initialCents ?? null,
+    newServiceMarginCents: newMarginCents,
     currentRevenueCents: margin.current.revenueCents,
     activeContracts,
     classificationId: cls?.id ?? null,
@@ -286,7 +290,7 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
     margin,
     required,
     paymentsAvailable: false,
-    viability: viab ? { complete: viab.complete, missing: viab.missing, engineeringRequired: viab.engineering.required, engineeringStatus: opp.engineeringStatus, alerts: viab.alerts } : null,
+    viability: { complete: !econMissing.length, missing: econMissing },
     coverageStatus: opp.coverageStatus,
     justification: pending?.justification ?? latest?.justification ?? null,
     risks: pending?.risks ?? null,
@@ -343,7 +347,7 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
     identity: see.customer ? identity : null,
     classification: see.customer ? { current: cls, history: classHist.slice(0, 10), options: settings.classificationOptions } : null,
     terms: { ...terms, listMonthlyCents: listMonthly, discountBp: discountBp(listMonthly, terms.proposedMonthlyCents), planName: planRow?.name ?? opp.planName },
-    viability: viab ? { complete: viab.complete, missing: viab.missing, route: viab.route, revenue: viab.revenue, monthlyDeductions: viab.monthlyDeductions, oneTimeCosts: viab.oneTimeCosts, investmentCents: viab.oneTimeCosts.reduce((a, l) => a + l.cents, 0), commissionCents: viab.commission.cents, marginMonthlyCents: viab.marginMonthlyCents, cacCents: viab.cacCents, paybackMonths: viab.paybackMonths, ltv: viab.ltv, alerts: viab.alerts, engineering: viab.engineering } : null,
+    economics: fin ? { mode: ectx.input.mode, verdict: fin.verdict, withinPolicy: fin.withinPolicy, missing: econMissing, initialCents: fin.initialCents, contributionCents: finKpi?.contributionCents ?? null, marginPct: finKpi?.marginPct ?? null, paybackMonths: finKpi?.paybackMonths ?? null, termMonths: fin.term.N } : null,
     projections: {
       revenue12mCents: proj(terms.proposedMonthlyCents, 12),
       revenueLifetimeCents: ltvMonths && terms.proposedMonthlyCents !== null ? Math.round(terms.proposedMonthlyCents * ltvMonths) : null,
@@ -359,7 +363,7 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
           billingHistory: billing.map((b) => ({ ...b, contract: contractRows.find((x) => x.c.id === b.contractId)?.v.number ?? null })),
           billedInCrmCents: billing.reduce((a, b) => a + b.amountCents, 0),
           ltvRealized: waiting,
-          ltvProjectedCents: currentMargin !== null && ltvMonths ? { value: Math.round(currentMargin * ltvMonths), kind: 'projetado' as const, source: `Margem mensal atual × vida média de ${ltvMonths} meses (${viab?.ltv.source === 'base' ? 'carteira' : 'parâmetro'})` } : null,
+          ltvProjectedCents: currentMargin !== null && ltvMonths ? { value: Math.round(currentMargin * ltvMonths), kind: 'projetado' as const, source: `Margem mensal atual × vigência de ${ltvMonths} meses da viabilidade econômica` } : null,
           cacHistoricalCents: cacHistorical === null ? null : { value: cacHistorical, kind: 'estimado' as const, source: `CAC calculado na venda de ${cacKnown.length} de ${won.length} venda(s) fechada(s)` },
           cacPaybackMonths: cacHistorical !== null && currentMargin && currentMargin > 0 ? Math.round((cacHistorical / currentMargin) * 10) / 10 : null,
           profitabilityRealized: waiting,
@@ -383,10 +387,10 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
       investmentCents: margin.incremental.investmentCents,
       marginBeforeBp: kind.kind === 'base' ? margin.current.marginBp : null,
       marginAfterBp: margin.after.marginBp,
-      newMarginBp: viab && terms.proposedMonthlyCents ? Math.round((viab.marginMonthlyCents * 10_000) / Math.max(1, terms.proposedMonthlyCents)) : null,
+      newMarginBp: newMarginCents !== null && terms.proposedMonthlyCents ? Math.round((newMarginCents * 10_000) / Math.max(1, terms.proposedMonthlyCents)) : null,
       paybackMonths: margin.incremental.paybackMonths,
       potential: cls?.potential ?? null,
-      viabilityComplete: viab?.complete ?? false,
+      viabilityComplete: !econMissing.length,
       risk: [cls?.risk ? `Risco ${cls.risk}` : null, main?.lifecycle === 'inadimplente' || main?.lifecycle === 'suspenso' ? `Cliente ${main.lifecycle}` : null, required.exceptional ? 'Fora da política comercial' : null, pending?.risks ?? null].filter(Boolean) as string[],
       justification: pending?.justification ?? latest?.justification ?? null,
       decisionAsked: pending ? `Aprovar ${NEGOTIATION_TYPE_LABELS[pending.negotiationType]?.toLowerCase()} por ${(pending.proposedMonthlyCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês${pending.discountBp ? ` com ${(pending.discountBp / 100).toLocaleString('pt-BR')}% de desconto` : ''} — alçada ${pending.requiredLabel}${pending.exceptional ? ' (excepcional)' : ''}` : null,

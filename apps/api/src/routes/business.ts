@@ -1,20 +1,15 @@
 /**
  * Configurações de negócio: jornadas pelo painel (etapas, membros, campos, automações),
- * regiões e condomínios, parâmetros de viabilidade; e na oportunidade, o cálculo de viabilidade.
+ * regiões e condomínios.
  */
 import { and, asc, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import {
-  AutomationSchema, CommissionRuleItem, CondominiumUpsert, DeductionItem, EquipmentItem, FieldSchema, PipelineUpsert, RegionUpsert, RouteItem, RouteRuleItem,
-  StagesPut, ViabilitySettingsUpdate, ViabilitySimulate, checkAutomation, listOf,
-} from '@isp/shared';
+import { AutomationSchema, CondominiumUpsert, FieldSchema, PipelineUpsert, RegionUpsert, StagesPut, checkAutomation } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { getActiveInstruction, journeyBlockers, pipelinesOf, replaceFields, resolveAutomationPeople, setPipelineMembers } from '../services/instructions';
-import { historicalBase, loadViabilityParams, viabilityFor } from '../services/viability';
-import { loadOpportunity } from '../services/opportunities';
 import { audit } from '../services/audit';
 import { portReservations, portUsage } from '../services/ports';
 
@@ -38,35 +33,6 @@ async function assertUsers(db: DbOrTx, tenantId: string, ids: string[]) {
   if (!ids.length) return;
   const found = await db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, tenantId), inArray(s.users.id, ids)));
   if (found.length !== new Set(ids).size) throw unprocessable('Usuário inválido.', [{ path: 'memberIds', message: 'Usuário não encontrado nesta empresa' }]);
-}
-
-/** Substitui uma lista simples (upsert pelo id; o que sumiu fica inativo). */
-async function replaceList<T extends { id?: string }>(
-  db: DbOrTx,
-  table: typeof s.viabilityDeductions | typeof s.equipmentItems | typeof s.deliveryRoutes | typeof s.routeRules | typeof s.commissionRules,
-  tenantId: string,
-  items: T[],
-  extra: Record<string, unknown> = {},
-  scopeCol?: { col: typeof s.viabilityDeductions.category; value: string },
-) {
-  const t = table as typeof s.equipmentItems;
-  const keep: string[] = [];
-  for (const [i, it] of items.entries()) {
-    const { id, ...values } = it as T & Record<string, unknown>;
-    const row = { ...values, ...extra, ...('position' in (table as object) ? { position: i } : {}) } as Record<string, unknown>;
-    if (id) {
-      const r = await db.update(t).set(row as never).where(and(eq(t.id, id), eq(t.tenantId, tenantId))).returning({ id: t.id });
-      if (!r.length) throw unprocessable('Item não encontrado.', [{ path: `items.${i}.id`, message: 'Item de outra empresa ou removido' }]);
-      keep.push(id);
-    } else {
-      const [r] = await db.insert(t).values({ ...row, tenantId } as never).returning({ id: t.id });
-      keep.push(r!.id);
-    }
-  }
-  await db
-    .update(t)
-    .set({ active: false } as never)
-    .where(and(eq(t.tenantId, tenantId), keep.length ? notInArray(t.id, keep) : undefined, scopeCol ? eq(scopeCol.col, scopeCol.value) : undefined));
 }
 
 export const businessRoutes = [
@@ -437,142 +403,5 @@ export const businessRoutes = [
     },
   }),
 
-  // ================================================================== viabilidade
-  defineRoute({
-    method: 'GET',
-    url: '/admin/viability',
-    summary: 'Parâmetros de viabilidade: tributos, parceiros, equipamentos, caminhos, regras, comissão e LTV',
-    tag: 'Viabilidade',
-    ...ADMIN,
-    handler: async ({ app, auth }) => {
-      const t = auth.tenantId;
-      const [deductions, equipments, routes, rules, commissions, [settings]] = await Promise.all([
-        app.db.select().from(s.viabilityDeductions).where(and(eq(s.viabilityDeductions.tenantId, t), eq(s.viabilityDeductions.active, true))).orderBy(asc(s.viabilityDeductions.createdAt)),
-        app.db.select().from(s.equipmentItems).where(and(eq(s.equipmentItems.tenantId, t), eq(s.equipmentItems.active, true))).orderBy(asc(s.equipmentItems.name)),
-        app.db.select().from(s.deliveryRoutes).where(and(eq(s.deliveryRoutes.tenantId, t), eq(s.deliveryRoutes.active, true))).orderBy(asc(s.deliveryRoutes.createdAt)),
-        app.db.select().from(s.routeRules).where(and(eq(s.routeRules.tenantId, t), eq(s.routeRules.active, true))).orderBy(asc(s.routeRules.position)),
-        app.db.select().from(s.commissionRules).where(and(eq(s.commissionRules.tenantId, t), eq(s.commissionRules.active, true))).orderBy(asc(s.commissionRules.position)),
-        app.db.select().from(s.viabilitySettings).where(eq(s.viabilitySettings.tenantId, t)).limit(1),
-      ]);
-      const params = await loadViabilityParams(app.db, t);
-      const base = await historicalBase(app.db, t, params);
-      const strip = <T extends { tenantId?: string }>(r: T) => { const { tenantId: _t, ...x } = r; return x; };
-      return {
-        taxes: deductions.filter((d) => d.category === 'tributo').map(strip),
-        partners: deductions.filter((d) => d.category === 'parceiro').map(strip),
-        equipments: equipments.map(strip),
-        routes: routes.map(strip),
-        rules: rules.map(strip),
-        commissions: commissions.map(strip),
-        settings: settings ? strip(settings) : { autonomyMaxMeters: 100, autonomyMaxMbps: 500, defaultRouteId: null, ltvLifetimeMonths: null, monthlyChurnBp: null, ltvMinSample: 30, maxPaybackMonths: null, defaultActivationFeeCents: null },
-        base,
-      };
-    },
-  }),
-  ...(
-    [
-      ['taxes', DeductionItem, s.viabilityDeductions, { category: 'tributo' }, 'Tributos do negócio'],
-      ['partners', DeductionItem, s.viabilityDeductions, { category: 'parceiro' }, 'Parceiros e fornecedores'],
-      ['equipments', EquipmentItem, s.equipmentItems, {}, 'Equipamentos e custos'],
-      ['routes', RouteItem, s.deliveryRoutes, {}, 'Caminhos de entrega'],
-      ['rules', RouteRuleItem, s.routeRules, {}, 'Regras de distância e banda (ordem importa)'],
-      ['commissions', CommissionRuleItem, s.commissionRules, {}, 'Regras de comissão (ordem importa)'],
-    ] as const
-  ).map(([name, item, table, extra, summary]) =>
-    defineRoute({
-      method: 'PUT',
-      url: `/admin/viability/${name}`,
-      summary: `${summary}: substitui a lista`,
-      tag: 'Viabilidade',
-      ...ADMIN,
-      body: listOf(item as z.ZodTypeAny),
-      handler: async ({ app, auth, body, req }) => {
-        const items = body.items as { id?: string; routeId?: string; kit?: { equipmentId: string }[]; routeIds?: string[] }[];
-        // referências precisam ser da mesma empresa
-        const routeIds = [...new Set(items.flatMap((i) => [i.routeId, ...(i.routeIds ?? [])].filter(Boolean) as string[]))];
-        if (routeIds.length) {
-          const found = await app.db.select({ id: s.deliveryRoutes.id }).from(s.deliveryRoutes).where(and(eq(s.deliveryRoutes.tenantId, auth.tenantId), inArray(s.deliveryRoutes.id, routeIds)));
-          if (found.length !== routeIds.length) throw unprocessable('Caminho de entrega inválido.', [{ path: 'routeId', message: 'Caminho não encontrado' }]);
-        }
-        const eqIds = [...new Set(items.flatMap((i) => (i.kit ?? []).map((k) => k.equipmentId)))];
-        if (eqIds.length) {
-          const found = await app.db.select({ id: s.equipmentItems.id }).from(s.equipmentItems).where(and(eq(s.equipmentItems.tenantId, auth.tenantId), inArray(s.equipmentItems.id, eqIds)));
-          if (found.length !== eqIds.length) throw unprocessable('Equipamento inválido no kit.', [{ path: 'kit', message: 'Equipamento não encontrado' }]);
-        }
-        await app.db.transaction((tx) => replaceList(tx, table, auth.tenantId, items, extra, 'category' in extra ? { col: s.viabilityDeductions.category, value: (extra as { category: string }).category } : undefined));
-        await audit(app.db, req, { action: 'viability.update', entityType: 'viability', entityId: name, metadata: { list: name, items: items.length } });
-        return { ok: true };
-      },
-    }),
-  ),
-  defineRoute({
-    method: 'PUT',
-    url: '/admin/viability/settings',
-    summary: 'Caminho padrão, LTV (vida média ou churn), amostra mínima, limite de payback e taxa de ativação padrão',
-    tag: 'Viabilidade',
-    ...ADMIN,
-    body: ViabilitySettingsUpdate,
-    handler: async ({ app, auth, body, req }) => {
-      if (body.defaultRouteId) {
-        const [r] = await app.db.select({ id: s.deliveryRoutes.id }).from(s.deliveryRoutes).where(and(eq(s.deliveryRoutes.id, body.defaultRouteId), eq(s.deliveryRoutes.tenantId, auth.tenantId))).limit(1);
-        if (!r) throw unprocessable('Caminho padrão inválido.');
-      }
-      const values = { ...body, updatedBy: auth.userId, updatedAt: new Date() };
-      await app.db.insert(s.viabilitySettings).values({ tenantId: auth.tenantId, ...values }).onConflictDoUpdate({ target: s.viabilitySettings.tenantId, set: values });
-      await audit(app.db, req, { action: 'viability.update', entityType: 'viability', entityId: 'settings', metadata: { list: 'settings' } });
-      return { ok: true };
-    },
-  }),
-
-  defineRoute({
-    method: 'GET',
-    url: '/meta/viability',
-    summary: 'Dados para o formulário: equipamentos, caminhos e taxa de ativação padrão',
-    tag: 'Viabilidade',
-    module: 'oportunidades',
-    handler: async ({ app, auth }) => {
-      const p = await loadViabilityParams(app.db, auth.tenantId);
-      const [settings] = await app.db.select({ fee: s.viabilitySettings.defaultActivationFeeCents }).from(s.viabilitySettings).where(eq(s.viabilitySettings.tenantId, auth.tenantId)).limit(1);
-      return {
-        equipments: p.equipments.filter((e) => e.active).map((e) => ({ id: e.id, name: e.name, costCents: e.costCents })),
-        routes: p.routes.filter((r) => r.active).map((r) => ({ id: r.id, name: r.name, requiresApproval: r.requiresApproval })),
-        defaultActivationFeeCents: settings?.fee ?? null,
-        configured: p.routes.some((r) => r.active),
-      };
-    },
-  }),
-  defineRoute({
-    method: 'POST',
-    url: '/viability/simulate',
-    summary: 'Calcula a viabilidade sem gravar (prévia no formulário)',
-    tag: 'Viabilidade',
-    module: 'oportunidades',
-    body: ViabilitySimulate,
-    handler: async ({ app, auth, body }) => {
-      let price: number | null = null;
-      if (body.planId) {
-        const [pl] = await app.db.select({ price: s.plans.priceCents }).from(s.plans).where(and(eq(s.plans.id, body.planId), eq(s.plans.tenantId, auth.tenantId))).limit(1);
-        if (!pl) throw unprocessable('Plano inválido.', [{ path: 'planId', message: 'Plano não encontrado' }]);
-        price = pl.price;
-      }
-      const { result } = await viabilityFor(app.db, auth.tenantId, { valueCents: price, planId: body.planId ?? null, cableMeters: body.cableMeters ?? null, activationFeeCents: body.activationFeeCents ?? null, saleType: body.saleType ?? null, equipment: body.equipment ?? null, routeId: body.routeId ?? null, location: body.location ?? null });
-      return result;
-    },
-  }),
-  defineRoute({
-    method: 'GET',
-    url: '/opportunities/:id/viability',
-    summary: 'Viabilidade atual da oportunidade (recalculada com os parâmetros de hoje)',
-    tag: 'Viabilidade',
-    module: 'oportunidades',
-    params: IdParams,
-    handler: async ({ app, auth, params }) => {
-      const o = await loadOpportunity(app.db, auth, params.id);
-      const { result } = await viabilityFor(app.db, auth.tenantId, o);
-      // venda fechada: mostra o que foi gravado no fechamento, para não mudar comissão retroativamente
-      const stored = o.stage === 'ganha' && o.viability ? (o.viability as unknown as typeof result) : null;
-      return { current: result, closed: stored };
-    },
-  }),
 ];
 

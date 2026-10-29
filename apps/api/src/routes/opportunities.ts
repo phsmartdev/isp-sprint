@@ -17,7 +17,6 @@ import { conflict, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { storeViability, viabilityFor } from '../services/viability';
 import { assertPortAvailable, portUsage } from '../services/ports';
 import { assertBranch, bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
@@ -266,7 +265,6 @@ export const opportunityRoutes = [
           .where(and(eq(s.opportunities.id, params.id), eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.rowVersion, body.rowVersion)))
           .returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(cur.rowVersion);
-        if (Object.keys(changed).some((k) => ['planId', 'cableMeters', 'activationFeeCents', 'saleType', 'equipment', 'routeId', 'condominiumId', 'installStreet'].includes(k))) await storeViability(tx, auth.tenantId, params.id);
         if (changed.ownerId) await tx.update(s.contacts).set({ ownerId: body.ownerId! }).where(and(eq(s.contacts.id, cur.contactId), eq(s.contacts.tenantId, auth.tenantId)));
         if (Object.keys(changed).length) {
           await tx.insert(s.opportunityEvents).values({
@@ -321,12 +319,6 @@ export const opportunityRoutes = [
             if (used >= c.ports) throw unprocessable(`A CTO do ${c.name} está sem portas livres (${used} de ${c.ports} ocupadas). Libere uma porta ou fale com a engenharia antes de fechar.`, [{ path: 'condominiumId', message: 'Sem portas livres na CTO' }]);
           }
         }
-        if (target.kind === 'won') {
-          // fora da autonomia da operação, só fecha com a viabilidade da engenharia aprovada
-          const { result } = await viabilityFor(tx, auth.tenantId, cur);
-          if (result.engineering.required && cur.engineeringStatus !== 'aprovada')
-            throw unprocessable(`Fora da autonomia da operação (${result.engineering.reasons.join(' e ')}). Registre a viabilidade aprovada pela engenharia antes de fechar.`, [{ path: 'engineeringStatus', message: 'Viabilidade da engenharia pendente' }]);
-        }
         const now = new Date();
         const reopening = TERMINAL_STAGES.includes(from);
         const updated = await tx
@@ -366,7 +358,6 @@ export const opportunityRoutes = [
           await audit(tx, req, { action: reopening ? 'opportunity.reopen' : `opportunity.${body.toStage}`, entityType: 'opportunity', entityId: params.id, metadata: { from, to: body.toStage } });
         }
       });
-      if (body.toStage === 'ganha') await storeViability(app.db, auth.tenantId, params.id);
       // fotografia da viabilidade econômica no dia do fechamento
       if (body.toStage === 'ganha') { const o = await loadOpportunity(app.db, auth, params.id); await snapshotEconomicsOnWon(app.db, { ...o, tenantId: auth.tenantId }, auth.userId).catch((e) => req.log.error(e, 'viabilidade econômica')); }
       await runAutomations(app.db, app.config, auth.tenantId, auth.userId, params.id, body.toStage === 'ganha' ? { type: 'ganha' } : body.toStage === 'perdida' ? { type: 'perdida' } : { type: 'entrou_na_etapa', stage: body.toStage });

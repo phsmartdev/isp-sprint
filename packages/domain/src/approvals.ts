@@ -195,7 +195,7 @@ export type OpinionInput = {
   required: RequiredLevel;
   /** Pagamentos/inadimplência do ERP disponíveis? */
   paymentsAvailable: boolean;
-  viability: { complete: boolean; missing: string[]; engineeringRequired: boolean; engineeringStatus: string; alerts: string[] } | null;
+  viability: { complete: boolean; missing: string[] } | null;
   coverageStatus: string;
   justification: string | null;
   risks: string | null;
@@ -245,8 +245,7 @@ export function buildOpinion(i: OpinionInput): Opinion {
 
   // viabilidade e cobertura
   if (i.viability) {
-    if (!i.viability.complete && i.viability.missing.length) o.pending.push({ text: `Viabilidade incompleta: falta ${i.viability.missing.join(', ')}.`, source: 'Viabilidade' });
-    if (i.viability.engineeringRequired && i.viability.engineeringStatus !== 'aprovada') o.attention.push({ text: 'Fora da autonomia da operação: viabilidade da engenharia ainda não aprovada.', source: 'Viabilidade técnica' });
+    if (!i.viability.complete && i.viability.missing.length) o.pending.push({ text: `Viabilidade econômica incompleta: falta ${i.viability.missing.join(', ')}.`, source: 'Viabilidade econômica' });
   }
   if (i.coverageStatus === 'inelegivel') o.attention.push({ text: 'Endereço sem cobertura.', source: 'Cobertura' });
 

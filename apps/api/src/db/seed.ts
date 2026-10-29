@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, type ProfileKey } from '@isp/domain';
 import { createHash } from 'node:crypto';
 import { getActiveInstruction } from '../services/instructions';
-import { storeViability } from '../services/viability';
 import { createDb, type DB } from './client';
 import * as s from './schema';
 import { hashPassword } from '../auth/password';
@@ -279,7 +278,6 @@ export async function seedTenant(
       })
       .returning();
     opps.push({ id: o!.id, ownerId, contactId: c.id, stage, segment: c.segment });
-    await storeViability(db, tenant.id, o!.id);
     if (['fechamento', 'ganha'].includes(baseStage)) {
       const pdf = fakeProposalPdf(c.name, plan.name, plan.priceCents);
       await db.insert(s.opportunityAttachments).values({ tenantId: tenant.id, opportunityId: o!.id, kind: 'proposta', filename: `Proposta ${plan.name} - ${c.name}.pdf`, mime: 'application/pdf', sizeBytes: pdf.length, sha256: createHash('sha256').update(pdf).digest('hex'), data: pdf, uploadedBy: ownerId, createdAt: changed });

@@ -14,9 +14,9 @@ const ok = (r: { statusCode: number; body: string }, code = 200) => { if (r.stat
 
 describe('telas de configuração (gerência)', () => {
   it('todas as leituras respondem', async () => {
-    for (const u of ['/admin/overview', '/admin/journeys', '/admin/automation-runs', '/admin/area', '/admin/viability', '/admin/instructions', '/admin/smtp', '/admin/notifications', '/admin/emails', '/admin/plans', '/admin/sources', '/admin/users', '/admin/security', '/admin/branding', '/admin/logs', '/meta/area', '/meta/viability', '/meta/playbook', '/meta/lookups'])
+    for (const u of ['/admin/overview', '/admin/journeys', '/admin/automation-runs', '/admin/area', '/admin/viability/econ', '/admin/cost-items', '/admin/instructions', '/admin/smtp', '/admin/notifications', '/admin/emails', '/admin/plans', '/admin/sources', '/admin/users', '/admin/security', '/admin/branding', '/admin/logs', '/meta/area', '/meta/playbook', '/meta/lookups'])
       ok(await carlos.get(u));
-    expect((await lucas.get('/admin/viability')).statusCode).toBe(403);
+    expect((await lucas.get('/admin/viability/econ')).statusCode).toBe(403);
   });
 
   it('jornada: criar, geral, etapas, campos e automação', async () => {
@@ -52,20 +52,6 @@ describe('telas de configuração (gerência)', () => {
     ok(await carlos.patch(`/admin/condominiums/${c.json().id}`, { regionId: r.json().id, name: 'Cond E2E', cep: '', street: null, number: null, district: null, city: null, blocks: [], units: null, hasNetwork: false, notes: null, active: false }));
   });
 
-  it('viabilidade: salva cada lista com o que a tela envia e a configuração geral', async () => {
-    const v = (await carlos.get('/admin/viability')).json();
-    ok(await carlos.put('/admin/viability/taxes', { items: [...v.taxes.map(({ id, name, kind, percentBp, amountCents, routeIds, notes }: Record<string, unknown>) => ({ id, name, kind, percentBp, amountCents, routeIds, notes })), { name: 'ISS E2E', kind: 'percent', percentBp: 200, amountCents: 0, routeIds: [], notes: null }] }));
-    ok(await carlos.put('/admin/viability/partners', { items: v.partners.map(({ id, name, kind, percentBp, amountCents, routeIds, notes }: Record<string, unknown>) => ({ id, name, kind, percentBp, amountCents, routeIds, notes })) }));
-    ok(await carlos.put('/admin/viability/equipments', { items: [...v.equipments.map(({ id, name, costCents }: Record<string, unknown>) => ({ id, name, costCents })), { name: 'Mesh E2E', costCents: 25000 }] }));
-    ok(await carlos.put('/admin/viability/routes', { items: v.routes.map(({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, kit }: Record<string, unknown>) => ({ id, name, description, cablePerMeterCents, installCostCents, monthlyCostCents, requiresApproval, kit })) }));
-    ok(await carlos.put('/admin/viability/rules', { items: v.rules.map(({ id, name, minMeters, maxMeters, minMbps, maxMbps, routeId }: Record<string, unknown>) => ({ id, name, minMeters, maxMeters, minMbps, maxMbps, routeId })) }));
-    ok(await carlos.put('/admin/viability/commissions', { items: v.commissions.map(({ id, name, saleType, minPriceCents, maxPriceCents, kind, percentBp, multiplierX100, amountCents }: Record<string, unknown>) => ({ id, name, saleType, minPriceCents, maxPriceCents, kind, percentBp, multiplierX100, amountCents })) }));
-    ok(await carlos.put('/admin/viability/settings', v.settings));
-    const sim = await carlos.post('/viability/simulate', { planId: (await carlos.get('/meta/lookups')).json().plans[0].id, saleType: 'ativa', cableMeters: 80, activationFeeCents: 5000 });
-    ok(sim);
-    expect(sim.json().cacCents).toBeGreaterThanOrEqual(0);
-  });
-
   it('modelo de instrução: exportar, enviar, prévia, ativar e descartar', async () => {
     const exp = await carlos.get('/admin/instructions/export');
     ok(exp);
@@ -95,33 +81,11 @@ describe('telas de configuração (gerência)', () => {
     const pl = await carlos.post('/admin/plans', { name: 'Plano E2E', line: null, segment: 'residencial', priceCents: 1, speedMbps: 300, invoiceServiceName: 'SCM - Internet 300M', products: [{ name: 'Internet 300M', qty: 1, unitPriceCents: 7990, commissionAtiva: { kind: 'percent', value: 5000 }, commissionReceptiva: { kind: 'fixo', value: 1000 } }, { name: 'Ponto extra', qty: 2, unitPriceCents: 1000, commissionAtiva: null, commissionReceptiva: null }], active: true });
     ok(pl, 201);
     expect(pl.json().priceCents).toBe(9990);
-    const sim = (await carlos.post('/viability/simulate', { planId: pl.json().id, saleType: 'receptiva', cableMeters: 50 })).json();
-    expect(sim.commission.cents).toBe(1000);
-    expect(sim.commission.rule).toBe('Produtos do plano');
     ok(await carlos.post('/admin/sources', { name: 'Instagram E2E' }), 201);
   });
 });
 
-describe('autonomia da operação e engenharia', () => {
-  it('acima do limite não fecha sem viabilidade aprovada; com aprovação fecha', async () => {
-    ok(await carlos.put('/admin/viability/settings', { ...(await carlos.get('/admin/viability')).json().settings, autonomyMaxMeters: 100, autonomyMaxMbps: 500 }));
-    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
-    const created = await lucas.post('/opportunities', { newContact: { name: 'Cliente Engenharia Fictício', segment: 'residencial' }, planId: plan.id, saleType: 'ativa', cableMeters: 250, installStreet: 'Rua Fictícia' });
-    ok(created, 201);
-    const o = created.json();
-    expect(o.viability.engineering.required).toBe(true);
-    expect(o.viability.route.name).toBe('Rua');
-    const blocked = await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: o.rowVersion });
-    expect(blocked.statusCode).toBe(422);
-    expect(blocked.json().detail).toContain('engenharia');
-    const upd = await lucas.patch(`/opportunities/${o.id}`, { engineeringStatus: 'aprovada', engineeringTicket: 'ENG-1', rowVersion: o.rowVersion });
-    ok(upd);
-    ok(await lucas.post(`/opportunities/${o.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: upd.json().rowVersion }));
-    const small = (await lucas.post('/opportunities', { newContact: { name: 'Cliente Curto Fictício', segment: 'residencial' }, planId: plan.id, cableMeters: 60, condominiumId: (await lucas.get('/meta/area')).json().condominiums[0].id })).json();
-    expect(small.viability.engineering.required).toBe(false);
-    expect(small.viability.route.name).toBe('Condomínio');
-  });
-
+describe('operação, integrações e cadastros', () => {
   it('portas da CTO: oportunidade reserva, venda ocupa, perda e cancelamento liberam', async () => {
     const r = (await carlos.post('/admin/regions', { name: 'Região Portas' })).json();
     const c = (await carlos.post('/admin/condominiums', { regionId: r.id, name: 'Cond Portas', ctoPorts: 2, blocks: [], hasNetwork: true, active: true })).json();
@@ -225,21 +189,6 @@ describe('autonomia da operação e engenharia', () => {
     const h = (await carlos.get('/home?from=2026-01-01&to=2026-12-31')).json();
     expect(h.period).toEqual({ from: '2026-01-01', to: '2026-12-31' });
     ok(await carlos.get('/home'));
-  });
-
-  it('custo do parceiro vem dos produtos do plano (PlayHub ligado ao SKY+)', async () => {
-    const v = (await carlos.get('/admin/viability')).json();
-    ok(await carlos.put('/admin/viability/partners', { items: [...v.partners.map(({ id, name, kind, percentBp, amountCents, routeIds, notes }: Record<string, unknown>) => ({ id, name, kind, percentBp, amountCents, routeIds, notes })), { name: 'PLAYHUB TESTE', kind: 'fixed', percentBp: 0, amountCents: 790, routeIds: [], notes: null }] }));
-    const ph = (await carlos.get('/admin/viability')).json().partners.find((x: { name: string }) => x.name === 'PLAYHUB TESTE');
-    const mk = async (name: string, withSky: boolean) => (await carlos.post('/admin/plans', { name, segment: 'residencial', priceCents: 1, speedMbps: 350, products: [{ name: 'Internet', qty: 1, unitPriceCents: 9000, commissionAtiva: null, commissionReceptiva: null }, ...(withSky ? [{ name: 'SKY+', qty: 1, unitPriceCents: 799, commissionAtiva: null, commissionReceptiva: null, partnerId: ph.id, partnerCostCents: 650 }] : [])] })).json();
-    const a = await mk('Plano Com SKY', true);
-    expect(a.partnersSwitched).toEqual(['PLAYHUB TESTE']);
-    const b = await mk('Plano Sem SKY', false);
-    const simA = (await carlos.post('/viability/simulate', { planId: a.id, saleType: 'ativa', cableMeters: 50 })).json();
-    const line = simA.monthlyDeductions.find((l: { label: string }) => l.label.includes('PLAYHUB TESTE'));
-    expect(line.cents).toBe(650);
-    const simB = (await carlos.post('/viability/simulate', { planId: b.id, saleType: 'ativa', cableMeters: 50 })).json();
-    expect(simB.monthlyDeductions.some((l: { label: string }) => l.label.includes('PLAYHUB TESTE'))).toBe(false);
   });
 
   it('ativos em uma data e mapa de calor por endereço', async () => {
