@@ -36,8 +36,11 @@ export const isFinal = (st: MeasurementStatus) => st === 'atestada' || st === 'f
 export const isLive = (st: MeasurementStatus) => st !== 'cancelada';
 
 export type CLine = { id: string; itemNumber: string; description: string; unit: string; classification: LineClass; qty4: number; price4: number; monthlyQty4: number | null };
-export type CCommitment = { id: string; number: string; fiscalYear: number; issuedOn: string; cancelled: boolean; source: string | null };
-export type CCommitmentItem = { id: string; commitmentId: string; lineId: string; code: string | null; itemNumber: string | null; qty4: number; /** reforços − anulações */ adjust4: number };
+export type CCommitment = { id: string; number: string; fiscalYear: number; issuedOn: string; cancelled: boolean; source: string | null; /** fonte de receita (RN09-a) */ sourceId?: string | null };
+export const COMMITMENT_MOVE_KINDS = ['reforco', 'anulacao', 'supressao'] as const;
+export type CommitmentMoveKind = (typeof COMMITMENT_MOVE_KINDS)[number];
+export const COMMITMENT_MOVE_LABELS: Record<CommitmentMoveKind, string> = { reforco: 'Reforço', anulacao: 'Anulação parcial', supressao: 'Supressão (virada de exercício)' };
+export type CCommitmentItem = { id: string; commitmentId: string; lineId: string; code: string | null; itemNumber: string | null; qty4: number; /** reforços − anulações − supressões */ adjust4: number; moves?: { kind: CommitmentMoveKind; qty4: number; occurredOn: string }[] };
 export type CAllocation = { commitmentItemId: string; qty4: number };
 export type CMeasurementItem = { measurementId: string; lineId: string; qty4: number; price4: number; allocations: CAllocation[]; uncovered4: number };
 export type CMeasurement = { id: string; competence: string; status: MeasurementStatus; superseded: boolean; title: string; kind: MeasurementKind; createdAt: string; attestedAt?: string | null; invoicedAt?: string | null };
@@ -119,28 +122,68 @@ export function allocateFifo(lineId: string, qty4: number, competence: string, c
   return { allocations, uncovered4: left };
 }
 
-/** Totais do contrato nos quatro saldos (contratado, empenhado, executado, faturado) em R$ ×10.000. */
-export function contractTotals(lines: CLine[], bal: LineBalance[]) {
+/**
+ * Totais do contrato nos quatro saldos (contratado, empenhado, executado, faturado) em R$ ×10.000.
+ * Com `actual`, o executado/faturado vale pelo preço gravado em cada medição (reajuste, RN08) e o contratado é
+ * o medido + o saldo pelo preço vigente; sem ele, tudo pelo preço do item.
+ */
+export function contractTotals(lines: CLine[], bal: LineBalance[], actual?: { measurements: CMeasurement[]; mItems: CMeasurementItem[] }) {
   const price = new Map(lines.map((l) => [l.id, l.price4]));
   const v = (k: keyof LineBalance) => bal.reduce((s, b) => s + value4(b[k] as number, price.get(b.lineId) ?? 0), 0);
   const t = { contracted: v('contracted4'), committed: v('committed4'), executed: v('executed4'), pending: v('pending4'), reserved: v('reserved4'), invoiced: v('invoiced4'), available: v('available4'), toCommit: v('toCommit4'), commitmentBalance: v('commitmentBalance4'), uncovered: v('uncovered4') };
+  if (actual) {
+    const live = new Map(actual.measurements.filter(counts).map((m) => [m.id, m]));
+    let executed = 0, pending = 0, invoiced = 0, uncovered = 0;
+    const usedV = new Map<string, number>();
+    for (const x of actual.mItems) {
+      const m = live.get(x.measurementId);
+      if (!m) continue;
+      const val = value4(x.qty4, x.price4);
+      if (isFinal(m.status)) executed += val; else pending += val;
+      if (m.status === 'faturada') invoiced += val;
+      uncovered += value4(x.uncovered4, x.price4);
+      usedV.set(x.lineId, (usedV.get(x.lineId) ?? 0) + val);
+    }
+    const contracted = bal.reduce((s, b) => s + (usedV.get(b.lineId) ?? 0) + value4(Math.max(0, b.contracted4 - b.executed4 - b.pending4), price.get(b.lineId) ?? 0), 0);
+    Object.assign(t, { executed, pending, invoiced, uncovered, contracted });
+  }
   return { ...t, executionPct: t.contracted ? ((t.executed + t.pending) / t.contracted) * 100 : null, committedPct: t.contracted ? (t.committed / t.contracted) * 100 : null };
 }
 
+/** Marcos de vigência do PF06 (dias até o fim do contrato). */
+export const VIGENCIA_MILESTONES = [180, 120, 90, 60] as const;
+/** RN16: pendência de faturamento acima deste número de dias gera alerta escalonado (sugestão da especificação). */
+export const DEFAULT_AGING_DAYS = 60;
+
 export type CommitmentAlert = { level: 'alto' | 'medio' | 'info'; key: string; text: string };
 /** Alertas do MVP (PF06): sem empenho, aguardando empenho, executado sem faturar, virada de exercício, recorrente sem medição. */
-export function commitmentAlerts(args: { today: string; lines: CLine[]; bal: LineBalance[]; commitments: CCommitment[]; items: CCommitmentItem[]; measurements: CMeasurement[]; mItems: CMeasurementItem[]; endAt?: string | null; agingDays?: number }): CommitmentAlert[] {
+export type AlertExtras = {
+  /** itens que esgotam antes do fim da vigência (projeção, PF07) */
+  exhaustBefore?: { itemNumber: string; competence: string }[];
+  /** itens recorrentes cujo saldo de empenho do ano não cobre a próxima parcela projetada */
+  nextInstallmentShort?: string[];
+  /** retroativo de reajuste ainda sem NF complementar */
+  retroPendingV4?: number;
+  /** necessidade projetada de empenho no exercício seguinte, quando a vigência continua nele */
+  nextYear?: { year: number; needV4: number; hasCommitment: boolean } | null;
+};
+export function commitmentAlerts(args: { today: string; lines: CLine[]; bal: LineBalance[]; commitments: CCommitment[]; items: CCommitmentItem[]; measurements: CMeasurement[]; mItems: CMeasurementItem[]; endAt?: string | null; agingDays?: number; /** % do contrato sem empenho que vira alerta (configurável por contrato); sem valor, só informa */ toCommitAlertPct?: number | null; extras?: AlertExtras }): CommitmentAlert[] {
   const out: CommitmentAlert[] = [];
   const fmt = (v4: number) => `R$ ${(v4 / Q).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const totals = contractTotals(args.lines, args.bal);
+  const totals = contractTotals(args.lines, args.bal, { measurements: args.measurements, mItems: args.mItems });
   if (totals.uncovered > 0) out.push({ level: 'alto', key: 'aguardando_empenho', text: `${fmt(totals.uncovered)} executados sem cobertura de empenho (aguardando empenho).` });
-  const age = args.agingDays ?? 60;
+  const age = args.agingDays ?? DEFAULT_AGING_DAYS;
   const day = (d: string) => Math.floor(new Date(`${d}T12:00:00Z`).getTime() / 86_400_000);
   const notInvoiced = args.measurements.filter((m) => counts(m) && m.status === 'atestada');
   const old = notInvoiced.filter((m) => day(args.today) - day((m.attestedAt ?? m.createdAt).slice(0, 10)) > age);
   if (old.length) out.push({ level: 'alto', key: 'sem_faturar', text: `${old.length} medição(ões) atestada(s) há mais de ${age} dias sem nota fiscal: ${old.slice(0, 3).map((m) => m.title).join(', ')}.` });
   else if (notInvoiced.length) out.push({ level: 'medio', key: 'atestada_sem_nf', text: `${notInvoiced.length} medição(ões) atestada(s) aguardando nota fiscal.` });
-  if (totals.contracted > 0 && totals.toCommit / totals.contracted > 0.3) out.push({ level: 'medio', key: 'a_empenhar', text: `${((totals.toCommit / totals.contracted) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% do contrato ainda sem empenho (${fmt(totals.toCommit)}).` });
+  if (totals.contracted > 0 && totals.toCommit > 0) {
+    const pct = (totals.toCommit / totals.contracted) * 100;
+    const limit = args.toCommitAlertPct;
+    const above = limit != null && pct > limit;
+    if (limit == null || above) out.push({ level: above ? 'medio' : 'info', key: 'a_empenhar', text: `${pct.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% do contrato ainda sem empenho (${fmt(totals.toCommit)})${above ? `, acima do limite de ${limit}%` : ''}.` });
+  }
   const year = Number(args.today.slice(0, 4)), month = Number(args.today.slice(5, 7));
   const bal = commitmentItemBalances(args.items, args.measurements, args.mItems);
   const left = (c: CCommitment) => args.items.filter((i) => i.commitmentId === c.id).reduce((s, i) => s + value4(Math.max(0, bal.get(i.id) ?? 0), args.lines.find((l) => l.id === i.lineId)?.price4 ?? 0), 0);
@@ -157,12 +200,17 @@ export function commitmentAlerts(args: { today: string; lines: CLine[]; bal: Lin
   const measured = new Set(args.mItems.filter((x) => args.measurements.some((m) => m.id === x.measurementId && counts(m) && m.competence === prev)).map((x) => x.lineId));
   const missing = rec.filter((l) => !measured.has(l.id));
   if (missing.length) out.push({ level: 'alto', key: 'recorrente_sem_medicao', text: `${missing.length} item(ns) recorrente(s) sem medição em ${prev.slice(5)}/${prev.slice(0, 4)} (franquia não lançada).` });
-  // saldo de empenho insuficiente para a próxima parcela recorrente (preventivo)
-  const short = rec.filter((l) => l.monthlyQty4 && (args.bal.find((b) => b.lineId === l.id)?.commitmentBalance4 ?? 0) < l.monthlyQty4);
-  if (short.length) out.push({ level: 'medio', key: 'parcela_sem_saldo', text: `${short.length} item(ns) recorrente(s) sem saldo de empenho para a próxima parcela mensal.` });
+  // saldo de empenho insuficiente para a próxima parcela recorrente projetada (preventivo)
+  const ex = args.extras ?? {};
+  const short = ex.nextInstallmentShort ?? rec.filter((l) => l.monthlyQty4 && (args.bal.find((b) => b.lineId === l.id)?.commitmentBalance4 ?? 0) < l.monthlyQty4).map((l) => l.itemNumber);
+  if (short.length) out.push({ level: 'medio', key: 'parcela_sem_saldo', text: `${short.length} item(ns) recorrente(s) sem saldo de empenho para a próxima parcela projetada (${short.slice(0, 5).join(', ')}).` });
+  if (ex.exhaustBefore?.length) out.push({ level: 'alto', key: 'esgotamento', text: `${ex.exhaustBefore.length} item(ns) esgota(m) antes do fim da vigência pelo consumo médio: item ${ex.exhaustBefore.slice(0, 4).map((x) => `${x.itemNumber} em ${x.competence.slice(5)}/${x.competence.slice(0, 4)}`).join(', ')}. Avalie aditivo de quantidade.` });
+  if (ex.retroPendingV4 && ex.retroPendingV4 > 0) out.push({ level: 'alto', key: 'retroativo', text: `${fmt(ex.retroPendingV4)} de retroativo de reajuste a faturar (NF complementar).` });
+  if (ex.nextYear && month >= 10 && !ex.nextYear.hasCommitment && ex.nextYear.needV4 > 0) out.push({ level: 'medio', key: 'ne_proximo_exercicio', text: `A vigência segue em ${ex.nextYear.year}: prepare a NE de ${ex.nextYear.year} (necessidade projetada de ${fmt(ex.nextYear.needV4)}).` });
   if (args.endAt) {
     const days = day(args.endAt) - day(args.today);
-    if (days >= 0 && days <= 180) out.push({ level: days <= 60 ? 'alto' : 'medio', key: 'vigencia', text: `Vigência termina em ${days} dia(s): providencie o aditivo de prorrogação e o novo empenho.` });
+    const mark = [...VIGENCIA_MILESTONES].reverse().find((m) => days <= m);
+    if (days >= 0 && mark != null) out.push({ level: days <= 60 ? 'alto' : 'medio', key: 'vigencia', text: `Vigência termina em ${days} dia(s) (marco de ${mark} dias): providencie o aditivo de prorrogação e o novo empenho.` });
   }
   return out;
 }

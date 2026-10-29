@@ -5,41 +5,23 @@
  */
 import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Info, Plus, Receipt, RotateCcw, Send, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, Download, FileSpreadsheet, Info, Plus, Receipt, RotateCcw, Send, ShieldCheck } from 'lucide-react';
 import { LINE_CLASSES, LINE_CLASS_LABELS, MEASUREMENT_KINDS, MEASUREMENT_KIND_LABELS, REVISION_REASONS, REVISION_REASON_LABELS, fillSheetPrices, parseCommitmentSheet, type LineClass, type MeasurementKind, type SheetMeasurement, type SheetRow } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
 import { Button, Chip, EmptyState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from './shared';
+import { downloadCsv, money, monthLabel, parseNum, pctOf, price, qty, useRefresh, type CItem, type Commitment, type Data, type Line, type Measurement } from './commitmentShared';
+import { AdjustmentsTab, LineMoveModal, ProjectionsTab, RetroInvoiceModal, RolloverLinkNotice, RolloverModal, RulesPanel } from './CommitmentPlanning';
 
-type Bal = { contracted4: number; committed4: number; executed4: number; pending4: number; reserved4: number; invoiced4: number; available4: number; toCommit4: number; commitmentBalance4: number; uncovered4: number };
-type Line = { id: string; itemNumber: string; arpItemNumber: string | null; description: string; unit: string; classification: LineClass; qty4: number; price4: number; monthlyQty4: number | null; valueV4: number; balance: Bal; reservations: { opportunityId: string; code: number; title: string; stage: string; qty4: number }[]; measured: { measurementId: string; qty4: number }[] };
-type CItem = { id: string; lineId: string; code: string | null; itemNumber: string | null; qty4: number; adjust4: number; balance4: number; valueV4: number; balanceV4: number; moves: { id: string; kind: string; qty4: number; occurredOn: string; reason: string }[] };
-type Commitment = { id: string; number: string; fiscalYear: number; issuedOn: string; source: string | null; cancelledAt: string | null; cancelReason: string | null; valueV4: number; balanceV4: number; items: CItem[] };
-type MItem = { lineId: string; qty4: number; price4: number; valueV4: number; allocations: { commitmentItemId: string; qty4: number }[]; uncovered4: number };
-type Measurement = { id: string; groupId: string; version: number; superseded: boolean; competence: string; kind: MeasurementKind; title: string; status: string; statusLabel: string; opportunityId: string | null; revisionReasonLabel: string | null; revisionNote: string | null; invoiceNumber: string | null; invoiceDate: string | null; invoiceCents: number | null; attestedAt: string | null; createdAt: string; valueV4: number; uncoveredV4: number; items: MItem[] };
-type Data = {
-  contract: { id: string; code: number; kind: string; number: string | null; object: string | null; startAt: string | null; endAt: string | null; totalCents: number | null; commitmentBlock: boolean };
-  lines: Line[]; commitments: Commitment[]; measurements: Measurement[];
-  pendencias: { kind: string; label: string; measurementId: string; title: string; competence: string; valueV4: number; since: string }[];
-  totals: { contracted: number; committed: number; executed: number; pending: number; reserved: number; invoiced: number; available: number; toCommit: number; commitmentBalance: number; uncovered: number; executionPct: number | null; committedPct: number | null };
-  alerts: { level: 'alto' | 'medio' | 'info'; key: string; text: string }[];
-  canManage: boolean; today: string; globalCheck: { itemsCents: number; globalCents: number; diffCents: number } | null;
-};
-
-const qty = (q4: number) => (q4 / 10_000).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
-const money = (v4: number) => (v4 / 10_000).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const pctOf = (a: number, b: number) => (b ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
-const parseNum = (t: string) => { const s = t.trim(); if (!s) return null; const n = Number(/,/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : null; };
 const STATUS_TONE: Record<string, 'neutral' | 'blue' | 'green' | 'yellow' | 'red'> = { elaboracao: 'neutral', enviada: 'blue', atestada: 'yellow', faturada: 'green', cancelada: 'red' };
-const monthLabel = (c: string) => new Date(`${c}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
 export function CommitmentControl({ contractId }: { contractId: string }) {
   const q = useQuery({ queryKey: ['commitment-control', contractId], queryFn: () => api<Data>(`/contracts/${contractId}/commitment-control`) });
-  const [tab, setTab] = useState<'itens' | 'empenhos' | 'medicoes' | 'pendencias'>('itens');
+  const [tab, setTab] = useState<'itens' | 'empenhos' | 'medicoes' | 'pendencias' | 'projecoes' | 'reajustes'>('itens');
   const [view, setView] = useState<'qtd' | 'valor'>('qtd');
   const [modal, setModal] = useState<null | 'import' | 'medicao' | 'empenho' | 'itens'>(null);
   const [line, setLine] = useState<Line | null>(null);
@@ -109,8 +91,8 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
         <section className="card p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 pt-3">
             <div role="tablist" aria-label="Controle de empenhos" className="flex gap-5">
-              {([['itens', 'Itens', d.lines.length], ['empenhos', 'Empenhos', d.commitments.length], ['medicoes', 'Medições', d.measurements.filter((m) => !m.superseded).length], ['pendencias', 'Pendências', d.pendencias.length]] as const).map(([k, l, n]) => (
-                <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => setTab(k)} className={clsx('-mb-px border-b-2 pb-2.5 text-sm font-semibold', tab === k ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink')}>{l} <span className={clsx('ml-1 rounded-full px-1.5 text-2xs', k === 'pendencias' && n ? 'bg-danger text-white' : 'bg-surface-2 text-muted')}>{n}</span></button>
+              {([['itens', 'Itens', d.lines.length], ['empenhos', 'Empenhos', d.commitments.length], ['medicoes', 'Medições', d.measurements.filter((m) => !m.superseded).length], ['pendencias', 'Pendências', d.pendencias.length], ['projecoes', 'Projeções', null], ['reajustes', 'Reajustes', d.adjustments.length]] as const).map(([k, l, n]) => (
+                <button key={k} role="tab" aria-selected={tab === k} type="button" onClick={() => setTab(k)} className={clsx('-mb-px border-b-2 pb-2.5 text-sm font-semibold', tab === k ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink')}>{l}{n != null && <span className={clsx('ml-1 rounded-full px-1.5 text-2xs', k === 'pendencias' && n ? 'bg-danger text-white' : 'bg-surface-2 text-muted')}>{n}</span>}</button>
               ))}
             </div>
             {tab === 'itens' && (
@@ -118,6 +100,7 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
                 <div className="flex border border-line text-xs font-semibold" role="group" aria-label="Mostrar">
                   {(['qtd', 'valor'] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={clsx('px-2.5 py-1', view === v ? 'bg-primary text-white' : 'text-ink hover:bg-surface-2')}>{v === 'qtd' ? 'Quantidade' : 'Valor (R$)'}</button>)}
                 </div>
+                <Button size="sm" variant="ghost" icon={<Download className="h-4 w-4" />} onClick={() => exportLines(d)}>Exportar planilha</Button>
                 {d.canManage && <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={() => setModal('itens')}>Incluir itens</Button>}
               </div>
             )}
@@ -126,14 +109,14 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
           {tab === 'empenhos' && <Commitments d={d} contractId={contractId} />}
           {tab === 'medicoes' && <Measurements d={d} contractId={contractId} />}
           {tab === 'pendencias' && <Pendencias d={d} contractId={contractId} />}
+          {tab === 'projecoes' && <ProjectionsTab d={d} contractId={contractId} />}
+          {tab === 'reajustes' && <AdjustmentsTab d={d} contractId={contractId} />}
         </section>
       )}
 
-      {d.canManage && !empty && (
-        <BlockSetting contractId={contractId} value={d.contract.commitmentBlock} />
-      )}
+      {d.canManage && !empty && <RulesPanel d={d} contractId={contractId} />}
 
-      {line && <LineDrawer d={d} line={line} onClose={() => setLine(null)} />}
+      {line && <LineDrawer d={d} line={d.lines.find((l) => l.id === line.id) ?? line} contractId={contractId} onClose={() => setLine(null)} />}
       {modal === 'import' && <ImportModal contractId={contractId} onClose={() => setModal(null)} />}
       {modal === 'itens' && <LinesModal contractId={contractId} onClose={() => setModal(null)} />}
       {modal === 'empenho' && <CommitmentModal d={d} contractId={contractId} onClose={() => setModal(null)} />}
@@ -153,12 +136,17 @@ function Big({ label, value, hint, warn }: { label: string; value: string; hint:
 }
 const Legend = ({ cls, label, value }: { cls: string; label: string; value: string }) => <span className="flex items-center gap-1.5"><span className={clsx('h-2.5 w-2.5 rounded-sm', cls)} aria-hidden />{label} <b className="num">{value}</b></span>;
 
-function useRefresh(contractId: string) {
-  const qc = useQueryClient();
-  return () => { qc.invalidateQueries({ queryKey: ['commitment-control', contractId] }); qc.invalidateQueries({ queryKey: ['contract', contractId] }); };
-}
 
 // ------------------------------------------------------------------ itens (a planilha)
+/** PF09.6: a planilha de controle para conferência lado a lado (itens, saldos e cada medição). */
+function exportLines(d: Data) {
+  const ms = d.measurements.filter((m) => !m.superseded && m.status !== 'cancelada').sort((a, b) => a.competence.localeCompare(b.competence) || a.createdAt.localeCompare(b.createdAt));
+  downloadCsv(`controle-empenhos-${d.contract.number ?? d.contract.code}.csv`, [
+    ['Item', 'Especificação', 'Unidade', 'Preço vigente', 'Contratado', 'Empenhado', 'Medido', 'Saldo do contrato', 'Saldo do empenho', 'Falta empenhar', 'Sem empenho', ...ms.map((m) => `${m.title} (${m.competence})`)],
+    ...d.lines.map((l) => { const b = l.balance; return [l.itemNumber, l.description, l.unit, l.price4 / 10_000, b.contracted4 / 10_000, b.committed4 / 10_000, (b.executed4 + b.pending4) / 10_000, b.available4 / 10_000, b.commitmentBalance4 / 10_000, b.toCommit4 / 10_000, b.uncovered4 / 10_000, ...ms.map((m) => (m.items.find((x) => x.lineId === l.id)?.qty4 ?? 0) / 10_000)]; }),
+  ]);
+}
+
 function LinesTable({ d, view, onOpen }: { d: Data; view: 'qtd' | 'valor'; onOpen: (l: Line) => void }) {
   const fmt = (l: Line, q4: number) => (view === 'qtd' ? qty(q4) : money(Math.round((q4 * l.price4) / 10_000)));
   return (
@@ -193,13 +181,25 @@ function LinesTable({ d, view, onOpen }: { d: Data; view: 'qtd' | 'valor'; onOpe
   );
 }
 
-function LineDrawer({ d, line, onClose }: { d: Data; line: Line; onClose: () => void }) {
+function LineDrawer({ d, line, contractId, onClose }: { d: Data; line: Line; contractId: string; onClose: () => void }) {
+  const [amend, setAmend] = useState(false);
   const ms = d.measurements.filter((m) => m.items.some((x) => x.lineId === line.id)).sort((a, b) => b.competence.localeCompare(a.competence) || b.version - a.version);
   const cis = d.commitments.flatMap((c) => c.items.filter((i) => i.lineId === line.id).map((i) => ({ c, i })));
   return (
     <Drawer open onClose={onClose} title={`Item ${line.itemNumber}`} width="lg">
       <p className="text-sm text-text">{line.description}</p>
-      <p className="mt-1 text-xs text-muted">{LINE_CLASS_LABELS[line.classification]} · {qty(line.qty4)} {line.unit} × {money(line.price4)} = {money(line.valueV4)}{line.monthlyQty4 ? ` · mensal ${qty(line.monthlyQty4)}` : ''}</p>
+      <p className="mt-1 text-xs text-muted">{LINE_CLASS_LABELS[line.classification]} · {qty(line.qty4)} {line.unit} × {price(line.price4)} = {money(line.valueV4)}{line.monthlyQty4 ? ` · mensal ${qty(line.monthlyQty4)}` : ''}</p>
+      {d.canManage && <Button size="sm" variant="ghost" className="mt-2" onClick={() => setAmend(true)}>Aditivo de quantidade</Button>}
+      {(!!line.moves.length || !!line.priceHistory.length) && (
+        <>
+          <h3 className="mt-4 text-sm font-bold text-ink">Contrato original, aditivos e reajustes</h3>
+          <ul className="mt-1 divide-y divide-line border border-line text-sm">
+            <li className="flex justify-between gap-2 px-3 py-1.5"><span>Original</span><span className="num">{qty(line.originalQty4)} {line.unit} × {price(line.originalPrice4)}</span></li>
+            {line.moves.map((m) => <li key={m.id} className="flex justify-between gap-2 px-3 py-1.5"><span>{m.kind === 'acrescimo' ? 'Acréscimo' : 'Supressão'} em {fmtDate(m.effectiveOn)}{m.reference ? ` · ${m.reference}` : ''}<span className="block text-2xs text-muted">{m.reason}</span></span><span className={clsx('num', m.kind === 'supressao' && 'text-danger')}>{m.kind === 'acrescimo' ? '+' : '−'}{qty(m.qty4)}</span></li>)}
+            {line.priceHistory.map((p) => <li key={p.id} className="flex justify-between gap-2 px-3 py-1.5"><span>Reajuste a partir de {monthLabel(p.fromCompetence)}</span><span className="num">{price(p.previousPrice4)} → <b>{price(p.price4)}</b></span></li>)}
+          </ul>
+        </>
+      )}
       <h3 className="mt-4 text-sm font-bold text-ink">Empenhos deste item</h3>
       {!cis.length ? <p className="text-sm text-[#C2610C]">Sem empenho: tudo o que for medido fica aguardando NE.</p> : (
         <ul className="mt-1 divide-y divide-line border border-line">{cis.map(({ c, i }) => <li key={i.id} className={clsx('flex items-center justify-between gap-2 px-3 py-2 text-sm', c.cancelledAt && 'opacity-50')}><span><b>{c.number}</b>{i.code ? ` · código ${i.code}` : ''}{c.cancelledAt ? ' · anulado' : ''}</span><span className="num text-right">{qty(i.qty4 + i.adjust4)} empenhado · <b>{qty(i.balance4)}</b> de saldo</span></li>)}</ul>
@@ -223,6 +223,7 @@ function LineDrawer({ d, line, onClose }: { d: Data; line: Line; onClose: () => 
           <ul className="mt-1 space-y-1 text-sm">{line.reservations.map((r) => <li key={r.opportunityId}><Link className="link" to={`/opportunities/${r.opportunityId}`}>OP-{r.code} · {r.title}</Link> — {qty(r.qty4)} {line.unit}</li>)}</ul>
         </>
       )}
+      {amend && <LineMoveModal contractId={contractId} line={line} onClose={() => setAmend(false)} />}
     </Drawer>
   );
 }
@@ -232,19 +233,42 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
   const toast = useToast();
   const refresh = useRefresh(contractId);
   const [move, setMove] = useState<{ item: CItem; c: Commitment } | null>(null);
+  const [rollover, setRollover] = useState(false);
+  const setSource = useMutation({ mutationFn: (x: { c: Commitment; sourceId: string }) => api(`/contracts/${contractId}/commitment-control/commitments/${x.c.id}`, { method: 'PATCH', body: { sourceId: x.sourceId || null } }), onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Fonte da NE salva' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const lineOf = (id: string) => d.lines.find((l) => l.id === id);
   if (!d.commitments.length) return <div className="p-5"><EmptyState title="Nenhum empenho" description="Registre a NE com os itens que ela cobre. Sem empenho, as medições ficam como pendência." /></div>;
+  const year = Number(d.today.slice(0, 4)), month = Number(d.today.slice(5, 7));
+  const leftover = d.commitments.filter((c) => !c.cancelledAt && c.balanceV4 > 0 && (c.fiscalYear < year || (c.fiscalYear === year && month >= 10)));
   return (
-    <div className="grid grid-cols-1 gap-3 p-4 xl:grid-cols-2">
+    <div className="space-y-3 p-4">
+      {d.canManage && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted">{leftover.length ? <span className="text-[#C2610C]">{leftover.length} NE(s) com saldo a suprimir na virada ({money(leftover.reduce((a, c) => a + c.balanceV4, 0))}).</span> : 'Empenho só vale no seu exercício; a sobra vai para a NE do ano seguinte na virada.'}</p>
+          <Button size="sm" icon={<CalendarClock className="h-4 w-4" />} onClick={() => setRollover(true)}>Virada de exercício</Button>
+        </div>
+      )}
+      <RolloverLinkNotice d={d} contractId={contractId} />
+    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
       {d.commitments.map((c) => (
         <article key={c.id} className={clsx('border border-line p-3', c.cancelledAt && 'opacity-60')}>
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <div><p className="font-bold text-ink">{c.number}</p><p className="text-xs text-muted">Exercício {c.fiscalYear} · emitido em {fmtDate(c.issuedOn)}{c.source ? ` · ${c.source}` : ''}</p></div>
-            {c.cancelledAt ? <Chip tone="red">Anulado</Chip> : c.fiscalYear < Number(d.today.slice(0, 4)) ? <Chip tone="yellow">Exercício anterior</Chip> : <Chip tone="green">Ativo</Chip>}
+            <div>
+              <p className="font-bold text-ink">{c.number}</p>
+              <p className="text-xs text-muted">Exercício {c.fiscalYear} · emitido em {fmtDate(c.issuedOn)}{c.sourceName ? ` · ${c.sourceName}` : ''}</p>
+              {!!c.substitui.length && <p className="text-xs text-primary">Reempenho de {c.substitui.map((x) => x.number).join(', ')}</p>}
+              {!!c.reempenhadaEm.length && <p className="text-xs text-primary">Saldo suprimido ({money(c.suppressedV4)}) reempenhado em {c.reempenhadaEm.map((x) => x.number).join(', ')}</p>}
+              {!c.reempenhadaEm.length && c.suppressedV4 > 0 && <p className="text-xs text-[#C2610C]">{money(c.suppressedV4)} suprimidos, sem NE nova vinculada</p>}
+            </div>
+            {c.cancelledAt ? <Chip tone="red">Anulado</Chip> : c.suppressedV4 > 0 && c.balanceV4 <= 0 ? <Chip>Encerrada na virada</Chip> : c.fiscalYear < Number(d.today.slice(0, 4)) ? <Chip tone="yellow">Exercício anterior</Chip> : <Chip tone="green">Ativo</Chip>}
           </div>
           <div className="mt-2 flex items-baseline justify-between text-sm"><span className="text-muted">Empenhado</span><span className="num font-semibold">{money(c.valueV4)}</span></div>
           <div className="flex items-baseline justify-between text-sm"><span className="text-muted">Saldo</span><span className={clsx('num font-bold', c.balanceV4 <= 0 ? 'text-muted' : 'text-ink')}>{money(c.balanceV4)}</span></div>
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"><span className="block h-full bg-primary" style={{ width: `${pctOf(c.valueV4 - c.balanceV4, c.valueV4)}%` }} /></div>
+          {d.canManage && !!d.sources.length && !c.sourceId && !c.cancelledAt && (
+            <label className="mt-2 flex items-center gap-2 text-xs text-[#C2610C]">Fonte de receita:
+              <Select aria-label={`Fonte da ${c.number}`} className="h-8 w-48" value="" onChange={(e) => e.target.value && setSource.mutate({ c, sourceId: e.target.value })}><option value="">Definir…</option>{d.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
+            </label>
+          )}
           <details className="mt-2">
             <summary className="cursor-pointer text-xs font-semibold text-primary">{c.items.length} item(ns) da nota</summary>
             <ul className="mt-1 divide-y divide-line text-xs">{c.items.map((i) => (
@@ -252,11 +276,14 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
                 <span className="min-w-0 flex-1 truncate">Item {lineOf(i.lineId)?.itemNumber}{i.code ? ` · ${i.code}` : ''} · {lineOf(i.lineId)?.description}</span>
                 <span className="num">{qty(i.qty4 + i.adjust4)} · saldo <b>{qty(i.balance4)}</b></span>
                 {d.canManage && !c.cancelledAt && <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setMove({ item: i, c })}>Reforçar / anular</button>}
+                {!!i.moves.length && <ul className="w-full pl-2 text-2xs text-muted">{i.moves.map((m) => <li key={m.id}>{fmtDate(m.occurredOn)} · {m.kindLabel} de {qty(m.qty4)} — {m.reason}</li>)}</ul>}
               </li>
             ))}</ul>
           </details>
         </article>
       ))}
+    </div>
+      {rollover && <RolloverModal d={d} contractId={contractId} onClose={() => setRollover(false)} />}
       {move && <MoveModal contractId={contractId} item={move.item} c={move.c} line={lineOf(move.item.lineId)!} onClose={() => setMove(null)} onDone={() => { refresh(); toast({ tone: 'success', message: 'Movimentação registrada' }); setMove(null); }} />}
     </div>
   );
@@ -264,13 +291,13 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
 
 function MoveModal({ contractId, item, c, line, onClose, onDone }: { contractId: string; item: CItem; c: Commitment; line: Line; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [v, setV] = useState({ kind: 'anulacao' as 'reforco' | 'anulacao', qty: '', occurredOn: new Date().toISOString().slice(0, 10), reason: '' });
+  const [v, setV] = useState({ kind: 'anulacao' as 'reforco' | 'anulacao' | 'supressao', qty: '', occurredOn: new Date().toISOString().slice(0, 10), reason: '' });
   const save = useMutation({ mutationFn: () => api(`/contracts/${contractId}/commitment-items/${item.id}/moves`, { method: 'POST', body: { ...v, qty: parseNum(v.qty) } }), onSuccess: onDone, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   return (
     <Modal open onClose={onClose} title={`${c.number} · item ${line.itemNumber}`} footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!parseNum(v.qty) || v.reason.trim().length < 5} loading={save.isPending} onClick={() => save.mutate()}>Registrar</Button></>}>
-      <p className="mb-3 text-sm text-muted">Saldo deste item na nota: {qty(item.balance4)} {line.unit}. Use anulação na virada do exercício (o saldo é suprimido e reempenhado na NE do ano novo).</p>
+      <p className="mb-3 text-sm text-muted">Saldo deste item na nota: {qty(item.balance4)} {line.unit}. Na virada do exercício use o botão “Virada de exercício”: ele suprime o saldo e liga a NE nova.</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Movimentação" htmlFor="mv-k"><Select id="mv-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}><option value="anulacao">Anulação parcial / supressão</option><option value="reforco">Reforço</option></Select></FormField>
+        <FormField label="Movimentação" htmlFor="mv-k"><Select id="mv-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}><option value="anulacao">Anulação parcial</option><option value="supressao">Supressão</option><option value="reforco">Reforço</option></Select></FormField>
         <FormField label={`Quantidade (${line.unit})`} htmlFor="mv-q"><Input id="mv-q" inputMode="decimal" value={v.qty} onChange={(e) => setV({ ...v, qty: e.target.value })} /></FormField>
         <FormField label="Data" htmlFor="mv-d"><Input id="mv-d" type="date" value={v.occurredOn} onChange={(e) => setV({ ...v, occurredOn: e.target.value })} /></FormField>
         <FormField label="Justificativa" htmlFor="mv-r" className="sm:col-span-2"><Textarea id="mv-r" rows={2} value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} /></FormField>
@@ -424,25 +451,33 @@ function Pendencias({ d, contractId }: { d: Data; contractId: string }) {
   const refresh = useRefresh(contractId);
   const cover = useMutation({ mutationFn: () => api<{ coveredV4: number }>(`/contracts/${contractId}/commitment-control/cover`, { method: 'POST' }), onSuccess: (r) => { refresh(); toast({ tone: 'success', message: r.coveredV4 ? `${money(r.coveredV4)} cobertos pelos empenhos` : 'Nenhum empenho com saldo para cobrir' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const days = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
+  const [pick, setPick] = useState<Record<string, boolean>>({});
+  const [retroNf, setRetroNf] = useState(false);
+  const retros = d.pendencias.filter((p) => p.kind === 'retroativo');
+  const chosen = retros.filter((p) => pick[p.retroId!]);
   if (!d.pendencias.length) return <div className="p-5"><EmptyState icon={<CheckCircle2 className="h-8 w-8 text-success" />} title="Sem pendências" description="Tudo o que foi executado tem empenho e nota fiscal." /></div>;
   const total = d.pendencias.reduce((a, p) => a + p.valueV4, 0);
   return (
     <div className="p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-ink">Em risco: <b className="num">{money(total)}</b></p>
-        {d.canManage && d.pendencias.some((p) => p.kind === 'aguardando_empenho') && <Button size="sm" loading={cover.isPending} onClick={() => cover.mutate()}>Cobrir com os empenhos disponíveis</Button>}
+        <div className="flex flex-wrap gap-2">
+          {d.canManage && !!retros.length && <Button size="sm" disabled={!chosen.length} onClick={() => setRetroNf(true)}>Faturar retroativo selecionado{chosen.length ? ` (${chosen.length})` : ''}</Button>}
+          {d.canManage && d.pendencias.some((p) => p.kind === 'aguardando_empenho') && <Button size="sm" loading={cover.isPending} onClick={() => cover.mutate()}>Cobrir com os empenhos disponíveis</Button>}
+        </div>
       </div>
       <table className="w-full text-sm">
         <thead className="text-left text-xs text-muted"><tr><th className="py-1.5">Tipo</th><th className="py-1.5">Medição</th><th className="py-1.5">Competência</th><th className="py-1.5 text-right">Há</th><th className="py-1.5 text-right">Valor</th></tr></thead>
         <tbody>{d.pendencias.sort((a, b) => a.since.localeCompare(b.since)).map((p) => (
-          <tr key={p.kind + p.measurementId} className="border-t border-line">
-            <td className="py-2"><Chip tone={p.kind === 'aguardando_empenho' ? 'red' : 'yellow'}>{p.label}</Chip></td>
+          <tr key={p.kind + p.measurementId + (p.retroId ?? '')} className="border-t border-line">
+            <td className="py-2">{p.retroId && d.canManage && <input type="checkbox" className="mr-2 align-middle" aria-label={`Selecionar ${p.title}`} checked={!!pick[p.retroId]} onChange={(e) => setPick({ ...pick, [p.retroId!]: e.target.checked })} />}<Chip tone={p.kind === 'aguardando_empenho' ? 'red' : p.kind === 'retroativo' ? 'blue' : 'yellow'}>{p.label}</Chip></td>
             <td className="py-2">{p.title}</td><td className="py-2">{monthLabel(p.competence)}</td>
-            <td className={clsx('num py-2 text-right', days(p.since) > 60 ? 'font-semibold text-danger' : '')}>{days(p.since)} dia(s)</td>
+            <td className={clsx('num py-2 text-right', days(p.since) > d.settings.agingDays ? 'font-semibold text-danger' : '')}>{days(p.since)} dia(s)</td>
             <td className="num py-2 text-right font-semibold">{money(p.valueV4)}</td>
           </tr>
         ))}</tbody>
       </table>
+      {retroNf && <RetroInvoiceModal contractId={contractId} items={chosen} onClose={() => { setRetroNf(false); setPick({}); }} />}
     </div>
   );
 }
@@ -481,18 +516,20 @@ function LinesModal({ contractId, onClose }: { contractId: string; onClose: () =
 function CommitmentModal({ d, contractId, onClose }: { d: Data; contractId: string; onClose: () => void }) {
   const toast = useToast();
   const refresh = useRefresh(contractId);
-  const [v, setV] = useState({ number: '', issuedOn: d.today, source: '' });
+  const [v, setV] = useState({ number: '', issuedOn: d.today, source: '', sourceId: '' });
   const [qtys, setQtys] = useState<Record<string, { qty: string; code: string }>>({});
   const items = Object.entries(qtys).map(([lineId, x]) => ({ lineId, qty: parseNum(x.qty), code: x.code || null })).filter((x): x is { lineId: string; qty: number; code: string | null } => !!x.qty && x.qty > 0);
   const total = items.reduce((a, x) => a + Math.round(x.qty * (d.lines.find((l) => l.id === x.lineId)?.price4 ?? 0)), 0);
-  const save = useMutation({ mutationFn: () => api(`/contracts/${contractId}/commitment-control/commitments`, { method: 'POST', body: { number: v.number.trim().toUpperCase(), issuedOn: v.issuedOn, source: v.source || null, items } }), onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Empenho registrado' }); onClose(); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const save = useMutation({ mutationFn: () => api(`/contracts/${contractId}/commitment-control/commitments`, { method: 'POST', body: { number: v.number.trim().toUpperCase(), issuedOn: v.issuedOn, ...(d.sources.length ? { sourceId: v.sourceId || null } : { source: v.source || null }), items } }), onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Empenho registrado' }); onClose(); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const fillAll = () => setQtys(Object.fromEntries(d.lines.filter((l) => l.balance.toCommit4 > 0).map((l) => [l.id, { qty: String(l.balance.toCommit4 / 10_000).replace('.', ','), code: qtys[l.id]?.code ?? '' }])));
   return (
-    <Modal open onClose={onClose} size="xl" title="Registrar empenho (NE)" footer={<><span className="mr-auto text-sm">Valor da NE: <b className="num">{money(total)}</b></span><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!v.number.trim() || !items.length} loading={save.isPending} onClick={() => save.mutate()}>Registrar</Button></>}>
+    <Modal open onClose={onClose} size="xl" title="Registrar empenho (NE)" footer={<><span className="mr-auto text-sm">Valor da NE: <b className="num">{money(total)}</b></span><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!v.number.trim() || !items.length || (d.settings.allocation === 'rateio' && !v.sourceId)} loading={save.isPending} onClick={() => save.mutate()}>Registrar</Button></>}>
       <div className="mb-3 grid gap-3 sm:grid-cols-3">
         <FormField label="Nº da NE" htmlFor="ne-n" hint="Ex.: 2026NE002244 (o ano vira o exercício)"><Input id="ne-n" value={v.number} onChange={(e) => setV({ ...v, number: e.target.value })} /></FormField>
         <FormField label="Data de emissão" htmlFor="ne-d"><Input id="ne-d" type="date" value={v.issuedOn} onChange={(e) => setV({ ...v, issuedOn: e.target.value })} /></FormField>
-        <FormField label="Fonte de receita (opcional)" htmlFor="ne-s"><Input id="ne-s" value={v.source} onChange={(e) => setV({ ...v, source: e.target.value })} placeholder="Ex.: Educação estadual" /></FormField>
+        {d.sources.length ? (
+          <FormField label={d.settings.allocation === 'rateio' ? 'Fonte de receita (obrigatória no rateio)' : 'Fonte de receita'} htmlFor="ne-s"><Select id="ne-s" value={v.sourceId} onChange={(e) => setV({ ...v, sourceId: e.target.value })}><option value="">—</option>{d.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>
+        ) : <FormField label="Fonte de receita (opcional)" htmlFor="ne-s" hint="Cadastre as fontes em Regras do contrato"><Input id="ne-s" value={v.source} onChange={(e) => setV({ ...v, source: e.target.value })} placeholder="Ex.: Educação estadual" /></FormField>}
       </div>
       <div className="mb-2 flex items-center gap-2"><Button size="sm" variant="ghost" onClick={fillAll}>Preencher com o que falta empenhar</Button><span className="text-xs text-muted">Informe a quantidade coberta e o código do item na nota.</span></div>
       <div className="max-h-[50vh] overflow-auto border border-line">
@@ -568,15 +605,4 @@ function ImportModal({ contractId, onClose }: { contractId: string; onClose: () 
   );
 }
 
-function BlockSetting({ contractId, value }: { contractId: string; value: boolean }) {
-  const toast = useToast();
-  const refresh = useRefresh(contractId);
-  const save = useMutation({ mutationFn: (v: boolean) => api(`/contracts/${contractId}/commitment-control/settings`, { method: 'POST', body: { commitmentBlock: v } }), onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Regra salva' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  return (
-    <section className="card flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-      <div><p className="font-semibold text-ink">Medição sem empenho</p><p className="text-xs text-muted">Padrão: registra e abre pendência "aguardando empenho", porque a execução contínua não para. Ative para bloquear.</p></div>
-      <label className="flex items-center gap-2"><input type="checkbox" checked={value} disabled={save.isPending} onChange={(e) => save.mutate(e.target.checked)} />Bloquear medição sem empenho</label>
-    </section>
-  );
-}
 
