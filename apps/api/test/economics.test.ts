@@ -241,4 +241,14 @@ describe('viabilidade econômica', () => {
     try { ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`), 403); }
     finally { ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'exportar', allowed: true })); }
   });
+
+  it('oportunidades: filtro por período de criação na lista e no kanban', async () => {
+    const all = ok(await carlos.get('/opportunities?status=todas&pageSize=1')).json().total;
+    expect(all).toBeGreaterThan(0);
+    expect(ok(await carlos.get('/opportunities?status=todas&pageSize=1&from=2000-01-01&to=2999-12-31')).json().total).toBe(all);
+    expect(ok(await carlos.get('/opportunities?status=todas&pageSize=1&from=2999-01-01')).json().total).toBe(0);
+    const k = ok(await carlos.get('/pipeline?from=2999-01-01')).json();
+    expect(k.stages.every((st: { cards: unknown[] }) => st.cards.length === 0)).toBe(true);
+    ok(await carlos.get('/opportunities?from=29-10-2026'), 422);
+  });
 });

@@ -1,11 +1,12 @@
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { compressImage } from '../../lib/files';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { settingsSearch, visibleGroups } from '../../features/settings/nav';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  ArrowRight, Bell, Box, CalendarClock, ChevronRight, CircleHelp, Clock, Database, FileText, Filter, Image as ImageIcon, KeyRound, Link2, MessageSquare, Monitor,
-  Palette, Plus, RefreshCw, Settings, Shield, Target, Trash2, Upload, UserPlus, Users, Workflow,
+  ArrowRight, Bell, Box, CalendarClock, ChevronRight, CircleHelp, Clock, Database, FileText, Filter, Image as ImageIcon, KeyRound, MessageSquare, Monitor,
+  Palette, Plus, RefreshCw, Settings, Trash2, Upload, UserPlus, Users, Workflow,
 } from 'lucide-react';
 import {
   BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
@@ -23,52 +24,6 @@ import { FitText } from '../../components/ui/FitText';
 import { IpAccessCard } from '../../features/admin/IpAccess';
 
 // =================================================================== layout
-const TABS = [
-  { to: '/settings', label: 'Visão geral', end: true },
-  { to: '/settings/users', label: 'Usuários' },
-  { to: '/settings/journeys', label: 'Jornadas e automações' },
-  { to: '/settings/area', label: 'Área de atendimento' },
-  { to: '/settings/viability', label: 'Viabilidade' },
-  { to: '/settings/plans', label: 'Planos e produtos' },
-  { to: '/settings/sources', label: 'Canais de entrada' },
-  { to: '/settings/modelos?aba=propostas', label: 'Modelos de proposta' },
-  { to: '/settings/modelos?aba=contratos', label: 'Modelos de contrato' },
-  { to: '/settings/modelos?aba=instrucao', label: 'Modelo de instrução' },
-  { to: '/settings/modelos?aba=emails', label: 'E-mail e alertas' },
-  { to: '/settings/integrations', label: 'Integrações' },
-  { to: '/settings/fields', label: 'Campos personalizados' },
-  { to: '/settings/modulos?cfg=contratos', label: 'Contratos' },
-  { to: '/settings/approvals', label: 'Aprovações e alçadas' },
-  { to: '/settings/customer-success', label: 'Sucesso do Cliente' },
-  { to: '/settings/desempenho', label: 'Gestão de desempenho' },
-  { to: '/settings/resultados', label: 'Gestão de Times' },
-  { to: '/settings/abm', label: 'ABM' },
-  { to: '/settings/data', label: 'Base de dados' },
-  { to: '/settings/security', label: 'Segurança' },
-  { to: '/settings/branding', label: 'Personalização' },
-  { to: '/settings/logs', label: 'Logs' },
-];
-
-export function AdminLayout() {
-  return (
-    <div className="w-full">
-      <PageHeader
-        icon={<Settings className="h-9 w-9" strokeWidth={2.2} />}
-        title="Administração"
-        subtitle="Gerencie todos os parâmetros da plataforma."
-      />
-      <nav aria-label="Seções da administração" className="scroll-thin mb-5 flex gap-5 overflow-x-auto border-b border-line">
-        {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} end={t.end} className={({ isActive }) => clsx('-mb-px whitespace-nowrap border-b-2 px-1 pb-3 pt-1 text-md', isActive ? 'border-primary font-semibold text-primary' : 'border-transparent text-muted hover:text-ink')}>
-            {t.label}
-          </NavLink>
-        ))}
-      </nav>
-      <Outlet />
-    </div>
-  );
-}
-
 // =================================================================== visão geral
 type Overview = {
   counts: { users: number; plans: number; stages: number; sources: number; integrations: number };
@@ -81,16 +36,31 @@ function uptime(s: number) {
   return d ? `${d} dias, ${h} horas` : h ? `${h} horas, ${m} min` : `${m} min`;
 }
 
-function Tile({ to, icon, tone, title, desc, foot }: { to: string; icon: ReactNode; tone: string; title: string; desc: string; foot: string }) {
+/** Todas as configurações, agrupadas por assunto, com busca por nome ou palavra-chave. */
+function SettingsDirectory() {
+  const { can } = useAuth();
+  const [q, setQ] = useState('');
+  const groups = settingsSearch(visibleGroups(can('configuracoes', 'total')), q);
   return (
-    <Link to={to} className="card group flex gap-4 p-5 hover:border-line-strong">
-      <span className={clsx('flex h-14 w-14 shrink-0 items-center justify-center rounded-circle', tone)}>{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-start justify-between gap-2"><span className="text-md font-bold text-ink">{title}</span><ChevronRight className="h-5 w-5 text-ink" aria-hidden /></span>
-        <span className="mt-1 block text-sm text-muted">{desc}</span>
-        <span className="mt-3 block text-sm text-text">{foot}</span>
-      </span>
-    </Link>
+    <section className="card p-5" aria-labelledby="h-all-settings">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div><h2 id="h-all-settings" className="text-lg font-bold text-ink">Todas as configurações</h2><p className="text-sm text-muted">Agrupadas por assunto. Procure pelo nome ou pelo que quer ajustar (ex.: CNPJ, desconto, senha).</p></div>
+        <Input aria-label="Procurar configuração" type="search" className="w-full max-w-xs" placeholder="Procurar…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      {!groups.length ? <EmptyState title="Nada encontrado" description="Tente outra palavra." /> : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {groups.map((g) => (
+            <div key={g.key} className="border border-line p-4">
+              <p className="font-bold text-ink">{g.label}</p>
+              <p className="mb-2 text-xs text-muted">{g.desc}</p>
+              <ul className="space-y-1">{g.items.filter((i) => i.to !== '/settings').map((i) => (
+                <li key={i.to}><Link to={i.to} className="group flex items-start gap-2 px-1 py-1 hover:bg-surface-2"><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-primary group-hover:underline">{i.label}</span><span className="block text-xs text-muted">{i.desc}</span></span><ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden /></Link></li>
+              ))}</ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -116,24 +86,7 @@ export function AdminOverview() {
           {stat('/settings/journeys', <Filter className="h-7 w-7" />, 'bg-purple-soft text-purple', d.counts.stages, 'Etapas nas jornadas')}
           {stat('/settings/integrations', <Workflow className="h-7 w-7" />, 'bg-success-soft text-success', d.counts.integrations, 'Integrações ativas')}
         </div>
-        <section className="card p-5">
-          <h2 className="text-lg font-bold text-ink">Configurações principais</h2>
-          <p className="mb-4 text-sm text-muted">Acesse e gerencie todas as áreas da plataforma.</p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <Tile to="/settings/users" icon={<Users className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Usuários e permissões" desc="Cadastre usuários, defina perfis e controle os acessos." foot={`${d.counts.users} usuários cadastrados`} />
-            <Tile to="/settings/plans" icon={<Box className="h-7 w-7" />} tone="bg-success-soft text-success" title="Planos e produtos" desc="Gerencie os planos de internet, produtos e serviços." foot={`${d.counts.plans} planos cadastrados`} />
-            <Tile to="/settings/journeys" icon={<Filter className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Jornadas e automações" desc="Crie funis, defina quem trabalha em cada um, campos do cadastro e automações." foot={`${d.counts.stages} etapas configuradas`} />
-            <Tile to="/settings/viability" icon={<Target className="h-7 w-7" />} tone="bg-success-soft text-success" title="Viabilidade" desc="Tributos, parceiros, equipamentos, caminhos de entrega, comissão e LTV." foot="CAC, margem e payback" />
-            <Tile to="/settings/area" icon={<Box className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Área de atendimento" desc="Regiões e condomínios, com blocos e endereço." foot="Região → condomínio" />
-            <Tile to="/settings/modelos?aba=instrucao" icon={<FileText className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="Modelo de instrução" desc="Exporte e adapte o playbook: roteiro, insights, jornadas e e-mails." foot="Versões com prévia" />
-            <Tile to="/settings/sources" icon={<Target className="h-7 w-7" />} tone="bg-warning-soft text-[#EA580C]" title="Canais de entrada" desc="WhatsApp, Instagram, telefone, site: por onde o cliente chega." foot={`${d.counts.sources} canais configurados`} />
-            <Tile to="/settings/integrations" icon={<Link2 className="h-7 w-7" />} tone="bg-primary-soft text-primary" title="Integrações" desc="Conecte com IXC, WhatsApp, e-mail e sistemas externos." foot={`${d.counts.integrations} integrações ativas`} />
-            <Tile to="/settings/modelos?aba=emails" icon={<Bell className="h-7 w-7" />} tone="bg-[#FFF3CC] text-[#E5A100]" title="E-mail e alertas" desc="Servidor SMTP, alertas automáticos e registro de envios." foot="Propostas, follow-ups e avisos" />
-            <Tile to="/settings/security" icon={<Shield className="h-7 w-7" />} tone="bg-danger-soft text-danger" title="Segurança" desc="Defina níveis de acesso por módulo e perfil, e acompanhe a auditoria." foot="Matriz de acesso por módulo" />
-            <Tile to="/settings/branding" icon={<Palette className="h-7 w-7" />} tone="bg-purple-soft text-purple" title="Personalização" desc="Identidade visual BKT aplicada em todo o sistema." foot="Identidade BKT" />
-            <Tile to="/settings/logs" icon={<FileText className="h-7 w-7" />} tone="bg-surface-2 text-ink" title="Logs do sistema" desc="Acompanhe todas as ações realizadas na plataforma." foot="Registro de atividades" />
-          </div>
-        </section>
+        <SettingsDirectory />
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <h2 className="text-lg font-bold text-ink">Atividades recentes na administração</h2>

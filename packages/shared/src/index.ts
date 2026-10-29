@@ -101,6 +101,9 @@ export const OpportunityListQuery = PageQuery.extend({
   ownerId: z.union([uuid, z.literal('me')]).optional(),
   sourceId: uuid.optional(),
   planId: uuid.optional(),
+  /** período de criação (AAAA-MM-DD, fuso de São Paulo) */
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
   status: z.enum(['abertas', 'encerradas', 'todas']).default('abertas'),
   sort: z.enum(OPPORTUNITY_SORTS).default('updated_at'),
   dir: z.enum(['asc', 'desc']).default('desc'),

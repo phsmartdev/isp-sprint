@@ -9,7 +9,8 @@ import { fmtBRL, fmtRelativeShort } from '../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../lib/hooks';
 import type { Kpi, LookupStage, Opportunity, Paged, PipelineStage } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
-import { Avatar, Button, Chip, EmptyState, ErrorState, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
+import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
+import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
 import { CLOSING_TAG, SourceChip, StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { TransitionDialog, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
@@ -145,7 +146,15 @@ export function OpportunitiesPage() {
   const { can } = useAuth();
   const lookups = useLookups();
   const nav = useNavigate();
-  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', pipelineId: '', view: 'kanban', status: 'abertas', page: '1', size: '10' });
+  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', pipelineId: '', from: '', to: '', view: 'kanban', status: 'abertas', page: '1', size: '10' });
+  const [advanced, setAdvanced] = useState(false);
+  const advRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!advanced) return;
+    const close = (e: MouseEvent) => { if (!advRef.current?.contains(e.target as Node)) setAdvanced(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [advanced]);
   const journeys = (lookups.data?.pipelines ?? []).filter((p) => p.allowed);
   const [search, setSearch] = useState(f.q);
   const dq = useDebounced(search);
@@ -154,7 +163,8 @@ export function OpportunitiesPage() {
   // Kanban ajustado à tela (todas as etapas visíveis): padrão ligado, escolha lembrada neste navegador
   const [fit, setFit] = useState(() => { try { return localStorage.getItem('isp:kanban-fit') !== '0'; } catch { return true; } });
   const setFitPersist = (v: boolean) => { setFit(v); try { localStorage.setItem('isp:kanban-fit', v ? '1' : '0'); } catch { /* sem armazenamento */ } };
-  const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId, pipelineId: f.pipelineId };
+  const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId, pipelineId: f.pipelineId, from: f.from, to: f.to };
+  const advancedCount = [f.ownerId, f.sourceId, f.planId, !kanban && f.status !== 'abertas' ? f.status : ''].filter(Boolean).length;
   const summary = useQuery({ queryKey: ['opportunities', 'summary'], queryFn: () => api<{ kpis: Kpi[] }>('/opportunities/summary') });
   const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
   const currentPipelineId = f.pipelineId || pipe.data?.pipeline.id || journeys.find((p) => p.isDefault)?.id || '';
@@ -208,55 +218,65 @@ export function OpportunitiesPage() {
         {!summary.data && Array.from({ length: 5 }).map((_, i) => <div key={i} className="card h-[92px] animate-pulse" />)}
       </section>
 
-      {journeys.length > 1 && (
-        <nav aria-label="Jornadas" className="scroll-thin mb-4 flex gap-2 overflow-x-auto">
-          {journeys.map((p) => (
-            <button
-              key={p.id}
-              aria-pressed={currentPipelineId === p.id}
-              onClick={() => setF({ pipelineId: p.id })}
-              className={clsx('whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold', currentPipelineId === p.id ? 'border-primary bg-primary text-white' : 'border-line bg-surface text-ink hover:border-line-strong')}
-            >
-              {p.name}
-            </button>
-          ))}
-          <button aria-pressed={!kanban && !f.pipelineId} onClick={() => setF({ pipelineId: '', view: 'lista' })} className={clsx('whitespace-nowrap rounded-full border px-4 py-2 text-sm font-semibold', !kanban && !f.pipelineId ? 'border-primary bg-primary text-white' : 'border-line bg-surface text-ink hover:border-line-strong')}>Todas (lista)</button>
-        </nav>
-      )}
       <div className="mb-4 flex flex-wrap items-center gap-3" role="search">
         <div className="flex rounded-md border border-line bg-surface p-1" role="group" aria-label="Visualização">
           <button aria-pressed={kanban} onClick={() => setF({ view: 'kanban' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><Columns3 className="h-5 w-5" />Kanban</button>
           <button aria-pressed={!kanban} onClick={() => setF({ view: 'lista' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', !kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><List className="h-5 w-5" />Lista</button>
         </div>
-        {kanban && <Button size="lg" aria-pressed={fit} icon={fit ? <Maximize2 className="h-5 w-5" /> : <Minimize2 className="h-5 w-5" />} onClick={() => setFitPersist(!fit)} title={fit ? 'Voltar às colunas largas (rolagem para o lado)' : 'Todas as etapas numa tela só'}>{fit ? 'Colunas largas' : 'Ajustar à tela'}</Button>}
-        <div className="relative min-w-[220px] flex-1 lg:max-w-[250px]">
+        {kanban && <Button size="lg" aria-pressed={fit} aria-label={fit ? 'Colunas largas' : 'Ajustar à tela'} icon={fit ? <Maximize2 className="h-5 w-5" /> : <Minimize2 className="h-5 w-5" />} onClick={() => setFitPersist(!fit)} title={fit ? 'Colunas largas (rolagem para o lado)' : 'Ajustar à tela: todas as etapas numa tela só'} />}
+        {journeys.length > 1 && (
+          <Select aria-label="Funil" className="h-12 w-auto min-w-[200px] font-semibold" value={kanban ? currentPipelineId : f.pipelineId || 'todas'} onChange={(e) => (e.target.value === 'todas' ? setF({ pipelineId: '', view: 'lista' }) : setF({ pipelineId: e.target.value }))}>
+            {journeys.map((p) => <option key={p.id} value={p.id}>Funil: {p.name}</option>)}
+            <option value="todas">Todos os funis (lista)</option>
+          </Select>
+        )}
+        <div className="relative min-w-[180px] flex-1 lg:max-w-[320px]">
           <label htmlFor="op-q" className="sr-only">Buscar oportunidades</label>
           <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-muted" aria-hidden />
           <Input id="op-q" className="h-12 pl-10" placeholder="Buscar oportunidades..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        {can('oportunidades', 'equipe') && (
-          <Select aria-label="Responsável" className="h-12 w-auto min-w-[190px]" value={f.ownerId} onChange={(e) => setF({ ownerId: e.target.value })}>
-            <option value="">Todos os responsáveis</option>
-            <option value="me">Minhas</option>
-            {lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </Select>
-        )}
-        <Select aria-label="Origem" className="h-12 w-auto min-w-[170px]" value={f.sourceId} onChange={(e) => setF({ sourceId: e.target.value })}>
-          <option value="">Todas as origens</option>
-          {lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </Select>
-        <Select aria-label="Plano" className="h-12 w-auto min-w-[160px]" value={f.planId} onChange={(e) => setF({ planId: e.target.value })}>
-          <option value="">Todos os planos</option>
-          {lookups.data?.plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </Select>
-        {!kanban && (
-          <Select aria-label="Situação" className="h-12 w-auto" value={f.status} onChange={(e) => setF({ status: e.target.value })}>
-            <option value="abertas">Abertas</option>
-            <option value="encerradas">Encerradas</option>
-            <option value="todas">Todas</option>
-          </Select>
-        )}
-        <Button size="lg" className="ml-auto" icon={<SlidersHorizontal className="h-5 w-5" />} onClick={() => { setSearch(''); setF({ q: '', ownerId: '', sourceId: '', planId: '' }); }} title="Limpar filtros">Filtros</Button>
+        <DateRange label="Criadas" emptyLabel="Todo o período" from={f.from} to={f.to} onChange={(r) => setF(r)} />
+        <div className="relative ml-auto" ref={advRef}>
+          <Button size="lg" aria-expanded={advanced} icon={<SlidersHorizontal className="h-5 w-5" />} onClick={() => setAdvanced((v) => !v)}>Filtro avançado{advancedCount ? ` (${advancedCount})` : ''}</Button>
+          {advanced && (
+            <div role="dialog" aria-label="Filtro avançado" className="absolute right-0 z-30 mt-2 w-[320px] space-y-3 border border-line bg-surface p-4 shadow-overlay">
+              {can('oportunidades', 'equipe') && (
+                <FormField label="Responsável" htmlFor="af-owner">
+                  <Select id="af-owner" value={f.ownerId} onChange={(e) => setF({ ownerId: e.target.value })}>
+                    <option value="">Todos os responsáveis</option>
+                    <option value="me">Minhas</option>
+                    {lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </Select>
+                </FormField>
+              )}
+              <FormField label="Origem" htmlFor="af-source">
+                <Select id="af-source" value={f.sourceId} onChange={(e) => setF({ sourceId: e.target.value })}>
+                  <option value="">Todas as origens</option>
+                  {lookups.data?.sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </Select>
+              </FormField>
+              <FormField label="Plano" htmlFor="af-plan">
+                <Select id="af-plan" value={f.planId} onChange={(e) => setF({ planId: e.target.value })}>
+                  <option value="">Todos os planos</option>
+                  {lookups.data?.plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </FormField>
+              {!kanban && (
+                <FormField label="Situação" htmlFor="af-status">
+                  <Select id="af-status" value={f.status} onChange={(e) => setF({ status: e.target.value })}>
+                    <option value="abertas">Abertas</option>
+                    <option value="encerradas">Encerradas</option>
+                    <option value="todas">Todas</option>
+                  </Select>
+                </FormField>
+              )}
+              <div className="flex justify-between gap-2 pt-1">
+                <Button size="sm" variant="ghost" onClick={() => { setSearch(''); setF({ q: '', ownerId: '', sourceId: '', planId: '', from: '', to: '', status: 'abertas' }); }}>Limpar todos os filtros</Button>
+                <Button size="sm" variant="primary" onClick={() => setAdvanced(false)}>Fechar</Button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {kanban ? (

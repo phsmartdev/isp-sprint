@@ -7,6 +7,7 @@ import {
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
+import { settingsLocate, visibleGroups } from '../../features/settings/nav';
 import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
 import { useHotkey } from '../../lib/hooks';
@@ -74,32 +75,6 @@ const NAV: NavEntry[] = [
   { to: '/settings', label: 'Configuração', icon: <Settings className={ICON} />, module: 'configuracoes' },
 ];
 
-export const SETTINGS_NAV: { to: string; label: string; admin: boolean; group?: string }[] = [
-  { to: '/settings/profile', label: 'Meu perfil', admin: false },
-  { to: '/settings', label: 'Administração', admin: true },
-  // permissões juntas: quem acessa (usuários), o que fica liberado (módulos) e com que nível (segurança)
-  { to: '/settings/users', label: 'Usuários', admin: true, group: 'Permissões' },
-  { to: '/settings/modulos', label: 'Módulos e liberação', admin: true, group: 'Permissões' },
-  { to: '/settings/security', label: 'Segurança', admin: true, group: 'Permissões' },
-  { to: '/settings/journeys', label: 'Jornadas e automações', admin: true },
-  { to: '/settings/area', label: 'Área de atendimento', admin: true },
-  { to: '/settings/viability', label: 'Viabilidade', admin: true },
-  { to: '/settings/plans', label: 'Planos e produtos', admin: true },
-  { to: '/settings/sources', label: 'Canais de entrada', admin: true },
-  { to: '/settings/modelos', label: 'Modelos', admin: true },
-  { to: '/settings/gmail', label: 'E-mail corporativo (Gmail)', admin: true },
-  { to: '/settings/integrations', label: 'Integrações', admin: true },
-  { to: '/settings/fields', label: 'Campos personalizados', admin: true },
-  { to: '/settings/filiais', label: 'Filiais e documentos fiscais', admin: true },
-  { to: '/settings/approvals', label: 'Aprovações e alçadas', admin: true },
-  { to: '/settings/customer-success', label: 'Sucesso do Cliente', admin: true },
-  { to: '/settings/desempenho', label: 'Gestão de desempenho', admin: true },
-  { to: '/settings/resultados', label: 'Gestão de Times', admin: true },
-  { to: '/settings/abm', label: 'ABM', admin: true },
-  { to: '/settings/data', label: 'Base de dados', admin: true },
-  { to: '/settings/branding', label: 'Personalização', admin: true },
-  { to: '/settings/logs', label: 'Logs do sistema', admin: true },
-];
 
 function useOpenActivities() {
   const { can } = useAuth();
@@ -109,6 +84,41 @@ function useOpenActivities() {
     queryFn: () => api<{ counts: { overdue: number; today: number; open: number } }>('/activities?status=hoje&pageSize=1'),
     refetchInterval: 60_000,
   });
+}
+
+/** Configuração no menu: grupos por assunto; só o grupo da página aberta fica expandido (os outros abrem com um clique). */
+function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
+  const { can } = useAuth();
+  const loc = useLocation();
+  const groups = visibleGroups(can('configuracoes', 'total'));
+  const current = settingsLocate(loc.pathname)?.group.key ?? groups[0]?.key;
+  const [open, setOpen] = useState<string | null>(null);
+  useEffect(() => setOpen(null), [current]);
+  return (
+    <ul className="mb-2 mt-1 space-y-0.5 pl-9">
+      {groups.map((g) => {
+        const expanded = g.key === (open ?? current);
+        return (
+          <li key={g.key}>
+            <button type="button" aria-expanded={expanded} onClick={() => setOpen(expanded ? '' : g.key)} className={clsx('flex w-full items-center justify-between rounded-sm px-3 py-1.5 text-left text-xs font-semibold', g.key === current ? 'text-lime' : 'text-white/70 hover:bg-white/5')}>
+              {g.label}<ChevronDown className={clsx('h-3.5 w-3.5 transition-transform', expanded && 'rotate-180')} aria-hidden />
+            </button>
+            {expanded && (
+              <ul className="mb-1 space-y-0.5">
+                {g.items.map((x) => (
+                  <li key={x.to}>
+                    <NavLink to={x.to} end onClick={onNavigate} className={({ isActive }) => clsx('block rounded-sm py-1.5 pl-5 pr-3 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/85 hover:bg-white/5')}>
+                      {x.label}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -188,23 +198,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   {n.icon}
                   <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
                 </NavLink>
-                {n.to === '/settings' && inSettings && (
-                  <ul className="mb-2 mt-1 space-y-0.5 pl-9">
-                    {SETTINGS_NAV.filter((x) => !x.admin || can('configuracoes', 'total')).map((x, i, all) => (
-                      <li key={x.to} className={clsx(x.group && all[i - 1]?.group !== x.group && 'mt-2', !x.group && all[i - 1]?.group && 'mt-2')}>
-                        {x.group && all[i - 1]?.group !== x.group && <p className="px-3 pb-0.5 text-2xs font-semibold text-white/55">{x.group}</p>}
-                        <NavLink
-                          to={x.to}
-                          end
-                          onClick={onNavigate}
-                          className={({ isActive }) => clsx('block rounded-sm px-3 py-1.5 text-sm', isActive ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/85 hover:bg-white/5')}
-                        >
-                          {x.label}
-                        </NavLink>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {n.to === '/settings' && inSettings && <SettingsMenu onNavigate={onNavigate} />}
               </li>
             );
           })}
