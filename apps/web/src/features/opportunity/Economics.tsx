@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
-  ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -150,8 +150,37 @@ function Dre({ r }: { r: EconResult }) {
   );
 }
 
+/** Memória de cálculo em passos: cada linha com a fórmula e os números que entraram nela (mesma função do CSV e do PDF). */
+function Memory({ r, settings }: { r: EconResult; settings?: EconSettings | null }) {
+  const steps = econMemory(r, fmtBRL, { legacy: { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 } });
+  return (
+    <ol className="space-y-3" aria-label="Memória de cálculo">
+      {steps.map((s, n) => (
+        <li key={s.key} className={clsx('border border-line', s.key === 'historico' && 'border-dashed')}>
+          <div className="flex items-start gap-2.5 border-b border-line bg-surface-2 px-3 py-2">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center bg-primary text-2xs font-bold text-white" aria-hidden>{n + 1}</span>
+            <div><p className="text-sm font-bold text-ink">{s.title}</p><p className="text-2xs text-muted">{s.desc}</p></div>
+          </div>
+          <dl className="divide-y divide-line">
+            {s.rows.map((row) => (
+              <div key={row.label} className="flex items-start justify-between gap-3 px-3 py-1.5">
+                <dt className="min-w-0">
+                  <span className={clsx('text-sm', row.strong ? 'font-semibold text-ink' : 'text-text')}>{row.label}</span>
+                  {row.formula && <span className="block break-words font-mono text-2xs text-muted">{row.formula}</span>}
+                </dt>
+                <dd className={clsx('num shrink-0 text-right text-sm', row.strong && 'font-semibold', row.ok === true ? 'text-success' : row.ok === false ? 'text-danger' : 'text-ink')}>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+          {s.note && <p className="border-t border-line bg-warning-soft/40 px-3 py-2 text-xs text-ink">{s.note}</p>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /** Leitura rápida do resultado: veredito, uma frase e quatro números. Detalhes só para quem abrir. */
-export function EconomicsResult({ r, compact = false }: { r: EconResult; compact?: boolean }) {
+export function EconomicsResult({ r, compact = false, settings }: { r: EconResult; compact?: boolean; settings?: EconSettings | null }) {
   const [open, setOpen] = useState(false);
   const per = r.mode === 'recorrente' ? '/mês' : '';
   const k = r.kpi;
@@ -178,8 +207,9 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
       </button>
       {open && (
         <div className="mt-2 space-y-3 text-sm">
+          <Memory r={r} settings={settings} />
           {k && r.priceCents != null && <Dre r={r} />}
-          <p className="text-xs text-muted">Preço mínimo = cobre custos, tributos e o investimento em {r.mode === 'recorrente' ? `${r.term.D} meses` : 'uma venda'}, com a TMA de {pct(r.rates.r * 100, 2)} ao mês (caixa {fmtBRL(r.floor.cashCents)}, econômico {fmtBRL(r.floor.economicCents)}). Preço da margem mínima = entrega {pct(r.rates.m * 100, 0)} de margem sobre a receita; abaixo dele a venda sai da política. Payback descontado pela TMA; tributo fixo contado uma vez por documento fiscal (fatura). Motor {r.engineVersion ?? 'anterior'}.</p>
+          <p className="text-2xs text-muted">Motor {r.engineVersion ?? 'anterior'}. Tributo fixo contado uma vez por documento fiscal (fatura).</p>
           {!!r.items.length && (
             <table className="w-full text-xs">
               <thead className="text-muted"><tr><th className="py-1 text-left font-medium">Produto</th><th className="py-1 text-left font-medium">Documento fiscal</th><th className="py-1 text-right font-medium">Peso na receita</th><th className="py-1 text-right font-medium">Tributos</th></tr></thead>
@@ -481,7 +511,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
       <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable} />
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
-      {shownResult ? <EconomicsResult r={shownResult} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
+      {shownResult ? <EconomicsResult r={shownResult} settings={d.settings} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
       {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
         <section className="border border-line p-4" aria-labelledby="ec-flow">
           <h3 id="ec-flow" className="text-sm font-semibold text-ink">Fluxo de caixa</h3>
@@ -577,7 +607,7 @@ export function EconomicsSummary({ oppId, onOpen }: { oppId: string; onOpen: () 
         <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={onOpen}>Abrir</button>
       </div>
       {d.stale && <Notice tone="warning">Desatualizada: produtos, tributos ou parâmetros mudaram depois de salva.</Notice>}
-      {d.financeHidden ? <HiddenVerdict r={r} /> : <EconomicsResult r={r} compact />}
+      {d.financeHidden ? <HiddenVerdict r={r} /> : <EconomicsResult r={r} compact settings={d.settings} />}
     </section>
   );
 }

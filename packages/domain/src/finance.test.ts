@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econDre, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
+import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
 
 /** Parâmetros de teste (na aplicação eles vêm de Configurações → Viabilidade, sem padrão no código). */
 const S: EconSettings = { marginTargetBp: 3500, tmaMonthlyBp: 150, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
@@ -229,5 +229,26 @@ describe('cadeia de margens', () => {
     expect(r.kpi!.margins!.netCents).toBeNull();
     expect(r.warnings.join(' ')).toMatch(/margem operacional e líquida não calculadas/);
     expect(econDre(r, String).some((x) => x.label === 'Margem líquida')).toBe(false);
+  });
+});
+
+describe('memória de cálculo', () => {
+  it('passos com fórmulas e o comparativo histórico do documento (×3,2: sobra 68,75%, margem real 36,75%)', () => {
+    // NFCOM com 30% de tributos e 2% de comissão; custo mensal R$ 3.200,00
+    const input = { ...emptyEconInput(), termMonths: 12, opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 320_000 }], capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 600_000 }] };
+    const r = financeEngine({ input, items: items([1_292_500, 3000]), settings: { ...S, commissionBp: 200, marginTargetBp: 3000, tmaMonthlyBp: 0 }, publicSector: false });
+    const steps = econMemory(r, (c) => `R$ ${(c / 100).toFixed(2)}`, { legacy: { recurringX100: 320, oneTimeX100: 250 } });
+    expect(steps.map((s) => s.key)).toEqual(['entradas', 'preco', 'historico', 'fluxo', 'decisao']);
+    const hist = steps.find((s) => s.key === 'historico')!;
+    expect(hist.rows[0]!.value).toBe('R$ 10240.00/mês');
+    expect(hist.rows[1]!.value).toBe('68,75%');
+    expect(hist.rows[2]!.value).toBe('36,8%'); // 36,75% arredondado a 1 casa
+    const fluxo = steps.find((s) => s.key === 'fluxo')!;
+    const roi = fluxo.rows.find((x) => x.label === 'ROI')!;
+    const k = r.kpi!;
+    expect(roi.value).toBe(`${(((k.contributionCents * 12 - 600_000) / 600_000) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
+    expect(steps.at(-1)!.rows.at(-1)).toMatchObject({ label: 'Resultado', ok: true });
+    // sem fator configurado, o comparativo não aparece
+    expect(econMemory(r, String).some((s) => s.key === 'historico')).toBe(false);
   });
 });
