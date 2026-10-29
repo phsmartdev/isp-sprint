@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, FileText, Scale, ShieldCheck, Sparkles, Target, TrendingUp } from 'lucide-react';
-import { APPROVAL_LEVELS, APPROVAL_LEVEL_LABELS, BILLING_TYPE_LABELS, CONTRACT_STAGE_LABELS, fmtMonths, type BillingType, type ContractStage } from '@isp/domain';
+import { APPROVAL_LEVELS, APPROVAL_LEVEL_LABELS, BILLING_TYPE_LABELS, CONTRACT_STAGE_LABELS, ECON_VERDICT_LABELS, fmtMonths, type BillingType, type ContractStage } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, EmptyState, Section, Tabs, type Tone } from '../../components/ui/primitives';
@@ -185,7 +185,7 @@ export function CustomerIntelligence({ a }: { a: Analysis }) {
 export function NewCustomerPanel({ a }: { a: Analysis }) {
   const o = a.opportunity;
   const c = a.customer;
-  const v = a.viability;
+  const v = a.economics;
   return (
     <Section title="Novo cliente: dados, potencial e viabilidade">
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -202,12 +202,11 @@ export function NewCustomerPanel({ a }: { a: Analysis }) {
         <dl className="grid grid-cols-2 gap-x-5 gap-y-3">
           <Fact label="Mensalidade proposta" value={brl(a.terms.proposedMonthlyCents)} hint={a.terms.listMonthlyCents ? `Tabela: ${brl(a.terms.listMonthlyCents)}` : undefined} />
           <Fact label="Taxa de ativação" value={brl(a.terms.activationFeeCents)} />
-          <Fact label="Investimento de implantação" value={brl(v?.investmentCents)} kind={v ? 'estimado' : undefined} hint={v?.oneTimeCosts.length ? v.oneTimeCosts.map((l) => l.label.split(' · ')[0]).filter((x, i, arr) => arr.indexOf(x) === i).join(', ') : undefined} />
-          <Fact label="CAC estimado" value={brl(v?.cacCents)} kind={v ? 'estimado' : undefined} hint="Comissão + implantação − ativação" />
-          <Fact label="Margem prevista" value={v ? `${brl(v.marginMonthlyCents)}/mês` : '—'} kind={v ? 'estimado' : undefined} />
-          <Fact label="Payback" value={months(v?.paybackMonths)} kind={v ? 'estimado' : undefined} />
+          <Fact label="Investimento inicial" value={brl(v?.initialCents)} kind={v ? 'estimado' : undefined} hint="CAPEX com contingência (viabilidade econômica)" />
+          <Fact label="Contribuição prevista" value={v?.contributionCents != null ? `${brl(v.contributionCents)}${v.mode === 'recorrente' ? '/mês' : ''}` : '—'} kind={v ? 'estimado' : undefined} hint={v?.marginPct != null ? `Margem de ${v.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : undefined} />
+          <Fact label="Payback descontado" value={months(v?.paybackMonths)} kind={v ? 'estimado' : undefined} />
           <Fact label="Receita projetada (12 meses)" value={brl(a.projections.revenue12mCents)} kind="projetado" />
-          <Fact label="Receita na vida média" value={brl(a.projections.revenueLifetimeCents)} kind="projetado" hint={a.projections.ltvMonths ? `${a.projections.ltvMonths} meses (${v?.ltv.source === 'base' ? 'carteira' : 'parâmetro'})` : 'Sem vida média configurada'} />
+          <Fact label="Receita na vigência" value={brl(a.projections.revenueLifetimeCents)} kind="projetado" hint={a.projections.ltvMonths ? `Vigência de ${a.projections.ltvMonths} meses` : 'Sem vigência na viabilidade econômica'} />
         </dl>
       </div>
       <ViabilityStrip a={a} />
@@ -216,17 +215,16 @@ export function NewCustomerPanel({ a }: { a: Analysis }) {
 }
 
 export function ViabilityStrip({ a }: { a: Analysis }) {
-  const v = a.viability;
+  const v = a.economics;
   const o = a.opportunity;
   const items: { ok: boolean | null; text: string }[] = [
     { ok: o.coverageStatus === 'elegivel' ? true : o.coverageStatus === 'inelegivel' ? false : null, text: `Cobertura: ${({ nao_consultada: 'não consultada', pendente: 'pendente', elegivel: 'atendida', inelegivel: 'sem cobertura', indeterminada: 'indeterminada' } as Record<string, string>)[o.coverageStatus] ?? o.coverageStatus}` },
-    { ok: v ? (v.engineering.required ? o.engineeringStatus === 'aprovada' : true) : null, text: v?.engineering.required ? `Engenharia: ${({ nao_necessaria: 'não solicitada', pendente: 'pendente', aprovada: 'aprovada', reprovada: 'reprovada' } as Record<string, string>)[o.engineeringStatus] ?? o.engineeringStatus} (${v.engineering.reasons.join(', ')})` : 'Dentro da autonomia da operação' },
-    { ok: v ? v.complete : null, text: v ? (v.complete ? `Viabilidade financeira completa${v.route ? ` · ${v.route.name}` : ''}` : `Falta: ${v.missing.join(', ')}`) : 'Viabilidade não calculada' },
+    { ok: v ? v.verdict === 'viavel' : null, text: v ? `Viabilidade econômica no preço proposto: ${ECON_VERDICT_LABELS[v.verdict as keyof typeof ECON_VERDICT_LABELS] ?? v.verdict}` : 'Viabilidade econômica não calculada' },
+    ...(v?.missing.length ? [{ ok: false, text: `Falta: ${v.missing.join(', ')}` }] : []),
   ];
   return (
-    <div className="mt-4 flex flex-wrap gap-2" aria-label="Viabilidade técnica e financeira">
+    <div className="mt-4 flex flex-wrap gap-2" aria-label="Viabilidade da proposta">
       {items.map((it) => <Chip key={it.text} className="max-w-full !whitespace-normal" tone={it.ok === null ? 'neutral' : it.ok ? 'green' : 'orange'}>{it.text}</Chip>)}
-      {v?.alerts.map((t) => <Chip key={t} className="max-w-full !whitespace-normal" tone="orange">{t}</Chip>)}
     </div>
   );
 }

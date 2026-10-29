@@ -67,7 +67,7 @@ export function ApprovalPage() {
           <MarginPanel a={a} />
           {base && a.viewer.see.contracts && <ContractsPanel a={a} />}
           {a.classification && a.customer && <ClassificationPanel a={a} />}
-          {base && <section className="card p-5"><h2 className="mb-1 text-md font-bold text-ink">Viabilidade técnica e financeira da proposta</h2><ViabilityStrip a={a} /></section>}
+          {base && <section className="card p-5"><h2 className="mb-1 text-md font-bold text-ink">Viabilidade da proposta</h2><ViabilityStrip a={a} /></section>}
           <IdentityPanel a={a} onDecided={() => q.refetch()} />
           <HistoryPanel a={a} />
           <DocumentsPanel a={a} />

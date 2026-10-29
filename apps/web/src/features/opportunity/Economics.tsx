@@ -52,6 +52,52 @@ const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++se
 const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, costItemId: x.costItemId ?? null }));
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
+/** Contribuição → operacional → líquida, em % da receita e R$ do período. */
+function MarginChain({ m, per, compact }: { m: NonNullable<NonNullable<EconResult['kpi']>['margins']>; per: string; compact?: boolean }) {
+  const steps = [
+    { label: 'Margem de contribuição', cents: null as number | null, pct: m.contributionPct, hint: 'depois de tributos, comissão, glosa e custos' },
+    { label: 'Margem operacional', cents: m.operatingCents, pct: m.operatingPct, hint: `− amortização ${fmtBRL(m.amortizationCents)} · − despesas fixas ${fmtBRL(m.overheadCents)}` },
+    { label: 'Margem líquida', cents: m.netCents, pct: m.netPct, hint: `− IR/CSLL ${fmtBRL(m.incomeTaxCents)}` },
+  ];
+  return (
+    <ol className="mt-2 grid grid-cols-1 gap-1.5" aria-label="Cadeia de margens">
+      {steps.map((s) => (
+        <li key={s.label} className="flex items-center justify-between gap-3 border border-line px-2.5 py-2">
+          <div className="min-w-0">
+            <p className="text-xs text-muted">{s.label}</p>
+            {!compact && s.pct != null && <p className="text-2xs text-muted">{s.hint}</p>}
+          </div>
+          {s.pct == null ? <p className="text-sm text-[#C2610C]">Parâmetro não informado</p> : (
+            <p className={clsx('num shrink-0 text-right font-bold', s.pct < 0 ? 'text-danger' : 'text-ink')}>{s.pct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%{s.cents != null && <span className="ml-1.5 text-xs font-normal text-muted">{fmtBRL(s.cents)}{per}</span>}</p>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** Sugestão de preço mínimo de venda: o maior entre os pisos (caixa/TMA, margem mínima e margem operacional zero). */
+function SuggestedPrice({ r, per }: { r: EconResult; per: string }) {
+  const s = r.suggestedMinCents;
+  if (s == null) return null;
+  const parts = [
+    { label: 'cobre caixa e TMA', v: r.floor.minCents },
+    { label: 'margem mínima', v: r.marginPriceCents },
+    { label: 'margem operacional zero', v: r.operatingFloorCents ?? null },
+  ].filter((x) => x.v != null);
+  const p = r.priceCents;
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-primary/30 bg-primary/5 p-3" aria-label="Preço mínimo sugerido">
+      <div>
+        <p className="text-xs font-semibold text-primary">Preço mínimo sugerido</p>
+        <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span></p>
+        <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
+      </div>
+      {p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
+    </div>
+  );
+}
+
 function PriceRuler({ r }: { r: EconResult }) {
   const min = r.floor.minCents, rec = r.recommendedCents, p = r.priceCents;
   if (min == null || rec == null || rec <= 0) return null; // sem custos não há régua para mostrar
@@ -118,12 +164,14 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
         </div>
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
       </div>
+      <SuggestedPrice r={r} per={per} />
       <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : 'dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{months(k?.paybackMonths)}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
+      {k?.margins && <MarginChain m={k.margins} per={per} compact={compact} />}
       <PriceRuler r={r} />
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
         <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />Memória de cálculo
@@ -410,7 +458,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
               : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
-            <FormField label={f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`Total dos produtos: ${fmtBRL(itemsTotal)}`}><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} /></FormField>
+            <FormField label={f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`Total dos produtos: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{shownResult?.suggestedMinCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money(shownResult.suggestedMinCents!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.suggestedMinCents)})</button>}</></FormField>
             </div>
           </div>
         </Step>

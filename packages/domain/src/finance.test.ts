@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
+import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econDre, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
 
 /** Parâmetros de teste (na aplicação eles vêm de Configurações → Viabilidade, sem padrão no código). */
 const S: EconSettings = { marginTargetBp: 3500, tmaMonthlyBp: 150, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
@@ -194,5 +194,40 @@ describe('TMA alta (caso real de 29/10: 50% ao mês)', () => {
     expect(r.kpi!.paybackMonths).toBeNull();
     expect(Math.round(r.kpi!.npvCents / 100)).toBe(-23_654);
     expect(econHeadline(r, (c) => `R$ ${(c ?? 0) / 100}`)).toMatch(/TMA de 50% ao mês .* voltaria em 3,8 meses/);
+  });
+});
+
+describe('cadeia de margens', () => {
+  const rec = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 120_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 20_000 }] };
+  it('contribuição → operacional (− amortização − despesas fixas) → líquida (− IR/CSLL)', () => {
+    // P = 100.000, tributos 10%, comissão 5% → MC = 100.000 − 10.000 − 5.000 − 20.000 = 65.000
+    const r = financeEngine({ input: rec, items: items([100_000, 1000]), settings: { ...S, commissionBp: 500, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
+    const m = r.kpi!.margins!;
+    expect(r.kpi!.contributionCents).toBe(65_000);
+    expect(m.amortizationCents).toBe(10_000); // 120.000 ÷ 12
+    expect(m.overheadCents).toBe(10_000);
+    expect(m.operatingCents).toBe(45_000);
+    expect(m.incomeTaxCents).toBe(15_300); // 34% de 45.000
+    expect(m.netCents).toBe(29_700);
+    near(m.netPct, 29.7, 1e-9);
+    // margem operacional zero: (20.000 + 10.000) ÷ (1 − 0,10 − 0,05 − 0,10) = 40.000; a margem mínima (35%) pede mais
+    near(r.operatingFloorCents!, 40_000);
+    near(r.marginPriceCents, 20_000 / (0.85 - 0.35));
+    expect(r.suggestedMinCents).toBe(Math.max(r.floor.minCents!, r.marginPriceCents!, r.operatingFloorCents!));
+    const dre = econDre(r, String);
+    expect(dre.map((x) => x.label)).toEqual(expect.arrayContaining(['Margem de contribuição', 'Margem operacional', 'IR/CSLL', 'Margem líquida']));
+    expect(dre.find((x) => x.label === 'Margem líquida')!.total).toBe(65_000 * 12 - 120_000 - 10_000 * 12 - 15_300 * 12);
+  });
+  it('IR/CSLL só sobre resultado operacional positivo', () => {
+    const r = financeEngine({ input: rec, items: items([30_000, 1000]), settings: { ...S, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
+    expect(r.kpi!.margins!.operatingCents).toBeLessThan(0);
+    expect(r.kpi!.margins!.incomeTaxCents).toBe(0);
+  });
+  it('sem despesas fixas e IR/CSLL nos parâmetros: não calcula operacional nem líquida e avisa', () => {
+    const r = financeEngine({ input: rec, items: items([100_000, 1000]), settings: S, publicSector: false });
+    expect(r.kpi!.margins!.operatingCents).toBeNull();
+    expect(r.kpi!.margins!.netCents).toBeNull();
+    expect(r.warnings.join(' ')).toMatch(/margem operacional e líquida não calculadas/);
+    expect(econDre(r, String).some((x) => x.label === 'Margem líquida')).toBe(false);
   });
 });

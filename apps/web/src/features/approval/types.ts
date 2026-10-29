@@ -35,7 +35,7 @@ export type Analysis = {
   identity: null | { contactIds: string[]; unresolved: number; candidates: { id: string; name: string; document: string | null; phone: string | null; email: string | null; city: string | null; lifecycle: string | null; match: string[]; decision: 'mesmo' | 'diferente' | null }[] };
   classification: null | { current: Classification | null; history: Classification[]; options: Record<string, string[]> };
   terms: { proposedMonthlyCents: number | null; activationFeeCents: number | null; replacesMonthlyCents: number; negotiationType: NegotiationType; listMonthlyCents: number | null; discountBp: number; planName: string | null };
-  viability: null | { complete: boolean; missing: string[]; route: { name: string } | null; revenue: { monthlyCents: number; activationFeeCents: number }; monthlyDeductions: Line[]; oneTimeCosts: Line[]; investmentCents: number; commissionCents: number; marginMonthlyCents: number; cacCents: number; paybackMonths: number | null; ltv: { months: number | null; source: string | null; sample: number }; alerts: string[]; engineering: { required: boolean; reasons: string[] } };
+  economics: null | { mode: 'recorrente' | 'pontual'; verdict: string; withinPolicy: boolean | null; missing: string[]; initialCents: number; contributionCents: number | null; marginPct: number | null; paybackMonths: number | null; termMonths: number };
   projections: { revenue12mCents: number | null; revenueLifetimeCents: number | null; ltvMonths: number | null };
   intelligence: null | {
     relationshipStart: string | null; relationshipMonths: number | null; lifecycle: string | null;

@@ -38,8 +38,10 @@ function summary(run: Run, h: RunHeader) {
     kpis: [
       ['Preço', r.priceCents == null ? '—' : `${money(r.priceCents)}${r.mode === 'recorrente' ? '/mês' : ''}`],
       ['Preço mínimo', r.floor.minCents == null ? '—' : money(r.floor.minCents)],
+      ['Preço mínimo sugerido', r.suggestedMinCents == null ? '—' : money(r.suggestedMinCents)],
       ['Preço da margem mínima', r.recommendedCents == null ? '—' : money(r.recommendedCents)],
       ['Margem efetiva', k ? `${pct(k.marginPct, 1)} (mínima ${pct(r.rates.m * 100, 1)})` : '—'],
+      ['Margens (contribuição / operacional / líquida)', k?.margins ? [k.margins.contributionPct, k.margins.operatingPct, k.margins.netPct].map((v) => (v == null ? 'não informada' : pct(v, 1))).join(' / ') : '—'],
       ['Payback descontado', k ? `${months(k.paybackMonths)} (limite ${r.term.Dalvo}; simples ${months(k.simplePaybackMonths)})` : '—'],
       ['VPL', k ? money(k.npvCents) : '—'],
       ['TIR', k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000% ao ano' : `${pct(k.irrAnnual * 100, 1)} ao ano`],

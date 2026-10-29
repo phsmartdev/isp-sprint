@@ -36,7 +36,7 @@ describe('novo cliente', () => {
     expect(a.intelligence).toBeNull();
     expect(a.executive).toMatchObject({ kindLabel: 'Novo cliente', monthlyRevenueCents: null, activeContracts: null });
     expect(a.terms.listMonthlyCents).toBe(p.priceCents);
-    expect(a.viability).not.toBeNull();
+    expect(a).toHaveProperty('economics');
     expect(a.opinion.summary).toContain('Novo cliente');
     expect(a.dataReference.some((d: { source: string }) => d.source.includes('IXC'))).toBe(true);
     // prévia com desconto muda a alçada

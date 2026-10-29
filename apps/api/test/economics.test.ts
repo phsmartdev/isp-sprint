@@ -6,7 +6,7 @@ import { login, makeApp, type Client } from './helpers';
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-const ECON = { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
+const ECON = { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 0, incomeTaxBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test'), login(ctx.app, 'rafael@yepnet.test')]); });
 afterAll(async () => ctx.close());
