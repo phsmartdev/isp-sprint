@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { COST_IMPACTS, COST_IMPACT_LABELS, toCents, type CostImpact } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
@@ -116,7 +117,7 @@ function EconEngine() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-md font-bold text-ink">Motor financeiro</h3>
-          <p className="max-w-3xl text-sm text-muted">Parâmetros da aba Viabilidade econômica. Cada publicação vale a partir da data escolhida; cálculos já salvos não mudam.</p>
+          <p className="max-w-3xl text-sm text-muted">Parâmetros da aba Viabilidade econômica. Cada publicação vale a partir da data escolhida; cálculos já salvos não mudam. As fórmulas que usam estes parâmetros ficam no <Link to="/settings/financial-studio" className="font-semibold text-primary hover:underline">Financial Studio</Link>.</p>
         </div>
         {cur ? <Chip tone="green">Em vigor desde {fmtDate(cur.validFrom)}</Chip> : <Chip tone="orange">Nada publicado</Chip>}
       </div>

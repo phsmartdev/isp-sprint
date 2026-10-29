@@ -199,7 +199,7 @@ export const economicsRoutes = [
     handler: async ({ app, auth, params }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
-      const { savedResult, ...rest } = ctx;
+      const { savedResult, model: _model, ...rest } = ctx;
       // "stale" só avisa que itens, tributos, parâmetros ou o motor mudaram desde o salvo; nada é gravado
       const stale = savedResult ? isStale(savedResult, computeEconomics(ctx)) : false;
       const [history, st] = await Promise.all([economicsHistory(app.db, auth.tenantId, opp.id), econStatus(app.db, auth.tenantId, opp.id)]);
