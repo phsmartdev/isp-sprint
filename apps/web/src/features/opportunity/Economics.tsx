@@ -8,9 +8,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import {
-  ECON_VERDICT_LABELS, costLineTotal, econHeadline, emptyEconInput, financeEngine, parseMoney, parseQty,
+  ECON_VERDICT_LABELS, costLineTotal, econDre, econHeadline, emptyEconInput, financeEngine, parseMoney, parseQty,
   type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
+import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDateTime } from '../../lib/format';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice } from '../../components/ui/primitives';
@@ -22,14 +23,16 @@ type Data = {
   settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
   /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
   result: EconResult | null; stale: boolean; editable: boolean;
+  emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null } | null;
   /** parâmetros vigentes; null = a empresa ainda não informou em Configurações → Viabilidade */
   settingsVersion: { id: string; validFrom: string } | null;
   status: EconStatus; canDecide: boolean; decisions: { id: string; snapshotId: string; action: 'enviada' | 'aprovada' | 'devolvida'; reason: string | null; actorName: string | null; createdAt: string }[];
   /** sem "ver financeiro" a API manda só o veredito */
-  financeHidden: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null }[];
+  financeHidden: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null; engineVersion: string | null; sha256: string | null }[];
 };
 type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
-type Line = { key: string; description: string; qty: string; unit: string };
+type Line = { key: string; description: string; qty: string; unit: string; costItemId?: string | null };
+type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; unitCents: number | null };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
   viavel: { bar: 'border-success bg-success-soft', chip: 'green' }, abaixo_recomendado: { bar: 'border-primary bg-primary-soft', chip: 'blue' },
@@ -42,8 +45,8 @@ const bpText = (bp: number | null) => (bp == null ? '' : (bp / 100).toLocaleStri
 const parseBp = (t: string): number | null => { if (!t.trim()) return null; const n = Number(t.replace(',', '.')); return Number.isFinite(n) && n >= 0 && n < 100 ? Math.round(n * 100) : NaN; };
 const money = (c: number | null) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 let seq = 0;
-const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: (x.qtyMilli / 1000).toLocaleString('pt-BR'), unit: money(x.unitCents) }));
-const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: parseQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1 }));
+const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: (x.qtyMilli / 1000).toLocaleString('pt-BR'), unit: money(x.unitCents), costItemId: x.costItemId ?? null }));
+const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: parseQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, costItemId: x.costItemId ?? null }));
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 function PriceRuler({ r }: { r: EconResult }) {
@@ -77,30 +80,11 @@ function PriceRuler({ r }: { r: EconResult }) {
   );
 }
 
-type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; total: number; strong?: boolean; tone?: boolean; note?: string };
-
-/** DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro. */
+/** DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro (mesma conta da exportação). */
 function Dre({ r }: { r: EconResult }) {
-  const k = r.kpi!, P = r.priceCents!;
   const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
-  const liquid = P - k.taxCents;
-  const result = k.contributionCents * N - r.initialCents;
-  // resultados salvos antes da contingência não têm as bases separadas
-  const opexBase = r.opexBaseCents ?? r.monthlyCostCents, opexCont = r.opexContingencyCents ?? 0;
-  const capexBase = r.capexBaseCents ?? r.initialCents, capexCont = r.capexContingencyCents ?? 0;
-  const rows: DreRow[] = [
-    { sign: '+', label: 'Receita bruta', month: P, total: P * N },
-    { sign: '−', label: `Tributos (${pct(r.rates.a * 100, 2)}${r.fixedTaxCents ? ` + ${fmtBRL(r.fixedTaxCents)}` : ''})`, month: -k.taxCents, total: -k.taxCents * N },
-    { sign: '=', label: 'Receita líquida', month: liquid, total: liquid * N, strong: true },
-    { sign: '−', label: `Comissão (${pct(r.rates.c * 100, 2)})`, month: -k.commissionCents, total: -k.commissionCents * N },
-    ...(k.lossCents > 0 ? [{ sign: '−' as const, label: `Perda / glosa (${pct(r.rates.g * 100, 2)})`, month: -k.lossCents, total: -k.lossCents * N }] : []),
-    ...(opexBase > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -opexBase, total: -opexBase * N }] : []),
-    ...(opexCont > 0 ? [{ sign: '−' as const, label: 'Contingência dos custos mensais', month: -opexCont, total: -opexCont * N }] : []),
-    { sign: '=', label: 'Margem de contribuição', month: k.contributionCents, total: k.contributionCents * N, strong: true, note: `${pct(k.marginPct)} da receita` },
-    { sign: '−', label: 'Investimento inicial', month: null, total: -capexBase },
-    ...(capexCont > 0 ? [{ sign: '−' as const, label: 'Contingência do investimento', month: null, total: -capexCont }] : []),
-    { sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: result, strong: true, tone: true, note: result >= 0 ? 'lucro' : 'prejuízo' },
-  ];
+  const k = r.kpi!;
+  const rows = econDre(r, fmtBRL);
   const money = (v: number) => (v < 0 ? `− ${fmtBRL(-v)}` : fmtBRL(Math.abs(v)));
   const signCls = { '+': 'text-[rgb(var(--chart-in))]', '−': 'text-[rgb(var(--chart-out))]', '=': 'text-muted' };
   return (
@@ -155,7 +139,7 @@ export function EconomicsResult({ r, compact = false }: { r: EconResult; compact
           {!!r.items.length && (
             <table className="w-full text-xs">
               <thead className="text-muted"><tr><th className="py-1 text-left font-medium">Produto</th><th className="py-1 text-left font-medium">Documento fiscal</th><th className="py-1 text-right font-medium">Peso na receita</th><th className="py-1 text-right font-medium">Tributos</th></tr></thead>
-              <tbody>{r.items.map((i, n) => <tr key={n} className="border-t border-line"><td className="py-1">{i.description}</td><td className={clsx('py-1', i.pending && 'text-[#C2610C]')}>{i.doc ?? 'sem documento'}</td><td className="num py-1 text-right">{pct(i.weight * 100)}</td><td className="num py-1 text-right">{pct(i.percentBp / 100, 2)}{i.fixedCents ? ` + ${fmtBRL(i.fixedCents)}` : ''}</td></tr>)}</tbody>
+              <tbody>{r.items.map((i, n) => <tr key={n} className="border-t border-line"><td className="py-1">{i.description}</td><td className={clsx('py-1', i.pending && 'text-[#C2610C]')}>{i.doc ?? 'sem documento'}{i.docVersion ? ` · tributos v${i.docVersion}` : ''}</td><td className="num py-1 text-right">{pct(i.weight * 100)}</td><td className="num py-1 text-right">{pct(i.percentBp / 100, 2)}{i.fixedCents ? ` + ${fmtBRL(i.fixedCents)}` : ''}</td></tr>)}</tbody>
             </table>
           )}
           {!!r.warnings.length && <ul className="list-disc space-y-0.5 pl-5 text-xs text-[#C2610C]">{r.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
@@ -186,33 +170,48 @@ function Step({ n, title, hint, total, children }: { n: number; title: string; h
 
 const linesTotal = (lines: Line[]) => fromLines(lines).reduce((t, l) => t + (l.unitCents >= 0 && l.qtyMilli > 0 ? costLineTotal(l) : 0), 0);
 
-function CostLines({ title, example, lines, setLines, disabled }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean }) {
+/** Linhas de custo; o nome puxa do catálogo (preço vigente) e a linha mostra se veio do catálogo ou foi alterada. */
+function CostLines({ title, example, lines, setLines, disabled, catalog }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[] }) {
   const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
+  const listId = `cat-${title.replace(/\W/g, '')}`;
+  const onName = (l: Line, v: string) => {
+    const hit = catalog.find((c) => c.name.toLowerCase() === v.trim().toLowerCase());
+    set(l.key, { description: v, costItemId: hit?.id ?? null, ...(hit && hit.unitCents != null && l.costItemId !== hit.id ? { unit: money(hit.unitCents) } : {}) });
+  };
+  const origin = (l: Line) => { const c = l.costItemId ? catalog.find((x) => x.id === l.costItemId) : null; return !c ? null : c.unitCents === parseMoney(l.unit) ? 'catálogo' : 'alterado'; };
   const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
-  const cols = 'grid grid-cols-[minmax(0,1fr)_64px_120px_28px] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_64px_120px_110px_28px]';
+  // descrição em linha inteira; quantidade, valor e total embaixo (cabe na coluna do meio da oportunidade)
+  const cols = 'grid grid-cols-[72px_130px_minmax(0,1fr)_28px] items-center gap-1.5';
   return (
     <div>
       {lines.length > 0 && (
         <>
-          <div className={clsx(cols, 'mb-1 text-2xs font-medium text-muted')}><span>Descrição</span><span>Qtd.</span><span>Valor unitário</span><span className="hidden text-right sm:block">Total</span><span /></div>
+          <p className="mb-1 text-2xs font-medium text-muted">Cada custo: descrição; embaixo, quantidade × valor unitário = total</p>
           <ul className="space-y-1.5">{lines.map((l, i) => {
             const one = fromLines([l])[0];
             return (
-              <li key={l.key} className={cols}>
-                <Input aria-label={`${title}: descrição ${i + 1}`} className="h-9" placeholder={example} value={l.description} disabled={disabled} onChange={(e) => set(l.key, { description: e.target.value })} />
+              <li key={l.key} className={clsx(cols, 'border-l-2 border-line pl-2')}>
+                <span className="relative col-span-4 block min-w-0">
+                  <Input aria-label={`${title}: descrição ${i + 1}`} className={clsx('h-9 w-full', origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
+                  {origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
+                </span>
                 <Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />
                 <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
-                <span className="num hidden text-right text-sm text-text sm:block">{one && one.unitCents >= 0 && one.qtyMilli > 0 ? fmtBRL(costLineTotal(one)) : '—'}</span>
+                <span className="num text-right text-sm text-text">{one && one.unitCents >= 0 && one.qtyMilli > 0 ? fmtBRL(costLineTotal(one)) : '—'}</span>
                 {!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />}
               </li>
             );
           })}</ul>
         </>
       )}
+      <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${fmtBRL(c.unitCents)} / ${c.unit}` : 'sem preço'}</option>)}</datalist>
       {!disabled && <Button size="sm" variant="ghost" className="mt-1.5" icon={<Plus className="h-4 w-4" />} onClick={add}>{lines.length ? 'Adicionar outro' : `Adicionar ${title.toLowerCase()}`}</Button>}
     </div>
   );
 }
+
+const exportHref = (oppId: string, runId: string, format: 'pdf' | 'csv') => `/api/v1/opportunities/${oppId}/economics/runs/${runId}/export?format=${format}`;
+const emitterLine = (e: NonNullable<Data['emitter']>) => [e.name, e.cnpj ? `CNPJ ${e.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}` : null, e.taxRegime ? TAX_REGIME_LABELS[e.taxRegime as TaxRegime] ?? e.taxRegime : null, e.city ? `${e.city}${e.state ? `/${e.state}` : ''}` : null].filter(Boolean).join(' · ');
 
 const formKey = (f: object) => JSON.stringify(f, (k, v) => (k === 'key' ? undefined : v));
 
@@ -289,6 +288,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
+  const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
+  const catalog = catQ.data?.items ?? [];
   const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; price: string } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
@@ -336,8 +337,12 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
           <h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2>
           <p className="max-w-2xl text-sm text-muted">Preencha os passos abaixo; o resultado se atualiza na hora. Os tributos saem do documento fiscal de cada produto (aba Produtos).</p>
         </div>
-        {official ? <Chip tone="green">Salvo em {fmtDateTime(d.saved!.updatedAt)}</Chip> : <Chip tone="yellow">Simulação — ainda não salva</Chip>}
+        <div className="flex flex-wrap items-center gap-2">
+          {official ? <Chip tone="green">Salvo em {fmtDateTime(d.saved!.updatedAt)}</Chip> : <Chip tone="yellow">Simulação — ainda não salva</Chip>}
+          {official && <><a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, 'ultimo', 'pdf')}>PDF</a><a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, 'ultimo', 'csv')}>CSV</a></>}
+        </div>
       </div>
+      <p className="text-xs text-muted">{d.emitter ? <>Emitente: {emitterLine(d.emitter)}{(!d.emitter.cnpj || !d.emitter.taxRegime) && <span className="text-[#C2610C]"> · complete CNPJ e regime em Configurações → Filiais e documentos fiscais</span>}</> : <span className="text-[#C2610C]">Oportunidade sem filial: escolha a filial para usar os documentos fiscais dela.</span>}</p>
 
       <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable} />
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
@@ -373,7 +378,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
         </Step>
 
         <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
-          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} />
+          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} />
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <label htmlFor="ec-extra" className="text-sm text-text">Frete, mobilização e taxas (valor único)</label>
             <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
@@ -382,7 +387,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
         {f.mode === 'recorrente' && (
           <Step n={3} title="Custos mensais para manter o serviço" hint="Todo mês enquanto o contrato durar: trânsito, link de terceiro, licenças, suporte." total={<>Total <b className="text-ink">{fmtBRL(opexTotal)}</b>/mês</>}>
-            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} />
+            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} />
           </Step>
         )}
 
@@ -407,7 +412,17 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       {!!d.history.length && (
         <details className="text-sm">
           <summary className="cursor-pointer font-semibold text-ink">Histórico de cálculos ({d.history.length})</summary>
-          <ul className="mt-2 divide-y divide-line">{d.history.map((h) => <li key={h.id} className="flex flex-wrap justify-between gap-2 py-1.5"><span>{fmtDateTime(h.createdAt)} · {h.actorName ?? 'sistema'}{h.reason === 'ganha' ? ' · fechamento' : ''}</span><span className="text-muted">{ECON_VERDICT_LABELS[h.verdict]} · {fmtBRL(h.priceCents)}</span></li>)}</ul>
+          <ul className="mt-2 divide-y divide-line">{d.history.map((h) => (
+            <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+              <span>{fmtDateTime(h.createdAt)} · {h.actorName ?? 'sistema'}{h.reason === 'ganha' ? ' · fechamento' : ''}</span>
+              <span className="flex flex-wrap items-center gap-2 text-muted">
+                {ECON_VERDICT_LABELS[h.verdict]} · {fmtBRL(h.priceCents)}
+                {h.sha256 ? <span title={`SHA-256 ${h.sha256} · motor ${h.engineVersion ?? ''}`} className="text-2xs text-success">assinado {h.sha256.slice(0, 8)}</span> : <span className="text-2xs">anterior à assinatura</span>}
+                <a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, h.id, 'pdf')}>PDF</a>
+                <a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, h.id, 'csv')}>CSV</a>
+              </span>
+            </li>
+          ))}</ul>
         </details>
       )}
     </div>

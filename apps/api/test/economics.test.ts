@@ -174,4 +174,71 @@ describe('viabilidade econômica', () => {
     ok(await carlos.post(`/opportunities/${o.id}/economics/submit`, {}));
     ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' }), 403);
   });
+
+  it('emitente na filial, versões dos tributos, catálogo de custos, cálculo assinado e exportação', async () => {
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const all = ok(await carlos.get('/admin/sales-branches')).json().items;
+    const br = all[0];
+    const keep = (b: { id: string; name: string; active: boolean; fiscalKinds: string[] }) => ({ id: b.id, name: b.name, active: b.active, fiscalKinds: b.fiscalKinds });
+    // etapa 2: CNPJ válido, regime e município
+    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: Parameters<typeof keep>[0]) => ({ ...keep(b), ...(b.id === br.id ? { cnpj: '11.222.333/0001-82' } : {}) })) }), 422);
+    ok(await carlos.put('/admin/sales-branches', { items: all.map((b: Parameters<typeof keep>[0]) => ({ ...keep(b), ...(b.id === br.id ? { cnpj: '11.222.333/0001-81', taxRegime: 'lucro_presumido', city: 'Aracaju', state: 'se' } : {}) })) }));
+    expect(ok(await carlos.get('/admin/sales-branches')).json().items.find((b: { id: string }) => b.id === br.id)).toMatchObject({ cnpj: '11222333000181', taxRegime: 'lucro_presumido', state: 'SE' });
+    // versões dos tributos: mudar gera a próxima; salvar igual não
+    const docs0 = ok(await carlos.get('/admin/fiscal-docs')).json().items.filter((d: { branchId: string }) => d.branchId === br.id);
+    const body = (taxBp: number) => ({ items: docs0.map((d: { id: string; fiscalKind: string; code: string; name: string; active: boolean; taxes: { name: string; percentBp: number }[] }) => ({ id: d.id, fiscalKind: d.fiscalKind, code: d.code, name: d.name, active: d.active, taxes: d.code === 'NFS-E' ? d.taxes.map((t, k) => (k === 0 ? { ...t, percentBp: taxBp } : t)) : d.taxes })) });
+    const nfse0 = docs0.find((d: { code: string }) => d.code === 'NFS-E');
+    ok(await carlos.put(`/admin/fiscal-docs/${br.id}`, body(nfse0.taxes[0].percentBp)));
+    expect(ok(await carlos.get('/admin/fiscal-docs')).json().items.find((d: { id: string }) => d.id === nfse0.id).version).toBe(nfse0.version);
+    ok(await carlos.put(`/admin/fiscal-docs/${br.id}`, body(300)));
+    expect(ok(await carlos.get('/admin/fiscal-docs')).json().items.find((d: { id: string }) => d.id === nfse0.id).version).toBe(nfse0.version + 1);
+
+    // etapa 6: catálogo com preço por vigência
+    ok(await lucas.put('/admin/cost-items', { items: [] }), 403);
+    const cat = ok(await carlos.put('/admin/cost-items', { items: [{ id: null, name: 'Roteador corporativo', kind: 'investimento', unit: 'un', active: true }, { id: null, name: 'Trânsito IP 1G', kind: 'mensal', unit: 'mes', active: true }] })).json().items;
+    const router = cat.find((c: { name: string }) => c.name === 'Roteador corporativo');
+    const transit = cat.find((c: { name: string }) => c.name === 'Trânsito IP 1G');
+    ok(await carlos.post(`/admin/cost-items/${router.id}/prices`, { unitCents: 200_000, validFrom: '2020-01-01' }), 422);
+    ok(await carlos.post(`/admin/cost-items/${router.id}/prices`, { unitCents: 200_000, validFrom: today }), 201);
+    ok(await carlos.post(`/admin/cost-items/${transit.id}/prices`, { unitCents: 50_000, validFrom: today }), 201);
+    const pub = ok(await lucas.get('/cost-items')).json().items;
+    expect(pub.find((c: { id: string }) => c.id === router.id)).toMatchObject({ unitCents: 200_000, kind: 'investimento' });
+
+    const o = ok(await carlos.post('/opportunities', { newContact: { name: `Empresa Etapas ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: br.id, saleKind: 'venda_consultiva' }), 201).json();
+    ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link dedicado', unit: 'un', qtyMilli: 1000, unitCents: 600_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: nfse0.id }] }));
+    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, extraInitialCents: 0, commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null,
+      capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 200_000, costItemId: router.id }, { description: 'Obra', qtyMilli: 1000, unitCents: 150_000, costItemId: transit.id }],
+      opex: [{ description: 'Trânsito IP 1G', qtyMilli: 1000, unitCents: 55_000, costItemId: transit.id }] };
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
+    const g = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
+    expect(g.emitter).toMatchObject({ cnpj: '11222333000181', taxRegime: 'lucro_presumido', city: 'Aracaju' });
+    expect(g.input.capex[0]).toMatchObject({ costItemId: router.id, manual: false });
+    expect(g.input.capex[0].priceId).toBeTruthy();
+    expect(g.input.capex[1]).toMatchObject({ costItemId: null, manual: true }); // item mensal não serve para investimento
+    expect(g.input.opex[0]).toMatchObject({ costItemId: transit.id, manual: true }); // valor diferente do catálogo
+    expect(g.result.items[0].docVersion).toBe(nfse0.version + 1);
+
+    // etapa 4: cálculo assinado, lido sem recalcular
+    const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
+    expect(run.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(run.verified).toBe(true);
+    expect(run.engineVersion).toBe(g.result.engineVersion);
+    expect(run.settings.emitter.cnpj).toBe('11222333000181');
+    expect(ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}`)).json().sha256).toBe(run.sha256);
+    expect(g.history[0].sha256).toBe(run.sha256);
+
+    // etapa 7: exportação de um cálculo salvo
+    const csv = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.body).toMatch(/Margem de contribuição/);
+    expect(csv.body).toMatch(/Lucro Presumido/);
+    expect(csv.body).toContain(run.sha256);
+    const pdf = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo/export?format=pdf`));
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    // sem "exportar" não sai arquivo
+    ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'exportar', allowed: false }));
+    try { ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`), 403); }
+    finally { ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'exportar', allowed: true })); }
+  });
 });

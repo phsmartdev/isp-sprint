@@ -460,11 +460,18 @@ export const salesBranches = pgTable('sales_branches', {
   name: text('name').notNull(),
   active: boolean('active').notNull().default(true),
   position: integer('position').notNull().default(0),
-  /** Tipos de venda que a filial aceita (vazio = todos). */
+  /** Emitente: CNPJ, regime tributário e município (o contexto fiscal dos documentos da filial). */
+  cnpj: text('cnpj'),
+  taxRegime: text('tax_regime'),
+  city: text('city'),
+  state: text('state'),
   /** Tipos fiscais que a filial emite (venda, prestação de serviço, aluguel); vazio = todos. */
   fiscalKinds: text('fiscal_kinds').array().notNull().default(sql`'{}'::text[]`),
   createdAt: createdAt(),
-}, (t) => ({ uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name) }));
+}, (t) => ({
+  uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name),
+  regimeCk: check('sales_branches_regime_ck', sql`tax_regime is null or tax_regime in ('simples_nacional','lucro_presumido','lucro_real','mei')`),
+}));
 
 /** Documento fiscal por filial e tipo fiscal (ex.: NFS-e na prestação de serviço, NF-e na venda) com os tributos que ele gera: alíquota e/ou valor fixo, ativo e vigência. */
 export const fiscalDocTypes = pgTable('fiscal_doc_types', {
@@ -4578,6 +4585,10 @@ export const opportunityEconomicsSnapshots = pgTable('opportunity_economics_snap
   settings: jsonb('settings').$type<Record<string, unknown>>().notNull(),
   result: jsonb('result').$type<Record<string, unknown>>().notNull(),
   reason: text('reason').notNull().default('salvo'),
+  /** Versão do motor, versão dos parâmetros e SHA-256 do conteúdo (entradas, parâmetros, resultado): prova de que o cálculo não mudou. Nulos = cálculos anteriores, não verificados. */
+  engineVersion: text('engine_version'),
+  settingsVersionId: uuid('settings_version_id'),
+  sha256: text('sha256'),
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opp_econ_snap_idx').on(t.opportunityId, t.createdAt) }));
@@ -4594,6 +4605,43 @@ export const econSettingsVersions = pgTable('econ_settings_versions', {
   createdBy: uuid('created_by'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('econ_settings_versions_idx').on(t.tenantId, t.validFrom, t.createdAt) }));
+
+/** Versões dos tributos de cada documento fiscal (append-only): cada mudança gera a próxima; o cálculo guarda a versão usada. */
+export const fiscalDocVersions = pgTable('fiscal_doc_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  docId: uuid('doc_id').notNull().references(() => fiscalDocTypes.id),
+  version: integer('version').notNull(),
+  taxes: jsonb('taxes').$type<Record<string, unknown>[]>().notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('fiscal_doc_versions_uq').on(t.docId, t.version) }));
+
+/** Catálogo de custos da viabilidade: materiais e equipamentos (investimento) e custos recorrentes (mensal). */
+export const costItems = pgTable('cost_items', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  unit: text('unit').notNull().default('un'),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  uq: uniqueIndex('cost_items_uq').on(t.tenantId, t.kind, t.name),
+  kindCk: check('cost_items_kind_ck', inList('kind', ['investimento', 'mensal'])),
+}));
+
+/** Preço de custo do item do catálogo com vigência (append-only): vale o de maior vigência até a data. */
+export const costItemPrices = pgTable('cost_item_prices', {
+  id: id(),
+  tenantId: tenantId(),
+  itemId: uuid('item_id').notNull().references(() => costItems.id),
+  unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+  validFrom: date('valid_from').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('cost_item_prices_idx').on(t.itemId, t.validFrom, t.createdAt) }));
 
 /** Decisão da viabilidade (append-only), presa à fotografia analisada: enviada → aprovada ou devolvida (com motivo). */
 export const opportunityEconDecisions = pgTable('opportunity_econ_decisions', {

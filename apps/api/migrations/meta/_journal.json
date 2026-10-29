@@ -554,6 +554,13 @@
       "when": 1793239756325,
       "tag": "0078_viabilidade_decisoes",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1793241393780,
+      "tag": "0079_viabilidade_etapas_2_4_6",
+      "breakpoints": true
     }
   ]
 }

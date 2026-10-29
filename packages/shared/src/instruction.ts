@@ -73,6 +73,18 @@ export const StageSchema = z.object({
 export const FIELD_TYPES = ['texto', 'texto_longo', 'numero', 'moeda', 'data', 'lista', 'sim_nao'] as const;
 export const FIELD_TYPE_LABELS: Record<(typeof FIELD_TYPES)[number], string> = { texto: 'Texto', texto_longo: 'Texto longo', numero: 'Número', moeda: 'Valor (R$)', data: 'Data', lista: 'Lista de opções', sim_nao: 'Sim/Não' };
 /** Tipos de venda: opções de formulário dentro do funil (não são funis). Cada campo pode valer para alguns tipos. */
+/** Regime tributário do emitente (a filial). */
+export const TAX_REGIMES = ['simples_nacional', 'lucro_presumido', 'lucro_real', 'mei'] as const;
+export type TaxRegime = (typeof TAX_REGIMES)[number];
+export const TAX_REGIME_LABELS: Record<TaxRegime, string> = { simples_nacional: 'Simples Nacional', lucro_presumido: 'Lucro Presumido', lucro_real: 'Lucro Real', mei: 'MEI' };
+/** CNPJ com 14 dígitos e dígitos verificadores corretos (aceita com ou sem pontuação). */
+export function isValidCnpj(v: string) {
+  const d = v.replace(/\D/g, '');
+  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  const dv = (n: number) => { let sum = 0, w = n - 7; for (let i = 0; i < n; i++) { sum += Number(d[i]) * w--; if (w < 2) w = 9; } const r = sum % 11; return r < 2 ? 0 : 11 - r; };
+  return dv(12) === Number(d[12]) && dv(13) === Number(d[13]);
+}
+
 /** Tipo fiscal da operação (define o documento fiscal e os tributos): venda de mercadoria, prestação de serviço ou aluguel. */
 export const FISCAL_KINDS = ['venda', 'servico', 'locacao'] as const;
 export type FiscalKind = (typeof FISCAL_KINDS)[number];

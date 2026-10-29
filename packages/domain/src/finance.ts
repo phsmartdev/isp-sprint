@@ -66,7 +66,8 @@ export function econSettingsErrors(s: EconSettings) {
 export const ECON_MODES = ['recorrente', 'pontual'] as const;
 export type EconMode = (typeof ECON_MODES)[number];
 export const ECON_MODE_LABELS: Record<EconMode, string> = { recorrente: 'Contrato recorrente (mensalidade)', pontual: 'Venda pontual (valor único)' };
-export type CostLine = { description: string; qtyMilli: number; unitCents: number };
+/** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo. */
+export type CostLine = { description: string; qtyMilli: number; unitCents: number; costItemId?: string | null; priceId?: string | null; manual?: boolean };
 export type EconInput = {
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
@@ -95,7 +96,7 @@ export function econInputErrors(i: EconInput) {
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { description: string; revenueCents: number; doc: { id?: string; name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
+export type EconItem = { description: string; revenueCents: number; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco'] as const;
@@ -155,7 +156,7 @@ export type EconResult = {
   initialCents: number; monthlyCostCents: number;
   capexBaseCents: number; capexContingencyCents: number; opexBaseCents: number; opexContingencyCents: number;
   term: { N: number; Dalvo: number; D: number; d: number };
-  items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; pending: boolean }[];
+  items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; docVersion?: number | null; pending: boolean }[];
   floor: { cashCents: number | null; economicCents: number | null; minCents: number | null };
   marginPriceCents: number | null; recommendedCents: number | null;
   /** indicadores no preço avaliado (P); paybackMonths = descontado pela TMA (é o que a política usa) */
@@ -184,7 +185,7 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   const items = args.items.map((i) => {
     const w = revenue > 0 ? Math.max(0, i.revenueCents) / revenue : n ? 1 / n : 0;
     const pending = !i.doc || !i.doc.complete;
-    return { description: i.description, revenueCents: i.revenueCents, weight: w, percentBp: i.doc?.percentBp ?? 0, fixedCents: i.doc?.fixedCents ?? 0, doc: i.doc?.name ?? null, pending };
+    return { description: i.description, revenueCents: i.revenueCents, weight: w, percentBp: i.doc?.percentBp ?? 0, fixedCents: i.doc?.fixedCents ?? 0, doc: i.doc?.name ?? null, docVersion: i.doc?.version ?? null, pending };
   });
   const a = items.reduce((s, i) => s + i.weight * bp(i.percentBp), 0);
   const perDoc = new Map<string, number>();
@@ -262,6 +263,38 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
     marginPriceCents: round(marginPrice), recommendedCents: round(recP), kpi, cashflow: flows.map(Math.round),
     marginOk, paybackOk, verdict, withinPolicy, withReservations: pendingItems.length > 0 || !n, warnings,
   };
+}
+
+export type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; total: number; strong?: boolean; tone?: boolean; note?: string };
+
+/**
+ * DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro.
+ * Mesma conta na tela e na exportação. `fmt` formata o tributo fixo no rótulo.
+ */
+export function econDre(r: EconResult, fmt: (c: number) => string): DreRow[] {
+  const k = r.kpi;
+  if (!k || r.priceCents == null) return [];
+  const P = r.priceCents;
+  const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
+  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
+  const liquid = P - k.taxCents;
+  const result = k.contributionCents * N - r.initialCents;
+  // resultados salvos antes da contingência não têm as bases separadas
+  const opexBase = r.opexBaseCents ?? r.monthlyCostCents, opexCont = r.opexContingencyCents ?? 0;
+  const capexBase = r.capexBaseCents ?? r.initialCents, capexCont = r.capexContingencyCents ?? 0;
+  return [
+    { sign: '+', label: 'Receita bruta', month: P, total: P * N },
+    { sign: '−', label: `Tributos (${pc(r.rates.a * 100)}${r.fixedTaxCents ? ` + ${fmt(r.fixedTaxCents)}` : ''})`, month: -k.taxCents, total: -k.taxCents * N },
+    { sign: '=', label: 'Receita líquida', month: liquid, total: liquid * N, strong: true },
+    { sign: '−', label: `Comissão (${pc(r.rates.c * 100)})`, month: -k.commissionCents, total: -k.commissionCents * N },
+    ...(k.lossCents > 0 ? [{ sign: '−' as const, label: `Perda / glosa (${pc(r.rates.g * 100)})`, month: -k.lossCents, total: -k.lossCents * N }] : []),
+    ...(opexBase > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -opexBase, total: -opexBase * N }] : []),
+    ...(opexCont > 0 ? [{ sign: '−' as const, label: 'Contingência dos custos mensais', month: -opexCont, total: -opexCont * N }] : []),
+    { sign: '=', label: 'Margem de contribuição', month: k.contributionCents, total: k.contributionCents * N, strong: true, note: `${pc(k.marginPct, 1)} da receita` },
+    { sign: '−', label: 'Investimento inicial', month: null, total: -capexBase },
+    ...(capexCont > 0 ? [{ sign: '−' as const, label: 'Contingência do investimento', month: null, total: -capexCont }] : []),
+    { sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: result, strong: true, tone: true, note: result >= 0 ? 'lucro' : 'prejuízo' },
+  ];
 }
 
 /** Uma frase para o time entender o impacto, sem fórmulas. */

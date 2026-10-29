@@ -387,6 +387,63 @@ function EconEngine() {
   );
 }
 
+type CostItem = { id: string | null; name: string; kind: 'investimento' | 'mensal'; unit: string; active: boolean; unitCents?: number | null; priceFrom?: string | null; prices?: { id: string; unitCents: number; validFrom: string; createdAt: string; createdByName: string | null }[] };
+
+/** Catálogo de custos: itens de investimento e mensais com preço de custo por vigência (o histórico fica guardado). */
+function CostCatalog() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['admin', 'cost-items'], queryFn: () => api<{ items: CostItem[]; today: string }>('/admin/cost-items') });
+  const [rows, setRows] = useState<CostItem[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [price, setPrice] = useState<Record<string, { value: string; from: string }>>({});
+  useEffect(() => { if (q.data) { setRows(q.data.items); setDirty(false); } }, [q.data]);
+  const done = (msg: string) => { qc.invalidateQueries({ queryKey: ['admin', 'cost-items'] }); qc.invalidateQueries({ queryKey: ['cost-items'] }); toast({ tone: 'success', message: msg }); };
+  const save = useMutation({
+    mutationFn: () => api('/admin/cost-items', { method: 'PUT', body: { items: rows.filter((r) => r.name.trim()).map(({ id, name, kind, unit, active }) => ({ id, name: name.trim(), kind, unit: unit.trim() || 'un', active })) } }),
+    onSuccess: () => done('Catálogo salvo'), onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
+  });
+  const publish = useMutation({
+    mutationFn: (id: string) => { const p = price[id]!; const c = numOrNull(p.value); if (c == null) throw new Error('Informe o preço no formato 1.250,00.'); return api(`/admin/cost-items/${id}/prices`, { method: 'POST', body: { unitCents: c, validFrom: p.from } }); },
+    onSuccess: (_r, id) => { setPrice((x) => { const y = { ...x }; delete y[id]; return y; }); done('Preço publicado'); }, onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
+  });
+  if (!q.data) return <section className="card p-5"><LoadingRows /></section>;
+  const set = (i: number, v: Partial<CostItem>) => { setRows(rows.map((r, j) => (j === i ? { ...r, ...v } : r))); setDirty(true); };
+  return (
+    <section className="card p-5">
+      <h3 className="text-md font-bold text-ink">Catálogo de custos</h3>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Materiais, equipamentos e serviços que entram no investimento ou nos custos mensais da viabilidade. Na oportunidade, o vendedor escolhe pelo nome e o preço vigente vem junto; se ele mudar o valor, a linha fica marcada como alterada. Preço novo vale a partir da data escolhida.</p>
+      {!!rows.length && (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-sm">
+            <thead className="text-xs text-muted"><tr>{['Item', 'Tipo', 'Unidade', 'Preço vigente', 'Novo preço', 'Ativo'].map((h) => <th key={h} className="py-1 pr-2 text-left font-medium">{h}</th>)}</tr></thead>
+            <tbody>{rows.map((r, i) => (
+              <tr key={r.id ?? `n${i}`} className="border-t border-line align-middle">
+                <td className="py-1.5 pr-2"><Input aria-label={`Item ${i + 1}`} className="h-9 min-w-[200px]" value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder="Ex.: Roteador corporativo" /></td>
+                <td className="py-1.5 pr-2"><Select aria-label={`Tipo do item ${i + 1}`} className="h-9 w-[140px]" value={r.kind} onChange={(e) => set(i, { kind: e.target.value as CostItem['kind'] })}><option value="investimento">Investimento</option><option value="mensal">Mensal</option></Select></td>
+                <td className="py-1.5 pr-2"><Input aria-label={`Unidade do item ${i + 1}`} className="h-9 w-[80px]" value={r.unit} onChange={(e) => set(i, { unit: e.target.value })} /></td>
+                <td className="num py-1.5 pr-2" title={(r.prices ?? []).map((p) => `${fmtDate(p.validFrom)}: ${fmtBRL(p.unitCents)} (${p.createdByName ?? '—'})`).join('\n') || undefined}>{r.unitCents != null ? <>{fmtBRL(r.unitCents)}<span className="block text-2xs text-muted">desde {fmtDate(r.priceFrom)}{(r.prices?.length ?? 0) > 1 ? ` · ${r.prices!.length} preços` : ''}</span></> : <span className="text-[#C2610C]">sem preço</span>}</td>
+                <td className="py-1.5 pr-2">{r.id ? (
+                  <span className="flex items-center gap-1">
+                    <Input aria-label={`Novo preço do item ${i + 1}`} inputMode="decimal" className="h-9 w-[110px]" placeholder="0,00" value={price[r.id]?.value ?? ''} onChange={(e) => setPrice({ ...price, [r.id!]: { value: e.target.value, from: price[r.id!]?.from ?? q.data!.today } })} />
+                    <Input aria-label={`Vigência do novo preço do item ${i + 1}`} type="date" min={q.data.today} className="h-9 w-[150px]" value={price[r.id]?.from ?? q.data.today} onChange={(e) => setPrice({ ...price, [r.id!]: { value: price[r.id!]?.value ?? '', from: e.target.value } })} />
+                    <Button size="sm" disabled={!price[r.id]?.value?.trim()} loading={publish.isPending && publish.variables === r.id} onClick={() => publish.mutate(r.id!)}>Publicar</Button>
+                  </span>
+                ) : <span className="text-xs text-muted">salve o item primeiro</span>}</td>
+                <td className="py-1.5"><input type="checkbox" aria-label={`Item ${i + 1} ativo`} className="h-4 w-4 accent-primary" checked={r.active} onChange={(e) => set(i, { active: e.target.checked })} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap justify-between gap-2">
+        <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => { setRows([...rows, { id: null, name: '', kind: 'investimento', unit: 'un', active: true }]); setDirty(true); }}>Adicionar item</Button>
+        <Button size="sm" variant="primary" loading={save.isPending} disabled={!dirty} onClick={() => save.mutate()}>Salvar itens</Button>
+      </div>
+    </section>
+  );
+}
+
 export function AdminViability() {
   const q = useQuery({ queryKey: ['admin', 'viability'], queryFn: () => api<Data>('/admin/viability') });
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
@@ -399,6 +456,7 @@ export function AdminViability() {
         <p className="max-w-3xl text-sm text-muted">Margem mensal = mensalidade − tributos − parceiros − custo mensal do caminho. CAC = comissão + cabo + instalação + equipamentos − taxa de ativação. Payback = CAC ÷ margem mensal. O vendedor vê tudo isso na negociação, comparado com o LTV histórico. Vendas fechadas guardam o cálculo do dia do fechamento.</p>
       </section>
       <EconEngine />
+      <CostCatalog />
       <Simulator />
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
         <Deductions title="Tributos" desc="Impostos sobre a mensalidade, em % ou valor fixo por mês. Um tributo em % pode ser calculado sobre o que sobra depois de tirar um parceiro (ex.: ISS sobre a mensalidade menos a UPNET)." url="/admin/viability/taxes" initial={d.taxes} routes={d.routes} partners={d.partners} />
