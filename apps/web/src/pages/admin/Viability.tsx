@@ -322,6 +322,14 @@ type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | n
 type EconVersion = Record<EconKey, number> & { paybackMaxPrivate: number; paybackMaxPublic: number; blockOutsidePolicy: boolean };
 type EconData = { current: (EconVersion & { id: string; validFrom: string }) | null; versions: { id: string; validFrom: string; createdAt: string; createdByName: string | null; values: EconVersion }[]; today: string };
 
+/** TMA é ao mês: mostra o equivalente anual e avisa valores que costumam ser digitados como anuais. */
+const tmaHint = (bp: number | null, base: string) => {
+  if (bp == null) return base;
+  const annual = ((1 + bp / 10_000) ** 12 - 1) * 100;
+  const a = `${annual.toLocaleString('pt-BR', { maximumFractionDigits: annual >= 100 ? 0 : 1 })}% ao ano`;
+  return bp > 500 ? `Atenção: ${(bp / 100).toLocaleString('pt-BR')}% AO MÊS equivale a ${a}. Se o número é anual, informe o mensal (ex.: 18% ao ano ≈ 1,39% ao mês).` : `Equivale a ${a}. ${base}`;
+};
+
 /** Motor financeiro da aba Viabilidade econômica: parâmetros publicados com data de vigência; o histórico fica guardado. */
 function EconEngine() {
   const qc = useQueryClient();
@@ -351,7 +359,7 @@ function EconEngine() {
       <p className="mb-3 max-w-3xl text-sm text-muted">Os tributos vêm do documento fiscal de cada item (Filiais e documentos fiscais). Preço mínimo = maior entre o que cobre o caixa e o que cobre a TMA; abaixo da margem mínima ou com payback descontado acima do limite, a venda sai da política. Cada publicação vale a partir da data escolhida e fica no histórico.</p>
       {cur ? <p className="mb-3 text-sm text-text">Em vigor desde {fmtDate(cur.validFrom)}.</p> : <Notice tone="warning">Nenhum parâmetro publicado: a viabilidade econômica não calcula até você preencher e publicar.</Notice>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {ECON_PCT.map(([k, label, hint]) => <FormField key={k} label={label} htmlFor={`ec-${k}`} hint={hint}><NumInput label={label} value={e[k]} suffix="%" onChange={(v) => set({ [k]: v } as Partial<EconForm>)} /></FormField>)}
+        {ECON_PCT.map(([k, label, hint]) => <FormField key={k} label={label} htmlFor={`ec-${k}`} hint={k === 'tmaMonthlyBp' ? tmaHint(e.tmaMonthlyBp, hint) : hint}><NumInput label={label} value={e[k]} suffix="%" onChange={(v) => set({ [k]: v } as Partial<EconForm>)} /></FormField>)}
         <FormField label="Payback máximo, setor privado" htmlFor="ec-pbp" hint="Comparado ao payback descontado"><NumInput label="Payback máximo, setor privado" int value={e.paybackMaxPrivate} suffix="meses" onChange={(v) => set({ paybackMaxPrivate: v })} /></FormField>
         <FormField label="Payback máximo, setor público" htmlFor="ec-pbg" hint="Comparado ao payback descontado"><NumInput label="Payback máximo, setor público" int value={e.paybackMaxPublic} suffix="meses" onChange={(v) => set({ paybackMaxPublic: v })} /></FormField>
         <FormField label="Vale a partir de" htmlFor="ec-from" hint="Hoje ou uma data futura"><Input id="ec-from" type="date" min={q.data.today} value={e.validFrom} onChange={(ev) => set({ validFrom: ev.target.value })} /></FormField>

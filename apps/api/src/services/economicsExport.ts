@@ -62,7 +62,7 @@ export function buildEconCsv(run: Run, h: RunHeader) {
     [], ['Produto', 'Documento fiscal', 'Versão dos tributos', 'Peso na receita', 'Tributos %', 'Tributo fixo (R$)'],
     ...r.items.map((i) => [i.description, i.doc ?? 'sem documento', i.docVersion ?? '', pct(i.weight * 100), pct(i.percentBp / 100), cents(i.fixedCents)]),
     [], ['Custo', 'Tipo', 'Quantidade', 'Valor unitário (R$)', 'Origem'],
-    ...[...run.input.capex.map((l) => ({ l, t: 'Investimento' })), ...run.input.opex.map((l) => ({ l, t: 'Mensal' }))].map(({ l, t }) => [l.description, t, (l.qtyMilli / 1000).toLocaleString('pt-BR'), cents(l.unitCents), l.costItemId ? (l.manual ? 'catálogo, valor alterado' : 'catálogo') : 'manual']),
+    ...[...run.input.capex.map((l) => ({ l, t: 'Investimento' })), ...run.input.opex.map((l) => ({ l, t: 'Mensal' }))].map(({ l, t }) => [l.description, t, `${(l.qtyMilli / 1000).toLocaleString('pt-BR')}${l.unit ? ` ${l.unit}` : ''}`, cents(l.unitCents), l.costItemId ? (l.manual ? 'catálogo, valor alterado' : 'catálogo') : 'manual']),
     [], ['Mês', 'Fluxo do mês (R$)', 'Acumulado (R$)'],
     ...(() => { let acc = 0; return r.cashflow.map((f, i) => { acc += f; return [i === 0 ? 'Início' : `M${i}`, cents(f), cents(acc)]; }); })(),
     [], [sm.footer],
@@ -119,7 +119,7 @@ export async function buildEconPdf(run: Run, h: RunHeader) {
   const costs = [...run.input.capex.map((l) => ({ l, t: 'Investimento' })), ...run.input.opex.map((l) => ({ l, t: 'Mensal' }))];
   if (costs.length) {
     section('Custos');
-    for (const { l, t } of costs) { need(14); text(l.description.slice(0, 50), M, 9.5); text(`${t} · ${l.costItemId ? (l.manual ? 'catálogo, alterado' : 'catálogo') : 'manual'}`, M + 250, 9, font, muted); right(`${(l.qtyMilli / 1000).toLocaleString('pt-BR')} × ${money(l.unitCents)}`, W - M, 9.5); y -= 14; }
+    for (const { l, t } of costs) { need(14); text(l.description.slice(0, 50), M, 9.5); text(`${t} · ${l.costItemId ? (l.manual ? 'catálogo, alterado' : 'catálogo') : 'manual'}`, M + 250, 9, font, muted); right(`${(l.qtyMilli / 1000).toLocaleString('pt-BR')}${l.unit ? ` ${l.unit}` : ''} × ${money(l.unitCents)}`, W - M, 9.5); y -= 14; }
   }
   if (r.cashflow.length > 1) {
     section('Fluxo de caixa');

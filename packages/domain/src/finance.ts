@@ -67,7 +67,7 @@ export const ECON_MODES = ['recorrente', 'pontual'] as const;
 export type EconMode = (typeof ECON_MODES)[number];
 export const ECON_MODE_LABELS: Record<EconMode, string> = { recorrente: 'Contrato recorrente (mensalidade)', pontual: 'Venda pontual (valor único)' };
 /** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo. */
-export type CostLine = { description: string; qtyMilli: number; unitCents: number; costItemId?: string | null; priceId?: string | null; manual?: boolean };
+export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; costItemId?: string | null; priceId?: string | null; manual?: boolean };
 export type EconInput = {
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
@@ -265,6 +265,71 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   };
 }
 
+const norm = (v: unknown) => String(v ?? '').normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+const COST_COLS = {
+  description: ['descricao', 'produto', 'servico', 'produto/servico', 'material', 'custo', 'item'],
+  unit: ['unidade', 'medida', 'un', 'und'],
+  qty: ['quantidade', 'qtd', 'qtde', 'quant'],
+  unitValue: ['valor unitario', 'valor unit', 'valor unit.', 'preco unitario', 'preco', 'valor', 'custo unitario'],
+  total: ['valor total', 'total'],
+};
+/** Quantidade de planilha ou digitada: "8400", "8.400" (milhar), "2,5", 21 → milésimos. */
+export function costQty(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 1000) : null;
+  const t = String(raw ?? '').trim().replace(/\s/g, '');
+  if (!t) return null;
+  const n = Number(/^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, '') : t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 1000) : null;
+}
+function costMoney(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 100) : null;
+  const t = String(raw ?? '').replace(/R\$|\s/g, '');
+  if (!t) return null;
+  const n = Number(/,\d{1,2}$/.test(t) ? t.replace(/\./g, '').replace(',', '.') : /^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, '') : t.replace(/,/g, ''));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+}
+
+/**
+ * Lê uma tabela de custos colada do Excel ou importada (CSV/XLSX).
+ * Com títulos: Descrição, Unidade, Quantidade, Valor unitário (e Item/Valor total, opcionais). Sem títulos, na ordem
+ * Item, Descrição, Unidade, Quantidade, Valor unitário, Valor total — ou Descrição, Quantidade, Valor unitário.
+ * Sem valor unitário, usa Valor total ÷ Quantidade. Linhas recusadas voltam com o motivo; nada é inventado.
+ */
+export function parseCostTable(rows: (string | number | null | undefined)[][]): { lines: CostLine[]; errors: { row: number; message: string }[]; missing: string[] } {
+  // guarda o número da linha na planilha (as linhas em branco contam)
+  const clean = rows.map((r, i) => ({ r, n: i + 1 })).filter(({ r }) => r.some((c) => String(c ?? '').trim()));
+  if (!clean.length) return { lines: [], errors: [], missing: ['Descrição', 'Quantidade', 'Valor unitário'] };
+  const head = clean[0]!.r.map(norm);
+  const find = (names: string[]) => { for (const n of names) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
+  let idx = { description: find(COST_COLS.description.filter((x) => x !== 'item')), unit: find(COST_COLS.unit), qty: find(COST_COLS.qty), unitValue: find(COST_COLS.unitValue), total: find(COST_COLS.total) };
+  if (idx.description < 0) idx.description = find(['item']);
+  let body = clean.slice(1);
+  if (idx.description < 0 || idx.qty < 0 || (idx.unitValue < 0 && idx.total < 0)) {
+    // sem títulos: pela posição
+    const w = clean[0]!.r.length;
+    if (w >= 6) idx = { description: 1, unit: 2, qty: 3, unitValue: 4, total: 5 };
+    else if (w === 5) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: 4 };
+    else if (w === 4) idx = { description: 0, unit: 1, qty: 2, unitValue: 3, total: -1 };
+    else if (w === 3) idx = { description: 0, unit: -1, qty: 1, unitValue: 2, total: -1 };
+    else return { lines: [], errors: [], missing: ['Descrição', 'Quantidade', 'Valor unitário'] };
+    body = clean;
+  }
+  const lines: CostLine[] = [];
+  const errors: { row: number; message: string }[] = [];
+  body.forEach(({ r, n: row }) => {
+    const description = String(r[idx.description] ?? '').trim();
+    const qtyMilli = costQty(r[idx.qty]);
+    let unitCents = idx.unitValue >= 0 ? costMoney(r[idx.unitValue]) : null;
+    if (unitCents == null && idx.total >= 0 && qtyMilli) { const t = costMoney(r[idx.total]); if (t != null) unitCents = Math.round((t * 1000) / qtyMilli); }
+    if (description.length < 2) return errors.push({ row, message: 'sem descrição' });
+    if (qtyMilli == null) return errors.push({ row, message: `quantidade inválida em ${description}` });
+    if (unitCents == null) return errors.push({ row, message: `valor inválido em ${description}` });
+    const unit = idx.unit >= 0 ? String(r[idx.unit] ?? '').trim().slice(0, 12) || null : null;
+    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit });
+  });
+  return { lines, errors, missing: [] };
+}
+
 export type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; total: number; strong?: boolean; tone?: boolean; note?: string };
 
 /**
@@ -303,7 +368,11 @@ export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) 
   if (rs.verdict === 'inviavel') return 'Tributos, comissão e perdas consomem toda a receita: revise a comissão, a perda esperada ou os documentos fiscais.';
   if (rs.verdict === 'sem_preco' || !rs.kpi) return `Informe o preço ou lance os produtos. O preço mínimo é ${fmt(rs.floor.minCents)}${per}${rs.recommendedCents != null ? ` e o que entrega a margem mínima, ${fmt(rs.recommendedCents)}${per}` : ''}.`;
   const k = rs.kpi;
-  const pb = k.paybackMonths === null ? 'não se paga na vigência' : k.paybackMonths === 0 ? 'sem investimento a recuperar' : `o investimento volta em ${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses, já descontada a TMA (limite ${rs.term.Dalvo})`;
+  const tma = (rs.rates.r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+  const pb = k.paybackMonths === null
+    ? (k.simplePaybackMonths != null && k.simplePaybackMonths > 0
+      ? `com a TMA de ${tma}% ao mês o investimento não se paga na vigência (sem descontar a TMA, voltaria em ${k.simplePaybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses)`
+      : 'não se paga na vigência') : k.paybackMonths === 0 ? 'sem investimento a recuperar' : `o investimento volta em ${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses, já descontada a TMA (limite ${rs.term.Dalvo})`;
   const sobra = rs.mode === 'recorrente' ? `sobram ${fmt(k.contributionCents)} por mês (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e custos` : `o resultado é ${fmt(k.contributionCents - rs.initialCents)} (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e investimento`;
   return `Com ${fmt(rs.priceCents)}${per}, ${sobra}; ${pb}.`;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shiftMonth, annuityFactor, consolidateCashflow, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
+import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econHeadline, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
 
 /** Parâmetros de teste (na aplicação eles vêm de Configurações → Viabilidade, sem padrão no código). */
 const S: EconSettings = { marginTargetBp: 3500, tmaMonthlyBp: 150, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
@@ -158,5 +158,41 @@ describe('fluxo de caixa consolidado', () => {
     expect(c.cumulative.at(-1)).toBe(100);
     expect(shiftMonth('2026-12', 1)).toBe('2027-01');
     expect(consolidateCashflow([]).months).toEqual([]);
+  });
+});
+
+describe('tabela de custos (colar do Excel / importar)', () => {
+  const t = [
+    ['ITEM', 'DESCRIÇÃO', 'UNIDADE', 'QUANTIDADE', 'VALOR UNITÁRIO', 'VALOR TOTAL'],
+    ['1', 'Cabo 01FO', 'm', '8400', 'R$ 1,50', 'R$ 12.600,00'],
+    ['2', 'ONU Bridge', 'und', '21', 'R$ 200,00', 'R$ 4.200,00'],
+    ['10', 'Elaboração de projeto FTTx', 'hh', '42', 'R$ 120,00', 'R$ 5.040,00'],
+    ['13', 'IPs Públicos', 'und', 4, 30, 120],
+    ['', '', '', '', '', ''],
+    ['14', 'Sem quantidade', 'und', '', 'R$ 10,00', ''],
+  ];
+  it('lê com títulos (planilha da diretoria) e recusa linha sem quantidade', () => {
+    const r = parseCostTable(t);
+    expect(r.missing).toEqual([]);
+    expect(r.lines.map((l) => [l.description, l.unit, l.qtyMilli, l.unitCents])).toEqual([
+      ['Cabo 01FO', 'm', 8_400_000, 150], ['ONU Bridge', 'und', 21_000, 20_000], ['Elaboração de projeto FTTx', 'hh', 42_000, 12_000], ['IPs Públicos', 'und', 4_000, 3_000],
+    ]);
+    expect(r.errors).toEqual([{ row: 7, message: 'quantidade inválida em Sem quantidade' }]);
+  });
+  it('sem títulos, pela posição; milhar "8.400"; valor pelo total quando falta o unitário', () => {
+    const r = parseCostTable([['1', 'Cabo 01FO', 'm', '8.400', '', 'R$ 12.600,00']]);
+    expect(r.lines[0]).toMatchObject({ qtyMilli: 8_400_000, unitCents: 150 });
+    expect(parseCostTable([['Roteador', '2', '350,00']]).lines[0]).toMatchObject({ description: 'Roteador', qtyMilli: 2_000, unitCents: 35_000 });
+  });
+});
+
+describe('TMA alta (caso real de 29/10: 50% ao mês)', () => {
+  it('payback simples volta em 3,8 meses, o descontado não; a frase explica o porquê', () => {
+    const S2: EconSettings = { marginTargetBp: 2500, tmaMonthlyBp: 5000, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 5, paybackMaxPublic: 12, blockOutsidePolicy: true };
+    const r = financeEngine({ input: { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Obra', qtyMilli: 1000, unitCents: 4_979_000 }], priceCents: 1_316_973 }, items: [], settings: S2, publicSector: false });
+    expect(r.kpi!.simplePaybackMonths).toBeCloseTo(3.78, 2);
+    expect(r.kpi!.paybackMonths).toBeNull();
+    expect(Math.round(r.kpi!.npvCents / 100)).toBe(-23_654);
+    expect(econHeadline(r, (c) => `R$ ${(c ?? 0) / 100}`)).toMatch(/TMA de 50% ao mês .* voltaria em 3,8 meses/);
   });
 });

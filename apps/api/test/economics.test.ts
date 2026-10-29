@@ -207,12 +207,12 @@ describe('viabilidade econômica', () => {
     const o = ok(await carlos.post('/opportunities', { newContact: { name: `Empresa Etapas ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: br.id, saleKind: 'venda_consultiva' }), 201).json();
     ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link dedicado', unit: 'un', qtyMilli: 1000, unitCents: 600_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: nfse0.id }] }));
     const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, extraInitialCents: 0, commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null,
-      capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 200_000, costItemId: router.id }, { description: 'Obra', qtyMilli: 1000, unitCents: 150_000, costItemId: transit.id }],
+      capex: [{ description: 'Roteador corporativo', qtyMilli: 1000, unitCents: 200_000, unit: 'und', costItemId: router.id }, { description: 'Obra', qtyMilli: 1000, unitCents: 150_000, costItemId: transit.id }],
       opex: [{ description: 'Trânsito IP 1G', qtyMilli: 1000, unitCents: 55_000, costItemId: transit.id }] };
     ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     const g = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(g.emitter).toMatchObject({ cnpj: '11222333000181', taxRegime: 'lucro_presumido', city: 'Aracaju' });
-    expect(g.input.capex[0]).toMatchObject({ costItemId: router.id, manual: false });
+    expect(g.input.capex[0]).toMatchObject({ costItemId: router.id, manual: false, unit: 'und' });
     expect(g.input.capex[0].priceId).toBeTruthy();
     expect(g.input.capex[1]).toMatchObject({ costItemId: null, manual: true }); // item mensal não serve para investimento
     expect(g.input.opex[0]).toMatchObject({ costItemId: transit.id, manual: true }); // valor diferente do catálogo

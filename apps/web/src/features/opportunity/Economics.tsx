@@ -6,16 +6,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Calculator, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 import {
-  ECON_VERDICT_LABELS, costLineTotal, econDre, econHeadline, emptyEconInput, financeEngine, parseMoney, parseQty,
+  ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDateTime } from '../../lib/format';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice } from '../../components/ui/primitives';
-import { useToast } from '../../components/ui/overlay';
+import { Modal, useToast } from '../../components/ui/overlay';
 import { CashflowChart, flowSeries } from '../../components/charts/Cashflow';
 import { errMsg } from '../contracts/shared';
 
@@ -31,7 +31,8 @@ type Data = {
   financeHidden: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null; engineVersion: string | null; sha256: string | null }[];
 };
 type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
-type Line = { key: string; description: string; qty: string; unit: string; costItemId?: string | null };
+/** Linha do formulário: `unit` = valor unitário digitado; `measure` = unidade de medida (m, und, hh…). */
+type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; costItemId?: string | null };
 type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; unitCents: number | null };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
@@ -45,8 +46,10 @@ const bpText = (bp: number | null) => (bp == null ? '' : (bp / 100).toLocaleStri
 const parseBp = (t: string): number | null => { if (!t.trim()) return null; const n = Number(t.replace(',', '.')); return Number.isFinite(n) && n >= 0 && n < 100 ? Math.round(n * 100) : NaN; };
 const money = (c: number | null) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 let seq = 0;
-const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: (x.qtyMilli / 1000).toLocaleString('pt-BR'), unit: money(x.unitCents), costItemId: x.costItemId ?? null }));
-const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: parseQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, costItemId: x.costItemId ?? null }));
+/** Quantidade sem separador de milhar ("8400", "2,5"): o ponto seria lido como decimal. */
+const qtyText = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 3 });
+const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, costItemId: x.costItemId ?? null }));
+const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, costItemId: x.costItemId ?? null }));
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 function PriceRuler({ r }: { r: EconResult }) {
@@ -173,8 +176,35 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
   };
   const origin = (l: Line) => { const c = l.costItemId ? catalog.find((x) => x.id === l.costItemId) : null; return !c ? null : c.unitCents === parseMoney(l.unit) ? 'catálogo' : 'alterado'; };
   const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
+  const [pasting, setPasting] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
+  // tabela colada ou importada: entra no fim (as linhas vazias saem); nome igual ao do catálogo liga a linha ao item
+  const addTable = (table: (string | number | null)[][], from: string) => {
+    const r = parseCostTable(table);
+    if (r.missing.length) { setMsg({ text: `${from}: não encontrei as colunas ${r.missing.join(', ')}. Use os títulos Descrição, Quantidade e Valor unitário (Unidade e Valor total são opcionais).`, bad: true }); return; }
+    const added: Line[] = r.lines.map((x) => {
+      const hit = catalog.find((c) => c.name.toLowerCase() === x.description.toLowerCase());
+      return { key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? hit?.unit ?? null, costItemId: hit?.id ?? null };
+    });
+    setLines([...lines.filter((x) => x.description.trim() || x.unit.trim()), ...added]);
+    setMsg({ text: `${from}: ${added.length} custo(s) incluído(s), total ${fmtBRL(r.lines.reduce((t, x) => t + costLineTotal(x), 0))}${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira e salve.`, bad: r.errors.length > 0 });
+  };
+  const onFile = async (f: File) => {
+    try {
+      if (/\.xlsx?$/i.test(f.name)) {
+        const { default: readXlsx } = await import('read-excel-file');
+        addTable((await readXlsx(f)) as (string | number | null)[][], f.name);
+      } else {
+        const text = await f.text();
+        const line0 = text.split('\n')[0] ?? '';
+        const sep = text.includes('\t') ? '\t' : line0.split(';').length > line0.split(',').length ? ';' : ',';
+        addTable(text.split(/\r?\n/).map((l) => l.split(sep).map((c) => c.replace(/^"|"$/g, ''))), f.name);
+      }
+    } catch { setMsg({ text: `Não foi possível ler ${f.name}. Use Excel (.xlsx) ou CSV.`, bad: true }); }
+  };
   // descrição em linha inteira; quantidade, valor e total embaixo (cabe na coluna do meio da oportunidade)
-  const cols = 'grid grid-cols-[72px_130px_minmax(0,1fr)_28px] items-center gap-1.5';
+  const cols = 'grid grid-cols-[110px_130px_minmax(0,1fr)_28px] items-center gap-1.5';
   return (
     <div>
       {lines.length > 0 && (
@@ -188,7 +218,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
                   <Input aria-label={`${title}: descrição ${i + 1}`} className={clsx('h-9 w-full', origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
                   {origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
                 </span>
-                <Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />
+                <span className="flex items-center gap-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 min-w-0" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />{l.measure && <span className="shrink-0 text-2xs text-muted">{l.measure}</span>}</span>
                 <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
                 <span className="num text-right text-sm text-text">{one && one.unitCents >= 0 && one.qtyMilli > 0 ? fmtBRL(costLineTotal(one)) : '—'}</span>
                 {!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />}
@@ -198,7 +228,22 @@ function CostLines({ title, example, lines, setLines, disabled, catalog }: { tit
         </>
       )}
       <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${fmtBRL(c.unitCents)} / ${c.unit}` : 'sem preço'}</option>)}</datalist>
-      {!disabled && <Button size="sm" variant="ghost" className="mt-1.5" icon={<Plus className="h-4 w-4" />} onClick={add}>{lines.length ? 'Adicionar outro' : `Adicionar ${title.toLowerCase()}`}</Button>}
+      {!disabled && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={add}>{lines.length ? 'Adicionar outro' : `Adicionar ${title.toLowerCase()}`}</Button>
+          <Button size="sm" variant="ghost" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => setPasting(true)}>Colar do Excel</Button>
+          <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 px-2 text-sm font-semibold text-ink hover:bg-surface-2">
+            <FileSpreadsheet className="h-4 w-4" aria-hidden />Importar planilha
+            <input type="file" accept=".xlsx,.xls,.csv,.txt" className="sr-only" aria-label={`Importar planilha: ${title}`} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} />
+          </label>
+        </div>
+      )}
+      {msg && <p className={clsx('mt-1 text-xs', msg.bad ? 'text-[#C2610C]' : 'text-success')}>{msg.text}</p>}
+      <Modal open={pasting} onClose={() => setPasting(false)} title={`Colar do Excel: ${title.toLowerCase()}`} size="lg"
+        footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!pasteText.trim()} onClick={() => { addTable(pasteText.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); setPasteText(''); }}>Incluir itens</Button></>}>
+        <p className="mb-2 text-sm text-muted">Copie as linhas da planilha (com ou sem a linha de títulos) e cole aqui. Colunas aceitas: Item, Descrição, Unidade, Quantidade, Valor unitário, Valor total. Sem valor unitário, ele vem do total ÷ quantidade.</p>
+        <textarea aria-label="Itens colados" rows={10} className="field-input w-full font-mono text-xs" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={'ITEM\tDESCRIÇÃO\tUNIDADE\tQUANTIDADE\tVALOR UNITÁRIO\tVALOR TOTAL\n1\tCabo 01FO\tm\t8400\tR$ 1,50\tR$ 12.600,00'} data-autofocus />
+      </Modal>
     </div>
   );
 }
