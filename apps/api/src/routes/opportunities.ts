@@ -39,11 +39,14 @@ const FilterQuery = z.object({
   sourceId: z.string().uuid().optional(),
   planId: z.string().uuid().optional(),
   pipelineId: z.string().uuid().optional(),
+  /** período de criação da oportunidade (dia no fuso de São Paulo) */
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
 });
 
 const OPEN = sql`${s.opportunities.stage} not in ('ganha','perdida')`;
 
-function filters(auth: AuthContext, f: { q?: string; ownerId?: string; sourceId?: string; planId?: string; pipelineId?: string }) {
+function filters(auth: AuthContext, f: { q?: string; ownerId?: string; sourceId?: string; planId?: string; pipelineId?: string; from?: string; to?: string }) {
   const where: SQL[] = [oppVisibility(auth)];
   if (f.q) {
     const term = `%${f.q.replace(/[%_\\]/g, '\\$&')}%`;
@@ -54,6 +57,9 @@ function filters(auth: AuthContext, f: { q?: string; ownerId?: string; sourceId?
   if (f.sourceId) where.push(eq(s.opportunities.sourceId, f.sourceId));
   if (f.planId) where.push(eq(s.opportunities.planId, f.planId));
   if (f.pipelineId) where.push(eq(s.opportunities.pipelineId, f.pipelineId));
+  const day = sql`(${s.opportunities.createdAt} at time zone 'America/Sao_Paulo')::date`;
+  if (f.from) where.push(sql`${day} >= ${f.from}::date`);
+  if (f.to) where.push(sql`${day} <= ${f.to}::date`);
   return where;
 }
 

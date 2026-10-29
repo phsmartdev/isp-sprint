@@ -1,7 +1,4 @@
-import { AdminModules } from './pages/admin/Modules';
-import { AdminSalesBranches } from './pages/admin/SalesBranches';
 import { EmailPage, MailboxesPage } from './pages/email/Email';
-import { AdminGmailSettings } from './pages/admin/GmailSettings';
 import { AbmPage } from './pages/marketing/Abm';
 import { Abm360Page } from './pages/marketing/Abm360';
 import { ProductPage } from './pages/product/Product';
@@ -11,12 +8,10 @@ import { AnalysisPage } from './pages/results/Analysis';
 import { RitualsPage } from './pages/results/Rituals';
 import { MeetingPage } from './pages/results/Meeting';
 import { DecisionsPage } from './pages/results/Decisions';
-import { AdminResultsSettings } from './pages/admin/ResultsSettings';
-import { AdminAbmSettings } from './pages/admin/AbmSettings';
 import { GoalsPage } from './pages/performance/Goals';
-import { AdminPerformanceSettings } from './pages/admin/PerformanceSettings';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { SettingsLayout } from './features/settings/SettingsLayout';
+import { lazy, Suspense, type ReactNode } from 'react';
 import type { FeatureKey, Module } from '@isp/domain';
 import { useAuth } from './auth/AuthProvider';
 import { AppShell } from './components/layout/AppShell';
@@ -25,7 +20,6 @@ import { LoginPage, ResetPasswordPage } from './pages/Login';
 import { useMoneyHidden } from './lib/privacy';
 import { ApprovalPage } from './pages/Approval';
 import { ApprovalsPage } from './pages/Approvals';
-import { AdminApprovalSettings } from './pages/admin/ApprovalSettings';
 import { HomePage } from './pages/Home';
 import { LeadsPage } from './pages/Leads';
 import { OpportunitiesPage } from './pages/Opportunities';
@@ -42,14 +36,6 @@ import { ProjectDetailPage } from './pages/projects/ProjectDetail';
 import { ReportsPage } from './pages/Reports';
 import { IntelligencePage } from './pages/Intelligence';
 import { CampaignDetailPage, CampaignsPage } from './pages/Campaigns';
-import { AdminLayout, AdminOverview, AdminUsers, AdminPlans, AdminSources, AdminIntegrations, AdminSecurity, AdminBranding, AdminLogs } from './pages/admin/Admin';
-import { AdminJourneys } from './pages/admin/Journeys';
-import { AdminArea } from './pages/admin/Area';
-import { AdminViability } from './pages/admin/Viability';
-import { AdminModels } from './pages/admin/Models';
-import { AdminData } from './pages/admin/DataAdmin';
-import { AdminCustomFields } from './pages/admin/CustomFields';
-import { ProfilePage } from './pages/admin/Profile';
 import { ContractsPage } from './pages/contracts/Contracts';
 import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
@@ -58,8 +44,32 @@ import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
-import { AdminCsSettings } from './pages/admin/CsSettings';
 import { KpiBoardPage } from './pages/KpiBoardPage';
+
+// Configurações carregam sob demanda: o código de cada tela só baixa quando ela é aberta
+const AdminModules = lazy(() => import('./pages/admin/Modules').then((m) => ({ default: m.AdminModules })));
+const AdminSalesBranches = lazy(() => import('./pages/admin/SalesBranches').then((m) => ({ default: m.AdminSalesBranches })));
+const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then((m) => ({ default: m.AdminGmailSettings })));
+const AdminResultsSettings = lazy(() => import('./pages/admin/ResultsSettings').then((m) => ({ default: m.AdminResultsSettings })));
+const AdminAbmSettings = lazy(() => import('./pages/admin/AbmSettings').then((m) => ({ default: m.AdminAbmSettings })));
+const AdminPerformanceSettings = lazy(() => import('./pages/admin/PerformanceSettings').then((m) => ({ default: m.AdminPerformanceSettings })));
+const AdminApprovalSettings = lazy(() => import('./pages/admin/ApprovalSettings').then((m) => ({ default: m.AdminApprovalSettings })));
+const AdminOverview = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminOverview })));
+const AdminUsers = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminUsers })));
+const AdminPlans = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminPlans })));
+const AdminSources = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSources })));
+const AdminIntegrations = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminIntegrations })));
+const AdminSecurity = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSecurity })));
+const AdminBranding = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminBranding })));
+const AdminLogs = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminLogs })));
+const AdminJourneys = lazy(() => import('./pages/admin/Journeys').then((m) => ({ default: m.AdminJourneys })));
+const AdminArea = lazy(() => import('./pages/admin/Area').then((m) => ({ default: m.AdminArea })));
+const AdminViability = lazy(() => import('./pages/admin/Viability').then((m) => ({ default: m.AdminViability })));
+const AdminModels = lazy(() => import('./pages/admin/Models').then((m) => ({ default: m.AdminModels })));
+const AdminData = lazy(() => import('./pages/admin/DataAdmin').then((m) => ({ default: m.AdminData })));
+const AdminCustomFields = lazy(() => import('./pages/admin/CustomFields').then((m) => ({ default: m.AdminCustomFields })));
+const ProfilePage = lazy(() => import('./pages/admin/Profile').then((m) => ({ default: m.ProfilePage })));
+const AdminCsSettings = lazy(() => import('./pages/admin/CsSettings').then((m) => ({ default: m.AdminCsSettings })));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -134,8 +144,8 @@ export function App() {
         <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />
         <Route path="contracts/atas/:id" element={<Gate module="contratos" feature="contratos.atas"><ArpDetailPage /></Gate>} />
         <Route path="contracts/:id" element={<Gate module="contratos"><ContractDetailPage /></Gate>} />
-        <Route path="settings/profile" element={<ProfilePage />} />
-        <Route path="settings" element={<Gate module="configuracoes" min="total"><AdminLayout /></Gate>}>
+        <Route path="settings/profile" element={<Suspense fallback={<div className="card"><LoadingRows rows={6} /></div>}><ProfilePage /></Suspense>} />
+        <Route path="settings" element={<Gate module="configuracoes" min="total"><SettingsLayout /></Gate>}>
           <Route index element={<AdminOverview />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="plans" element={<AdminPlans />} />
