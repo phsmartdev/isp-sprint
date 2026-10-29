@@ -20,7 +20,10 @@ import { errMsg } from '../contracts/shared';
 
 type Data = {
   settings: EconSettings; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
-  result: EconResult; editable: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null }[];
+  /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
+  result: EconResult | null; stale: boolean; editable: boolean;
+  /** sem "ver financeiro" a API manda só o veredito */
+  financeHidden: boolean; history: { id: string; reason: string; createdAt: string; actorName: string | null; verdict: EconVerdict; priceCents: number | null }[];
 };
 type Line = { key: string; description: string; qty: string; unit: string };
 
@@ -202,15 +205,44 @@ function CostLines({ title, example, lines, setLines, disabled }: { title: strin
   );
 }
 
+const formKey = (f: object) => JSON.stringify(f, (k, v) => (k === 'key' ? undefined : v));
+
+/** Veredito sem números, para quem não vê valores financeiros. */
+function HiddenVerdict({ r }: { r: Pick<EconResult, 'verdict' | 'withReservations'> }) {
+  return (
+    <div className={clsx('border-l-4 p-3', TONE[r.verdict].bar)}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-md font-bold text-ink">{ECON_VERDICT_LABELS[r.verdict]}</p>
+        {r.withReservations && <Chip tone="yellow">Calculável com ressalvas</Chip>}
+      </div>
+      <p className="mt-1 text-sm text-muted">Valores ocultos para o seu perfil.</p>
+    </div>
+  );
+}
+
+function HiddenEconomics({ d }: { d: Data }) {
+  return (
+    <div className="space-y-4">
+      <h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2>
+      {d.result ? <HiddenVerdict r={d.result} /> : <Notice tone="info">Ainda não preenchida.</Notice>}
+      <p className="text-sm text-muted">Seu perfil não vê valores financeiros: custos, preço, margem e fluxo de caixa ficam com quem tem essa permissão, que também é quem preenche a viabilidade.</p>
+    </div>
+  );
+}
+
 export function EconomicsTab({ oppId }: { oppId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; price: string } | null>(null);
+  // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
+  const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
-    if (q.data && !f) {
+    if (q.data?.input && !f) {
       const i = q.data.input;
-      setF({ mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), price: money(i.priceCents) });
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), price: money(i.priceCents) };
+      setF(init);
+      setBase(formKey(init));
     }
   }, [q.data, f]);
   const input = useMemo<EconInput | null>(() => (f ? {
@@ -219,16 +251,20 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     commissionBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), priceCents: f.price.trim() ? parseMoney(f.price) : null,
   } : null), [f]);
   const invalid = !input || [input.commissionBp, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
-  const live = useMemo(() => (q.data && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector }) : null), [q.data, input, invalid]);
+  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector }) : null), [q.data, input, invalid]);
   const save = useMutation({
     mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
+    onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
-  if (q.isLoading || !f) return <LoadingRows rows={5} />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
+  if (q.data?.financeHidden) return <HiddenEconomics d={q.data} />;
+  if (q.isLoading || !f) return <LoadingRows rows={5} />;
   const d = q.data!;
   const st = d.settings;
+  // salvo e sem mudanças no formulário = o cálculo oficial; senão, a simulação ao vivo
+  const official = !!d.saved && !!d.result && formKey(f) === base;
+  const shownResult = official ? d.result : live;
   const dis = !d.editable;
   const set = (p: Partial<NonNullable<typeof f>>) => setF({ ...f, ...p });
   const itemsTotal = d.items.reduce((t, i) => t + i.revenueCents, 0);
@@ -243,15 +279,16 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
           <h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2>
           <p className="max-w-2xl text-sm text-muted">Preencha os passos abaixo; o resultado se atualiza na hora. Os tributos saem do documento fiscal de cada produto (aba Produtos).</p>
         </div>
-        {d.saved && <p className="text-xs text-muted">Salvo em {fmtDateTime(d.saved.updatedAt)}</p>}
+        {official ? <Chip tone="green">Salvo em {fmtDateTime(d.saved!.updatedAt)}</Chip> : <Chip tone="yellow">Simulação — ainda não salva</Chip>}
       </div>
 
-      {live ? <EconomicsResult r={live} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
-      {live && live.cashflow.length > 1 && live.cashflow.some((v) => v !== 0) && (
+      {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
+      {shownResult ? <EconomicsResult r={shownResult} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
+      {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
         <section className="border border-line p-4" aria-labelledby="ec-flow">
           <h3 id="ec-flow" className="text-sm font-semibold text-ink">Fluxo de caixa</h3>
           <p className="mb-3 text-xs text-muted">Início = investimento; depois, o que sobra a cada mês. A linha mostra quanto já voltou para o caixa.</p>
-          <CashflowChart labels={live.cashflow.map((_, i) => (i === 0 ? 'Início' : `M${i}`))} {...flowSeries(live.cashflow)} ariaLabel="Fluxo de caixa mensal da oportunidade" height={220} />
+          <CashflowChart labels={shownResult.cashflow.map((_, i) => (i === 0 ? 'Início' : `M${i}`))} {...flowSeries(shownResult.cashflow)} ariaLabel="Fluxo de caixa mensal da oportunidade" height={220} />
         </section>
       )}
 
@@ -322,14 +359,17 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 /** Painel lateral "Viabilidade da venda": o resultado salvo, em poucas linhas. */
 export function EconomicsSummary({ oppId, onOpen }: { oppId: string; onOpen: () => void }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
-  if (!q.data?.saved) return null;
+  const d = q.data;
+  const r = d?.result;
+  if (!d?.saved || !r) return null;
   return (
     <section className="card p-4" aria-labelledby="econ-sum">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 id="econ-sum" className="flex items-center gap-2 font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade da venda</h2>
         <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={onOpen}>Abrir</button>
       </div>
-      <EconomicsResult r={q.data.result} compact />
+      {d.stale && <Notice tone="warning">Desatualizada: produtos, tributos ou parâmetros mudaram depois de salva.</Notice>}
+      {d.financeHidden ? <HiddenVerdict r={r} /> : <EconomicsResult r={r} compact />}
     </section>
   );
 }

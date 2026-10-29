@@ -39,13 +39,14 @@ describe('viabilidade econômica', () => {
 
     const g = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(g.saved).toBeNull();
-    // a = 0,5×20% + 0,5×8,65% = 14,325%
-    expect(g.result.rates.a).toBeCloseTo(0.14325, 8);
-    expect(g.result.withReservations).toBe(false);
+    expect(g.result).toBeNull(); // nada salvo: consultar não inventa resultado
 
     const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 3_000_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 200_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
     ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, termMonths: 0 }), 422);
     const saved = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
+    // a = 0,5×20% + 0,5×8,65% = 14,325%
+    expect(saved.result.rates.a).toBeCloseTo(0.14325, 8);
+    expect(saved.result.withReservations).toBe(false);
     // P = 10.000; MC = 10.000 − 1.432,50 − 500 − 2.000 = 6.067,50; payback = 30.000 ÷ 6.067,50 ≈ 4,9 meses (≤ 6)
     expect(saved.result.kpi.contributionCents).toBe(606_750);
     expect(saved.result.kpi.paybackMonths).toBeCloseTo(3_000_000 / 606_750, 4);
@@ -71,6 +72,34 @@ describe('viabilidade econômica', () => {
     expect(intel.flow.outflow[0]).toBeLessThanOrEqual(-6_000_000);
     expect(intel.totals.investmentCents).toBeGreaterThanOrEqual(6_000_000);
     expect(ok(await carlos.get('/intelligence/economics?status=ganhas')).json().items.some((i: { id: string }) => i.id === o.id)).toBe(false);
+
+    // consultar não recalcula: parâmetro mudou → continua o salvo, marcado como desatualizado, e a aprovação pede para salvar de novo
+    const before = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
+    expect(before.stale).toBe(false);
+    ok(await carlos.put('/admin/viability/econ', { marginTargetBp: 3500, tmaMonthlyBp: 300, commissionBp: 500, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true }));
+    const after = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
+    expect(after.stale).toBe(true);
+    expect(after.result).toEqual(before.result);
+    expect(after.history).toHaveLength(2); // nada gravado na consulta
+    const ap2 = await carlos.post(`/opportunities/${o.id}/approval/requests`, { negotiationType: 'novo_servico', proposedMonthlyCents: 1_000_000, activationFeeCents: 0, justification: 'Pedido com viabilidade desatualizada' });
+    expect(ap2.statusCode, ap2.body).toBe(422);
+    expect(ap2.json().detail).toMatch(/mudou desde que foi salva/);
+    ok(await carlos.put('/admin/viability/econ', { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true }));
+    expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().stale).toBe(false);
+
+    // sem "ver financeiro": só o veredito; não preenche; consolidado bloqueado
+    ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'ver_financeiro', allowed: false }));
+    try {
+      const hid = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
+      expect(hid.financeHidden).toBe(true);
+      expect(Object.keys(hid.result).sort()).toEqual(['mode', 'verdict', 'withReservations', 'withinPolicy']);
+      expect(hid.input).toBeNull();
+      expect(JSON.stringify(hid)).not.toMatch(/cashflow|irr|payback|"rates"|"weight"/i);
+      ok(await carlos.put(`/opportunities/${o.id}/economics`, input), 403);
+      ok(await carlos.get('/intelligence/economics'), 403);
+    } finally {
+      ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'ver_financeiro', allowed: true }));
+    }
   });
 
   it('filial emite só os tipos fiscais liberados; tipo de venda da oportunidade não depende da filial', async () => {
@@ -96,6 +125,7 @@ describe('viabilidade econômica', () => {
     const lk = ok(await carlos.get('/meta/lookups')).json();
     const o = ok(await carlos.post('/opportunities', { newContact: { name: `Órgão Viab ${Date.now()}`, segment: 'governamental' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: lk.branches[0].id, saleKind: 'venda_consultiva' }), 201).json();
     ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link', unit: 'un', qtyMilli: 1000, unitCents: 100_000, discountCents: 0, surchargeCents: 0 }] }));
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, { mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null }));
     const r = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(r.result.withReservations).toBe(true);
     expect(r.publicSector).toBe(true);

@@ -5,6 +5,7 @@ import { consolidateCashflow, type EconResult } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ownerScope, visibleUserIds } from '../services/scope';
+import { requireAction } from '../services/modules';
 import { pctDelta, ratio } from '../services/metrics';
 import { periodBounds } from '../services/period';
 import { leadOrigins, leadScopeFor, monthlySeries, oppScopeFor, salesByPlan, salesTotals } from './reports';
@@ -26,6 +27,7 @@ export const intelligenceRoutes = [
     module: 'inteligencia',
     query: z.object({ status: z.enum(['todas', 'ganhas', 'andamento']).default('todas') }),
     handler: async ({ app, auth, query }) => {
+      requireAction(auth, 'ver_financeiro', 'O fluxo de caixa das vendas mostra valores financeiros que seu perfil não vê.');
       const month = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).format(d);
       const rows = await app.db
         .select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage, wonAt: s.opportunities.wonAt, account: s.contacts.name, result: s.opportunityEconomics.result })

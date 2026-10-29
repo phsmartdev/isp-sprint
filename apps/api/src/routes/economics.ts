@@ -8,7 +8,8 @@ import { notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity } from '../services/opportunities';
-import { computeEconomics, econSettingsOf, economicsContext, economicsHistory, fiscalDocsOf, saveEconomics } from '../services/economics';
+import { computeEconomics, econSettingsOf, economicsContext, economicsHistory, fiscalDocsOf, isStale, saveEconomics } from '../services/economics';
+import { requireAction } from '../services/modules';
 
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const bp = z.number().int().min(0).max(9_999);
@@ -85,13 +86,24 @@ export const economicsRoutes = [
     handler: async ({ app, auth, params }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
-      return { ...ctx, result: computeEconomics(ctx), history: await economicsHistory(app.db, auth.tenantId, opp.id), editable: !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]) };
+      const { savedResult, ...rest } = ctx;
+      // consultar não recalcula: o resultado é o salvo; "stale" só avisa que itens, tributos ou parâmetros mudaram desde então
+      const stale = savedResult ? isStale(savedResult, computeEconomics(ctx)) : false;
+      const history = await economicsHistory(app.db, auth.tenantId, opp.id);
+      const open = !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]);
+      if (!auth.actions.ver_financeiro) {
+        // sem "ver financeiro": só o veredito; nada de custos, fluxo, TIR, payback, pesos ou taxas
+        return { financeHidden: true, publicSector: ctx.publicSector, saved: ctx.saved, stale, editable: false, history, input: null, items: [], settings: null, branchDocs: [],
+          result: savedResult ? { verdict: savedResult.verdict, mode: savedResult.mode, withReservations: savedResult.withReservations, withinPolicy: savedResult.withinPolicy } : null };
+      }
+      return { ...rest, financeHidden: false, result: savedResult, stale, history, editable: open };
     },
   }),
   defineRoute({
     method: 'PUT', url: '/opportunities/:id/economics', summary: 'Salva a viabilidade econômica (calcula no servidor e guarda a fotografia auditável)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
     body: EconBody,
     handler: async ({ app, auth, params, body, req }) => {
+      requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
       const input = body as EconInput;

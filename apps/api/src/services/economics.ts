@@ -6,7 +6,7 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import {
   DEFAULT_ECON_SETTINGS, emptyEconInput, financeEngine, fiscalDocRates, itemTotal,
-  type EconInput, type EconItem, type EconSettings, type FiscalTax,
+  type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -43,11 +43,21 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     return { description: i.description, revenueCents: itemTotal(i), doc: d ? { name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
-  return { settings, items: econItems, publicSector, input, saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)) };
+  return { settings, items: econItems, publicSector, input, saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, savedResult: saved ? (saved.result as unknown as EconResult) : null, branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)) };
 }
 
 export const computeEconomics = (ctx: Awaited<ReturnType<typeof economicsContext>>, input?: EconInput) =>
   financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector });
+
+/**
+ * O resultado salvo deixou de valer? Recalcula as mesmas entradas com os itens, tributos e parâmetros de hoje
+ * só para comparar: nada é gravado e o número mostrado continua sendo o salvo.
+ */
+export function isStale(saved: EconResult, fresh: EconResult) {
+  return saved.verdict !== fresh.verdict || saved.priceCents !== fresh.priceCents || saved.floor?.minCents !== fresh.floor.minCents
+    || saved.recommendedCents !== fresh.recommendedCents || (saved.kpi?.contributionCents ?? null) !== (fresh.kpi?.contributionCents ?? null)
+    || saved.withReservations !== fresh.withReservations;
+}
 
 /** Guarda entradas e resultado e tira a fotografia auditável (entradas, parâmetros, tributos e avisos da época). */
 export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, actorId: string | null, reason = 'salvo') {
