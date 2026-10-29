@@ -22,7 +22,7 @@ import { sendZapiText, waPhone } from '../services/whatsapp';
 import { level, ownerScope } from '../services/scope';
 import { chatOf } from '../services/negotiation';
 import { loadOpportunity } from '../services/opportunities';
-import { computeEconomics, economicsContext } from '../services/economics';
+import { computeEconomics, economicsContext, isStale } from '../services/economics';
 import {
   approvalLevelOf, approvalSettingsOf, buildAnalysis, classificationHistory, financialSummary, latestProposal, loadForAnalysis, requestsOf, timelines, type Analysis, type RequestView,
 } from '../services/approvals';
@@ -151,8 +151,10 @@ export const approvalRoutes = [
       // trava de segmento do motor financeiro: com a viabilidade econômica preenchida, retorno fora da política não vai para aprovação
       const [econ] = await app.db.select({ opportunityId: s.opportunityEconomics.opportunityId }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
       if (econ) {
+        // decide pelo cálculo salvo; se itens, tributos ou parâmetros mudaram depois, pede para salvar de novo
         const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
-        const er = computeEconomics(ctx);
+        const er = ctx.savedResult!;
+        if (isStale(er, computeEconomics(ctx))) throw unprocessable('A viabilidade econômica mudou desde que foi salva (produtos, tributos ou parâmetros). Abra a aba Viabilidade econômica, confira e salve de novo antes de pedir aprovação.');
         if (ctx.settings.blockOutsidePolicy && (er.withinPolicy === false || er.verdict === 'inviavel')) {
           throw unprocessable(er.verdict === 'inviavel'
             ? 'Viabilidade econômica: tributos, comissão e perdas consomem a receita. Revise antes de pedir aprovação.'
