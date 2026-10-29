@@ -473,6 +473,28 @@ export const salesBranches = pgTable('sales_branches', {
   regimeCk: check('sales_branches_regime_ck', sql`tax_regime is null or tax_regime in ('simples_nacional','lucro_presumido','lucro_real','mei')`),
 }));
 
+/**
+ * Papel timbrado da filial (Configurações → Modelos → Timbrado): página A4 em PNG, JPG ou PDF usada de fundo nos
+ * documentos gerados pelo sistema (viabilidade econômica). As margens guardam a área livre do cabeçalho e do rodapé.
+ */
+export const branchLetterheads = pgTable('branch_letterheads', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id, { onDelete: 'cascade' }),
+  filename: text('filename').notNull(),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  /** área do texto em milímetros a partir das bordas */
+  topMm: integer('top_mm').notNull().default(35),
+  bottomMm: integer('bottom_mm').notNull().default(25),
+  sideMm: integer('side_mm').notNull().default(17),
+  updatedBy: uuid('updated_by'),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  uq: uniqueIndex('branch_letterheads_branch_uq').on(t.branchId),
+  mimeCk: check('branch_letterheads_mime_ck', sql`mime in ('image/png','image/jpeg','application/pdf')`),
+}));
+
 /** Documento fiscal por filial e tipo fiscal (ex.: NFS-e na prestação de serviço, NF-e na venda) com os tributos que ele gera: alíquota e/ou valor fixo, ativo e vigência. */
 export const fiscalDocTypes = pgTable('fiscal_doc_types', {
   id: id(),

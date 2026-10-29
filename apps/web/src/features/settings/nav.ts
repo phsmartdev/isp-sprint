@@ -22,7 +22,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     { to: '/settings/sources', label: 'Canais de entrada', desc: 'Por onde o cliente chega: WhatsApp, site, telefone.', admin: true, keywords: 'origem lead' },
     { to: '/settings/fields', label: 'Campos personalizados', desc: 'Campos extras em contas, oportunidades e contratos.', admin: true },
     { to: '/settings/approvals', label: 'Aprovações e alçadas', desc: 'Quem aprova desconto e condição especial, e até quanto.', admin: true, keywords: 'desconto alçada' },
-    { to: '/settings/modelos', label: 'Modelos', desc: 'Propostas, contratos, instrução e e-mails automáticos.', admin: true, keywords: 'proposta contrato email alerta instrução playbook' },
+    { to: '/settings/modelos', label: 'Modelos', desc: 'Propostas, contratos, timbrado das filiais, instrução e e-mails automáticos.', admin: true, keywords: 'proposta contrato timbrado papel logo filial email alerta instrução playbook' },
   ] },
   { key: 'ofertas', label: 'Ofertas e viabilidade', desc: 'O que se vende, por quanto, de onde e com qual custo.', items: [
     { to: '/settings/plans', label: 'Planos e produtos', desc: 'Planos, produtos, comissão e documento fiscal padrão.', admin: true, keywords: 'preço produto' },

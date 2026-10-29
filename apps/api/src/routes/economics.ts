@@ -1,5 +1,5 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
-import { and, desc, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
@@ -10,7 +10,7 @@ import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
 import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
-import { buildEconCsv, buildEconPdf } from '../services/economicsExport';
+import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
@@ -49,6 +49,59 @@ export const economicsRoutes = [
       await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
       reply.code(201);
       return { id: v!.id, validFrom, ...values };
+    },
+  }),
+
+  // ------------------------------------------------------------------ timbrado por filial (Configurações → Modelos → Timbrado)
+  defineRoute({
+    method: 'GET', url: '/admin/letterheads', summary: 'Filiais com o timbrado de cada uma (sem o arquivo)', tag: 'Configurações', ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const [branches, lhs] = await Promise.all([
+        app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, active: s.salesBranches.active }).from(s.salesBranches).where(eq(s.salesBranches.tenantId, auth.tenantId)).orderBy(s.salesBranches.position, s.salesBranches.name),
+        app.db.select({ branchId: s.branchLetterheads.branchId, filename: s.branchLetterheads.filename, mime: s.branchLetterheads.mime, topMm: s.branchLetterheads.topMm, bottomMm: s.branchLetterheads.bottomMm, sideMm: s.branchLetterheads.sideMm, updatedAt: s.branchLetterheads.updatedAt, size: sql<number>`length(${s.branchLetterheads.data})::int` }).from(s.branchLetterheads).where(eq(s.branchLetterheads.tenantId, auth.tenantId)),
+      ]);
+      return { items: branches.map((b) => ({ ...b, letterhead: lhs.find((l) => l.branchId === b.id) ?? null })) };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/admin/letterheads/:id', summary: 'Envia ou troca o timbrado da filial (PNG, JPG ou PDF em A4) e as margens da área do texto; sem arquivo, só atualiza as margens', tag: 'Configurações', ...ADMIN, params: IdParams,
+    bodyLimit: 12_000_000,
+    body: z.object({ data: z.string().min(10).max(11_500_000).optional(), filename: z.string().trim().min(1).max(160).optional(), topMm: z.number().int().min(0).max(120), bottomMm: z.number().int().min(0).max(120), sideMm: z.number().int().min(5).max(60) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const [br] = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name }).from(s.salesBranches).where(and(eq(s.salesBranches.id, params.id), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
+      if (!br) throw notFound('Filial não encontrada.');
+      if (body.topMm + body.bottomMm > 220) throw unprocessable('As margens de cima e de baixo não deixam espaço para o texto.');
+      const margins = { topMm: body.topMm, bottomMm: body.bottomMm, sideMm: body.sideMm, updatedBy: auth.userId, updatedAt: new Date() };
+      if (body.data) {
+        const data = Buffer.from(body.data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+        if (data.length > 8_000_000) throw unprocessable('Arquivo maior que 8 MB. Exporte o timbrado com qualidade menor.');
+        const mime = await letterheadMime(data).catch(() => null);
+        if (!mime) throw unprocessable('Envie o timbrado em PNG, JPG ou PDF (página A4).');
+        await app.db.insert(s.branchLetterheads).values({ tenantId: auth.tenantId, branchId: br.id, filename: body.filename ?? 'timbrado', mime, data, ...margins })
+          .onConflictDoUpdate({ target: s.branchLetterheads.branchId, set: { filename: body.filename ?? 'timbrado', mime, data, ...margins } });
+      } else {
+        const r = await app.db.update(s.branchLetterheads).set(margins).where(and(eq(s.branchLetterheads.branchId, br.id), eq(s.branchLetterheads.tenantId, auth.tenantId))).returning({ id: s.branchLetterheads.id });
+        if (!r.length) throw unprocessable('Envie o arquivo do timbrado.');
+      }
+      await audit(app.db, req, { action: 'branch.letterhead', entityType: 'branch', entityId: br.id, metadata: { branch: br.name, file: body.filename ?? null, topMm: body.topMm, bottomMm: body.bottomMm, sideMm: body.sideMm } });
+      return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/admin/letterheads/:id', summary: 'Remove o timbrado da filial (os PDFs voltam ao papel em branco)', tag: 'Configurações', ...ADMIN, params: IdParams,
+    handler: async ({ app, auth, params, req, reply }) => {
+      const r = await app.db.delete(s.branchLetterheads).where(and(eq(s.branchLetterheads.branchId, params.id), eq(s.branchLetterheads.tenantId, auth.tenantId))).returning({ id: s.branchLetterheads.id });
+      if (!r.length) throw notFound('Filial sem timbrado.');
+      await audit(app.db, req, { action: 'branch.letterhead_remove', entityType: 'branch', entityId: params.id });
+      return reply.code(204).send();
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/admin/letterheads/:id/preview', summary: 'Prévia em PDF do timbrado com a área do texto marcada', tag: 'Configurações', ...ADMIN, params: IdParams,
+    handler: async ({ app, auth, params, reply }) => {
+      const [row] = await app.db.select({ lh: s.branchLetterheads, name: s.salesBranches.name }).from(s.branchLetterheads).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.branchLetterheads.branchId)).where(and(eq(s.branchLetterheads.branchId, params.id), eq(s.branchLetterheads.tenantId, auth.tenantId))).limit(1);
+      if (!row) throw notFound('Filial sem timbrado.');
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="Timbrado-${row.name.replace(/[^\w-]+/g, '_')}.pdf"`).send(await letterheadSample(row.lh, row.name));
     },
   }),
 
@@ -194,10 +247,11 @@ export const economicsRoutes = [
       if (!run) throw notFound('Cálculo não encontrado.');
       const [acc] = await app.db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1);
       const h = { code: opp.code, title: opp.title ?? '', account: acc?.name ?? '' };
-      const name = `viabilidade-OP-${opp.code}-${run.createdAt.toISOString().slice(0, 10)}`;
+      const name = econFileName(opp.code);
+      const [lh] = opp.branchId ? await app.db.select().from(s.branchLetterheads).where(and(eq(s.branchLetterheads.branchId, opp.branchId), eq(s.branchLetterheads.tenantId, auth.tenantId))).limit(1) : [];
       await audit(app.db, req, { action: 'opportunity.economics_export', entityType: 'opportunity', entityId: opp.id, metadata: { runId: run.id, format: query.format } });
       if (query.format === 'csv') return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${name}.csv"`).send(buildEconCsv(run, h));
-      return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${name}.pdf"`).send(await buildEconPdf(run, h));
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${name}.pdf"`).send(await buildEconPdf(run, h, lh ?? null));
     },
   }),
   defineRoute({

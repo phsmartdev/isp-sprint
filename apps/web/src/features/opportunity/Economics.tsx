@@ -122,7 +122,7 @@ function PriceRuler({ r }: { r: EconResult }) {
   );
 }
 
-/** DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro (mesma conta da exportação). */
+/** Desdobramento financeiro da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro (mesma conta da exportação). */
 function Dre({ r }: { r: EconResult }) {
   const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
   const k = r.kpi!;
@@ -132,7 +132,7 @@ function Dre({ r }: { r: EconResult }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[420px] text-sm">
-        <caption className="mb-1 text-left text-xs font-semibold text-muted">DRE da oportunidade</caption>
+        <caption className="mb-1 text-left text-xs font-semibold text-muted">Desdobramento financeiro</caption>
         <thead className="text-2xs text-muted"><tr><th className="w-6" /><th className="py-1 text-left font-medium" />{rec && <th className="py-1 text-right font-medium">Por mês</th>}<th className="py-1 text-right font-medium">{rec ? `No contrato (${N} meses)` : 'Na venda'}</th></tr></thead>
         <tbody>
           {rows.map((row) => (
