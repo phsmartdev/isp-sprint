@@ -1,8 +1,9 @@
 /**
  * Exportação de um cálculo salvo da viabilidade econômica (CSV e PDF). Usa só o que foi gravado: nada é recalculado.
- * O DRE sai da mesma função da tela (econDre), e o rodapé traz a versão do motor e o hash do cálculo.
+ * O desdobramento financeiro sai da mesma função da tela (econDre), e o rodapé traz a versão do motor e o hash do cálculo.
+ * Com timbrado na filial, cada página é desenhada sobre ele, dentro das margens configuradas.
  */
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFEmbeddedPage, type PDFFont, type PDFImage, type PDFPage } from 'pdf-lib';
 import { ECON_VERDICT_LABELS, econDre, econHeadline, type EconResult } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { brl } from './email';
@@ -11,6 +12,7 @@ import type { economicsRun } from './economics';
 
 type Run = NonNullable<Awaited<ReturnType<typeof economicsRun>>>;
 export type RunHeader = { code: number; title: string; account: string };
+export type Letterhead = { mime: string; data: Buffer; topMm: number; bottomMm: number; sideMm: number };
 type Emitter = { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null } | null;
 
 const pct = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
@@ -41,7 +43,7 @@ function summary(run: Run, h: RunHeader) {
       ['Preço mínimo sugerido', r.suggestedMinCents == null ? '—' : money(r.suggestedMinCents)],
       ['Preço da margem mínima', r.recommendedCents == null ? '—' : money(r.recommendedCents)],
       ['Margem efetiva', k ? `${pct(k.marginPct, 1)} (mínima ${pct(r.rates.m * 100, 1)})` : '—'],
-      ['Margens (contribuição / operacional / líquida)', k?.margins ? [k.margins.contributionPct, k.margins.operatingPct, k.margins.netPct].map((v) => (v == null ? 'não informada' : pct(v, 1))).join(' / ') : '—'],
+      ...(k?.margins ? ([['Margem de contribuição', k.margins.contributionPct], ['Margem operacional', k.margins.operatingPct], ['Margem líquida', k.margins.netPct]] as const).map(([l, v]) => [l, v == null ? 'parâmetro não informado' : pct(v, 1)]) : []),
       ['Payback descontado', k ? `${months(k.paybackMonths)} (limite ${r.term.Dalvo}; simples ${months(k.simplePaybackMonths)})` : '—'],
       ['VPL', k ? money(k.npvCents) : '—'],
       ['TIR', k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000% ao ano' : `${pct(k.irrAnnual * 100, 1)} ao ano`],
@@ -59,7 +61,7 @@ export function buildEconCsv(run: Run, h: RunHeader) {
   const sm = summary(run, h);
   const rows: (string | number | null)[][] = [
     ['Viabilidade econômica'], ...sm.head, [], ...sm.kpis, [],
-    ['DRE', 'Por mês (R$)', r.mode === 'recorrente' ? `No contrato, ${r.term.N} meses (R$)` : 'Na venda (R$)'],
+    ['Desdobramento financeiro', 'Por mês (R$)', r.mode === 'recorrente' ? `No contrato, ${r.term.N} meses (R$)` : 'Na venda (R$)'],
     ...econDre(r, money).map((d) => [`${d.sign} ${d.label}`, cents(d.month), cents(d.total)]),
     [], ['Produto', 'Documento fiscal', 'Versão dos tributos', 'Peso na receita', 'Tributos %', 'Tributo fixo (R$)'],
     ...r.items.map((i) => [i.description, i.doc ?? 'sem documento', i.docVersion ?? '', pct(i.weight * 100), pct(i.percentBp / 100), cents(i.fixedCents)]),
@@ -72,16 +74,40 @@ export function buildEconCsv(run: Run, h: RunHeader) {
   return `﻿${rows.map((row) => row.map(csvCell).join(';')).join('\r\n')}\r\n`;
 }
 
-export async function buildEconPdf(run: Run, h: RunHeader) {
+/** Nome do arquivo e título do PDF: Viabilidade-OP-<código>-<DDMMAAAA> (data da emissão, horário de Brasília). */
+export function econFileName(code: number, at = new Date()) {
+  const [d, m, y] = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' }).format(at).split('/');
+  return `Viabilidade-OP-${code}-${d}${m}${y}`;
+}
+
+const MM = 72 / 25.4;
+/** Fundo de cada página: o timbrado da filial (imagem esticada na página A4 ou a 1ª página do PDF). */
+async function letterheadPainter(doc: PDFDocument, lh: Letterhead | null | undefined) {
+  if (!lh) return null;
+  if (lh.mime === 'application/pdf') {
+    const [art] = await doc.embedPdf(lh.data, [0]);
+    return (p: PDFPage) => p.drawPage(art as PDFEmbeddedPage, { x: 0, y: 0, ...p.getSize() });
+  }
+  const img: PDFImage = lh.mime === 'image/png' ? await doc.embedPng(lh.data) : await doc.embedJpg(lh.data);
+  return (p: PDFPage) => p.drawImage(img, { x: 0, y: 0, ...p.getSize() });
+}
+
+export async function buildEconPdf(run: Run, h: RunHeader, letterhead?: Letterhead | null, sample = false) {
   const r: EconResult = run.result;
   const sm = summary(run, h);
   const doc = await PDFDocument.create();
+  const title = econFileName(h.code);
+  doc.setTitle(title); doc.setSubject(`Viabilidade econômica OP-${h.code}`);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const W = 595.28, H = 841.89, M = 48, ink = rgb(0.18, 0.2, 0.22), muted = rgb(0.42, 0.45, 0.5), line = rgb(0.85, 0.87, 0.9);
-  let page: PDFPage = doc.addPage([W, H]);
-  let y = H - M;
-  const need = (h2: number) => { if (y - h2 < M + 24) { page = doc.addPage([W, H]); y = H - M; } };
+  const W = 595.28, H = 841.89, ink = rgb(0.18, 0.2, 0.22), muted = rgb(0.42, 0.45, 0.5), line = rgb(0.85, 0.87, 0.9);
+  // área do texto: margens do timbrado (ou 17 mm sem timbrado)
+  const M = letterhead ? letterhead.sideMm * MM : 48, TOP = letterhead ? letterhead.topMm * MM : 48, BOT = letterhead ? letterhead.bottomMm * MM : 48;
+  const paint = await letterheadPainter(doc, letterhead);
+  const newPage = () => { const p = doc.addPage([W, H]); paint?.(p); if (sample) p.drawRectangle({ x: M, y: BOT, width: W - 2 * M, height: H - TOP - BOT, borderColor: rgb(0.2, 0.45, 0.85), borderWidth: 0.8, borderDashArray: [4, 3] }); return p; };
+  let page: PDFPage = newPage();
+  let y = H - TOP - 14;
+  const need = (h2: number) => { if (y - h2 < BOT + 26) { page = newPage(); y = H - TOP - 14; } };
   const text = (t: string, x: number, size = 10, f: PDFFont = font, color = ink) => page.drawText(safeText(f, t), { x, y, size, font: f, color });
   const right = (t: string, xr: number, size = 10, f: PDFFont = font, color = ink) => { const s = safeText(f, t); page.drawText(s, { x: xr - f.widthOfTextAtSize(s, size), y, size, font: f, color }); };
   const para = (t: string, size = 10, f: PDFFont = font, color = ink) => { for (const l of wrap(f, t, size, W - 2 * M)) { need(size + 4); text(l, M, size, f, color); y -= size + 4; } };
@@ -94,11 +120,22 @@ export async function buildEconPdf(run: Run, h: RunHeader) {
   para(econHeadline(r, (c) => (c == null ? '—' : money(c))), 10.5, font);
 
   section('Indicadores');
-  for (const [k, v] of sm.kpis) { for (const [i, l] of wrap(font, v, 10, W - 2 * M - 150).entries()) { need(14); if (!i) text(k, M, 9, font, muted); text(l, M + 150, 10); y -= 14; } }
+  {
+    // duas colunas: indicador à esquerda, número alinhado à direita; linhas alternadas para leitura
+    const valW = (W - 2 * M) * 0.5, labW = W - 2 * M - valW - 12;
+    sm.kpis.forEach(([k, v], idx) => {
+      const ls = wrap(font, k, 9.5, labW), vs = wrap(font, v, 10, valW);
+      const n = Math.max(ls.length, vs.length), hgt = n * 13 + 5;
+      need(hgt);
+      if (idx % 2 === 0) page.drawRectangle({ x: M, y: y - hgt + 13, width: W - 2 * M, height: hgt, color: rgb(0.96, 0.97, 0.98) });
+      for (let i = 0; i < n; i++) { if (ls[i]) text(ls[i]!, M + 6, 9.5, font, muted); if (vs[i]) right(vs[i]!, W - M - 6, 10, i === 0 ? bold : font); y -= 13; }
+      y -= 5;
+    });
+  }
 
   const dre = econDre(r, money);
   if (dre.length) {
-    section('DRE da oportunidade');
+    section('Desdobramento financeiro');
     const c1 = W - M - 130, c2 = W - M;
     need(14); if (r.mode === 'recorrente') right('Por mês', c1, 9, font, muted); right(r.mode === 'recorrente' ? `No contrato (${r.term.N} meses)` : 'Na venda', c2, 9, font, muted); y -= 15;
     for (const d of dre) {
@@ -142,7 +179,37 @@ export async function buildEconPdf(run: Run, h: RunHeader) {
   // rodapé em todas as páginas
   const pages = doc.getPages();
   pages.forEach((p, i) => {
-    for (const [n, l] of wrap(font, `${sm.footer} · página ${i + 1} de ${pages.length}`, 7.5, W - 2 * M).entries()) p.drawText(safeText(font, l), { x: M, y: 28 - n * 9, size: 7.5, font, color: muted });
+    const fl = wrap(font, `${sm.footer} · página ${i + 1} de ${pages.length}`, 7.5, W - 2 * M);
+    // com timbrado, o rodapé do sistema fica logo acima da área do rodapé da arte
+    const y0 = letterhead ? BOT + 6 + (fl.length - 1) * 9 : 28;
+    fl.forEach((l, n) => p.drawText(safeText(font, l), { x: M, y: y0 - n * 9, size: 7.5, font, color: muted }));
   });
   return Buffer.from(await doc.save());
+}
+
+/** Prévia do timbrado: a arte com a área do texto tracejada e um texto de exemplo, para conferir as margens. */
+export async function letterheadSample(lh: Letterhead, branchName: string) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const paint = (await letterheadPainter(doc, lh))!;
+  const W = 595.28, H = 841.89, M = lh.sideMm * MM, TOP = lh.topMm * MM, BOT = lh.bottomMm * MM;
+  const p = doc.addPage([W, H]);
+  paint(p);
+  p.drawRectangle({ x: M, y: BOT, width: W - 2 * M, height: H - TOP - BOT, borderColor: rgb(0.2, 0.45, 0.85), borderWidth: 0.8, borderDashArray: [4, 3] });
+  let y = H - TOP - 14;
+  p.drawText(safeText(bold, 'Viabilidade econômica'), { x: M, y, size: 18, font: bold, color: rgb(0.18, 0.2, 0.22) }); y -= 24;
+  for (const l of wrap(font, `Prévia do timbrado da filial ${branchName}. O texto dos documentos fica dentro da área tracejada; ajuste as margens se ele encostar no cabeçalho ou no rodapé da arte.`, 10, W - 2 * M)) { p.drawText(safeText(font, l), { x: M, y, size: 10, font, color: rgb(0.42, 0.45, 0.5) }); y -= 14; }
+  return Buffer.from(await doc.save());
+}
+
+/** Confere o arquivo do timbrado: PNG, JPG ou PDF legível. */
+export async function letterheadMime(data: Buffer) {
+  if (data[0] === 0x89 && data[1] === 0x50) return 'image/png';
+  if (data[0] === 0xff && data[1] === 0xd8) return 'image/jpeg';
+  if (data.subarray(0, 5).toString('latin1') === '%PDF-') {
+    const d = await PDFDocument.load(data, { ignoreEncryption: true });
+    return d.getPageCount() > 0 ? 'application/pdf' : null;
+  }
+  return null;
 }

@@ -1,6 +1,7 @@
 /** Viabilidade econômica: documentos fiscais por filial, tributo no item, parâmetros, cálculo, fotografia e trava de payback. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { PDFDocument } from 'pdf-lib';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -236,6 +237,23 @@ describe('viabilidade econômica', () => {
     const pdf = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo/export?format=pdf`));
     expect(pdf.headers['content-type']).toBe('application/pdf');
     expect(pdf.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    expect(pdf.headers['content-disposition']).toMatch(/filename="Viabilidade-OP-\d+-\d{8}\.pdf"/);
+    // timbrado da filial: PDF A4 de fundo, margens da área do texto e prévia
+    const branchId = ok(await carlos.get(`/opportunities/${o.id}`)).json().branchId as string;
+    const art = await PDFDocument.create(); art.addPage([595.28, 841.89]).drawText('TIMBRADO BKT', { x: 40, y: 800, size: 20 });
+    const artB64 = Buffer.from(await art.save()).toString('base64');
+    ok(await lucas.put(`/admin/letterheads/${branchId}`, { data: artB64, filename: 'timbrado.pdf', topMm: 40, bottomMm: 30, sideMm: 18 }), 403);
+    ok(await carlos.put(`/admin/letterheads/${branchId}`, { data: Buffer.from('nao e imagem').toString('base64'), filename: 'x.txt', topMm: 40, bottomMm: 30, sideMm: 18 }), 422);
+    ok(await carlos.put(`/admin/letterheads/${branchId}`, { data: artB64, filename: 'timbrado.pdf', topMm: 40, bottomMm: 30, sideMm: 18 }));
+    const lhs = ok(await carlos.get('/admin/letterheads')).json().items;
+    expect(lhs.find((b: { id: string }) => b.id === branchId).letterhead).toMatchObject({ mime: 'application/pdf', topMm: 40, filename: 'timbrado.pdf' });
+    ok(await carlos.put(`/admin/letterheads/${branchId}`, { topMm: 45, bottomMm: 30, sideMm: 18 }));
+    expect(ok(await carlos.get(`/admin/letterheads/${branchId}/preview`)).headers['content-type']).toBe('application/pdf');
+    const withArt = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo/export?format=pdf`));
+    const loaded = await PDFDocument.load(withArt.rawPayload);
+    expect(loaded.getTitle()).toMatch(/^Viabilidade-OP-\d+-\d{8}$/);
+    expect(withArt.rawPayload.length).toBeGreaterThan(pdf.rawPayload.length);
+    ok(await carlos.del(`/admin/letterheads/${branchId}`), 204);
     // sem "exportar" não sai arquivo
     ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'exportar', allowed: false }));
     try { ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`), 403); }
