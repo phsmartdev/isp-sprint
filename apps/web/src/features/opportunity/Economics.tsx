@@ -9,7 +9,7 @@ import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   COST_IMPACTS, COST_IMPACT_LABELS, ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  buildModel, type FinOverride, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -21,6 +21,8 @@ import { errMsg } from '../contracts/shared';
 
 type Data = {
   settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
+  /** fórmulas publicadas no Financial Studio (a prévia usa o mesmo modelo do servidor) */
+  modelOverrides?: FinOverride[];
   /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
   result: EconResult | null; stale: boolean; editable: boolean;
   emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null } | null;
@@ -495,7 +497,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     commissionBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
   } : null), [f]);
   const invalid = !input || [input.commissionBp, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
-  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector }) : null), [q.data, input, invalid]);
+  const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
+  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel }) : null), [q.data, input, invalid, liveModel]);
   const save = useMutation({
     mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
     onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseCostTable, shiftMonth, annuityFactor, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, irr, npv, paybackMonths, type EconItem, type EconSettings } from './finance';
+import { parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings } from './finance';
+import { annuityFactor, irr, npv, paybackMonths } from './formula';
 
 /** Parâmetros de teste (na aplicação eles vêm de Configurações → Viabilidade, sem padrão no código). */
 const S: EconSettings = { marginTargetBp: 3500, tmaMonthlyBp: 150, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };

@@ -27,6 +27,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   { key: 'ofertas', label: 'Ofertas e viabilidade', desc: 'O que se vende, por quanto, de onde e com qual custo.', items: [
     { to: '/settings/plans', label: 'Planos e produtos', desc: 'Planos, produtos, comissão e documento fiscal padrão.', admin: true, keywords: 'preço produto' },
     { to: '/settings/viability', label: 'Viabilidade', desc: 'Motor financeiro e catálogo de custos.', admin: true, keywords: 'tma margem payback custo capex opex comissão contingência despesas ir csll' },
+    { to: '/settings/financial-studio', label: 'Financial Studio', desc: 'Fórmulas do motor financeiro: editar, simular o impacto, versionar e publicar.', admin: true, keywords: 'fórmula formula editor simulação impacto versão vpl tir roi payback modelo financeiro' },
     { to: '/settings/filiais', label: 'Filiais e documentos fiscais', desc: 'Emitentes (CNPJ, regime), tipos fiscais e tributos.', admin: true, keywords: 'cnpj imposto tributo nota fiscal' },
     { to: '/settings/area', label: 'Área de atendimento', desc: 'Regiões e condomínios atendidos.', admin: true, keywords: 'cobertura condomínio' },
   ] },

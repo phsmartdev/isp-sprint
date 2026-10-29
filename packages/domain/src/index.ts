@@ -36,3 +36,5 @@ export * from './stageFunnel';
 export * from './budget';
 export * from './ixc';
 export * from './finance';
+export * from './formula';
+export * from './financeModel';

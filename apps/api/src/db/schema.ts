@@ -4683,3 +4683,62 @@ export const opportunityEconDecisions = pgTable('opportunity_econ_decisions', {
   oppIdx: index('opp_econ_decision_idx').on(t.opportunityId, t.createdAt),
   actionCk: check('opp_econ_decision_action_ck', inList('action', ['enviada', 'aprovada', 'devolvida'])),
 }));
+
+// --------------------------------------------------------------- Financial Studio (fórmulas do motor financeiro)
+
+/** Fórmula personalizada criada pela diretoria (as do sistema ficam no código, em packages/domain/src/financeModel.ts). */
+export const financialFormulas = pgTable('financial_formulas', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  category: text('category').notNull().default('personalizadas'),
+  unit: text('unit').notNull(),
+  description: text('description'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('financial_formulas_uq').on(t.tenantId, t.code) }));
+
+/**
+ * Versão de uma fórmula (do sistema ou personalizada): rascunho → simulada → em validação → validada → aprovada → publicada
+ * (ou devolvida para ajuste). Só rascunho, simulada e devolvida mudam; publicada nunca é sobrescrita (vale pela vigência).
+ */
+export const financialFormulaVersions = pgTable('financial_formula_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  version: integer('version').notNull(),
+  expression: text('expression').notNull(),
+  status: text('status').notNull().default('rascunho'),
+  justification: text('justification'),
+  /** variáveis e fórmulas que a expressão usa (grafo de dependências) */
+  refs: text('refs').array().notNull().default(sql`'{}'::text[]`),
+  baseVersionId: uuid('base_version_id'),
+  restoredFromId: uuid('restored_from_id'),
+  /** última simulação: resultado anterior e novo, indicadores impactados e efeito na viabilidade */
+  simulation: jsonb('simulation').$type<Record<string, unknown>>(),
+  validFrom: date('valid_from'),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  submittedBy: uuid('submitted_by'), submittedAt: ts('submitted_at'),
+  validatedBy: uuid('validated_by'), validatedAt: ts('validated_at'),
+  approvedBy: uuid('approved_by'), approvedAt: ts('approved_at'),
+  publishedBy: uuid('published_by'), publishedAt: ts('published_at'),
+}, (t) => ({
+  uq: uniqueIndex('financial_formula_versions_uq').on(t.tenantId, t.code, t.version),
+  idx: index('financial_formula_versions_idx').on(t.tenantId, t.code, t.status),
+  statusCk: check('financial_formula_versions_status_ck', inList('status', ['rascunho', 'simulada', 'em_validacao', 'validada', 'aprovada', 'publicada', 'devolvida'])),
+}));
+
+/** Histórico da governança das fórmulas (append-only): criação, simulação, envio, validação, aprovação, publicação, devolução e restauração. */
+export const financialFormulaEvents = pgTable('financial_formula_events', {
+  id: id(),
+  tenantId: tenantId(),
+  versionId: uuid('version_id').notNull().references(() => financialFormulaVersions.id),
+  code: text('code').notNull(),
+  action: text('action').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('financial_formula_events_idx').on(t.tenantId, t.code, t.createdAt) }));

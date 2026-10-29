@@ -65,6 +65,7 @@ const AdminLogs = lazy(() => import('./pages/admin/Admin').then((m) => ({ defaul
 const AdminJourneys = lazy(() => import('./pages/admin/Journeys').then((m) => ({ default: m.AdminJourneys })));
 const AdminArea = lazy(() => import('./pages/admin/Area').then((m) => ({ default: m.AdminArea })));
 const AdminViability = lazy(() => import('./pages/admin/Viability').then((m) => ({ default: m.AdminViability })));
+const AdminFinancialStudio = lazy(() => import('./pages/admin/FinancialStudio').then((m) => ({ default: m.AdminFinancialStudio })));
 const AdminModels = lazy(() => import('./pages/admin/Models').then((m) => ({ default: m.AdminModels })));
 const AdminData = lazy(() => import('./pages/admin/DataAdmin').then((m) => ({ default: m.AdminData })));
 const AdminCustomFields = lazy(() => import('./pages/admin/CustomFields').then((m) => ({ default: m.AdminCustomFields })));
@@ -153,6 +154,7 @@ export function App() {
           <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
           <Route path="area" element={<AdminArea />} />
           <Route path="viability" element={<AdminViability />} />
+          <Route path="financial-studio" element={<AdminFinancialStudio />} />
           <Route path="modelos" element={<AdminModels />} />
           <Route path="instructions" element={<Navigate to="/settings/modelos?aba=instrucao" replace />} />
           <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />

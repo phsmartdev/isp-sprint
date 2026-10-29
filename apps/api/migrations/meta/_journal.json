@@ -575,6 +575,13 @@
       "when": 1793304746405,
       "tag": "0081_bom_descricao_unidade",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793307184708,
+      "tag": "0082_financial_studio",
+      "breakpoints": true
     }
   ]
 }

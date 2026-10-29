@@ -6,10 +6,11 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { emptyEconInput, financeEngine, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
+import { defaultModel, emptyEconInput, financeEngine, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
+import { modelFor } from './financeStudio';
 
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 
@@ -77,13 +78,14 @@ type Opp = { id: string; tenantId: string; contactId: string; branchId: string |
 
 /** Tudo que o cálculo precisa: itens com a resolução fiscal, parâmetros vigentes, segmento e o que foi salvo. */
 export async function economicsContext(db: DbOrTx, opp: Opp) {
-  const [version, items, docs, [contact], [saved], [branch]] = await Promise.all([
+  const [version, items, docs, [contact], [saved], [branch], fm] = await Promise.all([
     econSettingsOf(db, opp.tenantId),
     db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, opp.tenantId))).orderBy(asc(s.opportunityItems.position)),
     fiscalDocsOf(db, opp.tenantId),
     db.select({ segment: s.contacts.segment, nature: s.contacts.nature }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1),
     db.select().from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1),
     opp.branchId ? db.select({ name: s.salesBranches.name, cnpj: s.salesBranches.cnpj, taxRegime: s.salesBranches.taxRegime, city: s.salesBranches.city, state: s.salesBranches.state }).from(s.salesBranches).where(eq(s.salesBranches.id, opp.branchId)).limit(1) : Promise.resolve([]),
+    modelFor(db, opp.tenantId),
   ]);
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
@@ -98,13 +100,15 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     emitter: branch ?? null,
     saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, savedResult: saved ? (saved.result as unknown as EconResult) : null,
     branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)),
+    /** modelo de fórmulas vigente (Financial Studio): padrão do sistema + fórmulas publicadas */
+    model: fm.model, modelOverrides: fm.overrides,
   };
 }
 export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 
 /** null = sem parâmetros vigentes (a empresa ainda não informou em Configurações → Viabilidade). */
 export const computeEconomics = (ctx: EconContext, input?: EconInput) =>
-  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector }) : null;
+  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model }) : null;
 
 /**
  * O resultado salvo deixou de valer? Recalcula as mesmas entradas com os itens, tributos, parâmetros e motor de hoje
@@ -112,7 +116,8 @@ export const computeEconomics = (ctx: EconContext, input?: EconInput) =>
  */
 export function isStale(saved: EconResult, fresh: EconResult | null) {
   if (!fresh) return true;
-  return saved.engineVersion !== fresh.engineVersion || saved.verdict !== fresh.verdict || saved.priceCents !== fresh.priceCents || saved.floor?.minCents !== fresh.floor.minCents
+  const savedKey = saved.model?.key ?? defaultModel().key;
+  return savedKey !== (fresh.model?.key ?? defaultModel().key) || saved.engineVersion !== fresh.engineVersion || saved.verdict !== fresh.verdict || saved.priceCents !== fresh.priceCents || saved.floor?.minCents !== fresh.floor.minCents
     || saved.recommendedCents !== fresh.recommendedCents || (saved.kpi?.contributionCents ?? null) !== (fresh.kpi?.contributionCents ?? null)
     || saved.withReservations !== fresh.withReservations || saved.fixedTaxCents !== fresh.fixedTaxCents;
 }
@@ -125,7 +130,8 @@ export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, acto
   const now = new Date();
   await db.insert(s.opportunityEconomics).values({ opportunityId: opp.id, tenantId: opp.tenantId, input, result, updatedBy: actorId, updatedAt: now })
     .onConflictDoUpdate({ target: s.opportunityEconomics.opportunityId, set: { input, result, updatedBy: actorId, updatedAt: now } });
-  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter };
+  // a fotografia guarda a versão de cada fórmula publicada usada (o histórico não muda com publicações futuras)
+  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
   await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId: ctx.settingsVersion?.id ?? null, sha256: snapshotHash({ input, settings, result }) });
   return result;
 }
