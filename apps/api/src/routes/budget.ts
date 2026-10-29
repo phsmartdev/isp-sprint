@@ -15,7 +15,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
-import { accountsOf, availableFor, categoryOf, costCentersOf, isBudgetAdmin, loadCostCenter, logBudget, quarterNumbers, totals } from '../services/budget';
+import { accountsOf, availableFor, categoryOf, costCentersOf, isBudgetAdmin, isBudgetRestricted, loadCostCenter, logBudget, quarterNumbers, totals } from '../services/budget';
 import { groupBy } from '../services/group';
 import { detectAttachment } from './sprint';
 
@@ -27,6 +27,7 @@ const Q = z.object({ year: z.coerce.number().int().min(2020).max(2100), quarter:
 const M = { module: 'orcamento' as const };
 const ADMIN = { module: 'orcamento' as const, min: 'total' as const };
 
+const SUPERVISION = 'A supervisão lança e dá baixa, mas não exclui nem altera valores. Peça à gestão.';
 function requireAdmin(auth: AuthContext) { if (!isBudgetAdmin(auth)) throw forbidden('Só a Diretoria (nível Total em Recursos e Orçamento) pode fazer isso.'); }
 
 async function leafAccount(db: DbOrTx, tenantId: string, id: string) {
@@ -172,6 +173,39 @@ export const budgetRoutes = [
     },
   }),
   defineRoute({
+    method: 'GET', url: '/budget/items', summary: 'Lançamentos do trimestre (tela principal): cada item planejado dos centros visíveis com o executado (baixas), situação de pagamento e o que a pessoa pode fazer', tag: 'Orçamento', ...M, query: Q,
+    handler: async ({ app, auth, query }) => {
+      const ccs = await costCentersOf(app.db, auth);
+      const months = monthsOfQuarter(query.year, query.quarter);
+      const ids = ccs.map((c) => c.id);
+      const from = `${months[0]}-01`, until = query.quarter === 4 ? `${query.year + 1}-01-01` : `${query.year}-${String(query.quarter * 3 + 1).padStart(2, '0')}-01`;
+      const [lines, exps] = ids.length ? await Promise.all([
+        app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.tenantId, auth.tenantId), inArray(s.budgetLines.costCenterId, ids), inArray(s.budgetLines.month, months), isNull(s.budgetLines.deletedAt))).orderBy(asc(s.budgetLines.month), asc(s.budgetLines.createdAt)),
+        app.db.select({ id: s.budgetExpenses.id, lineId: s.budgetExpenses.lineId, costCenterId: s.budgetExpenses.costCenterId, occurredOn: s.budgetExpenses.occurredOn, description: s.budgetExpenses.description, amountCents: s.budgetExpenses.amountCents, paymentMethod: s.budgetExpenses.paymentMethod, supplierId: s.budgetExpenses.supplierId, docName: s.budgetExpenses.docName, status: s.budgetExpenses.status, cancelReason: s.budgetExpenses.cancelReason, createdAt: s.budgetExpenses.createdAt, createdBy: s.users.name })
+          .from(s.budgetExpenses).leftJoin(s.users, eq(s.users.id, s.budgetExpenses.createdBy)).where(and(eq(s.budgetExpenses.tenantId, auth.tenantId), inArray(s.budgetExpenses.costCenterId, ids), sql`${s.budgetExpenses.occurredOn} >= ${from} and ${s.budgetExpenses.occurredOn} < ${until}`)).orderBy(desc(s.budgetExpenses.occurredOn), desc(s.budgetExpenses.createdAt)),
+      ]) : [[], []];
+      const byLine = groupBy(exps.filter((e) => e.lineId), (e) => e.lineId!);
+      const ccOf = new Map(ccs.map((c) => [c.id, { id: c.id, code: c.code, name: c.name }]));
+      const items = lines.map((l) => {
+        const baixas = byLine.get(l.id) ?? [];
+        const executedCents = baixas.filter((e) => e.status === 'valido').reduce((a, e) => a + e.amountCents, 0);
+        return { ...l, costCenter: ccOf.get(l.costCenterId)!, executedCents, paid: executedCents >= l.amountCents ? 'pago' : executedCents > 0 ? 'parcial' : 'aberto', baixas };
+      });
+      const live = items.filter((i) => i.status !== 'recusado');
+      const unlinked = exps.filter((e) => !e.lineId && e.status === 'valido');
+      const executed = live.reduce((a, i) => a + i.executedCents, 0) + unlinked.reduce((a, e) => a + e.amountCents, 0);
+      const planned = live.reduce((a, i) => a + i.amountCents, 0);
+      const drafts = ccs.map((c) => { const d = items.filter((i) => i.costCenterId === c.id && (i.status === 'rascunho' || i.status === 'recusado')); return { costCenterId: c.id, code: c.code, name: c.name, count: d.length, cents: d.reduce((a, i) => a + i.amountCents, 0) }; }).filter((d) => d.count);
+      const restricted = isBudgetRestricted(auth);
+      return {
+        label: quarterLabel(query.year, query.quarter), months, items,
+        totals: { planned, executed, deviation: planned - executed, unlinkedCents: unlinked.reduce((a, e) => a + e.amountCents, 0), unlinkedCount: unlinked.length },
+        drafts, costCenters: [...ccOf.values()],
+        can: { create: ccs.length > 0, delete: !restricted, editAmount: !restricted, cancelBaixa: !restricted, approve: isBudgetAdmin(auth) },
+      };
+    },
+  }),
+  defineRoute({
     method: 'GET', url: '/budget/plan', summary: 'Planejamento de um centro no trimestre: itens (o quê, como, quando), números por conta e mês, ajustes e gastos', tag: 'Orçamento', ...M,
     query: Q.extend({ costCenterId: uuid }),
     handler: async ({ app, auth, query }) => {
@@ -229,6 +263,7 @@ export const budgetRoutes = [
       if (l.status !== 'rascunho' && l.status !== 'recusado') throw unprocessable('Item enviado ou aprovado não muda. Depois de aprovado, ajustes vão pelo Budget Guardião.');
       if (body.month && quarterOfMonth(body.month) !== quarterOfMonth(l.month)) throw unprocessable('O mês precisa ser do mesmo trimestre.');
       if (body.accountId) await leafAccount(app.db, auth.tenantId, body.accountId);
+      if (isBudgetRestricted(auth) && body.amountCents !== undefined && body.amountCents !== l.amountCents) throw forbidden(SUPERVISION);
       const [n] = await app.db.update(s.budgetLines).set({ ...body, status: 'rascunho', updatedAt: new Date() }).where(eq(s.budgetLines.id, l.id)).returning();
       await logBudget(app.db, auth, cc.id, 'item', l.id, 'alterado', `${cc.code}: item “${n!.what}” alterado (−${brl(n!.amountCents)} em ${n!.month}).`);
       return n;
@@ -240,6 +275,7 @@ export const budgetRoutes = [
       const [l] = await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.id, params.id), eq(s.budgetLines.tenantId, auth.tenantId), isNull(s.budgetLines.deletedAt))).limit(1);
       if (!l) throw notFound();
       const cc = await loadCostCenter(app.db, auth, l.costCenterId);
+      if (isBudgetRestricted(auth)) throw forbidden(SUPERVISION);
       if (l.status === 'aprovado' || l.status === 'em_aprovacao') throw unprocessable('Item enviado ou aprovado não sai do planejamento; use o Budget Guardião para reduzir.');
       await app.db.update(s.budgetLines).set({ deletedAt: new Date() }).where(eq(s.budgetLines.id, l.id));
       await logBudget(app.db, auth, cc.id, 'item', l.id, 'retirado', `${cc.code}: item “${l.what}” retirado do planejamento.`);
@@ -407,6 +443,7 @@ export const budgetRoutes = [
       const [e] = await app.db.select().from(s.budgetExpenses).where(and(eq(s.budgetExpenses.id, params.id), eq(s.budgetExpenses.tenantId, auth.tenantId))).limit(1);
       if (!e) throw notFound();
       const cc = await loadCostCenter(app.db, auth, e.costCenterId);
+      if (isBudgetRestricted(auth)) throw forbidden(SUPERVISION);
       if (e.status === 'cancelado') throw unprocessable('Gasto já cancelado.');
       await app.db.update(s.budgetExpenses).set({ status: 'cancelado', cancelReason: body.reason, cancelledAt: new Date(), cancelledBy: auth.userId }).where(eq(s.budgetExpenses.id, e.id));
       await logBudget(app.db, auth, cc.id, 'gasto', e.id, 'cancelado', `${cc.code}: gasto “${e.description}” (−${brl(e.amountCents)}) cancelado: ${body.reason}`);

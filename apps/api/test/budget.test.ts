@@ -103,6 +103,36 @@ describe('consumo pelo líder, Budget Guardião e revisão mensal', () => {
   });
 });
 
+describe('lançamentos na tela principal e supervisão', () => {
+  it('lista os itens com o executado; baixa no item; supervisão não exclui nem altera valor; gestão pode', async () => {
+    let d = ok(await ana.get(`/budget/items?year=${year}&quarter=${quarter}`)).json();
+    expect(d.can).toMatchObject({ create: true, delete: false, editAmount: false, cancelBaixa: false, approve: false });
+    const crmLine = d.items.find((i: { what: string }) => i.what === 'Licença do CRM');
+    expect(crmLine).toMatchObject({ status: 'aprovado', executedCents: 0, paid: 'aberto', costCenter: { code: 'MKT' } });
+    // baixa no próprio item (parcial e depois o restante)
+    const base = { costCenterId: ccMkt, accountId: crm, lineId: crmLine.id, occurredOn: today, description: 'Licença do CRM', paymentMethod: 'boleto', financeCheck: true };
+    const b1 = ok(await ana.post('/budget/expenses', { ...base, amountCents: 100_000 }), 201).json();
+    d = ok(await ana.get(`/budget/items?year=${year}&quarter=${quarter}`)).json();
+    expect(d.items.find((i: { id: string }) => i.id === crmLine.id)).toMatchObject({ executedCents: 100_000, paid: 'parcial' });
+    ok(await ana.post('/budget/expenses', { ...base, amountCents: 200_000 }), 201);
+    const done = ok(await ana.get(`/budget/items?year=${year}&quarter=${quarter}`)).json().items.find((i: { id: string }) => i.id === crmLine.id);
+    expect(done).toMatchObject({ executedCents: 300_000, paid: 'pago' });
+    expect(done.baixas).toHaveLength(2);
+    // supervisão: não cancela baixa, não exclui item e não muda valor (mas lança e altera a descrição)
+    ok(await ana.post(`/budget/expenses/${b1.id}/cancel`, { reason: 'Lançada em duplicidade' }), 403);
+    const next = quarter === 4 ? `${year + 1}-01` : `${year}-${String(quarter * 3 + 1).padStart(2, '0')}`;
+    const draft = ok(await ana.post('/budget/plan/lines', { costCenterId: ccMkt, accountId: midia, what: 'Mídia do próximo trimestre', month: next, amountCents: 50_000, itemType: 'midia' }), 201).json();
+    ok(await ana.patch(`/budget/plan/lines/${draft.id}`, { amountCents: 60_000 }), 403);
+    ok(await ana.patch(`/budget/plan/lines/${draft.id}`, { what: 'Mídia paga do próximo trimestre' }));
+    ok(await ana.del(`/budget/plan/lines/${draft.id}`), 403);
+    // gestão pode
+    ok(await carlos.patch(`/budget/plan/lines/${draft.id}`, { amountCents: 60_000 }));
+    ok(await carlos.del(`/budget/plan/lines/${draft.id}`));
+    ok(await carlos.post(`/budget/expenses/${b1.id}/cancel`, { reason: 'Lançada em duplicidade' }));
+    expect(ok(await carlos.get(`/budget/items?year=${year}&quarter=${quarter}`)).json().can).toMatchObject({ delete: true, editAmount: true, approve: true });
+  });
+});
+
 describe('recursos: softwares, contratos, ativos e compras', () => {
   it('licença sem senha (Vault), em dólar com cotação, entra no planejamento; compra específica pede Jurídico e Diretoria', async () => {
     const lic = { kind: 'software', costCenterId: ccCom, accountId: crm, name: 'Ferramenta de prospecção (fictícia)', currency: 'USD', amountCents: 10_000, period: 'mensal', startOn: `${year}-01-01`, paymentMethod: 'cartao_corporativo' };

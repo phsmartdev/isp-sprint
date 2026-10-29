@@ -10,6 +10,9 @@ import { level } from './scope';
 /** Diretoria/gestão: nível Total no módulo (aprova, vê todos os centros, mantém a estrutura). */
 export const isBudgetAdmin = (auth: AuthContext) => level(auth, 'orcamento') === 'total';
 
+/** Supervisão (perfil Supervisor sem nível Total): lança e dá baixa, mas não exclui nem muda valor. */
+export const isBudgetRestricted = (auth: AuthContext) => !isBudgetAdmin(auth) && auth.profiles.includes('supervisor') && !auth.profiles.includes('gerencia');
+
 export async function costCentersOf(db: DbOrTx, auth: AuthContext, includeInactive = false) {
   const all = await db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code);
   const list = includeInactive ? all : all.filter((c) => c.active);
