@@ -1121,7 +1121,7 @@ export const viabilitySettings = pgTable('viability_settings', {
   ltvMinSample: integer('ltv_min_sample').notNull().default(30),
   maxPaybackMonths: integer('max_payback_months'),
   defaultActivationFeeCents: bigint('default_activation_fee_cents', { mode: 'number' }),
-  /** Parâmetros do motor financeiro da viabilidade econômica (margem alvo, TMA, comissão, perda, payback por segmento). */
+  /** Antigo lugar dos parâmetros do motor financeiro; desde a migration 0078 eles ficam em econ_settings_versions. */
   econ: jsonb('econ').$type<Record<string, unknown>>().notNull().default({}),
   /** Limite de autonomia da operação (acima: viabilidade da engenharia). */
   autonomyMaxMeters: integer('autonomy_max_meters').default(100),
@@ -4581,3 +4581,31 @@ export const opportunityEconomicsSnapshots = pgTable('opportunity_economics_snap
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opp_econ_snap_idx').on(t.opportunityId, t.createdAt) }));
+
+/**
+ * Parâmetros do motor financeiro com vigência (append-only): vale a versão de maior "valid_from" até hoje.
+ * Margem mínima, TMA, comissão padrão, glosa por segmento, contingências e payback máximo. Sem versão = não calcula.
+ */
+export const econSettingsVersions = pgTable('econ_settings_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  values: jsonb('values').$type<Record<string, unknown>>().notNull(),
+  validFrom: date('valid_from').notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('econ_settings_versions_idx').on(t.tenantId, t.validFrom, t.createdAt) }));
+
+/** Decisão da viabilidade (append-only), presa à fotografia analisada: enviada → aprovada ou devolvida (com motivo). */
+export const opportunityEconDecisions = pgTable('opportunity_econ_decisions', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  snapshotId: uuid('snapshot_id').notNull().references(() => opportunityEconomicsSnapshots.id),
+  action: text('action').notNull(),
+  reason: text('reason'),
+  actorId: uuid('actor_id'),
+  createdAt: createdAt(),
+}, (t) => ({
+  oppIdx: index('opp_econ_decision_idx').on(t.opportunityId, t.createdAt),
+  actionCk: check('opp_econ_decision_action_ck', inList('action', ['enviada', 'aprovada', 'devolvida'])),
+}));

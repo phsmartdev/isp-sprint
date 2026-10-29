@@ -4,16 +4,22 @@ import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
-let carlos: Client, lucas: Client;
+let carlos: Client, lucas: Client, rafael: Client;
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+const ECON = { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
-beforeAll(async () => { ctx = await makeApp(); [carlos, lucas] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test')]); });
+beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test'), login(ctx.app, 'rafael@yepnet.test')]); });
 afterAll(async () => ctx.close());
 
 describe('viabilidade econômica', () => {
   it('documentos fiscais por filial, item com documento, cálculo com tributo ponderado, fotografia e trava de payback', async () => {
     // parâmetros do motor (Configurações → Viabilidade)
-    ok(await lucas.put('/admin/viability/econ', {}), 403);
-    ok(await carlos.put('/admin/viability/econ', { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true }));
+    ok(await lucas.post('/admin/viability/econ', {}), 403);
+    // vigência no passado não vale (cálculos salvos não mudam de regra)
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, validFrom: '2020-01-01' }), 422);
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+    const adm = ok(await carlos.get('/admin/viability/econ')).json();
+    expect(adm.current).toMatchObject({ marginTargetBp: 3500, validFrom: today });
 
     // documentos fiscais na filial
     const lk = ok(await carlos.get('/meta/lookups')).json();
@@ -57,7 +63,7 @@ describe('viabilidade econômica', () => {
     ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, capex: [{ description: 'Obra de rede', qtyMilli: 1000, unitCents: 6_000_000 }] }));
     const ap = await carlos.post(`/opportunities/${o.id}/approval/requests`, { negotiationType: 'novo_servico', proposedMonthlyCents: 1_000_000, activationFeeCents: 0, justification: 'Pedido de teste da trava' });
     expect(ap.statusCode, ap.body).toBe(422);
-    expect(ap.json().detail).toMatch(/fora da política.*limite para setor privado é 6/);
+    expect(ap.json().detail).toMatch(/abaixo do preço mínimo/);
 
     // fotografias são append-only
     await expect(ctx.db.execute(sql`update opportunity_economics_snapshots set reason = 'x' where opportunity_id = ${o.id}`)).rejects.toThrow(/append-only/);
@@ -76,7 +82,7 @@ describe('viabilidade econômica', () => {
     // consultar não recalcula: parâmetro mudou → continua o salvo, marcado como desatualizado, e a aprovação pede para salvar de novo
     const before = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(before.stale).toBe(false);
-    ok(await carlos.put('/admin/viability/econ', { marginTargetBp: 3500, tmaMonthlyBp: 300, commissionBp: 500, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true }));
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, tmaMonthlyBp: 300 }), 201);
     const after = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(after.stale).toBe(true);
     expect(after.result).toEqual(before.result);
@@ -84,7 +90,7 @@ describe('viabilidade econômica', () => {
     const ap2 = await carlos.post(`/opportunities/${o.id}/approval/requests`, { negotiationType: 'novo_servico', proposedMonthlyCents: 1_000_000, activationFeeCents: 0, justification: 'Pedido com viabilidade desatualizada' });
     expect(ap2.statusCode, ap2.body).toBe(422);
     expect(ap2.json().detail).toMatch(/mudou desde que foi salva/);
-    ok(await carlos.put('/admin/viability/econ', { marginTargetBp: 3500, tmaMonthlyBp: 0, commissionBp: 500, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true }));
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().stale).toBe(false);
 
     // sem "ver financeiro": só o veredito; não preenche; consolidado bloqueado
@@ -130,5 +136,42 @@ describe('viabilidade econômica', () => {
     expect(r.result.withReservations).toBe(true);
     expect(r.publicSector).toBe(true);
     expect(r.result.term.Dalvo).toBe(12);
+    // decisão 8: só vai para decisão com 100% dos tributos parametrizados na filial
+    const sub = await carlos.post(`/opportunities/${o.id}/economics/submit`, {});
+    expect(sub.statusCode, sub.body).toBe(422);
+    expect(sub.json().detail).toMatch(/documento fiscal com tributos vigentes/);
+  });
+
+  it('decisão: o vendedor envia, a gestão aprova ou devolve com motivo; ninguém decide o que enviou; salvar de novo reabre', async () => {
+    const lk = ok(await rafael.get('/meta/lookups')).json();
+    const branch = lk.branches[0].id;
+    const doc = ok(await rafael.get('/fiscal-docs')).json().items.find((d: { branchId: string; code: string }) => d.branchId === branch && d.code === 'NFS-E');
+    const o = ok(await rafael.post('/opportunities', { newContact: { name: `Empresa Decisão ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: branch, saleKind: 'venda_consultiva' }), 201).json();
+    ok(await rafael.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link dedicado', unit: 'un', qtyMilli: 1000, unitCents: 500_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: doc.id }] }));
+    const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 300_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 50_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
+    ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}), 422); // nada salvo
+    expect(ok(await rafael.put(`/opportunities/${o.id}/economics`, input)).json().result.verdict).toBe('viavel');
+    expect(ok(await rafael.get(`/opportunities/${o.id}/economics`)).json().status).toBe('calculada');
+    expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json().status).toBe('em_decisao');
+    ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}), 422);
+    // vendedor não aprova; a gestão vê na fila
+    ok(await rafael.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' }), 403);
+    expect(ok(await rafael.get('/economics/pending')).json().items).toEqual([]);
+    const pend = ok(await carlos.get('/economics/pending')).json().items;
+    expect(pend.find((p: { opportunityId: string }) => p.opportunityId === o.id)).toMatchObject({ verdict: 'viavel', submittedByName: 'Rafael Mendes' });
+    expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().canDecide).toBe(true);
+    ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver' }), 422); // sem motivo
+    expect(ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver', reason: 'Revisar o custo do trânsito' })).json().status).toBe('devolvida');
+    ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}));
+    expect(ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' })).json().status).toBe('aprovada');
+    // salvar de novo gera outra fotografia: volta a "calculada" e a aprovação fica no histórico
+    ok(await rafael.put(`/opportunities/${o.id}/economics`, { ...input, termMonths: 36 }));
+    const after = ok(await rafael.get(`/opportunities/${o.id}/economics`)).json();
+    expect(after.status).toBe('calculada');
+    expect(after.decisions.map((d: { action: string }) => d.action)).toEqual(['aprovada', 'enviada', 'devolvida', 'enviada']);
+    await expect(ctx.db.execute(sql`update opportunity_econ_decisions set reason = 'x' where opportunity_id = ${o.id}`)).rejects.toThrow(/append-only/);
+    // quem envia não decide, nem sendo da gestão
+    ok(await carlos.post(`/opportunities/${o.id}/economics/submit`, {}));
+    ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' }), 403);
   });
 });

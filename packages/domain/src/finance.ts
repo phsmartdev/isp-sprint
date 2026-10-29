@@ -40,18 +40,25 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 }
 
 // ------------------------------------------------------------------ parâmetros e entradas
+/** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
+export const ENGINE_VERSION = 'FINANCE-1.3/isp-2';
+
+/**
+ * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
+ * Não há valor padrão no código: sem parâmetros vigentes a viabilidade não calcula.
+ */
 export type EconSettings = {
-  /** m: margem de contribuição alvo sobre a receita bruta */ marginTargetBp: number;
+  /** m: margem de contribuição MÍNIMA sobre a receita bruta (abaixo dela a venda sai da política) */ marginTargetBp: number;
   /** r: TMA mensal */ tmaMonthlyBp: number;
   /** c: comissão padrão sobre a receita bruta */ commissionBp: number;
-  /** g: perda esperada / glosa padrão */ lossBp: number;
-  /** D_alvo por segmento (meses) */ paybackMaxPrivate: number; paybackMaxPublic: number;
-  /** Trava de segmento: retorno fora da política não vai para aprovação */ blockOutsidePolicy: boolean;
+  /** g: perda esperada / glosa padrão por segmento */ lossPrivateBp: number; lossPublicBp: number;
+  /** contingência sobre o investimento inicial e sobre os custos mensais */ contingencyCapexBp: number; contingencyOpexBp: number;
+  /** D_alvo por segmento (meses), comparado ao payback descontado */ paybackMaxPrivate: number; paybackMaxPublic: number;
+  /** Trava: venda fora da política não vai para aprovação */ blockOutsidePolicy: boolean;
 };
-export const DEFAULT_ECON_SETTINGS: EconSettings = { marginTargetBp: 3500, tmaMonthlyBp: 150, commissionBp: 0, lossBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
-  for (const [k, v] of [['Margem alvo', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Perda/glosa', s.lossBp]] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp]] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
   if (!(s.paybackMaxPrivate >= 1 && s.paybackMaxPrivate <= 120) || !(s.paybackMaxPublic >= 1 && s.paybackMaxPublic <= 120)) e.push('Payback máximo entre 1 e 120 meses.');
   return e;
 }
@@ -81,20 +88,20 @@ export function econInputErrors(i: EconInput) {
     if (l.description.trim().length < 2) e.push('Todo custo precisa de descrição.');
     if (!Number.isInteger(l.qtyMilli) || l.qtyMilli <= 0 || !Number.isInteger(l.unitCents) || l.unitCents < 0) e.push(`Valores inválidos em ${l.description || 'custo'}.`);
   }
-  for (const [k, v] of [['Comissão', i.commissionBp], ['Perda/glosa', i.lossBp], ['Margem alvo', i.marginTargetBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 10_000)) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Comissão', i.commissionBp], ['Perda/glosa', i.lossBp], ['Margem mínima', i.marginTargetBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 10_000)) e.push(`${k} inválida.`);
   if (i.priceCents != null && (!Number.isInteger(i.priceCents) || i.priceCents < 0)) e.push('Preço informado inválido.');
   if (!Number.isInteger(i.extraInitialCents) || i.extraInitialCents < 0) e.push('Adicional inicial inválido.');
   return e;
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { description: string; revenueCents: number; doc: { name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
+export type EconItem = { description: string; revenueCents: number; doc: { id?: string; name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco'] as const;
 export type EconVerdict = (typeof ECON_VERDICTS)[number];
 export const ECON_VERDICT_LABELS: Record<EconVerdict, string> = {
-  viavel: 'Viável', abaixo_recomendado: 'Viável, abaixo do recomendado', fora_politica: 'Fora da política de payback',
+  viavel: 'Viável', abaixo_recomendado: 'Abaixo da margem mínima', fora_politica: 'Fora da política de payback',
   abaixo_minimo: 'Abaixo do preço mínimo', inviavel: 'Inviável: deduções consomem a receita', sem_preco: 'Sem preço para avaliar',
 };
 
@@ -121,12 +128,15 @@ export function irr(flows: number[]): number | null {
   }
   return (lo + hi) / 2;
 }
-/** Payback simples com interpolação: (k − 1) + saldo a recuperar no início do mês k ÷ FCₖ. */
-export function paybackMonths(flows: number[]): number | null {
+/**
+ * Payback com interpolação: (k − 1) + saldo a recuperar no início do mês k ÷ FCₖ.
+ * Com r > 0 é o payback descontado (cada FCₖ trazido a valor presente pela TMA); r = 0 = simples.
+ */
+export function paybackMonths(flows: number[], r = 0): number | null {
   let cum = flows[0] ?? 0;
   if (cum >= 0) return 0;
   for (let k = 1; k < flows.length; k++) {
-    const f = flows[k]!;
+    const f = flows[k]! / (1 + r) ** k;
     if (cum + f >= 0) return f > 0 ? k - 1 + -cum / f : k;
     cum += f;
   }
@@ -134,17 +144,25 @@ export function paybackMonths(flows: number[]): number | null {
 }
 
 export type EconResult = {
+  engineVersion: string;
   mode: EconMode; publicSector: boolean;
-  revenueCents: number; priceCents: number | null; priceSource: 'itens' | 'informado' | 'recomendado';
+  /** P = preço informado; sem ele, o total dos produtos; sem produtos, nenhum (não se inventa preço) */
+  revenueCents: number; priceCents: number | null; priceSource: 'itens' | 'informado';
   rates: { a: number; c: number; g: number; m: number; r: number; b: number };
-  fixedTaxCents: number; initialCents: number; monthlyCostCents: number;
+  /** F: tributo fixo, contado uma vez por documento fiscal (por fatura) */
+  fixedTaxCents: number;
+  /** I e O já com contingência; as bases e as contingências vêm separadas para o DRE */
+  initialCents: number; monthlyCostCents: number;
+  capexBaseCents: number; capexContingencyCents: number; opexBaseCents: number; opexContingencyCents: number;
   term: { N: number; Dalvo: number; D: number; d: number };
   items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; pending: boolean }[];
   floor: { cashCents: number | null; economicCents: number | null; minCents: number | null };
   marginPriceCents: number | null; recommendedCents: number | null;
-  /** indicadores no preço avaliado (P) */
-  kpi: null | { taxCents: number; commissionCents: number; lossCents: number; contributionCents: number; marginPct: number; npvCents: number; irrMonthly: number | null; irrAnnual: number | null; paybackMonths: number | null };
+  /** indicadores no preço avaliado (P); paybackMonths = descontado pela TMA (é o que a política usa) */
+  kpi: null | { taxCents: number; commissionCents: number; lossCents: number; contributionCents: number; marginPct: number; npvCents: number; irrMonthly: number | null; irrAnnual: number | null; paybackMonths: number | null; simplePaybackMonths: number | null };
   cashflow: number[];
+  /** política: margem mínima atingida e payback descontado dentro do limite do segmento */
+  marginOk: boolean | null; paybackOk: boolean | null;
   verdict: EconVerdict; withinPolicy: boolean | null; withReservations: boolean; warnings: string[];
 };
 
@@ -154,12 +172,14 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   const { input: inp, settings: st, publicSector } = args;
   const warnings: string[] = [];
   const bp = (v: number) => v / 10_000;
-  // 1. entradas & escopo
+  // 1. entradas & escopo (contingência sobre investimento e custo mensal)
   const revenue = args.items.reduce((s, i) => s + Math.max(0, i.revenueCents), 0);
-  const I = inp.capex.reduce((s, l) => s + costLineTotal(l), 0) + inp.extraInitialCents;
-  const O = inp.mode === 'recorrente' ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
+  const capexBase = inp.capex.reduce((s, l) => s + costLineTotal(l), 0) + inp.extraInitialCents;
+  const opexBase = inp.mode === 'recorrente' ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
+  const capexCont = capexBase * bp(st.contingencyCapexBp), opexCont = opexBase * bp(st.contingencyOpexBp);
+  const I = capexBase + capexCont, O = opexBase + opexCont;
   if (inp.mode === 'pontual' && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
-  // 2. resolução fiscal por item e ponderação pela receita
+  // 2. resolução fiscal por item e ponderação pela receita; tributo fixo uma vez por documento (fatura)
   const n = args.items.length;
   const items = args.items.map((i) => {
     const w = revenue > 0 ? Math.max(0, i.revenueCents) / revenue : n ? 1 / n : 0;
@@ -167,12 +187,14 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
     return { description: i.description, revenueCents: i.revenueCents, weight: w, percentBp: i.doc?.percentBp ?? 0, fixedCents: i.doc?.fixedCents ?? 0, doc: i.doc?.name ?? null, pending };
   });
   const a = items.reduce((s, i) => s + i.weight * bp(i.percentBp), 0);
-  const F = items.reduce((s, i) => s + i.fixedCents, 0);
+  const perDoc = new Map<string, number>();
+  args.items.forEach((i, k) => { if (i.doc) perDoc.set(i.doc.id ?? `item-${k}`, i.doc.fixedCents); });
+  const F = [...perDoc.values()].reduce((s, v) => s + v, 0);
   const pendingItems = items.filter((i) => i.pending);
   if (!n) warnings.push('Sem produtos na oportunidade: sem tributos por item e sem preço pelos itens.');
   if (pendingItems.length) warnings.push(`${pendingItems.length} item(ns) sem documento fiscal ou sem tributos vigentes (${pendingItems.slice(0, 3).map((i) => i.description).join(', ')}${pendingItems.length > 3 ? '…' : ''}): calculado sem esses tributos.`);
   const c = bp(inp.commissionBp ?? st.commissionBp);
-  const g = bp(inp.lossBp ?? st.lossBp);
+  const g = bp(inp.lossBp ?? (publicSector ? st.lossPublicBp : st.lossPrivateBp));
   const m = bp(inp.marginTargetBp ?? st.marginTargetBp);
   const r = bp(st.tmaMonthlyBp);
   const b = 1 - a - c - g;
@@ -181,7 +203,7 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
   const D = inp.mode === 'recorrente' ? Math.min(N, Dalvo) : 0;
   const d = inp.mode === 'pontual' ? inp.receiveMonth : 0;
 
-  // 3. piso mínimo e 4. preço recomendado
+  // 3. piso mínimo e 4. preço pela margem mínima
   let cash: number | null = null, eco: number | null = null, marginPrice: number | null = null;
   if (b > 0) {
     if (inp.mode === 'pontual') {
@@ -194,14 +216,14 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
       eco = (O + F + (A ? I / A : 0)) / b;
       marginPrice = b - m > 0 ? (O + F) / (b - m) : null;
     }
-    if (marginPrice === null) warnings.push('A margem alvo é maior que a base líquida: não há preço que entregue essa margem.');
+    if (marginPrice === null) warnings.push('A margem mínima é maior que a base líquida: não há preço que entregue essa margem.');
   } else warnings.push('Tributos, comissão e perdas somam 100% ou mais da receita: nenhum preço cobre os custos.');
   const minP = cash !== null && eco !== null ? Math.max(cash, eco) : null;
-  const recP = minP !== null ? Math.max(minP, marginPrice ?? minP) : null;
+  const recP = minP !== null && marginPrice !== null ? Math.max(minP, marginPrice) : null;
 
-  // 5. preço avaliado e indicadores
-  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : revenue > 0 ? 'itens' : 'recomendado';
-  const P = inp.priceCents ?? (revenue > 0 ? revenue : recP);
+  // 5. preço avaliado (informado, senão o dos produtos) e indicadores
+  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : 'itens';
+  const P = inp.priceCents ?? (revenue > 0 ? revenue : null);
   let kpi: EconResult['kpi'] = null;
   let flows: number[] = [];
   if (P != null && P > 0) {
@@ -213,27 +235,32 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
     kpi = {
       taxCents: Math.round(T), commissionCents: Math.round(comm), lossCents: Math.round(loss), contributionCents: Math.round(contribution),
       marginPct: (inp.mode === 'pontual' ? (contribution - I) / P : contribution / P) * 100,
-      npvCents: Math.round(npv(flows, r)), irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1, paybackMonths: paybackMonths(flows),
+      npvCents: Math.round(npv(flows, r)), irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1,
+      paybackMonths: paybackMonths(flows, r), simplePaybackMonths: paybackMonths(flows),
     };
   }
   const pb = kpi?.paybackMonths ?? null;
-  const withinPolicy = inp.mode === 'recorrente' && kpi ? I === 0 || (pb !== null && pb <= Dalvo) : null;
+  const paybackOk = inp.mode === 'recorrente' && kpi ? I === 0 || (pb !== null && pb <= Dalvo) : null;
+  const marginOk = kpi ? kpi.marginPct >= m * 100 - 1e-9 : null;
+  const withinPolicy = kpi ? paybackOk !== false && marginOk === true : null;
   let verdict: EconVerdict;
   if (b <= 0) verdict = 'inviavel';
   else if (!kpi || P == null) verdict = 'sem_preco';
   else if (minP !== null && P < Math.round(minP)) verdict = 'abaixo_minimo';
-  else if (withinPolicy === false) verdict = 'fora_politica';
-  else if (recP !== null && P < Math.round(recP)) verdict = 'abaixo_recomendado';
+  else if (paybackOk === false) verdict = 'fora_politica';
+  else if (!marginOk) verdict = 'abaixo_recomendado';
   else verdict = 'viavel';
   if (inp.mode === 'recorrente' && N < Dalvo && I > 0) warnings.push(`Vigência de ${N} meses menor que o limite de payback (${Dalvo}): o investimento é amortizado na vigência.`);
 
   return {
+    engineVersion: ENGINE_VERSION,
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
-    rates: { a, c, g, m, r, b }, fixedTaxCents: F, initialCents: I, monthlyCostCents: O,
+    rates: { a, c, g, m, r, b }, fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
+    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     term: { N, Dalvo, D, d }, items,
     floor: { cashCents: round(cash), economicCents: round(eco), minCents: round(minP) },
     marginPriceCents: round(marginPrice), recommendedCents: round(recP), kpi, cashflow: flows.map(Math.round),
-    verdict, withinPolicy, withReservations: pendingItems.length > 0 || !n, warnings,
+    marginOk, paybackOk, verdict, withinPolicy, withReservations: pendingItems.length > 0 || !n, warnings,
   };
 }
 
@@ -241,9 +268,9 @@ export function financeEngine(args: { input: EconInput; items: EconItem[]; setti
 export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) {
   const per = rs.mode === 'recorrente' ? '/mês' : '';
   if (rs.verdict === 'inviavel') return 'Tributos, comissão e perdas consomem toda a receita: revise a comissão, a perda esperada ou os documentos fiscais.';
-  if (rs.verdict === 'sem_preco' || !rs.kpi) return `Informe o preço ou lance os produtos. O preço mínimo é ${fmt(rs.floor.minCents)}${per} e o recomendado ${fmt(rs.recommendedCents)}${per}.`;
+  if (rs.verdict === 'sem_preco' || !rs.kpi) return `Informe o preço ou lance os produtos. O preço mínimo é ${fmt(rs.floor.minCents)}${per}${rs.recommendedCents != null ? ` e o que entrega a margem mínima, ${fmt(rs.recommendedCents)}${per}` : ''}.`;
   const k = rs.kpi;
-  const pb = k.paybackMonths === null ? 'não se paga na vigência' : k.paybackMonths === 0 ? 'sem investimento a recuperar' : `o investimento volta em ${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses (limite ${rs.term.Dalvo})`;
+  const pb = k.paybackMonths === null ? 'não se paga na vigência' : k.paybackMonths === 0 ? 'sem investimento a recuperar' : `o investimento volta em ${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses, já descontada a TMA (limite ${rs.term.Dalvo})`;
   const sobra = rs.mode === 'recorrente' ? `sobram ${fmt(k.contributionCents)} por mês (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e custos` : `o resultado é ${fmt(k.contributionCents - rs.initialCents)} (${k.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% da receita) depois de tributos, comissão, perdas e investimento`;
   return `Com ${fmt(rs.priceCents)}${per}, ${sobra}; ${pb}.`;
 }

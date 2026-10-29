@@ -1,14 +1,14 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
-import { and, eq, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { ECON_MODES, econInputErrors, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
+import { ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
-import { notFound, unprocessable } from '../http/errors';
+import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
-import { loadOpportunity } from '../services/opportunities';
-import { computeEconomics, econSettingsOf, economicsContext, economicsHistory, fiscalDocsOf, isStale, saveEconomics } from '../services/economics';
+import { loadOpportunity, oppVisibility } from '../services/opportunities';
+import { computeEconomics, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
 
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
@@ -24,19 +24,29 @@ const EconBody = z.object({
 export const economicsRoutes = [
   // ------------------------------------------------------------------ parâmetros (Configurações → Viabilidade)
   defineRoute({
-    method: 'GET', url: '/admin/viability/econ', summary: 'Parâmetros do motor financeiro: margem alvo, TMA, comissão, perda/glosa e payback máximo por segmento', tag: 'Viabilidade', ...ADMIN,
-    handler: async ({ app, auth }) => econSettingsOf(app.db, auth.tenantId),
+    method: 'GET', url: '/admin/viability/econ', summary: 'Parâmetros do motor financeiro: versão vigente e histórico de versões com vigência', tag: 'Viabilidade', ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const cur = await econSettingsOf(app.db, auth.tenantId);
+      return { current: cur ? { id: cur.id, validFrom: cur.validFrom, ...cur.settings } : null, versions: await econSettingsHistory(app.db, auth.tenantId), today: today() };
+    },
   }),
   defineRoute({
-    method: 'PUT', url: '/admin/viability/econ', summary: 'Salva os parâmetros do motor financeiro (auditado)', tag: 'Viabilidade', ...ADMIN,
-    body: z.object({ marginTargetBp: bp, tmaMonthlyBp: bp, commissionBp: bp, lossBp: bp, paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean() }),
-    handler: async ({ app, auth, body, req }) => {
-      const e = econSettingsErrors(body);
+    method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
+    body: z.object({
+      marginTargetBp: bp, tmaMonthlyBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp,
+      paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean(),
+      validFrom: z.string().date(),
+    }),
+    handler: async ({ app, auth, body, req, reply }) => {
+      const { validFrom, ...values } = body;
+      const e = econSettingsErrors(values);
       if (e.length) throw unprocessable(e.join(' '));
+      if (validFrom < today()) throw unprocessable('A vigência começa hoje ou numa data futura: cálculos já salvos não mudam de regra.');
       const before = await econSettingsOf(app.db, auth.tenantId);
-      await app.db.insert(s.viabilitySettings).values({ tenantId: auth.tenantId, econ: body, updatedBy: auth.userId }).onConflictDoUpdate({ target: s.viabilitySettings.tenantId, set: { econ: body, updatedBy: auth.userId, updatedAt: new Date() } });
-      await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: 'econ', metadata: { from: before, to: body } });
-      return body;
+      const [v] = await app.db.insert(s.econSettingsVersions).values({ tenantId: auth.tenantId, values, validFrom, createdBy: auth.userId }).returning({ id: s.econSettingsVersions.id });
+      await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
+      reply.code(201);
+      return { id: v!.id, validFrom, ...values };
     },
   }),
 
@@ -82,25 +92,26 @@ export const economicsRoutes = [
 
   // ------------------------------------------------------------------ viabilidade econômica da oportunidade
   defineRoute({
-    method: 'GET', url: '/opportunities/:id/economics', summary: 'Viabilidade econômica: entradas salvas, itens com tributos, parâmetros e o resultado calculado agora', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    method: 'GET', url: '/opportunities/:id/economics', summary: 'Viabilidade econômica: entradas e resultado SALVOS (consultar não recalcula), situação da decisão e histórico', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
     handler: async ({ app, auth, params }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
       const { savedResult, ...rest } = ctx;
-      // consultar não recalcula: o resultado é o salvo; "stale" só avisa que itens, tributos ou parâmetros mudaram desde então
+      // "stale" só avisa que itens, tributos, parâmetros ou o motor mudaram desde o salvo; nada é gravado
       const stale = savedResult ? isStale(savedResult, computeEconomics(ctx)) : false;
-      const history = await economicsHistory(app.db, auth.tenantId, opp.id);
+      const [history, st] = await Promise.all([economicsHistory(app.db, auth.tenantId, opp.id), econStatus(app.db, auth.tenantId, opp.id)]);
       const open = !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]);
+      const decision = { status: st.status, decisions: st.decisions.map(({ actorId: _a, ...d }) => d), canDecide: st.status === 'em_decisao' && auth.actions.aprovar_viabilidade && st.submittedBy !== auth.userId };
       if (!auth.actions.ver_financeiro) {
         // sem "ver financeiro": só o veredito; nada de custos, fluxo, TIR, payback, pesos ou taxas
-        return { financeHidden: true, publicSector: ctx.publicSector, saved: ctx.saved, stale, editable: false, history, input: null, items: [], settings: null, branchDocs: [],
+        return { financeHidden: true, publicSector: ctx.publicSector, saved: ctx.saved, stale, editable: false, history, input: null, items: [], settings: null, settingsVersion: null, branchDocs: [], ...decision, canDecide: false,
           result: savedResult ? { verdict: savedResult.verdict, mode: savedResult.mode, withReservations: savedResult.withReservations, withinPolicy: savedResult.withinPolicy } : null };
       }
-      return { ...rest, financeHidden: false, result: savedResult, stale, history, editable: open };
+      return { ...rest, financeHidden: false, result: savedResult, stale, history, editable: open, ...decision };
     },
   }),
   defineRoute({
-    method: 'PUT', url: '/opportunities/:id/economics', summary: 'Salva a viabilidade econômica (calcula no servidor e guarda a fotografia auditável)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    method: 'PUT', url: '/opportunities/:id/economics', summary: 'Salva a viabilidade econômica (calcula no servidor com os parâmetros vigentes e guarda a fotografia auditável)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
     body: EconBody,
     handler: async ({ app, auth, params, body, req }) => {
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
@@ -110,8 +121,66 @@ export const economicsRoutes = [
       const e = econInputErrors(input);
       if (e.length) throw unprocessable(e.join(' '));
       const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
-      await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null } });
+      if (!result) throw unprocessable(NO_SETTINGS);
+      await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
       return { result, history: await economicsHistory(app.db, auth.tenantId, opp.id) };
     },
   }),
+  defineRoute({
+    method: 'POST', url: '/opportunities/:id/economics/submit', summary: 'Envia a viabilidade salva para decisão da gestão (exige cálculo atualizado e 100% dos tributos parametrizados na filial)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params, req }) => {
+      requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é enviada por quem vê valores financeiros.');
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada.');
+      const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
+      if (!ctx.savedResult) throw unprocessable('Salve a viabilidade econômica antes de enviar.');
+      assertDecidable(ctx);
+      const st = await econStatus(app.db, auth.tenantId, opp.id);
+      if (st.status === 'em_decisao') throw unprocessable('Esta viabilidade já está em decisão.');
+      if (st.status === 'aprovada') throw unprocessable('Esta viabilidade já foi aprovada. Para mudar, salve de novo e envie a nova versão.');
+      await app.db.insert(s.opportunityEconDecisions).values({ tenantId: auth.tenantId, opportunityId: opp.id, snapshotId: st.snapshotId!, action: 'enviada', actorId: auth.userId });
+      await audit(app.db, req, { action: 'opportunity.economics_submit', entityType: 'opportunity', entityId: opp.id, metadata: { snapshotId: st.snapshotId, verdict: ctx.savedResult.verdict } });
+      return econStatus(app.db, auth.tenantId, opp.id).then((x) => ({ status: x.status }));
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/opportunities/:id/economics/decision', summary: 'Aprova ou devolve (com motivo) a viabilidade em decisão — gestão e diretoria; ninguém decide o que enviou', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    body: z.object({ decision: z.enum(['aprovar', 'devolver']), reason: z.string().trim().max(1000).optional() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      requireAction(auth, 'aprovar_viabilidade', 'Aprovar a viabilidade econômica é da gestão e da diretoria.');
+      requireAction(auth, 'ver_financeiro', 'Para decidir a viabilidade é preciso ver os valores financeiros.');
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const st = await econStatus(app.db, auth.tenantId, opp.id);
+      if (st.status !== 'em_decisao') throw unprocessable('Não há viabilidade aguardando decisão nesta oportunidade.');
+      if (st.submittedBy === auth.userId) throw forbidden('Quem enviou a viabilidade não pode decidir sobre ela.');
+      if (body.decision === 'devolver' && (body.reason ?? '').length < 5) throw unprocessable('Diga o motivo da devolução.', [{ path: 'reason', message: 'Motivo obrigatório' }]);
+      if (body.decision === 'aprovar') assertDecidable(await economicsContext(app.db, { ...opp, tenantId: auth.tenantId }));
+      await app.db.insert(s.opportunityEconDecisions).values({ tenantId: auth.tenantId, opportunityId: opp.id, snapshotId: st.snapshotId!, action: body.decision === 'aprovar' ? 'aprovada' : 'devolvida', reason: body.reason || null, actorId: auth.userId });
+      await audit(app.db, req, { action: body.decision === 'aprovar' ? 'opportunity.economics_approve' : 'opportunity.economics_return', entityType: 'opportunity', entityId: opp.id, metadata: { snapshotId: st.snapshotId, reason: body.reason ?? null } });
+      return econStatus(app.db, auth.tenantId, opp.id).then((x) => ({ status: x.status }));
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/economics/pending', summary: 'Viabilidades aguardando decisão, nas oportunidades que você enxerga (gestão e diretoria)', tag: 'Oportunidades', module: 'oportunidades',
+    handler: async ({ app, auth }) => {
+      if (!auth.actions.aprovar_viabilidade || !auth.actions.ver_financeiro) return { items: [] };
+      const sent = await app.db.selectDistinct({ id: s.opportunityEconDecisions.opportunityId }).from(s.opportunityEconDecisions).where(and(eq(s.opportunityEconDecisions.tenantId, auth.tenantId), eq(s.opportunityEconDecisions.action, 'enviada')));
+      if (!sent.length) return { items: [] };
+      const opps = await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, account: s.contacts.name, result: s.opportunityEconomics.result })
+        .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).innerJoin(s.opportunityEconomics, eq(s.opportunityEconomics.opportunityId, s.opportunities.id))
+        .where(and(oppVisibility(auth), inArray(s.opportunities.id, sent.map((x) => x.id))));
+      const pend = await pendingDecisions(app.db, auth.tenantId, opps.map((o) => o.id));
+      return { items: pend.map((p) => { const o = opps.find((x) => x.id === p.opportunityId)!; const r = o.result as unknown as EconResult; return { ...p, code: o.code, title: o.title, account: o.account, verdict: r.verdict, priceCents: r.priceCents, mode: r.mode, paybackMonths: r.kpi?.paybackMonths ?? null, marginPct: r.kpi?.marginPct ?? null, mine: p.submittedBy === auth.userId }; }) };
+    },
+  }),
 ];
+
+const NO_SETTINGS = 'A empresa ainda não informou os parâmetros da viabilidade (margem mínima, TMA, glosa, payback…). Quem administra preenche em Configurações → Viabilidade.';
+
+/** Decisão (enviar ou aprovar) só com cálculo atualizado e 100% dos tributos parametrizados na filial. */
+function assertDecidable(ctx: EconContext) {
+  const fresh = computeEconomics(ctx);
+  if (!fresh) throw unprocessable(NO_SETTINGS);
+  if (isStale(ctx.savedResult!, fresh)) throw unprocessable('A viabilidade mudou desde que foi salva (produtos, tributos ou parâmetros). Abra a aba Viabilidade econômica, confira e salve de novo.');
+  if (fresh.withReservations) throw unprocessable('Todos os produtos precisam de documento fiscal com tributos vigentes cadastrados na filial (Configurações → Filiais e documentos fiscais).');
+}

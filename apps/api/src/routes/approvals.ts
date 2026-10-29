@@ -151,14 +151,22 @@ export const approvalRoutes = [
       // trava de segmento do motor financeiro: com a viabilidade econômica preenchida, retorno fora da política não vai para aprovação
       const [econ] = await app.db.select({ opportunityId: s.opportunityEconomics.opportunityId }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
       if (econ) {
-        // decide pelo cálculo salvo; se itens, tributos ou parâmetros mudaram depois, pede para salvar de novo
+        // decide pelo cálculo salvo; desatualizado, sem parâmetros ou com tributo faltando, pede para resolver antes
         const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
         const er = ctx.savedResult!;
-        if (isStale(er, computeEconomics(ctx))) throw unprocessable('A viabilidade econômica mudou desde que foi salva (produtos, tributos ou parâmetros). Abra a aba Viabilidade econômica, confira e salve de novo antes de pedir aprovação.');
-        if (ctx.settings.blockOutsidePolicy && (er.withinPolicy === false || er.verdict === 'inviavel')) {
-          throw unprocessable(er.verdict === 'inviavel'
-            ? 'Viabilidade econômica: tributos, comissão e perdas consomem a receita. Revise antes de pedir aprovação.'
-            : `Viabilidade econômica fora da política: o investimento volta em ${er.kpi?.paybackMonths == null ? 'mais que a vigência' : `${er.kpi.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses`} e o limite para ${ctx.publicSector ? 'setor público' : 'setor privado'} é ${er.term.Dalvo}. Ajuste preço, investimento ou vigência.`);
+        const fresh = computeEconomics(ctx);
+        if (!fresh || !ctx.settings) throw unprocessable('A empresa ainda não informou os parâmetros da viabilidade econômica (Configurações → Viabilidade).');
+        if (isStale(er, fresh)) throw unprocessable('A viabilidade econômica mudou desde que foi salva (produtos, tributos ou parâmetros). Abra a aba Viabilidade econômica, confira e salve de novo antes de pedir aprovação.');
+        if (er.withReservations) throw unprocessable('Viabilidade econômica: todos os produtos precisam de documento fiscal com tributos vigentes cadastrados na filial antes de pedir aprovação.');
+        if (ctx.settings.blockOutsidePolicy && er.verdict !== 'viavel') {
+          const pb = er.kpi?.paybackMonths;
+          throw unprocessable({
+            inviavel: 'Viabilidade econômica: tributos, comissão e perdas consomem a receita. Revise antes de pedir aprovação.',
+            sem_preco: 'Viabilidade econômica sem preço: lance os produtos ou informe o preço.',
+            abaixo_minimo: 'Viabilidade econômica abaixo do preço mínimo: o preço não cobre custos, tributos e o investimento no prazo da política.',
+            fora_politica: `Viabilidade econômica fora da política: o investimento volta em ${pb == null ? 'mais que a vigência' : `${pb.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses`} (payback descontado) e o limite para ${ctx.publicSector ? 'setor público' : 'setor privado'} é ${er.term.Dalvo}. Ajuste preço, investimento ou vigência.`,
+            abaixo_recomendado: `Viabilidade econômica abaixo da margem mínima: ${(er.kpi?.marginPct ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% contra ${(er.rates.m * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% exigidos.`,
+          }[er.verdict as 'inviavel']);
         }
       }
       const a = await buildAnalysis(app.db, auth, opp, { proposedMonthlyCents: body.proposedMonthlyCents, activationFeeCents: body.activationFeeCents, replacesMonthlyCents: body.replacesMonthlyCents, negotiationType: body.negotiationType });
