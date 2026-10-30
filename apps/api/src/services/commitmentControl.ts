@@ -20,42 +20,85 @@ export const canManageCommitments = (auth: AuthContext, c: { commercialOwnerId: 
   isAdmin(auth) || level(auth, 'contratos') === 'total' || hasSector(auth, ['administracao', 'inteligencia_comercial', 'diretoria', 'financeiro']) || c.commercialOwnerId === auth.userId || c.operationalOwnerId === auth.userId;
 
 export async function controlData(db: DbOrTx, contractId: string) {
+  return (await controlDataMany(db, [contractId])).get(contractId)!;
+}
+
+/** O histórico de vários contratos em poucas consultas (uma por tabela), agrupado por contrato. */
+export async function controlDataMany(db: DbOrTx, contractIds: string[]) {
+  const out = new Map<string, ReturnType<typeof buildControlData>>();
+  if (!contractIds.length) return out;
+  const ids = contractIds;
   const [lines, commitments, measurements, reservations, lineMoves, sources, shareVersions, adjustments, retros] = await Promise.all([
-    db.select().from(s.contractLines).where(eq(s.contractLines.contractId, contractId)).orderBy(asc(s.contractLines.position), asc(s.contractLines.createdAt)),
-    db.select().from(s.contractCommitments).where(eq(s.contractCommitments.contractId, contractId)).orderBy(asc(s.contractCommitments.issuedOn), asc(s.contractCommitments.number)),
-    db.select().from(s.contractMeasurements).where(eq(s.contractMeasurements.contractId, contractId)).orderBy(asc(s.contractMeasurements.competence), asc(s.contractMeasurements.createdAt)),
+    db.select().from(s.contractLines).where(inArray(s.contractLines.contractId, ids)).orderBy(asc(s.contractLines.position), asc(s.contractLines.createdAt)),
+    db.select().from(s.contractCommitments).where(inArray(s.contractCommitments.contractId, ids)).orderBy(asc(s.contractCommitments.issuedOn), asc(s.contractCommitments.number)),
+    db.select().from(s.contractMeasurements).where(inArray(s.contractMeasurements.contractId, ids)).orderBy(asc(s.contractMeasurements.competence), asc(s.contractMeasurements.createdAt)),
     db.select({ r: s.contractOpportunityLines, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage }).from(s.contractOpportunityLines)
       .innerJoin(s.opportunities, eq(s.opportunities.id, s.contractOpportunityLines.opportunityId))
-      .where(and(eq(s.contractOpportunityLines.contractId, contractId), eq(s.contractOpportunityLines.status, 'reservada'))),
-    db.select().from(s.contractLineMoves).where(eq(s.contractLineMoves.contractId, contractId)).orderBy(asc(s.contractLineMoves.effectiveOn)),
-    db.select().from(s.contractRevenueSources).where(eq(s.contractRevenueSources.contractId, contractId)).orderBy(asc(s.contractRevenueSources.createdAt)),
-    db.select().from(s.contractSourceShares).where(eq(s.contractSourceShares.contractId, contractId)).orderBy(desc(s.contractSourceShares.version)),
-    db.select().from(s.contractAdjustments).where(eq(s.contractAdjustments.contractId, contractId)).orderBy(asc(s.contractAdjustments.startCompetence), asc(s.contractAdjustments.createdAt)),
-    db.select().from(s.contractAdjustmentRetros).where(eq(s.contractAdjustmentRetros.contractId, contractId)),
+      .where(and(inArray(s.contractOpportunityLines.contractId, ids), eq(s.contractOpportunityLines.status, 'reservada'))),
+    db.select().from(s.contractLineMoves).where(inArray(s.contractLineMoves.contractId, ids)).orderBy(asc(s.contractLineMoves.effectiveOn)),
+    db.select().from(s.contractRevenueSources).where(inArray(s.contractRevenueSources.contractId, ids)).orderBy(asc(s.contractRevenueSources.createdAt)),
+    db.select().from(s.contractSourceShares).where(inArray(s.contractSourceShares.contractId, ids)).orderBy(desc(s.contractSourceShares.version)),
+    db.select().from(s.contractAdjustments).where(inArray(s.contractAdjustments.contractId, ids)).orderBy(asc(s.contractAdjustments.startCompetence), asc(s.contractAdjustments.createdAt)),
+    db.select().from(s.contractAdjustmentRetros).where(inArray(s.contractAdjustmentRetros.contractId, ids)),
   ]);
-  const ids = commitments.map((c) => c.id);
-  const cItems = ids.length ? await db.select().from(s.contractCommitmentItems).where(inArray(s.contractCommitmentItems.commitmentId, ids)) : [];
+  const cIds = commitments.map((c) => c.id), mIds = measurements.map((m) => m.id), aIds = adjustments.map((a) => a.id);
+  const [cItems, mItems, priceRows] = await Promise.all([
+    cIds.length ? db.select().from(s.contractCommitmentItems).where(inArray(s.contractCommitmentItems.commitmentId, cIds)) : Promise.resolve([]),
+    mIds.length ? db.select().from(s.contractMeasurementItems).where(inArray(s.contractMeasurementItems.measurementId, mIds)) : Promise.resolve([]),
+    aIds.length ? db.select().from(s.contractLinePrices).where(inArray(s.contractLinePrices.adjustmentId, aIds)) : Promise.resolve([]),
+  ]);
   const moves = cItems.length ? await db.select().from(s.contractCommitmentMoves).where(inArray(s.contractCommitmentMoves.commitmentItemId, cItems.map((i) => i.id))).orderBy(asc(s.contractCommitmentMoves.occurredOn)) : [];
-  const mIds = measurements.map((m) => m.id);
-  const mItems = mIds.length ? await db.select().from(s.contractMeasurementItems).where(inArray(s.contractMeasurementItems.measurementId, mIds)) : [];
-  const aIds = adjustments.map((a) => a.id);
-  const priceRows = aIds.length ? await db.select().from(s.contractLinePrices).where(inArray(s.contractLinePrices.adjustmentId, aIds)) : [];
+  const by = <T,>(rows: T[], key: (r: T) => string) => { const m = new Map<string, T[]>(); for (const r of rows) { const k = key(r); const l = m.get(k); if (l) l.push(r); else m.set(k, [r]); } return m; };
+  const commitmentContract = new Map(commitments.map((c) => [c.id, c.contractId]));
+  const measurementContract = new Map(measurements.map((m) => [m.id, m.contractId]));
+  const adjustmentContract = new Map(adjustments.map((a) => [a.id, a.contractId]));
+  const itemContract = new Map(cItems.map((i) => [i.id, commitmentContract.get(i.commitmentId)!]));
+  const g = {
+    lines: by(lines, (x) => x.contractId), commitments: by(commitments, (x) => x.contractId), measurements: by(measurements, (x) => x.contractId),
+    reservations: by(reservations, (x) => x.r.contractId), lineMoves: by(lineMoves, (x) => x.contractId), sources: by(sources, (x) => x.contractId),
+    shareVersions: by(shareVersions, (x) => x.contractId), adjustments: by(adjustments, (x) => x.contractId), retros: by(retros, (x) => x.contractId),
+    cItems: by(cItems, (x) => commitmentContract.get(x.commitmentId)!), mItems: by(mItems, (x) => measurementContract.get(x.measurementId)!),
+    priceRows: by(priceRows, (x) => adjustmentContract.get(x.adjustmentId)!), moves: by(moves, (x) => itemContract.get(x.commitmentItemId)!),
+  };
+  for (const id of ids) {
+    out.set(id, buildControlData({
+      lines: g.lines.get(id) ?? [], commitments: g.commitments.get(id) ?? [], measurements: g.measurements.get(id) ?? [], reservations: g.reservations.get(id) ?? [],
+      lineMoves: g.lineMoves.get(id) ?? [], sources: g.sources.get(id) ?? [], shareVersions: g.shareVersions.get(id) ?? [], adjustments: g.adjustments.get(id) ?? [],
+      retros: g.retros.get(id) ?? [], cItems: g.cItems.get(id) ?? [], mItems: g.mItems.get(id) ?? [], priceRows: g.priceRows.get(id) ?? [], moves: g.moves.get(id) ?? [],
+    }));
+  }
+  return out;
+}
+
+type RawRows = {
+  lines: (typeof s.contractLines.$inferSelect)[]; commitments: (typeof s.contractCommitments.$inferSelect)[]; measurements: (typeof s.contractMeasurements.$inferSelect)[];
+  reservations: { r: typeof s.contractOpportunityLines.$inferSelect; code: number; title: string; stage: string }[];
+  lineMoves: (typeof s.contractLineMoves.$inferSelect)[]; sources: (typeof s.contractRevenueSources.$inferSelect)[]; shareVersions: (typeof s.contractSourceShares.$inferSelect)[];
+  adjustments: (typeof s.contractAdjustments.$inferSelect)[]; retros: (typeof s.contractAdjustmentRetros.$inferSelect)[];
+  cItems: (typeof s.contractCommitmentItems.$inferSelect)[]; mItems: (typeof s.contractMeasurementItems.$inferSelect)[]; priceRows: (typeof s.contractLinePrices.$inferSelect)[];
+  moves: (typeof s.contractCommitmentMoves.$inferSelect)[];
+};
+
+function buildControlData(raw: RawRows) {
+  const { lines, commitments, measurements, reservations, lineMoves, cItems, moves, mItems, priceRows } = raw;
   const prices: CPrice[] = priceRows.map((p) => ({ lineId: p.lineId, price4: p.price4, from: p.fromCompetence, adjustmentId: p.adjustmentId }));
   const today = todayIso().slice(0, 7);
+  const movesByItem = new Map<string, typeof moves>();
+  for (const m of moves) movesByItem.set(m.commitmentItemId, [...(movesByItem.get(m.commitmentItemId) ?? []), m]);
   // quantidade contratada = original + aditivos (acréscimo − supressão); preço = tabela vigente hoje (reajustes, PF08)
   const netQty = (l: (typeof lines)[number]) => l.qty4 + lineMoves.filter((m) => m.lineId === l.id).reduce((a, m) => a + (m.kind === 'acrescimo' ? m.qty4 : -m.qty4), 0);
   const dl: CLine[] = lines.map((l) => ({ id: l.id, itemNumber: l.itemNumber, description: l.description, unit: l.unit, classification: l.classification as LineClass, qty4: netQty(l), price4: priceAt(l, prices, today), monthlyQty4: l.monthlyQty4 }));
   const dc: CCommitment[] = commitments.map((c) => ({ id: c.id, number: c.number, fiscalYear: c.fiscalYear, issuedOn: c.issuedOn, cancelled: !!c.cancelledAt, source: c.source, sourceId: c.sourceId }));
   const di: CCommitmentItem[] = cItems.map((i) => {
-    const mv = moves.filter((m) => m.commitmentItemId === i.id).map((m) => ({ kind: m.kind as CommitmentMoveKind, qty4: m.qty4, occurredOn: m.occurredOn }));
+    const mv = (movesByItem.get(i.id) ?? []).map((m) => ({ kind: m.kind as CommitmentMoveKind, qty4: m.qty4, occurredOn: m.occurredOn }));
     return { id: i.id, commitmentId: i.commitmentId, lineId: i.lineId, code: i.code, itemNumber: i.itemNumber, qty4: i.qty4, adjust4: mv.reduce((a, m) => a + (m.kind === 'reforco' ? m.qty4 : -m.qty4), 0), moves: mv };
   });
   const dm: CMeasurement[] = measurements.map((m) => ({ id: m.id, competence: m.competence, status: m.status as MeasurementStatus, superseded: m.superseded, title: m.title, kind: m.kind as MeasurementKind, createdAt: m.createdAt.toISOString(), attestedAt: m.attestedAt?.toISOString() ?? null }));
   const dmi: CMeasurementItem[] = mItems.map((x) => ({ measurementId: x.measurementId, lineId: x.lineId, qty4: x.qty4, price4: x.price4, allocations: x.allocations, uncovered4: x.uncovered4 }));
   const dr: CReservation[] = reservations.map((x) => ({ lineId: x.r.lineId, qty4: x.r.qty4, opportunityId: x.r.opportunityId }));
-  return { raw: { lines, commitments, cItems, moves, measurements, mItems, reservations, lineMoves, sources, shareVersions, adjustments, priceRows, retros }, lines: dl, commitments: dc, items: di, measurements: dm, mItems: dmi, reservations: dr, prices };
+  return { raw, lines: dl, commitments: dc, items: di, measurements: dm, mItems: dmi, reservations: dr, prices };
 }
-export type ControlData = Awaited<ReturnType<typeof controlData>>;
+export type ControlData = ReturnType<typeof buildControlData>;
 
 /** Parâmetros do contrato que a regra usa (ordem de baixa e alertas). */
 export type ControlSettings = { allocation: 'fifo' | 'rateio'; agingDays: number; toCommitPct: number | null; windowMonths: number };
