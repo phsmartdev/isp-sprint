@@ -1,4 +1,4 @@
-import { annuityFactor, type FValue } from './formula';
+import { annuityFactor, irr as irrOf, npv as npvOf, paybackMonths as paybackOf, type FValue } from './formula';
 import { buildModel, runModel, type FinBase, type FinModel, type ModelRun } from './financeModel';
 /**
  * Motor financeiro da viabilidade econômica (especificação FINANCE-1.0 a 1.3, "ENT_MotorFinanceiroViabilidade").
@@ -91,8 +91,14 @@ export type CostImpact = (typeof COST_IMPACTS)[number];
 export const COST_IMPACT_LABELS: Record<CostImpact, string> = { material: 'Material/Equipamento', servico: 'Serviço/Mão de obra', operacional: 'Custo operacional', entrega: 'Despesa de entrega', taxa_venda: 'Taxa fixa de venda' };
 /** Despesa de entrega e taxa fixa de venda são despesas variáveis em R$: entram no preço, mas fora do investimento (sem contingência). */
 export const isVariableFixed = (impact?: CostImpact | null) => impact === 'entrega' || impact === 'taxa_venda';
-/** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo. */
-export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean };
+/** Tipo de negociação de cada produto/serviço: venda (pagamento único), recorrência (mensalidade) ou locação/aluguel (mensal, mesma conta da recorrência). */
+export const DEAL_KINDS = ['venda', 'recorrencia', 'locacao'] as const;
+export type DealKind = (typeof DEAL_KINDS)[number];
+export const DEAL_KIND_LABELS: Record<DealKind, string> = { venda: 'Venda', recorrencia: 'Recorrência', locacao: 'Locação/aluguel' };
+/** venda é pontual; recorrência e locação são mensais */
+export const isMonthlyKind = (k: DealKind) => k !== 'venda';
+/** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo; kind = de qual tipo de negociação o custo sai (vazio = comum, rateado pela receita). */
+export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
 export type EconInput = {
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
@@ -102,7 +108,8 @@ export type EconInput = {
   /** O: custos operacionais mensais */ opex: CostLine[];
   /** sobrescritas da negociação; null = padrão da empresa (margem: a sugestão, limitada ao piso e ao teto) */ commissionBp: number | null; lossBp: number | null; marginTargetBp: number | null;
   /** payback que o vendedor define (meses), até o teto do segmento; null = o teto */ paybackMonths?: number | null;
-  /** P informado; null = itens da oportunidade */ priceCents: number | null;
+  /** P informado; null = itens da oportunidade (na negociação mista, é o preço mensal) */ priceCents: number | null;
+  /** negociação mista: preço informado da parte de venda (pagamento único); null = itens de venda */ salePriceCents?: number | null;
 };
 export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
 export const costLineTotal = (l: CostLine) => Math.round((l.qtyMilli * l.unitCents) / 1000);
@@ -120,11 +127,13 @@ export function econInputErrors(i: EconInput) {
   if (!Number.isInteger(i.extraInitialCents) || i.extraInitialCents < 0) e.push('Adicional inicial inválido.');
   if (i.paybackMonths != null && !(Number.isInteger(i.paybackMonths) && i.paybackMonths >= 1 && i.paybackMonths <= 240)) e.push('Payback entre 1 e 240 meses.');
   for (const l of i.capex) if (l.impact && !(COST_IMPACTS as readonly string[]).includes(l.impact)) e.push(`Impacto inválido em ${l.description}.`);
+  for (const l of [...i.capex, ...i.opex]) if (l.kind && !(DEAL_KINDS as readonly string[]).includes(l.kind)) e.push(`Tipo de negociação inválido em ${l.description}.`);
+  if (i.salePriceCents != null && (!Number.isInteger(i.salePriceCents) || i.salePriceCents < 0)) e.push('Preço da venda inválido.');
   return e;
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { description: string; revenueCents: number; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
+export type EconItem = { description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco'] as const;
@@ -136,8 +145,20 @@ export const ECON_VERDICT_LABELS: Record<EconVerdict, string> = {
 
 export type EconStatement = { revenue: number; tax: number; commission: number; opex: number; amortization: number; contribution: number; risk: number; overhead: number | null; operating: number | null; incomeTax: number | null; net: number | null };
 
+/** Negociação mista: as partes calculadas (venda pontual e mensal) e o rateio dos custos comuns. */
+export type DealSummary = {
+  kinds: DealKind[];
+  revenue: Record<DealKind, number>;
+  /** participação de cada parte nos custos comuns (pela receita do contrato) */
+  share: { venda: number; mensal: number };
+  parts: { venda: EconResult; mensal: EconResult };
+  /** preço mínimo sugerido por tipo (venda: valor único; recorrência e locação: por mês) */
+  suggested: Record<DealKind, number | null>;
+};
 export type EconResult = {
   engineVersion: string;
+  /** negociação com venda e itens mensais juntos (um resultado só) */
+  deal?: DealSummary;
   mode: EconMode; publicSector: boolean;
   /** P = preço informado; sem ele, o total dos produtos; sem produtos, o preço exato do motor */
   revenueCents: number; priceCents: number | null; /** sugerido = produtos lançados sem valor: a análise roda no preço mínimo sugerido (que acompanha payback e margem) */ priceSource: 'itens' | 'informado' | 'motor' | 'sugerido';
@@ -215,7 +236,100 @@ export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'
  * 4. decisão: preço mínimo, margem e payback; aprovação automática quando VPL > 0 e TIR > TMA, senão alçada.
  */
 export type EngineArgs = { input: EconInput; items: EconItem[]; settings: EconSettings; publicSector: boolean; model?: FinModel };
-export const financeEngine = (args: EngineArgs): EconResult => financeEngineDetailed(args).result;
+export function financeEngine(args: EngineArgs): EconResult {
+  const kindOf = (i: EconItem): DealKind => i.kind ?? (args.input.mode === 'pontual' ? 'venda' : 'recorrencia');
+  const sale = args.items.filter((i) => kindOf(i) === 'venda'), monthly = args.items.filter((i) => isMonthlyKind(kindOf(i)));
+  // um tipo só: o motor de sempre, com o modo dado pelos produtos
+  if (!sale.length || !monthly.length) {
+    const mode: EconMode = !args.items.length ? args.input.mode : sale.length ? 'pontual' : 'recorrente';
+    const r = financeEngineDetailed({ ...args, input: { ...args.input, mode } }).result;
+    const other = args.input.capex.concat(args.input.opex).filter((l) => l.kind && (mode === 'pontual' ? isMonthlyKind(l.kind) : l.kind === 'venda'));
+    if (args.items.length && other.length) r.warnings.push(`${other.length} custo(s) marcado(s) para ${mode === 'pontual' ? 'recorrência/locação' : 'venda'} sem produto desse tipo: calculado(s) junto com os demais.`);
+    return r;
+  }
+  return mixedEngine(args, kindOf, sale, monthly);
+}
+
+/**
+ * Negociação mista (venda + recorrência/locação, um resultado só): cada custo sai do seu tipo; os comuns são rateados
+ * pela receita do contrato (venda × mensal no prazo). Cada parte passa pelo motor; os fluxos de caixa somados dão o
+ * VPL, a TIR, o payback e a decisão da negociação. Locação usa a mesma conta da recorrência.
+ */
+function mixedEngine(args: EngineArgs, kindOf: (i: EconItem) => DealKind, sale: EconItem[], monthly: EconItem[]): EconResult {
+  const inp = args.input, st = args.settings;
+  const rev = (k: DealKind) => args.items.filter((i) => kindOf(i) === k).reduce((s, i) => s + Math.max(0, i.revenueCents), 0);
+  const revenue: Record<DealKind, number> = { venda: rev('venda'), recorrencia: rev('recorrencia'), locacao: rev('locacao') };
+  const N = Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths);
+  const saleTotal = inp.salePriceCents ?? revenue.venda, monthTotal = (inp.priceCents ?? revenue.recorrencia + revenue.locacao) * N;
+  // sem preço lançado, o rateio vai pela quantidade de produtos de cada parte
+  const shareV = saleTotal + monthTotal > 0 ? saleTotal / (saleTotal + monthTotal) : sale.length / (sale.length + monthly.length);
+  const split = (l: CostLine, f: number): CostLine => ({ ...l, unitCents: Math.round(l.unitCents * f) });
+  const common = inp.capex.filter((l) => !l.kind);
+  const saleCapex = [...inp.capex.filter((l) => l.kind === 'venda'), ...common.map((l) => split(l, shareV))].filter((l) => l.unitCents > 0);
+  const monthCapex = [...inp.capex.filter((l) => l.kind && isMonthlyKind(l.kind)), ...common.map((l) => split(l, 1 - shareV))].filter((l) => l.unitCents > 0);
+  const extraV = Math.round(inp.extraInitialCents * shareV);
+  const vendaPart = financeEngineDetailed({ ...args, items: sale, input: { ...inp, mode: 'pontual', capex: saleCapex, opex: [], extraInitialCents: extraV, priceCents: inp.salePriceCents ?? null } }).result;
+  const mensalPart = financeEngineDetailed({ ...args, items: monthly, input: { ...inp, mode: 'recorrente', capex: monthCapex, extraInitialCents: inp.extraInitialCents - extraV, salePriceCents: null } }).result;
+  const warnings = [...new Set([...mensalPart.warnings, ...vendaPart.warnings.filter((w) => !w.startsWith('Venda pontual: custos mensais'))])];
+  const opexSale = inp.opex.filter((l) => l.kind === 'venda');
+  if (opexSale.length) warnings.push(`${opexSale.length} custo(s) mensal(is) marcado(s) como venda: a venda é pagamento único, então entram nos custos mensais da recorrência/locação.`);
+
+  // fluxo único da negociação: investimento das duas partes no início, a venda no mês do recebimento, as mensalidades
+  const len = Math.max(vendaPart.cashflow.length, mensalPart.cashflow.length);
+  const flows = Array.from({ length: len }, (_, k) => (vendaPart.cashflow[k] ?? 0) + (mensalPart.cashflow[k] ?? 0));
+  const r = mensalPart.rates.r;
+  const priced = !!vendaPart.kpi && !!mensalPart.kpi;
+  const pb = priced ? paybackOf(flows, r) : null, pbS = priced ? paybackOf(flows, 0) : null;
+  const npvC = priced ? Math.round(npvOf(flows, r)) : 0;
+  const ir = priced ? irrOf(flows) : null;
+  const Dalvo = mensalPart.term.Dalvo;
+  const paybackOk = priced ? (vendaPart.investmentCents ?? 0) + (mensalPart.investmentCents ?? 0) === 0 || (pb != null && pb <= Dalvo) : null;
+  const order: EconVerdict[] = ['inviavel', 'sem_preco', 'abaixo_minimo', 'fora_politica', 'abaixo_recomendado', 'viavel'];
+  const partVerdict = (v: EconVerdict) => (v === 'fora_politica' ? 'viavel' : v); // payback da parte não decide: vale o da negociação
+  let verdict = order[Math.min(order.indexOf(partVerdict(vendaPart.verdict)), order.indexOf(partVerdict(mensalPart.verdict)))]!;
+  if (verdict === 'viavel' && paybackOk === false) verdict = 'fora_politica';
+  else if (verdict === 'abaixo_recomendado' && paybackOk === false) verdict = 'fora_politica';
+  const marginOk = vendaPart.marginOk === true && mensalPart.marginOk === true ? true : vendaPart.marginOk === null || mensalPart.marginOk === null ? null : false;
+  const tma = r;
+  const checks = [
+    { label: 'VPL positivo', ok: priced && npvC > 0 },
+    { label: 'TIR acima da TMA', ok: ir != null && ir > tma },
+    { label: 'Payback descontado dentro do teto', ok: paybackOk === true },
+    { label: 'Margem no piso ou acima (venda e mensal)', ok: marginOk === true },
+    { label: 'Preço no mínimo ou acima (venda e mensal)', ok: !['abaixo_minimo', 'inviavel', 'sem_preco'].includes(verdict) },
+    { label: 'Tributos de todos os produtos', ok: !vendaPart.withReservations && !mensalPart.withReservations },
+    ...(vendaPart.priceSource === 'sugerido' || mensalPart.priceSource === 'sugerido' ? [{ label: 'Preço definido na negociação', ok: false }] : []),
+  ];
+  const share = (k: 'recorrencia' | 'locacao') => {
+    const t = revenue.recorrencia + revenue.locacao;
+    const cnt = monthly.filter((i) => kindOf(i) === k).length;
+    return t > 0 ? revenue[k] / t : cnt / monthly.length;
+  };
+  const sug = mensalPart.suggestedMinCents;
+  const sumStmt = (a?: EconStatement, b?: EconStatement): EconStatement | undefined => {
+    if (!a || !b) return a ?? b;
+    const add = (x: number | null, y: number | null) => (x == null && y == null ? null : (x ?? 0) + (y ?? 0));
+    return { revenue: a.revenue + b.revenue, tax: a.tax + b.tax, commission: a.commission + b.commission, opex: a.opex + b.opex, amortization: a.amortization + b.amortization, contribution: a.contribution + b.contribution, risk: a.risk + b.risk, overhead: add(a.overhead, b.overhead), operating: add(a.operating, b.operating), incomeTax: add(a.incomeTax, b.incomeTax), net: add(a.net, b.net) };
+  };
+  return {
+    ...mensalPart,
+    initialCents: mensalPart.initialCents + vendaPart.initialCents, capexBaseCents: mensalPart.capexBaseCents + vendaPart.capexBaseCents, capexContingencyCents: mensalPart.capexContingencyCents + vendaPart.capexContingencyCents,
+    variableFixedCents: (mensalPart.variableFixedCents ?? 0) + (vendaPart.variableFixedCents ?? 0), investmentCents: (mensalPart.investmentCents ?? 0) + (vendaPart.investmentCents ?? 0),
+    fixedTaxCents: mensalPart.fixedTaxCents + vendaPart.fixedTaxCents,
+    items: [...vendaPart.items, ...mensalPart.items],
+    kpi: mensalPart.kpi && priced ? { ...mensalPart.kpi, npvCents: npvC, irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1, paybackMonths: pb, simplePaybackMonths: pbS } : null,
+    cashflow: flows.map(Math.round),
+    statement: mensalPart.statement && vendaPart.statement ? { month: mensalPart.statement.month, total: sumStmt(mensalPart.statement.total, vendaPart.statement.total)! } : mensalPart.statement,
+    paybackOk, marginOk, verdict, withinPolicy: priced ? paybackOk !== false && marginOk === true : null,
+    withReservations: vendaPart.withReservations || mensalPart.withReservations, warnings,
+    autoApproval: { ok: checks.every((x) => x.ok) && !!vendaPart.autoApproval && !!mensalPart.autoApproval, checks },
+    deal: {
+      kinds: DEAL_KINDS.filter((k) => args.items.some((i) => kindOf(i) === k)), revenue, share: { venda: shareV, mensal: 1 - shareV },
+      parts: { venda: vendaPart, mensal: mensalPart },
+      suggested: { venda: vendaPart.suggestedMinCents ?? null, recorrencia: sug == null ? null : Math.ceil(sug * share('recorrencia')), locacao: sug == null ? null : Math.ceil(sug * share('locacao')) },
+    },
+  };
+}
 
 /** O motor com o que o Financial Studio mostra: as variáveis de entrada (com o preço avaliado) e a execução do modelo. */
 export function financeEngineDetailed(args: EngineArgs): { result: EconResult; base: FinBase; run: ModelRun; model: FinModel } {
@@ -541,6 +655,11 @@ function econDreV1(r: EconResult, fmt: (c: number) => string): DreRow[] {
 
 /** Uma frase para o time entender o impacto, sem fórmulas. */
 export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) {
+  if (rs.deal) {
+    const v = rs.deal.parts.venda, k = rs.kpi;
+    const pb = k?.paybackMonths != null ? `${k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses` : 'fora da projeção';
+    return `Negociação com venda de ${fmt(v.priceCents)} e ${fmt(rs.priceCents)}/mês (${rs.deal.kinds.filter((x) => x !== 'venda').map((x) => DEAL_KIND_LABELS[x].toLowerCase()).join(' e ')}): ${k ? `o investimento total de ${fmt(rs.investmentCents ?? 0)} volta em ${pb} e o ganho no contrato (VPL) é ${fmt(k.npvCents)}` : 'defina os preços para ver o retorno'}. ${ECON_VERDICT_LABELS[rs.verdict]}.`;
+  }
   const per = rs.mode === 'recorrente' ? '/mês' : '';
   if (rs.verdict === 'inviavel') return 'Tributos, comissão e perdas consomem toda a receita: revise a comissão, a perda esperada ou os documentos fiscais.';
   if (rs.priceSource === 'sugerido' && rs.kpi) {
