@@ -24,7 +24,8 @@ function scenario(rand: () => number) {
     capex: rand() < 0.8 ? [{ description: 'Equipamento', qtyMilli: 1000 * pick([1, 2, 21]), unitCents: pick([15_000, 300_000, 1_500_000]), impact: 'material' }, ...(rand() < 0.4 ? [{ description: 'Frete', qtyMilli: 1000, unitCents: 50_000, impact: 'entrega' as const }] : [])] : [],
     opex: rand() < 0.8 ? [{ description: 'Link', qtyMilli: 1000, unitCents: pick([20_000, 120_000, 400_000]) }] : [],
     extraInitialCents: pick([0, 0, 25_000]), commissionBp: rand() < 0.2 ? 300 : null, lossBp: null,
-    marginTargetBp: rand() < 0.3 ? pick([1000, 3000, 7000]) : null, paybackMonths: rand() < 0.4 ? pick([3, 6, 30]) : null,
+    marginTargetBp: rand() < 0.3 ? pick([1000, 3000, 7000]) : null, // payback acima do teto: o motor atual não corta mais no teto (mudança pedida em 30/10/2026), então fica fora da comparação
+    paybackMonths: rand() < 0.4 ? pick([3, 6]) : null,
     priceCents: rand() < 0.3 ? pick([50_000, 500_000, 2_000_000]) : null,
   };
   const items: EconItem[] = rand() < 0.9 ? [{ description: 'Link', revenueCents: pick([100_000, 600_000, 1_292_500]), doc: { id: 'd1', name: 'NFCOM', percentBp: pick([865, 3000]), fixedCents: pick([0, 350]), complete: rand() < 0.9 } }] : [];
@@ -45,6 +46,10 @@ describe('compatibilidade: o modelo padrão reproduz o motor anterior', () => {
       const a = legacyEngine(args), b = financeEngine(args);
       const ctx = `cenário ${k}: ${JSON.stringify(args.input.mode)}`;
       where = ctx;
+      // sem produtos e sem preço informado o preço é o do motor, agora arredondado para o centavo de cima (30/10/2026):
+      // a decisão pode mudar no limite (o motor anterior arredondava para baixo e caía 1 centavo abaixo do mínimo)
+      const motorPrice = !args.items.length && args.input.priceCents == null;
+      if (motorPrice) { close(b.priceCents, a.priceCents); continue; }
       expect(b.priceCents, ctx).toBe(a.priceCents);
       for (const key of ['cashCents', 'economicCents', 'minCents'] as const) close(b.floor[key], a.floor[key]);
       close(b.marginPriceCents, a.marginPriceCents); close(b.recommendedCents, a.recommendedCents); close(b.markupPriceCents, a.markupPriceCents);
