@@ -61,7 +61,9 @@ export type RetroItem = { lineId: string; qty4: number; oldPrice4: number; newPr
  *   faturadas → retroativo medição a medição (qtd × diferença de preço), a cobrar em NF complementar (PF05);
  *   ainda não faturadas → passam a valer pelo preço novo (RN08).
  */
-export function retroactiveFor(measurements: CMeasurement[], mItems: CMeasurementItem[], table: { lineId: string; newPrice4: number }[], start: string) {
+export function retroactiveFor(measurements: CMeasurement[], mItems: CMeasurementItem[], table: { lineId: string; newPrice4: number }[], start: string, opts: { repriceOpen?: boolean } = {}) {
+  // repriceOpen = false: as medições ainda não faturadas mantêm o preço lançado e a diferença também vira retroativo
+  const repriceOpen = opts.repriceOpen ?? true;
   const np = new Map(table.map((t) => [t.lineId, t.newPrice4]));
   const invoiced: { measurementId: string; competence: string; title: string; items: RetroItem[]; diffV4: number }[] = [];
   const reprice: { measurementId: string; lineId: string; oldPrice4: number; newPrice4: number }[] = [];
@@ -69,7 +71,7 @@ export function retroactiveFor(measurements: CMeasurement[], mItems: CMeasuremen
     if (!isLive(m.status) || m.superseded || m.competence < start) continue;
     const its = mItems.filter((x) => x.measurementId === m.id && np.has(x.lineId) && np.get(x.lineId) !== x.price4);
     if (!its.length) continue;
-    if (m.status === 'faturada') {
+    if (m.status === 'faturada' || !repriceOpen) {
       const items = its.map((x) => ({ lineId: x.lineId, qty4: x.qty4, oldPrice4: x.price4, newPrice4: np.get(x.lineId)!, diffV4: value4(x.qty4, np.get(x.lineId)!) - value4(x.qty4, x.price4) }));
       invoiced.push({ measurementId: m.id, competence: m.competence, title: m.title, items, diffV4: items.reduce((a, i) => a + i.diffV4, 0) });
     } else for (const x of its) reprice.push({ measurementId: m.id, lineId: x.lineId, oldPrice4: x.price4, newPrice4: np.get(x.lineId)! });
@@ -256,8 +258,8 @@ export type CommitmentProjection = ReturnType<typeof commitmentProjection>;
 
 // ------------------------------------------------------------------ PF07.5 curva
 /**
- * Curva mês a mês (acumulada) das quatro linhas. O empenhado vale qtd × preço vigente e acompanha emissão, reforço,
- * anulação e supressão pelas datas; executado pela competência das medições atestadas/faturadas; faturado pela data da NF.
+ * Curva mês a mês (acumulada) das quatro linhas. O empenhado acompanha emissão, reforço,
+ * anulação, supressão e reforço de valor pelas datas, no preço da emissão da NE; executado pela competência das medições atestadas/faturadas; faturado pela data da NF.
  */
 export function commitmentCurve(a: { today: string; startAt: string | null; lines: (CLine & { qtyMoves?: { qty4: number; effectiveOn: string }[]; originalQty4?: number })[]; commitments: CCommitment[]; items: CCommitmentItem[]; measurements: (CMeasurement & { invoiceDate?: string | null })[]; mItems: CMeasurementItem[] }) {
   const cur = a.today.slice(0, 7);
@@ -277,8 +279,11 @@ export function commitmentCurve(a: { today: string; startAt: string | null; line
     for (const i of a.items) {
       const c = active.get(i.commitmentId);
       if (!c || c.issuedOn > eom) continue;
-      const adj = i.moves ? i.moves.filter((m) => m.occurredOn <= eom).reduce((t, m) => t + (m.kind === 'reforco' ? m.qty4 : -m.qty4), 0) : i.adjust4;
-      committedV4 += value4(i.qty4 + adj, price.get(i.lineId) ?? 0);
+      const ms = i.moves ? i.moves.filter((m) => m.occurredOn <= eom) : null;
+      const p = i.price4 ?? price.get(i.lineId) ?? 0;
+      committedV4 += ms
+        ? value4(i.qty4, p) + ms.reduce((t, m) => t + (m.kind === 'reforco' ? value4(m.qty4, p) : m.kind === 'reforco_valor' ? m.value4 ?? 0 : -(m.value4 ?? value4(m.qty4, p))), 0)
+        : value4(i.qty4 + i.adjust4, p) + (i.valueAdjust4 ?? 0);
     }
     let executedV4 = 0, invoicedV4 = 0;
     for (const m of live) {

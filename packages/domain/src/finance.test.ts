@@ -28,7 +28,7 @@ describe('resolução fiscal', () => {
 });
 
 describe('piso, preço recomendado e indicadores', () => {
-  it('venda pontual: pisos com o risco e preço exato pelo markup divisor (I + F) ÷ (1 − a − c − m); produto sem valor fica com preço zero', () => {
+  it('venda pontual: pisos com o risco e preço exato pelo markup divisor (I + F) ÷ (1 − a − c − m); produto sem valor é avaliado no preço sugerido', () => {
     const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 2, capex: [{ description: 'Equipamento', qtyMilli: 1000, unitCents: 85_000 }] };
     const r = financeEngine({ input, items: items([0, 1500]), settings: { ...S, tmaMonthlyBp: 100, marginTargetBp: 2000 }, publicSector: false });
     // b = 1 − 0,15 = 0,85; margem = piso (sem sugestão) = 20%
@@ -36,12 +36,11 @@ describe('piso, preço recomendado e indicadores', () => {
     near(r.floor.economicCents, (85_000 * 1.01 ** 2) / 0.85);
     near(r.markupPriceCents!, 85_000 / 0.65);
     near(r.recommendedCents, 85_000 / 0.65);
-    expect(r.priceSource).toBe('itens');
-    expect(r.priceCents).toBe(0);
-    expect(r.verdict).toBe('sem_preco');
-    const at = financeEngine({ input: { ...input, priceCents: r.recommendedCents }, items: items([0, 1500]), settings: { ...S, tmaMonthlyBp: 100, marginTargetBp: 2000 }, publicSector: false });
-    expect(at.kpi!.marginPct).toBeCloseTo(20, 2);
-    expect(at.verdict).toBe('viavel');
+    // produto sem valor: avaliado no preço que entrega a margem (aqui acima dos pisos)
+    expect(r.priceSource).toBe('sugerido');
+    expect(r.priceCents).toBe(r.recommendedCents);
+    expect(r.kpi!.marginPct).toBeCloseTo(20, 2);
+    expect(r.verdict).toBe('viavel');
   });
   it('recorrente: C = (I + E) ÷ payback + O; M = (C + F) ÷ (1 − a − c − m); fluxo com glosa e inadimplência; aprovação automática', () => {
     const input = { ...emptyEconInput(), termMonths: 24, capex: [{ description: 'Roteador', qtyMilli: 2000, unitCents: 150_000 }], opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 40_000 }] };
@@ -145,16 +144,21 @@ describe('decisões da diretoria (29/10)', () => {
     expect(none.priceSource).toBe('motor');
     expect(none.priceCents).toBe(none.recommendedCents);
   });
-  it('produto lançado sem valor: preço zero na análise e o mínimo sugerido para definir o preço', () => {
+  it('produto lançado sem valor: receita zero e análise no mínimo sugerido, que acompanha payback e margem', () => {
     const r = financeEngine({ input: rec(), items: items([0, 0]), settings: S, publicSector: false });
-    expect(r.priceSource).toBe('itens');
-    expect(r.priceCents).toBe(0);
-    expect(r.kpi).toBeNull();
-    expect(r.verdict).toBe('sem_preco');
-    expect(r.suggestedMinCents).toBeGreaterThan(0);
-    // usando o mínimo sugerido, a análise fecha
-    const ok = financeEngine({ input: rec({ priceCents: r.suggestedMinCents }), items: items([0, 0]), settings: S, publicSector: false });
-    expect(ok.kpi).not.toBeNull();
+    expect(r.priceSource).toBe('sugerido');
+    expect(r.revenueCents).toBe(0);
+    expect(r.priceCents).toBe(Math.max(r.suggestedMinCents!, r.recommendedCents!));
+    expect(r.kpi).not.toBeNull();
+    expect(r.verdict).toBe('viavel');
+    // payback e margem indicados mudam o preço avaliado e o retorno real
+    const fast = financeEngine({ input: rec({ paybackMonths: 3 }), items: items([0, 0]), settings: S, publicSector: false });
+    expect(fast.priceCents!).toBeGreaterThan(r.priceCents!);
+    expect(fast.kpi!.paybackMonths!).toBeLessThan(r.kpi!.paybackMonths!);
+    const rich = financeEngine({ input: rec({ marginTargetBp: 6000 }), items: items([0, 0]), settings: { ...S, marginMaxBp: 8000 }, publicSector: false });
+    expect(rich.priceCents!).toBeGreaterThan(r.priceCents!);
+    expect(rich.kpi!.marginPct).toBeCloseTo(60, 1);
+    expect(econHeadline(r, (c) => String(c))).toMatch(/analisado no preço mínimo sugerido/);
   });
   it('payback do vendedor muda a análise inteira (inclusive acima do teto); o teto segue na aprovação pelo retorno real', () => {
     const it0 = items([0, 0]);

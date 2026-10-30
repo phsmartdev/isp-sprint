@@ -140,7 +140,7 @@ export type EconResult = {
   engineVersion: string;
   mode: EconMode; publicSector: boolean;
   /** P = preço informado; sem ele, o total dos produtos; sem produtos, o preço exato do motor */
-  revenueCents: number; priceCents: number | null; priceSource: 'itens' | 'informado' | 'motor';
+  revenueCents: number; priceCents: number | null; /** sugerido = produtos lançados sem valor: a análise roda no preço mínimo sugerido (que acompanha payback e margem) */ priceSource: 'itens' | 'informado' | 'motor' | 'sugerido';
   /**
    * a tributos ponderados · c comissão · g glosa e inadimplência (risco) · m margem escolhida (entre piso e teto) ·
    * r TMA mensal · b base líquida de caixa (1 − a − c − g) · (v2) glosa e inadimplência separadas, base do markup e limites da margem
@@ -294,10 +294,14 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   else if (markupPrice === null) warnings.push('A margem escolhida é maior que a base do markup: não há preço que entregue essa margem.');
   for (const w of pre.warnings) if (!w.includes('Divisão por zero')) warnings.push(`Fórmula ${w}`);
 
-  // 3. preço avaliado (informado; senão o dos produtos, mesmo zerado; sem produtos, o preço recomendado) e o modelo no preço.
-  // Produto lançado sem valor fica com preço zero: a análise mostra o mínimo sugerido para o vendedor definir o preço.
-  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : n ? 'itens' : 'motor';
-  const P0 = inp.priceCents ?? (n ? revenue : roundUp(recP));
+  // 3. preço avaliado: informado; senão o dos produtos; sem produtos, o recomendado do motor.
+  // Produtos lançados sem valor (receita zero): a análise roda no preço mínimo sugerido, então payback, margens e VPL
+  // acompanham o payback e a margem que o vendedor indicar; a receita dos produtos continua zero.
+  const noValue = n > 0 && revenue <= 0;
+  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : noValue ? 'sugerido' : n ? 'itens' : 'motor';
+  // sem valor nos produtos: o maior entre o mínimo sugerido e o preço que entrega a margem escolhida pelo vendedor
+  const sugP = suggested != null && recP != null ? Math.max(suggested, recP) : suggested ?? recP;
+  const P0 = inp.priceCents ?? (noValue ? roundUp(sugP) : n ? revenue : roundUp(recP));
   const P = P0 != null && Number.isFinite(P0) ? P0 : null;
   let kpi: EconResult['kpi'] = null;
   let flows: number[] = [];
@@ -354,6 +358,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     { label: 'Margem no piso ou acima', ok: marginOk === true },
     { label: 'Preço no mínimo ou acima', ok: verdict !== 'abaixo_minimo' && verdict !== 'inviavel' && verdict !== 'sem_preco' },
     { label: 'Tributos de todos os produtos', ok: !withReservations },
+    ...(priceSource === 'sugerido' ? [{ label: 'Preço definido na negociação', ok: false }] : []),
   ];
   const versions: Record<string, number> = {};
   for (const f of fm.formulas.values()) if (f.version !== 0) versions[f.code] = f.version ?? -1;
@@ -538,7 +543,10 @@ function econDreV1(r: EconResult, fmt: (c: number) => string): DreRow[] {
 export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) {
   const per = rs.mode === 'recorrente' ? '/mês' : '';
   if (rs.verdict === 'inviavel') return 'Tributos, comissão e perdas consomem toda a receita: revise a comissão, a perda esperada ou os documentos fiscais.';
-  if ((rs.verdict === 'sem_preco' || !rs.kpi) && rs.priceSource === 'itens' && !rs.priceCents) return `Produtos lançados sem preço: com o investimento e os custos informados, o preço mínimo sugerido é ${fmt(rs.suggestedMinCents ?? rs.floor.minCents)}${per}${rs.mode === 'recorrente' ? ` (payback de ${rs.term.D} meses)` : ''}. Use a sugestão ou informe o preço para ver a análise completa.`;
+  if (rs.priceSource === 'sugerido' && rs.kpi) {
+    const pbx = rs.kpi.paybackMonths != null ? `${rs.kpi.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses` : 'não se paga na projeção';
+    return `Produtos lançados sem preço: analisado no preço mínimo sugerido de ${fmt(rs.priceCents)}${per}, com margem de contribuição de ${rs.kpi.marginPct.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%${rs.mode === 'recorrente' ? ` e o investimento diluído em ${rs.term.D} meses` : ''}. O investimento volta em ${pbx}. Mude o payback ou a margem e a análise acompanha; para fechar, informe o preço.`;
+  }
   if (rs.verdict === 'sem_preco' || !rs.kpi) return `Informe o preço ou lance os produtos. O preço mínimo é ${fmt(rs.floor.minCents)}${per}${rs.recommendedCents != null ? ` e o que entrega a margem mínima, ${fmt(rs.recommendedCents)}${per}` : ''}.`;
   const k = rs.kpi;
   const tma = (rs.rates.r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
@@ -644,7 +652,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
     { label: 'Preço mínimo', formula: 'maior dos dois', value: money(r.floor.minCents), strong: true },
     ...(r.operatingFloorCents != null ? [{ label: 'Preço da margem operacional zero', formula: '(mesmo numerador) ÷ (1 - a - c - glosa - inadimplência - despesas fixas)', value: money(r.operatingFloorCents) }] : []),
     ...(r.suggestedMinCents != null ? [{ label: 'Preço mínimo sugerido', formula: 'maior entre o mínimo, o do piso de margem e o da margem operacional zero', value: money(r.suggestedMinCents), strong: true }] : []),
-    { label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : r.priceSource === 'itens' ? 'total dos produtos' : 'preço exato do motor', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true },
+    { label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : r.priceSource === 'itens' ? 'total dos produtos' : r.priceSource === 'sugerido' ? 'produtos sem preço: mínimo sugerido' : 'preço exato do motor', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true },
   ];
   void bMk;
   steps.push({ key: 'preco', title: 'Precificação exata (markup divisor)', desc: 'Valores em R$ no numerador; tributos, despesas variáveis (comissão) e margem, que variam com o preço, no denominador. IR/CSLL não entram na nota: ficam cobertos pela margem.', rows: prices });
@@ -744,7 +752,7 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
     if (r.operatingFloorCents != null) prices.push({ label: 'Preço da margem operacional zero', formula: rec ? '(O + F + I ÷ N) ÷ (b - despesas fixas)' : '(I + F) ÷ (b - despesas fixas)', value: money(r.operatingFloorCents) });
     if (r.suggestedMinCents != null) prices.push({ label: 'Preço mínimo sugerido', formula: 'maior entre o preço mínimo, o da margem mínima e o da margem operacional zero', value: money(r.suggestedMinCents), strong: true });
   }
-  prices.push({ label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : 'total dos produtos', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true });
+  prices.push({ label: 'Preço avaliado (P)', formula: r.priceSource === 'informado' ? 'informado na negociação' : r.priceSource === 'sugerido' ? 'produtos sem preço: mínimo sugerido' : 'total dos produtos', value: `${money(r.priceCents)}${rec ? '/mês' : ''}`, strong: true });
   steps.push({ key: 'preco', title: 'Preço (markup divisor)', desc: 'Valores em R$ ficam no numerador; tributos, comissão, glosa e margem, que variam com o preço, no denominador.', rows: prices });
 
   // 3. comparativo com o modelo histórico (informativo)

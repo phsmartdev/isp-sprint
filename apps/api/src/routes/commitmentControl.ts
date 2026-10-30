@@ -71,17 +71,21 @@ function serialize(d: ControlData, st: ReturnType<typeof controlState>) {
       const adj = d.items.find((x) => x.id === i.id)!.adjust4;
       const l = lineById.get(i.lineId);
       const balance4 = st.ciBal.get(i.id) ?? 0;
-      return { ...i, adjust4: adj, balance4, valueV4: value4(i.qty4 + adj, l?.price4 ?? 0), balanceV4: value4(balance4, l?.price4 ?? 0), moves: d.raw.moves.filter((m) => m.commitmentItemId === i.id).map((m) => ({ ...m, kindLabel: COMMITMENT_MOVE_LABELS[m.kind as CommitmentMoveKind] ?? m.kind })) };
+      const val = st.ciVal.get(i.id) ?? { committedV4: value4(i.qty4 + adj, l?.price4 ?? 0), usedV4: 0, balanceV4: value4(balance4, l?.price4 ?? 0) };
+      return { ...i, price4: i.price4 ?? l?.price4 ?? 0, adjust4: adj, balance4, valueV4: val.committedV4, usedV4: val.usedV4, balanceV4: val.balanceV4, valueAdjust4: d.items.find((x) => x.id === i.id)?.valueAdjust4 ?? 0, moves: d.raw.moves.filter((m) => m.commitmentItemId === i.id).map((m) => ({ ...m, kindLabel: COMMITMENT_MOVE_LABELS[m.kind as CommitmentMoveKind] ?? m.kind })) };
     });
     // virada (RN10): NE nova que recebeu o saldo suprimido desta e NEs antigas que esta substitui
     const linked = [...new Set(d.raw.moves.filter((m) => m.kind === 'supressao' && m.linkedCommitmentId && its.some((i) => i.id === m.commitmentItemId)).map((m) => m.linkedCommitmentId!))];
     const replaces = [...new Set(d.raw.moves.filter((m) => m.kind === 'supressao' && m.linkedCommitmentId === c.id).map((m) => d.raw.cItems.find((i) => i.id === m.commitmentItemId)?.commitmentId).filter((x): x is string => !!x))];
     const num = (id: string) => d.raw.commitments.find((x) => x.id === id)?.number ?? '';
-    return { ...c, sourceName: c.sourceId ? sourceName.get(c.sourceId) ?? null : c.source, items: its, valueV4: its.reduce((a, i) => a + i.valueV4, 0), balanceV4: c.cancelledAt ? 0 : its.reduce((a, i) => a + i.balanceV4, 0), suppressedV4: its.reduce((a, i) => a + value4(i.moves.filter((m) => m.kind === 'supressao').reduce((t, m) => t + m.qty4, 0), lineById.get(i.lineId)?.price4 ?? 0), 0), reempenhadaEm: linked.map((id) => ({ id, number: num(id) })), substitui: replaces.map((id) => ({ id, number: num(id) })) };
+    return { ...c, sourceName: c.sourceId ? sourceName.get(c.sourceId) ?? null : c.source, items: its, valueV4: its.reduce((a, i) => a + i.valueV4, 0), balanceV4: c.cancelledAt ? 0 : its.reduce((a, i) => a + i.balanceV4, 0), suppressedV4: its.reduce((a, i) => a + i.moves.filter((m) => m.kind === 'supressao').reduce((t, m) => t + (m.value4 ?? value4(m.qty4, i.price4)), 0), 0),
+      /** consumo em R$ acima do valor da nota (preço reajustado sem reforço de valor) */ valueDeficitV4: c.cancelledAt ? 0 : its.reduce((a, i) => a + Math.max(0, -i.balanceV4), 0), reempenhadaEm: linked.map((id) => ({ id, number: num(id) })), substitui: replaces.map((id) => ({ id, number: num(id) })) };
   });
   // pendências estruturadas (PF05): sem empenho, executado sem nota fiscal
   const pendencias = [
     ...measurements.filter((m) => m.status !== 'cancelada' && !m.superseded && m.uncoveredV4 > 0).map((m) => ({ kind: 'aguardando_empenho', label: 'Aguardando empenho', measurementId: m.id, title: m.title, competence: m.competence, valueV4: m.uncoveredV4, since: m.createdAt })),
+    // empenho em R$ insuficiente (o preço subiu e a NE não foi reforçada em valor)
+    ...commitments.filter((c) => c.valueDeficitV4 > 0).map((c) => ({ kind: 'reforco_valor', label: 'Reforço de valor da NE', measurementId: c.id, title: `${c.number}: consumo acima do valor empenhado`, competence: `${c.fiscalYear}-12`, valueV4: c.valueDeficitV4, since: c.createdAt })),
     ...measurements.filter((m) => m.status === 'atestada' && !m.superseded).map((m) => ({ kind: 'sem_nf', label: 'Executado sem nota fiscal', measurementId: m.id, title: m.title, competence: m.competence, valueV4: m.valueV4, since: m.attestedAt ?? m.createdAt })),
     // PF05.3: retroativo de reajuste a cobrar, por medição
     ...d.raw.retros.filter((x) => x.status === 'pendente').flatMap((x) => {
@@ -127,15 +131,15 @@ async function createCommitment(tx: DbOrTx, auth: AuthContext, c: { id: string; 
     const b = st.bal.find((x) => x.lineId === it.lineId)!;
     if (q4(it.qty) > b.toCommit4) throw unprocessable(`Item ${l.itemNumber}: empenhar ${nQty(q4(it.qty))} passa do que falta empenhar (${nQty(Math.max(0, b.toCommit4))}). Suprima o saldo da NE antiga (virada de exercício) antes de reempenhar.`);
   }
-  const amount = body.items.reduce((a, it) => a + value4(q4(it.qty), d.lines.find((l) => l.id === it.lineId)!.price4), 0);
+  const amount = body.items.reduce((a, it) => a + value4(q4(it.qty), linePriceAt(d, it.lineId, body.issuedOn.slice(0, 7))), 0);
   const fy = body.fiscalYear ?? (Number(/^(\d{4})NE/i.exec(body.number)?.[1]) || Number(body.issuedOn.slice(0, 4)));
   const [e] = await tx.insert(s.contractCommitments).values({ tenantId: auth.tenantId, contractId: c.id, number: body.number, issuedOn: body.issuedOn, fiscalYear: fy, amountCents: Math.max(1, cents(amount)), source: src?.name ?? body.source ?? null, sourceId: src?.id ?? null, replacesId: body.replacesId ?? null, notes: body.notes ?? null, createdBy: auth.userId }).returning({ id: s.contractCommitments.id });
-  await tx.insert(s.contractCommitmentItems).values(body.items.map((it) => ({ tenantId: auth.tenantId, commitmentId: e!.id, lineId: it.lineId, qty4: q4(it.qty), code: it.code ?? null, itemNumber: it.itemNumber ?? null })));
+  await tx.insert(s.contractCommitmentItems).values(body.items.map((it) => ({ tenantId: auth.tenantId, commitmentId: e!.id, lineId: it.lineId, qty4: q4(it.qty), price4: linePriceAt(d, it.lineId, body.issuedOn.slice(0, 7)), code: it.code ?? null, itemNumber: it.itemNumber ?? null })));
   await addEvent(tx, auth.tenantId, c.id, auth.userId, 'empenho', `Empenho ${body.number} (${fy}) de ${brl4(amount)} cobrindo ${body.items.length} item(ns)${src ? ` · fonte ${src.name}` : ''}.`, { commitmentId: e!.id });
   return e!.id;
 }
 
-const adjustmentBody = z.object({ indexName: z.string().trim().min(2).max(60), mode: z.enum(['fator', 'percentual']), index: z.string().trim().min(1).max(20), baseDate: day, startCompetence: month });
+const adjustmentBody = z.object({ indexName: z.string().trim().min(2).max(60), mode: z.enum(['fator', 'percentual']), index: z.string().trim().min(1).max(20), baseDate: day, startCompetence: month, repriceOpen: z.boolean().default(true) });
 
 /** Reajuste sobre a tabela vigente na competência de início; só depois do último reajuste (a ordem importa). */
 async function planAdjustment(db: DbOrTx, contractId: string, body: z.infer<typeof adjustmentBody>) {
@@ -146,7 +150,7 @@ async function planAdjustment(db: DbOrTx, contractId: string, body: z.infer<type
   const last = d.raw.adjustments.at(-1);
   if (last && body.startCompetence <= last.startCompetence) throw unprocessable(`Já existe reajuste a partir de ${last.startCompetence.slice(5)}/${last.startCompetence.slice(0, 4)}: o novo começa depois dele.`);
   const table = adjustmentTable(d.raw.lines, d.prices, factor8, body.startCompetence);
-  const retro = retroactiveFor(d.measurements, d.mItems, table, body.startCompetence);
+  const retro = retroactiveFor(d.measurements, d.mItems, table, body.startCompetence, { repriceOpen: body.repriceOpen });
   return { d, factor8, table, retro };
 }
 
@@ -299,8 +303,9 @@ export const commitmentControlRoutes = [
   defineRoute({
     method: 'POST', url: '/contracts/:id/commitment-items/:itemId/moves', summary: 'Reforço ou anulação parcial de um item de empenho (movimentação formal com motivo)', tag: 'Contratos', module: 'contratos',
     params: z.object({ id: z.string().uuid(), itemId: z.string().uuid() }),
-    body: z.object({ kind: z.enum(COMMITMENT_MOVE_KINDS), qty: z.number().positive().max(1_000_000_000), occurredOn: day, reason: z.string().trim().min(5).max(500) }),
+    body: z.object({ kind: z.enum(COMMITMENT_MOVE_KINDS), qty: z.number().min(0).max(1_000_000_000).default(0), value: z.number().positive().max(10_000_000_000).optional(), occurredOn: day, reason: z.string().trim().min(5).max(500) }),
     handler: async ({ app, auth, params, body, req, reply }) => {
+      if (body.kind === 'reforco_valor' ? !body.value : body.qty <= 0) throw unprocessable(body.kind === 'reforco_valor' ? 'Informe o valor do reforço (R$).' : 'Informe a quantidade.');
       const c = await manageable(app.db, auth, params.id);
       const d = await controlData(app.db, c.id);
       const it = d.items.find((i) => i.id === params.itemId);
@@ -308,9 +313,13 @@ export const commitmentControlRoutes = [
       const st = controlState(d, { startAt: null, endAt: null });
       if (body.kind !== 'reforco' && q4(body.qty) > Math.max(0, st.ciBal.get(it.id) ?? 0)) throw unprocessable(`A ${body.kind === 'supressao' ? 'supressão' : 'anulação'} passa do saldo do item de empenho (${nQty(Math.max(0, st.ciBal.get(it.id) ?? 0))}).`);
       if (body.kind === 'reforco' && q4(body.qty) > (st.bal.find((b) => b.lineId === it.lineId)?.toCommit4 ?? 0)) throw unprocessable('O reforço passa do que falta empenhar no item do contrato.');
-      await app.db.insert(s.contractCommitmentMoves).values({ tenantId: auth.tenantId, commitmentItemId: it.id, kind: body.kind, qty4: q4(body.qty), occurredOn: body.occurredOn, reason: body.reason, createdBy: auth.userId });
+      if (body.kind === 'reforco' || body.kind === 'reforco_valor') { /* reforço não reduz saldo */ } else if (q4(body.qty) > Math.max(0, st.ciBal.get(it.id) ?? 0)) throw unprocessable('A movimentação passa do saldo do item de empenho.');
+      // anulação/supressão tiram em R$ no máximo o que sobra de valor na nota (depois de reajuste, menos que qtd × preço)
+      const itemPrice = it.price4 ?? d.lines.find((l) => l.id === it.lineId)?.price4 ?? 0;
+      const value4v = body.kind === 'reforco_valor' ? q4(body.value!) : body.kind === 'reforco' ? null : Math.min(value4(q4(body.qty), itemPrice), Math.max(0, st.ciVal.get(it.id)?.balanceV4 ?? 0));
+      await app.db.insert(s.contractCommitmentMoves).values({ tenantId: auth.tenantId, commitmentItemId: it.id, kind: body.kind, qty4: body.kind === 'reforco_valor' ? 0 : q4(body.qty), value4: value4v, occurredOn: body.occurredOn, reason: body.reason, createdBy: auth.userId });
       const ne = d.commitments.find((x) => x.id === it.commitmentId)!;
-      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'empenho', `${COMMITMENT_MOVE_LABELS[body.kind]} de ${nQty(q4(body.qty))} no empenho ${ne.number}: ${body.reason}`);
+      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'empenho', `${COMMITMENT_MOVE_LABELS[body.kind]} de ${value4v != null ? brl4(value4v) : nQty(q4(body.qty))} no empenho ${ne.number}: ${body.reason}`);
       await audit(app.db, req, { action: `contract.commitment_${body.kind}`, entityType: 'contract', entityId: c.id, metadata: { itemId: it.id, ...body } });
       reply.code(201);
       return { ok: true };
@@ -370,6 +379,14 @@ export const commitmentControlRoutes = [
         if (m.status !== 'atestada') throw unprocessable('Fature depois de atestada.');
         // RN13: NF só com empenho ativo cobrindo tudo
         if (its.some((x) => x.uncovered4 > 0)) throw unprocessable(`Há ${brl4(its.reduce((a, x) => a + value4(x.uncovered4, x.price4), 0))} sem empenho nesta medição: registre a NE e use "Cobrir com empenho" antes de faturar.`);
+        // RN13 em valor: a NE precisa ter saldo em R$ (depois de reajuste, o reforço de valor)
+        const dv = await controlData(tx, c.id);
+        const sv = controlState(dv, { startAt: null, endAt: null });
+        const short = [...new Set(its.flatMap((x) => x.allocations.map((a) => a.commitmentItemId)))].filter((id) => (sv.ciVal.get(id)?.balanceV4 ?? 0) < 0);
+        if (short.length) {
+          const nes = [...new Set(short.map((id) => dv.commitments.find((n) => n.id === dv.items.find((i) => i.id === id)?.commitmentId)?.number).filter(Boolean))];
+          throw unprocessable(`Empenho sem saldo em valor: ${nes.join(', ')} (o preço reajustado passou do valor da nota). Registre o reforço de valor da NE antes de faturar.`);
+        }
         if (!body.invoiceNumber || !body.invoiceDate) throw unprocessable('Informe o número e a data da nota fiscal.');
         set = { status: 'faturada', invoiceNumber: body.invoiceNumber, invoiceDate: body.invoiceDate, invoiceCents: body.invoiceCents ?? cents(total) };
       }
@@ -474,7 +491,7 @@ export const commitmentControlRoutes = [
         const line = byItem.get(r.itemNumber.toLowerCase())!;
         const [dup] = await tx.select({ id: s.contractCommitmentItems.id }).from(s.contractCommitmentItems).where(and(eq(s.contractCommitmentItems.commitmentId, ne!.id), eq(s.contractCommitmentItems.lineId, line.id))).limit(1);
         if (dup) continue;
-        await tx.insert(s.contractCommitmentItems).values({ tenantId: auth.tenantId, commitmentId: ne!.id, lineId: line.id, qty4: q4(r.qty), code: r.code, itemNumber: r.commitmentItem });
+        await tx.insert(s.contractCommitmentItems).values({ tenantId: auth.tenantId, commitmentId: ne!.id, lineId: line.id, qty4: q4(r.qty), price4: line.price4, code: r.code, itemNumber: r.commitmentItem });
         createdItems++;
       }
       // valor das NEs pelos itens
@@ -585,9 +602,11 @@ export const commitmentControlRoutes = [
         if (ne.cancelled || ne.fiscalYear !== body.year) throw unprocessable(`A NE ${ne.number} não é do exercício ${body.year}.`);
         const free = Math.max(0, st.ciBal.get(it.id) ?? 0);
         if (q4(x.qty) > free) throw unprocessable(`NE ${ne.number}: a supressão passa do saldo do item (${nQty(free)}).`);
-        const [mv] = await tx.insert(s.contractCommitmentMoves).values({ tenantId: auth.tenantId, commitmentItemId: it.id, kind: 'supressao', qty4: q4(x.qty), occurredOn: body.occurredOn, reason: body.reason, createdBy: auth.userId }).returning({ id: s.contractCommitmentMoves.id });
+        // suprime em R$ o que de fato sobrou na nota (depois de reajuste pode ser menos que qtd × preço)
+        const sv = Math.min(value4(q4(x.qty), it.price4 ?? d.lines.find((l) => l.id === it.lineId)?.price4 ?? 0), Math.max(0, st.ciVal.get(it.id)?.balanceV4 ?? 0));
+        const [mv] = await tx.insert(s.contractCommitmentMoves).values({ tenantId: auth.tenantId, commitmentItemId: it.id, kind: 'supressao', qty4: q4(x.qty), value4: sv, occurredOn: body.occurredOn, reason: body.reason, createdBy: auth.userId }).returning({ id: s.contractCommitmentMoves.id });
         moveIds.push(mv!.id); olds.add(ne.id);
-        suppressedV4 += value4(q4(x.qty), d.lines.find((l) => l.id === it.lineId)?.price4 ?? 0);
+        suppressedV4 += sv;
       }
       let linked: string | null = null;
       if (body.newCommitment) {
@@ -641,11 +660,13 @@ export const commitmentControlRoutes = [
     handler: async ({ app, auth, params, body, req, reply }) => app.db.transaction(async (tx) => {
       const c = await manageable(tx, auth, params.id);
       const p = await planAdjustment(tx, c.id, body);
-      const [a] = await tx.insert(s.contractAdjustments).values({ tenantId: auth.tenantId, contractId: c.id, indexName: body.indexName, mode: body.mode, inputText: body.index, factor8: p.factor8, baseDate: body.baseDate, startCompetence: body.startCompetence, note: body.note ?? null, repriced: p.retro.reprice, createdBy: auth.userId }).returning({ id: s.contractAdjustments.id });
+      const [a] = await tx.insert(s.contractAdjustments).values({ tenantId: auth.tenantId, contractId: c.id, indexName: body.indexName, mode: body.mode, inputText: body.index, factor8: p.factor8, baseDate: body.baseDate, startCompetence: body.startCompetence, note: body.note ?? null, repriceOpen: body.repriceOpen, repriced: p.retro.reprice, createdBy: auth.userId }).returning({ id: s.contractAdjustments.id });
       if (p.table.length) await tx.insert(s.contractLinePrices).values(p.table.map((t) => ({ tenantId: auth.tenantId, adjustmentId: a!.id, lineId: t.lineId, fromCompetence: body.startCompetence, previousPrice4: t.oldPrice4, price4: t.newPrice4 })));
       if (p.retro.invoiced.length) await tx.insert(s.contractAdjustmentRetros).values(p.retro.invoiced.map((r) => ({ tenantId: auth.tenantId, contractId: c.id, adjustmentId: a!.id, measurementId: r.measurementId, items: r.items, diffV4: r.diffV4 })));
       // RN08: a medição passa a valer pelo preço reajustado (a faturada fica com a diferença como retroativo)
-      for (const x of [...p.retro.reprice, ...p.retro.invoiced.flatMap((r) => r.items.map((i) => ({ measurementId: r.measurementId, lineId: i.lineId, newPrice4: i.newPrice4 })))]) {
+      // a faturada passa ao preço novo (a diferença é o retroativo); a aberta só se a opção for repassar o preço
+      const invoicedIds = new Set(p.d.raw.measurements.filter((m) => m.status === 'faturada').map((m) => m.id));
+      for (const x of [...p.retro.reprice, ...p.retro.invoiced.filter((r) => invoicedIds.has(r.measurementId)).flatMap((r) => r.items.map((i) => ({ measurementId: r.measurementId, lineId: i.lineId, newPrice4: i.newPrice4 })))]) {
         await tx.update(s.contractMeasurementItems).set({ price4: x.newPrice4 }).where(and(eq(s.contractMeasurementItems.measurementId, x.measurementId), eq(s.contractMeasurementItems.lineId, x.lineId)));
       }
       const retroV4 = p.retro.invoiced.reduce((acc, x) => acc + x.diffV4, 0);

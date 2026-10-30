@@ -1559,6 +1559,8 @@ export const contractCommitmentItems = pgTable('contract_commitment_items', {
   itemNumber: text('item_number'),
   code: text('code'),
   qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  /** preço do item na emissão da NE: o valor empenhado em R$ fica fixo mesmo depois de reajuste */
+  price4: bigint('price4', { mode: 'number' }),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('contract_commitment_items_uq').on(t.commitmentId, t.lineId), qtyCk: check('contract_commitment_items_qty_ck', sql`qty4 > 0`) }));
 
@@ -1569,13 +1571,15 @@ export const contractCommitmentMoves = pgTable('contract_commitment_moves', {
   commitmentItemId: uuid('commitment_item_id').notNull().references(() => contractCommitmentItems.id),
   kind: text('kind').notNull(),
   qty4: bigint('qty4', { mode: 'number' }).notNull(),
+  /** reforço de valor (R$ ×10.000): a NE ganha valor sem mudar a quantidade (ex.: depois de reajuste) */
+  value4: bigint('value4', { mode: 'number' }),
   occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
   reason: text('reason').notNull(),
   /** virada de exercício (RN10): NE nova que reempenha o saldo suprimido */
   linkedCommitmentId: uuid('linked_commitment_id'),
   createdBy: uuid('created_by'),
   createdAt: createdAt(),
-}, (t) => ({ kindCk: check('contract_commitment_moves_kind_ck', inList('kind', ['reforco', 'anulacao', 'supressao'])), qtyCk: check('contract_commitment_moves_qty_ck', sql`qty4 > 0`) }));
+}, (t) => ({ kindCk: check('contract_commitment_moves_kind_ck', inList('kind', ['reforco', 'anulacao', 'supressao', 'reforco_valor'])), qtyCk: check('contract_commitment_moves_qty_ck', sql`qty4 > 0 or (kind = 'reforco_valor' and qty4 = 0 and value4 > 0)`) }));
 
 /** Fonte de receita do cliente (RN09-a): ex. educação estadual e municipal, cada uma com empenhos próprios. */
 export const contractRevenueSources = pgTable('contract_revenue_sources', {
@@ -1628,6 +1632,8 @@ export const contractAdjustments = pgTable('contract_adjustments', {
   baseDate: date('base_date', { mode: 'string' }).notNull(),
   startCompetence: text('start_competence').notNull(),
   note: text('note'),
+  /** medições ainda não faturadas: passam ao preço novo (true) ou mantêm o preço lançado e a diferença vira retroativo (false) */
+  repriceOpen: boolean('reprice_open').notNull().default(true),
   /** medições não faturadas que passaram ao preço novo (RN08) */
   repriced: jsonb('repriced').$type<{ measurementId: string; lineId: string; oldPrice4: number; newPrice4: number }[]>().notNull().default([]),
   createdBy: uuid('created_by'),

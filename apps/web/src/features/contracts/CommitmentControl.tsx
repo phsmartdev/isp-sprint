@@ -261,8 +261,9 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
             </div>
             {c.cancelledAt ? <Chip tone="red">Anulado</Chip> : c.suppressedV4 > 0 && c.balanceV4 <= 0 ? <Chip>Encerrada na virada</Chip> : c.fiscalYear < Number(d.today.slice(0, 4)) ? <Chip tone="yellow">Exercício anterior</Chip> : <Chip tone="green">Ativo</Chip>}
           </div>
-          <div className="mt-2 flex items-baseline justify-between text-sm"><span className="text-muted">Empenhado</span><span className="num font-semibold">{money(c.valueV4)}</span></div>
-          <div className="flex items-baseline justify-between text-sm"><span className="text-muted">Saldo</span><span className={clsx('num font-bold', c.balanceV4 <= 0 ? 'text-muted' : 'text-ink')}>{money(c.balanceV4)}</span></div>
+          <div className="mt-2 flex items-baseline justify-between text-sm"><span className="text-muted">Valor da nota</span><span className="num font-semibold">{money(c.valueV4)}</span></div>
+          <div className="flex items-baseline justify-between text-sm"><span className="text-muted">Saldo em R$</span><span className={clsx('num font-bold', c.balanceV4 < 0 ? 'text-danger' : c.balanceV4 === 0 ? 'text-muted' : 'text-ink')}>{money(c.balanceV4)}</span></div>
+          {c.valueDeficitV4 > 0 && <p className="mt-1 text-xs font-semibold text-danger">Em {c.items.filter((i) => i.balanceV4 < 0).length} item(ns) o consumo passou do valor empenhado (preço reajustado): falta reforço de valor de {money(c.valueDeficitV4)}. Use “Reforçar / anular” no item.</p>}
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-2"><span className="block h-full bg-primary" style={{ width: `${pctOf(c.valueV4 - c.balanceV4, c.valueV4)}%` }} /></div>
           {d.canManage && !!d.sources.length && !c.sourceId && !c.cancelledAt && (
             <label className="mt-2 flex items-center gap-2 text-xs text-[#C2610C]">Fonte de receita:
@@ -274,9 +275,9 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
             <ul className="mt-1 divide-y divide-line text-xs">{c.items.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
                 <span className="min-w-0 flex-1 truncate">Item {lineOf(i.lineId)?.itemNumber}{i.code ? ` · ${i.code}` : ''} · {lineOf(i.lineId)?.description}</span>
-                <span className="num">{qty(i.qty4 + i.adjust4)} · saldo <b>{qty(i.balance4)}</b></span>
+                <span className="num">{qty(i.qty4 + i.adjust4)} · saldo <b>{qty(i.balance4)}</b> · <span className={clsx(i.balanceV4 < 0 && 'font-semibold text-danger')}>{money(i.balanceV4)}</span></span>
                 {d.canManage && !c.cancelledAt && <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setMove({ item: i, c })}>Reforçar / anular</button>}
-                {!!i.moves.length && <ul className="w-full pl-2 text-2xs text-muted">{i.moves.map((m) => <li key={m.id}>{fmtDate(m.occurredOn)} · {m.kindLabel} de {qty(m.qty4)} — {m.reason}</li>)}</ul>}
+                {!!i.moves.length && <ul className="w-full pl-2 text-2xs text-muted">{i.moves.map((m) => <li key={m.id}>{fmtDate(m.occurredOn)} · {m.kindLabel} de {m.kind === 'reforco_valor' ? money(m.value4 ?? 0) : `${qty(m.qty4)}${m.value4 != null ? ` (${money(m.value4)})` : ''}`} — {m.reason}</li>)}</ul>}
               </li>
             ))}</ul>
           </details>
@@ -291,14 +292,16 @@ function Commitments({ d, contractId }: { d: Data; contractId: string }) {
 
 function MoveModal({ contractId, item, c, line, onClose, onDone }: { contractId: string; item: CItem; c: Commitment; line: Line; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [v, setV] = useState({ kind: 'anulacao' as 'reforco' | 'anulacao' | 'supressao', qty: '', occurredOn: new Date().toISOString().slice(0, 10), reason: '' });
-  const save = useMutation({ mutationFn: () => api(`/contracts/${contractId}/commitment-items/${item.id}/moves`, { method: 'POST', body: { ...v, qty: parseNum(v.qty) } }), onSuccess: onDone, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const [v, setV] = useState({ kind: (item.balanceV4 < 0 ? 'reforco_valor' : 'anulacao') as 'reforco' | 'anulacao' | 'supressao' | 'reforco_valor', qty: '', value: item.balanceV4 < 0 ? (-item.balanceV4 / 10_000).toFixed(2).replace('.', ',') : '', occurredOn: new Date().toISOString().slice(0, 10), reason: '' });
+  const byValue = v.kind === 'reforco_valor';
+  const save = useMutation({ mutationFn: () => api(`/contracts/${contractId}/commitment-items/${item.id}/moves`, { method: 'POST', body: { kind: v.kind, occurredOn: v.occurredOn, reason: v.reason, ...(byValue ? { value: parseNum(v.value) } : { qty: parseNum(v.qty) }) } }), onSuccess: onDone, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   return (
-    <Modal open onClose={onClose} title={`${c.number} · item ${line.itemNumber}`} footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!parseNum(v.qty) || v.reason.trim().length < 5} loading={save.isPending} onClick={() => save.mutate()}>Registrar</Button></>}>
-      <p className="mb-3 text-sm text-muted">Saldo deste item na nota: {qty(item.balance4)} {line.unit}. Na virada do exercício use o botão “Virada de exercício”: ele suprime o saldo e liga a NE nova.</p>
+    <Modal open onClose={onClose} title={`${c.number} · item ${line.itemNumber}`} footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!parseNum(byValue ? v.value : v.qty) || v.reason.trim().length < 5} loading={save.isPending} onClick={() => save.mutate()}>Registrar</Button></>}>
+      <p className="mb-3 text-sm text-muted">Saldo deste item na nota: {qty(item.balance4)} {line.unit} e {money(item.balanceV4)} (empenhado a {price(item.price4)}; consumido pelo preço de cada medição). Na virada do exercício use o botão “Virada de exercício”: ele suprime o saldo e liga a NE nova.</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Movimentação" htmlFor="mv-k"><Select id="mv-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}><option value="anulacao">Anulação parcial</option><option value="supressao">Supressão</option><option value="reforco">Reforço</option></Select></FormField>
-        <FormField label={`Quantidade (${line.unit})`} htmlFor="mv-q"><Input id="mv-q" inputMode="decimal" value={v.qty} onChange={(e) => setV({ ...v, qty: e.target.value })} /></FormField>
+        <FormField label="Movimentação" htmlFor="mv-k"><Select id="mv-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}><option value="anulacao">Anulação parcial</option><option value="supressao">Supressão</option><option value="reforco">Reforço de quantidade</option><option value="reforco_valor">Reforço de valor (R$)</option></Select></FormField>
+        {byValue ? <FormField label="Valor (R$)" htmlFor="mv-v" hint="Depois de reajuste: a nota ganha valor sem mudar a quantidade"><Input id="mv-v" inputMode="decimal" value={v.value} onChange={(e) => setV({ ...v, value: e.target.value })} /></FormField>
+          : <FormField label={`Quantidade (${line.unit})`} htmlFor="mv-q"><Input id="mv-q" inputMode="decimal" value={v.qty} onChange={(e) => setV({ ...v, qty: e.target.value })} /></FormField>}
         <FormField label="Data" htmlFor="mv-d"><Input id="mv-d" type="date" value={v.occurredOn} onChange={(e) => setV({ ...v, occurredOn: e.target.value })} /></FormField>
         <FormField label="Justificativa" htmlFor="mv-r" className="sm:col-span-2"><Textarea id="mv-r" rows={2} value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} /></FormField>
       </div>
@@ -470,7 +473,7 @@ function Pendencias({ d, contractId }: { d: Data; contractId: string }) {
         <thead className="text-left text-xs text-muted"><tr><th className="py-1.5">Tipo</th><th className="py-1.5">Medição</th><th className="py-1.5">Competência</th><th className="py-1.5 text-right">Há</th><th className="py-1.5 text-right">Valor</th></tr></thead>
         <tbody>{d.pendencias.sort((a, b) => a.since.localeCompare(b.since)).map((p) => (
           <tr key={p.kind + p.measurementId + (p.retroId ?? '')} className="border-t border-line">
-            <td className="py-2">{p.retroId && d.canManage && <input type="checkbox" className="mr-2 align-middle" aria-label={`Selecionar ${p.title}`} checked={!!pick[p.retroId]} onChange={(e) => setPick({ ...pick, [p.retroId!]: e.target.checked })} />}<Chip tone={p.kind === 'aguardando_empenho' ? 'red' : p.kind === 'retroativo' ? 'blue' : 'yellow'}>{p.label}</Chip></td>
+            <td className="py-2">{p.retroId && d.canManage && <input type="checkbox" className="mr-2 align-middle" aria-label={`Selecionar ${p.title}`} checked={!!pick[p.retroId]} onChange={(e) => setPick({ ...pick, [p.retroId!]: e.target.checked })} />}<Chip tone={p.kind === 'aguardando_empenho' || p.kind === 'reforco_valor' ? 'red' : p.kind === 'retroativo' ? 'blue' : 'yellow'}>{p.label}</Chip></td>
             <td className="py-2">{p.title}</td><td className="py-2">{monthLabel(p.competence)}</td>
             <td className={clsx('num py-2 text-right', days(p.since) > d.settings.agingDays ? 'font-semibold text-danger' : '')}>{days(p.since)} dia(s)</td>
             <td className="num py-2 text-right font-semibold">{money(p.valueV4)}</td>

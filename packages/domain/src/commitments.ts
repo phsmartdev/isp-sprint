@@ -37,10 +37,16 @@ export const isLive = (st: MeasurementStatus) => st !== 'cancelada';
 
 export type CLine = { id: string; itemNumber: string; description: string; unit: string; classification: LineClass; qty4: number; price4: number; monthlyQty4: number | null };
 export type CCommitment = { id: string; number: string; fiscalYear: number; issuedOn: string; cancelled: boolean; source: string | null; /** fonte de receita (RN09-a) */ sourceId?: string | null };
-export const COMMITMENT_MOVE_KINDS = ['reforco', 'anulacao', 'supressao'] as const;
+export const COMMITMENT_MOVE_KINDS = ['reforco', 'anulacao', 'supressao', 'reforco_valor'] as const;
 export type CommitmentMoveKind = (typeof COMMITMENT_MOVE_KINDS)[number];
-export const COMMITMENT_MOVE_LABELS: Record<CommitmentMoveKind, string> = { reforco: 'Reforço', anulacao: 'Anulação parcial', supressao: 'Supressão (virada de exercício)' };
-export type CCommitmentItem = { id: string; commitmentId: string; lineId: string; code: string | null; itemNumber: string | null; qty4: number; /** reforços − anulações − supressões */ adjust4: number; moves?: { kind: CommitmentMoveKind; qty4: number; occurredOn: string }[] };
+export const COMMITMENT_MOVE_LABELS: Record<CommitmentMoveKind, string> = { reforco: 'Reforço', anulacao: 'Anulação parcial', supressao: 'Supressão (virada de exercício)', reforco_valor: 'Reforço de valor' };
+export type CCommitmentItem = {
+  id: string; commitmentId: string; lineId: string; code: string | null; itemNumber: string | null; qty4: number;
+  /** reforços − anulações − supressões (quantidade) */ adjust4: number;
+  /** preço na emissão: o valor empenhado em R$ fica fixo mesmo com reajuste */ price4?: number | null;
+  /** reforços de valor (R$ ×10.000) */ valueAdjust4?: number;
+  moves?: { kind: CommitmentMoveKind; qty4: number; value4?: number | null; occurredOn: string }[];
+};
 export type CAllocation = { commitmentItemId: string; qty4: number };
 export type CMeasurementItem = { measurementId: string; lineId: string; qty4: number; price4: number; allocations: CAllocation[]; uncovered4: number };
 export type CMeasurement = { id: string; competence: string; status: MeasurementStatus; superseded: boolean; title: string; kind: MeasurementKind; createdAt: string; attestedAt?: string | null; invoicedAt?: string | null };
@@ -99,6 +105,26 @@ export function commitmentItemBalances(items: CCommitmentItem[], measurements: C
   const used = new Map<string, number>();
   for (const x of mItems) if (live.has(x.measurementId)) for (const a of x.allocations) used.set(a.commitmentItemId, (used.get(a.commitmentItemId) ?? 0) + a.qty4);
   return new Map(items.map((i) => [i.id, i.qty4 + i.adjust4 - (used.get(i.id) ?? 0)]));
+}
+
+/**
+ * Saldo de cada item de empenho em R$ (os dois controles andam juntos: quantidade e valor).
+ * Empenhado = (qtd + reforços − anulações − supressões) × preço da emissão + reforços de valor;
+ * consumido = qtd baixada × preço da medição (depois do reajuste a mesma quantidade custa mais).
+ */
+export function commitmentItemValues(items: CCommitmentItem[], measurements: CMeasurement[], mItems: CMeasurementItem[], linePrice: (lineId: string) => number) {
+  const live = new Set(measurements.filter(counts).map((m) => m.id));
+  const used = new Map<string, number>();
+  for (const x of mItems) if (live.has(x.measurementId)) for (const a of x.allocations) used.set(a.commitmentItemId, (used.get(a.commitmentItemId) ?? 0) + value4(a.qty4, x.price4));
+  return new Map(items.map((i) => {
+    const p = i.price4 ?? linePrice(i.lineId);
+    // com o histórico: anulação e supressão tiram o valor gravado (o que de fato sobrou em R$); sem ele, qtd × preço
+    const committedV4 = i.moves
+      ? value4(i.qty4, p) + i.moves.reduce((a, m) => a + (m.kind === 'reforco' ? value4(m.qty4, p) : m.kind === 'reforco_valor' ? m.value4 ?? 0 : -(m.value4 ?? value4(m.qty4, p))), 0)
+      : value4(i.qty4 + i.adjust4, p) + (i.valueAdjust4 ?? 0);
+    const usedV4 = used.get(i.id) ?? 0;
+    return [i.id, { committedV4, usedV4, balanceV4: committedV4 - usedV4 }];
+  }));
 }
 
 /**
@@ -164,6 +190,8 @@ export type AlertExtras = {
   nextInstallmentShort?: string[];
   /** retroativo de reajuste ainda sem NF complementar */
   retroPendingV4?: number;
+  /** NEs com consumo em R$ acima do valor empenhado (reajuste sem reforço de valor) */
+  valueShort?: { number: string; deficitV4: number }[];
   /** necessidade projetada de empenho no exercício seguinte, quando a vigência continua nele */
   nextYear?: { year: number; needV4: number; hasCommitment: boolean } | null;
 };
@@ -205,6 +233,7 @@ export function commitmentAlerts(args: { today: string; lines: CLine[]; bal: Lin
   const short = ex.nextInstallmentShort ?? rec.filter((l) => l.monthlyQty4 && (args.bal.find((b) => b.lineId === l.id)?.commitmentBalance4 ?? 0) < l.monthlyQty4).map((l) => l.itemNumber);
   if (short.length) out.push({ level: 'medio', key: 'parcela_sem_saldo', text: `${short.length} item(ns) recorrente(s) sem saldo de empenho para a próxima parcela projetada (${short.slice(0, 5).join(', ')}).` });
   if (ex.exhaustBefore?.length) out.push({ level: 'alto', key: 'esgotamento', text: `${ex.exhaustBefore.length} item(ns) esgota(m) antes do fim da vigência pelo consumo médio: item ${ex.exhaustBefore.slice(0, 4).map((x) => `${x.itemNumber} em ${x.competence.slice(5)}/${x.competence.slice(0, 4)}`).join(', ')}. Avalie aditivo de quantidade.` });
+  if (ex.valueShort?.length) out.push({ level: 'alto', key: 'empenho_valor', text: `${fmt(ex.valueShort.reduce((a, x) => a + x.deficitV4, 0))} consumidos além do valor empenhado (preço reajustado): peça reforço de valor de ${ex.valueShort.slice(0, 4).map((x) => x.number).join(', ')}. A NF dessas medições fica bloqueada até o reforço.` });
   if (ex.retroPendingV4 && ex.retroPendingV4 > 0) out.push({ level: 'alto', key: 'retroativo', text: `${fmt(ex.retroPendingV4)} de retroativo de reajuste a faturar (NF complementar).` });
   if (ex.nextYear && month >= 10 && !ex.nextYear.hasCommitment && ex.nextYear.needV4 > 0) out.push({ level: 'medio', key: 'ne_proximo_exercicio', text: `A vigência segue em ${ex.nextYear.year}: prepare a NE de ${ex.nextYear.year} (necessidade projetada de ${fmt(ex.nextYear.needV4)}).` });
   if (args.endAt) {

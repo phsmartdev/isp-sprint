@@ -95,7 +95,7 @@ function SuggestedPrice({ r, per }: { r: EconResult; per: string }) {
         <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span></p>
         <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
       </div>
-      {p === 0 && r.priceSource === 'itens' ? <Chip tone="orange">Produtos sem preço: use a sugestão</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
+      {r.priceSource === 'sugerido' ? <Chip tone="orange">Produtos sem preço: análise feita neste preço</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
     </div>
   );
 }
@@ -197,7 +197,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
       </div>
       <SuggestedPrice r={r} per={per} />
       <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : 'dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">{r.priceSource === 'informado' ? 'Preço informado' : r.priceSource === 'sugerido' ? 'Preço avaliado (sugerido)' : 'Preço dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd>{r.priceSource === 'sugerido' && <dd className="text-2xs text-muted">produtos lançados por {fmtBRL(r.revenueCents)}</dd>}</div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
@@ -452,7 +452,7 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 text-sm"><span className="text-muted">Decisão:</span><Chip tone={look.tone}>{look.label}</Chip></div>
         <div className="flex flex-wrap gap-2">
-          {(d.status === 'calculada' || d.status === 'devolvida') && <Button size="sm" variant="primary" disabled={!canSubmit} loading={submit.isPending} title={canSubmit ? undefined : 'Salve o cálculo atualizado antes de enviar'} onClick={() => submit.mutate()}>Enviar para decisão da gestão</Button>}
+          {(d.status === 'calculada' || d.status === 'devolvida') && <Button size="sm" variant="primary" disabled={!canSubmit} loading={submit.isPending} title={canSubmit ? undefined : d.result?.priceSource === 'sugerido' ? 'Defina o preço (nos produtos ou no campo Preço) antes de enviar' : 'Salve o cálculo atualizado antes de enviar'} onClick={() => submit.mutate()}>Enviar para decisão da gestão</Button>}
           {d.canDecide && reason === null && <><Button size="sm" variant="primary" loading={decide.isPending} onClick={() => decide.mutate({ decision: 'aprovar' })}>Aprovar</Button><Button size="sm" onClick={() => setReason('')}>Devolver</Button></>}
         </div>
       </div>
@@ -539,7 +539,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>
       <p className="text-xs text-muted">{d.emitter ? <>Emitente: {emitterLine(d.emitter)}{(!d.emitter.cnpj || !d.emitter.taxRegime) && <span className="text-[#C2610C]"> · complete CNPJ e regime em Configurações → Filiais e documentos fiscais</span>}</> : <span className="text-[#C2610C]">Oportunidade sem filial: escolha a filial para usar os documentos fiscais dela.</span>}</p>
 
-      <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable} />
+      <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable && d.result?.priceSource !== 'sugerido'} />
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
       {shownResult ? <EconomicsResult r={shownResult} settings={d.settings} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
       {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
