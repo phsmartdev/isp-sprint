@@ -14,7 +14,7 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { addEvent, contractScope, loadContract } from '../services/contracts';
 import { loadOpportunity } from '../services/opportunities';
-import { allocateItems, availableFor, canManageCommitments, controlCurve, controlData, controlState, linePriceAt, settingsOf, sharesAt, todayIso, type ControlData } from '../services/commitmentControl';
+import { allocateItems, availableFor, canManageCommitments, controlCurve, controlData, controlDataMany, controlState, linePriceAt, settingsOf, sharesAt, todayIso, type ControlData } from '../services/commitmentControl';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Competência no formato AAAA-MM');
@@ -159,14 +159,17 @@ export const commitmentControlRoutes = [
         .innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion)))
         .innerJoin(s.contacts, eq(s.contacts.id, s.contracts.contactId))
         .where(and(contractScope(auth), sql`(${s.contracts.kind} = 'publico' or ${s.contracts.billingType} = 'medicao')`, sql`${s.contracts.stage} <> 'arquivado'`));
+      // tudo em poucas consultas (uma por tabela) e o cálculo em memória
+      const all = await controlDataMany(app.db, rows.map((r) => r.c.id));
       const out = [];
       for (const r of rows) {
-        const d = await controlData(app.db, r.c.id);
+        const d = all.get(r.c.id)!;
         const base = { id: r.c.id, code: r.c.code, number: r.number, object: r.object, contact: r.contact, agency: (r.publicTerms as { agency?: string | null } | null)?.agency ?? null, stage: r.c.stage, startAt: r.startAt, endAt: r.endAt, lines: d.raw.lines.length };
         if (!d.raw.lines.length) { out.push({ ...base, totals: null, alerts: [], pendingV4: 0, exhaustBefore: 0, toInvoiceV4: 0, nextYearNeedV4: 0, commitments: 0 }); continue; }
         const st = controlState(d, { startAt: r.startAt, endAt: r.endAt }, settingsOf(r.c));
         const live = new Set(d.raw.measurements.filter((m) => !m.superseded && m.status !== 'cancelada').map((m) => m.id));
-        const semNf = d.raw.mItems.filter((x) => live.has(x.measurementId) && d.raw.measurements.find((m) => m.id === x.measurementId)!.status === 'atestada').reduce((a, x) => a + value4(x.qty4, x.price4), 0);
+        const attested = new Set(d.raw.measurements.filter((m) => m.status === 'atestada').map((m) => m.id));
+        const semNf = d.raw.mItems.filter((x) => live.has(x.measurementId) && attested.has(x.measurementId)).reduce((a, x) => a + value4(x.qty4, x.price4), 0);
         const year = Number(todayIso().slice(0, 4));
         out.push({
           ...base, totals: st.totals, alerts: st.alerts, commitments: d.raw.commitments.length,

@@ -23,7 +23,7 @@ type Filter = 'todos' | 'atencao' | 'sem_itens';
 const daysTo = (iso: string | null, today: string) => (iso ? Math.round((new Date(`${iso}T12:00:00Z`).getTime() - new Date(`${today}T12:00:00Z`).getTime()) / 86_400_000) : null);
 
 export function CommitmentPortfolio() {
-  const q = useQuery({ queryKey: ['commitment-portfolio'], queryFn: () => api<{ items: Row[]; today: string }>('/contracts/commitment-portfolio') });
+  const q = useQuery({ queryKey: ['commitment-portfolio'], queryFn: () => api<{ items: Row[]; today: string }>('/contracts/commitment-portfolio'), staleTime: 30_000 });
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('todos');
   const rows = q.data?.items ?? [];
