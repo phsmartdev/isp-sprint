@@ -111,6 +111,14 @@ describe('Controle de Empenhos — fase 2', () => {
     ok(await carlos.post(`/contracts/${cid}/commitment-control/rollover/link`, { year, commitmentId: nw.id }), 422);
   });
 
+  it('carteira: o contrato aparece com os saldos e o que está em risco', async () => {
+    const r = ok(await carlos.get('/contracts/commitment-portfolio')).json();
+    const row = r.items.find((x: { id: string }) => x.id === cid);
+    expect(row).toMatchObject({ number: 'CTR-107/2025', agency: 'Secretaria Fictícia', lines: 2 });
+    expect(row.totals.contracted).toBeGreaterThan(0);
+    expect(row.pendingV4).toBeGreaterThan(0); // medição 2 e 3 sem empenho
+  });
+
   it('projeção, curva e alertas parametrizados', async () => {
     const g = await get();
     expect(g.projection.lines).toHaveLength(2);

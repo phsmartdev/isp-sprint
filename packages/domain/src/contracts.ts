@@ -101,14 +101,14 @@ export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail
 
 // ------------------------------------------------------------------ abas e painel
 /** Abas da Gestão de Contratos, na ordem do menu. Cada aba é uma permissão por perfil (Configurações → Módulos e liberação → Contratos). */
-export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'calendario', 'relatorios'] as const;
+export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const;
 export type ContractTab = (typeof CONTRACT_TABS)[number];
 export const CONTRACT_TAB_LABELS: Record<ContractTab, string> = {
   atencao: 'Central de atenção', painel: 'Painel', funil: 'Funil', lista: 'Lista', modelos: 'Modelos de contratos e propostas', atestados: 'Atestados',
-  atas: 'Atas de registro de preços', calendario: 'Calendário', relatorios: 'Relatórios',
+  atas: 'Atas de registro de preços', empenhos: 'Controle de Empenhos', calendario: 'Calendário', relatorios: 'Relatórios',
 };
 /** Abas que viram submenu de Gestão de Contratos na barra lateral; as demais ficam juntas no item "Contratos". */
-export const CONTRACT_MENU_TABS = ['painel', 'funil', 'atestados', 'atas', 'calendario', 'relatorios'] as const satisfies readonly ContractTab[];
+export const CONTRACT_MENU_TABS = ['painel', 'funil', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const satisfies readonly ContractTab[];
 export const isContractTab = (t: unknown): t is ContractTab => CONTRACT_TABS.includes(t as ContractTab);
 /** Abas negadas por perfil (chave = perfil). Sem registro = todas liberadas, como antes. */
 export type ContractTabAccess = Partial<Record<string, ContractTab[]>>;
