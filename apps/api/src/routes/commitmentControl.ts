@@ -12,7 +12,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
-import { addEvent, loadContract } from '../services/contracts';
+import { addEvent, contractScope, loadContract } from '../services/contracts';
 import { loadOpportunity } from '../services/opportunities';
 import { allocateItems, availableFor, canManageCommitments, controlCurve, controlData, controlState, linePriceAt, settingsOf, sharesAt, todayIso, type ControlData } from '../services/commitmentControl';
 
@@ -151,6 +151,33 @@ async function planAdjustment(db: DbOrTx, contractId: string, body: z.infer<type
 }
 
 export const commitmentControlRoutes = [
+  defineRoute({
+    method: 'GET', url: '/contracts/commitment-portfolio', summary: 'Carteira do Controle de Empenhos (PF09.5): contratos públicos ou por medição com os quatro saldos, pendências, alertas e projeção', tag: 'Contratos', module: 'contratos',
+    handler: async ({ app, auth }) => {
+      const rows = await app.db.select({ c: s.contracts, number: s.contractVersions.number, object: s.contractVersions.object, startAt: s.contractVersions.startAt, endAt: s.contractVersions.endAt, publicTerms: s.contractVersions.publicTerms, contact: s.contacts.name })
+        .from(s.contracts)
+        .innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion)))
+        .innerJoin(s.contacts, eq(s.contacts.id, s.contracts.contactId))
+        .where(and(contractScope(auth), sql`(${s.contracts.kind} = 'publico' or ${s.contracts.billingType} = 'medicao')`, sql`${s.contracts.stage} <> 'arquivado'`));
+      const out = [];
+      for (const r of rows) {
+        const d = await controlData(app.db, r.c.id);
+        const base = { id: r.c.id, code: r.c.code, number: r.number, object: r.object, contact: r.contact, agency: (r.publicTerms as { agency?: string | null } | null)?.agency ?? null, stage: r.c.stage, startAt: r.startAt, endAt: r.endAt, lines: d.raw.lines.length };
+        if (!d.raw.lines.length) { out.push({ ...base, totals: null, alerts: [], pendingV4: 0, exhaustBefore: 0, toInvoiceV4: 0, nextYearNeedV4: 0, commitments: 0 }); continue; }
+        const st = controlState(d, { startAt: r.startAt, endAt: r.endAt }, settingsOf(r.c));
+        const live = new Set(d.raw.measurements.filter((m) => !m.superseded && m.status !== 'cancelada').map((m) => m.id));
+        const semNf = d.raw.mItems.filter((x) => live.has(x.measurementId) && d.raw.measurements.find((m) => m.id === x.measurementId)!.status === 'atestada').reduce((a, x) => a + value4(x.qty4, x.price4), 0);
+        const year = Number(todayIso().slice(0, 4));
+        out.push({
+          ...base, totals: st.totals, alerts: st.alerts, commitments: d.raw.commitments.length,
+          pendingV4: st.totals.uncovered + semNf + st.retroPendingV4,
+          exhaustBefore: st.projection.exhaustBefore.length, toInvoiceV4: st.projection.toInvoiceV4,
+          nextYearNeedV4: st.projection.years.find((y) => y.year === year + 1)?.needV4 ?? 0,
+        });
+      }
+      return { items: out, today: todayIso() };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/contracts/:id/commitment-control', summary: 'Controle de Empenhos do contrato: itens com os saldos (contratado, empenhado, executado, faturado, a empenhar), NEs, medições, pendências e alertas', tag: 'Contratos', module: 'contratos', params: IdParams,
     handler: async ({ app, auth, params }) => {

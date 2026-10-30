@@ -18,6 +18,7 @@ import { ContractsDashboard } from '../../features/contracts/Dashboard';
 import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
+import { CommitmentPortfolio } from '../../features/contracts/CommitmentPortfolio';
 import { ModelsTab } from '../../features/contracts/ModelsTab';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type ContractRow } from '../../features/contracts/shared';
@@ -263,7 +264,7 @@ export function ContractsPage() {
   const shownTabs = mainTabs.map((t) => (t.key === 'atencao' && urgent ? { ...t, count: urgent } : t));
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TV_TABS = tabs.filter((t) => ['atencao', 'painel', 'lista', 'atas', 'funil', 'calendario', 'relatorios'].includes(t.key));
+  const TV_TABS = tabs.filter((t) => ['atencao', 'painel', 'lista', 'atas', 'empenhos', 'funil', 'calendario', 'relatorios'].includes(t.key));
   return (
     <div className="w-full">
       <PageHeader
@@ -273,7 +274,7 @@ export function ContractsPage() {
         actions={<><TvButton onClick={() => void tv.enter()} /><Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav('/contracts/new')}>Novo contrato</Button></>}
       />
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
-      {tv.active && view && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps']]} />}
+      {tv.active && view && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps'], ['commitment-portfolio']]} />}
       {cfg.isLoading ? <div className="card"><LoadingRows /></div> : cfg.isError ? <ErrorState error={cfg.error} onRetry={() => cfg.refetch()} /> : !view ? (
         <div className="card"><EmptyState title="Nenhuma aba liberada" description="Seu perfil não tem acesso a nenhuma aba da Gestão de Contratos. Fale com a administração (Configurações → Módulos e liberação → Contratos)." /></div>
       ) : isMenu(view) ? <h2 className="mb-4 text-xl font-bold text-ink">{CONTRACT_TAB_LABELS[view]}</h2>
@@ -283,6 +284,7 @@ export function ContractsPage() {
       {view === 'lista' && <Lista />}
       {view === 'atestados' && <CertificatesLibrary />}
       {view === 'atas' && <AtasTab />}
+      {view === 'empenhos' && <CommitmentPortfolio />}
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
       {view === 'relatorios' && <Relatorios />}

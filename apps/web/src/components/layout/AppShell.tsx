@@ -40,6 +40,7 @@ const NAV: NavEntry[] = [
     { to: '/contracts?t=funil', label: 'Funil', module: 'contratos', contractTab: 'funil' },
     { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados' },
     { to: '/contracts?t=atas', label: 'Atas de Registro de Preço', module: 'contratos', contractTab: 'atas', feature: 'contratos.atas' },
+    { to: '/contracts?t=empenhos', label: 'Controle de Empenhos', module: 'contratos', contractTab: 'empenhos' },
     { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
     { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
   ] },
