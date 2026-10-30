@@ -631,9 +631,11 @@ export const opportunityItems = pgTable('opportunity_items', {
   bidUnitCents: bigint('bid_unit_cents', { mode: 'number' }),
   /** Documento fiscal do item (da filial da oportunidade): define os tributos na viabilidade econômica. */
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
+  /** Tipo de negociação do item: venda (pagamento único), recorrência ou locação/aluguel (mensais). */
+  dealKind: text('deal_kind').notNull().default('recorrencia'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
-}, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`) }));
+}, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'recorrencia', 'locacao'])) }));
 
 /** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
 export const bidParticipants = pgTable('bid_participants', {

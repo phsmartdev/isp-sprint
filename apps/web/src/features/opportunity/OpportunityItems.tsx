@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardPaste, FileSpreadsheet, Package, Plus, Trash2 } from 'lucide-react';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS, type FiscalKind } from '@isp/shared';
-import { ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
+import { DEAL_KINDS, DEAL_KIND_LABELS, ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, type DealKind, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import type { Opportunity } from '../../lib/types';
@@ -15,17 +15,17 @@ import { Button, Input, Notice, Select, Textarea } from '../../components/ui/pri
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 
-type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null };
+type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean };
-type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string };
+type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind };
 
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
-const blank = (doc = ''): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc });
-const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
-const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null });
+const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind });
+const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
+const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind });
 
 export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
@@ -112,13 +112,14 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       ) : (
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
                 const lt = lineTotal(parsed[i]!);
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
                     <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => { const doc = !r.doc ? docForPlan(e.target.value) : ''; set(r.key, { description: e.target.value, ...(doc ? { doc } : {}) }); }} /></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Venda = pagamento único; recorrência e locação = mensais" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{DEAL_KINDS.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
                         <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
@@ -156,6 +157,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
         {discount > 0 && <div className="flex gap-2"><dt className="text-muted">Descontos</dt><dd className="num text-ink">−{fmtBRL(discount)}</dd></div>}
         {surcharge > 0 && <div className="flex gap-2"><dt className="text-muted">Acréscimos</dt><dd className="num text-ink">+{fmtBRL(surcharge)}</dd></div>}
         <div className="flex gap-2"><dt className="font-semibold text-ink">Total</dt><dd className="num font-bold text-ink">{fmtBRL(total)}</dd></div>
+        {new Set(cur.map((r) => r.kind)).size > 1 && DEAL_KINDS.filter((k) => cur.some((r) => r.kind === k)).map((k) => <div key={k} className="flex gap-2"><dt className="text-muted">{DEAL_KIND_LABELS[k]}</dt><dd className="num text-ink">{fmtBRL(parsed.reduce((t, it, i) => t + (cur[i]?.kind === k ? lineTotal(it) ?? 0 : 0), 0))}{k === 'venda' ? ' (único)' : '/mês'}</dd></div>)}
         {bid && bidTotal != null && bidTotal > 0 && <div className="flex gap-2"><dt className="font-semibold text-ink">Lance</dt><dd className="num font-bold text-ink">{fmtBRL(bidTotal)}{total > 0 ? <span className="ml-1 font-normal text-muted">({((1 - bidTotal / total) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% abaixo)</span> : null}</dd></div>}
       </dl>
       {editable && (dirty || cur.length > 0) && (

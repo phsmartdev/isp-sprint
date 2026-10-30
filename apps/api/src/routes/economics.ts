@@ -1,7 +1,7 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -16,11 +16,11 @@ const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
-const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
+const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional(), kind: z.enum(DEAL_KINDS).nullable().optional() });
 const EconBody = z.object({
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
-  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(),
+  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
 });
 
 export const economicsRoutes = [

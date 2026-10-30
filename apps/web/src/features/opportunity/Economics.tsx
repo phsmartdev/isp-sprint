@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
-  COST_IMPACTS, COST_IMPACT_LABELS, ECON_VERDICT_LABELS, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_VERDICT_LABELS, isMonthlyKind, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   buildModel, type FinOverride, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -34,7 +34,7 @@ type Data = {
 };
 type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
 /** Linha do formulário: `unit` = valor unitário digitado; `measure` = unidade de medida (m, und, hh…). */
-type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; impact?: CostImpact | null; costItemId?: string | null };
+type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; impact?: CostImpact | null; costItemId?: string | null; kind?: DealKind | null };
 type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; impact?: CostImpact | null; unitCents: number | null };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
@@ -50,8 +50,8 @@ const money = (c: number | null) => (c == null ? '' : (c / 100).toLocaleString('
 let seq = 0;
 /** Quantidade sem separador de milhar ("8400", "2,5"): o ponto seria lido como decimal. */
 const qtyText = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 3 });
-const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null }));
-const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null }));
+const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
+const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 /** Contribuição → operacional → líquida, em % da receita e R$ do período. */
@@ -91,12 +91,42 @@ function SuggestedPrice({ r, per }: { r: EconResult; per: string }) {
   return (
     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-primary/30 bg-primary/5 p-3" aria-label="Preço mínimo sugerido">
       <div>
-        <p className="text-xs font-semibold text-primary">Preço mínimo sugerido</p>
+        <p className="text-xs font-semibold text-primary">Preço mínimo sugerido{r.deal ? " (parte mensal)" : ""}</p>
         <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span></p>
         <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
       </div>
       {r.priceSource === 'sugerido' ? <Chip tone="orange">Produtos sem preço: análise feita neste preço</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
     </div>
+  );
+}
+
+/** Negociação mista: o que cada tipo traz de receita, de custo e o preço mínimo sugerido de cada um. */
+function DealBreakdown({ r, compact }: { r: EconResult; compact?: boolean }) {
+  const d = r.deal!;
+  const v = d.parts.venda, m = d.parts.mensal;
+  const monthlyRev = d.revenue.recorrencia + d.revenue.locacao;
+  const rows = d.kinds.map((k) => {
+    const part = k === 'venda' ? v : m;
+    const shareInMonthly = monthlyRev > 0 ? d.revenue[k] / monthlyRev : null;
+    return { k, revenue: d.revenue[k], suggested: d.suggested[k], margin: part.kpi?.marginPct ?? null, invest: k === 'venda' ? v.investmentCents ?? 0 : shareInMonthly != null ? Math.round((m.investmentCents ?? 0) * shareInMonthly) : null, unit: k === 'venda' ? ' (único)' : '/mês' };
+  });
+  return (
+    <section className="mt-3 border border-line p-3" aria-label="Por tipo de negociação">
+      <p className="text-xs font-semibold text-ink">Por tipo de negociação</p>
+      <div className="mt-1 overflow-x-auto"><table className={clsx('w-full text-sm', !compact && 'min-w-[480px]')}>
+        <thead className="text-left text-2xs uppercase text-muted"><tr><th className="py-1">Tipo</th>{!compact && <th className="py-1 text-right">Receita</th>}{!compact && <th className="py-1 text-right">Investimento</th>}<th className="py-1 text-right">Margem</th><th className="py-1 text-right">Mínimo sugerido</th></tr></thead>
+        <tbody>{rows.map((x) => (
+          <tr key={x.k} className="border-t border-line">
+            <td className="py-1.5 font-semibold text-ink">{DEAL_KIND_LABELS[x.k]}</td>
+            {!compact && <td className="num py-1.5 text-right">{fmtBRL(x.revenue)}<span className="text-2xs text-muted">{x.unit}</span></td>}
+            {!compact && <td className="num py-1.5 text-right">{x.invest != null ? fmtBRL(x.invest) : '—'}</td>}
+            <td className="num py-1.5 text-right">{x.margin != null ? `${x.margin.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%` : '—'}</td>
+            <td className="num py-1.5 text-right font-semibold">{x.suggested != null ? <>{fmtBRL(x.suggested)}<span className="text-2xs font-normal text-muted">{x.unit}</span></> : '—'}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      {!compact && <p className="mt-1 text-2xs text-muted">Custos comuns rateados pela receita do contrato: {(d.share.venda * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% venda · {(d.share.mensal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% mensal. Recorrência e locação usam a mesma conta (margem da parte mensal); o investimento mensal é dividido entre elas pela receita.</p>}
+    </section>
   );
 }
 
@@ -196,6 +226,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
       </div>
       <SuggestedPrice r={r} per={per} />
+      {r.deal && <DealBreakdown r={r} compact={compact} />}
       <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">{r.priceSource === 'informado' ? 'Preço informado' : r.priceSource === 'sugerido' ? 'Preço avaliado (sugerido)' : 'Preço dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd>{r.priceSource === 'sugerido' && <dd className="text-2xs text-muted">produtos lançados por {fmtBRL(r.revenueCents)}</dd>}</div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
@@ -254,7 +285,7 @@ const findCat = (catalog: CatalogItem[], name: string, unit?: string | null) => 
 };
 
 /** Custos da planilha; `impacts` liga a coluna "Impacta o quê?"; `onOther` recebe as linhas coladas da outra frequência. */
-function CostLines({ title, example, lines, setLines, disabled, catalog, impacts, frequency, onOther }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void }) {
+function CostLines({ title, example, lines, setLines, disabled, catalog, impacts, frequency, onOther, kinds = [] }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void; /** tipos de negociação dos produtos: com mais de um, cada custo diz de qual sai */ kinds?: DealKind[] }) {
   const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
   const listId = `cat-${title.replace(/\W/g, '')}`;
   // auto-preenchimento: descrição + unidade já conhecidas trazem o impacto e o preço da última cotação
@@ -264,6 +295,12 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
     set(l.key, { ...p, costItemId: hit?.id ?? null, ...(hit && l.costItemId !== hit.id ? { ...(hit.unitCents != null ? { unit: money(hit.unitCents) } : {}), ...(hit.impact && !next.impact ? { impact: hit.impact } : {}), ...(!next.measure ? { measure: hit.unit } : {}) } : {}) });
   };
   const onName = (l: Line, v: string) => fill(l, { description: v });
+  const kindSel = (l: Line, i: number, cls: string) => kinds.length > 1 ? (
+    <select aria-label={`${title}: de qual tipo sai ${i + 1}`} disabled={disabled} value={l.kind ?? ''} onChange={(e) => set(l.key, { kind: (e.target.value || null) as DealKind | null })} className={clsx('field-input', cls)} title="De qual tipo de negociação este custo é deduzido; comum = rateado pela receita">
+      <option value="">Comum (rateado)</option>
+      {kinds.map((k) => <option key={k} value={k}>Sai da {DEAL_KIND_LABELS[k].toLowerCase()}</option>)}
+    </select>
+  ) : null;
   const impactSel = (l: Line, i: number, cls: string) => impacts ? (
     <select aria-label={`${title}: impacta o quê ${i + 1}`} disabled={disabled} value={l.impact ?? ''} onChange={(e) => set(l.key, { impact: (e.target.value || null) as CostImpact | null })}
       className={clsx('field-input', cls, !l.impact && l.description.trim() && !l.costItemId && 'border-warning text-[#C2610C]')}>
@@ -300,7 +337,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
           return (
             <tr key={l.key} className="border-t border-line">
               <td className="num px-1.5 py-1 text-xs text-muted">{i + 1}</td>
-              <td className="px-0.5 py-1">{nameInput(l, i, cell, big)}{impacts && <div className="mt-0.5">{impactSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{!big && originTag(l)}</td>
+              <td className="px-0.5 py-1">{nameInput(l, i, cell, big)}{impacts && <div className="mt-0.5">{impactSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{kinds.length > 1 && <div className="mt-0.5">{kindSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{!big && originTag(l)}</td>
               <td className="px-0.5 py-1 align-top"><Input aria-label={`${title}: unidade ${i + 1}`} className={cell} placeholder="un" value={l.measure ?? ''} disabled={disabled} onChange={(e) => fill(l, { measure: e.target.value.slice(0, 12) || null })} /></td>
               <td className="px-0.5 py-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} /></td>
               <td className="px-0.5 py-1"><Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} /></td>
@@ -365,6 +402,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
               <li key={l.key} className={clsx(cols, 'border-l-2 border-line pl-2')}>
                 <span className="col-span-4 block min-w-0">{nameInput(l, i, 'h-9 w-full')}</span>
                 {impacts && <span className="col-span-4 block">{impactSel(l, i, 'h-8 w-full text-xs')}</span>}
+                {kinds.length > 1 && <span className="col-span-4 block">{kindSel(l, i, 'h-8 w-full text-xs')}</span>}
                 <span className="flex items-center gap-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 min-w-0" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />{l.measure && <span className="shrink-0 text-2xs text-muted">{l.measure}</span>}</span>
                 <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
                 <span className="num text-right text-sm text-text">{tot != null ? fmtBRL(tot) : '—'}</span>
@@ -480,13 +518,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
   const catalog = catQ.data?.items ?? [];
-  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string } | null>(null);
+  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
     if (q.data?.input && !f) {
       const i = q.data.input;
-      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents) };
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.commissionBp), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null) };
       setF(init);
       setBase(formKey(init));
     }
@@ -495,6 +533,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     ...emptyEconInput(), mode: f.mode, termMonths: Number(f.term) || 0, receiveMonth: Number(f.receive) || 0,
     capex: fromLines(f.capex), extraInitialCents: parseMoney(f.extra) ?? -1, opex: fromLines(f.opex),
     commissionBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
+    salePriceCents: f.salePrice.trim() ? parseMoney(f.salePrice) : null,
   } : null), [f]);
   const invalid = !input || [input.commissionBp, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
@@ -515,7 +554,15 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const shownResult = official ? d.result : live;
   const dis = !d.editable;
   const set = (p: Partial<NonNullable<typeof f>>) => setF({ ...f, ...p });
-  const itemsTotal = d.items.reduce((t, i) => t + i.revenueCents, 0);
+  // tipos de negociação vêm dos produtos (aba Produtos); sem produtos vale a escolha abaixo
+  const kindOf = (i: EconItem): DealKind => i.kind ?? (f.mode === 'pontual' ? 'venda' : 'recorrencia');
+  const kinds = DEAL_KINDS.filter((k) => d.items.some((i) => kindOf(i) === k));
+  const mixed = kinds.includes('venda') && kinds.some(isMonthlyKind);
+  const derivedMode: EconInput['mode'] | null = !d.items.length || mixed ? null : kinds.includes('venda') ? 'pontual' : 'recorrente';
+  if (derivedMode && f.mode !== derivedMode) queueMicrotask(() => setF((x) => (x && x.mode !== derivedMode ? { ...x, mode: derivedMode } : x)));
+  if (mixed && f.mode !== 'recorrente') queueMicrotask(() => setF((x) => (x && x.mode !== 'recorrente' ? { ...x, mode: 'recorrente' } : x)));
+  const saleTotal = d.items.filter((i) => kindOf(i) === 'venda').reduce((t, i) => t + i.revenueCents, 0);
+  const itemsTotal = d.items.filter((i) => (mixed ? isMonthlyKind(kindOf(i)) : true)).reduce((t, i) => t + i.revenueCents, 0);
   const capexTotal = linesTotal(f.capex);
   const opexTotal = linesTotal(f.opex);
   const customized = [f.commission, f.loss].some((v) => v.trim() !== '');
@@ -553,6 +600,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       <div className="space-y-3">
         <Step n={1} title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">
           <div className="space-y-3">
+            {d.items.length ? (
+              <div>
+                <p className="mb-1 text-sm font-medium text-ink">Tipo de negociação (dos produtos)</p>
+                <div className="flex flex-wrap gap-1.5">{kinds.map((k) => <Chip key={k} tone={k === 'venda' ? 'blue' : 'green'}>{DEAL_KIND_LABELS[k]}{k === 'venda' ? ' · pagamento único' : ' · mensal'}</Chip>)}</div>
+                <p className="mt-1 text-xs text-muted">{mixed ? 'Venda e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada custo sai do seu tipo; o comum é rateado pela receita.' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
+              </div>
+            ) : (
             <fieldset>
               <legend className="mb-1.5 text-sm font-medium text-ink">Tipo de receita</legend>
               <div className="flex flex-wrap gap-2" role="radiogroup">
@@ -563,7 +617,10 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
                 ))}
               </div>
             </fieldset>
+            )}
             <div className="grid grid-cols-2 gap-3">
+            {mixed && <FormField label="Venda: recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
+            {mixed && <FormField label="Preço da venda (R$, único)" htmlFor="ec-sale" hint={`Produtos de venda: ${fmtBRL(saleTotal)}`}><><Input id="ec-sale" inputMode="decimal" placeholder={money(saleTotal)} value={f.salePrice} disabled={dis} onChange={(e) => set({ salePrice: e.target.value })} />{shownResult?.deal?.suggested.venda != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ salePrice: money(shownResult.deal!.suggested.venda!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.deal.suggested.venda)})</button>}</></FormField>}
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
               : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
@@ -577,13 +634,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             <FormField label={`Margem de contribuição: ${bpText(mNow)}%`} htmlFor="ec-mar" hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%`}>
               <input id="ec-mar" type="range" className="w-full accent-[rgb(var(--primary))]" min={mPiso / 100} max={(mTeto ?? Math.min(9_000, mPiso + 5_000)) / 100} step={0.5} value={mNow / 100} disabled={dis} onChange={(e) => set({ margin: String(e.target.value).replace('.', ',') })} />
             </FormField>
-            <FormField label={f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`Total dos produtos: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{shownResult?.suggestedMinCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money(shownResult.suggestedMinCents!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.suggestedMinCents)})</button>}</></FormField>
+            <FormField label={mixed ? 'Preço por mês (R$, recorrência + locação)' : f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`${mixed ? 'Produtos mensais' : 'Total dos produtos'}: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{shownResult?.suggestedMinCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money(shownResult.suggestedMinCents!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.suggestedMinCents)})</button>}</></FormField>
             </div>
           </div>
         </Step>
 
         <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
-          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={f.mode === 'recorrente' ? (l) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null }))] } : x)) : undefined} />
+          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={kinds} frequency="unico" onOther={f.mode === 'recorrente' ? (l) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null }))] } : x)) : undefined} />
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
             <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
@@ -592,7 +649,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
         {f.mode === 'recorrente' && (
           <Step n={3} title="Custos mensais para manter o serviço" hint="Todo mês enquanto o contrato durar: trânsito, link de terceiro, licenças, suporte." total={<>Total <b className="text-ink">{fmtBRL(opexTotal)}</b>/mês</>}>
-            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
+            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} kinds={kinds.filter(isMonthlyKind)} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
           </Step>
         )}
 

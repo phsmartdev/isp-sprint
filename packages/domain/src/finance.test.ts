@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings } from './finance';
+import { npv as npvF } from './formula';
 import { annuityFactor, irr, npv, paybackMonths } from './formula';
 
 /** Parâmetros de teste (na aplicação eles vêm de Configurações → Viabilidade, sem padrão no código). */
@@ -331,3 +332,46 @@ describe('planilha de materiais (BOM) com frequência e impacto', () => {
     expect(r.lines[0]).toMatchObject({ qtyMilli: 1_000_000, unitCents: 500, unit: 'Metro' });
   });
 });
+
+describe('negociação mista: venda, recorrência e locação na mesma oportunidade', () => {
+  const doc = (bp: number) => ({ name: `Doc ${bp}`, percentBp: bp, fixedCents: 0, complete: true });
+  const base = { ...emptyEconInput(), termMonths: 12, receiveMonth: 0 };
+  it('cada custo sai do seu tipo, o comum é rateado pela receita e o resultado é um só', () => {
+    const items: EconItem[] = [
+      { description: 'Roteador vendido', revenueCents: 120_000, kind: 'venda', doc: doc(1000) },
+      { description: 'Link', revenueCents: 10_000, kind: 'recorrencia', doc: doc(2000) },
+      { description: 'ONU alugada', revenueCents: 10_000, kind: 'locacao', doc: doc(0) },
+    ];
+    const input = { ...base, capex: [
+      { description: 'Roteador', qtyMilli: 1000, unitCents: 60_000, kind: 'venda' as const },
+      { description: 'ONU', qtyMilli: 1000, unitCents: 30_000, kind: 'locacao' as const },
+      { description: 'Instalação', qtyMilli: 1000, unitCents: 24_000 },
+    ], opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 2_000 }] };
+    const S0 = { ...S, tmaMonthlyBp: 100, contingencyCapexBp: 0, contingencyOpexBp: 0 };
+    const r = financeEngine({ input, items, settings: S0, publicSector: false });
+    expect(r.deal).toBeDefined();
+    const d = r.deal!;
+    expect(d.kinds).toEqual(['venda', 'recorrencia', 'locacao']);
+    // receita do contrato: venda 120.000 × mensal 20.000 × 12 = 240.000 → venda 1/3 dos custos comuns
+    expect(d.share.venda).toBeCloseTo(1 / 3, 9);
+    expect(d.parts.venda.capexBaseCents).toBe(60_000 + 8_000);
+    expect(d.parts.mensal.capexBaseCents).toBe(30_000 + 16_000);
+    expect(d.parts.mensal.opexBaseCents).toBe(2_000);
+    expect(d.parts.venda.mode).toBe('pontual');
+    expect(d.parts.mensal.mode).toBe('recorrente');
+    // um fluxo só: no início, os dois investimentos e a venda à vista; depois as mensalidades
+    expect(r.cashflow[0]).toBe(d.parts.venda.cashflow[0]! + d.parts.mensal.cashflow[0]!);
+    expect(r.cashflow).toHaveLength(13);
+    expect(r.kpi!.npvCents).toBe(Math.round(npvF(r.cashflow, r.rates.r)));
+    expect(r.investmentCents).toBe(114_000);
+    expect(d.suggested.venda).toBe(d.parts.venda.suggestedMinCents);
+    expect(d.suggested.recorrencia).toBe(Math.ceil(d.parts.mensal.suggestedMinCents! / 2));
+  });
+  it('produtos sem kind seguem o tipo da viabilidade; um tipo só = motor de sempre', () => {
+    const single = financeEngine({ input: { ...base, capex: [{ description: 'Obra', qtyMilli: 1000, unitCents: 50_000 }] }, items: items([100_000, 0]), settings: S, publicSector: false });
+    expect(single.deal).toBeUndefined();
+    const sale = financeEngine({ input: { ...base, mode: 'recorrente' }, items: [{ description: 'Kit', revenueCents: 90_000, kind: 'venda', doc: doc(0) }], settings: S, publicSector: false });
+    expect(sale.mode).toBe('pontual');
+  });
+});
+
