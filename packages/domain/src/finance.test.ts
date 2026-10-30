@@ -28,7 +28,7 @@ describe('resolução fiscal', () => {
 });
 
 describe('piso, preço recomendado e indicadores', () => {
-  it('venda pontual: pisos com o risco e preço exato pelo markup divisor (I + F) ÷ (1 − a − c − m); sem produtos, o preço é o do motor', () => {
+  it('venda pontual: pisos com o risco e preço exato pelo markup divisor (I + F) ÷ (1 − a − c − m); produto sem valor fica com preço zero', () => {
     const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 2, capex: [{ description: 'Equipamento', qtyMilli: 1000, unitCents: 85_000 }] };
     const r = financeEngine({ input, items: items([0, 1500]), settings: { ...S, tmaMonthlyBp: 100, marginTargetBp: 2000 }, publicSector: false });
     // b = 1 − 0,15 = 0,85; margem = piso (sem sugestão) = 20%
@@ -36,10 +36,12 @@ describe('piso, preço recomendado e indicadores', () => {
     near(r.floor.economicCents, (85_000 * 1.01 ** 2) / 0.85);
     near(r.markupPriceCents!, 85_000 / 0.65);
     near(r.recommendedCents, 85_000 / 0.65);
-    expect(r.priceSource).toBe('motor');
-    near(r.priceCents, 85_000 / 0.65);
-    expect(r.kpi!.marginPct).toBeCloseTo(20, 4);
-    expect(r.verdict).toBe('viavel');
+    expect(r.priceSource).toBe('itens');
+    expect(r.priceCents).toBe(0);
+    expect(r.verdict).toBe('sem_preco');
+    const at = financeEngine({ input: { ...input, priceCents: r.recommendedCents }, items: items([0, 1500]), settings: { ...S, tmaMonthlyBp: 100, marginTargetBp: 2000 }, publicSector: false });
+    expect(at.kpi!.marginPct).toBeCloseTo(20, 2);
+    expect(at.verdict).toBe('viavel');
   });
   it('recorrente: C = (I + E) ÷ payback + O; M = (C + F) ÷ (1 − a − c − m); fluxo com glosa e inadimplência; aprovação automática', () => {
     const input = { ...emptyEconInput(), termMonths: 24, capex: [{ description: 'Roteador', qtyMilli: 2000, unitCents: 150_000 }], opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 40_000 }] };
@@ -64,10 +66,10 @@ describe('piso, preço recomendado e indicadores', () => {
     expect(r.kpi!.roiPct).toBeCloseTo(((fc * 24 - 300_000) / 300_000) * 100, 6);
     expect(r.verdict).toBe('viavel');
     expect(r.autoApproval!.ok).toBe(true);
-    // payback do vendedor: 3 meses dobra a amortização; acima do teto é ajustado ao teto
+    // payback do vendedor: 3 meses dobra a amortização; acima do teto também vale (o teto fica na aprovação)
     expect(financeEngine({ input: { ...input, paybackMonths: 3 }, items: items([200_000, 1000]), settings: st, publicSector: false }).term.D).toBe(3);
     const over = financeEngine({ input: { ...input, paybackMonths: 10 }, items: items([200_000, 1000]), settings: st, publicSector: false });
-    expect(over.term.D).toBe(6);
+    expect(over.term.D).toBe(10);
     expect(over.warnings.join(' ')).toMatch(/acima do teto/);
   });
   it('margem do vendedor fica entre o piso e o teto; sem escolha, vale a sugestão', () => {
@@ -93,7 +95,7 @@ describe('piso, preço recomendado e indicadores', () => {
     expect(r.warnings.join(' ')).toMatch(/prazo máximo de previsão/);
   });
   it('entrega e taxa fixa de venda entram no preço sem contingência', () => {
-    const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 1, capex: [{ description: 'Cabo', qtyMilli: 1000, unitCents: 100_000, impact: 'material' as const }, { description: 'Frete', qtyMilli: 1000, unitCents: 50_000, impact: 'entrega' as const }] };
+    const input = { ...emptyEconInput(), mode: 'pontual' as const, receiveMonth: 1, priceCents: 300_000, capex: [{ description: 'Cabo', qtyMilli: 1000, unitCents: 100_000, impact: 'material' as const }, { description: 'Frete', qtyMilli: 1000, unitCents: 50_000, impact: 'entrega' as const }] };
     const r = financeEngine({ input, items: items([0, 0]), settings: { ...S, contingencyCapexBp: 1000, marginTargetBp: 0 }, publicSector: false });
     expect(r.initialCents).toBe(110_000);
     expect(r.variableFixedCents).toBe(50_000);
@@ -142,6 +144,30 @@ describe('decisões da diretoria (29/10)', () => {
     const none = financeEngine({ input: rec(), items: [], settings: S, publicSector: false });
     expect(none.priceSource).toBe('motor');
     expect(none.priceCents).toBe(none.recommendedCents);
+  });
+  it('produto lançado sem valor: preço zero na análise e o mínimo sugerido para definir o preço', () => {
+    const r = financeEngine({ input: rec(), items: items([0, 0]), settings: S, publicSector: false });
+    expect(r.priceSource).toBe('itens');
+    expect(r.priceCents).toBe(0);
+    expect(r.kpi).toBeNull();
+    expect(r.verdict).toBe('sem_preco');
+    expect(r.suggestedMinCents).toBeGreaterThan(0);
+    // usando o mínimo sugerido, a análise fecha
+    const ok = financeEngine({ input: rec({ priceCents: r.suggestedMinCents }), items: items([0, 0]), settings: S, publicSector: false });
+    expect(ok.kpi).not.toBeNull();
+  });
+  it('payback do vendedor muda a análise inteira (inclusive acima do teto); o teto segue na aprovação pelo retorno real', () => {
+    const it0 = items([0, 0]);
+    const a = financeEngine({ input: rec({ paybackMonths: 3 }), items: it0, settings: S, publicSector: false });
+    const b = financeEngine({ input: rec({ paybackMonths: 12 }), items: it0, settings: S, publicSector: false });
+    expect(a.term.D).toBe(3);
+    expect(b.term.D).toBe(12); // teto privado é 6: não corta mais
+    expect(b.suggestedMinCents!).toBeLessThan(a.suggestedMinCents!);
+    expect(b.warnings.join(' ')).toMatch(/acima do teto/);
+    // no preço mínimo do payback de 12 meses, o retorno real passa do teto de 6: fora da política
+    const atMin = financeEngine({ input: rec({ paybackMonths: 12, priceCents: b.suggestedMinCents }), items: it0, settings: S, publicSector: false });
+    expect(atMin.kpi!.margins!.amortizationCents).toBe(Math.round(atMin.investmentCents! / 12));
+    expect(atMin.paybackOk).toBe(false);
   });
   it('a trava usa o payback descontado: 5,9 meses simples passa de 6 com TMA de 3%', () => {
     // I = 500.000, MC = 85.000/mês → simples 5,88; descontado a 3% passa de 6

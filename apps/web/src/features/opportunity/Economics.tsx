@@ -95,7 +95,7 @@ function SuggestedPrice({ r, per }: { r: EconResult; per: string }) {
         <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span></p>
         <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
       </div>
-      {p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
+      {p === 0 && r.priceSource === 'itens' ? <Chip tone="orange">Produtos sem preço: use a sugestão</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
     </div>
   );
 }
@@ -199,7 +199,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
       <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Preço {r.priceSource === 'informado' ? 'informado' : 'dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
-        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{months(k?.paybackMonths)}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
+        <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
       {k?.margins && <MarginChain m={k.margins} per={per} compact={compact} />}
@@ -567,7 +567,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
               : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
-            {f.mode === 'recorrente' && <FormField label="Payback (meses)" htmlFor="ec-pb" hint={`Até ${teto} meses (teto do setor ${d.publicSector ? 'público' : 'privado'}); o investimento é diluído nesse prazo`}><Input id="ec-pb" inputMode="numeric" placeholder={String(teto)} value={f.payback} disabled={dis} invalid={!!f.payback && (Number(f.payback) < 1 || Number(f.payback) > teto)} onChange={(e) => set({ payback: e.target.value.replace(/\D/g, '').slice(0, 3) })} /></FormField>}
+            {f.mode === 'recorrente' && (
+              <FormField label="Payback (meses)" htmlFor="ec-pb" hint={`Sugestão: ${teto} meses (teto do setor ${d.publicSector ? 'público' : 'privado'}). O investimento é diluído nesse prazo e toda a análise muda junto; acima do teto, o retorno real decide a alçada.`}>
+                <>
+                  <Input id="ec-pb" inputMode="numeric" placeholder={String(teto)} value={f.payback} disabled={dis} invalid={!!f.payback && Number(f.payback) < 1} onChange={(e) => set({ payback: e.target.value.replace(/\D/g, '').slice(0, 3) })} />
+                </>
+              </FormField>
+            )}
             <FormField label={`Margem de contribuição: ${bpText(mNow)}%`} htmlFor="ec-mar" hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%`}>
               <input id="ec-mar" type="range" className="w-full accent-[rgb(var(--primary))]" min={mPiso / 100} max={(mTeto ?? Math.min(9_000, mPiso + 5_000)) / 100} step={0.5} value={mNow / 100} disabled={dis} onChange={(e) => set({ margin: String(e.target.value).replace('.', ',') })} />
             </FormField>

@@ -43,7 +43,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-2.0/isp-3';
+export const ENGINE_VERSION = 'FINANCE-2.0/isp-4';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -199,6 +199,8 @@ export function marginChain(P: number, contribution: number, amortization: numbe
 }
 
 const round = (v: number | null) => (v == null || !Number.isFinite(v) ? null : Math.round(v));
+/** preços sugeridos sobem para o centavo de cima: usar a sugestão nunca fica um centavo abaixo da regra */
+const roundUp = (v: number | null) => (v == null || !Number.isFinite(v) ? null : Math.ceil(v - 1e-6));
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 /** TMA mensal: da anual quando informada, senão a mensal das versões antigas. */
 export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'>) => (st.tmaAnnualBp != null ? (1 + st.tmaAnnualBp / 10_000) ** (1 / 12) - 1 : st.tmaMonthlyBp / 10_000);
@@ -257,9 +259,11 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const N = rec ? Math.min(inp.termMonths, horizon ?? inp.termMonths) : 0;
   if (rec && horizon != null && inp.termMonths > horizon) warnings.push(`Vigência de ${inp.termMonths} meses acima do prazo máximo de previsão: a projeção vai até ${horizon} meses.`);
   const pbAsk = inp.paybackMonths ?? null;
-  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, Dalvo, N || 1)) : 0;
-  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback pedido (${pbAsk} meses) acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): ajustado para ${Math.min(Dalvo, N)}.`);
-  else if (rec && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
+  // o vendedor ajusta o payback livremente (até o prazo projetado) e a análise toda acompanha;
+  // o teto do setor continua como regra de aprovação, pelo payback descontado real (atende_payback)
+  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, N || 1)) : 0;
+  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o preço mínimo cai, mas se o retorno real passar do teto a viabilidade vai para a alçada superior.`);
+  if (rec && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
   const d = rec ? 0 : inp.receiveMonth;
 
   // 2–4. preço, fluxo de caixa e decisão: executados pelo modelo de fórmulas (Financial Studio; padrão = motor 2.0)
@@ -290,9 +294,10 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   else if (markupPrice === null) warnings.push('A margem escolhida é maior que a base do markup: não há preço que entregue essa margem.');
   for (const w of pre.warnings) if (!w.includes('Divisão por zero')) warnings.push(`Fórmula ${w}`);
 
-  // 3. preço avaliado (informado; senão o dos produtos; senão o preço recomendado) e o modelo no preço
-  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : revenue > 0 ? 'itens' : 'motor';
-  const P0 = inp.priceCents ?? (revenue > 0 ? revenue : recP);
+  // 3. preço avaliado (informado; senão o dos produtos, mesmo zerado; sem produtos, o preço recomendado) e o modelo no preço.
+  // Produto lançado sem valor fica com preço zero: a análise mostra o mínimo sugerido para o vendedor definir o preço.
+  const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : n ? 'itens' : 'motor';
+  const P0 = inp.priceCents ?? (n ? revenue : roundUp(recP));
   const P = P0 != null && Number.isFinite(P0) ? P0 : null;
   let kpi: EconResult['kpi'] = null;
   let flows: number[] = [];
@@ -361,8 +366,8 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     variableFixedCents: E, investmentCents: Math.round(Inv),
     term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items,
-    floor: { cashCents: round(cash), economicCents: round(eco), minCents: round(minP) },
-    marginPriceCents: round(marginPrice), recommendedCents: round(recP), markupPriceCents: round(markupPrice), operatingFloorCents: round(opFloor), suggestedMinCents: round(suggested),
+    floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
+    marginPriceCents: roundUp(marginPrice), recommendedCents: roundUp(recP), markupPriceCents: roundUp(markupPrice), operatingFloorCents: roundUp(opFloor), suggestedMinCents: roundUp(suggested),
     kpi, cashflow: flows.map(Math.round), statement,
     marginOk, paybackOk, verdict, withinPolicy, withReservations, warnings,
     autoApproval: { ok: boolv(v.aprovacao_automatica) && checks.every((x) => x.ok), checks },
@@ -533,6 +538,7 @@ function econDreV1(r: EconResult, fmt: (c: number) => string): DreRow[] {
 export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) {
   const per = rs.mode === 'recorrente' ? '/mês' : '';
   if (rs.verdict === 'inviavel') return 'Tributos, comissão e perdas consomem toda a receita: revise a comissão, a perda esperada ou os documentos fiscais.';
+  if ((rs.verdict === 'sem_preco' || !rs.kpi) && rs.priceSource === 'itens' && !rs.priceCents) return `Produtos lançados sem preço: com o investimento e os custos informados, o preço mínimo sugerido é ${fmt(rs.suggestedMinCents ?? rs.floor.minCents)}${per}${rs.mode === 'recorrente' ? ` (payback de ${rs.term.D} meses)` : ''}. Use a sugestão ou informe o preço para ver a análise completa.`;
   if (rs.verdict === 'sem_preco' || !rs.kpi) return `Informe o preço ou lance os produtos. O preço mínimo é ${fmt(rs.floor.minCents)}${per}${rs.recommendedCents != null ? ` e o que entrega a margem mínima, ${fmt(rs.recommendedCents)}${per}` : ''}.`;
   const k = rs.kpi;
   const tma = (rs.rates.r * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
