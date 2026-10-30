@@ -180,7 +180,7 @@ export function AdjustmentsTab({ d, contractId }: { d: Data; contractId: string 
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <p className="font-bold text-ink">{a.indexName} · {a.pct >= 0 ? '+' : ''}{a.pct.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}%</p>
-                  <p className="text-xs text-muted">A partir de {monthLabel(a.startCompetence)} · data-base {fmtDate(a.baseDate)} · registrado em {fmtDateTime(a.createdAt)}{a.note ? ` · ${a.note}` : ''}</p>
+                  <p className="text-xs text-muted">A partir de {monthLabel(a.startCompetence)} · data-base {fmtDate(a.baseDate)} · registrado em {fmtDateTime(a.createdAt)} · medições abertas {a.repriceOpen ? 'no preço novo' : 'mantidas no preço lançado'}{a.note ? ` · ${a.note}` : ''}</p>
                 </div>
                 <div className="text-right text-sm">
                   <p>Retroativo: <b className="num">{money(total)}</b></p>
@@ -224,10 +224,10 @@ function AdjustmentModal({ d, contractId, onClose }: { d: Data; contractId: stri
   const toast = useToast();
   const refresh = useRefresh(contractId);
   const last = d.adjustments.at(-1);
-  const [v, setV] = useState({ indexName: 'IPCA', mode: 'percentual' as 'percentual' | 'fator', index: '', baseDate: d.contract.startAt ?? d.today, startCompetence: d.today.slice(0, 7), note: '' });
+  const [v, setV] = useState({ indexName: 'IPCA', mode: 'percentual' as 'percentual' | 'fator', index: '', baseDate: d.contract.startAt ?? d.today, startCompetence: d.today.slice(0, 7), note: '', repriceOpen: true });
   const [pv, setPv] = useState<{ key: string; data: Preview } | null>(null);
   const key = JSON.stringify({ ...v, note: '' });
-  const body = { indexName: v.indexName.trim(), mode: v.mode, index: v.index.trim(), baseDate: v.baseDate, startCompetence: v.startCompetence };
+  const body = { indexName: v.indexName.trim(), mode: v.mode, index: v.index.trim(), baseDate: v.baseDate, startCompetence: v.startCompetence, repriceOpen: v.repriceOpen };
   const preview = useMutation({ mutationFn: () => api<Preview>(`/contracts/${contractId}/commitment-control/adjustments/preview`, { method: 'POST', body }), onSuccess: (r) => setPv({ key, data: r }), onError: (e) => { setPv(null); toast({ tone: 'error', message: errMsg(e) }); } });
   const save = useMutation({ mutationFn: () => api<{ retroTotalV4: number }>(`/contracts/${contractId}/commitment-control/adjustments`, { method: 'POST', body: { ...body, note: v.note.trim() || null } }), onSuccess: (r) => { refresh(); toast({ tone: 'success', message: r.retroTotalV4 ? `Reajuste registrado. ${money(r.retroTotalV4)} de retroativo foram para Pendências.` : 'Reajuste registrado' }); onClose(); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const ready = pv && pv.key === key;
@@ -244,9 +244,14 @@ function AdjustmentModal({ d, contractId, onClose }: { d: Data; contractId: stri
         <FormField label="Vale a partir da competência" htmlFor="aj-s" hint={last ? `Depois de ${monthShort(last.startCompetence)} (último reajuste)` : 'Medições desta competência em diante usam o preço novo'}><Input id="aj-s" type="month" value={v.startCompetence} onChange={(e) => setV({ ...v, startCompetence: e.target.value })} /></FormField>
         <FormField label="Observação" htmlFor="aj-o" hint="Ex.: nº do apostilamento"><Input id="aj-o" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} /></FormField>
       </div>
+      <fieldset className="mt-3 border border-line p-3 text-sm">
+        <legend className="px-1 text-xs font-semibold text-ink">Medições já lançadas e ainda não faturadas</legend>
+        <label className="flex items-start gap-2"><input type="radio" className="mt-1" name="aj-rp" checked={v.repriceOpen} onChange={() => setV({ ...v, repriceOpen: true })} /><span><b>Mudar para o preço novo</b>: a medição passa a valer pelo preço reajustado e a NF sai no valor novo</span></label>
+        <label className="mt-1 flex items-start gap-2"><input type="radio" className="mt-1" name="aj-rp" checked={!v.repriceOpen} onChange={() => setV({ ...v, repriceOpen: false })} /><span><b>Manter o preço lançado</b>: a medição fica como foi atestada e a diferença vira retroativo, cobrado em NF complementar</span></label>
+      </fieldset>
       {!ready ? <p className="mt-3 text-sm text-muted">Clique em <b>Simular</b> para ver a tabela reajustada e o retroativo antes de registrar.</p> : (
         <div className="mt-4 space-y-3">
-          <Notice tone="info">{pv.data.pct >= 0 ? '+' : ''}{pv.data.pct.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}% em {pv.data.table.length} item(ns). Saldo do contrato: {money(sum('oldPrice4'))} → <b>{money(sum('newPrice4'))}</b>. {pv.data.repriced ? `${pv.data.repriced} item(ns) de medições em aberto passam ao preço novo. ` : ''}{pv.data.retroTotalV4 ? `Retroativo de ${money(pv.data.retroTotalV4)} em ${pv.data.retro.length} medição(ões) faturada(s).` : 'Sem retroativo.'}</Notice>
+          <Notice tone="info">{pv.data.pct >= 0 ? '+' : ''}{pv.data.pct.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}% em {pv.data.table.length} item(ns). Saldo do contrato: {money(sum('oldPrice4'))} → <b>{money(sum('newPrice4'))}</b>. {pv.data.repriced ? `${pv.data.repriced} item(ns) de medições em aberto passam ao preço novo. ` : ''}{pv.data.retroTotalV4 ? `Retroativo de ${money(pv.data.retroTotalV4)} em ${pv.data.retro.length} medição(ões)${v.repriceOpen ? ' faturada(s)' : ''}.` : 'Sem retroativo.'} O valor das NEs não muda: se o consumo passar do valor da nota, a NE pede reforço de valor.</Notice>
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="max-h-64 overflow-auto border border-line">
               <table className="w-full text-sm">
@@ -257,7 +262,7 @@ function AdjustmentModal({ d, contractId, onClose }: { d: Data; contractId: stri
             <div className="max-h-64 overflow-auto border border-line">
               {!pv.data.retro.length ? <p className="p-3 text-sm text-muted">Nenhuma medição faturada a partir de {monthLabel(v.startCompetence)}.</p> : (
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-surface-2 text-left text-xs text-muted"><tr><th className="px-2 py-1.5">Medição faturada</th><th className="px-2 py-1.5 text-right">Retroativo</th></tr></thead>
+                  <thead className="sticky top-0 bg-surface-2 text-left text-xs text-muted"><tr><th className="px-2 py-1.5">{v.repriceOpen ? 'Medição faturada' : 'Medição'}</th><th className="px-2 py-1.5 text-right">Retroativo</th></tr></thead>
                   <tbody>{pv.data.retro.map((r) => <tr key={r.measurementId} className="border-t border-line"><td className="px-2 py-1.5">{r.title}<span className="block text-2xs capitalize text-muted">{monthLabel(r.competence)}</span></td><td className="num px-2 py-1.5 text-right font-semibold">{money(r.diffV4)}</td></tr>)}</tbody>
                 </table>
               )}

@@ -266,6 +266,7 @@ export const economicsRoutes = [
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada.');
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
       if (!ctx.savedResult) throw unprocessable('Salve a viabilidade econômica antes de enviar.');
+      if (ctx.savedResult.priceSource === 'sugerido') throw unprocessable('Os produtos estão sem preço: defina o preço (nos produtos ou no campo Preço da viabilidade) e salve antes de enviar.');
       assertDecidable(ctx);
       const st = await econStatus(app.db, auth.tenantId, opp.id);
       if (st.status === 'em_decisao') throw unprocessable('Esta viabilidade já está em decisão.');

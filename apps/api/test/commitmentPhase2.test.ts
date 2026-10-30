@@ -63,6 +63,9 @@ describe('Controle de Empenhos — fase 2', () => {
     ok(await carlos.post(`/contracts/${cid}/measurements/${m1.id}/status`, { action: 'faturar', invoiceNumber: 'NF 77', invoiceDate: `${comp}-10` }));
     const body = { indexName: 'IPCA', mode: 'percentual', index: '10', baseDate: `${year}-01-10`, startCompetence: comp };
     ok(await carlos.post(`/contracts/${cid}/commitment-control/adjustments/preview`, { ...body, index: '10,12345' }), 422);
+    // manter o preço das medições abertas: nada é repassado e a medição 2 também entra no retroativo
+    const keep = ok(await carlos.post(`/contracts/${cid}/commitment-control/adjustments/preview`, { ...body, repriceOpen: false })).json();
+    expect(keep).toMatchObject({ repriced: 0, retroTotalV4: 40 * 10_000 + 50 * 10_000 });
     const pv = ok(await carlos.post(`/contracts/${cid}/commitment-control/adjustments/preview`, body)).json();
     expect(pv.table.find((t: { lineId: string }) => t.lineId === L.A)).toMatchObject({ oldPrice4: 100_000, newPrice4: 110_000 });
     expect(pv).toMatchObject({ retroTotalV4: 40 * 10_000, repriced: 1 });
@@ -77,6 +80,17 @@ describe('Controle de Empenhos — fase 2', () => {
     expect(retro.valueV4).toBe(400_000);
     expect(g.totals.invoiced).toBe(40 * 110_000 - 400_000);
     expect(g.alerts.map((x) => x.key)).toContain('retroativo');
+    // empenho em R$: a municipal empenhou 30 × R$ 10 e já consumiu 30 × R$ 11 → falta R$ 30 de reforço de valor
+    const mun = g.commitments.find((c) => c.number === `${year}NE000002`)! as unknown as { items: { id: string }[]; valueV4: number; balanceV4: number };
+    expect(mun.valueV4).toBe(300 * 10_000);
+    expect(mun.balanceV4).toBe(-30 * 10_000);
+    expect(g.alerts.map((x) => x.key)).toContain('empenho_valor');
+    expect(g.pendencias.find((p) => p.kind === 'reforco_valor')!.valueV4).toBe(30 * 10_000);
+    ok(await carlos.post(`/contracts/${cid}/commitment-items/${mun.items[0]!.id}/moves`, { kind: 'reforco_valor', occurredOn: `${comp}-15`, reason: 'Reforço de valor após o reajuste' }), 422);
+    ok(await carlos.post(`/contracts/${cid}/commitment-items/${mun.items[0]!.id}/moves`, { kind: 'reforco_valor', value: 30, occurredOn: `${comp}-15`, reason: 'Reforço de valor após o reajuste' }), 201);
+    g = await get();
+    expect(g.pendencias.some((p) => p.kind === 'reforco_valor')).toBe(false);
+    expect(g.alerts.map((x) => x.key)).not.toContain('empenho_valor');
     // nova medição já sai pelo preço reajustado
     const m3 = ok(await carlos.post(`/contracts/${cid}/measurements`, { competence: comp, kind: 'avulsa', title: 'Medição 3', items: [{ lineId: L.B, qty: 1 }] }), 201).json();
     expect(m3.uncoveredV4).toBe(110 * 10_000);
@@ -97,11 +111,12 @@ describe('Controle de Empenhos — fase 2', () => {
     // reempenhar sem suprimir passa do que falta empenhar? 132 − 90 = 42: cabe; o teste é a rastreabilidade
     ok(await carlos.post(`/contracts/${cid}/commitment-control/rollover`, { year, occurredOn: `${year}-12-31`, reason: 'Virada do exercício', items: [{ commitmentItemId: item.id, qty: 7 }] }), 422);
     const r = ok(await carlos.post(`/contracts/${cid}/commitment-control/rollover`, { year, occurredOn: `${year}-12-31`, reason: 'Virada do exercício', items: [{ commitmentItemId: item.id, qty: 6 }], newCommitment: { number: `${year + 1}NE000010`, issuedOn: `${year + 1}-01-05`, sourceId: S.est, items: [{ lineId: L.A, qty: 6, code: '460319-2' }] } }), 201).json();
-    expect(r.suppressedV4).toBe(6 * 110_000);
+    // em quantidade sobravam 6, mas em R$ só R$ 6 (600 empenhados − 594 consumidos no preço reajustado)
+    expect(r.suppressedV4).toBe(6 * 10_000);
     g = await get();
     const old = g.commitments.find((c) => c.number === `${year}NE000001`)!;
     const nw = g.commitments.find((c) => c.number === `${year + 1}NE000010`)!;
-    expect(old).toMatchObject({ balanceV4: 0, suppressedV4: 6 * 110_000, reempenhadaEm: [{ number: `${year + 1}NE000010` }] });
+    expect(old).toMatchObject({ balanceV4: 0, suppressedV4: 6 * 10_000, reempenhadaEm: [{ number: `${year + 1}NE000010` }] });
     expect(nw.substitui).toEqual([{ number: `${year}NE000001`, id: old.id }]);
     // NE do ano seguinte não cobre medição deste ano
     expect(g.lines.find((l) => l.id === L.A)!.balance.committed4).toBe((60 - 6 + 30 + 6) * 10_000);

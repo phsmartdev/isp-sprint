@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import {
-  allocateRateio, commitmentAlerts, commitmentCurve, commitmentItemBalances, commitmentProjection, contractTotals, lineBalances, priceAt,
+  allocateRateio, commitmentAlerts, commitmentCurve, commitmentItemBalances, commitmentItemValues, commitmentProjection, contractTotals, lineBalances, priceAt,
   type CCommitment, type CCommitmentItem, type CLine, type CMeasurement, type CMeasurementItem, type CPrice, type CReservation, type CShare, type CommitmentMoveKind, type LineClass, type MeasurementKind, type MeasurementStatus,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
@@ -90,8 +90,10 @@ function buildControlData(raw: RawRows) {
   const dl: CLine[] = lines.map((l) => ({ id: l.id, itemNumber: l.itemNumber, description: l.description, unit: l.unit, classification: l.classification as LineClass, qty4: netQty(l), price4: priceAt(l, prices, today), monthlyQty4: l.monthlyQty4 }));
   const dc: CCommitment[] = commitments.map((c) => ({ id: c.id, number: c.number, fiscalYear: c.fiscalYear, issuedOn: c.issuedOn, cancelled: !!c.cancelledAt, source: c.source, sourceId: c.sourceId }));
   const di: CCommitmentItem[] = cItems.map((i) => {
-    const mv = (movesByItem.get(i.id) ?? []).map((m) => ({ kind: m.kind as CommitmentMoveKind, qty4: m.qty4, occurredOn: m.occurredOn }));
-    return { id: i.id, commitmentId: i.commitmentId, lineId: i.lineId, code: i.code, itemNumber: i.itemNumber, qty4: i.qty4, adjust4: mv.reduce((a, m) => a + (m.kind === 'reforco' ? m.qty4 : -m.qty4), 0), moves: mv };
+    const mv = (movesByItem.get(i.id) ?? []).map((m) => ({ kind: m.kind as CommitmentMoveKind, qty4: m.qty4, value4: m.value4, occurredOn: m.occurredOn }));
+    const adjust4 = mv.reduce((a, m) => a + (m.kind === 'reforco' ? m.qty4 : m.kind === 'reforco_valor' ? 0 : -m.qty4), 0);
+    const valueAdjust4 = mv.reduce((a, m) => a + (m.kind === 'reforco_valor' ? m.value4 ?? 0 : 0), 0);
+    return { id: i.id, commitmentId: i.commitmentId, lineId: i.lineId, code: i.code, itemNumber: i.itemNumber, qty4: i.qty4, adjust4, price4: i.price4, valueAdjust4, moves: mv };
   });
   const dm: CMeasurement[] = measurements.map((m) => ({ id: m.id, competence: m.competence, status: m.status as MeasurementStatus, superseded: m.superseded, title: m.title, kind: m.kind as MeasurementKind, createdAt: m.createdAt.toISOString(), attestedAt: m.attestedAt?.toISOString() ?? null }));
   const dmi: CMeasurementItem[] = mItems.map((x) => ({ measurementId: x.measurementId, lineId: x.lineId, qty4: x.qty4, price4: x.price4, allocations: x.allocations, uncovered4: x.uncovered4 }));
@@ -111,19 +113,31 @@ export function controlState(d: ControlData, contract: { startAt: string | null;
   const bal = lineBalances({ lines: d.lines, commitments: d.commitments, items: d.items, measurements: d.measurements, mItems: d.mItems, reservations: d.reservations });
   const ciBal = commitmentItemBalances(d.items, d.measurements, d.mItems);
   const totals = contractTotals(d.lines, bal, { measurements: d.measurements, mItems: d.mItems });
+  // empenho em R$: valor da nota fixo (preço da emissão + reforços de valor) − consumo pelo preço da medição
+  const priceNow = new Map(d.lines.map((l) => [l.id, l.price4]));
+  const ciVal = commitmentItemValues(d.items, d.measurements, d.mItems, (id) => priceNow.get(id) ?? 0);
+  const activeNe = new Set(d.commitments.filter((c) => !c.cancelled).map((c) => c.id));
+  const activeItems = d.items.filter((i) => activeNe.has(i.commitmentId));
+  totals.committed = activeItems.reduce((a, i) => a + (ciVal.get(i.id)?.committedV4 ?? 0), 0);
+  totals.commitmentBalance = activeItems.reduce((a, i) => a + (ciVal.get(i.id)?.balanceV4 ?? 0), 0);
+  totals.committedPct = totals.contracted ? (totals.committed / totals.contracted) * 100 : null;
+  const valueShort = d.commitments.filter((c) => activeNe.has(c.id)).map((c) => ({ number: c.number, deficitV4: d.items.filter((i) => i.commitmentId === c.id).reduce((a, i) => a + Math.max(0, -(ciVal.get(i.id)?.balanceV4 ?? 0)), 0) })).filter((x) => x.deficitV4 > 0);
   const projection = commitmentProjection({ today, startAt: contract.startAt, endAt: contract.endAt, windowMonths: settings?.windowMonths ?? 3, lines: d.lines, bal, commitments: d.commitments, items: d.items, ciBal, measurements: d.measurements, mItems: d.mItems, reservations: d.reservations });
   const live = new Set(d.raw.measurements.filter((m) => !m.superseded && m.status !== 'cancelada').map((m) => m.id));
   const retroPendingV4 = d.raw.retros.filter((r) => r.status === 'pendente' && live.has(r.measurementId)).reduce((a, r) => a + r.diffV4, 0);
-  // a medição faturada já vale pelo preço reajustado; o retroativo ainda sem NF complementar não está faturado
-  totals.invoiced = Math.max(0, totals.invoiced - retroPendingV4);
+  // a medição faturada já vale pelo preço reajustado; o retroativo dela ainda sem NF complementar não está faturado
+  // (no reajuste que mantém o preço das medições abertas, a diferença fica só no retroativo, fora do valor da medição)
+  const invoicedM = new Set(d.raw.measurements.filter((m) => m.status === 'faturada' && live.has(m.id)).map((m) => m.id));
+  const inValue = d.raw.retros.filter((r) => r.status === 'pendente' && invoicedM.has(r.measurementId)).reduce((a, r) => a + r.items.reduce((t, i) => t + (d.raw.mItems.some((x) => x.measurementId === r.measurementId && x.lineId === i.lineId && x.price4 === i.newPrice4) ? i.diffV4 : 0), 0), 0);
+  totals.invoiced = Math.max(0, totals.invoiced - inValue);
   const year = Number(today.slice(0, 4));
   const next = projection.years.find((y) => y.year === year + 1);
   const alerts = commitmentAlerts({
     today, lines: d.lines, bal, commitments: d.commitments, items: d.items, measurements: d.measurements, mItems: d.mItems, endAt: contract.endAt,
     agingDays: settings?.agingDays, toCommitAlertPct: settings?.toCommitPct ?? null,
-    extras: { exhaustBefore: projection.exhaustBefore, nextInstallmentShort: projection.nextInstallmentShort, retroPendingV4, nextYear: next ? { year: next.year, needV4: next.needV4, hasCommitment: d.commitments.some((c) => !c.cancelled && c.fiscalYear === next.year) } : null },
+    extras: { valueShort, exhaustBefore: projection.exhaustBefore, nextInstallmentShort: projection.nextInstallmentShort, retroPendingV4, nextYear: next ? { year: next.year, needV4: next.needV4, hasCommitment: d.commitments.some((c) => !c.cancelled && c.fiscalYear === next.year) } : null },
   });
-  return { bal, ciBal, totals, alerts, projection, retroPendingV4 };
+  return { bal, ciBal, ciVal, totals, alerts, projection, retroPendingV4, valueShort };
 }
 
 /** Curva contratado × empenhado × executado × faturado (PF07.5). */

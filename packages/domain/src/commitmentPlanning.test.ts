@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { commitmentItemBalances, lineBalances, q4, value4, type CCommitment, type CCommitmentItem, type CLine, type CMeasurement, type CMeasurementItem } from './commitments';
+import { commitmentItemBalances, commitmentItemValues, lineBalances, q4, value4, type CCommitment, type CCommitmentItem, type CLine, type CMeasurement, type CMeasurementItem } from './commitments';
 import { FACTOR, compAddMonths, adjustmentTable, allocateRateio, commitmentCurve, commitmentProjection, compMonthsBetween, parseAdjustmentIndex, priceAt, retroactiveFor, splitByShares, PPM } from './commitmentPlanning';
 
 const line = (id: string, over: Partial<CLine> = {}): CLine => ({ id, itemNumber: id, description: id, unit: 'UN', classification: 'recorrente', qty4: q4(120), price4: q4(10), monthlyQty4: q4(10), ...over });
@@ -40,6 +40,39 @@ describe('reajuste (PF08)', () => {
     expect(r.invoiced[0]!.items.find((i) => i.lineId === 'B')!.diffV4).toBe(value4(q4(10), 1_356_180) - value4(q4(10), q4(130)));
     expect(r.invoiced[0]!.diffV4).toBe(r.invoiced[0]!.items.reduce((a, i) => a + i.diffV4, 0));
     expect(r.reprice).toEqual([{ measurementId: 'm6', lineId: 'B', oldPrice4: q4(130), newPrice4: 1_356_180 }]);
+  });
+});
+
+describe('reajuste: manter o preço das medições abertas', () => {
+  it('sem repassar o preço, a medição aberta mantém o valor e a diferença vira retroativo', () => {
+    const ms = [meas('m5', '2026-05', 'faturada'), meas('m6', '2026-06', 'atestada')];
+    const mi: CMeasurementItem[] = [
+      { measurementId: 'm5', lineId: 'B', qty4: q4(10), price4: q4(130), allocations: [], uncovered4: 0 },
+      { measurementId: 'm6', lineId: 'B', qty4: q4(5), price4: q4(130), allocations: [], uncovered4: 0 },
+    ];
+    const t = [{ lineId: 'B', oldPrice4: q4(130), newPrice4: q4(140) }];
+    const keep = retroactiveFor(ms, mi, t, '2026-05', { repriceOpen: false });
+    expect(keep.reprice).toEqual([]);
+    expect(keep.invoiced.map((x) => [x.measurementId, x.diffV4])).toEqual([['m5', value4(q4(10), q4(10))], ['m6', value4(q4(5), q4(10))]]);
+    const change = retroactiveFor(ms, mi, t, '2026-05');
+    expect(change.invoiced.map((x) => x.measurementId)).toEqual(['m5']);
+    expect(change.reprice).toHaveLength(1);
+  });
+});
+
+describe('empenho em quantidade e em reais', () => {
+  it('depois do reajuste a mesma quantidade consome mais valor; reforço de valor cobre a diferença', () => {
+    const items: CCommitmentItem[] = [{ id: 'i', commitmentId: 'N', lineId: 'A', code: null, itemNumber: null, qty4: q4(100), adjust4: 0, price4: q4(10) }];
+    const ms = [meas('a', '2026-04', 'faturada'), meas('b', '2026-06', 'atestada')];
+    const mi: CMeasurementItem[] = [
+      { measurementId: 'a', lineId: 'A', qty4: q4(50), price4: q4(10), allocations: [{ commitmentItemId: 'i', qty4: q4(50) }], uncovered4: 0 },
+      { measurementId: 'b', lineId: 'A', qty4: q4(50), price4: q4(11), allocations: [{ commitmentItemId: 'i', qty4: q4(50) }], uncovered4: 0 },
+    ];
+    const v = commitmentItemValues(items, ms, mi, () => q4(11)).get('i')!;
+    expect(v).toEqual({ committedV4: value4(q4(100), q4(10)), usedV4: value4(q4(50), q4(10)) + value4(q4(50), q4(11)), balanceV4: -value4(q4(50), q4(1)) });
+    expect(commitmentItemBalances(items, ms, mi).get('i')).toBe(0); // em quantidade está zerado, em valor falta R$ 50
+    const v2 = commitmentItemValues([{ ...items[0]!, valueAdjust4: value4(q4(50), q4(1)) }], ms, mi, () => q4(11)).get('i')!;
+    expect(v2.balanceV4).toBe(0);
   });
 });
 
