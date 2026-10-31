@@ -411,3 +411,11 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - **Consequência:**
   - A leitura por IMAP é feita em lotes: 50 mensagens na primeira vez e 100 nas seguintes, para caber no tempo da função.
   - A assinatura ainda não aceita imagem, porque os e-mails saem em texto simples.
+
+## ADR-073 — Uma base de código, várias instâncias de marca (31/10/2026)
+**Contexto:** o Paulo quer uma segunda instância, paralela ao RevOps/BKT, para a Yepnet: ferramenta 100% personalizável para provedor de internet, bem menor, começando só pela marca e copiando o resto do que existe.
+**Decisão:** em vez de fork, o mesmo repositório com um deploy por empresa (projeto Vercel + projeto Supabase próprios). A variável `VITE_BRAND` (`bkt` padrão, `yepnet`) vale para o build e para a API e escolhe:
+- front (`apps/web/src/brand.ts` + `tokens.css` sob `[data-brand]`): cores, raios (BKT reto, Yepnet arredondado), fontes, logo, título/ícone da aba, Dino e "Confiar ficou fácil.", banner/card do menu, cores padrão das etapas, Personalização com upload (Yepnet) ou fixa (BKT);
+- API (`apps/api/src/brand.ts`): nome da ferramenta nos textos automáticos (e-mails, exportações, GLPI, modelos iniciais) e filiais iniciais (BKT Soluções/UPNET × Yepnet).
+"Bem menor" = desligar módulos em Configurações → Módulos da instância (sem cortar código).
+**Consequências:** correção ou funcionalidade nova vale para as duas instâncias; dados totalmente isolados (bancos separados). Uma nova marca é um bloco em `brand.ts` (web e API) + um bloco em `tokens.css`. **(reversível)**
