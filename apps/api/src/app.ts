@@ -61,6 +61,7 @@ import { financeStudioRoutes } from './routes/financeStudio';
 import { commitmentControlRoutes } from './routes/commitmentControl';
 import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
+import { routeStudyRoutes } from './routes/routeStudies';
 import { opportunityItemRoutes } from './routes/opportunityItems';
 import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants';
 import { competitorRoutes } from './routes/competitors';
@@ -232,6 +233,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...financeStudioRoutes,
     ...commitmentControlRoutes,
     ...opportunityContactRoutes,
+    ...routeStudyRoutes,
     ...salesBranchRoutes,
     ...opportunityItemRoutes,
     ...bidParticipantRoutes,

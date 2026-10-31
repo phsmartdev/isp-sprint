@@ -50,6 +50,13 @@ O repositório já vem pronto (`vercel.json` + função `api/server.mjs`): o sit
 4. **Deploy.** O build aplica as migrations no banco (só em produção) e, com `SEED_DEMO=true`, cria os dados de demonstração.
 5. Em **Configurações → E-mail e alertas**, cadastre o SMTP e clique em **Testar**.
 
+### Viabilidade técnica por mapa (só instância Yepnet)
+
+- **Mapa da rede:** Configurações → Mapa da rede (KMZ). Envie o KMZ/KML exportado do Google Earth, OZmap, GeoGrid etc.; o arquivo é lido no navegador (CTOs, cabos e áreas) e cada envio vira uma versão.
+- **Traçado:** na oportunidade, aba *Viabilidade técnica* → *Abrir mapa do traçado*. Marque o cliente, trace a partir da CTO, informe porta e sobra e salve: a imagem (PNG) vai para os anexos.
+- **Chamado com a imagem:** *Pedir viabilidade (GLPI)* abre o chamado já preenchido e anexa a imagem. O anexo usa a API REST clássica do GLPI: em Configuração → Geral → API, ligue **API REST** e **login com credenciais** (o mesmo usuário de integração). Se o cliente da API exigir, informe o *Token da aplicação* em Configurações → Integrações → GLPI.
+- Fundos do mapa: imagens de satélite da Esri e ruas do OpenStreetMap, carregados direto pelo navegador.
+
 Domínios próprios: acrescente-os em `WEB_ORIGIN` (separados por vírgula). As URLs `*.vercel.app` do projeto já são aceitas automaticamente.
 
 ## Testes

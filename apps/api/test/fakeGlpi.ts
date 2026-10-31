@@ -24,6 +24,8 @@ export type FakeGlpi = {
   /** O técnico responde/age no GLPI; com `hook`, dispara o webhook assinado como o GLPI faz. */
   act: (ticketId: number, a: { kind: 'followup' | 'task' | 'solution' | 'status' | 'validation'; text?: string; status?: number; isPrivate?: boolean; toOther?: boolean }, hook?: { url: string; secret: string; badSignature?: boolean }) => Promise<number | null>;
   failNext: (status: number) => void;
+  /** Arquivos recebidos pela API REST clássica (/apirest.php), com o chamado a que foram ligados. */
+  documents: { id: number; name: string; bytes: number; entityId: number | null; ticketId: number | null }[];
 };
 
 /** Como o GLPI: data local do servidor (aqui, Brasília), sem fuso. */
@@ -35,10 +37,13 @@ const filterBy = <T extends { name: string }>(list: T[], filter: string | null) 
   return m ? list.filter((x) => x.name.toLowerCase().includes(m[1]!.toLowerCase())) : list;
 };
 
-export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
+/** `firstTicketId`: numeração própria por suíte, para chamados de suítes diferentes não colidirem no banco de teste. */
+export async function startFakeGlpi(port = 0, opts: { firstTicketId?: number } = {}): Promise<FakeGlpi> {
   const tickets = new Map<number, Ticket>();
   const tokens = new Set<string>();
-  let seq = 100, itemSeq = 500, failNext: number | null = null;
+  let seq = (opts.firstTicketId ?? 101) - 1, itemSeq = 500, failNext: number | null = null;
+  const documents: FakeGlpi['documents'] = [];
+  const sessions = new Map<string, number | null>();
 
   async function sendHook(item: Record<string, unknown>, hook: { url: string; secret: string; badSignature?: boolean }) {
     const payload = JSON.stringify({ event: 'new', item }, null, 4);
@@ -67,6 +72,34 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
         const tk = randomBytes(12).toString('hex');
         tokens.add(tk);
         return json(res, 200, { token_type: 'Bearer', expires_in: 3600, access_token: tk, refresh_token: 'r' });
+      }
+      // API REST clássica: só o que o anexo de arquivo usa
+      if (p.startsWith('/apirest.php/')) {
+        const rp = p.slice('/apirest.php'.length);
+        if (rp === '/initSession') {
+          if (req.headers['app-token'] && req.headers['app-token'] !== 'app-token-ok') return json(res, 400, ['ERROR_WRONG_APP_TOKEN_PARAMETER', 'Parâmetro app_token incorreto']);
+          const basic = Buffer.from((req.headers.authorization ?? '').replace(/^Basic /, ''), 'base64').toString();
+          if (basic !== `${GLPI_CREDS.username}:${GLPI_CREDS.password}`) return json(res, 401, ['ERROR_GLPI_LOGIN', 'Usuário ou senha incorretos']);
+          const tk = randomBytes(8).toString('hex'); sessions.set(tk, null);
+          return json(res, 200, { session_token: tk });
+        }
+        const st = String(req.headers['session-token'] ?? '');
+        if (!sessions.has(st)) return json(res, 401, ['ERROR_SESSION_TOKEN_INVALID', 'session_token inválido']);
+        if (rp === '/changeActiveEntities' && req.method === 'POST') { sessions.set(st, JSON.parse(raw).entities_id); return json(res, 200, true); }
+        if (rp === '/Document' && req.method === 'POST') {
+          const m = raw.match(/name="uploadManifest"\r\n\r\n(\{.*?\})\r\n/s);
+          if (!m || !/name="filename\[0\]"/.test(raw)) return json(res, 400, ['ERROR_UPLOAD_FILE_TOO_BIG_POST_MAX_SIZE', 'arquivo ausente']);
+          const id = ++itemSeq; documents.push({ id, name: JSON.parse(m[1]!).input.name, bytes: raw.length, entityId: sessions.get(st) ?? null, ticketId: null });
+          return json(res, 201, { id, message: 'Item adicionado' });
+        }
+        if (rp === '/Document_Item' && req.method === 'POST') {
+          const i = JSON.parse(raw).input;
+          const d = documents.find((x) => x.id === i.documents_id);
+          if (!d || i.itemtype !== 'Ticket' || !tickets.has(i.items_id)) return json(res, 400, ['ERROR_GLPI_ADD', 'ligação inválida']);
+          d.ticketId = i.items_id; return json(res, 201, { id: ++itemSeq });
+        }
+        if (rp === '/killSession') { sessions.delete(st); return json(res, 200, true); }
+        return json(res, 404, ['ERROR_RESOURCE_NOT_FOUND_NOR_COMMONDBTM', '']);
       }
       if (!p.startsWith('/api.php/')) return json(res, 404, { status: 'ERROR_ROUTE_NOT_FOUND' });
       const auth = (req.headers.authorization ?? '').replace(/^Bearer /, '');
@@ -145,6 +178,7 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
     tickets,
     close: () => new Promise((ok) => server.close(() => ok())),
     failNext: (status) => { failNext = status; },
+    documents,
     act: async (ticketId, a, hook) => {
       const t = tickets.get(ticketId);
       if (!t) throw new Error(`chamado ${ticketId} não existe no GLPI simulado`);

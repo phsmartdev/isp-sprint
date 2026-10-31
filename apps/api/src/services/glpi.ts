@@ -30,7 +30,7 @@ import { integrationRow, logEvent } from './integrations';
 import { unprocessable } from '../http/errors';
 import { APP } from '../brand';
 
-export type GlpiCfg = { tenantId: string; baseUrl: string; clientId: string; clientSecret: string; username: string; password: string; webhookSecret: string | null };
+export type GlpiCfg = { tenantId: string; baseUrl: string; clientId: string; clientSecret: string; username: string; password: string; webhookSecret: string | null; appToken?: string | null };
 export class GlpiError extends Error {
   constructor(message: string, public readonly status = 502) { super(message); }
 }
@@ -59,7 +59,7 @@ export async function glpiConfig(db: DbOrTx, tenantId: string, opts: { requireEn
   const password = sec('password');
   if ((opts.requireEnabled ?? true) && !r.enabled) throw unprocessable('A integração com o GLPI está desligada. Ligue em Configurações → Integrações.');
   if (!r.config.baseUrl || !r.config.clientId || !clientSecret || !r.config.username || !password) throw unprocessable('Integração com o GLPI incompleta: informe endereço, cliente OAuth, usuário e senha em Configurações → Integrações.');
-  return { tenantId, baseUrl: assertGlpiUrl(r.config.baseUrl), clientId: r.config.clientId, clientSecret, username: r.config.username, password, webhookSecret: sec('webhookSecret') };
+  return { tenantId, baseUrl: assertGlpiUrl(r.config.baseUrl), clientId: r.config.clientId, clientSecret, username: r.config.username, password, webhookSecret: sec('webhookSecret'), appToken: sec('appToken') };
 }
 
 // ------------------------------------------------------------------ chamadas
@@ -133,6 +133,44 @@ export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: 
     catch (e) { groupWarning = (e as Error).message; }
   }
   return { id: r.id, groupWarning };
+}
+
+/**
+ * Anexa um arquivo ao chamado. A API de alto nível (/api.php, v2) não recebe arquivos; quem recebe é a API REST
+ * clássica (/apirest.php), com sessão aberta pelo mesmo usuário de integração:
+ *   GET  /apirest.php/initSession            (Authorization: Basic usuário:senha [+ App-Token]) → session_token
+ *   POST /apirest.php/changeActiveEntities   { entities_id, is_recursive }  (o documento nasce na entidade do chamado)
+ *   POST /apirest.php/Document               multipart: uploadManifest {"input":{name,_filename:[arquivo]}} + filename[0]
+ *   POST /apirest.php/Document_Item          { input: { documents_id, itemtype: 'Ticket', items_id } }
+ *   GET  /apirest.php/killSession
+ * No GLPI: Configuração → Geral → API → ligar "API REST" e "login com credenciais". Validação real pendente.
+ */
+export async function glpiAttachFile(c: GlpiCfg, ticketId: number, entityId: number, file: { filename: string; mime: string; data: Buffer }) {
+  const base = `${c.baseUrl}/apirest.php`;
+  const app: Record<string, string> = c.appToken ? { 'App-Token': c.appToken } : {};
+  const init = await hfetch(`${base}/initSession`, { method: 'GET', headers: { ...app, authorization: `Basic ${Buffer.from(`${c.username}:${c.password}`).toString('base64')}`, accept: 'application/json' } });
+  const sj = (await init.json().catch(() => null)) as { session_token?: string } | string[] | null;
+  const token = sj && !Array.isArray(sj) ? sj.session_token : undefined;
+  if (!init.ok || !token) {
+    const why = Array.isArray(sj) ? sj.join(' ') : String(init.status);
+    throw new GlpiError(/API_ERROR_DISABLED|disabled/i.test(why) ? 'A API REST do GLPI está desligada (Configuração → Geral → API).' : /APP_TOKEN|app_token/i.test(why) ? 'O GLPI pediu o token da aplicação: informe em Configurações → Integrações → GLPI.' : `O GLPI recusou abrir a sessão para anexar (${why}).`);
+  }
+  const h = { ...app, 'Session-Token': token, accept: 'application/json' };
+  try {
+    await hfetch(`${base}/changeActiveEntities`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ entities_id: entityId, is_recursive: true }) });
+    const form = new FormData();
+    form.append('uploadManifest', JSON.stringify({ input: { name: file.filename, _filename: [file.filename] } }));
+    form.append('filename[0]', new Blob([new Uint8Array(file.data)], { type: file.mime }), file.filename);
+    const up = await hfetch(`${base}/Document`, { method: 'POST', headers: h, body: form });
+    const uj = (await up.json().catch(() => null)) as { id?: number } | string[] | null;
+    const docId = uj && !Array.isArray(uj) ? uj.id : undefined;
+    if (!up.ok || !docId) throw new GlpiError(`O GLPI não aceitou o arquivo (${Array.isArray(uj) ? uj.join(' ') : up.status}).`);
+    const link = await hfetch(`${base}/Document_Item`, { method: 'POST', headers: { ...h, 'content-type': 'application/json' }, body: JSON.stringify({ input: { documents_id: docId, itemtype: 'Ticket', items_id: ticketId } }) });
+    if (!link.ok) throw new GlpiError(`O arquivo subiu, mas o GLPI não o ligou ao chamado (${link.status}).`);
+    return { documentId: docId };
+  } finally {
+    await hfetch(`${base}/killSession`, { method: 'GET', headers: h }).catch(() => undefined);
+  }
 }
 
 /** Acompanhamento: público (o solicitante vê) ou privado (só a equipe do GLPI vê), como o "olho" do próprio GLPI. */

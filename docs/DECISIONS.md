@@ -419,3 +419,13 @@ O visual segue o Brand Book BKT (GUIA_BKT_v4):
 - API (`apps/api/src/brand.ts`): nome da ferramenta nos textos automáticos (e-mails, exportações, GLPI, modelos iniciais) e filiais iniciais (BKT Soluções/UPNET × Yepnet).
 "Bem menor" = desligar módulos em Configurações → Módulos da instância (sem cortar código).
 **Consequências:** correção ou funcionalidade nova vale para as duas instâncias; dados totalmente isolados (bancos separados). Uma nova marca é um bloco em `brand.ts` (web e API) + um bloco em `tokens.css`. **(reversível)**
+
+## ADR-074 — Viabilidade técnica por mapa: KMZ lido no navegador, traçado versionado, anexo no GLPI pela API REST (31/10/2026)
+**Contexto:** na Yepnet o vendedor precisa fazer o traçado da CTO até o cliente, com metragem, porta e localização, e mandar a imagem para a engenharia no chamado do GLPI.
+**Decisão:**
+- O KMZ/KML é lido no navegador (ZIP por `DecompressionStream`, XML por `DOMParser`, sem biblioteca) e chega à API como lista de pontos, linhas e áreas. Envio em partes de até 3 MB (limite de 4,5 MB da Vercel). Cada envio é uma versão (`network_maps`); só uma ativa.
+- Traçado em mapa Leaflet (satélite Esri com nomes de ruas, ou OpenStreetMap). O primeiro clique gruda na CTO mais próxima (60 m), clicar no cliente termina. A metragem gravada é recalculada no servidor (haversine, soma dos trechos). Cada "Salvar" é uma versão nova (`route_studies`), nada é sobrescrito.
+- A imagem é desenhada em canvas (Web Mercator, mesmos tiles), com quadro de endereço, coordenadas, CTO, porta, metragem, sobra e total. Se o fundo não carregar, sai sem fundo. Vai para os anexos da oportunidade (PNG, até 3 MB).
+- O chamado usa o fluxo existente (API de alto nível do GLPI 11) e passa a aceitar anexos da oportunidade. Como a API v2 não recebe arquivo, o anexo sobe pela API REST clássica (`/apirest.php`: initSession → changeActiveEntities → Document → Document_Item → killSession) com o mesmo usuário de integração; falha no anexo vira aviso, o chamado abre mesmo assim. Validação com o GLPI real pendente.
+- Só na instância Yepnet: a API responde 404 nas outras marcas e a tela não mostra a aba nem a configuração.
+**Consequências:** distância em linha pelo caminho traçado (não pelo cabo do KMZ); confirmar em campo. O mapa da rede é cadastro: "Limpar base" apaga os traçados, não o mapa. **(reversível)**

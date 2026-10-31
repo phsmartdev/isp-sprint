@@ -132,12 +132,25 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
   );
 }
 
-function OpenTicketDialog({ open, onClose, oppId, contactName, hasCustomer }: { open: boolean; onClose: () => void; oppId: string; contactName: string; hasCustomer: boolean }) {
+/**
+ * Abrir chamado. `prefill` e `attachments` vêm de quem abre a partir de outro lugar (ex.: traçado de viabilidade técnica):
+ * título e descrição já preenchidos e anexos da oportunidade marcados para subir junto.
+ */
+export function OpenTicketDialog({ open, onClose, oppId, contactName, hasCustomer, prefill, attachments = [], onCreated }: {
+  open: boolean; onClose: () => void; oppId: string; contactName: string; hasCustomer: boolean;
+  prefill?: { title: string; content: string; urgency?: string }; attachments?: { id: string; filename: string }[]; onCreated?: (ticketId: string) => void;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const dq = useDebounced(q, 300);
   const [f, setF] = useState({ entityId: '', categoryId: '', groupId: '', type: '2', urgency: '3', title: '', content: '', remember: true });
+  const [files, setFiles] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    if (prefill) setF((x) => ({ ...x, title: prefill.title, content: prefill.content, urgency: prefill.urgency ?? x.urgency }));
+    setFiles(attachments.map((a) => a.id));
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const ents = useQuery({ queryKey: ['glpi', 'entities', oppId, dq], enabled: open, queryFn: () => api<{ linked: Opt | null; items: Opt[] }>(`/glpi/entities${qs({ q: dq || undefined, opportunityId: oppId })}`) });
   const cats = useQuery({ queryKey: ['glpi', 'categories'], enabled: open, staleTime: 5 * 60_000, queryFn: () => api<{ items: Opt[] }>('/glpi/categories') });
   const groups = useQuery({ queryKey: ['glpi', 'groups'], enabled: open, staleTime: 5 * 60_000, queryFn: () => api<{ items: Opt[] }>('/glpi/groups') });
@@ -146,16 +159,17 @@ function OpenTicketDialog({ open, onClose, oppId, contactName, hasCustomer }: { 
   const entityOpts = [...(linked && !ents.data?.items.some((e) => e.id === linked.id) ? [{ id: linked.id, name: linked.name ?? `Entidade ${linked.id}` }] : []), ...(ents.data?.items ?? [])];
   const nameOf = (list: Opt[] | undefined, id: string) => list?.find((x) => String(x.id) === id)?.name ?? null;
   const mut = useMutation({
-    mutationFn: () => api<{ glpiId: number; warning: string | null }>(`/opportunities/${oppId}/glpi-tickets`, {
+    mutationFn: () => api<{ id: string; glpiId: number; attached: number; warning: string | null }>(`/opportunities/${oppId}/glpi-tickets`, {
       method: 'POST',
       body: {
         entityId: Number(f.entityId), entityName: nameOf(entityOpts, f.entityId), categoryId: f.categoryId ? Number(f.categoryId) : null, categoryName: nameOf(cats.data?.items, f.categoryId),
-        groupId: f.groupId ? Number(f.groupId) : null, groupName: nameOf(groups.data?.items, f.groupId), type: Number(f.type), urgency: Number(f.urgency), title: f.title, content: f.content, rememberEntity: f.remember,
+        groupId: f.groupId ? Number(f.groupId) : null, groupName: nameOf(groups.data?.items, f.groupId), type: Number(f.type), urgency: Number(f.urgency), title: f.title, content: f.content, rememberEntity: f.remember, attachmentIds: files,
       },
     }),
     onSuccess: (r) => {
       void qc.invalidateQueries({ queryKey: ['glpi'] });
-      toast({ tone: r.warning ? 'error' : 'success', message: r.warning ?? `Chamado #${r.glpiId} aberto no GLPI` });
+      toast({ tone: r.warning ? 'error' : 'success', message: r.warning ?? `Chamado #${r.glpiId} aberto no GLPI${r.attached ? ` com ${r.attached} anexo(s)` : ''}` });
+      onCreated?.(r.id);
       setF({ entityId: '', categoryId: '', groupId: '', type: '2', urgency: '3', title: '', content: '', remember: true });
       onClose();
     },
@@ -182,6 +196,15 @@ function OpenTicketDialog({ open, onClose, oppId, contactName, hasCustomer }: { 
         </div>
         <FormField label="Título" htmlFor="gl-title" required><Input id="gl-title" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Ex.: Viabilidade de link dedicado 200 Mb" /></FormField>
         <FormField label="Descrição" htmlFor="gl-content" required hint="O código desta negociação (OP) e o seu nome vão junto no chamado"><Textarea id="gl-content" rows={5} value={f.content} onChange={(e) => setF({ ...f, content: e.target.value })} /></FormField>
+        {attachments.length > 0 && (
+          <fieldset className="space-y-1.5">
+            <legend className="mb-1 text-sm font-semibold text-ink">Anexar no chamado</legend>
+            {attachments.map((a) => (
+              <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={files.includes(a.id)} onChange={(e) => setFiles((x) => (e.target.checked ? [...x, a.id] : x.filter((y) => y !== a.id)))} />{a.filename}</label>
+            ))}
+            <p className="text-xs text-muted">O arquivo sobe pela API REST do GLPI (Configuração → Geral → API). Se ela estiver desligada, o chamado abre do mesmo jeito e o aviso diz o que faltou.</p>
+          </fieldset>
+        )}
         {hasCustomer && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.remember} onChange={(e) => setF({ ...f, remember: e.target.checked })} />Lembrar esta entidade para o cliente</label>}
       </div>
     </Modal>

@@ -2,6 +2,8 @@
  * Mapa único de Configurações: grupos por assunto, usados no menu lateral, nas abas do topo e na Visão geral.
  * `admin` = exige Configurações (Total); `match` = outros caminhos que pertencem à mesma página.
  */
+import { isYepnet } from '../../brand';
+
 export type SettingsItem = { to: string; label: string; desc: string; admin: boolean; keywords?: string };
 export type SettingsGroup = { key: string; label: string; desc: string; items: SettingsItem[] };
 
@@ -30,6 +32,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     { to: '/settings/financial-studio', label: 'Financial Studio', desc: 'Fórmulas do motor financeiro: editar, simular o impacto, versionar e publicar.', admin: true, keywords: 'fórmula formula editor simulação impacto versão vpl tir roi payback modelo financeiro' },
     { to: '/settings/filiais', label: 'Filiais e documentos fiscais', desc: 'Emitentes (CNPJ, regime), tipos fiscais e tributos.', admin: true, keywords: 'cnpj imposto tributo nota fiscal' },
     { to: '/settings/area', label: 'Área de atendimento', desc: 'Regiões e condomínios atendidos.', admin: true, keywords: 'cobertura condomínio' },
+    ...(isYepnet ? [{ to: '/settings/rede', label: 'Mapa da rede (KMZ)', desc: 'CTOs, cabos e áreas da rede para o traçado de viabilidade técnica.', admin: true, keywords: 'kmz kml cto cabo mapa traçado viabilidade técnica google earth' }] : []),
   ] },
   { key: 'times', label: 'Relacionamento e times', desc: 'Pós-venda, marketing de contas e gestão das equipes.', items: [
     { to: '/settings/customer-success', label: 'Sucesso do Cliente', desc: 'Jornadas de pós-venda, tiers e pesquisas.', admin: true, keywords: 'cs csm tier ipc' },

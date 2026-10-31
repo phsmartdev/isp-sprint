@@ -37,7 +37,7 @@ describe('GLPI', () => {
     ok(await carlos.put('/admin/integrations/glpi', { enabled: true, config: { baseUrl: glpi.url, clientId: GLPI_CREDS.clientId, username: GLPI_CREDS.username }, secrets: { clientSecret: GLPI_CREDS.clientSecret } }));
     expect(ok(await carlos.post('/admin/integrations/glpi/test')).json()).toMatchObject({ ok: true, message: expect.stringMatching(/3 entidade/) });
     const adm = ok(await carlos.get('/admin/integrations')).json().items.find((i: { kind: string }) => i.kind === 'glpi');
-    expect(adm.secretsSet).toEqual({ clientSecret: true, password: true, webhookSecret: true });
+    expect(adm.secretsSet).toEqual({ clientSecret: true, password: true, webhookSecret: true, appToken: false });
     expect(JSON.stringify(adm)).not.toContain(GLPI_CREDS.password);
     hookToken = adm.webhookUrl.split('/').pop();
     expect(ok(await lucas.get('/glpi/status')).json()).toMatchObject({ ready: true });

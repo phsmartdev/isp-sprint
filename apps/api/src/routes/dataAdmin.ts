@@ -132,6 +132,8 @@ export const dataAdminRoutes = [
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(eq(s.negotiationReads.tenantId, t));
           await tx.delete(s.negotiationMessages).where(eq(s.negotiationMessages.tenantId, t));
+          // traçados de viabilidade técnica (apontam para oportunidade, anexo e chamado); o mapa da rede é cadastro e fica
+          await tx.delete(s.routeStudies).where(eq(s.routeStudies.tenantId, t));
           // chamados do GLPI ligados às oportunidades (o chamado continua existindo no GLPI)
           await tx.delete(s.glpiTicketEvents).where(eq(s.glpiTicketEvents.tenantId, t));
           await tx.delete(s.glpiTickets).where(eq(s.glpiTickets.tenantId, t));

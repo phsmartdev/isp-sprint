@@ -45,8 +45,11 @@ import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Jou
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
 import { KpiBoardPage } from './pages/KpiBoardPage';
+import { isYepnet } from './brand';
 
 // Configurações carregam sob demanda: o código de cada tela só baixa quando ela é aberta
+const RouteStudioPage = lazy(() => import('./pages/RouteStudioPage').then((m) => ({ default: m.RouteStudioPage })));
+const AdminNetworkMaps = lazy(() => import('./pages/admin/NetworkMaps').then((m) => ({ default: m.AdminNetworkMaps })));
 const AdminModules = lazy(() => import('./pages/admin/Modules').then((m) => ({ default: m.AdminModules })));
 const AdminSalesBranches = lazy(() => import('./pages/admin/SalesBranches').then((m) => ({ default: m.AdminSalesBranches })));
 const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then((m) => ({ default: m.AdminGmailSettings })));
@@ -107,6 +110,7 @@ export function App() {
         <Route path="pipeline" element={<Navigate to="/opportunities" replace />} />
         <Route path="opportunities/new" element={<Gate module="oportunidades"><NewOpportunityPage /></Gate>} />
         <Route path="opportunities/:id" element={<Gate module="oportunidades"><OpportunityWorkspacePage /></Gate>} />
+        {isYepnet && <Route path="opportunities/:id/tracado" element={<Gate module="oportunidades"><Suspense fallback={<div className="card"><LoadingRows rows={8} /></div>}><RouteStudioPage /></Suspense></Gate>} />}
         <Route path="opportunities/:id/aprovacao" element={<ApprovalPage />} />
         <Route path="aprovacoes" element={<ApprovalsPage />} />
         <Route path="customers" element={<Gate module="clientes" feature="crm.contas"><CustomersPage /></Gate>} />
@@ -153,6 +157,7 @@ export function App() {
           <Route path="journeys" element={<AdminJourneys />} />
           <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
           <Route path="area" element={<AdminArea />} />
+          {isYepnet && <Route path="rede" element={<AdminNetworkMaps />} />}
           <Route path="viability" element={<AdminViability />} />
           <Route path="financial-studio" element={<AdminFinancialStudio />} />
           <Route path="modelos" element={<AdminModels />} />

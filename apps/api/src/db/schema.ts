@@ -4963,3 +4963,52 @@ export const financialFormulaEvents = pgTable('financial_formula_events', {
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('financial_formula_events_idx').on(t.tenantId, t.code, t.createdAt) }));
+
+// ================================================================== viabilidade técnica (Yepnet)
+/**
+ * Mapa da rede enviado em Configurações (KMZ/KML lido no navegador): pontos (CTOs, caixas), linhas (cabos) e áreas
+ * (cobertura). Cada envio é uma versão; só uma fica ativa. Trocar de versão não mexe nos traçados já salvos.
+ */
+export const networkMaps = pgTable('network_maps', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  filename: text('filename').notNull(),
+  features: jsonb('features').$type<unknown[]>().notNull(),
+  points: integer('points').notNull().default(0),
+  lines: integer('lines').notNull().default(0),
+  areas: integer('areas').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  uploadedBy: uuid('uploaded_by').references(() => users.id),
+  createdAt: createdAt(),
+  deletedAt: ts('deleted_at'),
+}, (t) => ({ idx: index('network_maps_tenant_idx').on(t.tenantId, t.createdAt) }));
+
+/**
+ * Traçado da CTO até o cliente, feito na oportunidade. Cada "Salvar" é uma versão nova (nada é sobrescrito):
+ * a metragem gravada é a calculada pelo servidor sobre os pontos; a imagem vai para os anexos da oportunidade.
+ */
+export const routeStudies = pgTable('route_studies', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  clientLat: doublePrecision('client_lat').notNull(),
+  clientLng: doublePrecision('client_lng').notNull(),
+  clientAddress: text('client_address'),
+  ctoName: text('cto_name'),
+  ctoLat: doublePrecision('cto_lat'),
+  ctoLng: doublePrecision('cto_lng'),
+  port: text('port'),
+  route: jsonb('route').$type<[number, number][]>().notNull(),
+  lengthM: integer('length_m').notNull(),
+  slackM: integer('slack_m').notNull().default(0),
+  notes: text('notes'),
+  networkMapId: uuid('network_map_id').references(() => networkMaps.id),
+  attachmentId: uuid('attachment_id').references(() => opportunityAttachments.id),
+  glpiTicketId: uuid('glpi_ticket_id').references(() => glpiTickets.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('route_studies_opp_idx').on(t.tenantId, t.opportunityId, t.createdAt),
+  lenCk: check('route_studies_len_ck', sql`length_m >= 0 and slack_m >= 0`),
+}));

@@ -40,3 +40,4 @@ export * from './formula';
 export * from './financeModel';
 export * from './commitments';
 export * from './commitmentPlanning';
+export * from './geo';

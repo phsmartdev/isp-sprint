@@ -63,6 +63,7 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
       { key: 'username', label: 'Usuário de integração', hint: 'Login do usuário que abre os chamados no GLPI' },
       { key: 'password', label: 'Senha do usuário de integração', secret: true },
       { key: 'webhookSecret', label: 'Segredo do webhook', secret: true, hint: 'O mesmo segredo cadastrado no webhook do GLPI (confere a assinatura de cada aviso)' },
+      { key: 'appToken', label: 'Token da aplicação (API REST, opcional)', secret: true, hint: 'Para anexar arquivos (ex.: imagem do traçado) no chamado: no GLPI, ligue a API REST e o login com credenciais em Configuração → Geral → API. Informe o token só se o cliente da API exigir.' },
     ],
   },
   whatsapp: {

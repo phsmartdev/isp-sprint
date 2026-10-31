@@ -1,6 +1,6 @@
 /** Chamados no GLPI a partir da negociação: abrir, acompanhar, responder e receber o retorno (webhook + releitura). */
 import { timingSafeEqual } from 'node:crypto';
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { GLPI_VALIDATION_DECISIONS, glpiBody, glpiOpen, glpiStatusLabel, glpiTicketErrors, glpiTicketUrl, glpiValidationError, glpiValidationHeader, pendingValidations, webhookTicketId } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -11,7 +11,7 @@ import type { DB } from '../db/client';
 import { audit } from '../services/audit';
 import { loadOpportunity } from '../services/opportunities';
 import { integrationRow, logEvent } from '../services/integrations';
-import { crcAnswer, GlpiError, glpiAnswerValidation, glpiCategories, glpiConfig, glpiCreateTicket, glpiEntities, glpiFollowup, glpiGroups, syncTicket, validWebhookSignature, type GlpiCfg } from '../services/glpi';
+import { crcAnswer, GlpiError, glpiAnswerValidation, glpiAttachFile, glpiCategories, glpiConfig, glpiCreateTicket, glpiEntities, glpiFollowup, glpiGroups, syncTicket, validWebhookSignature, type GlpiCfg } from '../services/glpi';
 import { APP } from '../brand';
 
 const ENTITY_SYSTEM = 'glpi_entidade';
@@ -118,6 +118,8 @@ export const glpiRoutes = [
       groupId: z.number().int().positive().nullable().optional(), groupName: z.string().trim().max(300).nullable().optional(),
       type: z.number().int(), urgency: z.number().int(), title: z.string().trim().max(250), content: z.string().trim().max(20_000),
       rememberEntity: z.boolean().default(true),
+      /** anexos da oportunidade que vão junto para o chamado (ex.: imagem do traçado de viabilidade) */
+      attachmentIds: z.array(z.string().uuid()).max(5).default([]),
     }),
     handler: async ({ app, auth, params, body, req, reply }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
@@ -141,9 +143,20 @@ export const glpiRoutes = [
         }
         return r;
       });
-      await audit(app.db, req, { action: 'glpi.ticket_open', entityType: 'opportunity', entityId: opp.id, metadata: { glpiId: created.id, entityId: body.entityId } });
+      // anexos escolhidos: cada um sobe pela API REST do GLPI; falha num anexo não desfaz o chamado, vira aviso
+      const warnings: string[] = created.groupWarning ? [`O grupo não foi atribuído: ${created.groupWarning}`] : [];
+      let attached = 0;
+      if (body.attachmentIds.length) {
+        const files = await app.db.select({ filename: s.opportunityAttachments.filename, mime: s.opportunityAttachments.mime, data: s.opportunityAttachments.data }).from(s.opportunityAttachments)
+          .where(and(eq(s.opportunityAttachments.tenantId, auth.tenantId), eq(s.opportunityAttachments.opportunityId, opp.id), inArray(s.opportunityAttachments.id, body.attachmentIds), isNull(s.opportunityAttachments.deletedAt)));
+        for (const f of files) {
+          try { await glpiAttachFile(c, created.id, body.entityId, f); attached++; }
+          catch (e) { warnings.push(`${f.filename} não foi anexado: ${(e as Error).message}`); break; }
+        }
+      }
+      await audit(app.db, req, { action: 'glpi.ticket_open', entityType: 'opportunity', entityId: opp.id, metadata: { glpiId: created.id, entityId: body.entityId, attached } });
       reply.code(201);
-      return { id: row!.id, glpiId: created.id, warning: created.groupWarning ? `Chamado aberto, mas o grupo não foi atribuído: ${created.groupWarning}` : null };
+      return { id: row!.id, glpiId: created.id, attached, warning: warnings.length ? `Chamado aberto, mas: ${warnings.join(' · ')}` : null };
     },
   }),
   defineRoute({

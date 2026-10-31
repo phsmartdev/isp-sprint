@@ -10,11 +10,11 @@ import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
 import { OriginEmail, useOriginEmail } from '../features/opportunity/OriginEmail';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Scale, Send, UserRound, XCircle } from 'lucide-react';
+import { Map as MapIcon, Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
@@ -42,7 +42,10 @@ import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
-import { OPENING_KINDS, SALE_KINDS, openingHint, openingLabel, type OpeningKind } from '../brand';
+import { OPENING_KINDS, SALE_KINDS, isYepnet, openingHint, openingLabel, type OpeningKind } from '../brand';
+
+/** Traçados de viabilidade técnica (Leaflet) só carregam quando a aba abre. */
+const StudiesList = lazy(() => import('../features/route/RouteStudio').then((m) => ({ default: m.StudiesList })));
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
@@ -605,7 +608,7 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
-  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'tecnica' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || (t === 'tecnica' && isYepnet) || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
   const econ = useQuery({ queryKey: ['economics', id], enabled: !!id, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
@@ -769,6 +772,7 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
+            ...(isYepnet ? [{ key: 'tecnica' as const, label: 'Viabilidade técnica' }] : []),
             { key: 'viabilidade', label: 'Viabilidade econômica' },
             ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(origin.data?.thread ? [{ key: 'email' as const, label: 'E-mail' }] : []),
@@ -782,6 +786,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
           {centerTab === 'viabilidade' && <EconomicsTab oppId={opp.id} />}
+          {centerTab === 'tecnica' && isYepnet && <Suspense fallback={<LoadingRows rows={6} />}><StudiesList opp={opp} action={<Link to={`/opportunities/${opp.id}/tracado`} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover"><MapIcon className="h-4 w-4" />Abrir mapa do traçado</Link>} /></Suspense>}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}

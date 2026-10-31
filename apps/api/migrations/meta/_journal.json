@@ -610,6 +610,13 @@
       "when": 1793374883534,
       "tag": "0086_item_deal_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793484083693,
+      "tag": "0087_viabilidade_tecnica",
+      "breakpoints": true
     }
   ]
 }
