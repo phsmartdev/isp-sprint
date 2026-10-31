@@ -253,7 +253,7 @@ export function ContractsPage() {
   const { feature } = useAuth();
   const cfg = useQuery({ queryKey: ['contracts', 'view'], queryFn: () => api<{ tabs: View[] }>('/contracts/view'), staleTime: 60_000 });
   const allowed = cfg.data?.tabs;
-  const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'modelos' || feature('contratos.modelos')) && (t.key !== 'atas' || feature('contratos.atas')));
+  const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'modelos' || feature('contratos.modelos')) && (t.key !== 'atas' || feature('contratos.atas')) && (t.key !== 'empenhos' || feature('contratos.empenhos')) && (t.key !== 'atestados' || feature('contratos.atestados')));
   const [f, setF] = useUrlState({ t: 'atencao' });
   // submenus da barra lateral (Painel, Funil…) abrem sozinhos; o item "Contratos" fica com as demais abas
   const isMenu = (t: View) => (CONTRACT_MENU_TABS as readonly View[]).includes(t);

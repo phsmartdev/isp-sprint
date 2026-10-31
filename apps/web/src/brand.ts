@@ -8,7 +8,8 @@
  *
  * Cores, raios e fontes moram em styles/tokens.css, sob [data-brand]. Aqui ficam só textos e comportamento.
  */
-import type { BrandSlot } from '@isp/shared';
+import { SALE_TYPE_KEYS, type BrandSlot, type SaleTypeKey } from '@isp/shared';
+import { BUSINESS_MODULE_LABELS, type BusinessModule } from '@isp/domain';
 
 export type BrandId = 'bkt' | 'yepnet';
 
@@ -25,6 +26,10 @@ export type BrandConfig = {
   /** Slogan da marca (balões, menu, login). */
   slogan: { before: string; highlight: string } | null;
   home: { title: [string, string, string]; text: string; tipTitle: string | null; tip: string | null };
+  /** Nome de módulo próprio da marca (igual ao da API, apps/api/src/brand.ts). */
+  moduleLabels?: Partial<Record<BusinessModule, string>>;
+  /** Tipos de venda oferecidos na abertura da oportunidade. Ausente = todos (inclui licitação e adesão à ata). */
+  saleKinds?: SaleTypeKey[];
 };
 
 const BKT: BrandConfig = {
@@ -50,12 +55,18 @@ const YEPNET: BrandConfig = {
     tipTitle: 'Dica do Dino',
     tip: 'Entenda o que o cliente precisa, consulte a cobertura e apresente a melhor oferta.',
   },
+  moduleLabels: { marketing: 'Inbound Marketing' },
+  // sem licitação (31/10/2026): fora Licitação e Adesão à Ata
+  saleKinds: ['venda_consultiva', 'consumo_contrato'],
 };
 
 const ALL: Record<BrandId, BrandConfig> = { bkt: BKT, yepnet: YEPNET };
 
 export const BRAND: BrandConfig = ALL[(import.meta.env.VITE_BRAND as BrandId) ?? 'bkt'] ?? BKT;
 export const isYepnet = BRAND.id === 'yepnet';
+/** Tipos de venda da instância, na ordem do formulário. */
+export const SALE_KINDS: readonly SaleTypeKey[] = BRAND.saleKinds ?? SALE_TYPE_KEYS;
+export const moduleLabel = (m: BusinessModule) => BRAND.moduleLabels?.[m] ?? BUSINESS_MODULE_LABELS[m];
 
 /** Textos fixos do balão do mascote em cada tela (decisão de 17/10: não são editáveis). */
 export const MASCOT_LINES: Partial<Record<BrandSlot, string[]>> = {

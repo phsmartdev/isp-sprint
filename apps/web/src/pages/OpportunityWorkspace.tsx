@@ -1,4 +1,4 @@
-import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { SALE_TYPE_HINTS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -42,6 +42,7 @@ import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
+import { SALE_KINDS } from '../brand';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
@@ -168,7 +169,7 @@ export function NewOpportunityPage() {
               <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
                 <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {SALE_KINDS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -701,7 +702,7 @@ export function OpportunityWorkspacePage() {
               <FormField label="Tipo de venda" htmlFor="ws-kind" hint={a.dirty ? 'Aguarde salvar para trocar' : undefined}>
                 <Select id="ws-kind" value={opp.saleKind ?? ''} disabled={!editable || setKind.isPending || a.dirty} onChange={(e) => setKind.mutate(e.target.value)}>
                   <option value="">Não informado</option>
-                  {SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {SALE_KINDS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
                 </Select>
               </FormField>
             )}

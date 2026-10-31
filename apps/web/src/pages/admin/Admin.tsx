@@ -20,7 +20,7 @@ import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, Loading
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { BrandImage, Logo, useBrand } from '../../components/brand';
-import { BRAND } from '../../brand';
+import { BRAND, moduleLabel } from '../../brand';
 import { FitText } from '../../components/ui/FitText';
 import { IpAccessCard } from '../../features/admin/IpAccess';
 
@@ -440,7 +440,7 @@ export function AdminSecurity() {
             </thead>
             <tbody>
               {GROUPS.map((g) => [
-                <tr key={`g-${g}`} className="border-t border-line bg-surface-2/60"><th scope="rowgroup" colSpan={d.profiles.length + 1} className="px-5 py-2 text-xs font-bold text-ink">{g === 'fundacao' ? 'Fundação (sempre ligada)' : BUSINESS_MODULE_LABELS[g]}</th></tr>,
+                <tr key={`g-${g}`} className="border-t border-line bg-surface-2/60"><th scope="rowgroup" colSpan={d.profiles.length + 1} className="px-5 py-2 text-xs font-bold text-ink">{g === 'fundacao' ? 'Fundação (sempre ligada)' : moduleLabel(g)}</th></tr>,
                 ...d.modules.filter((mod) => MODULE_OWNER[mod.key] === g).map((mod) => (
                 <tr key={mod.key} className="border-t border-line">
                   <th scope="row" className="px-5 py-3 font-semibold text-ink">{MODULE_LABELS[mod.key]}</th>

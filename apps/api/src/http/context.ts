@@ -1,13 +1,14 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
 import {
-  BUSINESS_MODULES, DEFAULT_ACTIONS, MODULES, SENSITIVE_ACTIONS, defaultTenantModule, gateAccess, mergeLevels, moduleDecision,
+  BUSINESS_MODULES, DEFAULT_ACTIONS, MODULES, SENSITIVE_ACTIONS, gateAccess, mergeLevels, moduleDecision,
   type AccessLevel, type BusinessModule, type ModuleDecision, type ModuleGrant, type Module, type ReleaseMode, type Sector, type SensitiveAction,
 } from '@isp/domain';
 import type { DB } from '../db/client';
 import type { Config } from '../config';
 import * as s from '../db/schema';
 import { hashToken } from '../auth/password';
+import { brandTenantModule } from '../brand';
 
 export type AuthContext = {
   sessionId: string;
@@ -126,7 +127,7 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: row.timezone || 'America/Sao_Paulo' }).format(new Date());
   const decisions = Object.fromEntries(BUSINESS_MODULES.map((m) => {
     const t = tms.find((x) => x.module === m);
-    const tm = t ? { module: m, enabled: t.enabled, mode: t.mode as ReleaseMode, disabledFeatures: t.disabledFeatures } : defaultTenantModule(m);
+    const tm = t ? { module: m, enabled: t.enabled, mode: t.mode as ReleaseMode, disabledFeatures: t.disabledFeatures } : brandTenantModule(m);
     return [m, moduleDecision(tm, grants.map((g) => ({ module: g.module as BusinessModule, subjectType: g.subjectType as 'equipe' | 'usuario', subjectId: g.subjectId, effect: g.effect as 'liberar' | 'bloquear', validUntil: g.validUntil })), { id: row.userId, teamIds }, today)];
   })) as Record<BusinessModule, ModuleDecision>;
   const modules = Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].enabled])) as Record<BusinessModule, boolean>;
@@ -152,7 +153,7 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     ipBypass: !!row.ipBypass,
     modules,
     moduleReasons: Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].reason])) as Record<BusinessModule, ModuleDecision['reason']>,
-    disabledFeatures: [...new Set(tms.flatMap((x) => x.disabledFeatures))],
+    disabledFeatures: [...new Set(BUSINESS_MODULES.flatMap((m) => tms.find((x) => x.module === m)?.disabledFeatures ?? brandTenantModule(m).disabledFeatures))],
     actions,
     teamIds: memberships.map((m) => m.teamId),
     teamMemberIds: [...new Set([row.userId, ...members.map((m) => m.userId)])],

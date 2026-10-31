@@ -63,6 +63,8 @@ export const FEATURES = [
   { key: 'gestao_time.times', module: 'gestao_time', label: 'Apuração, intervenções e rituais' },
   { key: 'contratos.contratos', module: 'contratos', label: 'Contratos' },
   { key: 'contratos.atas', module: 'contratos', label: 'Atas de registro de preços' },
+  { key: 'contratos.empenhos', module: 'contratos', label: 'Controle de empenhos (contratos públicos)' },
+  { key: 'contratos.atestados', module: 'contratos', label: 'Acervo de atestados de capacidade técnica (licitações)' },
   { key: 'contratos.modelos', module: 'contratos', label: 'Modelos de contratos e propostas' },
   { key: 'projetos.projetos', module: 'projetos', label: 'Projetos e marcos' },
   { key: 'projetos.tarefas', module: 'projetos', label: 'Quadro de tarefas' },
@@ -114,6 +116,9 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/arps', feature: 'contratos.atas' },
   { prefix: '/arp-', feature: 'contratos.atas' },
   { prefix: '/contract-templates', feature: 'contratos.modelos' },
+  { prefix: '/contracts/commitment-portfolio', feature: 'contratos.empenhos' },
+  { prefix: '/contracts/certificates', feature: 'contratos.atestados' },
+  { prefix: '/contracts/:id/certificates', feature: 'contratos.atestados' },
   // Relatórios: cada seção exige o módulo de origem
   { prefix: '/intelligence/contracts', feature: 'relatorios.contratos' },
   { prefix: '/intelligence', feature: 'relatorios.comercial' },

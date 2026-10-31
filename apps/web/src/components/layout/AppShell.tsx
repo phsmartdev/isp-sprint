@@ -15,7 +15,7 @@ import { useTheme, type ThemeChoice } from '../../lib/theme';
 import { Avatar } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
 import { AppName, Logo, SidebarCard } from '../brand';
-import { BRAND } from '../../brand';
+import { BRAND, isYepnet, moduleLabel } from '../../brand';
 import { GlobalSearch } from './GlobalSearch';
 
 type NavLeaf = {
@@ -39,18 +39,18 @@ const NAV: NavEntry[] = [
     { to: '/contracts', label: 'Contratos', module: 'contratos' },
     { to: '/contracts?t=painel', label: 'Painel', module: 'contratos', contractTab: 'painel' },
     { to: '/contracts?t=funil', label: 'Funil', module: 'contratos', contractTab: 'funil' },
-    { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados' },
+    { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados', feature: 'contratos.atestados' },
     { to: '/contracts?t=atas', label: 'Atas de Registro de Preço', module: 'contratos', contractTab: 'atas', feature: 'contratos.atas' },
-    { to: '/contracts?t=empenhos', label: 'Controle de Empenhos', module: 'contratos', contractTab: 'empenhos' },
+    { to: '/contracts?t=empenhos', label: 'Controle de Empenhos', module: 'contratos', contractTab: 'empenhos', feature: 'contratos.empenhos' },
     { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
     { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
   ] },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
-  { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
+  { key: 'marketing', label: moduleLabel('marketing'), icon: <Megaphone className={ICON} />, children: [
     { to: '/leads', label: 'Leads', module: 'leads' },
     { to: '/abm', label: 'ABM', module: 'clientes', feature: 'marketing.abm' },
-    { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
+    { to: '/campaigns', label: isYepnet ? 'Campanhas' : 'Plays/Campanhas', module: 'campanhas' },
   ] },
   { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [

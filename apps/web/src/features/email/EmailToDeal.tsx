@@ -6,12 +6,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { Briefcase } from 'lucide-react';
-import { SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
 import { api } from '../../lib/api';
 import { useLookups } from '../../lib/hooks';
 import { Button, FormField, Input, Select } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { SALE_KINDS } from '../../brand';
 
 type Thread = {
   id: string; subject: string; contact: { id: string; name: string } | null; suggestions: { id: string; name: string }[];
@@ -83,7 +84,7 @@ export function EmailToDeal({ d }: { d: Thread }) {
             </div>
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <FormField label="Tipo de venda" htmlFor="etd-kind"><Select id="etd-kind" value={kind} onChange={(e) => setKind(e.target.value as SaleTypeKey | '')}><option value="">Escolha</option>{SALE_TYPE_KEYS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}</Select></FormField>
+            <FormField label="Tipo de venda" htmlFor="etd-kind"><Select id="etd-kind" value={kind} onChange={(e) => setKind(e.target.value as SaleTypeKey | '')}><option value="">Escolha</option>{SALE_KINDS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}</Select></FormField>
             <FormField label="Filial" htmlFor="etd-branch"><Select id="etd-branch" value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">Escolha</option>{lk?.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select></FormField>
           </div>
           <FormField label="Nome do deal" htmlFor="etd-title"><Input id="etd-title" value={title} onChange={(e) => setTitle(e.target.value)} /></FormField>

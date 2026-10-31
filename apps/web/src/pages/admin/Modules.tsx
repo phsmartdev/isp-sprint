@@ -14,6 +14,7 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { AdminContractSettings } from './ContractSettings';
+import { moduleLabel } from '../../brand';
 
 type Grant = { id: string; subjectType: 'equipe' | 'usuario'; subjectId: string; subjectName: string; effect: 'liberar' | 'bloquear'; reason: string; validUntil: string | null; expired: boolean };
 type ModuleRow = { key: BusinessModule; label: string; hint: string; enabled: boolean; mode: ReleaseMode; disabledFeatures: string[]; saved: boolean; technical: Module[]; features: { key: string; label: string; requires: BusinessModule[] }[]; grants: Grant[] };
@@ -92,7 +93,7 @@ function ModuleCard({ m }: { m: ModuleRow }) {
         <fieldset disabled={!v.enabled}><legend className="mb-1 text-sm font-semibold text-ink">Funcionalidades</legend>
           <div className="grid gap-1 sm:grid-cols-2">{m.features.map((f) => (
             <label key={f.key} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={!v.disabledFeatures.includes(f.key)} onChange={(e) => setV({ ...v, disabledFeatures: e.target.checked ? v.disabledFeatures.filter((x) => x !== f.key) : [...v.disabledFeatures, f.key] })} />
-              {f.label}{f.requires.length ? <span className="text-xs text-muted"> (precisa de {f.requires.map((r) => BUSINESS_MODULE_LABELS[r]).join(', ')})</span> : null}</label>
+              {f.label}{f.requires.length ? <span className="text-xs text-muted"> (precisa de {f.requires.map((r) => moduleLabel(r)).join(', ')})</span> : null}</label>
           ))}</div>
         </fieldset>
       )}
@@ -206,7 +207,7 @@ function AccessPreview() {
       {q.data && (
         <div className="grid gap-4 md:grid-cols-2">
           <ul className="space-y-1 text-sm">{(Object.keys(q.data.modules) as BusinessModule[]).map((m) => (
-            <li key={m} className="flex flex-wrap items-center gap-2"><Chip tone={q.data!.modules[m].enabled ? 'green' : 'neutral'}>{q.data!.modules[m].enabled ? 'Ligado' : 'Desligado'}</Chip><b className="text-ink">{BUSINESS_MODULE_LABELS[m]}</b><span className="text-muted">{REASON_TEXT[q.data!.modules[m].reason] ?? q.data!.modules[m].reason}</span></li>
+            <li key={m} className="flex flex-wrap items-center gap-2"><Chip tone={q.data!.modules[m].enabled ? 'green' : 'neutral'}>{q.data!.modules[m].enabled ? 'Ligado' : 'Desligado'}</Chip><b className="text-ink">{moduleLabel(m)}</b><span className="text-muted">{REASON_TEXT[q.data!.modules[m].reason] ?? q.data!.modules[m].reason}</span></li>
           ))}</ul>
           <ul className="space-y-1 text-sm">{(Object.keys(q.data.access) as Module[]).map((t) => (
             <li key={t} className="flex justify-between gap-2"><span className="text-ink">{MODULE_LABELS[t]}</span><span className="text-muted">{LEVEL_LABELS[q.data!.access[t] as keyof typeof LEVEL_LABELS]}{q.data!.access[t] !== q.data!.profileAccess[t] ? ` (perfil: ${LEVEL_LABELS[q.data!.profileAccess[t] as keyof typeof LEVEL_LABELS]}; módulo desligado)` : ''}</span></li>

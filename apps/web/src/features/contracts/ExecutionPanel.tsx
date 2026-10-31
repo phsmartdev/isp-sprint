@@ -11,6 +11,7 @@ import {
   PENALTY_KINDS, SLA_DEFAULTS, SLA_METRICS, SLA_METRIC_LABELS, allowedDowntimeHours, type OccurrenceKind, type SlaMetric,
 } from '@isp/domain';
 import { api } from '../../lib/api';
+import { useAuth } from '../../auth/AuthProvider';
 import { fileToBase64 } from '../../lib/files';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
@@ -44,6 +45,7 @@ function Section({ title, sub, action, children, label }: { title: string; sub?:
 
 export function ExecutionPanel({ c }: { c: ContractDetail }) {
   const q = useQuery({ queryKey: ['contract-execution', c.id], queryFn: () => api<Data>(`/contracts/${c.id}/execution`) });
+  const { feature } = useAuth();
   const [dlg, setDlg] = useState<null | { k: 'sla' } | { k: 'meas'; sla: Sla } | { k: 'occ' } | { k: 'upd'; occ: Occ } | { k: 'party'; role: string; label: string } | { k: 'clause' } | { k: 'cert' }>(null);
   if (q.isLoading || !q.data) return <LoadingRows rows={6} />;
   const d = q.data;
@@ -118,6 +120,7 @@ export function ExecutionPanel({ c }: { c: ContractDetail }) {
         )}
       </Section>
 
+      {feature('contratos.atestados') && (
       <Section label="Atestados de capacidade técnica" title="Atestados de capacidade técnica" sub="Peça o atestado com a execução comprovada: ele vira habilitação técnica nas próximas licitações." action={add('Registrar atestado', () => setDlg({ k: 'cert' }), d.canOperate)}>
         {d.certificateDue && <p className="mb-2 bg-warning-soft px-3 py-2 text-sm text-[#9A4B07]">{d.certificateDue.requested ? 'Atestado pedido e ainda não recebido: cobre o cliente.' : d.certificateDue.stage === 'fim' ? 'Contrato perto do fim e sem atestado: peça antes do encerramento.' : 'Metade da vigência cumprida: já dá para pedir o atestado.'}</p>}
         {!d.certificates.length ? <p className="text-sm text-muted">Nenhum atestado registrado.</p> : (
@@ -129,6 +132,7 @@ export function ExecutionPanel({ c }: { c: ContractDetail }) {
           ))}</ul>
         )}
       </Section>
+      )}
 
       {dlg && <ExecDialog c={c} dlg={dlg} onClose={() => setDlg(null)} />}
     </div>

@@ -15,6 +15,7 @@ import { authForUser } from '../http/context';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { ensureRoles } from './admin';
+import { brandTenantModule, moduleHint, moduleLabel } from '../brand';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
 const ModParams = z.object({ module: z.enum(BUSINESS_MODULES) });
@@ -32,9 +33,9 @@ export const moduleRoutes = [
       return {
         items: BUSINESS_MODULES.map((m) => {
           const r = rows.find((x) => x.module === m);
-          const cfg = r ? { enabled: r.enabled, mode: r.mode, disabledFeatures: r.disabledFeatures } : defaultTenantModule(m);
+          const cfg = r ? { enabled: r.enabled, mode: r.mode, disabledFeatures: r.disabledFeatures } : brandTenantModule(m);
           return {
-            key: m, label: BUSINESS_MODULE_LABELS[m], hint: BUSINESS_MODULE_HINTS[m], ...cfg, saved: !!r,
+            key: m, label: moduleLabel(m), hint: moduleHint(m), ...cfg, saved: !!r,
             technical: MODULES.filter((t) => MODULE_OWNER[t] === m),
             features: FEATURES.filter((f) => f.module === m).map((f) => ({ key: f.key, label: f.label, requires: 'requires' in f ? f.requires : [] })),
             grants: grants.filter((g) => g.module === m).map((g) => ({
@@ -54,7 +55,7 @@ export const moduleRoutes = [
       const bad = body.disabledFeatures.find((f) => !allowed.includes(f));
       if (bad) throw unprocessable(`Funcionalidade fora do módulo: ${bad}`);
       const [cur] = await app.db.select().from(s.tenantModules).where(and(eq(s.tenantModules.tenantId, auth.tenantId), eq(s.tenantModules.module, params.module))).limit(1);
-      const before = cur ? { enabled: cur.enabled, mode: cur.mode, disabledFeatures: cur.disabledFeatures } : defaultTenantModule(params.module);
+      const before = cur ? { enabled: cur.enabled, mode: cur.mode, disabledFeatures: cur.disabledFeatures } : brandTenantModule(params.module);
       const value = { enabled: body.enabled, mode: body.mode, disabledFeatures: [...new Set(body.disabledFeatures)], updatedBy: auth.userId, updatedAt: new Date() };
       await app.db.insert(s.tenantModules).values({ tenantId: auth.tenantId, module: params.module, ...value }).onConflictDoUpdate({ target: [s.tenantModules.tenantId, s.tenantModules.module], set: value });
       await audit(app.db, req, { action: 'module.update', entityType: 'module', entityId: params.module, metadata: { from: before, to: { enabled: value.enabled, mode: value.mode, disabledFeatures: value.disabledFeatures }, note: body.note } });

@@ -9,6 +9,7 @@ import { BUSINESS_MODULE_LABELS, MODULE_OWNER, featureDef, featureOn, redactMone
 import { forbidden, unauthorized, unprocessable, zodToProblemErrors } from './errors';
 import type { AuthContext } from './context';
 import { requireLevel } from '../services/scope';
+import { moduleLabel } from '../brand';
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
@@ -46,11 +47,11 @@ export const routeRegistry: (RouteDef & { feature: FeatureKey | null })[] = [];
 /** Etapa 1: módulo de negócio desligado ou funcionalidade desligada → 403 com o motivo, antes da matriz de níveis. */
 export function assertModuleOpen(auth: AuthContext, module: Module | undefined, feature: FeatureKey | null) {
   const owner = module ? MODULE_OWNER[module] : 'fundacao';
-  if (owner !== 'fundacao' && !auth.modules[owner]) throw forbidden(`O módulo ${BUSINESS_MODULE_LABELS[owner]} não está liberado para você.`);
+  if (owner !== 'fundacao' && !auth.modules[owner]) throw forbidden(`O módulo ${moduleLabel(owner)} não está liberado para você.`);
   if (feature && !featureOn(feature, auth.modules, auth.disabledFeatures, auth.access)) {
     const f = featureDef(feature);
     const off = [f.module, ...(f.requires ?? [])].find((m) => !auth.modules[m]);
-    if (off) throw forbidden(`O módulo ${BUSINESS_MODULE_LABELS[off]} não está liberado para você.`);
+    if (off) throw forbidden(`O módulo ${moduleLabel(off)} não está liberado para você.`);
     throw forbidden(auth.disabledFeatures.includes(feature) ? `A funcionalidade "${f.label}" está desligada na empresa. Quem administra liga em Configurações → Permissões → Módulos e liberação.` : `Seu perfil não tem acesso a ${f.label}.`);
   }
 }
