@@ -26,9 +26,10 @@ const BRANDS: Record<ServerBrand['id'], ServerBrand> = {
   bkt: { id: 'bkt', app: 'RevOps', company: 'BKT', defaultBranches: ['BKT Soluções', 'UPNET'] },
   yepnet: {
     id: 'yepnet', app: 'ISP Sprint', company: 'Yepnet', defaultBranches: ['Yepnet'],
-    // Pedido do Paulo (31/10/2026): CRM, Inbound Marketing, Gestão de Time, Contratos sem licitação, Relatórios e Orçamento.
+    // Pedido do Paulo (31/10/2026): CRM com GLPI e sem Sucesso do Cliente, Inbound Marketing, Gestão de Time,
+    // Contratos sem licitação, Relatórios e Orçamento.
     modules: {
-      crm: { enabled: true, disabledFeatures: ['crm.chamados', 'crm.sucesso_cliente'] },
+      crm: { enabled: true, disabledFeatures: ['crm.sucesso_cliente'] },
       marketing: { enabled: true, disabledFeatures: ['marketing.abm'] },
       produto: { enabled: false },
       gestao_time: { enabled: true },

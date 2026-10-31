@@ -1,4 +1,4 @@
-import { SALE_TYPE_HINTS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -42,7 +42,7 @@ import { Attachments } from '../features/Attachments';
 import { GlpiTickets } from '../features/GlpiTickets';
 import { EmailComposer } from '../features/EmailComposer';
 import { ProposalGenerator } from '../features/ProposalGenerator';
-import { SALE_KINDS } from '../brand';
+import { OPENING_KINDS, SALE_KINDS, openingHint, openingLabel, type OpeningKind } from '../brand';
 
 const toReais = (c: number | null | undefined) => (c === null || c === undefined ? '' : (c / 100).toFixed(2).replace('.', ','));
 
@@ -82,7 +82,10 @@ export function NewOpportunityPage() {
   const [campaignId, setCampaignId] = useState('');
   const [planId, setPlanId] = useState('');
   const [ownerId, setOwnerId] = useState('');
-  const [saleKind, setSaleKind] = useState<SaleTypeKey | ''>('');
+  // escolha da abertura: um tipo do Corporativo ou "residencial" (funil Residencial, sem tipo de venda gravado)
+  const [opening, setOpening] = useState<OpeningKind | ''>('');
+  const isRes = opening === 'residencial';
+  const saleKind: SaleTypeKey | '' = opening && opening !== 'residencial' ? opening : '';
   const [branchId, setBranchId] = useState('');
   const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
@@ -91,10 +94,12 @@ export function NewOpportunityPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const dq = useDebounced(search.trim(), 250);
   const hits = useQuery({ queryKey: ['contacts', dq], enabled: mode === 'existente' && dq.length >= 2, queryFn: () => api<{ items: ContactHit[] }>(`/contacts${qs({ q: dq })}`) });
-  const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : segment;
+  const seg = mode === 'existente' ? contact?.segment ?? 'residencial' : isRes ? 'residencial' : segment;
   // abertura por tipo de venda: só as jornadas de tipo de venda (a residencial saiu da abertura em 23/10)
   // tipo de venda é opção do formulário; o funil é o de vendas Corporativo (pedido do Paulo, 23/10)
-  const journey = (lookups.data?.pipelines ?? []).find((p) => p.key === 'empresarial' && p.allowed);
+  // Residencial (Yepnet): funil Residencial; sem ele, cai no Corporativo como antes
+  const pipes = lookups.data?.pipelines ?? [];
+  const journey = (isRes && pipes.find((p) => p.key === 'residencial' && p.allowed)) || pipes.find((p) => p.key === 'empresarial' && p.allowed);
   const kindFields = (journey?.fields ?? []).filter((f) => !f.saleKinds?.length || (!!saleKind && f.saleKinds.includes(saleKind)));
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
@@ -105,7 +110,7 @@ export function NewOpportunityPage() {
       api<Opportunity>('/opportunities', {
         method: 'POST',
         body: {
-          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: saleKind === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
+          ...(mode === 'existente' ? { contactId: contact?.id, customerSuccess: isBase ? cs === 'sim' : undefined } : { newContact: { name, phone: phone || null, email: email || null, segment: isRes ? 'residencial' : saleKind === 'venda_consultiva' ? segment : 'governamental', city: accAddress.installCity || address.installCity || null, document: document_.trim() || null, address: { postalCode: accAddress.installCep || null, street: accAddress.installStreet || null, number: accAddress.installNumber || null, district: accAddress.installDistrict || null, city: accAddress.installCity || null, state: null } } }),
           title: title.trim() || null,
           leadId: params.get('leadId') || null,
           sourceId: sourceId || null,
@@ -138,7 +143,7 @@ export function NewOpportunityPage() {
     e.preventDefault();
     if (create.isPending) return;
     const errs: Record<string, string> = {};
-    if (!saleKind) errs.saleKind = 'Escolha o tipo de venda';
+    if (!opening) errs.saleKind = 'Escolha o tipo de venda';
     if ((lookups.data?.branches ?? []).length && !branchId) errs.branchId = 'Escolha a filial da venda';
     if (mode === 'novo' && name.trim().length < 2) errs['newContact.name'] = 'Informe o nome da conta (ao menos 2 letras)';
     if (mode === 'existente' && !contact) errs.contactId = 'Selecione um cliente da lista';
@@ -166,10 +171,10 @@ export function NewOpportunityPage() {
               <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente">
                 <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
-              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
-                <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
+              <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={opening ? openingHint(opening) : undefined}>
+                <Select id="no-pipe" value={opening} invalid={!!errors.saleKind} onChange={(e) => { setOpening(e.target.value as OpeningKind | ''); setCustom({}); setStage(''); }}>
                   <option value="">Escolha o tipo de venda</option>
-                  {SALE_KINDS.map((k) => <option key={k} value={k}>{SALE_TYPE_LABELS[k]}</option>)}
+                  {OPENING_KINDS.map((k) => <option key={k} value={k}>{openingLabel(k)}</option>)}
                 </Select>
               </FormField>
               {journey && (
@@ -281,8 +286,8 @@ export function NewOpportunityPage() {
             <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" hideCondominium />
           </Panel>
 
-          {saleKind && kindFields.length > 0 && (
-            <Panel title={`Informações de ${SALE_TYPE_LABELS[saleKind]}`}>
+          {opening && kindFields.length > 0 && (
+            <Panel title={`Informações de ${openingLabel(opening)}`}>
               <CustomFieldsEditor fields={kindFields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
               {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Preencha os campos obrigatórios da jornada.</p>}
             </Panel>

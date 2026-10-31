@@ -8,7 +8,7 @@
  *
  * Cores, raios e fontes moram em styles/tokens.css, sob [data-brand]. Aqui ficam só textos e comportamento.
  */
-import { SALE_TYPE_KEYS, type BrandSlot, type SaleTypeKey } from '@isp/shared';
+import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type BrandSlot, type SaleTypeKey } from '@isp/shared';
 import { BUSINESS_MODULE_LABELS, type BusinessModule } from '@isp/domain';
 
 export type BrandId = 'bkt' | 'yepnet';
@@ -28,8 +28,11 @@ export type BrandConfig = {
   home: { title: [string, string, string]; text: string; tipTitle: string | null; tip: string | null };
   /** Nome de módulo próprio da marca (igual ao da API, apps/api/src/brand.ts). */
   moduleLabels?: Partial<Record<BusinessModule, string>>;
-  /** Tipos de venda oferecidos na abertura da oportunidade. Ausente = todos (inclui licitação e adesão à ata). */
-  saleKinds?: SaleTypeKey[];
+  /**
+   * Tipos de venda oferecidos na abertura da oportunidade. Ausente = os quatro do Corporativo (com licitação e adesão à ata).
+   * "residencial" abre no funil Residencial (venda para casa); os demais abrem no funil Corporativo com o tipo marcado.
+   */
+  saleKinds?: OpeningKind[];
 };
 
 const BKT: BrandConfig = {
@@ -56,16 +59,22 @@ const YEPNET: BrandConfig = {
     tip: 'Entenda o que o cliente precisa, consulte a cobertura e apresente a melhor oferta.',
   },
   moduleLabels: { marketing: 'Inbound Marketing' },
-  // sem licitação (31/10/2026): fora Licitação e Adesão à Ata
-  saleKinds: ['venda_consultiva', 'consumo_contrato'],
+  // vendas da Yepnet (31/10/2026): Residencial e Venda Consultiva; sem licitação
+  saleKinds: ['residencial', 'venda_consultiva'],
 };
 
 const ALL: Record<BrandId, BrandConfig> = { bkt: BKT, yepnet: YEPNET };
 
 export const BRAND: BrandConfig = ALL[(import.meta.env.VITE_BRAND as BrandId) ?? 'bkt'] ?? BKT;
 export const isYepnet = BRAND.id === 'yepnet';
+/** Escolha de "Tipo de venda" na abertura: os tipos do Corporativo ou a venda Residencial. */
+export type OpeningKind = SaleTypeKey | 'residencial';
 /** Tipos de venda da instância, na ordem do formulário. */
-export const SALE_KINDS: readonly SaleTypeKey[] = BRAND.saleKinds ?? SALE_TYPE_KEYS;
+export const OPENING_KINDS: readonly OpeningKind[] = BRAND.saleKinds ?? SALE_TYPE_KEYS;
+/** Só os tipos do funil Corporativo (troca de tipo dentro da oportunidade, e-mail que vira negociação). */
+export const SALE_KINDS: readonly SaleTypeKey[] = OPENING_KINDS.filter((k): k is SaleTypeKey => k !== 'residencial');
+export const openingLabel = (k: OpeningKind) => (k === 'residencial' ? 'Residencial' : SALE_TYPE_LABELS[k]);
+export const openingHint = (k: OpeningKind) => (k === 'residencial' ? 'Internet para casa: planos residenciais, no funil Residencial.' : SALE_TYPE_HINTS[k]);
 export const moduleLabel = (m: BusinessModule) => BRAND.moduleLabels?.[m] ?? BUSINESS_MODULE_LABELS[m];
 
 /** Textos fixos do balão do mascote em cada tela (decisão de 17/10: não são editáveis). */
