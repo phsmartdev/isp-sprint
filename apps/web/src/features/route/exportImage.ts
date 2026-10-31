@@ -67,23 +67,26 @@ async function render(i: RouteImageInput, withTiles: boolean): Promise<HTMLCanva
   // fundo
   let tilesOk = false;
   if (withTiles) {
-    const n = 2 ** z;
     // desenha na ordem (fundo antes das camadas de nomes): carrega tudo e pinta camada por camada
-    const layers = await Promise.all(BASES[i.base].tiles.map(async (tpl) => {
-      const tiles: { img: HTMLImageElement | null; x: number; y: number }[] = [];
+    // cada camada no seu tamanho de tile (256 ou 512 px): o tile de 512 no zoom z-1 cobre a mesma área que 4 de 256 no z
+    const layers = await Promise.all(BASES[i.base].tiles.map(async (src) => {
+      const ts = src.tileSize;
+      const tz = z - Math.log2(ts / TILE);
+      const n = 2 ** tz;
+      const tiles: { img: HTMLImageElement | null; x: number; y: number; size: number }[] = [];
       const loads: Promise<void>[] = [];
-      for (let tx = Math.floor(ox / TILE); tx <= Math.floor((ox + W) / TILE); tx++) {
-        for (let ty = Math.floor(oy / TILE); ty <= Math.floor((oy + MAP_H) / TILE); ty++) {
+      for (let tx = Math.floor(ox / ts); tx <= Math.floor((ox + W) / ts); tx++) {
+        for (let ty = Math.floor(oy / ts); ty <= Math.floor((oy + MAP_H) / ts); ty++) {
           if (ty < 0 || ty >= n) continue;
           const wx = ((tx % n) + n) % n;
-          const url = tpl.replace('{z}', String(z)).replace('{x}', String(wx)).replace('{y}', String(ty));
-          loads.push(loadImage(url).then((img) => { tiles.push({ img, x: tx * TILE - ox, y: ty * TILE - oy }); }));
+          const url = src.url.replace('{z}', String(tz)).replace('{x}', String(wx)).replace('{y}', String(ty));
+          loads.push(loadImage(url).then((img) => { tiles.push({ img, x: tx * ts - ox, y: ty * ts - oy, size: ts }); }));
         }
       }
       await Promise.all(loads);
       return tiles;
     }));
-    for (const layer of layers) for (const t of layer) if (t.img) { g.drawImage(t.img, t.x, t.y, TILE, TILE); tilesOk = true; }
+    for (const layer of layers) for (const t of layer) if (t.img) { g.drawImage(t.img, t.x, t.y, t.size, t.size); tilesOk = true; }
   }
   if (!tilesOk) {
     g.fillStyle = '#E5E7EB'; g.fillRect(0, 0, W, MAP_H);

@@ -55,7 +55,7 @@ O repositório já vem pronto (`vercel.json` + função `api/server.mjs`): o sit
 - **Mapa da rede:** Configurações → Mapa da rede (KMZ). Envie o KMZ/KML exportado do Google Earth, OZmap, GeoGrid etc.; o arquivo é lido no navegador (CTOs, cabos e áreas) e cada envio vira uma versão.
 - **Traçado:** na oportunidade, aba *Viabilidade técnica* → *Abrir mapa do traçado*. Marque o cliente, trace a partir da CTO, informe porta e sobra e salve: a imagem (PNG) vai para os anexos.
 - **Chamado com a imagem:** *Pedir viabilidade (GLPI)* abre o chamado já preenchido e anexa a imagem. O anexo usa a API REST clássica do GLPI: em Configuração → Geral → API, ligue **API REST** e **login com credenciais** (o mesmo usuário de integração). Se o cliente da API exigir, informe o *Token da aplicação* em Configurações → Integrações → GLPI.
-- Fundos do mapa: imagens de satélite da Esri e ruas do OpenStreetMap, carregados direto pelo navegador.
+- **Mapa e busca de endereço (ArcGIS):** crie uma conta gratuita no ArcGIS Location Platform, gere uma *API key* com as permissões **Basemaps** e **Geocoding (not stored)**, restrinja aos endereços do sistema (*referrers*, ex.: `https://*.vercel.app` e o domínio próprio) e cadastre na Vercel como `VITE_ARCGIS_KEY`; depois faça um Redeploy. Com a chave: satélite World Imagery com nomes de ruas, mapa de ruas, busca de endereço e endereço sugerido ao marcar a casa. Sem a chave, o mapa usa fundos públicos e a busca do OpenStreetMap.
 
 Domínios próprios: acrescente-os em `WEB_ORIGIN` (separados por vírgula). As URLs `*.vercel.app` do projeto já são aceitas automaticamente.
 

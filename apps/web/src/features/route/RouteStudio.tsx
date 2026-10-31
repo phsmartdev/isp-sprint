@@ -20,7 +20,7 @@ import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 import { OpenTicketDialog } from '../GlpiTickets';
 import { BRAND } from '../../brand';
-import { COLORS, DEFAULT_CENTER, BASES, baseLayer, dot, networkBounds, networkLayer, type BaseKind } from './mapBase';
+import { COLORS, DEFAULT_CENTER, BASES, baseLayer, dot, geocode, networkBounds, networkLayer, reverseGeocode, type BaseKind } from './mapBase';
 import { routeImage } from './exportImage';
 
 type Point = Extract<NetFeature, { kind: 'ponto' }>;
@@ -35,15 +35,6 @@ const SNAP_CTO_M = 60;
 const SNAP_CLIENT_M = 20;
 
 const addressOf = (o: Opportunity) => [o.installStreet && `${o.installStreet}${o.installNumber ? `, ${o.installNumber}` : ''}`, o.installDistrict, o.installCity].filter(Boolean).join(' · ') || null;
-
-/** Busca o endereço no OpenStreetMap (Nominatim) direto do navegador; o vendedor confirma arrastando o pino. */
-async function geocode(q: string): Promise<LatLng | null> {
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&q=${encodeURIComponent(q)}`;
-  const r = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!r.ok) return null;
-  const j = (await r.json()) as { lat: string; lon: string }[];
-  return j[0] ? [Number(j[0].lat), Number(j[0].lon)] : null;
-}
 
 /** Editor do traçado (página cheia, mapa largo). */
 export function RouteStudio({ opp }: { opp: Opportunity }) {
@@ -126,9 +117,15 @@ export function RouteStudio({ opp }: { opp: Opportunity }) {
     }
   }, [net.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // cliente marcado no mapa: sem endereço preenchido, o ArcGIS sugere o endereço do ponto
+  const placeClient = (at: LatLng) => {
+    setClient(at);
+    if (!address.trim()) void reverseGeocode(at).then((a) => { if (a) setAddress((cur) => cur.trim() ? cur : a); }).catch(() => undefined);
+  };
+
   // cliques conforme o modo
   handlers.current.click = (at) => {
-    if (mode === 'cliente') { setClient(at); setMode(route.length ? 'navegar' : 'tracar'); return; }
+    if (mode === 'cliente') { placeClient(at); setMode(route.length ? 'navegar' : 'tracar'); return; }
     if (mode !== 'tracar') return;
     if (!route.length) {
       const near = nearestPoint(points, at, SNAP_CTO_M);
@@ -167,7 +164,7 @@ export function RouteStudio({ opp }: { opp: Opportunity }) {
     if (client) {
       const m = L.marker(client, { draggable: true, icon: dot(COLORS.client, COLORS.clientEdge, 22, 'Cliente'), zIndexOffset: 1000 }).addTo(g);
       m.bindTooltip('Arraste para a casa do cliente', { direction: 'top', offset: [0, -10] });
-      m.on('dragend', () => { const ll = m.getLatLng(); setClient([ll.lat, ll.lng]); });
+      m.on('dragend', () => { const ll = m.getLatLng(); placeClient([ll.lat, ll.lng]); });
       // no modo traçar, clicar no pino do cliente termina o traçado nele
       m.on('click', (e) => { L.DomEvent.stopPropagation(e); if (mode === 'tracar' && route.length) { setRoute((r) => [...r, client]); setMode('navegar'); } });
     }
@@ -183,7 +180,7 @@ export function RouteStudio({ opp }: { opp: Opportunity }) {
       if (!at) { toast({ tone: 'error', message: 'Endereço não encontrado. Clique em "Marcar cliente" e clique na casa no mapa.' }); return; }
       setClient(at); mapRef.current?.setView(at, 18);
       toast({ tone: 'success', message: 'Pino colocado pelo endereço. Confira no satélite e arraste se precisar.' });
-    } catch { toast({ tone: 'error', message: 'A busca de endereço não respondeu. Marque o cliente clicando no mapa.' }); }
+    } catch (e) { toast({ tone: 'error', message: `A busca de endereço não respondeu${e instanceof Error && e.message ? ` (${e.message})` : ''}. Marque o cliente clicando no mapa.` }); }
     finally { setSearching(false); }
   };
 
