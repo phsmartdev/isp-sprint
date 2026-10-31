@@ -82,6 +82,7 @@ export function CustomersPage() {
       <PageHeader
         icon={<Users className="h-9 w-9" strokeWidth={2.2} />}
         title="Contas"
+        mascot="mascote_clientes"
         subtitle="Clientes e contas em prospecção, com todo o histórico de relacionamento."
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => setCreating(true)}>Novo cliente</Button>}
       />

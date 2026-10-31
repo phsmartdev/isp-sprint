@@ -66,6 +66,7 @@ export function ReportsPage() {
       <PageHeader
         icon={<BarChart3 className="h-9 w-9" strokeWidth={2.4} />}
         title="Relatórios"
+        mascot="mascote_relatorios"
         subtitle="Acompanhe seus resultados e tome decisões com mais segurança."
         actions={
           <>

@@ -330,7 +330,7 @@ export const LEGACY_SALE_TYPE_JOURNEYS = SALE_TYPE_KEYS;
 const t = (assunto: string, corpo: string) => ({ assunto, corpo });
 
 /** Modelo inicial: jornada Residencial (funil Yepnet) e jornada Empresarial com visita técnica. */
-export function defaultInstruction(): Instruction {
+export function defaultInstruction(app = 'RevOps'): Instruction {
   const fim = [
     { chave: 'ganha', nome: 'Venda fechada', tipo: 'ganha' as const, cor: '#22C55E', exige: { proposta: false, plano: true, proximaAcao: false, respostasObrigatorias: false }, perguntas: [], dicas: ['Venda fechada é ganho comercial; o contrato só conta depois da confirmação no IXC.'] },
     { chave: 'perdida', nome: 'Perdido', tipo: 'perdida' as const, cor: '#EF4444', exige: { proposta: false, plano: false, proximaAcao: false, respostasObrigatorias: false }, perguntas: [], dicas: [] },
@@ -339,7 +339,7 @@ export function defaultInstruction(): Instruction {
   return {
     schema: INSTRUCTION_SCHEMA_ID,
     _leia_me: INSTRUCTION_README,
-    descricao: 'Modelo inicial do RevOps',
+    descricao: `Modelo inicial do ${app}`,
     jornadas: [
       {
         chave: 'residencial',
@@ -435,7 +435,7 @@ export function defaultInstruction(): Instruction {
       modelos: {
         proposta: t('Sua proposta {{empresa.nome}} — {{plano.nome}}', 'Olá, {{cliente.nome}}!\n\nConforme conversamos, segue em anexo a proposta do plano {{plano.nome}} por {{plano.valor}} por mês.\n\nQualquer dúvida, é só responder este e-mail.\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
         followup: t('{{cliente.nome}}, conseguiu ver a proposta?', 'Olá, {{cliente.nome}}!\n\nPassando para saber se ficou alguma dúvida sobre o plano {{plano.nome}}. Posso ajudar com algo?\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
-        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        convite_usuario: t(`Seu acesso ao ${app} — {{empresa.nome}}`, 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
         nova_senha: t('Nova senha temporária — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.'),
         alerta_atividades: t('Você tem {{quantidade}} atividade(s) para hoje ou vencida(s)', 'Olá, {{usuario.nome}}!\n\n{{lista}}\n\nVeja em {{link}}'),
         alerta_lead_atribuido: t('Novo lead para você: {{lead.nome}}', 'Olá, {{usuario.nome}}!\n\n{{atribuido_por}} atribuiu o lead {{lead.nome}} ({{lead.telefone}}) para você.\n\nAbra em {{link}}'),

@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
+import { ArrowRight, BarChart3, Lightbulb, ClipboardList, Clock3, Home as HomeIcon, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
 import { type ActivityType } from '@isp/domain';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtRelativeShort, fmtTime, fmtLongDate } from '../lib/format';
@@ -10,7 +10,8 @@ import { defaultPeriod, useStageInfo, useUrlState } from '../lib/hooks';
 import { DateRange } from '../components/ui/DateRange';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip, Delta, ErrorState, LoadingRows, formatKpi } from '../components/ui/primitives';
-import { Hexagons } from '../components/brand';
+import { BrandArt } from '../components/brand';
+import { BRAND } from '../brand';
 import { Progress } from '../components/charts/charts';
 import { StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { useToast } from '../components/ui/overlay';
@@ -111,15 +112,25 @@ export function HomePage() {
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(400px,1fr)]">
         {/* Banner */}
-        <section className="relative min-h-[260px] overflow-hidden rounded-lg bg-gradient-to-br from-navy to-primary text-white xl:col-span-2" aria-label="Nova oportunidade">
-          <Hexagons className="absolute inset-y-0 right-0 h-full w-[70%]" />
-          <div className="relative z-10 max-w-[480px] p-8 sm:p-10">
-            <h2 className="font-display text-[30px] font-bold leading-[1.15] tracking-wide sm:text-[34px]">Nova oportunidade</h2>
-            <p className="mt-4 text-md text-white/90">Qualifique o cliente, consulte a cobertura e monte a proposta em um passo a passo guiado.</p>
+        <section className={clsx('relative overflow-hidden text-white xl:col-span-2', BRAND.uploads ? 'min-h-[300px] rounded-[18px] bg-gradient-to-br from-[#0F4FD8] via-[#0B3AA6] to-[#0A1F66]' : 'min-h-[260px] rounded-lg bg-gradient-to-br from-navy to-primary')} aria-label="Nova oportunidade">
+          <BrandArt slot="banner_inicio" className={clsx('absolute inset-y-0 right-0 h-full', BRAND.uploads ? 'w-[62%] object-left' : 'w-[70%]')} />
+          <div className={clsx('relative z-10 p-8 sm:p-10', BRAND.uploads ? 'max-w-[440px]' : 'max-w-[480px]')}>
+            {BRAND.uploads ? (
+              <h2 className="text-[38px] font-extrabold leading-[1.1] sm:text-[44px]">{BRAND.home.title[0]}<br /><span className="text-lime">{BRAND.home.title[1]}</span><br />{BRAND.home.title[2]}</h2>
+            ) : (
+              <h2 className="font-display text-[30px] font-bold leading-[1.15] tracking-wide sm:text-[34px]">{BRAND.home.title[0]}</h2>
+            )}
+            <p className="mt-4 text-md text-white/90">{BRAND.home.text}</p>
             <button onClick={() => nav('/opportunities/new')} className="mt-6 inline-flex h-12 items-center gap-2 rounded-md bg-white px-6 text-md font-bold text-primary hover:bg-primary-soft">
               <Plus className="h-5 w-5" /> Nova oportunidade
             </button>
           </div>
+          {BRAND.home.tip && (
+            <div className="absolute right-5 top-8 z-10 hidden max-w-[210px] rounded-lg bg-white/95 p-4 text-ink shadow-overlay md:block">
+              <p className="flex items-center gap-1.5 text-sm font-bold text-lime-ink"><Lightbulb className="h-4 w-4" />{BRAND.home.tipTitle}</p>
+              <p className="mt-1 text-xs text-muted">{BRAND.home.tip}</p>
+            </div>
+          )}
         </section>
 
         {/* Meta do mês */}

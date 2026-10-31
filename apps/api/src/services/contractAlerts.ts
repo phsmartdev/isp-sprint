@@ -13,6 +13,7 @@ import { consumptionOf } from './contractLedger';
 import { runCompanyDocAlerts } from './companyDocs';
 import { adjustmentSuggestion } from './indices';
 import { addEvent, contractSettingsOf, contractSummary, createTask, mailTo, openProcess, sectorOwners, setStage, userById, type ContractRow } from './contracts';
+import { APP } from '../brand';
 
 type Settings = Awaited<ReturnType<typeof contractSettingsOf>>;
 const due = (iso: string) => new Date(`${iso}T12:00:00Z`);
@@ -83,7 +84,7 @@ async function act(db: DbOrTx, config: Config, c: ContractRow, a: DueAlert, cfg:
       if (c.kind === 'privado') {
         const people = [ownerUser, csm].filter(Boolean) as { id: string; email: string }[];
         await taskFor(people, `Revisar condições para renovação: ${client}`, `Revisão das condições atuais antes da renovação (vence ${when}).\n\n${sum.text}`, addDays(today, 10));
-        await mailPeople(people, 'contrato_renovacao', `Renovação contratual – Contrato ${sum.v.number} – ${client}`, `O contrato abaixo vence ${when}. Revise as condições atuais com o cliente e registre a proposta de continuidade no RevOps.\n\n${sum.text}`);
+        await mailPeople(people, 'contrato_renovacao', `Renovação contratual – Contrato ${sum.v.number} – ${client}`, `O contrato abaixo vence ${when}. Revise as condições atuais com o cliente e registre a proposta de continuidade no ${APP}.\n\n${sum.text}`);
       }
       detail = `Processo de renovação ${process.id.slice(0, 8)} aberto; vence ${when}.`;
       break;

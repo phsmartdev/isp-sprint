@@ -8,6 +8,7 @@ import { fmtDateTime } from '../../lib/format';
 import { useAuth } from '../../auth/AuthProvider';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Pagination } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
+import { BRAND } from '../../brand';
 
 type Smtp = { configured: false } | { configured: true; host: string; port: number; secure: boolean; username: string | null; fromName: string; fromEmail: string; replyTo: string | null; enabled: boolean; hasPassword: boolean; lastTestAt: string | null; lastTestOk: boolean | null; lastTestError: string | null; updatedAt: string };
 type Notif = { activityDigest: boolean; leadAssigned: boolean; dealWon: boolean; userAccess: boolean; smtpConfigured: boolean; cronConfigured: boolean };
@@ -61,7 +62,7 @@ function SmtpForm() {
         <FormField label="Senha" htmlFor="sm-pass" hint={d.configured && d.hasPassword && !changePwd ? 'Guardada' : 'Em branco: sem senha'}>
           {changePwd ? <Input id="sm-pass" type="password" autoComplete="new-password" value={f.password} onChange={(e) => set({ password: e.target.value })} /> : <Button id="sm-pass" onClick={() => setChangePwd(true)}>Trocar senha</Button>}
         </FormField>
-        <FormField label="Nome do remetente" htmlFor="sm-fname" required error={errors.fromName}><Input id="sm-fname" value={f.fromName} onChange={(e) => set({ fromName: e.target.value })} placeholder="BKT Vendas" /></FormField>
+        <FormField label="Nome do remetente" htmlFor="sm-fname" required error={errors.fromName}><Input id="sm-fname" value={f.fromName} onChange={(e) => set({ fromName: e.target.value })} placeholder={`${BRAND.company} Vendas`} /></FormField>
         <FormField label="E-mail do remetente" htmlFor="sm-from" required error={errors.fromEmail}><Input id="sm-from" type="email" value={f.fromEmail} onChange={(e) => set({ fromEmail: e.target.value })} placeholder="vendas@empresa.com.br" /></FormField>
         <FormField label="Responder para" htmlFor="sm-reply" error={errors.replyTo} hint="Em branco: o vendedor que enviou"><Input id="sm-reply" type="email" value={f.replyTo} onChange={(e) => set({ replyTo: e.target.value })} /></FormField>
         <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={f.enabled} onChange={(e) => set({ enabled: e.target.checked })} />Envio ligado</label>

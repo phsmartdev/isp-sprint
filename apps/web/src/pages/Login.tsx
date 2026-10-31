@@ -6,7 +6,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { api, ApiError } from '../lib/api';
 import type { Me } from '../lib/types';
 import { Button, FormField, Input } from '../components/ui/primitives';
-import { Hexagons } from '../components/brand';
+import { AppName, BrandArt, ConfiarFacilPartial, Logo } from '../components/brand';
+import { BRAND } from '../brand';
 
 const GOOGLE_ERRORS: Record<string, string> = {
   google_desligado: 'O login com Google ainda não foi configurado. Entre com e-mail e senha.',
@@ -27,14 +28,17 @@ export function AuthFrame({ children }: { children: ReactNode }) {
   return (
     <div className="relative flex min-h-screen bg-navy">
       <div className="fixed inset-0 overflow-hidden bg-gradient-to-br from-navy to-primary lg:right-[520px]" aria-hidden>
-        <Hexagons className="absolute inset-0 h-full w-full" />
-        <img src="/brand/bkt-logo-white.png" alt="" className="absolute bottom-10 left-10 hidden h-16 w-auto lg:block" draggable={false} />
+        <BrandArt slot="login_fundo" publicAsset className="absolute inset-0 h-full w-full" />
+        {!BRAND.uploads && <Logo variant="white" className="absolute bottom-10 left-10 hidden h-16 lg:block" />}
       </div>
       <div className="relative ml-auto flex min-h-screen w-full items-center justify-center px-4 py-10 lg:w-[520px] lg:bg-surface lg:px-12 lg:shadow-overlay">
         <div className="w-full max-w-sm space-y-5 rounded-lg bg-surface p-7 shadow-overlay lg:p-0 lg:shadow-none">
-          <div className="flex items-center justify-center gap-3 pb-2">
-            <img src="/brand/bkt-logo.png" alt="BKT" className="h-14 w-auto object-contain" draggable={false} />
-            <span className="border-l border-line pl-3 font-display text-base font-semibold text-muted">RevOps</span>
+          <div className="flex flex-col items-center gap-2 pb-2">
+            <div className="flex items-center justify-center gap-3">
+              <Logo variant="color" publicAsset className="h-14" />
+              <AppName className="border-l border-line pl-3 text-base text-muted" />
+            </div>
+            {BRAND.slogan && <p className="text-md font-semibold text-ink"><ConfiarFacilPartial /></p>}
           </div>
           {children}
         </div>

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import type { BrandSlot } from '@isp/shared';
+import { MascotBubble } from '../brand';
 
-/** Cabeçalho das telas: ícone + título grande, subtítulo, mascote com balão fixo e ações. */
-export function PageHeader({ icon, title, subtitle, actions }: { icon: ReactNode; title: string; subtitle: string; mascot?: { slot: BrandSlot; lines: string[]; highlight: ReactNode }; actions?: ReactNode }) {
+/** Cabeçalho das telas: ícone + título grande, subtítulo, mascote com balão fixo (só nas marcas com mascote) e ações. */
+export function PageHeader({ icon, title, subtitle, mascot, actions }: { icon: ReactNode; title: string; subtitle: string; mascot?: BrandSlot; actions?: ReactNode }) {
   return (
     <header className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
       <div className="flex min-w-[min(100%,20rem)] flex-1 items-start gap-3 sm:gap-4">
@@ -12,6 +13,7 @@ export function PageHeader({ icon, title, subtitle, actions }: { icon: ReactNode
           <p className="mt-0.5 text-sm text-muted sm:text-md">{subtitle}</p>
         </div>
       </div>
+      {mascot && <MascotBubble slot={mascot} />}
       {actions && <div className="flex flex-wrap items-center gap-3 sm:ml-auto">{actions}</div>}
     </header>
   );

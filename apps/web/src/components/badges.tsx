@@ -3,9 +3,11 @@ import {
   type ActivityPriority, type ActivityType, type ContractRequestStatus, type CoverageStatus, type CustomerLifecycle, type LeadStatus, type OpportunityStage, type ProposalStatus, type Segment,
 } from '@isp/domain';
 import { Chip, type Tone } from './ui/primitives';
+import { BRAND } from '../brand';
 
-/** Cores por etapa (Kanban, gráficos e selos) — iguais ao design. */
-export const STAGE_STYLE: Record<OpportunityStage, { col: string; badge: string; text: string; bar: string; tone: Tone }> = {
+type StageLook = Record<OpportunityStage, { col: string; badge: string; text: string; bar: string; tone: Tone }>;
+/** Cores por etapa (Kanban, gráficos e selos) — paleta BKT. */
+const STAGE_STYLE_BKT: StageLook = {
   novo_lead: { col: 'bg-[#EAF3FC]', badge: 'bg-[#3885D3]', text: 'text-[#2C6CAE]', bar: '#3885D3', tone: 'blue' },
   qualificacao: { col: 'bg-[#E8F6FF]', badge: 'bg-[#4FBBFF]', text: 'text-[#1F7DB8]', bar: '#4FBBFF', tone: 'sky' },
   cobertura: { col: 'bg-[#EEF1F3]', badge: 'bg-[#677680]', text: 'text-[#4E5A62]', bar: '#677680', tone: 'neutral' },
@@ -14,12 +16,25 @@ export const STAGE_STYLE: Record<OpportunityStage, { col: string; badge: string;
   ganha: { col: 'bg-[#E7F7EC]', badge: 'bg-[#16A34A]', text: 'text-[#15803D]', bar: '#22A447', tone: 'green' },
   perdida: { col: 'bg-[#FFECEC]', badge: 'bg-[#E04646]', text: 'text-[#C23434]', bar: '#FF5050', tone: 'red' },
 };
-const FALLBACK = ['#2F5986', '#3885D3', '#4FBBFF', '#677680', '#00A9C6', '#87362F', '#AAAAAA', '#002233'];
-/** Cores padrão antigas (antes da identidade BKT) trocadas pela paleta da marca; cores escolhidas pelo admin ficam como estão. */
+/** Cores por etapa na Yepnet — iguais às telas de referência. */
+const STAGE_STYLE_YEPNET: StageLook = {
+  novo_lead: { col: 'bg-[#EAF2FF]', badge: 'bg-[#2563EB]', text: 'text-[#2563EB]', bar: '#60A5FA', tone: 'blue' },
+  qualificacao: { col: 'bg-[#FFF3E2]', badge: 'bg-[#F59E0B]', text: 'text-[#EA8A0C]', bar: '#F59E0B', tone: 'orange' },
+  cobertura: { col: 'bg-[#F1EAFF]', badge: 'bg-[#7C3AED]', text: 'text-[#7C3AED]', bar: '#A78BFA', tone: 'purple' },
+  proposta: { col: 'bg-[#EAF2FF]', badge: 'bg-[#2563EB]', text: 'text-[#2F7BF5]', bar: '#7CB3FF', tone: 'blue' },
+  fechamento: { col: 'bg-[#E7F7EC]', badge: 'bg-[#16A34A]', text: 'text-[#16A34A]', bar: '#4ADE80', tone: 'green' },
+  ganha: { col: 'bg-[#E7F7EC]', badge: 'bg-[#16A34A]', text: 'text-[#16A34A]', bar: '#22C55E', tone: 'green' },
+  perdida: { col: 'bg-[#FEE4E2]', badge: 'bg-[#DC2626]', text: 'text-[#DC2626]', bar: '#EF4444', tone: 'red' },
+};
+export const STAGE_STYLE: StageLook = BRAND.id === 'yepnet' ? STAGE_STYLE_YEPNET : STAGE_STYLE_BKT;
+const FALLBACK = BRAND.id === 'yepnet'
+  ? ['#3B82F6', '#F59E0B', '#8B5CF6', '#60A5FA', '#22C55E', '#14B8A6', '#EC4899', '#F97316']
+  : ['#2F5986', '#3885D3', '#4FBBFF', '#677680', '#00A9C6', '#87362F', '#AAAAAA', '#002233'];
+/** BKT: cores padrão antigas (antes da identidade BKT) trocadas pela paleta da marca; cores escolhidas pelo admin ficam como estão. */
 const LEGACY: Record<string, string> = { '#3B82F6': '#3885D3', '#F59E0B': '#4FBBFF', '#8B5CF6': '#677680', '#A78BFA': '#677680', '#60A5FA': '#2F5986', '#7CB3FF': '#2F5986', '#4ADE80': '#00C2E0', '#22C55E': '#22A447', '#EF4444': '#FF5050', '#14B8A6': '#00A9C6', '#EC4899': '#87362F', '#F97316': '#AAAAAA' };
 /** Cor da etapa: a cadastrada na jornada; senão a do design; senão uma da paleta pela posição. */
 export function stageColor(key: string, color?: string | null, index = 0) {
-  if (color && LEGACY[color.toUpperCase()]) return LEGACY[color.toUpperCase()]!;
+  if (BRAND.id === 'bkt' && color && LEGACY[color.toUpperCase()]) return LEGACY[color.toUpperCase()]!;
   return color ?? (STAGE_STYLE as Record<string, { bar: string }>)[key]?.bar ?? FALLBACK[index % FALLBACK.length]!;
 }
 /** Escurece a cor para texto legível sobre fundo claro. */

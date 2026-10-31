@@ -14,7 +14,8 @@ import { useHotkey } from '../../lib/hooks';
 import { useTheme, type ThemeChoice } from '../../lib/theme';
 import { Avatar } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
-import { Hexagons, Logo } from '../brand';
+import { AppName, Logo, SidebarCard } from '../brand';
+import { BRAND } from '../../brand';
 import { GlobalSearch } from './GlobalSearch';
 
 type NavLeaf = {
@@ -142,9 +143,9 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const toggle = (k: string, v: boolean) => setOpenGroups((g) => { const n = { ...g, [k]: v }; try { localStorage.setItem('isp:nav-groups', JSON.stringify(n)); } catch { /* sem armazenamento */ } return n; });
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-navy to-navy-2 text-white">
-      <Link to="/" onClick={onNavigate} className="flex h-[84px] items-center gap-3 px-7" aria-label="RevOps — início">
+      <Link to="/" onClick={onNavigate} className="flex h-[84px] items-center gap-3 px-7" aria-label={`${BRAND.app} — início`}>
         <Logo />
-        <span className="border-l border-white/25 pl-3 font-display text-sm font-semibold text-white/70">RevOps</span>
+        <AppName className="border-l border-white/25 pl-3 text-sm text-white/70" />
       </Link>
       <nav aria-label="Navegação principal" className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
         <ul className="space-y-1">
@@ -205,10 +206,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </ul>
       </nav>
-      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[140px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[200px] min-h-[140px] shrink-0 [@media(max-height:720px)]:hidden')} aria-hidden>
-        <Hexagons className="absolute inset-0 h-full w-full" />
-        <img src="/brand/bkt-symbol-white.png" alt="" className="absolute bottom-4 left-5 h-10 w-auto opacity-90" draggable={false} />
-      </div>
+      <SidebarCard compact={inSettings} />
     </div>
   );
 }

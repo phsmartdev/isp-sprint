@@ -23,6 +23,7 @@ import { errMsg } from '../../features/contracts/shared';
 import { EmailToDeal } from '../../features/email/EmailToDeal';
 import { FolderRail } from '../../features/email/Folders';
 import { ComposeButton, SignatureEditor } from '../../features/email/Compose';
+import { BRAND } from '../../brand';
 
 export type MailboxRow = { id: string; kind: MailboxKind; address: string; displayName: string | null; ownerId: string | null; status: MailboxStatus; lastSyncAt: string | null; lastError: string | null; connectedAt: string | null; rowVersion: number; scopes: string[]; lastRun: { kind: string; ok: boolean; fetched: number; stored: number; error: string | null; created_at: string } | null };
 type Queue = { id: string; name: string; mailboxId: string | null; routing: string; slaHours: number; members: string[]; active: boolean; rowVersion: number };
@@ -329,7 +330,7 @@ const CONNECT_MSG: Record<string, { tone: 'info' | 'warning'; text: string }> = 
   estado: { tone: 'warning', text: 'A conexão expirou ou não foi iniciada aqui. Tente de novo.' },
   cancelada: { tone: 'warning', text: 'A autorização foi cancelada no Google.' },
   escopos: { tone: 'warning', text: 'O Google não liberou a leitura e o envio de e-mails. Marque as permissões pedidas e tente de novo.' },
-  sem_acesso_offline: { tone: 'warning', text: 'O Google não liberou o acesso contínuo. Remova o acesso do RevOps na conta Google e conecte de novo.' },
+  sem_acesso_offline: { tone: 'warning', text: `O Google não liberou o acesso contínuo. Remova o acesso do ${BRAND.app} na conta Google e conecte de novo.` },
   falhou: { tone: 'warning', text: 'O Google recusou a conexão. Tente de novo em instantes.' },
   google_desligado: { tone: 'warning', text: 'A integração com o Google não está configurada no servidor.' },
 };

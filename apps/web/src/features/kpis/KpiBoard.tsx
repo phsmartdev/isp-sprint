@@ -10,6 +10,7 @@ import clsx from 'clsx';
 import { kpiBands, type IndicatorDef, type KpiStatus } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { AccountHealth, BookingChart, ClosedContracts, OpenPipeline, useBookingContext, useRevenue } from './BookingContext';
+import { BrandSymbol } from '../../components/brand';
 import './kpiBoard.css';
 
 export type KpiQuarter = { q: number; target: number | null; value: number | null; status: KpiStatus; attainment: number | null; months: { period: string; value: number | null; status: KpiStatus }[] | null; phase: 'fechado' | 'atual' | 'futuro'; entries: number };
@@ -241,7 +242,7 @@ function TvTitle({ onExit }: { onExit?: () => void }) {
   return (
     <header className="mb-5 flex items-end justify-between gap-6">
       <div className="flex items-center gap-4">
-        <img src="/brand/bkt-symbol.png" alt="BKT" className="h-12 w-auto" />
+        <BrandSymbol className="h-12 w-auto" />
         <div><h1 className="font-display text-[1.9rem] font-bold leading-tight tracking-wide text-ink">Resultados da área</h1><p className="text-md text-muted">Indicadores principais</p></div>
       </div>
       <div className="text-right">

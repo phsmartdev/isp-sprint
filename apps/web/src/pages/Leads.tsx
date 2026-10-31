@@ -217,6 +217,7 @@ export function LeadsPage() {
       <PageHeader
         icon={<UsersRound className="h-9 w-9" strokeWidth={2.2} />}
         title="Leads"
+        mascot="mascote_leads"
         subtitle="Gerencie seus leads e transforme interesse em oportunidades."
         actions={
           <>

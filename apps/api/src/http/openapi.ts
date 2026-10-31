@@ -1,5 +1,6 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { RouteDef } from './route';
+import { APP } from '../brand';
 
 /** Gera OpenAPI 3.1 a partir das rotas registradas (schemas Zod são a fonte única). */
 export function buildOpenApi(routes: RouteDef[]) {
@@ -41,7 +42,7 @@ export function buildOpenApi(routes: RouteDef[]) {
   }
   return {
     openapi: '3.1.0',
-    info: { title: 'RevOps API', version: '1.0.0-fase1', description: 'API interna do CRM RevOps. Erros em application/problem+json com requestId.' },
+    info: { title: `${APP} API`, version: '1.0.0-fase1', description: `API interna do CRM ${APP}. Erros em application/problem+json com requestId.` },
     servers: [{ url: '/' }],
     components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'isp_session' } } },
     paths,

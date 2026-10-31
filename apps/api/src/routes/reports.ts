@@ -14,6 +14,7 @@ import { pctDelta } from '../services/metrics';
 import { monthsEnding, periodBounds } from '../services/period';
 import { audit } from '../services/audit';
 import { occupiesPort, portReservations, portUsage, reservesPort } from '../services/ports';
+import { APP } from '../brand';
 
 type Mod = 'relatorios' | 'inteligencia';
 export const oppScopeFor = (auth: AuthContext, m: Mod) => ownerScope(auth, m, { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
@@ -265,7 +266,7 @@ export const reportRoutes = [
         lines = rows.map((o) => [`OP-${o.code}`, o.contactName, o.planName, o.valueCents === null ? '' : (o.valueCents / 100).toFixed(2).replace('.', ','), o.stageName ?? STAGE_LABELS[o.stage as OpportunityStage] ?? o.stage, o.ownerName, o.createdAt.toISOString(), o.wonAt?.toISOString() ?? '', CONTRACT_LABELS[o.contractRequestStatus as ContractRequestStatus] ?? o.contractRequestStatus]);
       }
       await audit(app.db, req, { action: 'export.csv', entityType: 'report', metadata: { kind: query.kind, from: query.from, to: query.to, rows: lines.length } });
-      const meta = [`# RevOps — exportação de ${query.kind}`, `# Período: ${query.from} a ${query.to} (${auth.timezone})`, `# Gerado em: ${new Date().toISOString()} por ${auth.name}`];
+      const meta = [`# ${APP} — exportação de ${query.kind}`, `# Período: ${query.from} a ${query.to} (${auth.timezone})`, `# Gerado em: ${new Date().toISOString()} por ${auth.name}`];
       const csv = '﻿' + [...meta, header.map(csvSafe).join(';'), ...lines.map((l) => l.map(csvSafe).join(';'))].join('\r\n');
       reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="isp-sprint-${query.kind}-${query.from}-a-${query.to}.csv"`);
       return reply.send(csv);

@@ -28,6 +28,7 @@ import * as s from '../db/schema';
 import { decryptSecret } from './email';
 import { integrationRow, logEvent } from './integrations';
 import { unprocessable } from '../http/errors';
+import { APP } from '../brand';
 
 export type GlpiCfg = { tenantId: string; baseUrl: string; clientId: string; clientSecret: string; username: string; password: string; webhookSecret: string | null };
 export class GlpiError extends Error {
@@ -122,7 +123,7 @@ export const glpiGroups = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET'
 export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: string; author: string; type: number; urgency: number; entityId: number; categoryId?: number | null; groupId?: number | null }) {
   const r = await glpiCall<{ id: number }>(c, 'POST', '/Assistance/Ticket', {
     // no GLPI 11 a entidade do chamado é somente leitura no corpo: vale a entidade ativa da sessão, escolhida pelo cabeçalho GLPI-Entity (Router::handleAuth)
-    body: { name: t.title, content: glpiBody(glpiTicketHeader(t.author), t.content), type: t.type, urgency: t.urgency, impact: t.urgency, ...(t.categoryId ? { category: t.categoryId } : {}) },
+    body: { name: t.title, content: glpiBody(glpiTicketHeader(t.author, APP), t.content), type: t.type, urgency: t.urgency, impact: t.urgency, ...(t.categoryId ? { category: t.categoryId } : {}) },
     entityId: t.entityId,
   });
   if (!r?.id) throw new GlpiError('O GLPI não devolveu o número do chamado.');
@@ -136,7 +137,7 @@ export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: 
 
 /** Acompanhamento: público (o solicitante vê) ou privado (só a equipe do GLPI vê), como o "olho" do próprio GLPI. */
 export const glpiFollowup = (c: GlpiCfg, ticketId: number, entityId: number, author: string, text: string, isPrivate = false) =>
-  glpiCall<{ id: number }>(c, 'POST', `/Assistance/Ticket/${ticketId}/Timeline/Followup`, { body: { content: glpiBody(glpiReplyHeader(author), text), is_private: isPrivate }, entityId });
+  glpiCall<{ id: number }>(c, 'POST', `/Assistance/Ticket/${ticketId}/Timeline/Followup`, { body: { content: glpiBody(glpiReplyHeader(author, APP), text), is_private: isPrivate }, entityId });
 
 /**
  * Responde uma validação (aprovação) do GLPI: PATCH /Assistance/Ticket/{id}/Timeline/Validation/{vid} com status 3 (aceita)

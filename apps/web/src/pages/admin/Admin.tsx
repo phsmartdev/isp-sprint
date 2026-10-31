@@ -19,7 +19,8 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Pagination, Select } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { BrandImage, useBrand } from '../../components/brand';
+import { BrandImage, Logo, useBrand } from '../../components/brand';
+import { BRAND } from '../../brand';
 import { FitText } from '../../components/ui/FitText';
 import { IpAccessCard } from '../../features/admin/IpAccess';
 
@@ -154,7 +155,7 @@ export function AdminOverview() {
           <ul className="list-disc space-y-1 pl-5 text-sm">
             <li>Níveis de acesso: Configurações → Segurança.</li>
             <li>Metas do mês: Configurações → Usuários (editar usuário).</li>
-            <li>Identidade visual: fixa, conforme o Brand Book BKT.</li>
+            <li>{BRAND.uploads ? 'Imagens da marca: Configurações → Personalização.' : 'Identidade visual: fixa, conforme o Brand Book BKT.'}</li>
             <li>Atalhos: <kbd>/</kbd> busca, <kbd>N</kbd> nova oportunidade.</li>
           </ul>
         )}
@@ -485,17 +486,92 @@ export function AdminSecurity() {
 }
 
 // =================================================================== personalização
+const SLOT_INFO: Record<BrandSlot, { label: string; where: string; size: string; bg: string }> = {
+  logo_escuro: { label: 'Logo (fundo escuro)', where: 'Menu lateral', size: '400 × 120 px', bg: 'bg-navy' },
+  logo_claro: { label: 'Logo (fundo claro)', where: 'Quadro de login, exportações e e-mails', size: '400 × 120 px', bg: 'bg-surface-2' },
+  login_fundo: { label: 'Fundo do login', where: 'Imagem fixa à esquerda da tela de login (sem texto)', size: '1600 × 1200 px', bg: 'bg-navy' },
+  favicon: { label: 'Ícone do navegador', where: 'Aba do navegador e modo TV', size: '256 × 256 px', bg: 'bg-surface-2' },
+  banner_inicio: { label: 'Banner do Início', where: 'Arte à direita do destaque “Uma venda mais fácil…” (sem texto)', size: '1600 × 600 px', bg: 'bg-[#0B3AA6]' },
+  card_sidebar: { label: 'Card do menu lateral', where: 'Arte de fundo do “Confiar ficou fácil.” (o texto é aplicado pelo sistema)', size: '400 × 600 px', bg: 'bg-navy' },
+  mascote_leads: { label: 'Mascote — Leads', where: 'Cabeçalho da tela Leads', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_oportunidades: { label: 'Mascote — Oportunidades', where: 'Cabeçalho da tela Oportunidades', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_clientes: { label: 'Mascote — Contas', where: 'Cabeçalho da tela Contas', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_atividades: { label: 'Mascote — Atividades', where: 'Cabeçalho da tela Atividades', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_relatorios: { label: 'Mascote — Relatórios', where: 'Cabeçalho da tela Relatórios', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_inteligencia: { label: 'Mascote — Inteligência', where: 'Cabeçalho da tela Inteligência', size: '400 × 400 px', bg: 'bg-surface-2' },
+  mascote_administracao: { label: 'Mascote — Configuração', where: 'Cabeçalho da tela de Configuração', size: '400 × 400 px', bg: 'bg-surface-2' },
+};
+
+function SlotCard({ slot, info }: { slot: BrandSlot; info?: { hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null } }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { bump } = useBrand();
+  const file = useRef<HTMLInputElement>(null);
+  const meta = SLOT_INFO[slot];
+  const upload = useMutation({
+    mutationFn: async (f: File) => {
+      if (!IMG_TYPES.includes(f.type)) throw new Error('Formato não aceito. Envie PNG, JPG ou WebP (SVG não é aceito).');
+      const img = await compressImage(f, { maxBytes: 1_800_000, maxDim: 2400, keepAlpha: true });
+      if (img.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB mesmo reduzida. Exporte em tamanho menor.');
+      return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(img) } });
+    },
+    onSuccess: () => { bump(); qc.invalidateQueries({ queryKey: ['admin', 'branding'] }); toast({ tone: 'success', message: `${meta.label} atualizado` }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/admin/branding/${slot}`, { method: 'DELETE' }),
+    onSuccess: () => { bump(); qc.invalidateQueries({ queryKey: ['admin', 'branding'] }); toast({ tone: 'success', message: `${meta.label} removido` }); },
+  });
+  return (
+    <li className="card flex flex-col overflow-hidden">
+      <div className={clsx('flex h-36 items-center justify-center', meta.bg)}>
+        {info?.hasImage ? <BrandImage slot={slot} alt={meta.label} className="max-h-32 max-w-[90%] object-contain" /> : <span className="flex flex-col items-center gap-1 text-sm text-muted"><ImageIcon className="h-8 w-8" />Sem imagem</span>}
+      </div>
+      <div className="flex flex-1 flex-col p-4">
+        <p className="font-bold text-ink">{meta.label}</p>
+        <p className="text-sm text-muted">{meta.where}</p>
+        <p className="mt-1 text-xs text-faint">Recomendado: {meta.size} · PNG, JPG ou WebP (imagens grandes são reduzidas automaticamente)</p>
+        {info?.hasImage && info.updatedAt && <p className="mt-1 text-xs text-faint">Enviado {fmtDateTime(info.updatedAt)}{info.updatedByName ? ` por ${info.updatedByName}` : ''} · {Math.round((info.sizeBytes ?? 0) / 1024)} KB</p>}
+        <div className="mt-auto flex gap-2 pt-3">
+          <Button size="sm" variant="primary" icon={info?.hasImage ? <RefreshCw className="h-4 w-4" /> : <Upload className="h-4 w-4" />} loading={upload.isPending} onClick={() => file.current?.click()}>{info?.hasImage ? 'Trocar' : 'Enviar imagem'}</Button>
+          {info?.hasImage && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} loading={remove.isPending} onClick={() => remove.mutate()}>Remover</Button>}
+        </div>
+        <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" aria-label={`Arquivo para ${meta.label}`} onChange={(e) => { const f = e.target.files?.[0]; if (f) upload.mutate(f); e.target.value = ''; }} />
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Personalização. BKT: identidade fixa do Brand Book, sem envio. Yepnet (marcas com upload): logo, Dino, banners e
+ * ícone enviados aqui, valendo para a empresa inteira; sem imagem, o espaço fica vazio ou mostra só o texto.
+ */
 export function AdminBranding() {
-  const q = useQuery({ queryKey: ['admin', 'branding'], queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null })[] }>('/admin/branding') });
+  const q = useQuery({ queryKey: ['admin', 'branding'], enabled: BRAND.uploads, queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null })[] }>('/admin/branding') });
+  if (!BRAND.uploads) {
+    return (
+      <div className="space-y-4">
+        <section className="card flex flex-wrap items-center gap-5 p-5">
+          <Logo variant="color" className="h-12" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold text-ink">Identidade visual BKT</h2>
+            <p className="text-sm text-muted">A identidade segue o Brand Book da BKT: logotipo oficial, azul #2F5986 e grafite #2D3339, títulos em Orbitron, textos em Work Sans e hexágonos como grafismo. Ela é fixa no sistema para não ser alterada por engano, por isso não há imagens a enviar aqui.</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
-      <section className="card flex flex-wrap items-center gap-5 p-5">
-        <img src="/brand/bkt-logo.png" alt="BKT" className="h-12 w-auto" />
-        <div className="min-w-0 flex-1">
-          <h2 className="text-lg font-bold text-ink">Identidade visual BKT</h2>
-          <p className="text-sm text-muted">A identidade segue o Brand Book da BKT: logotipo oficial, azul #2F5986 e grafite #2D3339, títulos em Orbitron, textos em Work Sans e hexágonos como grafismo. Ela é fixa no sistema para não ser alterada por engano, por isso não há imagens a enviar aqui.</p>
-        </div>
+      <section className="card p-5">
+        <h2 className="text-lg font-bold text-ink">Identidade visual {BRAND.company}</h2>
+        <p className="text-sm text-muted">Envie as imagens da marca. Valem para a empresa inteira. Sem imagem, o espaço fica vazio ou mostra só o texto, sem quebrar o layout. Os textos dos balões do mascote são fixos.</p>
       </section>
+      {q.isLoading ? <div className="card"><LoadingRows /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {q.data!.slots.map((s) => <SlotCard key={s.slot} slot={s.slot} info={s} />)}
+        </ul>
+      )}
     </div>
   );
 }

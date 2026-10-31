@@ -52,9 +52,9 @@ export function htmlToText(html: string | null | undefined): string {
  * Cabeçalhos que identificam, no GLPI, o que foi enviado pela integração e quem do comercial fez (pedidos do Paulo, 23/10).
  * No GLPI tudo fica em nome do usuário de integração; o nome real vai no cabeçalho.
  */
-export const glpiTicketHeader = (name: string) => `Ticket gerado a partir do RevOps por ${name}:`;
-export const glpiReplyHeader = (name: string) => `Resposta enviada pelo RevOps por ${name}:`;
-export const glpiValidationHeader = (approved: boolean, name: string) => `${approved ? 'Aprovado' : 'Recusado'} no RevOps por ${name}`;
+export const glpiTicketHeader = (name: string, app = 'RevOps') => `Ticket gerado a partir do ${app} por ${name}:`;
+export const glpiReplyHeader = (name: string, app = 'RevOps') => `Resposta enviada pelo ${app} por ${name}:`;
+export const glpiValidationHeader = (approved: boolean, name: string, app = 'RevOps') => `${approved ? 'Aprovado' : 'Recusado'} no ${app} por ${name}`;
 const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 /** Corpo enviado ao GLPI: cabeçalho em destaque e, abaixo, o texto escrito na ferramenta. */
 export const glpiBody = (header: string, text: string) => `<p><strong>${escHtml(header)}</strong></p>${text.trim() ? textToHtml(text) : ''}`;

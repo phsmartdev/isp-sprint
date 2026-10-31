@@ -20,6 +20,7 @@ import { dueAtOf } from '../services/projects';
 import { applyStatus, taskEvent } from '../services/tasks';
 import { factsOf, emptyFacts } from './abm';
 import { abmPolicy, assertAccount, canViewInfluence, stakeholderRows } from './stakeholders';
+import { APP } from '../brand';
 
 /** JSON com chaves ordenadas (o jsonb reordena as chaves ao gravar). */
 const canonical = (v: unknown): string => (Array.isArray(v) ? `[${v.map(canonical).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => `${JSON.stringify(k)}:${canonical((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v));
@@ -50,7 +51,7 @@ async function ensureTemplates(db: DbOrTx, auth: AuthContext) {
   const known = new Set(have.map((h) => h.k));
   for (const t of PLAY_TEMPLATES.filter((x) => !known.has(x.key))) {
     const [p] = await db.insert(s.abmPlays).values({ tenantId: auth.tenantId, templateKey: t.key, name: t.name, category: t.category, objective: t.objective, target: t.audience.target, createdBy: null }).onConflictDoNothing().returning({ id: s.abmPlays.id });
-    if (p) await db.insert(s.abmPlayVersions).values({ tenantId: auth.tenantId, playId: p.id, version: 1, definition: { steps: t.steps, successCriteria: t.successCriteria, audience: t.audience }, note: 'Modelo inicial do RevOps', createdBy: null });
+    if (p) await db.insert(s.abmPlayVersions).values({ tenantId: auth.tenantId, playId: p.id, version: 1, definition: { steps: t.steps, successCriteria: t.successCriteria, audience: t.audience }, note: `Modelo inicial do ${APP}`, createdBy: null });
   }
 }
 
@@ -131,7 +132,7 @@ export const abmPlayRoutes = [
       const [p] = await playsWithDefinition(app.db, auth.tenantId, [params.id]);
       if (!p) throw notFound('Play não encontrado.');
       const versions = await app.db.select({ v: s.abmPlayVersions, by: s.users.name }).from(s.abmPlayVersions).leftJoin(s.users, eq(s.users.id, s.abmPlayVersions.createdBy)).where(eq(s.abmPlayVersions.playId, p.id)).orderBy(desc(s.abmPlayVersions.version));
-      return { ...p, canManage: canManage(auth), versions: versions.map((x) => ({ ...x.v, createdByName: x.by ?? 'RevOps' })) };
+      return { ...p, canManage: canManage(auth), versions: versions.map((x) => ({ ...x.v, createdByName: x.by ?? APP })) };
     },
   }),
   defineRoute({

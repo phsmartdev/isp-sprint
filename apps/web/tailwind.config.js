@@ -28,10 +28,11 @@ export default {
         yellow: c('yellow'),
         focus: c('focus'),
       },
-      // marca BKT: cantos retos em tudo; só fotos/indicadores redondos usam rounded-circle
-      borderRadius: { none: '0', sm: '0', DEFAULT: '0', md: '0', lg: '0', xl: '0', '2xl': '0', '3xl': '0', full: '0', circle: '9999px' },
+      // raios por marca (tokens.css): BKT tudo reto; Yepnet arredondado. rounded-circle é sempre redondo (fotos, indicadores).
+      borderRadius: { none: '0', sm: 'var(--radius-sm)', DEFAULT: 'var(--radius-md)', md: 'var(--radius-md)', lg: 'var(--radius-lg)', xl: 'var(--radius-xl)', '2xl': 'var(--radius-2xl)', '3xl': 'var(--radius-3xl)', full: 'var(--radius-full)', circle: '9999px' },
       boxShadow: { card: 'var(--shadow-card)', overlay: 'var(--shadow-overlay)' },
-      fontFamily: { sans: ['"Work Sans"', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'], display: ['Orbitron', '"Work Sans"', 'system-ui', 'sans-serif'] },
+      // fontes por marca (tokens.css): BKT Work Sans + Orbitron nos títulos; Yepnet Plus Jakarta Sans em tudo
+      fontFamily: { sans: ['var(--font-sans)', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'], display: ['var(--font-display)', 'system-ui', 'sans-serif'] },
       fontSize: {
         '2xs': ['0.6875rem', '1rem'],
         xs: ['0.75rem', '1.05rem'],

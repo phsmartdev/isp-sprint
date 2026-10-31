@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { KpiBoard, useKpis } from '../features/kpis/KpiBoard';
+import { BRAND } from '../brand';
 
 export function KpiBoardPage() {
   const nav = useNavigate();
@@ -14,7 +15,7 @@ export function KpiBoardPage() {
   const [idle, setIdle] = useState(false);
   const timer = useRef<number>();
   useEffect(() => {
-    document.title = 'Resultados da área · RevOps';
+    document.title = `Resultados da área · ${BRAND.app}`;
     const wake = async () => { try { await (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<unknown> } }).wakeLock?.request('screen'); } catch { /* sem suporte: segue */ } };
     void wake();
     const vis = () => { if (document.visibilityState === 'visible') void wake(); };

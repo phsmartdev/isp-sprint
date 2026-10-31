@@ -10,6 +10,7 @@ import { useDebounced } from '../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
 import { errMsg } from './contracts/shared';
+import { BRAND } from '../brand';
 
 type Ev = { id: string; kind: GlpiTimelineKind | 'Abertura'; direction: 'entrada' | 'saida'; author: string | null; text: string; isPrivate: boolean; occurredAt: string; validationId: number | null; validationStatus: number | null };
 type Ticket = {
@@ -122,7 +123,7 @@ function TicketCard({ t, oppId }: { t: Ticket; oppId: string }) {
         footer={<><Button variant="secondary" onClick={() => setAnswer(null)}>Cancelar</Button><Button variant={answer?.decision === 'aprovar' ? 'primary' : 'danger'} disabled={answer?.decision === 'recusar' && comment.trim().length < 5} loading={decide.isPending} onClick={() => decide.mutate()}>{answer?.decision === 'aprovar' ? 'Aprovar' : 'Recusar'}</Button></>}>
         <div className="space-y-4">
           {answer?.ev.text && <div className="rounded-md bg-surface-2 p-3 text-sm"><p className="font-semibold text-ink">Pedido de aprovação{answer.ev.author ? ` de ${answer.ev.author}` : ''}</p><p className="mt-1 whitespace-pre-line">{answer.ev.text}</p></div>}
-          <FormField label={answer?.decision === 'recusar' ? 'Motivo da recusa' : 'Comentário (opcional)'} htmlFor={`glpi-v-${t.id}`} required={answer?.decision === 'recusar'} hint="Vai para o GLPI com o seu nome: “Aprovado/Recusado no RevOps por …”">
+          <FormField label={answer?.decision === 'recusar' ? 'Motivo da recusa' : 'Comentário (opcional)'} htmlFor={`glpi-v-${t.id}`} required={answer?.decision === 'recusar'} hint={`Vai para o GLPI com o seu nome: “Aprovado/Recusado no ${BRAND.app} por …”`}>
             <Textarea id={`glpi-v-${t.id}`} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />
           </FormField>
         </div>

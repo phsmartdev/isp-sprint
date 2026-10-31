@@ -12,6 +12,7 @@ import { audit } from '../services/audit';
 import { loadOpportunity } from '../services/opportunities';
 import { integrationRow, logEvent } from '../services/integrations';
 import { crcAnswer, GlpiError, glpiAnswerValidation, glpiCategories, glpiConfig, glpiCreateTicket, glpiEntities, glpiFollowup, glpiGroups, syncTicket, validWebhookSignature, type GlpiCfg } from '../services/glpi';
+import { APP } from '../brand';
 
 const ENTITY_SYSTEM = 'glpi_entidade';
 const TicketParams = z.object({ id: z.string().uuid('ID inválido') });
@@ -124,7 +125,7 @@ export const glpiRoutes = [
       if (errs.length) throw unprocessable(errs[0]!.message, errs);
       const c = await glpiConfig(app.db, auth.tenantId);
       const [me] = await app.db.select({ name: s.users.name, email: s.users.email }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
-      const content = `${body.content}\n\n—\nAberto no RevOps por ${me?.name ?? 'usuário'} (${me?.email ?? ''}) na oportunidade OP-${opp.code} · ${opp.contactName}.`;
+      const content = `${body.content}\n\n—\nAberto no ${APP} por ${me?.name ?? 'usuário'} (${me?.email ?? ''}) na oportunidade OP-${opp.code} · ${opp.contactName}.`;
       const created = await viaGlpi(() => glpiCreateTicket(c, { ...body, content, author: me?.name ?? 'usuário' }));
       const [row] = await app.db.transaction(async (tx) => {
         const r = await tx.insert(s.glpiTickets).values({
@@ -174,7 +175,7 @@ export const glpiRoutes = [
       if (!pendingValidations(evs.map((e) => ({ ...e, occurredAt: e.occurredAt.toISOString() }))).length) throw unprocessable('Esta aprovação já foi respondida. Clique em Atualizar para ver a situação atual.');
       const [me] = await app.db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
       const approve = body.decision === 'aprovar';
-      const html = glpiBody(glpiValidationHeader(approve, me?.name ?? 'usuário'), body.comment ?? '');
+      const html = glpiBody(glpiValidationHeader(approve, me?.name ?? 'usuário', APP), body.comment ?? '');
       const c = await glpiConfig(app.db, auth.tenantId);
       await viaGlpi(() => glpiAnswerValidation(c, t.glpiId, t.entityId, params.validationId, approve, html));
       // registra a decisão com quem decidiu e o que escreveu; a releitura do GLPI traz o mesmo id e não duplica

@@ -94,6 +94,7 @@ export function ActivitiesPage() {
       <PageHeader
         icon={<CalendarCheck className="h-9 w-9" strokeWidth={2.2} />}
         title="Atividades"
+        mascot="mascote_atividades"
         subtitle="Organize suas tarefas e mantenha o foco nas suas vendas."
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => setCreating(true)}>Nova atividade</Button>}
       />

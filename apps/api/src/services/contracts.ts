@@ -16,6 +16,7 @@ import { forbidden, notFound, unprocessable } from '../http/errors';
 import { level } from './scope';
 import { brl, sendAlert } from './email';
 import { publicLink } from './alerts';
+import { APP } from '../brand';
 
 export type ContractRow = typeof s.contracts.$inferSelect;
 export type VersionRow = typeof s.contractVersions.$inferSelect;
@@ -162,7 +163,7 @@ export async function contractSummary(db: DbOrTx, c: ContractRow, config: Config
     v.items.length ? `Itens:\n${v.items.map((i) => `- ${i.qty} × ${i.description}: ${brl(i.unitCents)} (total ${brl(i.qty * i.unitCents)})`).join('\n')}` : null,
     `Responsável comercial: ${owner?.name ?? '—'}`,
     c.erpRef ? `Referência no ERP: ${c.erpRef}` : 'ERP: cadastro pendente',
-    `Abrir no RevOps: ${publicLink(config, `/contracts/${c.id}`)}`,
+    `Abrir no ${APP}: ${publicLink(config, `/contracts/${c.id}`)}`,
   ].filter(Boolean);
   return { v, contact, owner, text: lines.join('\n') };
 }

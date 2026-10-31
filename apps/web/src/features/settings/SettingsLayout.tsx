@@ -13,7 +13,7 @@ export function SettingsLayout() {
   const group = hit?.group;
   return (
     <div className="w-full">
-      <PageHeader icon={<Settings className="h-9 w-9" strokeWidth={2.2} />} title={hit?.item.label ?? 'Configuração'} subtitle={hit?.item.desc ?? 'Gerencie os parâmetros da plataforma.'} />
+      <PageHeader icon={<Settings className="h-9 w-9" strokeWidth={2.2} />} title={hit?.item.label ?? 'Configuração'} subtitle={hit?.item.desc ?? 'Gerencie os parâmetros da plataforma.'} mascot="mascote_administracao" />
       {group && (
         <nav aria-label={`Páginas de ${group.label}`} className="scroll-thin mb-5 flex items-end gap-5 overflow-x-auto border-b border-line">
           <span className="whitespace-nowrap pb-3 text-xs font-semibold uppercase tracking-wide text-muted">{group.label}</span>

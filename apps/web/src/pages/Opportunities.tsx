@@ -209,6 +209,7 @@ export function OpportunitiesPage() {
       <PageHeader
         icon={<ClipboardList className="h-9 w-9" strokeWidth={2.2} />}
         title="Oportunidades"
+        mascot="mascote_oportunidades"
         subtitle="Visualize e gerencie seu funil de vendas de forma simples."
         actions={<Button variant="primary" size="lg" icon={<Plus className="h-5 w-5" />} onClick={() => nav(`/opportunities/new${qs({ pipelineId: f.pipelineId })}`)}>Nova oportunidade</Button>}
       />

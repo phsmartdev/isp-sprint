@@ -64,6 +64,7 @@ export function IntelligencePage() {
       <PageHeader
         icon={<Lightbulb className="h-9 w-9" strokeWidth={2.2} />}
         title="Inteligência"
+        mascot="mascote_inteligencia"
         subtitle="Transforme dados em oportunidades e tome decisões mais estratégicas."
         actions={f.v === 'indicadores' || f.v === 'economia' ? undefined :
           <>

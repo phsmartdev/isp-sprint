@@ -12,6 +12,7 @@ import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './sco
 import { audit } from './audit';
 import { resolvePipeline } from './instructions';
 import { assertPortAvailable } from './ports';
+import { BRAND } from '../brand';
 
 export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   contactId?: string | null;
@@ -332,9 +333,9 @@ export async function assertBranch(db: DbOrTx, tenantId: string, branchId: strin
   if (!b) throw unprocessable('Filial inválida.', [{ path: 'branchId', message: 'Filial inexistente ou desativada' }]);
 }
 
-/** Empresas sem filial cadastrada ganham as filiais iniciais (BKT Soluções e UPNET). */
+/** Empresas sem filial cadastrada ganham as filiais iniciais da marca (BKT: BKT Soluções e UPNET; Yepnet: Yepnet). */
 export async function ensureSalesBranches(db: DbOrTx, tenantId: string) {
   const [any] = await db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(eq(s.salesBranches.tenantId, tenantId)).limit(1);
   if (any) return;
-  await db.insert(s.salesBranches).values([{ tenantId, name: 'BKT Soluções', position: 0 }, { tenantId, name: 'UPNET', position: 1 }]).onConflictDoNothing();
+  await db.insert(s.salesBranches).values(BRAND.defaultBranches.map((name, position) => ({ tenantId, name, position }))).onConflictDoNothing();
 }

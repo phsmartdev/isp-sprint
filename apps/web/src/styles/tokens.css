@@ -1,4 +1,7 @@
 /*
+ * Uma instância por empresa, mesmo código (ver src/brand.ts e VITE_BRAND). O <html> recebe data-brand no build:
+ * sem atributo ou "bkt" vale o bloco :root abaixo; "yepnet" sobrescreve no fim deste arquivo.
+ *
  * Tokens da identidade visual BKT (Brand Book 2025): azul #2F5986, grafite #2D3339 e branco na paleta primária;
  * azuis e grafites secundários/terciários com moderação. ÚNICA fonte de cor, raio e sombra.
  * Valores em canais RGB para permitir opacidade (rgb(var(--x) / .5)).
@@ -43,6 +46,13 @@
   --radius-sm: 0;
   --radius-md: 0;
   --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-full: 0;
+  --font-sans: 'Work Sans';
+  --font-display: 'Orbitron';
+  --display-tracking: 0.02em;
   --shadow-card: 0 1px 2px rgb(45 51 57 / 0.05), 0 2px 8px rgb(45 51 57 / 0.05);
   --shadow-overlay: 0 16px 40px rgb(45 51 57 / 0.22);
   --chart-in: 56 133 211;      /* #3885D3 entradas de caixa */
@@ -91,4 +101,100 @@
   --shadow-overlay: 0 16px 40px rgb(0 0 0 / 0.55);
   --chart-in: 77 141 205;      /* #4D8DCD entradas de caixa */
   --chart-out: 212 117 44;     /* #D4752C saídas de caixa (validado CVD contra a superfície escura) */
+}
+
+
+/* ===================================================================================================
+ * Yepnet (fiel às telas de referência de 17/10/2026): azul-marinho no menu, azul nos botões, verde Yepnet
+ * de destaque, cantos arredondados e Plus Jakarta Sans em tudo. Mesmos nomes de token da BKT.
+ * =================================================================================================== */
+:root[data-brand='yepnet'] {
+  --bg: 244 247 252;            /* #F4F7FC fundo das páginas */
+  --surface: 255 255 255;
+  --surface-2: 247 249 253;     /* cabeçalho de tabela, áreas internas */
+  --line: 229 234 243;          /* #E5EAF3 bordas */
+  --line-strong: 205 214 230;
+  --ink: 10 26 79;              /* #0A1A4F títulos e texto forte */
+  --text: 30 41 73;             /* #1E2949 texto corrido */
+  --muted: 92 106 138;          /* #5C6A8A texto secundário (AA) */
+  --faint: 128 141 168;         /* legendas pequenas */
+
+  --navy: 8 31 92;              /* #081F5C menu lateral */
+  --navy-2: 6 23 69;            /* #061745 base do gradiente do menu */
+  --navy-active: 21 54 133;     /* #153685 item ativo */
+  --lime: 126 217 87;           /* #7ED957 verde Yepnet */
+  --lime-ink: 52 140 30;        /* #348C1E verde sobre claro (AA) */
+  --primary: 21 101 240;        /* #1565F0 azul dos botões */
+  --primary-hover: 13 82 204;
+  --primary-soft: 232 240 254;  /* #E8F0FE balões e fundos suaves */
+
+  --success: 22 163 74;
+  --success-soft: 227 246 233;
+  --warning: 234 122 18;
+  --warning-soft: 255 240 222;
+  --danger: 220 38 38;          /* #DC2626 */
+  --danger-soft: 254 228 226;
+  --purple: 124 58 237;         /* #7C3AED */
+  --purple-soft: 240 233 255;
+  --sky: 56 132 255;
+  --sky-soft: 234 242 255;
+  --yellow: 245 180 0;
+  --focus: 21 101 240;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 18px;
+  --radius-3xl: 24px;
+  --radius-full: 9999px;
+  --font-sans: 'Plus Jakarta Sans';
+  --font-display: 'Plus Jakarta Sans';
+  --display-tracking: -0.01em;
+  --shadow-card: 0 1px 2px rgb(16 34 87 / 0.04), 0 2px 8px rgb(16 34 87 / 0.04);
+  --shadow-overlay: 0 16px 40px rgb(10 26 79 / 0.18);
+  --chart-in: 21 101 240;
+  --chart-out: 234 122 18;
+}
+/* títulos da Yepnet sem o espaçamento largo pensado para a Orbitron */
+:root[data-brand='yepnet'] .font-display { letter-spacing: var(--display-tracking); }
+
+/* Yepnet no tema escuro: marinho profundo, azul clareado para contraste e o mesmo verde de destaque. */
+:root[data-brand='yepnet'][data-theme='dark'] {
+  --bg: 9 16 38;                /* #091026 */
+  --surface: 17 27 56;          /* #111B38 */
+  --surface-2: 24 36 70;        /* #182446 */
+  --line: 36 50 90;             /* #24325A */
+  --line-strong: 56 72 118;
+  --ink: 236 241 252;
+  --text: 210 219 238;
+  --muted: 156 170 201;
+  --faint: 128 142 175;
+
+  --navy: 6 12 31;
+  --navy-2: 4 9 24;
+  --navy-active: 21 54 133;
+  --lime: 126 217 87;
+  --lime-ink: 140 224 104;
+  --primary: 77 140 245;        /* #4D8CF5 */
+  --primary-hover: 104 160 248;
+  --primary-soft: 28 45 88;
+
+  --success: 52 199 110;
+  --success-soft: 22 52 36;
+  --warning: 245 151 58;
+  --warning-soft: 58 40 20;
+  --danger: 244 98 98;
+  --danger-soft: 62 28 30;
+  --purple: 167 139 250;
+  --purple-soft: 45 36 82;
+  --sky: 96 165 250;
+  --sky-soft: 26 42 76;
+  --yellow: 245 190 40;
+  --focus: 96 165 250;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 8px rgb(0 0 0 / 0.25);
+  --shadow-overlay: 0 16px 40px rgb(0 0 0 / 0.55);
+  --chart-in: 77 140 245;
+  --chart-out: 245 151 58;
 }

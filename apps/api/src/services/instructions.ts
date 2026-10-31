@@ -12,6 +12,7 @@ import { defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEY
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
+import { APP } from '../brand';
 
 const KIND = { aberta: 'open', ganha: 'won', perdida: 'lost' } as const;
 const TIPO = { open: 'aberta', won: 'ganha', lost: 'perdida' } as const;
@@ -91,13 +92,13 @@ export async function getActiveInstruction(db: DbOrTx, tenantId: string): Promis
     .limit(1);
   if (!row) return bootstrapInstruction(db, tenantId);
   const parsed = parseInstruction(row.content);
-  const stored = parsed.ok ? parsed.value : defaultInstruction();
+  const stored = parsed.ok ? parsed.value : defaultInstruction(APP);
   const jornadas = await journeysFromDb(db, tenantId, stored);
   return { id: row.id, version: row.version, content: { ...stored, jornadas: jornadas.length ? jornadas : stored.jornadas } };
 }
 
 async function bootstrapInstruction(db: DbOrTx, tenantId: string): Promise<ActiveInstruction> {
-  const content = defaultInstruction();
+  const content = defaultInstruction(APP);
   return (db as unknown as { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
     // duas requisições simultâneas: a segunda espera a primeira
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + tenantId}))`);
@@ -108,7 +109,7 @@ async function bootstrapInstruction(db: DbOrTx, tenantId: string): Promise<Activ
       .limit(1);
     if (!again) {
       await applyJourneys(tx, tenantId, content.jornadas);
-      await tx.insert(s.businessInstructions).values({ tenantId, version: 1, status: 'ativa', content, changes: ['Modelo inicial do RevOps.'], activatedAt: new Date() });
+      await tx.insert(s.businessInstructions).values({ tenantId, version: 1, status: 'ativa', content, changes: [`Modelo inicial do ${APP}.`], activatedAt: new Date() });
     }
     const [row] = await tx
       .select({ id: s.businessInstructions.id, version: s.businessInstructions.version })
@@ -222,7 +223,7 @@ export async function applyJourneys(tx: DbOrTx, tenantId: string, journeys: Inst
 
 /** Conteúdo para exportar: o modelo com o “leia-me” atualizado e o número da versão. */
 export function exportable(content: Instruction, version: number): Instruction {
-  return { ...content, _leia_me: INSTRUCTION_README, versao: version };
+  return { ...content, _leia_me: INSTRUCTION_README.map((l) => l.replace('RevOps', APP)), versao: version };
 }
 
 /** Jornadas que o usuário pode usar: sem membros = todos; com membros = só eles (gerência vê todas). */
