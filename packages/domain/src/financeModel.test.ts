@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEconInput, financeEngine, type EconInput, type EconItem, type EconSettings } from './finance';
+import { emptyEconInput, financeEngine, lotOfKind, type EconInput, type EconItem, type EconSettings } from './finance';
 import { financeEngine as legacyEngine } from './legacy/financeV2';
 import { buildModel, dependentsOf, findCycle, runModel, traceOf, validateModel, FIN_FORMULAS, FIN_VARIABLES } from './financeModel';
 import { evalFinFormula, parseFinFormula, printFinFormula, FormulaError } from './formula';
+
+const lotTop = (items: EconItem[]) => {
+  const best = new Map<string, NonNullable<EconItem['doc']>>();
+  for (const i of items) { const l = lotOfKind(i.kind ?? 'recorrencia'); const c = best.get(l); if (i.doc?.complete && (!c || i.doc.percentBp > c.percentBp || (i.doc.percentBp === c.percentBp && i.doc.fixedCents > c.fixedCents))) best.set(l, i.doc); }
+  return items.map((i) => ({ ...i, doc: best.get(lotOfKind(i.kind ?? 'recorrencia')) ?? i.doc }));
+};
 
 /** Gerador determinístico (os mesmos cenários em toda execução). */
 function rng(seed: number) { return () => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31; }; }
@@ -43,7 +49,9 @@ describe('compatibilidade: o modelo padrão reproduz o motor anterior', () => {
     const rand = rng(20261029);
     for (let k = 0; k < 400; k++) {
       const args = scenario(rand);
-      const a = legacyEngine(args), b = financeEngine(args);
+      // regra de 11/2026: o documento de maior tributo do lote vale para todos os produtos do lote (o motor anterior
+      // recebe os produtos já com esse documento, então os dois precisam bater centavo a centavo)
+      const a = legacyEngine({ ...args, items: lotTop(args.items) }), b = financeEngine(args);
       const ctx = `cenário ${k}: ${JSON.stringify(args.input.mode)}`;
       where = ctx;
       // sem produtos e sem preço informado o preço é o do motor, agora arredondado para o centavo de cima (30/10/2026):

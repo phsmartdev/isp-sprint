@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings } from './finance';
+import { econCompare, parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings } from './finance';
 import { npv as npvF } from './formula';
 import { annuityFactor, irr, npv, paybackMonths } from './formula';
 
@@ -11,10 +11,22 @@ const items = (...x: [number, number][]) => x.map(([rev, bp]) => ({ description:
 const near = (v: number | null, x: number, tol = 1) => { expect(v).not.toBeNull(); expect(Math.abs(v! - x)).toBeLessThanOrEqual(tol); };
 
 describe('resolução fiscal', () => {
-  it('alíquota ponderada pela receita (exemplo do documento: 10% e 20% em 50/50 = 15%, não 30%)', () => {
-    const r = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: items([5000, 1000], [5000, 2000]), settings: { ...S, marginTargetBp: 0 }, publicSector: false });
-    expect(r.rates.a).toBeCloseTo(0.15, 10);
-    expect(r.rates.b).toBeCloseTo(0.85, 10);
+  it('lotes (11/2026): no mesmo lote vale o documento de maior tributo; entre lotes, ponderado pela receita', () => {
+    // mesmo lote (venda), 10% e 20%: vale o maior, 20%
+    const same = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: items([5000, 1000], [5000, 2000]), settings: { ...S, marginTargetBp: 0 }, publicSector: false });
+    expect(same.rates.a).toBeCloseTo(0.2, 10);
+    expect(same.lots).toEqual([expect.objectContaining({ lot: 'venda', percentBp: 2000, items: 2 })]);
+    expect(same.items.map((i) => i.percentBp)).toEqual([2000, 2000]);
+    // Lote Venda 10% e Lote Serviço (serviço único) 20%, 50/50: 15%
+    const [v, sv] = items([5000, 1000], [5000, 2000]);
+    const two = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: [{ ...v!, kind: 'venda' }, { ...sv!, kind: 'servico' }], settings: { ...S, marginTargetBp: 0 }, publicSector: false });
+    expect(two.rates.a).toBeCloseTo(0.15, 10);
+    expect(two.lots!.map((l) => [l.lot, l.percentBp])).toEqual([['venda', 1000], ['servico', 2000]]);
+    // produto sem documento usa o do lote (e não fica pendente)
+    const noDoc = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: [{ ...v!, kind: 'venda' }, { description: 'Sem NF', revenueCents: 5000, kind: 'venda', doc: null }], settings: { ...S, marginTargetBp: 0 }, publicSector: false });
+    expect(noDoc.rates.a).toBeCloseTo(0.1, 10);
+    expect(noDoc.withReservations).toBe(false);
+    expect(noDoc.warnings.join(' ')).toMatch(/1 produto\(s\) sem documento fiscal próprio/);
   });
   it('tributos vigentes do documento: soma, vigência e desativados', () => {
     const d = { active: true, taxes: [
@@ -182,12 +194,15 @@ describe('decisões da diretoria (29/10)', () => {
     expect(r.paybackOk).toBe(false);
     expect(r.verdict === 'fora_politica' || r.verdict === 'abaixo_minimo').toBe(true);
   });
-  it('tributo fixo uma vez por fatura (documento), não por item', () => {
+  it('tributo fixo uma vez por lote (o documento escolhido do lote), não por item', () => {
     const fixed = (id: string) => ({ id, name: id, percentBp: 0, fixedCents: 1_000, complete: true });
     const same = financeEngine({ input: rec(), items: [{ description: 'A', revenueCents: 50_000, doc: fixed('nfse') }, { description: 'B', revenueCents: 50_000, doc: fixed('nfse') }], settings: S, publicSector: false });
     expect(same.fixedTaxCents).toBe(1_000);
     const two = financeEngine({ input: rec(), items: [{ description: 'A', revenueCents: 50_000, doc: fixed('nfse') }, { description: 'B', revenueCents: 50_000, doc: fixed('nfcom') }], settings: S, publicSector: false });
-    expect(two.fixedTaxCents).toBe(2_000);
+    // mesmo lote, documentos diferentes com o mesmo percentual: vale um só (o de maior fixo), uma vez
+    expect(two.fixedTaxCents).toBe(1_000);
+    const lots = financeEngine({ input: { ...rec(), mode: 'pontual' }, items: [{ description: 'A', revenueCents: 50_000, kind: 'venda', doc: fixed('nfe') }, { description: 'B', revenueCents: 50_000, kind: 'servico', doc: fixed('nfse') }], settings: S, publicSector: false });
+    expect(lots.fixedTaxCents).toBe(2_000);
   });
   it('glosa por segmento e contingência sobre investimento e custo mensal', () => {
     const st = { ...S, lossPrivateBp: 100, lossPublicBp: 400, contingencyCapexBp: 1000, contingencyOpexBp: 500 };
@@ -375,3 +390,57 @@ describe('negociação mista: venda, recorrência e locação na mesma oportunid
   });
 });
 
+
+describe('lotes Venda e Serviço (11/2026)', () => {
+  it('serviço único no pagamento único com o tributo do Lote Serviço; investimento de cada lote sai do seu lote', () => {
+    const doc = (id: string, pct: number) => ({ id, name: id, percentBp: pct, fixedCents: 0, complete: true });
+    const r = financeEngine({
+      input: { ...emptyEconInput(), mode: 'recorrente', termMonths: 12, capex: [{ description: 'Roteador (patrimonial)', qtyMilli: 1000, unitCents: 6_000, kind: 'venda' }, { description: 'Instalação', qtyMilli: 1000, unitCents: 3_000, kind: 'servico' }] },
+      items: [
+        { description: 'Roteador', revenueCents: 10_000, kind: 'venda', doc: doc('NF-e', 1000) },
+        { description: 'Instalação', revenueCents: 5_000, kind: 'servico', doc: doc('NFS-e 5%', 500) },
+        { description: 'Link', revenueCents: 1_000, kind: 'recorrencia', doc: doc('NFS-e 15%', 1500) },
+      ],
+      settings: { ...S, marginTargetBp: 0, contingencyCapexBp: 0 }, publicSector: false,
+    });
+    // Lote Serviço: o maior entre os serviços (15%) vale também para o serviço único
+    expect(r.lots!.map((l) => [l.lot, l.percentBp, l.items])).toEqual([['venda', 1000, 1], ['servico', 1500, 2]]);
+    const venda = r.deal!.parts.venda, mensal = r.deal!.parts.mensal;
+    expect(venda.rates.a).toBeCloseTo((10_000 * 0.1 + 5_000 * 0.15) / 15_000, 10);
+    expect(mensal.rates.a).toBeCloseTo(0.15, 10);
+    // investimento: Lote Venda inteiro na venda; Lote Serviço dividido entre o serviço único (5.000) e a recorrência (1.000 × 12)
+    const fS = 5_000 / (5_000 + 12_000);
+    expect(venda.capexBaseCents).toBe(6_000 + Math.round(3_000 * fS));
+    expect(mensal.capexBaseCents).toBe(Math.round(3_000 * (1 - fS)));
+    expect(r.deal!.revenue).toMatchObject({ venda: 10_000, servico: 5_000, recorrencia: 1_000 });
+    expect(r.deal!.suggestedOneTimeCents).toBe(venda.suggestedCents);
+  });
+});
+
+describe('comparativo com o modelo antigo', () => {
+  const rec = (over: Partial<ReturnType<typeof emptyEconInput>> = {}) => ({ ...emptyEconInput(), termMonths: 24, ...over });
+  it('markup efetivo, margem bruta e efetiva do sugerido e do modelo antigo (×3,2 mensal / ×2,5 único)', () => {
+    const r = financeEngine({ input: rec({ opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 10_000 }] }), items: items([0, 1000]), settings: { ...S, marginTargetBp: 2000 }, publicSector: false });
+    const c = econCompare(r, {});
+    expect(c.baseCents).toBe(10_000);
+    expect(c.legacy).toMatchObject({ priceCents: 32_000, factor: 3.2 });
+    expect(c.legacy.markupPct).toBeCloseTo(220, 10);
+    expect(c.legacy.grossMarginPct).toBeCloseTo((1 - 1 / 3.2) * 100, 10);
+    expect(c.legacy.effectiveMarginPct).toBeCloseTo((1 - 1 / 3.2 - r.rates.a - r.rates.c) * 100, 10);
+    const P = r.suggestedCents!;
+    expect(c.engine.markupPct).toBeCloseTo(((P - 10_000) / 10_000) * 100, 10);
+    expect(c.differenceCents).toBe(32_000 - P);
+    // fator da empresa em Configurações vence o padrão
+    expect(econCompare(r, { recurringX100: 300 }).legacy.priceCents).toBe(30_000);
+    // pagamento único: sobre o investimento, ×2,5
+    const u = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual', capex: [{ description: 'Equip.', qtyMilli: 1000, unitCents: 40_000 }] }, items: items([0, 1000]), settings: S, publicSector: false });
+    expect(econCompare(u).legacy).toMatchObject({ priceCents: 100_000, factor: 2.5 });
+  });
+  it('o preço sugerido acompanha a margem escolhida', () => {
+    const input = rec({ opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 10_000 }] });
+    const lo = financeEngine({ input: { ...input, marginTargetBp: 2000 }, items: items([0, 1000]), settings: { ...S, marginTargetBp: 2000, marginMaxBp: 6000 }, publicSector: false });
+    const hi = financeEngine({ input: { ...input, marginTargetBp: 4000 }, items: items([0, 1000]), settings: { ...S, marginTargetBp: 2000, marginMaxBp: 6000 }, publicSector: false });
+    expect(hi.suggestedCents!).toBeGreaterThan(lo.suggestedCents!);
+    expect(hi.suggestedMinCents).toBe(lo.suggestedMinCents);
+  });
+});

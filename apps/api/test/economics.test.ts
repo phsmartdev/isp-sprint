@@ -51,14 +51,15 @@ describe('viabilidade econômica', () => {
     const input = { mode: 'recorrente', termMonths: 24, receiveMonth: 0, capex: [{ description: 'Roteador', impact: 'material', qtyMilli: 1000, unitCents: 3_000_000 }], extraInitialCents: 0, opex: [{ description: 'Trânsito IP', qtyMilli: 1000, unitCents: 200_000 }], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
     ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, termMonths: 0 }), 422);
     const saved = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
-    // a = 0,5×20% + 0,5×8,65% = 14,325%
-    expect(saved.result.rates.a).toBeCloseTo(0.14325, 8);
+    // lotes (11/2026): os dois produtos são do Lote Serviço, então vale o documento de maior tributo do lote: a = 20%
+    expect(saved.result.rates.a).toBeCloseTo(0.2, 8);
+    expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
-    // P = 10.000; caixa do mês = 10.000 − 1.432,50 − 500 − 2.000 = 6.067,50; payback = 30.000 ÷ 6.067,50 ≈ 4,9 meses (≤ 6)
-    // margem de contribuição (precificação) desconta também o investimento no payback: 6.067,50 − 30.000 ÷ 6 = 1.067,50
-    expect(saved.result.kpi.cashMonthlyCents).toBe(606_750);
-    expect(saved.result.kpi.contributionCents).toBe(106_750);
-    expect(saved.result.kpi.paybackMonths).toBeCloseTo(3_000_000 / 606_750, 4);
+    // P = 10.000; caixa do mês = 10.000 − 2.000 − 500 − 2.000 = 5.500; payback = 30.000 ÷ 5.500 ≈ 5,5 meses (≤ 6)
+    // margem de contribuição (precificação) desconta também o investimento no payback: 5.500 − 30.000 ÷ 6 = 500
+    expect(saved.result.kpi.cashMonthlyCents).toBe(550_000);
+    expect(saved.result.kpi.contributionCents).toBe(50_000);
+    expect(saved.result.kpi.paybackMonths).toBeCloseTo(3_000_000 / 550_000, 4);
     expect(saved.result.verdict).not.toBe('fora_politica');
     expect(saved.history).toHaveLength(1);
 

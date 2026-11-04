@@ -635,7 +635,7 @@ export const opportunityItems = pgTable('opportunity_items', {
   dealKind: text('deal_kind').notNull().default('recorrencia'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
-}, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'recorrencia', 'locacao'])) }));
+}, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'servico', 'recorrencia', 'locacao'])) }));
 
 /** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
 export const bidParticipants = pgTable('bid_participants', {
