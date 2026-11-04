@@ -55,11 +55,14 @@ describe('viabilidade econômica', () => {
     expect(saved.result.rates.a).toBeCloseTo(0.2, 8);
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
-    // P = 10.000; caixa do mês = 10.000 − 2.000 − 500 − 2.000 = 5.500; payback = 30.000 ÷ 5.500 ≈ 5,5 meses (≤ 6)
-    // margem de contribuição (precificação) desconta também o investimento no payback: 5.500 − 30.000 ÷ 6 = 500
-    expect(saved.result.kpi.cashMonthlyCents).toBe(550_000);
-    expect(saved.result.kpi.contributionCents).toBe(50_000);
-    expect(saved.result.kpi.paybackMonths).toBeCloseTo(3_000_000 / 550_000, 4);
+    // FINANCE-3.0: sem comissão; preço sugerido = (30.000 ÷ 6 + 2.000) ÷ (1 − 20% − 35%) = 15.555,56/mês
+    expect(saved.result.engineVersion).toBe('FINANCE-3.0');
+    expect(saved.result.suggestedCents).toBe(1_555_556);
+    expect(saved.result.kpi.marginPct).toBeCloseTo(35, 2);
+    // decisão no proposto (total dos produtos, 10.000): caixa do mês = 10.000 − 2.000 − 2.000 = 6.000; MC = 6.000 − 5.000 = 1.000 (10%)
+    expect(saved.result.decision).toMatchObject({ basis: 'proposto', source: 'itens', priceCents: 1_000_000 });
+    expect(saved.result.decision.marginPct).toBeCloseTo(10, 6);
+    expect(saved.result.decision.paybackMonths).toBeCloseTo(3_000_000 / 600_000, 4);
     expect(saved.result.verdict).not.toBe('fora_politica');
     expect(saved.history).toHaveLength(1);
 
@@ -160,14 +163,14 @@ describe('viabilidade econômica', () => {
     expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json()).toMatchObject({ status: 'aprovada', autoApproved: true });
     // margem abaixo do piso: vai para a alçada superior
     const input2 = { ...input, opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 250_000 }] };
-    expect(ok(await rafael.put(`/opportunities/${o.id}/economics`, input2)).json().result.verdict).toBe('abaixo_recomendado');
+    expect(ok(await rafael.put(`/opportunities/${o.id}/economics`, input2)).json().result.verdict).toBe('abaixo_minimo'); // 3.0: margem abaixo do piso = abaixo do mínimo
     expect(ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {})).json()).toMatchObject({ status: 'em_decisao', autoApproved: false });
     ok(await rafael.post(`/opportunities/${o.id}/economics/submit`, {}), 422);
     // vendedor não aprova; a gestão vê na fila
     ok(await rafael.post(`/opportunities/${o.id}/economics/decision`, { decision: 'aprovar' }), 403);
     expect(ok(await rafael.get('/economics/pending')).json().items).toEqual([]);
     const pend = ok(await carlos.get('/economics/pending')).json().items;
-    expect(pend.find((p: { opportunityId: string }) => p.opportunityId === o.id)).toMatchObject({ verdict: 'abaixo_recomendado', submittedByName: 'Rafael Mendes' });
+    expect(pend.find((p: { opportunityId: string }) => p.opportunityId === o.id)).toMatchObject({ verdict: 'abaixo_minimo', submittedByName: 'Rafael Mendes' });
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().canDecide).toBe(true);
     ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver' }), 422); // sem motivo
     expect(ok(await carlos.post(`/opportunities/${o.id}/economics/decision`, { decision: 'devolver', reason: 'Revisar o custo do trânsito' })).json().status).toBe('devolvida');

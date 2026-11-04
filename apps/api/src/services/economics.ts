@@ -90,7 +90,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete } : null };
+    return { description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {
@@ -119,7 +119,10 @@ export function isStale(saved: EconResult, fresh: EconResult | null) {
   const savedKey = saved.model?.key ?? defaultModel().key;
   return savedKey !== (fresh.model?.key ?? defaultModel().key) || saved.engineVersion !== fresh.engineVersion || saved.verdict !== fresh.verdict || saved.priceCents !== fresh.priceCents || saved.floor?.minCents !== fresh.floor.minCents
     || saved.recommendedCents !== fresh.recommendedCents || (saved.kpi?.contributionCents ?? null) !== (fresh.kpi?.contributionCents ?? null)
-    || saved.withReservations !== fresh.withReservations || saved.fixedTaxCents !== fresh.fixedTaxCents;
+    || saved.withReservations !== fresh.withReservations || saved.fixedTaxCents !== fresh.fixedTaxCents
+    // 3.0: TMA e reajuste não mudam o preço, só o VPL e o payback (do sugerido e da decisão)
+    || (saved.kpi?.npvCents ?? null) !== (fresh.kpi?.npvCents ?? null) || (saved.decision?.npvCents ?? null) !== (fresh.decision?.npvCents ?? null)
+    || (saved.decision?.paybackMonths ?? null) !== (fresh.decision?.paybackMonths ?? null) || (saved.suggestedCents ?? null) !== (fresh.suggestedCents ?? null);
 }
 
 /** Guarda entradas e resultado e tira a fotografia auditável (entradas, parâmetros com a versão, tributos e avisos da época). */
