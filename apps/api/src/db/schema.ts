@@ -762,8 +762,19 @@ export const activities = pgTable(
     arpId: uuid('arp_id'),
     /** ABM Fase 6: pessoas da conta (stakeholders) com quem foi a interação */
     stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Playbook: transferência entre áreas exige aceite de quem recebe; sem aceite a demanda segue pendente com quem enviou. */
+    acceptStatus: text('accept_status'),
+    handoffFrom: uuid('handoff_from').references(() => users.id),
+    acceptedAt: ts('accepted_at'),
+    acceptedBy: uuid('accepted_by').references(() => users.id),
+    returnReason: text('return_reason'),
+    /** atividade da matriz RACI do Playbook (o SLA configurado dela define o prazo quando não há data) */
+    raciKey: text('raci_key'),
+    /** concluir exige ao menos um arquivo anexado como evidência */
+    evidenceRequired: boolean('evidence_required').notNull().default(false),
   },
   (t) => ({
+    acceptCk: check('activities_accept_ck', sql`accept_status is null or accept_status in ('pendente','aceita','devolvida')`),
     csCadenceUq: uniqueIndex('activities_cs_cadence_uq').on(t.tenantId, t.contactId, t.csCadenceKey).where(sql`cs_cadence_key is not null`),
     csIdx: index('activities_cs_idx').on(t.tenantId, t.contactId, t.csPlannedAt),
     typeCk: check('activities_type_ck', inList('type', ['tarefa', 'ligacao', 'reuniao', 'email', 'whatsapp', 'visita'])),
@@ -1262,6 +1273,8 @@ export const contracts = pgTable(
     commercialOwnerId: uuid('commercial_owner_id').notNull().references(() => users.id),
     operationalOwnerId: uuid('operational_owner_id').references(() => users.id),
     csmId: uuid('csm_id').references(() => users.id),
+    /** Playbook: responsável administrativo nominal do contrato (em aberto até ser designado). */
+    adminOwnerId: uuid('admin_owner_id').references(() => users.id),
     validatedAt: ts('validated_at'),
     validatedBy: uuid('validated_by').references(() => users.id),
     erpRef: text('erp_ref'),
@@ -1368,6 +1381,94 @@ export const contractEvents = pgTable(
   },
   (t) => ({ idx: index('contract_events_idx').on(t.tenantId, t.contractId, t.occurredAt) }),
 );
+
+// --------------------------------------------------------------- Playbook: papéis, SLA e Cadastro ERP
+
+/** Titulares dos papéis do Playbook: usuário do sistema ou ator externo (nome, sem login). Sem registro = papel em aberto. */
+export const playbookRoleHolders = pgTable('playbook_role_holders', {
+  id: id(),
+  tenantId: tenantId(),
+  role: text('role').notNull(),
+  userId: uuid('user_id').references(() => users.id),
+  externalName: text('external_name'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('playbook_role_holders_idx').on(t.tenantId, t.role),
+  oneCk: check('playbook_role_holders_one_ck', sql`(user_id is null) <> (external_name is null)`),
+  userUq: uniqueIndex('playbook_role_holders_user_uq').on(t.tenantId, t.role, t.userId).where(sql`user_id is not null`),
+}));
+
+/** Prazo (SLA, em horas) por atividade da matriz RACI. Sem registro ou nulo = sem SLA (em aberto). */
+export const raciSettings = pgTable('raci_settings', {
+  tenantId: tenantId(),
+  activityKey: text('activity_key').notNull(),
+  slaHours: integer('sla_hours'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: uniqueIndex('raci_settings_pk').on(t.tenantId, t.activityKey), slaCk: check('raci_settings_sla_ck', sql`sla_hours is null or sla_hours > 0`) }));
+
+export type ErpItemRow = import('@isp/domain').ErpItem;
+export type ErpExtraRow = import('@isp/domain').ErpExtra;
+
+/** Cadastro ERP do contrato: um por ciclo (implantação, aditivo, reajuste, renovação). Herdados não são copiados. */
+export const contractErpRecords = pgTable('contract_erp_records', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  seq: integer('seq').notNull(),
+  cycle: text('cycle').notNull().default('implantacao'),
+  status: text('status').notNull().default('nao_iniciado'),
+  /** só valores digitados ou sobrescritos (chave do campo → texto) */
+  values: jsonb('values').$type<Record<string, string | null>>().notNull().default({}),
+  /** grupo C com os complementos; nulo = ainda igual aos itens da versão vigente */
+  items: jsonb('items').$type<ErpItemRow[] | null>(),
+  extras: jsonb('extras').$type<ErpExtraRow[]>().notNull().default([]),
+  /** senha da Central do assinante, criptografada */
+  secretEnc: text('secret_enc'),
+  evidenceDocIds: uuid('evidence_doc_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** quem editou desde a última aprovação (nenhum deles pode aprovar) */
+  editors: uuid('editors').array().notNull().default(sql`'{}'::uuid[]`),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  submittedAt: ts('submitted_at'),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  approvedSnapshot: jsonb('approved_snapshot').$type<{ values: Record<string, string | null>; items: ErpItemRow[]; extras: ErpExtraRow[] } | null>(),
+  approvedHash: text('approved_hash'),
+  firstPass: boolean('first_pass'),
+  launcherId: uuid('launcher_id').references(() => users.id),
+  launchedBy: uuid('launched_by').references(() => users.id),
+  launchedAt: ts('launched_at'),
+  ixcClientId: text('ixc_client_id'),
+  ixcContractId: text('ixc_contract_id'),
+  checkedBy: uuid('checked_by').references(() => users.id),
+  checkedAt: ts('checked_at'),
+  lastCompare: jsonb('last_compare').$type<import('@isp/domain').IxcCompare[] | null>(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+}, (t) => ({
+  uq: uniqueIndex('contract_erp_records_uq').on(t.contractId, t.seq),
+  idx: index('contract_erp_records_idx').on(t.tenantId, t.status),
+  statusCk: check('contract_erp_records_status_ck', inList('status', ['nao_iniciado', 'em_preenchimento', 'aguardando_conferencia', 'devolvido', 'aprovado', 'aguardando_lancamento', 'lancado', 'conferido_ixc', 'divergente'])),
+  cycleCk: check('contract_erp_records_cycle_ck', inList('cycle', ['implantacao', 'aditivo', 'reajuste', 'renovacao'])),
+}));
+
+/** Histórico do Cadastro ERP (só acréscimo): cada ação com quem, quando, resultado e justificativa. */
+export const contractErpEvents = pgTable('contract_erp_events', {
+  id: id(),
+  tenantId: tenantId(),
+  recordId: uuid('record_id').notNull().references(() => contractErpRecords.id),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  action: text('action').notNull(),
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  actorId: uuid('actor_id').references(() => users.id),
+  note: text('note'),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('contract_erp_events_idx').on(t.tenantId, t.recordId, t.createdAt) }));
 
 export type ProcessStepState = { doneAt: string; doneBy: string; doneByName: string; note: string | null; value: unknown; skipped?: boolean };
 /** Processos paralelos (implantação, renovação, reajuste, encerramento), cada um com o próprio roteiro. */

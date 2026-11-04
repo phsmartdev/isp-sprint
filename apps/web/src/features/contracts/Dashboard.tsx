@@ -75,7 +75,16 @@ function Executive({ e, money }: { e: Exec; money: Money }) {
   );
 }
 
+type Ops = {
+  erp: { byStatus: Record<string, number>; withoutRecord: number };
+  divergence: { n: number; share: number | null };
+  adjustments: { eligible: number; applied: number };
+  overdueTasks: { n: number; items: { id: string; title: string; contractId: string; clientName: string; dueAt: string; ownerName: string }[] };
+  pendingAccept: { n: number; returned: number };
+  atRisk: { id: string; clientName: string; number: string; endAt: string | null; daysLeft: number | null; monthlyCents: number; reason: string }[];
+};
 type Dash = {
+  operations: Ops; expiringCents: { d30: number; d60: number; d90: number };
   executive: Exec;
   period: { from: string; to: string; prevFrom: string; prevTo: string };
   billing: { totalCents: number; prevTotalCents: number; note: string; byType: { type: BillingType; label: string; active: number; billedCents: number; billedPrevCents: number; monthlyCents: number; balance?: { credited: number; consumed: number; available: number } }[] };
@@ -126,6 +135,66 @@ function StratCard({ title, items, colorOf }: { title: string; items: Strat[]; c
   );
 }
 
+const ERP_ORDER: [string, string, string][] = [
+  ['nao_iniciado', 'Não iniciados', 'text-muted'], ['em_preenchimento', 'Em preenchimento', 'text-ink'], ['aguardando_conferencia', 'Aguardando conferência', 'text-[#C2610C]'],
+  ['devolvido', 'Devolvidos', 'text-[#C2610C]'], ['aprovado', 'Aprovados', 'text-ink'], ['aguardando_lancamento', 'Aguardando lançamento', 'text-[#C2610C]'],
+  ['lancado', 'Lançados no IXC', 'text-ink'], ['conferido_ixc', 'Conferidos no IXC', 'text-success'], ['divergente', 'Divergentes', 'text-danger'],
+];
+const pct = (a: number, b: number) => (b ? fmtPct(a / b) : '—');
+
+/** O que exige decisão ou ação: Cadastro ERP, divergências, reajustes, pendências com prazo vencido e contratos em risco. */
+function Operations({ o, money }: { o: Ops; money: Money }) {
+  return (
+    <section aria-label="Operação" className="space-y-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="card min-w-0 p-4">
+          <p className="text-sm text-muted">Contratos com divergência</p>
+          <p className="num text-2xl font-extrabold text-ink">{o.divergence.share == null ? '—' : fmtPct(o.divergence.share)}</p>
+          <p className="text-xs text-muted">{o.divergence.n} com Cadastro ERP divergente do IXC</p>
+        </div>
+        <div className="card min-w-0 p-4">
+          <p className="text-sm text-muted">Reajustes elegíveis efetivados</p>
+          <p className="num text-2xl font-extrabold text-ink">{pct(o.adjustments.applied, o.adjustments.eligible)}</p>
+          <p className="text-xs text-muted">{o.adjustments.applied} de {o.adjustments.eligible} com data-base nos últimos 12 meses</p>
+        </div>
+        <div className="card min-w-0 p-4">
+          <p className="text-sm text-muted">Pendências com prazo vencido</p>
+          <p className={clsx('num text-2xl font-extrabold', o.overdueTasks.n ? 'text-danger' : 'text-ink')}>{fmtInt(o.overdueTasks.n)}</p>
+          <p className="text-xs text-muted">tarefas ligadas a contratos</p>
+        </div>
+        <div className="card min-w-0 p-4">
+          <p className="text-sm text-muted">Transferências sem aceite</p>
+          <p className={clsx('num text-2xl font-extrabold', o.pendingAccept.n ? 'text-[#C2610C]' : 'text-ink')}>{fmtInt(o.pendingAccept.n)}</p>
+          <p className="text-xs text-muted">{o.pendingAccept.returned} devolvida(s) aguardando tratamento</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <section className="card p-5">
+          <h3 className="mb-3 font-bold text-ink">Cadastro ERP</h3>
+          <ul className="space-y-1.5 text-sm">
+            {ERP_ORDER.map(([k, l, tone]) => <li key={k} className="flex justify-between gap-2"><span className="text-text">{l}</span><span className={clsx('num font-semibold', o.erp.byStatus[k] ? tone : 'text-muted')}>{o.erp.byStatus[k] ?? 0}</span></li>)}
+            <li className="flex justify-between gap-2 border-t border-line pt-1.5"><span className="text-text">Contratos ativos sem cadastro</span><span className="num font-semibold">{o.erp.withoutRecord}</span></li>
+          </ul>
+        </section>
+        <section className="card p-5">
+          <h3 className="mb-1 font-bold text-ink">Contratos em risco</h3>
+          <p className="mb-2 text-xs text-muted">Maior receita primeiro.</p>
+          {!o.atRisk.length ? <p className="py-4 text-sm text-muted">Nenhum.</p> : (
+            <ul className="divide-y divide-line">{o.atRisk.map((r) => <li key={r.id}><Link to={`/contracts/${r.id}`} className="flex flex-wrap items-center justify-between gap-2 px-1 py-2 hover:bg-surface-2"><span className="min-w-0"><span className="block truncate font-semibold text-ink">{r.clientName}</span><span className="text-xs text-muted">{r.number} · {r.reason}{r.endAt ? ` · ${fmtDate(r.endAt)}` : ''}</span></span><span className="flex items-center gap-3"><span className="num text-sm font-semibold" title={fmtBRL(r.monthlyCents)}>{money(r.monthlyCents)}</span><DaysLeft days={r.daysLeft} /></span></Link></li>)}</ul>
+          )}
+        </section>
+        <section className="card p-5">
+          <h3 className="mb-1 font-bold text-ink">Pendências vencidas</h3>
+          <p className="mb-2 text-xs text-muted">Mais antigas primeiro.</p>
+          {!o.overdueTasks.items.length ? <p className="py-4 text-sm text-muted">Nenhuma.</p> : (
+            <ul className="divide-y divide-line">{o.overdueTasks.items.map((t) => <li key={t.id}><Link to={`/contracts/${t.contractId}?aba=projetos`} className="block px-1 py-2 hover:bg-surface-2"><span className="block truncate font-semibold text-ink">{t.title}</span><span className="text-xs text-muted">{t.clientName} · {t.ownerName} · venceu {fmtDate(t.dueAt)}</span></Link></li>)}</ul>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 export function ContractsDashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const [f, setF] = useUrlState({ from: `${today.slice(0, 7)}-01`, to: today });
@@ -137,8 +206,6 @@ export function ContractsDashboard() {
   const cfg = view.data?.dashboard ?? DEFAULT_DASHBOARD;
   // valores dos cartões na medida do tamanho (mil, mi, bi); o valor inteiro fica no title
   const money: Money = cfg.compactValues ? fmtBRLCompact : fmtBRL;
-  const months = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' });
-  const maxExp = Math.max(1, ...d.expiringByMonth.map((m) => BILLING_TYPES.reduce((a, t) => a + m[t], 0)));
   const sections: Record<DashboardSection, () => React.ReactNode> = {
     faturamento: () => (
       <div className="space-y-3">
@@ -163,50 +230,18 @@ export function ContractsDashboard() {
     ),
     executivo: () => <Executive e={d.executive} money={money} />,
     indicadores: () => (
-      <section aria-label="Indicadores da carteira" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat icon={<FileSignature className="h-6 w-6" />} tone="bg-primary-soft text-primary" label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} />
-        <Stat icon={<Wallet className="h-6 w-6" />} tone="bg-success-soft text-success" label="Receita mensal contratada" value={money(d.monthlyCents)} full={fmtBRL(d.monthlyCents)} sub={`Global ${money(d.globalCents)} · ticket médio ${money(d.portfolio.avgTicketCents)}`} />
-        <Stat icon={<CalendarDays className="h-6 w-6" />} tone="bg-warning-soft text-[#C2610C]" label="Vencem em 30 / 60 / 90 dias" value={`${d.expiring.d30} / ${d.expiring.d60} / ${d.expiring.d90}`} sub={`${money(d.portfolio.renewalPipelineCents)}/mês a renovar em 90 dias`} />
-        <Stat icon={<AlertTriangle className="h-6 w-6" />} tone="bg-danger-soft text-danger" label="Receita em risco (90 dias)" value={money(d.atRisk.monthlyCents)} full={fmtBRL(d.atRisk.monthlyCents)} sub={`${d.atRisk.n} contrato(s) · ${d.alerts.open} notificação(ões), ${d.alerts.overdue} atrasada(s)`} />
-      </section>
-    ),
-    perfil: () => (
-      <section aria-label="Perfil da carteira" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[['Idade média dos contratos', d.portfolio.avgAgeMonths === null ? 'N/D' : `${d.portfolio.avgAgeMonths} meses`], ['Vigência restante média', d.portfolio.avgRemainingMonths === null ? 'N/D' : `${d.portfolio.avgRemainingMonths} meses`], ['Contratos públicos', fmtPct(d.portfolio.publicShare)], ['Contratos por medição', fmtInt(d.measurement.contracts)]].map(([l, v]) => (
-          <div key={l} className="card p-4"><p className="text-sm text-muted">{l}</p><p className="num text-lg font-extrabold text-ink">{v}</p></div>
+      <section aria-label="Indicadores da carteira" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        <Stat icon={<FileSignature className="h-6 w-6" />} tone="bg-primary-soft text-primary" label="Total de contratos" value={fmtInt(d.active)} sub={`ativos · ${d.pendingValidation} aguardando validação`} />
+        <Stat icon={<Wallet className="h-6 w-6" />} tone="bg-success-soft text-success" label="MRR contratos" value={money(d.monthlyCents)} full={fmtBRL(d.monthlyCents)} sub="receita mensal recorrente contratada" />
+        {([30, 60, 90] as const).map((n) => (
+          <Link key={n} to={`/contracts?t=lista&exp=${n}`} className="block min-w-0 transition hover:opacity-90" aria-label={`Ver contratos vencendo em até ${n} dias`}>
+            <Stat icon={<CalendarDays className="h-6 w-6" />} tone="bg-warning-soft text-[#C2610C]" label={`Vencendo em até ${n} dias`} value={fmtInt(d.expiring[`d${n}`])} sub={`${money(d.expiringCents[`d${n}`])}/mês · ver lista`} />
+          </Link>
         ))}
+        <Stat icon={<AlertTriangle className="h-6 w-6" />} tone="bg-danger-soft text-danger" label="Receita em risco" value={money(d.atRisk.monthlyCents)} full={fmtBRL(d.atRisk.monthlyCents)} sub={`/mês · ${d.atRisk.n} contrato(s) em 90 dias sem renovação ou com encerramento previsto`} />
       </section>
     ),
-    estratificacao: () => (
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <StratCard title="Por tipo de contrato" items={d.byBillingType} colorOf={(k) => TYPE_COLOR[k as BillingType]} />
-        <StratCard title="Por responsável" items={d.byOwner} />
-        <StratCard title="Por categoria de cliente" items={d.bySegment} colorOf={() => '#7C3AED'} />
-        <StratCard title="Público e privado" items={d.byKind} colorOf={(k) => (k === 'publico' ? '#0E7490' : '#2F5986')} />
-      </div>
-    ),
-    vencimentos: () => (
-      <section className="card p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-bold text-ink">Vencimentos nos próximos 12 meses por tipo</h3>
-          <div className="flex gap-3 text-xs text-muted">{BILLING_TYPES.map((t) => <span key={t} className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: TYPE_COLOR[t] }} aria-hidden />{d.billing.byType.find((x) => x.type === t)?.label}</span>)}</div>
-        </div>
-        <div className="scroll-thin flex items-end gap-2 overflow-x-auto pb-1" role="img" aria-label="Contratos que vencem por mês e tipo">
-          {d.expiringByMonth.map((m) => {
-            const total = BILLING_TYPES.reduce((a, t) => a + m[t], 0);
-            return (
-              <div key={m.month} className="flex min-w-[52px] flex-1 flex-col items-center gap-1" title={`${months(m.month)}: ${total} contrato(s), ${fmtBRL(m.monthlyCents)}/mês`}>
-                <span className="num text-xs font-semibold text-ink">{total || ''}</span>
-                <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-sm" style={{ height: `${Math.max(2, (total / maxExp) * 110)}px`, background: total ? undefined : '#EEF2F9' }}>
-                  {BILLING_TYPES.map((t) => m[t] ? <div key={t} style={{ height: `${(m[t] / total) * 100}%`, background: TYPE_COLOR[t] }} /> : null)}
-                </div>
-                <span className="text-[11px] capitalize text-muted">{months(m.month)}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-    ),
+    operacao: () => <Operations o={d.operations} money={money} />,
     clientes: () => (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <section className="card p-5 xl:col-span-2">

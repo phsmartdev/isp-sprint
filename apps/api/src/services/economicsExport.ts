@@ -87,7 +87,7 @@ export function econFileName(code: number, at = new Date()) {
 
 const MM = 72 / 25.4;
 /** Fundo de cada página: o timbrado da filial (imagem esticada na página A4 ou a 1ª página do PDF). */
-async function letterheadPainter(doc: PDFDocument, lh: Letterhead | null | undefined) {
+export async function letterheadPainter(doc: PDFDocument, lh: Letterhead | null | undefined) {
   if (!lh) return null;
   if (lh.mime === 'application/pdf') {
     const [art] = await doc.embedPdf(lh.data, [0]);

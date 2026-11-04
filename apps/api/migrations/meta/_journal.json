@@ -617,6 +617,13 @@
       "when": 1793806837481,
       "tag": "0087_item_servico_unico",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1793826340879,
+      "tag": "0088_playbook_cadastro_erp",
+      "breakpoints": true
     }
   ]
 }

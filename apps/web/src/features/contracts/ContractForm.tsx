@@ -9,7 +9,7 @@ import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version 
 
 type ItemRow = { planId: string; description: string; qty: string; unit: string };
 export type FormState = {
-  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
+  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
   items: ItemRow[]; monthly: string; total: string; billingDay: string; billingTerms: string;
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
@@ -17,10 +17,10 @@ export type FormState = {
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
 };
 
-export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
+export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
   const g = v.guarantee, p = v.publicTerms;
   return {
-    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
+    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
     items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents) })),
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
@@ -47,7 +47,7 @@ export function payloadOf(f: FormState) {
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
     initialBalanceCents,
-    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt) },
+    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, adminOwnerId: f.adminOwnerId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt) },
     version: {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
@@ -76,10 +76,10 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
   const setStart = (startAt: string) => { const patch: Partial<FormState> = { startAt }; if (startAt && f.termMonths) { patch.endAt = endFromTerm(startAt, Number(f.termMonths)); patch.renewalAt = addDays(patch.endAt, 1); } onChange(patch); };
   const setTerm = (termMonths: string) => { const patch: Partial<FormState> = { termMonths }; if (f.startAt && termMonths) { patch.endAt = endFromTerm(f.startAt, Number(termMonths)); patch.renewalAt = addDays(patch.endAt, 1); } onChange(patch); };
   const suggestLimit = () => { const m = LEGAL_REFERENCE_MONTHS[f.legalRegime]; if (m && f.startAt) onChange({ legalLimitAt: addDays(addMonths(f.startAt, m), -1) }); };
-  const u = (id: string, label: string, key: 'commercialOwnerId' | 'operationalOwnerId' | 'csmId', required = false) => (
+  const u = (id: string, label: string, key: 'commercialOwnerId' | 'operationalOwnerId' | 'csmId' | 'adminOwnerId', required = false) => (
     <FormField label={label} htmlFor={id} required={required}>
       <Select id={id} value={f[key]} onChange={(e) => onChange({ [key]: e.target.value })}>
-        <option value="">{required ? 'Escolha' : 'Ninguém'}</option>
+        <option value="">{required ? 'Escolha' : key === 'adminOwnerId' ? 'Em aberto' : 'Ninguém'}</option>
         {users.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
       </Select>
     </FormField>
@@ -161,6 +161,7 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
         {u('cf-owner', 'Responsável comercial', 'commercialOwnerId', true)}
         {u('cf-ops', 'Responsável operacional', 'operationalOwnerId')}
         {u('cf-csm', 'Sucesso do Cliente (CSM)', 'csmId')}
+        {u('cf-adm', 'Responsável administrativo (Playbook)', 'adminOwnerId')}
         <FormField label="Próxima ação" htmlFor="cf-next" className="sm:col-span-2"><Input id="cf-next" value={f.nextAction} onChange={(e) => onChange({ nextAction: e.target.value })} /></FormField>
         <FormField label="Data da próxima ação" htmlFor="cf-next-at"><Input id="cf-next-at" type="date" value={f.nextActionAt} onChange={(e) => onChange({ nextActionAt: e.target.value })} /></FormField>
       </Fieldset>

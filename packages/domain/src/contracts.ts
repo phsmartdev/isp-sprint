@@ -101,11 +101,12 @@ export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail
 
 // ------------------------------------------------------------------ abas e painel
 /** Abas da Gestão de Contratos, na ordem do menu. Cada aba é uma permissão por perfil (Configurações → Módulos e liberação → Contratos). */
-export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const;
+export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios', 'responsabilidades'] as const;
 export type ContractTab = (typeof CONTRACT_TABS)[number];
 export const CONTRACT_TAB_LABELS: Record<ContractTab, string> = {
   atencao: 'Central de atenção', painel: 'Painel', funil: 'Funil', lista: 'Lista', modelos: 'Modelos de contratos e propostas', atestados: 'Atestados',
   atas: 'Atas de registro de preços', empenhos: 'Controle de Empenhos', calendario: 'Calendário', relatorios: 'Relatórios',
+  responsabilidades: 'Responsabilidades (RACI)',
 };
 /** Abas que viram submenu de Gestão de Contratos na barra lateral; as demais ficam juntas no item "Contratos". */
 export const CONTRACT_MENU_TABS = ['painel', 'funil', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const satisfies readonly ContractTab[];
@@ -122,13 +123,15 @@ export function allowedContractTabs(denied: ContractTabAccess, profiles: string[
 }
 
 /** Seções do Painel de contratos, configuráveis (ordem e visibilidade) em Configurações → Módulos e liberação → Contratos. */
-export const DASHBOARD_SECTIONS = ['indicadores', 'perfil', 'estratificacao', 'vencimentos', 'clientes', 'etapas', 'faturamento', 'executivo'] as const;
+/**
+ * Seções do Painel. Perfil da carteira, estratificações e o gráfico de vencimentos em 12 meses saíram em 04/11/2026:
+ * não ajudavam a decidir nem a operar. No lugar entrou "Operação" (o que exige ação).
+ */
+export const DASHBOARD_SECTIONS = ['indicadores', 'operacao', 'etapas', 'clientes', 'faturamento', 'executivo'] as const;
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 export const DASHBOARD_SECTION_LABELS: Record<DashboardSection, string> = {
-  indicadores: 'Indicadores da carteira (ativos, receita mensal, vencimentos, risco)',
-  perfil: 'Perfil da carteira (idade, vigência restante, públicos, medição)',
-  estratificacao: 'Estratificação (tipo, responsável, categoria, público e privado)',
-  vencimentos: 'Vencimentos nos próximos 12 meses',
+  indicadores: 'Indicadores (total, MRR, vencendo em 30/60/90 dias, receita em risco)',
+  operacao: 'Operação: Cadastro ERP, divergências, reajustes, pendências e contratos em risco',
   clientes: 'Maiores clientes e medição com saldo baixo',
   etapas: 'Etapas, próximos vencimentos e notificações',
   faturamento: 'Faturamento por tipo no período',

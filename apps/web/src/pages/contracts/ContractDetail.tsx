@@ -19,11 +19,12 @@ import { ConsumptionPanel } from '../../features/contracts/ConsumptionPanel';
 import { CommitmentControl } from '../../features/contracts/CommitmentControl';
 import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
 import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
+import { ErpPanel } from '../../features/contracts/ErpPanel';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -161,6 +162,7 @@ export function ContractDetailPage() {
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
+            ...(c.stage !== 'cadastro_validacao' ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
@@ -185,6 +187,7 @@ export function ContractDetailPage() {
                 <Info label="Responsável operacional">{c.operationalOwnerName ?? '—'}</Info>
                 <Info label="Sucesso do Cliente">{c.csmName ?? '—'}{c.validatedAt && <span className="block"><ContractJourney contractId={c.id} /></span>}</Info>
                 <Info label="ERP">{c.erpRef ?? <span className="text-[#C2610C]">Cadastro pendente</span>}</Info>
+                <Info label="Responsável administrativo">{c.adminOwnerName ?? <span className="text-muted">Em aberto</span>}</Info>
                 {c.kind === 'publico' && <Info label="Órgão / processo">{v.publicTerms?.agency ?? '—'}{v.publicTerms?.processNumber ? ` · ${v.publicTerms.processNumber}` : ''}{v.publicTerms?.modality ? <span className="block text-sm text-muted">{v.publicTerms.modality}{v.publicTerms.commitmentNote ? ` · empenho ${v.publicTerms.commitmentNote}` : ''}</span> : null}</Info>}
                 {c.kind === 'publico' && <Info label="Limite total de vigência">{c.legalLimitAt ? fmtDate(c.legalLimitAt) : 'Não informado'}</Info>}
                 <Info label="Garantia">{v.guarantee ? `${v.guarantee.type}${v.guarantee.amountCents ? ` · ${fmtBRL(v.guarantee.amountCents)}` : ''}${v.guarantee.expiresAt ? ` · vence ${fmtDate(v.guarantee.expiresAt)}` : ''}` : 'Sem garantia'}</Info>
@@ -209,6 +212,7 @@ export function ContractDetailPage() {
               {!c.processes.length ? <EmptyState title="Nenhum processo" description={c.validatedAt ? 'Renovação, reajuste e encerramento abrem pelos alertas automáticos ou pelo botão Mover no funil.' : 'A implantação abre na validação do cadastro.'} /> : c.processes.map((p) => <ProcessPanel key={p.id} c={c} p={p} onUpload={(category, processId) => setUpload({ category, processId })} />)}
             </div>
           )}
+          {tab === 'erp' && <ErpPanel c={c} />}
           {tab === 'empenhos' && <CommitmentControl contractId={c.id} />}
           {tab === 'consumo' && <ConsumptionPanel c={c} />}
           {tab === 'aditivos' && <AmendmentsPanel c={c} />}

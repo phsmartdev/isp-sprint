@@ -1,6 +1,6 @@
 /** Gestão de Contratos: cadastro (a partir da oportunidade), edição versionada, validação, funil, painel, calendário e relatórios. */
 import { requireAction } from '../services/modules';
-import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
@@ -54,6 +54,8 @@ const Header = z.object({
   commercialOwnerId: uuid,
   operationalOwnerId: uuid.nullable().default(null),
   csmId: uuid.nullable().default(null),
+  /** Playbook: responsável administrativo nominal (em aberto até ser designado) */
+  adminOwnerId: uuid.nullable().default(null),
   legalLimitAt: optDay,
   nextAction: optText(300), nextActionAt: optDay,
 });
@@ -174,13 +176,13 @@ export const contractRoutes = [
       if (!contact) throw unprocessable('Cliente inválido.');
       if (!customerId) customerId = (await app.db.select({ id: s.customers.id }).from(s.customers).where(eq(s.customers.contactId, contactId)).limit(1))[0]?.id ?? null;
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
-      await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId]);
+      await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const ver = normalizeVersion(body.version);
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
           tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
-          commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, legalLimitAt: body.legalLimitAt ?? null,
+          commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, adminOwnerId: body.adminOwnerId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
         await tx.insert(s.contractVersions).values({ ...ver, tenantId: auth.tenantId, contractId: c!.id, version: 1, changeKind: 'cadastro', reason: 'Cadastro inicial', guarantee: ver.guarantee ?? null, publicTerms: ver.publicTerms ?? null, createdBy: auth.userId } as typeof s.contractVersions.$inferInsert);
@@ -292,7 +294,33 @@ export const contractRoutes = [
         concentration: concentration([...perClient.values()]),
         publicAnnualCents: live.filter((r) => r.kind === 'publico').reduce((t, r) => t + annual(r), 0),
       };
+      // operação: o que exige decisão ou ação (Cadastro ERP, divergências, reajustes, pendências e aceite)
+      const liveIds = active.map((r) => r.id);
+      const erpRows = liveIds.length ? await app.db.select({ contractId: s.contractErpRecords.contractId, status: s.contractErpRecords.status, seq: s.contractErpRecords.seq }).from(s.contractErpRecords).where(inArray(s.contractErpRecords.contractId, liveIds)) : [];
+      const latestBy = new Map<string, { status: string; seq: number }>();
+      for (const r of erpRows) if ((latestBy.get(r.contractId)?.seq ?? 0) < r.seq) latestBy.set(r.contractId, r);
+      const erpLatest = [...latestBy.values()];
+      const erpBy = (st: string) => erpLatest.filter((x) => x.status === st).length;
+      const yearAgo = addDays(today, -365);
+      const adj = ids.length ? await app.db.select({ status: s.contractProcesses.status, steps: s.contractProcesses.steps, cycleKey: s.contractProcesses.cycleKey }).from(s.contractProcesses)
+        .where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : [];
+      const adjEligible = adj.filter((p) => p.status !== 'cancelado' && /^\d{4}-\d{2}-\d{2}$/.test(p.cycleKey) && p.cycleKey >= yearAgo && p.cycleKey <= today);
+      const tasks = ids.length ? await app.db.select({ id: s.activities.id, title: s.activities.title, contractId: s.activities.contractId, dueAt: s.activities.dueAt, acceptStatus: s.activities.acceptStatus, ownerName: s.users.name })
+        .from(s.activities).innerJoin(s.users, eq(s.users.id, s.activities.ownerId))
+        .where(and(inArray(s.activities.contractId, ids), isNull(s.activities.deletedAt), isNull(s.activities.completedAt), sql`${s.activities.status} <> 'cancelada'`)) : [];
+      const overdueTasks = tasks.filter((t) => t.dueAt && t.dueAt < new Date());
+      const clientOf = new Map(rows.map((r) => [r.id, { name: r.clientName, number: r.number }]));
+      const operations = {
+        erp: { byStatus: Object.fromEntries(['nao_iniciado', 'em_preenchimento', 'aguardando_conferencia', 'devolvido', 'aprovado', 'aguardando_lancamento', 'lancado', 'conferido_ixc', 'divergente'].map((k) => [k, erpBy(k)])), withoutRecord: active.length - erpLatest.length },
+        divergence: { n: erpBy('divergente'), share: active.length ? erpBy('divergente') / active.length : null },
+        adjustments: { eligible: adjEligible.length, applied: adjEligible.filter((p) => p.status === 'concluido' && p.steps.aplicacao).length },
+        overdueTasks: { n: overdueTasks.length, items: overdueTasks.sort((a, b) => +a.dueAt! - +b.dueAt!).slice(0, 8).map((t) => ({ id: t.id, title: t.title, contractId: t.contractId, clientName: clientOf.get(t.contractId!)?.name ?? '', dueAt: t.dueAt, ownerName: t.ownerName })) },
+        pendingAccept: { n: tasks.filter((t) => t.acceptStatus === 'pendente').length, returned: tasks.filter((t) => t.acceptStatus === 'devolvida').length },
+        atRisk: atRisk.sort((a, b) => b.monthlyCents - a.monthlyCents).slice(0, 8).map((r) => ({ id: r.id, clientName: r.clientName, number: r.number, endAt: r.endAt, daysLeft: r.daysLeft, monthlyCents: r.monthlyCents, reason: r.closureExpected ? 'Encerramento previsto' : 'Vence sem renovação concluída' })),
+      };
       return {
+        operations,
+        expiringCents: { d30: within(30).reduce((a, r) => a + r.monthlyCents, 0), d60: within(60).reduce((a, r) => a + r.monthlyCents, 0), d90: within(90).reduce((a, r) => a + r.monthlyCents, 0) },
         period: { from, to, prevFrom, prevTo },
         executive,
         billing: { totalCents: totalBilled, prevTotalCents: byType.reduce((a, t) => a + t.billedPrevCents, 0), byType, note: 'Faturamento registrado no CRM: recorrente pela mensalidade dos meses faturáveis (previsto), frequente pelos lançamentos e medição pelos consumos. O faturado no ERP entra com a integração.' },
@@ -560,7 +588,7 @@ export const contractRoutes = [
       const [contact] = await app.db.select({ id: s.contacts.id, name: s.contacts.name, document: s.contacts.document, email: s.contacts.email, phone: s.contacts.phone, segment: s.contacts.segment, city: s.contacts.city }).from(s.contacts).where(eq(s.contacts.id, c.contactId)).limit(1);
       const [address] = await app.db.select().from(s.addresses).where(or(eq(s.addresses.contactId, c.contactId), c.customerId ? eq(s.addresses.customerId, c.customerId) : undefined)).orderBy(desc(s.addresses.validFrom)).limit(1);
       const [opp] = c.opportunityId ? await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage, handoffStage: s.opportunities.handoffStage }).from(s.opportunities).where(eq(s.opportunities.id, c.opportunityId)).limit(1) : [];
-      const people = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(inArray(s.users.id, [c.commercialOwnerId, c.operationalOwnerId, c.csmId, c.validatedBy, c.archiveResponsibleId].filter((x): x is string => !!x)));
+      const people = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(inArray(s.users.id, [c.commercialOwnerId, c.operationalOwnerId, c.csmId, c.adminOwnerId, c.validatedBy, c.archiveResponsibleId].filter((x): x is string => !!x)));
       const name = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
       const processes = await app.db.select().from(s.contractProcesses).where(eq(s.contractProcesses.contractId, c.id)).orderBy(desc(s.contractProcesses.openedAt));
       const alerts = await app.db.select().from(s.contractAlerts).where(eq(s.contractAlerts.contractId, c.id)).orderBy(desc(s.contractAlerts.createdAt));
@@ -568,7 +596,7 @@ export const contractRoutes = [
       const pend = (await openPendencies(app.db, [c.id])).get(c.id) ?? { alerts: 0, overdue: 0, steps: 0 };
       return {
         ...c,
-        commercialOwnerName: name(c.commercialOwnerId), operationalOwnerName: name(c.operationalOwnerId), csmName: name(c.csmId), validatedByName: name(c.validatedBy), archiveResponsibleName: name(c.archiveResponsibleId),
+        commercialOwnerName: name(c.commercialOwnerId), operationalOwnerName: name(c.operationalOwnerId), csmName: name(c.csmId), adminOwnerName: name(c.adminOwnerId), validatedByName: name(c.validatedBy), archiveResponsibleName: name(c.archiveResponsibleId),
         current: cur, versions, contact, address: address ?? null, opportunity: opp ?? null, processes,
         alerts: alerts.map((a) => ({ ...a, label: ALERT_LABELS[a.kind as AlertKind] ?? a.kind })),
         daysLeft: cur.endAt ? daysBetween(today, cur.endAt) : null, pendencies: pend,
@@ -591,10 +619,10 @@ export const contractRoutes = [
       if (!canEdit(auth, c)) throw forbidden('Você não pode editar este contrato.');
       if (c.stage === 'arquivado') throw unprocessable('Contrato arquivado não pode ser alterado.');
       if (c.validatedAt && body.version && !body.reason) throw unprocessable('Informe o motivo da alteração (fica no histórico da versão).', [{ path: 'reason', message: 'Obrigatório' }]);
-      await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId]);
+      await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
-        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'legalLimitAt', 'nextAction', 'nextActionAt'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
+        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
         if (header.kind === 'privado') header.legalRegime = 'privado';
         const changedHeader = Object.keys(header).filter((k) => JSON.stringify((header as Record<string, unknown>)[k]) !== JSON.stringify((c as Record<string, unknown>)[k]));
         if (changedHeader.length) {

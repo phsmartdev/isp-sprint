@@ -25,14 +25,14 @@ describe('abas e painel de contratos', () => {
 
   it('nega a aba por perfil na tela e na API; os parâmetros de contratos não apagam a configuração', async () => {
     ok(await lucas.put('/admin/contract-view', { tabAccess: {}, dashboard: DEFAULT_DASHBOARD }), 403);
-    const dashboard = { ...DEFAULT_DASHBOARD, order: ['executivo', ...DEFAULT_DASHBOARD.order.filter((k) => k !== 'executivo')], hidden: ['perfil'], compactValues: false };
+    const dashboard = { ...DEFAULT_DASHBOARD, order: ['executivo', ...DEFAULT_DASHBOARD.order.filter((k) => k !== 'executivo')], hidden: ['clientes'], compactValues: false };
     ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'] }, dashboard }));
 
     const v = ok(await lucas.get('/contracts/view')).json();
     expect(v.tabs).not.toContain('painel');
     expect(v.tabs).toContain('lista');
     expect(v.dashboard.order[0]).toBe('executivo');
-    expect(v.dashboard.hidden).toEqual(['perfil']);
+    expect(v.dashboard.hidden).toEqual(['clientes']);
     ok(await lucas.get('/contracts/dashboard'), 403);
     ok(await lucas.get('/contracts/attention'), 403);
     ok(await lucas.get('/contracts/reports/expiring'), 403);

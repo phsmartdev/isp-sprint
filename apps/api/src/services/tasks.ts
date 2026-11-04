@@ -117,6 +117,13 @@ export async function applyStatus(db: DbOrTx, auth: AuthContext, t: TaskRow, to:
   if (to === t.status && to !== 'aguardando') return { status: t.status, next: null };
   if (to === 'em_aprovacao') throw unprocessable('Para pedir aprovação, conclua a tarefa: ela vai para o aprovador automaticamente.');
   if (to === 'concluida') {
+    // Playbook: sem aceite, a demanda segue em transferência; e o registro da execução sozinho não conclui
+    if (t.acceptStatus === 'pendente') throw unprocessable('Aguardando o aceite de quem recebeu a demanda.');
+    if (t.acceptStatus === 'devolvida') throw unprocessable('A demanda foi devolvida: reatribua ou trate o motivo antes de concluir.');
+    if (t.evidenceRequired) {
+      const [{ n } = { n: 0 }] = await db.select({ n: sql<number>`count(*)::int` }).from(s.workFiles).where(and(eq(s.workFiles.activityId, t.id), isNull(s.workFiles.deletedAt)));
+      if (!n) throw unprocessable('Anexe a evidência da entrega antes de concluir.');
+    }
     const b = await blockersOf(db, t);
     if (b.length) throw unprocessable(`Ainda não dá para concluir: ${b.join(' ')}`);
     if (t.requiresApproval && !t.approvedAt) {

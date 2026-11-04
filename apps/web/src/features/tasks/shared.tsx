@@ -18,6 +18,7 @@ export type TaskItem = {
   ownerId: string; ownerName: string; createdBy: string | null; createdByName: string | null; dueOn: string | null; startOn: string | null; completedAt: string | null;
   tags: string[]; category: string | null; estimateMinutes: number | null; timeMinutes: number; checklist: ChecklistItem[]; checklistProgress: { done: number; total: number; pct: number | null };
   participants: string[]; waitingOn: string | null; recurrence: Recurrence | null; recurrenceText: string | null; requiresApproval: boolean; approverId: string | null; approvedAt: string | null;
+  acceptStatus: 'pendente' | 'aceita' | 'devolvida' | null; handoffFrom: string | null; returnReason: string | null; raciKey: string | null; evidenceRequired: boolean;
   parentId: string | null; projectId: string | null; projectName: string | null; projectStageId: string | null; milestoneId: string | null;
   contactId: string | null; opportunityId: string | null; contractId: string | null; arpId: string | null;
   subDone: number; subTotal: number; blockedBy: number; comments: number; unread: number; overdue: boolean; bucket: MyTaskBucket | null; rowVersion: number;

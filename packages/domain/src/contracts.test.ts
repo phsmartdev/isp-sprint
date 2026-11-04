@@ -166,10 +166,10 @@ describe('abas e painel de contratos', () => {
     expect(CONTRACT_TABS.indexOf('funil')).toBe(CONTRACT_TABS.indexOf('painel') + 1);
   });
   it('painel: completa seções que faltam e ignora as desconhecidas', () => {
-    const n = normalizeDashboard({ order: ['executivo', 'xpto', 'executivo'], hidden: ['perfil', 'nada'], compactValues: false });
+    const n = normalizeDashboard({ order: ['executivo', 'xpto', 'executivo'], hidden: ['clientes', 'nada'], compactValues: false });
     expect(n.order[0]).toBe('executivo');
     expect([...n.order].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
-    expect(n.hidden).toEqual(['perfil']);
+    expect(n.hidden).toEqual(['clientes']);
     expect(n.compactValues).toBe(false);
     expect(normalizeDashboard(null).order.slice(-2)).toEqual(['faturamento', 'executivo']);
   });

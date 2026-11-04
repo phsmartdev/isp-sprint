@@ -137,12 +137,16 @@ export const contractWorkRoutes = [
       await app.db.transaction(async (tx) => {
         if (!body.skip) switch (d.requires) {
           case 'nota': if (!note || note.length < 3) throw bad('Descreva o que foi feito.', 'note'); break;
-          case 'erp':
+          case 'erp': {
+            // com Cadastro ERP aberto, a etapa só conclui quando ele estiver Conferido no IXC (conclui sozinha nessa hora)
+            const [erp] = await tx.select({ status: s.contractErpRecords.status }).from(s.contractErpRecords).where(eq(s.contractErpRecords.contractId, c.id)).orderBy(desc(s.contractErpRecords.seq)).limit(1);
+            if (erp && erp.status !== 'conferido_ixc') throw bad('Esta etapa conclui pelo Cadastro ERP do contrato, quando ele estiver Conferido no IXC.');
             if (!val.ref) throw bad('Informe o código/referência no ERP.', 'value.ref');
             state.value = { ref: val.ref };
             await tx.update(s.contracts).set({ erpRef: val.ref, updatedAt: new Date() }).where(eq(s.contracts.id, c.id));
             if (c.opportunityId) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: c.opportunityId, type: 'erp_atualizado', actorId: auth.userId, payload: { contractId: c.id, ref: val.ref, process: p.kind } });
             break;
+          }
           case 'documento': {
             const doc = await requiredDoc(tx, c, p, d);
             if (!doc) throw bad(`Anexe antes o documento do tipo ${d.docType}${['documento_assinado', 'pdf_assinado', 'formalizacao'].includes(d.key) ? ' marcado como assinado' : ''}.`);
