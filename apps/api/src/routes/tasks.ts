@@ -4,7 +4,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
-  RECURRENCE_FREQS, TASK_MANUAL_STATUSES, TASK_STATUSES, TASK_STATUS_LABELS, atLeast, bucketOf, checklistProgress, createsCycle, describeRecurrence, validateRecurrence,
+  RACI_KEYS, RECURRENCE_FREQS, TASK_MANUAL_STATUSES, slaDueAt, TASK_STATUSES, TASK_STATUS_LABELS, atLeast, bucketOf, checklistProgress, createsCycle, describeRecurrence, validateRecurrence,
   type ChecklistItem, type MyTaskBucket, type TaskStatus,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -39,11 +39,20 @@ const TaskFields = {
   approverId: uuidN,
   checklist: ChecklistIn.optional(),
   contactId: uuidN, opportunityId: uuidN, contractId: uuidN, arpId: uuidN,
+  /** Playbook: quem recebe precisa aceitar (transferência entre áreas) */
+  requireAccept: z.boolean().optional(),
+  raciKey: z.string().max(60).refine((k) => RACI_KEYS.includes(k), 'Atividade fora da matriz RACI').nullable().optional(),
+  evidenceRequired: z.boolean().optional(),
 };
 const TaskCreate = z.object({ ...TaskFields, projectId: uuidN, parentId: uuidN, templateId: uuidN, status: z.enum(['a_fazer', 'em_andamento', 'aguardando']).optional(), waitingOn: z.string().max(200).nullable().optional() });
 const TaskPatch = z.object({ ...TaskFields, title: TaskFields.title.optional(), rowVersion: z.number().int(), status: z.enum(TASK_STATUSES).optional(), waitingOn: z.string().max(200).nullable().optional(), statusNote: z.string().max(1000).optional() });
 
 const owner = alias(s.users, 'task_owner');
+
+async function slaHoursOf(db: DbOrTx, tenantId: string, key: string) {
+  const [r] = await db.select({ h: s.raciSettings.slaHours }).from(s.raciSettings).where(and(eq(s.raciSettings.tenantId, tenantId), eq(s.raciSettings.activityKey, key))).limit(1);
+  return r?.h ?? null;
+}
 const creator = alias(s.users, 'task_creator');
 
 function listSelect(auth: AuthContext) {
@@ -57,6 +66,7 @@ function listSelect(auth: AuthContext) {
     projectId: s.activities.projectId, projectName: s.projects.name, projectStageId: s.activities.projectStageId, milestoneId: s.activities.milestoneId,
     contactId: s.activities.contactId, contactName: s.contacts.name, opportunityId: s.activities.opportunityId, opportunityCode: s.opportunities.code,
     contractId: s.activities.contractId, contractCode: s.contracts.code, arpId: s.activities.arpId, arpNumber: s.arps.number, rowVersion: s.activities.rowVersion, createdAt: s.activities.createdAt,
+    acceptStatus: s.activities.acceptStatus, handoffFrom: s.activities.handoffFrom, returnReason: s.activities.returnReason, raciKey: s.activities.raciKey, evidenceRequired: s.activities.evidenceRequired,
     timeMinutes: sql<number>`coalesce((select sum(minutes) from activity_time_entries te where te.activity_id = ${s.activities.id}), 0)::int`,
     subDone: sql<number>`(select count(*) from activities sa where sa.parent_id = ${s.activities.id} and sa.deleted_at is null and sa.status = 'concluida')::int`,
     subTotal: sql<number>`(select count(*) from activities sa where sa.parent_id = ${s.activities.id} and sa.deleted_at is null and sa.status <> 'cancelada')::int`,
@@ -243,16 +253,20 @@ export const taskRoutes = [
         await checkApprover(tx, auth, !!b.requiresApproval, b.approverId, ownerId);
         if (b.recurrence) { const e = validateRecurrence(b.recurrence); if (e.length) throw unprocessable(e[0]!); if (!b.dueOn) throw unprocessable('Tarefa recorrente precisa de prazo (a série conta a partir dele).', [{ path: 'dueOn', message: 'Obrigatório na recorrência' }]); }
         if (b.startOn && b.dueOn && b.dueOn < b.startOn) throw unprocessable('O prazo não pode ser antes do início.', [{ path: 'dueOn', message: 'Antes do início' }]);
+        // sem prazo informado, a atividade da matriz RACI usa o SLA configurado (em aberto = sem prazo)
+        const slaDue = !b.dueOn && b.raciKey ? slaDueAt(new Date(), await slaHoursOf(tx, auth.tenantId, b.raciKey)) : null;
+        const handoff = !!b.requireAccept && ownerId !== auth.userId;
         const [a] = await tx.insert(s.activities).values({
+          acceptStatus: handoff ? 'pendente' : null, handoffFrom: handoff ? auth.userId : null, raciKey: b.raciKey ?? null, evidenceRequired: !!b.evidenceRequired,
           tenantId: auth.tenantId, type: 'tarefa', title: b.title, notes: b.notes ?? null, priority: b.priority ?? 'media', ownerId, createdBy: auth.userId,
-          dueAt: dueAtOf(auth, b.dueOn) as unknown as Date, startOn: b.startOn ?? null, status: b.status ?? 'a_fazer', waitingOn: b.status === 'aguardando' ? b.waitingOn ?? null : null,
+          dueAt: (slaDue ?? dueAtOf(auth, b.dueOn)) as unknown as Date, startOn: b.startOn ?? null, status: b.status ?? 'a_fazer', waitingOn: b.status === 'aguardando' ? b.waitingOn ?? null : null,
           estimateMinutes: b.estimateMinutes ?? null, tags: [...new Set(b.tags ?? [])], category: b.category ?? null, participants: [...new Set(b.participants ?? [])],
           recurrence: b.recurrence ?? null, requiresApproval: !!b.requiresApproval, approverId: b.requiresApproval ? b.approverId ?? null : null,
           checklist: normalizeChecklist(b.checklist ?? [], [], auth.userId), parentId: parent?.id ?? null, projectId, projectStageId: stageId,
           contactId: b.contactId ?? parent?.contactId ?? null, opportunityId: b.opportunityId ?? parent?.opportunityId ?? null, contractId: b.contractId ?? parent?.contractId ?? null, arpId: b.arpId ?? parent?.arpId ?? null,
           position: stageId ? sql`coalesce((select max(position) + 1 from activities where project_stage_id = ${stageId}), 0)` as unknown as number : 0,
         }).returning({ id: s.activities.id });
-        await taskEvent(tx, auth, a!.id, 'created', { parentId: parent?.id ?? null, delegatedTo: ownerId !== auth.userId ? ownerId : null, templateId: body.templateId ?? null });
+        await taskEvent(tx, auth, a!.id, 'created', { parentId: parent?.id ?? null, delegatedTo: ownerId !== auth.userId ? ownerId : null, templateId: body.templateId ?? null, requireAccept: handoff || undefined, raciKey: b.raciKey ?? undefined, slaDue: slaDue?.toISOString() });
         return a!.id;
       });
       reply.code(201);
@@ -281,6 +295,13 @@ export const taskRoutes = [
           await assertAssignee(tx, auth, body.ownerId, t.projectId);
           events.push({ type: 'assigned', payload: { from: t.ownerId, to: body.ownerId } });
         }
+        // transferência com aceite: reatribuir reabre o aceite com quem recebe
+        const acceptFlow = body.requireAccept ?? t.acceptStatus !== null;
+        const reassigned = !!body.ownerId && body.ownerId !== t.ownerId;
+        const acceptPatch = reassigned && acceptFlow && body.ownerId !== auth.userId
+          ? { acceptStatus: 'pendente', handoffFrom: auth.userId, acceptedAt: null, acceptedBy: null, returnReason: null }
+          : body.requireAccept === true && t.acceptStatus === null && ownerId !== auth.userId ? { acceptStatus: 'pendente', handoffFrom: auth.userId }
+          : body.requireAccept === false ? { acceptStatus: null, handoffFrom: null } : {};
         await assertLinks(tx, auth, body);
         if (body.participants) await assertUsersActive(tx, auth, body.participants, 'participants');
         const requires = body.requiresApproval ?? t.requiresApproval;
@@ -298,7 +319,7 @@ export const taskRoutes = [
           const done = body.checklist.filter((c) => c.done && !prev.find((p) => p.id === c.id)?.done).length;
           if (done || body.checklist.length !== prev.length) events.push({ type: 'checklist', payload: { done, total: body.checklist.length } });
         }
-        const edited = ['title', 'notes', 'priority', 'startOn', 'estimateMinutes', 'tags', 'category', 'participants', 'recurrence', 'requiresApproval', 'approverId', 'contactId', 'opportunityId', 'contractId', 'arpId'].filter((k) => (body as Record<string, unknown>)[k] !== undefined);
+        const edited = ['title', 'notes', 'priority', 'startOn', 'estimateMinutes', 'tags', 'category', 'participants', 'recurrence', 'requiresApproval', 'approverId', 'contactId', 'opportunityId', 'contractId', 'arpId', 'raciKey', 'evidenceRequired'].filter((k) => (body as Record<string, unknown>)[k] !== undefined);
         if (edited.length) events.push({ type: 'updated', payload: { fields: edited } });
         await tx.update(s.activities).set({
           title: body.title, notes: body.notes, priority: body.priority, ownerId: body.ownerId, startOn: body.startOn,
@@ -309,6 +330,7 @@ export const taskRoutes = [
           requiresApproval: body.requiresApproval, approverId: body.requiresApproval === false ? null : body.approverId,
           checklist: body.checklist ? normalizeChecklist(body.checklist, t.checklist ?? [], auth.userId) : undefined,
           contactId: body.contactId, opportunityId: body.opportunityId, contractId: body.contractId, arpId: body.arpId,
+          raciKey: body.raciKey, evidenceRequired: body.evidenceRequired, ...acceptPatch,
           waitingOn: body.status === undefined && body.waitingOn !== undefined && t.status === 'aguardando' ? body.waitingOn : undefined,
           updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1`,
         }).where(eq(s.activities.id, t.id));
@@ -496,6 +518,31 @@ export const taskRoutes = [
     handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
       const { t } = await loadTask(tx, auth, params.id);
       return decideApproval(tx, auth, t, body.approve, body.note);
+    }),
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/tasks/:id/accept',
+    summary: 'Aceite da demanda transferida (Playbook): quem recebe aceita ou devolve com motivo; devolvida volta para quem enviou',
+    tag: 'Tarefas',
+    module: 'atividades',
+    params: IdParams,
+    body: z.object({ accept: z.boolean(), reason: z.string().max(1000).default('') }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { t } = await loadTask(tx, auth, params.id);
+      if (t.acceptStatus !== 'pendente') throw unprocessable('Esta tarefa não está aguardando aceite.');
+      if (t.ownerId !== auth.userId) throw forbidden('Só quem recebeu a demanda aceita ou devolve.');
+      if (body.accept) {
+        await tx.update(s.activities).set({ acceptStatus: 'aceita', acceptedAt: new Date(), acceptedBy: auth.userId, returnReason: null, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, t.id));
+        await taskEvent(tx, auth, t.id, 'accepted', {});
+        return { acceptStatus: 'aceita' as const };
+      }
+      if (body.reason.trim().length < 5) throw unprocessable('Explique por que está devolvendo (mínimo 5 caracteres).', [{ path: 'reason', message: 'Obrigatório para devolver' }]);
+      const back = t.handoffFrom ?? t.createdBy ?? t.ownerId;
+      await tx.update(s.activities).set({ acceptStatus: 'devolvida', returnReason: body.reason.trim(), ownerId: back, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, t.id));
+      await taskEvent(tx, auth, t.id, 'returned', { reason: body.reason.trim(), to: back });
+      return { acceptStatus: 'devolvida' as const };
     }),
   }),
 

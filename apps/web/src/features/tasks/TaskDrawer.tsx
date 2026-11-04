@@ -7,6 +7,7 @@ import { Ban, CheckCircle2, Download, Lock, Paperclip, Plus, Trash2, Undo2, X } 
 import {
   RECURRENCE_FREQS, RECURRENCE_LABELS, TASK_MANUAL_STATUSES, TASK_STATUS_LABELS, fmtMinutes, parseMinutes,
   type Recurrence, type RecurrenceFreq, type TaskStatus,
+  RACI_MATRIX, RACI_PHASES, RACI_PHASE_LABELS,
 } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
@@ -69,7 +70,7 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
   });
   const fromT = () => ({
     title: t.title, notes: t.notes ?? '', ownerId: t.ownerId, priority: t.priority, startOn: t.startOn ?? '', dueOn: t.dueOn ?? '', estimate: t.estimateMinutes ? fmtMinutes(t.estimateMinutes) : '',
-    category: t.category ?? '', tags: t.tags.join(', '), participants: t.participants, requiresApproval: t.requiresApproval, approverId: t.approverId ?? '',
+    category: t.category ?? '', tags: t.tags.join(', '), participants: t.participants, requiresApproval: t.requiresApproval, approverId: t.approverId ?? '', requireAccept: t.acceptStatus !== null, raciKey: t.raciKey ?? '', evidenceRequired: t.evidenceRequired,
     recurring: !!t.recurrence, rec: (t.recurrence ?? { freq: 'semanal', interval: 1 }) as Recurrence, waitingOn: t.waitingOn ?? '',
   });
   const [f, setF] = useState(fromT);
@@ -89,6 +90,10 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
     if (f.participants.join(',') !== t.participants.join(',')) body.participants = f.participants;
     if (f.requiresApproval !== t.requiresApproval) body.requiresApproval = f.requiresApproval;
     if ((f.approverId || null) !== t.approverId && f.requiresApproval) body.approverId = f.approverId || null;
+    if (f.requireAccept !== (t.acceptStatus !== null) && !f.requireAccept) body.requireAccept = false;
+    if (f.requireAccept && t.acceptStatus === null) body.requireAccept = true;
+    if ((f.raciKey || null) !== t.raciKey) body.raciKey = f.raciKey || null;
+    if (f.evidenceRequired !== t.evidenceRequired) body.evidenceRequired = f.evidenceRequired;
     const rec = f.recurring ? f.rec : null;
     if (JSON.stringify(rec) !== JSON.stringify(t.recurrence)) body.recurrence = rec;
     return body;
@@ -115,6 +120,8 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
           <span className="text-xs text-muted">Criada por {t.createdByName ?? '—'}</span>
         </div>
         {!!t.blockers.length && !closed && <Notice tone="warning"><Lock className="mr-1 inline h-4 w-4" aria-hidden />{t.blockers.join(' ')}</Notice>}
+        {t.acceptStatus && t.acceptStatus !== 'aceita' && !closed && <AcceptBox t={t} />}
+        {t.evidenceRequired && !closed && <p className="text-xs text-muted">Concluir exige ao menos um arquivo anexado como evidência.</p>}
         {t.status === 'em_aprovacao' && <ApprovalBox t={t} />}
         {t.status === 'aguardando' && t.waitingOn && <p className="text-sm">Aguardando: <span className="font-semibold text-ink">{t.waitingOn}</span></p>}
         {!ro && (
@@ -154,6 +161,12 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
           </div>
         </FormField>
         <div className="sm:col-span-2 space-y-2 rounded-md border border-line p-3">
+          <p className="text-sm font-semibold text-ink">Playbook</p>
+          <FormField label="Atividade da matriz RACI" htmlFor="td-raci" hint="Com SLA definido em Contratos → Responsabilidades e sem prazo informado, o prazo vem do SLA."><Select id="td-raci" disabled={ro} value={f.raciKey} onChange={(e) => setF({ ...f, raciKey: e.target.value })}><option value="">Nenhuma</option>{RACI_PHASES.map((ph) => <optgroup key={ph} label={RACI_PHASE_LABELS[ph]}>{RACI_MATRIX.filter((x) => x.phase === ph).map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</optgroup>)}</Select></FormField>
+          <label className="flex items-center gap-2 text-sm text-ink"><input type="checkbox" className="h-4 w-4 accent-primary" disabled={ro} checked={f.requireAccept} onChange={(e) => setF({ ...f, requireAccept: e.target.checked })} />Transferência com aceite (quem recebe aceita ou devolve)</label>
+          <label className="flex items-center gap-2 text-sm text-ink"><input type="checkbox" className="h-4 w-4 accent-primary" disabled={ro} checked={f.evidenceRequired} onChange={(e) => setF({ ...f, evidenceRequired: e.target.checked })} />Concluir exige evidência anexada</label>
+        </div>
+        <div className="sm:col-span-2 space-y-2 rounded-md border border-line p-3">
           <label className="flex items-center gap-2 text-sm font-semibold text-ink"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.requiresApproval} onChange={(e) => setF({ ...f, requiresApproval: e.target.checked })} />A entrega precisa de aprovação</label>
           {f.requiresApproval && <FormField label="Quem aprova" htmlFor="td-appr"><Select id="td-appr" value={f.approverId} onChange={(e) => setF({ ...f, approverId: e.target.value })}><option value="">Escolha</option>{users.filter((u) => u.id !== f.ownerId).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
         </div>
@@ -191,6 +204,28 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
         <ol className="space-y-1.5 text-sm">{t.events.map((e) => <li key={e.id} className="flex gap-2"><span className="num shrink-0 text-xs text-muted">{fmtDateTime(e.occurredAt)}</span><span><span className="font-semibold text-ink">{e.actorName ?? 'Sistema'}</span> {EVENT_LABELS[e.type] ?? e.type}{e.type === 'rejected' && e.payload?.note ? `: ${String(e.payload.note)}` : ''}</span></li>)}</ol>
       </section>
       {(t.createdBy === me?.user.id || t.can.assign) && <RemoveTask t={t} onRemoved={onRemoved} />}
+    </div>
+  );
+}
+
+/** Playbook: demanda transferida aguarda o aceite de quem recebe; devolvida volta para quem enviou, com o motivo. */
+function AcceptBox({ t }: { t: Detail }) {
+  const toast = useToast();
+  const invalidate = useInvalidateTasks();
+  const { me } = useAuth();
+  const [reason, setReason] = useState('');
+  const m = useMutation({
+    mutationFn: (accept: boolean) => api(`/tasks/${t.id}/accept`, { method: 'POST', body: { accept, reason } }),
+    onSuccess: (_, accept) => { invalidate(); toast({ tone: 'success', message: accept ? 'Demanda aceita' : 'Demanda devolvida a quem enviou' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (t.acceptStatus === 'devolvida') return <Notice tone="warning">Demanda devolvida{t.returnReason ? `: “${t.returnReason}”` : ''}. Trate o motivo ou reatribua (o aceite é pedido de novo).</Notice>;
+  if (t.ownerId !== me?.user.id) return <Notice tone="info">Aguardando o aceite de {t.ownerName}. Até lá, a demanda segue sob acompanhamento de quem enviou.</Notice>;
+  return (
+    <div className="space-y-2 rounded-md border border-line bg-warning-soft/40 p-3">
+      <p className="text-sm font-semibold text-ink">Esta demanda foi transferida para você. Aceite para começar ou devolva com o motivo.</p>
+      <FormField label="Motivo" htmlFor="ac-reason" hint="Obrigatório para devolver"><Textarea id="ac-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} /></FormField>
+      <div className="flex gap-2"><Button variant="primary" loading={m.isPending && m.variables === true} onClick={() => m.mutate(true)}>Aceitar</Button><Button variant="danger" disabled={reason.trim().length < 5} loading={m.isPending && m.variables === false} onClick={() => m.mutate(false)}>Devolver</Button></div>
     </div>
   );
 }

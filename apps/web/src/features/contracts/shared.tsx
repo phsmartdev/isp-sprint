@@ -26,7 +26,7 @@ export type ContractRow = {
 };
 export type ContractDetail = {
   id: string; code: number; stage: ContractStage; kind: 'publico' | 'privado'; billingType: BillingType; legalRegime: 'privado' | 'lei_8666' | 'lei_14133' | 'outro'; contactId: string; customerId: string | null; opportunityId: string | null;
-  commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; commercialOwnerName: string | null; operationalOwnerName: string | null; csmName: string | null;
+  commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; commercialOwnerName: string | null; operationalOwnerName: string | null; csmName: string | null; adminOwnerId: string | null; adminOwnerName: string | null;
   validatedAt: string | null; validatedByName: string | null; erpRef: string | null; renewed: boolean; closureExpected: boolean; closureReason: string | null; closureAt: string | null; legalLimitAt: string | null;
   closedAt: string | null; archivedAt: string | null; archiveLocation: string | null; archiveResponsibleName: string | null; finalNote: string | null; nextAction: string | null; nextActionAt: string | null;
   currentVersion: number; current: Version; versions: Version[];

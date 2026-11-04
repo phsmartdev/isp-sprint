@@ -36,6 +36,8 @@ describe('indicadores', () => {
   });
 
   it('valor com crédito ponderado: tarefa em dupla 50/50 conta meio para cada, inteira para a equipe', async () => {
+    // eventos pendentes de testes anteriores entram antes de medir o "antes"
+    ok(await carlos.post('/performance/sync'));
     const st = ok(await carlos.get('/performance/settings')).json();
     ok(await carlos.put('/performance/settings', { config: { ...st.config, attribution: { ...st.config.attribution, tarefa_concluida: { ownerShareBp: 5000, participants: true, managers: false } } }, note: 'Dupla divide' }));
     const before = ok(await lucas.get(`/performance/indicators/${indTarefas}/value`)).json().value as number;
