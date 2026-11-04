@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
-  COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_VERDICT_LABELS, isMonthlyKind, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   buildModel, type FinOverride, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -78,24 +78,68 @@ function MarginChain({ m, per, compact }: { m: NonNullable<NonNullable<EconResul
   );
 }
 
-/** Sugestão de preço mínimo de venda: o maior entre os pisos (caixa/TMA, margem mínima e margem operacional zero). */
-function SuggestedPrice({ r, per }: { r: EconResult; per: string }) {
-  const s = r.suggestedMinCents;
+/**
+ * Preço sugerido em destaque: o maior entre os pisos (caixa/TMA, margem mínima, margem operacional zero) e o preço que entrega a
+ * margem escolhida pelo vendedor (assim ele acompanha a margem digitada). Com o markup efetivo e o comparativo do modelo antigo.
+ */
+function SuggestedPrice({ r, per, settings }: { r: EconResult; per: string; settings?: EconSettings | null }) {
+  const [cmp, setCmp] = useState(false);
+  const s = r.suggestedCents ?? r.suggestedMinCents;
   if (s == null) return null;
   const parts = [
     { label: 'cobre caixa e TMA', v: r.floor.minCents },
     { label: 'margem mínima', v: r.marginPriceCents },
     { label: 'margem operacional zero', v: r.operatingFloorCents ?? null },
+    { label: `margem escolhida ${pct(r.rates.m * 100, 1)}`, v: r.recommendedCents },
   ].filter((x) => x.v != null);
   const p = r.priceCents;
+  const legacy = { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 };
+  const c = econCompare(r, legacy);
   return (
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border border-primary/30 bg-primary/5 p-3" aria-label="Preço mínimo sugerido">
-      <div>
-        <p className="text-xs font-semibold text-primary">Preço mínimo sugerido{r.deal ? " (parte mensal)" : ""}</p>
-        <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span></p>
-        <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
+    <div className="mt-3 border border-primary/30 bg-primary/5 p-3" aria-label="Preço sugerido">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-primary">Preço sugerido{r.deal ? ' (parte mensal)' : ''} · margem {pct(r.rates.m * 100, 1)}</p>
+          <p className="num text-lg font-bold text-ink">{fmtBRL(s)}<span className="text-xs font-normal text-muted">{per}</span>
+            {c.engine.markupPct != null && <span className="ml-2 text-xs font-semibold text-text">markup efetivo {pct(c.engine.markupPct, 1)}</span>}</p>
+          <p className="text-2xs text-muted">O maior entre: {parts.map((x) => `${x.label} ${fmtBRL(x.v)}`).join(' · ')}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          {r.priceSource === 'sugerido' ? <Chip tone="orange">Produtos sem preço: análise feita neste preço</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
+          <button type="button" className="text-xs font-semibold text-primary hover:underline" aria-expanded={cmp} onClick={() => setCmp((v) => !v)}>{cmp ? 'Fechar comparativo' : 'Comparar com o modelo antigo'}</button>
+        </div>
       </div>
-      {r.priceSource === 'sugerido' ? <Chip tone="orange">Produtos sem preço: análise feita neste preço</Chip> : p != null && <Chip tone={p >= s ? 'green' : 'orange'}>{p >= s ? (p === s ? 'Preço avaliado no mínimo sugerido' : `Preço avaliado ${fmtBRL(p)} acima da sugestão`) : `Faltam ${fmtBRL(s - p)}${per} para a sugestão`}</Chip>}
+      {cmp && <LegacyCompare r={r} legacy={legacy} />}
+    </div>
+  );
+}
+
+/** Comparativo rápido com o modelo antigo (mensal: custos × 3,2 · único: investimento × 2,5). Só informativo. */
+function LegacyCompare({ r, legacy }: { r: EconResult; legacy: { oneTimeX100?: number | null; recurringX100?: number | null } }) {
+  const parts = r.deal ? [{ k: 'Pagamento único', res: r.deal.parts.venda }, { k: 'Mensal', res: r.deal.parts.mensal }] : [{ k: r.mode === 'recorrente' ? 'Mensal' : 'Pagamento único', res: r }];
+  return (
+    <div className="mt-3 space-y-3 border-t border-primary/20 pt-3">
+      {parts.map(({ k, res }) => {
+        const c = econCompare(res, legacy);
+        const rec = res.mode === 'recorrente', per = rec ? '/mês' : '';
+        const col = (x: typeof c.engine) => [x.priceCents == null ? '—' : `${fmtBRL(x.priceCents)}${per}`, pct(x.markupPct, 1), pct(x.grossMarginPct, 1), pct(x.effectiveMarginPct, 1)];
+        const rows = ['Preço', 'Markup efetivo', 'Margem contrib. bruta', 'Margem contrib. efetiva'];
+        const eng = col(c.engine), ev = col(c.evaluated), old = col(c.legacy);
+        return (
+          <div key={k}>
+            {r.deal && <p className="mb-1 text-xs font-semibold text-ink">{k}</p>}
+            {c.baseCents <= 0 ? <p className="text-xs text-muted">Sem {c.baseLabel}: o modelo antigo não tem base para comparar.</p> : (
+              <div className="overflow-x-auto"><table className="w-full text-sm">
+                <thead className="text-left text-2xs uppercase text-muted"><tr><th className="py-1" /><th className="py-1 pl-2 text-right">Sugerido</th><th className="py-1 pl-2 text-right">Avaliado</th><th className="whitespace-nowrap py-1 pl-2 text-right">Antigo ×{(c.legacy.factor ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</th></tr></thead>
+                <tbody>{rows.map((label, i) => (
+                  <tr key={label} className="border-t border-line"><td className="py-1.5 text-xs text-text">{label}</td><td className="num whitespace-nowrap py-1.5 pl-2 text-right font-semibold text-ink">{eng[i]}</td><td className="num whitespace-nowrap py-1.5 pl-2 text-right">{ev[i]}</td><td className="num whitespace-nowrap py-1.5 pl-2 text-right">{old[i]}</td></tr>
+                ))}</tbody>
+              </table></div>
+            )}
+            <p className="mt-1 text-2xs text-muted">Base: {c.baseLabel} {fmtBRL(c.baseCents)}{per}. Markup efetivo = (preço − base) ÷ base. Margem bruta = 1 − base ÷ preço (no modelo antigo, 1 − 1 ÷ fator). Margem efetiva = bruta − tributos {pct(c.taxesPct, 2)} − despesas variáveis {pct(c.variablePct, 2)}.{c.differenceCents != null ? ` Modelo antigo ${c.differenceCents >= 0 ? 'acima' : 'abaixo'} do sugerido em ${fmtBRL(Math.abs(c.differenceCents))}${per}.` : ''} Só comparação: não entra na decisão.</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -105,10 +149,12 @@ function DealBreakdown({ r, compact }: { r: EconResult; compact?: boolean }) {
   const d = r.deal!;
   const v = d.parts.venda, m = d.parts.mensal;
   const monthlyRev = d.revenue.recorrencia + d.revenue.locacao;
+  const oneRev = d.revenue.venda + d.revenue.servico;
   const rows = d.kinds.map((k) => {
-    const part = k === 'venda' ? v : m;
-    const shareInMonthly = monthlyRev > 0 ? d.revenue[k] / monthlyRev : null;
-    return { k, revenue: d.revenue[k], suggested: d.suggested[k], margin: part.kpi?.marginPct ?? null, invest: k === 'venda' ? v.investmentCents ?? 0 : shareInMonthly != null ? Math.round((m.investmentCents ?? 0) * shareInMonthly) : null, unit: k === 'venda' ? ' (único)' : '/mês' };
+    const one = isOneTimeKind(k);
+    const part = one ? v : m;
+    const share = one ? (oneRev > 0 ? d.revenue[k] / oneRev : null) : monthlyRev > 0 ? d.revenue[k] / monthlyRev : null;
+    return { k, revenue: d.revenue[k], suggested: d.suggested[k], margin: part.kpi?.marginPct ?? null, invest: share != null ? Math.round((part.investmentCents ?? 0) * share) : null, unit: one ? ' (único)' : '/mês' };
   });
   return (
     <section className="mt-3 border border-line p-3" aria-label="Por tipo de negociação">
@@ -125,7 +171,7 @@ function DealBreakdown({ r, compact }: { r: EconResult; compact?: boolean }) {
           </tr>
         ))}</tbody>
       </table></div>
-      {!compact && <p className="mt-1 text-2xs text-muted">Custos comuns rateados pela receita do contrato: {(d.share.venda * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% venda · {(d.share.mensal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% mensal. Recorrência e locação usam a mesma conta (margem da parte mensal); o investimento mensal é dividido entre elas pela receita.</p>}
+      {!compact && <p className="mt-1 text-2xs text-muted">Investimento do Lote Venda sai da venda; o do Lote Serviço, dos serviços (serviço único e mensais, pela receita). Custos sem lote rateados pela receita do contrato: {(d.share.venda * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% pagamento único · {(d.share.mensal * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}% mensal. Recorrência e locação usam a mesma conta (margem da parte mensal).</p>}
     </section>
   );
 }
@@ -225,11 +271,14 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         </div>
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
       </div>
-      <SuggestedPrice r={r} per={per} />
+      <SuggestedPrice r={r} per={per} settings={settings} />
       {r.deal && <DealBreakdown r={r} compact={compact} />}
-      <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
+      <dl className={clsx('mt-3 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3')}>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">{r.priceSource === 'informado' ? 'Preço informado' : r.priceSource === 'sugerido' ? 'Preço avaliado (sugerido)' : 'Preço dos produtos'}</dt><dd className="num font-bold text-ink">{fmtBRL(r.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></dd>{r.priceSource === 'sugerido' && <dd className="text-2xs text-muted">produtos lançados por {fmtBRL(r.revenueCents)}</dd>}</div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem efetiva</dt><dd className={clsx('num font-bold', k && k.marginPct < r.rates.m * 100 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">mínima {pct(r.rates.m * 100, 0)}</dd></div>
+        {(() => { const c = econCompare(r, { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 }); return (
+          <div className="bg-surface-2 p-2.5" title="(preço sugerido − custos) ÷ custos"><dt className="text-xs text-muted">Markup efetivo</dt><dd className="num font-bold text-ink">{pct(c.engine.markupPct, 1)}</dd><dd className="text-2xs text-muted">{c.evaluated.markupPct != null && c.evaluated.priceCents !== c.engine.priceCents ? `no preço avaliado ${pct(c.evaluated.markupPct, 1)}` : `sobre ${c.baseLabel}`}</dd></div>
+        ); })()}
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className={clsx('num font-bold', (r.paybackOk ?? r.withinPolicy) === false ? 'text-danger' : 'text-ink')}>{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
         <div className="bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
@@ -298,7 +347,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
   const kindSel = (l: Line, i: number, cls: string) => kinds.length > 1 ? (
     <select aria-label={`${title}: de qual tipo sai ${i + 1}`} disabled={disabled} value={l.kind ?? ''} onChange={(e) => set(l.key, { kind: (e.target.value || null) as DealKind | null })} className={clsx('field-input', cls)} title="De qual tipo de negociação este custo é deduzido; comum = rateado pela receita">
       <option value="">Comum (rateado)</option>
-      {kinds.map((k) => <option key={k} value={k}>Sai da {DEAL_KIND_LABELS[k].toLowerCase()}</option>)}
+      {kinds.map((k) => <option key={k} value={k}>{k === 'venda' || k === 'servico' ? `Mover para o ${ECON_LOT_LABELS[lotOfKind(k)]}` : `Sai da ${DEAL_KIND_LABELS[k].toLowerCase()}`}</option>)}
     </select>
   ) : null;
   const impactSel = (l: Line, i: number, cls: string) => impacts ? (
@@ -557,11 +606,11 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   // tipos de negociação vêm dos produtos (aba Produtos); sem produtos vale a escolha abaixo
   const kindOf = (i: EconItem): DealKind => i.kind ?? (f.mode === 'pontual' ? 'venda' : 'recorrencia');
   const kinds = DEAL_KINDS.filter((k) => d.items.some((i) => kindOf(i) === k));
-  const mixed = kinds.includes('venda') && kinds.some(isMonthlyKind);
-  const derivedMode: EconInput['mode'] | null = !d.items.length || mixed ? null : kinds.includes('venda') ? 'pontual' : 'recorrente';
+  const mixed = kinds.some(isOneTimeKind) && kinds.some(isMonthlyKind);
+  const derivedMode: EconInput['mode'] | null = !d.items.length || mixed ? null : kinds.some(isOneTimeKind) ? 'pontual' : 'recorrente';
   if (derivedMode && f.mode !== derivedMode) queueMicrotask(() => setF((x) => (x && x.mode !== derivedMode ? { ...x, mode: derivedMode } : x)));
   if (mixed && f.mode !== 'recorrente') queueMicrotask(() => setF((x) => (x && x.mode !== 'recorrente' ? { ...x, mode: 'recorrente' } : x)));
-  const saleTotal = d.items.filter((i) => kindOf(i) === 'venda').reduce((t, i) => t + i.revenueCents, 0);
+  const saleTotal = d.items.filter((i) => isOneTimeKind(kindOf(i))).reduce((t, i) => t + i.revenueCents, 0);
   const itemsTotal = d.items.filter((i) => (mixed ? isMonthlyKind(kindOf(i)) : true)).reduce((t, i) => t + i.revenueCents, 0);
   const capexTotal = linesTotal(f.capex);
   const opexTotal = linesTotal(f.opex);
@@ -569,6 +618,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const teto = d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
   const mPiso = st.marginTargetBp, mTeto = st.marginMaxBp ?? null, mSug = st.marginSuggestedBp ?? st.marginTargetBp;
   const mNow = parseBp(f.margin) ?? mSug;
+  const mOut = f.margin.trim() !== '' && !Number.isNaN(mNow) && (mNow < mPiso || (mTeto != null && mNow > mTeto));
   const tmaText = st.tmaAnnualBp != null ? `TMA de ${bpText(st.tmaAnnualBp)}% ao ano` : `TMA de ${bpText(st.tmaMonthlyBp)}% ao mês`;
   const shown = (v: string, def: number) => (v.trim() ? v : bpText(def));
   const segLoss = d.publicSector ? st.lossPublicBp : st.lossPrivateBp;
@@ -603,8 +653,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             {d.items.length ? (
               <div>
                 <p className="mb-1 text-sm font-medium text-ink">Tipo de negociação (dos produtos)</p>
-                <div className="flex flex-wrap gap-1.5">{kinds.map((k) => <Chip key={k} tone={k === 'venda' ? 'blue' : 'green'}>{DEAL_KIND_LABELS[k]}{k === 'venda' ? ' · pagamento único' : ' · mensal'}</Chip>)}</div>
-                <p className="mt-1 text-xs text-muted">{mixed ? 'Venda e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada custo sai do seu tipo; o comum é rateado pela receita.' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
+                <div className="flex flex-wrap gap-1.5">{kinds.map((k) => <Chip key={k} tone={k === 'venda' ? 'blue' : 'green'}>{ECON_LOT_LABELS[lotOfKind(k)]}: {DEAL_KIND_LABELS[k]}{isOneTimeKind(k) ? ' · pagamento único' : ' · mensal'}</Chip>)}</div>
+                <p className="mt-1 text-xs text-muted">{mixed ? 'Pagamento único e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada investimento sai do seu lote (Venda ou Serviço).' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
               </div>
             ) : (
             <fieldset>
@@ -620,7 +670,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             )}
             <div className="grid grid-cols-2 gap-3">
             {mixed && <FormField label="Venda: recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
-            {mixed && <FormField label="Preço da venda (R$, único)" htmlFor="ec-sale" hint={`Produtos de venda: ${fmtBRL(saleTotal)}`}><><Input id="ec-sale" inputMode="decimal" placeholder={money(saleTotal)} value={f.salePrice} disabled={dis} onChange={(e) => set({ salePrice: e.target.value })} />{shownResult?.deal?.suggested.venda != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ salePrice: money(shownResult.deal!.suggested.venda!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.deal.suggested.venda)})</button>}</></FormField>}
+            {mixed && <FormField label="Preço do pagamento único (R$: venda + serviço único)" htmlFor="ec-sale" hint={`Produtos de pagamento único: ${fmtBRL(saleTotal)}`}><><Input id="ec-sale" inputMode="decimal" placeholder={money(saleTotal)} value={f.salePrice} disabled={dis} onChange={(e) => set({ salePrice: e.target.value })} />{shownResult?.deal?.suggestedOneTimeCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ salePrice: money(shownResult.deal!.suggestedOneTimeCents!) })}>Usar o preço sugerido ({fmtBRL(shownResult.deal.suggestedOneTimeCents)})</button>}</></FormField>}
             {f.mode === 'recorrente'
               ? <FormField label="Vigência (meses)" htmlFor="ec-term"><Input id="ec-term" inputMode="numeric" value={f.term} disabled={dis} onChange={(e) => set({ term: e.target.value.replace(/\D/g, '') })} /></FormField>
               : <FormField label="Recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
@@ -631,16 +681,45 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
                 </>
               </FormField>
             )}
-            <FormField label={`Margem de contribuição: ${bpText(mNow)}%`} htmlFor="ec-mar" hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%`}>
-              <input id="ec-mar" type="range" className="w-full accent-[rgb(var(--primary))]" min={mPiso / 100} max={(mTeto ?? Math.min(9_000, mPiso + 5_000)) / 100} step={0.5} value={mNow / 100} disabled={dis} onChange={(e) => set({ margin: String(e.target.value).replace('.', ',') })} />
+            <FormField label="Margem de contribuição (%)" htmlFor="ec-mar" error={mOut ? `Fora dos limites: o cálculo usa ${bpText(Math.min(Math.max(mNow, mPiso), mTeto ?? 10_000))}%.` : undefined} hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%. Em branco vale a sugestão.`}>
+              <Input id="ec-mar" inputMode="decimal" placeholder={bpText(mSug)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin)) || mOut} onChange={(e) => set({ margin: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
             </FormField>
-            <FormField label={mixed ? 'Preço por mês (R$, recorrência + locação)' : f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`${mixed ? 'Produtos mensais' : 'Total dos produtos'}: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{shownResult?.suggestedMinCents != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money(shownResult.suggestedMinCents!) })}>Usar o mínimo sugerido ({fmtBRL(shownResult.suggestedMinCents)})</button>}</></FormField>
+            <FormField label={mixed ? 'Preço por mês (R$, recorrência + locação)' : f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`${mixed ? 'Produtos mensais' : 'Total dos produtos'}: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{(shownResult?.suggestedCents ?? shownResult?.suggestedMinCents) != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money((shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)!) })}>Usar o preço sugerido ({fmtBRL(shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)})</button>}</></FormField>
             </div>
           </div>
         </Step>
 
         <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
-          <CostLines title="Investimento" example="Ex.: roteador, obra, projeto" lines={f.capex} setLines={(l) => set({ capex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={kinds} frequency="unico" onOther={f.mode === 'recorrente' ? (l) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null }))] } : x)) : undefined} />
+          {(() => {
+            // passo 2 em lotes: Venda (patrimonial) e Serviço; linhas antigas sem lote ficam num bloco à parte (rateadas)
+            const inLot = (l: Line, lot: EconLot) => !!l.kind && lotOfKind(l.kind) === lot;
+            const byLot = (lot: EconLot | null) => f.capex.filter((l) => (lot ? inLot(l, lot) : !l.kind));
+            const put = (lot: EconLot | null, lines: Line[]) => {
+              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'servico' as DealKind) : null }));
+              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
+            };
+            const toOpex = f.mode === 'recorrente' ? (l: Line[]) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null, kind: null }))] } : x)) : undefined;
+            const legacy = byLot(null);
+            const sub = (lot: EconLot) => linesTotal(byLot(lot));
+            return (
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.venda} <span className="text-xs font-normal text-muted">o que é patrimonial: sai da venda · {fmtBRL(sub('venda'))}</span></p>
+                  <CostLines title="Investimento do Lote Venda" example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                </div>
+                <div>
+                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.servico} <span className="text-xs font-normal text-muted">o resto (obra, instalação, projeto): sai dos serviços · {fmtBRL(sub('servico'))}</span></p>
+                  <CostLines title="Investimento do Lote Serviço" example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                </div>
+                {!!legacy.length && (
+                  <div>
+                    <p className="mb-1 text-sm font-semibold text-ink">Sem lote <span className="text-xs font-normal text-muted">(lançados antes dos lotes: rateados pela receita) · {fmtBRL(linesTotal(legacy))}</span></p>
+                    <CostLines title="Investimento sem lote" example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico']} frequency="unico" onOther={toOpex} />
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
             <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />

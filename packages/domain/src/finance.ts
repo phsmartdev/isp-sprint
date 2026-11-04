@@ -7,7 +7,7 @@ import { buildModel, runModel, type FinBase, type FinModel, type ModelRun } from
  *   [1. Entradas & Escopo] → [2. Resolução Fiscal] → [3. Piso Mínimo] → [4. Preço Recomendado] → [5. DRE & Indicadores]
  *
  *   b = 1 − a − c − g                   (base líquida; precisa ser > 0)
- *   a = Σ (wᵢ × aᵢ)                      (alíquota ponderada pela participação de cada item na receita)
+ *   a = Σ (w_lote × a_lote)              (a_lote = maior tributo entre os documentos do lote Venda / Serviço; w = receita do lote)
  *   F = Σ Fᵢ                             (tributos fixos em R$ por faturamento)
  *   Pontual:    P_caixa = (I + F) / b    P_eco = (I(1+r)^d + F) / b        P_margem = (I + F) / (b − m)
  *   Recorrente: D = min(N, D_alvo)       P_caixa = (O + F + I/D) / b       P_eco = (O + F + I/A(r,D)) / b
@@ -43,7 +43,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-2.0/isp-4';
+export const ENGINE_VERSION = 'FINANCE-2.0/isp-5';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -92,11 +92,21 @@ export const COST_IMPACT_LABELS: Record<CostImpact, string> = { material: 'Mater
 /** Despesa de entrega e taxa fixa de venda são despesas variáveis em R$: entram no preço, mas fora do investimento (sem contingência). */
 export const isVariableFixed = (impact?: CostImpact | null) => impact === 'entrega' || impact === 'taxa_venda';
 /** Tipo de negociação de cada produto/serviço: venda (pagamento único), recorrência (mensalidade) ou locação/aluguel (mensal, mesma conta da recorrência). */
-export const DEAL_KINDS = ['venda', 'recorrencia', 'locacao'] as const;
+export const DEAL_KINDS = ['venda', 'servico', 'recorrencia', 'locacao'] as const;
 export type DealKind = (typeof DEAL_KINDS)[number];
-export const DEAL_KIND_LABELS: Record<DealKind, string> = { venda: 'Venda', recorrencia: 'Recorrência', locacao: 'Locação/aluguel' };
+export const DEAL_KIND_LABELS: Record<DealKind, string> = { venda: 'Venda', servico: 'Serviço único', recorrencia: 'Recorrência', locacao: 'Locação/aluguel' };
+/**
+ * Lotes da viabilidade: Venda = o que é patrimonial (sempre pagamento único); Serviço = o resto, recorrente (recorrência,
+ * locação) ou não (serviço único). Em cada lote o tributo é o do documento fiscal de maior tributo entre os produtos do lote.
+ */
+export const ECON_LOTS = ['venda', 'servico'] as const;
+export type EconLot = (typeof ECON_LOTS)[number];
+export const ECON_LOT_LABELS: Record<EconLot, string> = { venda: 'Lote Venda', servico: 'Lote Serviço' };
+export const lotOfKind = (k: DealKind): EconLot => (k === 'venda' ? 'venda' : 'servico');
+/** pagamento único: venda e serviço único; mensal: recorrência e locação */
+export const isOneTimeKind = (k: DealKind) => k === 'venda' || k === 'servico';
 /** venda é pontual; recorrência e locação são mensais */
-export const isMonthlyKind = (k: DealKind) => k !== 'venda';
+export const isMonthlyKind = (k: DealKind) => !isOneTimeKind(k);
 /** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo; kind = de qual tipo de negociação o custo sai (vazio = comum, rateado pela receita). */
 export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
 export type EconInput = {
@@ -152,8 +162,10 @@ export type DealSummary = {
   /** participação de cada parte nos custos comuns (pela receita do contrato) */
   share: { venda: number; mensal: number };
   parts: { venda: EconResult; mensal: EconResult };
-  /** preço mínimo sugerido por tipo (venda: valor único; recorrência e locação: por mês) */
+  /** preço sugerido por tipo (venda e serviço único: valor único; recorrência e locação: por mês), na margem escolhida */
   suggested: Record<DealKind, number | null>;
+  /** preço sugerido do pagamento único inteiro (venda + serviço único) */
+  suggestedOneTimeCents?: number | null;
 };
 export type EconResult = {
   engineVersion: string;
@@ -176,7 +188,9 @@ export type EconResult = {
   variableFixedCents?: number; investmentCents?: number;
   /** N meses projetados (vigência limitada ao horizonte máximo) · Dalvo teto de payback · D payback do vendedor · d mês do recebimento */
   term: { N: number; Dalvo: number; D: number; d: number; termMonths?: number; horizon?: number | null; paybackAsked?: number | null };
-  items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; docVersion?: number | null; pending: boolean }[];
+  items: { description: string; revenueCents: number; weight: number; percentBp: number; fixedCents: number; doc: string | null; docVersion?: number | null; pending: boolean; lot?: EconLot }[];
+  /** tributo por lote: o documento fiscal de maior tributo entre os produtos do lote (pesos pela receita do lote) */
+  lots?: { lot: EconLot; revenueCents: number; weight: number; items: number; doc: string | null; docVersion: number | null; percentBp: number; fixedCents: number; pending: boolean }[];
   floor: { cashCents: number | null; economicCents: number | null; minCents: number | null };
   /** preço da margem mínima (piso) e recomendado (preço exato na margem escolhida, nunca abaixo do mínimo) */
   marginPriceCents: number | null; recommendedCents: number | null;
@@ -186,6 +200,8 @@ export type EconResult = {
   operatingFloorCents?: number | null;
   /** sugestão de preço mínimo de venda: o maior entre caixa/TMA, margem mínima e margem operacional zero */
   suggestedMinCents?: number | null;
+  /** preço sugerido em destaque: o mínimo sugerido, ou o preço da margem escolhida quando ele é maior (acompanha a margem) */
+  suggestedCents?: number | null;
   /** indicadores no preço avaliado (P); paybackMonths = descontado pela TMA (é o que a política usa) */
   kpi: null | { taxCents: number; commissionCents: number; lossCents: number; contributionCents: number; marginPct: number; npvCents: number; irrMonthly: number | null; irrAnnual: number | null; paybackMonths: number | null; simplePaybackMonths: number | null;
     /**
@@ -228,7 +244,7 @@ export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'
 
 /**
  * Motor financeiro (FINANCE-2.0), conforme a especificação do motor:
- * 1. entradas: investimento (com contingência), despesas variáveis em R$, custo mensal, tributos ponderados por item;
+ * 1. entradas: investimento (com contingência), despesas variáveis em R$, custo mensal, tributos pelo maior documento de cada lote;
  * 2. preço exato pelo markup divisor: (custos em R$) ÷ (1 − tributos − despesas variáveis − margem), com o investimento
  *    amortizado no payback definido pelo vendedor (até o teto do segmento) e a margem entre o piso e o teto;
  * 3. fluxo de caixa no horizonte (vigência limitada ao prazo máximo): receita reajustada após o 12º mês, menos glosa,
@@ -236,18 +252,41 @@ export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'
  * 4. decisão: preço mínimo, margem e payback; aprovação automática quando VPL > 0 e TIR > TMA, senão alçada.
  */
 export type EngineArgs = { input: EconInput; items: EconItem[]; settings: EconSettings; publicSector: boolean; model?: FinModel };
-export function financeEngine(args: EngineArgs): EconResult {
-  const kindOf = (i: EconItem): DealKind => i.kind ?? (args.input.mode === 'pontual' ? 'venda' : 'recorrencia');
-  const sale = args.items.filter((i) => kindOf(i) === 'venda'), monthly = args.items.filter((i) => isMonthlyKind(kindOf(i)));
+export function financeEngine(args0: EngineArgs): EconResult {
+  const kindOf = (i: EconItem): DealKind => i.kind ?? (args0.input.mode === 'pontual' ? 'venda' : 'recorrencia');
+  // o documento de maior tributo de cada lote vale para todos os produtos do lote (inclusive nas duas partes da mista)
+  const top = new Map<EconLot, NonNullable<EconItem['doc']>>();
+  for (const i of args0.items) {
+    const l = lotOfKind(kindOf(i)), cur = top.get(l), d = i.doc;
+    if (d?.complete && (!cur || d.percentBp > cur.percentBp || (d.percentBp === cur.percentBp && d.fixedCents > cur.fixedCents))) top.set(l, d);
+  }
+  const inherited = args0.items.filter((i) => !(i.doc?.complete) && top.has(lotOfKind(kindOf(i)))).length;
+  // sem documento completo no lote, cada produto segue com o seu (o cálculo por lote escolhe o maior e marca pendente)
+  const args: EngineArgs = { ...args0, items: args0.items.map((i) => ({ ...i, kind: kindOf(i), doc: top.get(lotOfKind(kindOf(i))) ?? i.doc })) };
+  const res = financeEngineLots(args, kindOf);
+  if (inherited) res.warnings.push(`${inherited} produto(s) sem documento fiscal próprio usam o documento de maior tributo do seu lote.`);
+  return res;
+}
+function financeEngineLots(args: EngineArgs, kindOf: (i: EconItem) => DealKind): EconResult {
+  const sale = args.items.filter((i) => isOneTimeKind(kindOf(i))), monthly = args.items.filter((i) => isMonthlyKind(kindOf(i)));
   // um tipo só: o motor de sempre, com o modo dado pelos produtos
   if (!sale.length || !monthly.length) {
     const mode: EconMode = !args.items.length ? args.input.mode : sale.length ? 'pontual' : 'recorrente';
     const r = financeEngineDetailed({ ...args, input: { ...args.input, mode } }).result;
-    const other = args.input.capex.concat(args.input.opex).filter((l) => l.kind && (mode === 'pontual' ? isMonthlyKind(l.kind) : l.kind === 'venda'));
-    if (args.items.length && other.length) r.warnings.push(`${other.length} custo(s) marcado(s) para ${mode === 'pontual' ? 'recorrência/locação' : 'venda'} sem produto desse tipo: calculado(s) junto com os demais.`);
+    const present = new Set(args.items.map((i) => lotOfKind(kindOf(i))));
+    const other = args.input.capex.filter((l) => l.kind && !present.has(lotOfKind(l.kind)));
+    if (args.items.length && other.length) r.warnings.push(`${other.length} custo(s) do ${ECON_LOT_LABELS[lotOfKind(other[0]!.kind!)]} sem produto desse lote: calculado(s) junto com os demais.`);
     return r;
   }
-  return mixedEngine(args, kindOf, sale, monthly);
+  const mix = mixedEngine(args, kindOf, sale, monthly);
+  // lotes da negociação inteira (cada parte calcula os seus; o documento já é o mesmo nas duas)
+  const byLot = new Map<EconLot, NonNullable<EconResult['lots']>[number]>();
+  for (const l of [...(mix.deal!.parts.venda.lots ?? []), ...(mix.deal!.parts.mensal.lots ?? [])]) {
+    const cur = byLot.get(l.lot);
+    byLot.set(l.lot, cur ? { ...cur, revenueCents: cur.revenueCents + l.revenueCents, items: cur.items + l.items } : { ...l });
+  }
+  mix.lots = [...byLot.values()];
+  return mix;
 }
 
 /**
@@ -258,15 +297,21 @@ export function financeEngine(args: EngineArgs): EconResult {
 function mixedEngine(args: EngineArgs, kindOf: (i: EconItem) => DealKind, sale: EconItem[], monthly: EconItem[]): EconResult {
   const inp = args.input, st = args.settings;
   const rev = (k: DealKind) => args.items.filter((i) => kindOf(i) === k).reduce((s, i) => s + Math.max(0, i.revenueCents), 0);
-  const revenue: Record<DealKind, number> = { venda: rev('venda'), recorrencia: rev('recorrencia'), locacao: rev('locacao') };
+  const revenue: Record<DealKind, number> = { venda: rev('venda'), servico: rev('servico'), recorrencia: rev('recorrencia'), locacao: rev('locacao') };
   const N = Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths);
-  const saleTotal = inp.salePriceCents ?? revenue.venda, monthTotal = (inp.priceCents ?? revenue.recorrencia + revenue.locacao) * N;
+  const saleTotal = inp.salePriceCents ?? revenue.venda + revenue.servico, monthTotal = (inp.priceCents ?? revenue.recorrencia + revenue.locacao) * N;
   // sem preço lançado, o rateio vai pela quantidade de produtos de cada parte
   const shareV = saleTotal + monthTotal > 0 ? saleTotal / (saleTotal + monthTotal) : sale.length / (sale.length + monthly.length);
   const split = (l: CostLine, f: number): CostLine => ({ ...l, unitCents: Math.round(l.unitCents * f) });
+  // investimento por lote: o do Lote Venda sai da venda; o do Lote Serviço sai dos serviços (serviço único na parte de
+  // pagamento único e recorrência/locação na mensal, pela receita de cada um); sem lote = comum, rateado pela receita
   const common = inp.capex.filter((l) => !l.kind);
-  const saleCapex = [...inp.capex.filter((l) => l.kind === 'venda'), ...common.map((l) => split(l, shareV))].filter((l) => l.unitCents > 0);
-  const monthCapex = [...inp.capex.filter((l) => l.kind && isMonthlyKind(l.kind)), ...common.map((l) => split(l, 1 - shareV))].filter((l) => l.unitCents > 0);
+  const servLot = inp.capex.filter((l) => l.kind && lotOfKind(l.kind) === 'servico');
+  const servOne = sale.filter((i) => kindOf(i) === 'servico');
+  const servOneTotal = inp.salePriceCents != null && saleTotal > 0 ? inp.salePriceCents * (revenue.servico / Math.max(1, revenue.venda + revenue.servico)) : revenue.servico;
+  const fS = !servOne.length ? 0 : servOneTotal + monthTotal > 0 ? servOneTotal / (servOneTotal + monthTotal) : servOne.length / (servOne.length + monthly.length);
+  const saleCapex = [...inp.capex.filter((l) => l.kind === 'venda'), ...servLot.map((l) => split(l, fS)), ...common.map((l) => split(l, shareV))].filter((l) => l.unitCents > 0);
+  const monthCapex = [...servLot.map((l) => split(l, 1 - fS)), ...common.map((l) => split(l, 1 - shareV))].filter((l) => l.unitCents > 0);
   const extraV = Math.round(inp.extraInitialCents * shareV);
   const vendaPart = financeEngineDetailed({ ...args, items: sale, input: { ...inp, mode: 'pontual', capex: saleCapex, opex: [], extraInitialCents: extraV, priceCents: inp.salePriceCents ?? null } }).result;
   const mensalPart = financeEngineDetailed({ ...args, items: monthly, input: { ...inp, mode: 'recorrente', capex: monthCapex, extraInitialCents: inp.extraInitialCents - extraV, salePriceCents: null } }).result;
@@ -305,7 +350,9 @@ function mixedEngine(args: EngineArgs, kindOf: (i: EconItem) => DealKind, sale: 
     const cnt = monthly.filter((i) => kindOf(i) === k).length;
     return t > 0 ? revenue[k] / t : cnt / monthly.length;
   };
-  const sug = mensalPart.suggestedMinCents;
+  const sug = mensalPart.suggestedCents ?? mensalPart.suggestedMinCents;
+  const sugV = vendaPart.suggestedCents ?? vendaPart.suggestedMinCents ?? null;
+  const shareOne = (k: 'venda' | 'servico') => { const t = revenue.venda + revenue.servico; const cnt = sale.filter((i) => kindOf(i) === k).length; return t > 0 ? revenue[k] / t : cnt / sale.length; };
   const sumStmt = (a?: EconStatement, b?: EconStatement): EconStatement | undefined => {
     if (!a || !b) return a ?? b;
     const add = (x: number | null, y: number | null) => (x == null && y == null ? null : (x ?? 0) + (y ?? 0));
@@ -326,7 +373,8 @@ function mixedEngine(args: EngineArgs, kindOf: (i: EconItem) => DealKind, sale: 
     deal: {
       kinds: DEAL_KINDS.filter((k) => args.items.some((i) => kindOf(i) === k)), revenue, share: { venda: shareV, mensal: 1 - shareV },
       parts: { venda: vendaPart, mensal: mensalPart },
-      suggested: { venda: vendaPart.suggestedMinCents ?? null, recorrencia: sug == null ? null : Math.ceil(sug * share('recorrencia')), locacao: sug == null ? null : Math.ceil(sug * share('locacao')) },
+      suggestedOneTimeCents: sugV,
+      suggested: { venda: sugV == null ? null : Math.ceil(sugV * shareOne('venda')), servico: sugV == null ? null : Math.ceil(sugV * shareOne('servico')), recorrencia: sug == null ? null : Math.ceil(sug * share('recorrencia')), locacao: sug == null ? null : Math.ceil(sug * share('locacao')) },
     },
   };
 }
@@ -344,20 +392,34 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const opexBase = rec ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
   const invEstimate = capexBase * (1 + bp(st.contingencyCapexBp)) + E; // só para os avisos de prazo
   if (!rec && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
-  // tributos por item, ponderados pela receita; tributo fixo uma vez por documento (fatura)
+  // tributos por lote: em cada lote (Venda / Serviço) vale o documento fiscal de maior tributo entre os produtos do lote;
+  // com os dois lotes no mesmo cálculo, a alíquota é a dos lotes ponderada pela receita; o fixo, uma vez por lote (fatura)
   const n = args.items.length;
+  const kindOfItem = (i: EconItem): DealKind => i.kind ?? (rec ? 'recorrencia' : 'venda');
+  const lotRev = (l: EconLot) => args.items.filter((i) => lotOfKind(kindOfItem(i)) === l).reduce((t, i) => t + Math.max(0, i.revenueCents), 0);
+  const lots = ECON_LOTS.map((lot) => {
+    const its = args.items.filter((i) => lotOfKind(kindOfItem(i)) === lot);
+    const all = its.map((i) => i.doc).filter((d): d is NonNullable<EconItem['doc']> => !!d);
+    const max = (ds: NonNullable<EconItem['doc']>[]) => ds.reduce<NonNullable<EconItem['doc']> | null>((best, d) => (!best || d.percentBp > best.percentBp || (d.percentBp === best.percentBp && d.fixedCents > best.fixedCents) ? d : best), null);
+    // o maior entre os documentos completos; sem nenhum completo, o maior que houver (e o lote fica pendente)
+    const top = max(all.filter((d) => d.complete)) ?? max(all);
+    return { lot, its, top, revenueCents: lotRev(lot) };
+  }).filter((x) => x.its.length);
+  const lotW = (x: (typeof lots)[number]) => (revenue > 0 ? x.revenueCents / revenue : n ? x.its.length / n : 0);
+  const a = lots.reduce((t, x) => t + lotW(x) * bp(x.top?.percentBp ?? 0), 0);
+  const F = lots.reduce((t, x) => t + (x.top?.fixedCents ?? 0), 0);
   const items = args.items.map((i) => {
+    const lot = lotOfKind(kindOfItem(i));
+    const top = lots.find((x) => x.lot === lot)?.top ?? null;
     const w = revenue > 0 ? Math.max(0, i.revenueCents) / revenue : n ? 1 / n : 0;
-    const pending = !i.doc || !i.doc.complete;
-    return { description: i.description, revenueCents: i.revenueCents, weight: w, percentBp: i.doc?.percentBp ?? 0, fixedCents: i.doc?.fixedCents ?? 0, doc: i.doc?.name ?? null, docVersion: i.doc?.version ?? null, pending };
+    return { description: i.description, revenueCents: i.revenueCents, weight: w, percentBp: top?.percentBp ?? 0, fixedCents: top?.fixedCents ?? 0, doc: top?.name ?? null, docVersion: top?.version ?? null, pending: !top?.complete, lot };
   });
-  const a = items.reduce((s, i) => s + i.weight * bp(i.percentBp), 0);
-  const perDoc = new Map<string, number>();
-  args.items.forEach((i, k) => { if (i.doc) perDoc.set(i.doc.id ?? `item-${k}`, i.doc.fixedCents); });
-  const F = [...perDoc.values()].reduce((s, v) => s + v, 0);
+  const lotsOut = lots.map((x) => ({ lot: x.lot, revenueCents: x.revenueCents, weight: lotW(x), items: x.its.length, doc: x.top?.name ?? null, docVersion: x.top?.version ?? null, percentBp: x.top?.percentBp ?? 0, fixedCents: x.top?.fixedCents ?? 0, pending: !x.top?.complete }));
   const pendingItems = items.filter((i) => i.pending);
+  const noDoc = args.items.filter((i, k) => !i.doc?.complete && !items[k]!.pending);
   if (!n) warnings.push('Sem produtos na oportunidade: sem tributos por item; o preço avaliado é o preço exato do motor.');
-  if (pendingItems.length) warnings.push(`${pendingItems.length} item(ns) sem documento fiscal ou sem tributos vigentes (${pendingItems.slice(0, 3).map((i) => i.description).join(', ')}${pendingItems.length > 3 ? '…' : ''}): calculado sem esses tributos.`);
+  if (pendingItems.length) warnings.push(`${lotsOut.filter((l) => l.pending).map((l) => ECON_LOT_LABELS[l.lot]).join(' e ')} sem documento fiscal com tributos vigentes (${pendingItems.slice(0, 3).map((i) => i.description).join(', ')}${pendingItems.length > 3 ? '…' : ''}): calculado sem esses tributos.`);
+  if (noDoc.length) warnings.push(`${noDoc.length} produto(s) sem documento fiscal próprio usam o documento de maior tributo do seu lote.`);
   // parâmetros
   const c = bp(inp.commissionBp ?? st.commissionBp);
   const glosa = bp(inp.lossBp ?? (publicSector ? st.lossPublicBp : st.lossPrivateBp));
@@ -484,9 +546,10 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
     capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     variableFixedCents: E, investmentCents: Math.round(Inv),
-    term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items,
+    term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items, lots: lotsOut,
     floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
     marginPriceCents: roundUp(marginPrice), recommendedCents: roundUp(recP), markupPriceCents: roundUp(markupPrice), operatingFloorCents: roundUp(opFloor), suggestedMinCents: roundUp(suggested),
+    suggestedCents: roundUp(sugP),
     kpi, cashflow: flows.map(Math.round), statement,
     marginOk, paybackOk, verdict, withinPolicy, withReservations, warnings,
     autoApproval: { ok: boolv(v.aprovacao_automatica) && checks.every((x) => x.ok), checks },
@@ -741,14 +804,14 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
   const { N, D, d, Dalvo } = r.term;
   const k = r.kpi;
   const steps: MemoryStep[] = [];
-  const taxParts = r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
+  const taxParts = r.lots?.length ? r.lots.map((l) => `${ECON_LOT_LABELS[l.lot]} ${pc(l.weight * 100, 1)} × ${pc(l.percentBp / 100)}${l.doc ? ` (${l.doc})` : ''}`).join(' + ') : r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Planilha de custos classificada (frequência e impacto), tributos do documento fiscal e parâmetros da Direção.',
     rows: [
       { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
       ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
-      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `peso na receita × alíquota: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
+      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Comissão (c)', value: pc(c * 100) },
       { label: `Glosa, setor ${r.publicSector ? 'público' : 'privado'}`, value: pc(glosa * 100) },
@@ -832,13 +895,13 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
   const steps: MemoryStep[] = [];
 
   // 1. entradas: o que veio da oportunidade e dos parâmetros
-  const taxParts = r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
+  const taxParts = r.lots?.length ? r.lots.map((l) => `${ECON_LOT_LABELS[l.lot]} ${pc(l.weight * 100, 1)} × ${pc(l.percentBp / 100)}${l.doc ? ` (${l.doc})` : ''}`).join(' + ') : r.items.slice(0, 4).map((i) => `${pc(i.weight * 100, 1)} × ${pc(i.percentBp / 100)}`).join(' + ') + (r.items.length > 4 ? ' + …' : '');
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Custos da oportunidade, tributos dos documentos fiscais e parâmetros vigentes do motor.',
     rows: [
       { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}` : undefined, value: money(I), strong: true },
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}` : undefined, value: money(O), strong: true }] : []),
-      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `peso na receita × alíquota: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
+      { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Comissão (c)', value: pc(c * 100) },
       { label: `Glosa e inadimplência (g), setor ${r.publicSector ? 'público' : 'privado'}`, value: pc(g * 100) },
@@ -920,3 +983,36 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
   }
   return steps;
 }
+
+// ------------------------------------------------------------------ comparativo com o modelo antigo (só informativo)
+/** Fatores do modelo antigo (Configurações → Viabilidade); sem valor lá, os da regra da empresa: mensal ×3,2 e único ×2,5. */
+export const LEGACY_FACTORS = { recurringX100: 320, oneTimeX100: 250 } as const;
+export type EconCompareSide = { priceCents: number | null; markupPct: number | null; grossMarginPct: number | null; effectiveMarginPct: number | null; factor: number | null };
+/**
+ * Preço sugerido do motor × modelo antigo, sobre a mesma base de custos da planilha:
+ * recorrente = soma dos custos mensais; pagamento único = soma do investimento.
+ *   markup efetivo = (preço − base) ÷ base
+ *   margem bruta = 1 − base ÷ preço  (= 1 − 1 ÷ fator)
+ *   margem efetiva = margem bruta − tributos % − despesas variáveis % (comissão)
+ * Modelo antigo: preço = base × fator (mensal ×3,2 · único ×2,5); não entra na decisão.
+ */
+export function econCompare(r: EconResult, legacy: { recurringX100?: number | null; oneTimeX100?: number | null } = {}) {
+  const rec = r.mode === 'recorrente';
+  const base = rec ? r.opexBaseCents : r.capexBaseCents;
+  const fx = (rec ? legacy.recurringX100 ?? LEGACY_FACTORS.recurringX100 : legacy.oneTimeX100 ?? LEGACY_FACTORS.oneTimeX100) / 100;
+  const ded = (r.rates.a + r.rates.c) * 100;
+  const side = (P: number | null): EconCompareSide => {
+    if (P == null || P <= 0 || base <= 0) return { priceCents: P, markupPct: null, grossMarginPct: null, effectiveMarginPct: null, factor: null };
+    const gross = (1 - base / P) * 100;
+    return { priceCents: P, markupPct: ((P - base) / base) * 100, grossMarginPct: gross, effectiveMarginPct: gross - ded, factor: P / base };
+  };
+  const sugg = r.suggestedCents ?? r.suggestedMinCents ?? null;
+  return {
+    mode: r.mode, baseCents: base, baseLabel: rec ? 'custos mensais da planilha' : 'investimento da planilha', taxesPct: r.rates.a * 100, variablePct: r.rates.c * 100,
+    engine: side(sugg),
+    evaluated: side(r.priceCents),
+    legacy: base > 0 ? { ...side(Math.round(base * fx)), factor: fx } : { priceCents: null, markupPct: null, grossMarginPct: null, effectiveMarginPct: null, factor: fx },
+    differenceCents: base > 0 && sugg != null ? Math.round(base * fx) - sugg : null,
+  };
+}
+export type EconCompare = ReturnType<typeof econCompare>;

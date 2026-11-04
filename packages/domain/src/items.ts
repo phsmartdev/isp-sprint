@@ -61,33 +61,52 @@ export function parseUnit(raw: string | null | undefined): ItemUnit | null {
   return null;
 }
 
-const COLS: Record<keyof Omit<ItemInput, 'qtyMilli' | 'unitCents' | 'discountCents' | 'surchargeCents' | 'bidUnitCents'> | 'qty' | 'unitValue' | 'discount' | 'surcharge' | 'bid', string[]> = {
-  description: ['produto/serviço', 'produto/servico', 'produto', 'serviço', 'servico', 'item', 'descrição', 'descricao'],
-  unitValue: ['valor', 'valor unitário', 'valor unitario', 'preço', 'preco', 'valor unit'],
-  unit: ['medida', 'unidade', 'un'],
-  qty: ['quantidade', 'qtd', 'qtde', 'quant'],
-  discount: ['desconto'],
-  surcharge: ['acréscimo', 'acrescimo'],
-  notes: ['observação', 'observacao', 'obs'],
-  bid: ['lance', 'valor do lance', 'lance unitário', 'lance unitario'],
+/** Título da coluna sem acento, caixa, pontuação e espaços repetidos ("VALOR UNITÁRIO (R$)" → "valor unitario r$"). */
+export const itemHeader = (h: unknown) => String(h ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[.:;()\[\]*º°ª]/g, ' ').replace(/\s+/g, ' ').trim();
+type ColKey = 'itemNo' | 'description' | 'unitValue' | 'unit' | 'qty' | 'discount' | 'surcharge' | 'notes' | 'bid';
+/** Como reconhecer cada coluna pelo título (já normalizado). A ordem das colunas na planilha não importa. */
+const COL_MATCH: Record<ColKey, (h: string) => boolean> = {
+  itemNo: (h) => ['item', 'itens', 'n', 'no', 'n item', 'item n', 'numero', 'num', 'nr', 'seq', 'sequencia', 'ordem', 'cod', 'codigo', 'lote item'].includes(h),
+  description: (h) => /^(descricao|discriminacao|especificacao)/.test(h) || ['produto/servico', 'produto / servico', 'produto', 'servico', 'produtos', 'servicos', 'objeto', 'material', 'nome', 'denominacao'].includes(h),
+  unitValue: (h) => !/total/.test(h) && (/^(valor|vlr|vl|preco|custo) ?unit/.test(h) || /^(valor|preco)( r\$| em r\$)?$/.test(h) || ['unitario', 'valor por unidade', 'preco por unidade'].includes(h)),
+  unit: (h) => /^(unidade|unid|und)/.test(h) || ['un', 'u', 'um', 'u m', 'medida', 'unidade de medida'].includes(h),
+  qty: (h) => /^(quantidade|quant|qtd|qtde|qde)/.test(h) || h === 'qt',
+  discount: (h) => h.startsWith('desconto'),
+  surcharge: (h) => h.startsWith('acrescimo'),
+  notes: (h) => /^(observacao|observacoes|obs)$/.test(h),
+  bid: (h) => /^lance/.test(h) || h === 'valor do lance',
 };
+/** Colunas obrigatórias para incluir itens; Item (número), Unidade, Desconto, Acréscimo, Observação e Lance são opcionais. */
+export const ITEM_REQUIRED_COLUMNS = ['Descrição', 'Quantidade', 'Valor unitário'] as const;
 
 /**
- * Lê uma tabela (planilha, CSV ou colado do Excel). A primeira linha precisa ter os títulos das colunas.
- * Devolve os itens válidos e, para cada linha recusada, o motivo — nada é inventado.
+ * Lê uma tabela (planilha, CSV ou colado do Excel). A primeira linha precisa ter os títulos das colunas, em qualquer ordem
+ * (ex.: ITEM, DESCRIÇÃO, UNIDADE, QUANTIDADE, VALOR UNITÁRIO ou DESCRIÇÃO, QUANTIDADE, UNIDADE, VALOR UNITÁRIO).
+ * Obrigatórias: Descrição, Quantidade e Valor unitário. ITEM é o número do item no edital (vai para a observação);
+ * sem coluna de descrição, ITEM vale como a descrição. Unidade em branco ou fora de Un/Km/R$/H vira Un e a unidade original
+ * fica na observação. Devolve os itens válidos e, para cada linha recusada, o motivo — nada é inventado.
  */
 export function parseItemsTable(rows: (string | number | null)[][]): { items: ItemInput[]; errors: { row: number; message: string }[]; missing: string[] } {
   const clean = rows.filter((r) => r.some((c) => String(c ?? '').trim()));
-  if (!clean.length) return { items: [], errors: [], missing: ['Produto/Serviço', 'Valor', 'Quantidade'] };
-  const head = clean[0]!.map((c) => String(c ?? '').trim().toLowerCase());
-  const idx = Object.fromEntries(Object.entries(COLS).map(([k, names]) => [k, head.findIndex((h) => names.includes(h))])) as Record<keyof typeof COLS, number>;
-  const missing = [idx.description < 0 && 'Produto/Serviço', idx.unitValue < 0 && 'Valor', idx.qty < 0 && 'Quantidade'].filter(Boolean) as string[];
+  if (!clean.length) return { items: [], errors: [], missing: [...ITEM_REQUIRED_COLUMNS] };
+  const head = clean[0]!.map(itemHeader);
+  const used = new Set<number>();
+  const find = (k: ColKey) => { const i = head.findIndex((h, j) => !used.has(j) && COL_MATCH[k](h)); if (i >= 0) used.add(i); return i; };
+  // a descrição primeiro: "Item" só vira descrição quando não há outra coluna de descrição
+  const idx = {} as Record<ColKey, number>;
+  idx.description = find('description');
+  idx.itemNo = find('itemNo');
+  if (idx.description < 0 && idx.itemNo >= 0 && ['item', 'itens'].includes(head[idx.itemNo]!)) { idx.description = idx.itemNo; idx.itemNo = -1; }
+  for (const k of ['unitValue', 'qty', 'unit', 'discount', 'surcharge', 'notes', 'bid'] as const) idx[k] = find(k);
+  const missing = [idx.description < 0 && 'Descrição', idx.qty < 0 && 'Quantidade', idx.unitValue < 0 && 'Valor unitário'].filter(Boolean) as string[];
   if (missing.length) return { items: [], errors: [], missing };
   const items: ItemInput[] = [];
   const errors: { row: number; message: string }[] = [];
   clean.slice(1).forEach((r, k) => {
     const cell = (i: number) => (i < 0 ? null : r[i] ?? null);
-    const unit = parseUnit(cell(idx.unit) == null ? '' : String(cell(idx.unit)));
+    const rawUnit = cell(idx.unit) == null ? '' : String(cell(idx.unit)).trim();
+    const known = parseUnit(rawUnit);
+    const unit = known ?? 'un';
     const qty = parseQty(cell(idx.qty) as string | number | null);
     const unitCents = parseMoney(cell(idx.unitValue) as string | number | null);
     const discountCents = parseMoney(cell(idx.discount) as string | number | null);
@@ -95,10 +114,11 @@ export function parseItemsTable(rows: (string | number | null)[][]): { items: It
     const bidRaw = cell(idx.bid);
     const bidUnitCents = bidRaw == null || bidRaw === '' ? null : parseMoney(bidRaw as string | number);
     const row = k + 2;
-    if (!unit) return errors.push({ row, message: `Medida “${cell(idx.unit)}” não reconhecida (use Un, Km, R$ ou H).` });
     if (qty == null) return errors.push({ row, message: 'Quantidade inválida.' });
     if (unitCents == null || discountCents == null || surchargeCents == null || (bidRaw != null && bidRaw !== '' && bidUnitCents == null)) return errors.push({ row, message: 'Valor, desconto, acréscimo ou lance em formato inválido.' });
-    const it: ItemInput = { description: String(cell(idx.description) ?? '').trim(), unit, qtyMilli: qty, unitCents, discountCents, surchargeCents, notes: cell(idx.notes) == null ? null : String(cell(idx.notes)).trim() || null, bidUnitCents };
+    const itemNo = cell(idx.itemNo) == null ? '' : String(cell(idx.itemNo)).trim();
+    const notes = [itemNo && `Item ${itemNo}`, !known && rawUnit && `Unidade: ${rawUnit}`, cell(idx.notes) == null ? '' : String(cell(idx.notes)).trim()].filter(Boolean).join(' · ');
+    const it: ItemInput = { description: String(cell(idx.description) ?? '').trim(), unit, qtyMilli: qty, unitCents, discountCents, surchargeCents, notes: notes || null, bidUnitCents };
     const err = itemErrors(it);
     if (err) return errors.push({ row, message: err });
     items.push(it);

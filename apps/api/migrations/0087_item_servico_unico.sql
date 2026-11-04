@@ -1,0 +1,2 @@
+ALTER TABLE "opportunity_items" DROP CONSTRAINT "opportunity_items_deal_kind_ck";--> statement-breakpoint
+ALTER TABLE "opportunity_items" ADD CONSTRAINT "opportunity_items_deal_kind_ck" CHECK (deal_kind in ('venda','servico','recorrencia','locacao'));

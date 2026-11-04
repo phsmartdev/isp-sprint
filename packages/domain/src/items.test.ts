@@ -27,10 +27,33 @@ describe('itens da oportunidade', () => {
       ['Suporte', '80', 'diária', '1', '', '', '', ''],
       ['', '', '', '', '', '', '', ''],
     ]);
-    expect(r.items).toHaveLength(2);
+    expect(r.items).toHaveLength(3);
     expect(r.items[0]).toMatchObject({ description: 'Link dedicado 200 Mb', unitCents: 150000, qtyMilli: 2000, discountCents: 10000, notes: 'Prédio sede', bidUnitCents: 140000 });
     expect(r.items[1]).toMatchObject({ unit: 'km', qtyMilli: 1500, bidUnitCents: null });
-    expect(r.errors).toEqual([{ row: 4, message: expect.stringMatching(/diária/) }]);
-    expect(parseItemsTable([['Nome', 'Preço']]).missing).toEqual(['Produto/Serviço', 'Quantidade']);
+    expect(r.items[2]).toMatchObject({ description: 'Suporte', unit: 'un', notes: 'Unidade: diária' });
+    expect(r.errors).toEqual([]);
+    expect(parseItemsTable([['Nome', 'Preço']]).missing).toEqual(['Quantidade']);
+    expect(parseItemsTable([['Código', 'Total']]).missing).toEqual(['Descrição', 'Quantidade', 'Valor unitário']);
+  });
+
+  it('colar do Excel: as quatro ordens de colunas dos editais, ITEM opcional', () => {
+    const orders = [
+      [['ITEM', 'DESCRIÇÃO', 'UNIDADE', 'QUANTIDADE', 'VALOR UNITÁRIO ITEM'], ['1', 'Roteador Wi-Fi 6', 'UN', '10', '1.250,00']],
+      [['DESCRIÇÃO', 'QUANTIDADE', 'UNIDADE', 'VALOR UNITÁRIO'], ['Roteador Wi-Fi 6', '10', 'UN', '1.250,00']],
+      [['ITEM', 'DESCRIÇÃO', 'UNIDADE', 'QUANTIDADE', 'VALOR UNITÁRIO'], ['1', 'Roteador Wi-Fi 6', 'UN', '10', 'R$ 1.250,00']],
+      [['ITEM', 'DESCRIÇÃO', 'QUANTIDADE', 'UNIDADE', 'VALOR UNITÁRIO'], ['1', 'Roteador Wi-Fi 6', '10', 'UN', '1250,00']],
+    ];
+    for (const rows of orders) {
+      const r = parseItemsTable(rows);
+      expect(r.missing).toEqual([]);
+      expect(r.items).toEqual([expect.objectContaining({ description: 'Roteador Wi-Fi 6', unit: 'un', qtyMilli: 10_000, unitCents: 125_000 })]);
+    }
+    expect(parseItemsTable(orders[0]!).items[0]!.notes).toBe('Item 1');
+    expect(parseItemsTable(orders[1]!).items[0]!.notes).toBeNull();
+    // valor total não é confundido com o unitário; unidade fora da lista vira Un com a original na observação
+    const t = parseItemsTable([['Item', 'Descrição', 'Unid.', 'Qtd.', 'Valor Total (R$)', 'Valor Unit. (R$)'], ['2', 'Link 200 Mb', 'MÊS', '12', '18.000,00', '1.500,00']]);
+    expect(t.items[0]).toMatchObject({ unitCents: 150_000, qtyMilli: 12_000, unit: 'un', notes: 'Item 2 · Unidade: MÊS' });
+    // sem coluna de descrição, ITEM é a descrição (como antes)
+    expect(parseItemsTable([['Item', 'Quantidade', 'Valor'], ['Instalação', '1', '300']]).items[0]).toMatchObject({ description: 'Instalação', notes: null });
   });
 });
