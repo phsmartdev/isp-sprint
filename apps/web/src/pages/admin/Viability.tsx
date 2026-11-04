@@ -29,7 +29,7 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
   );
 }
 
-const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
+const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
 type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; blockOutsidePolicy: boolean; validFrom: string };
 type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; blockOutsidePolicy: boolean };
@@ -38,8 +38,10 @@ type EconData = { current: (EconVersion & { id: string; validFrom: string }) | n
 /** Campos em grupos, na ordem em que o cálculo os usa. */
 type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic' | 'horizonMaxMonths'; label: string; hint: string; months?: boolean; factor?: boolean; optional?: boolean };
 const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
-  { title: 'Deduções da receita', desc: 'Saem do preço antes da margem de contribuição. Os tributos vêm do documento fiscal de cada item.', fields: [
-    { key: 'commissionBp', label: 'Comissão padrão', hint: 'Sobre o preço; o vendedor pode ajustar na oportunidade' },
+  { title: 'Divisor do markup (sai da nota)', desc: 'Preço = custos ÷ (1 − tributos da cesta − despesas variáveis − margem). Os tributos vêm do documento fiscal de maior tributo de cada cesta. Não há comissão.', fields: [
+    { key: 'variableExpenseBp', label: 'Despesas variáveis', hint: 'Sobre o preço (ex.: taxas de cobrança); em branco = 0. O vendedor pode ajustar', optional: true },
+  ] },
+  { title: 'Fora do preço: perdas no fluxo de caixa', desc: 'Não entram no divisor do markup. Reduzem o caixa (VPL, TIR, payback) e a margem operacional.', fields: [
     { key: 'lossPrivateBp', label: 'Glosa, setor privado', hint: 'Retenção ou não aceite parcial das faturas (SLA, disputas)' },
     { key: 'lossPublicBp', label: 'Glosa, setor público', hint: 'Conta governamental, natureza pública ou licitação' },
     { key: 'badDebtBp', label: 'Inadimplência', hint: 'Perda ou atraso esperado sobre o faturamento' },
@@ -103,7 +105,7 @@ function EconEngine() {
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
-    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: e }),
+    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: { ...e, commissionBp: 0 } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Parâmetros publicados' }); },
     onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
   });
@@ -155,13 +157,13 @@ function EconEngine() {
           <summary className="cursor-pointer font-semibold text-ink">Histórico de publicações ({q.data.versions.length})</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[960px] text-xs">
-              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Comissão', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{q.data.versions.map((v) => (
                 <tr key={v.id} className="border-t border-line">
                   <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>
                   <td className="num py-1 pr-3">{p2(v.values.marginTargetBp)} / {p2(v.values.marginSuggestedBp)} / {p2(v.values.marginMaxBp)}</td>
                   <td className="num py-1 pr-3">{v.values.tmaAnnualBp != null ? `${p2(v.values.tmaAnnualBp)} a.a.` : `${p2(v.values.tmaMonthlyBp)} a.m.`}</td>
-                  <td className="num py-1 pr-3">{p2(v.values.commissionBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.variableExpenseBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.lossPrivateBp)} / {p2(v.values.lossPublicBp)} · {p2(v.values.badDebtBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.contingencyCapexBp)} / {p2(v.values.contingencyOpexBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.overheadBp)}</td>

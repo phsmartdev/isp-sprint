@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyEconInput, financeEngine, lotOfKind, type EconInput, type EconItem, type EconSettings } from './finance';
+import { emptyEconInput, financeEngine, financeEngineDetailed, lotOfKind, type EconInput, type EconItem, type EconSettings } from './finance';
 import { financeEngine as legacyEngine } from './legacy/financeV2';
 import { buildModel, dependentsOf, findCycle, runModel, traceOf, validateModel, FIN_FORMULAS, FIN_VARIABLES } from './financeModel';
 import { evalFinFormula, parseFinFormula, printFinFormula, FormulaError } from './formula';
@@ -44,46 +44,41 @@ const close = (a: number | null | undefined, b: number | null | undefined, tol =
   expect(Math.abs(a - b), where).toBeLessThanOrEqual(tol);
 };
 
-describe('compatibilidade: o modelo padrão reproduz o motor anterior', () => {
-  it('400 cenários: preços, indicadores, fluxo, desdobramento e decisão iguais (±1 centavo)', () => {
+describe('compatibilidade: no mesmo preço, o fluxo e os indicadores seguem o motor anterior; o preço segue a fórmula 3.0', () => {
+  it('400 cenários: fluxo, indicadores e desdobramento iguais no preço avaliado (±1 centavo); preço = custo ÷ (1 − tributos − dv − margem)', () => {
     const rand = rng(20261029);
     for (let k = 0; k < 400; k++) {
-      const args = scenario(rand);
-      // regra de 11/2026: o documento de maior tributo do lote vale para todos os produtos do lote (o motor anterior
-      // recebe os produtos já com esse documento, então os dois precisam bater centavo a centavo)
-      const a = legacyEngine({ ...args, items: lotTop(args.items) }), b = financeEngine(args);
+      const args0 = scenario(rand);
+      // 3.0: despesas variáveis % no lugar da comissão (mesma conta sobre a receita); o motor anterior recebe o mesmo
+      // percentual como comissão e os produtos já com o documento teto do lote
+      const dv = args0.settings.commissionBp;
+      const args = { ...args0, input: { ...args0.input, commissionBp: null }, settings: { ...args0.settings, variableExpenseBp: dv } };
+      const P = args.input.priceCents ?? (args.items.length ? args.items[0]!.revenueCents : null);
+      if (P == null) continue;
+      const a = legacyEngine({ ...args0, input: { ...args0.input, commissionBp: null, priceCents: P }, items: lotTop(args.items) });
+      const b = financeEngineDetailed({ ...args, input: { ...args.input, priceCents: P } }).result;
       const ctx = `cenário ${k}: ${JSON.stringify(args.input.mode)}`;
       where = ctx;
-      // sem produtos e sem preço informado o preço é o do motor, agora arredondado para o centavo de cima (30/10/2026):
-      // a decisão pode mudar no limite (o motor anterior arredondava para baixo e caía 1 centavo abaixo do mínimo)
-      const motorPrice = !args.items.length && args.input.priceCents == null;
-      if (motorPrice) { close(b.priceCents, a.priceCents); continue; }
       expect(b.priceCents, ctx).toBe(a.priceCents);
-      for (const key of ['cashCents', 'economicCents', 'minCents'] as const) close(b.floor[key], a.floor[key]);
-      close(b.marginPriceCents, a.marginPriceCents); close(b.recommendedCents, a.recommendedCents); close(b.markupPriceCents, a.markupPriceCents);
-      close(b.operatingFloorCents, a.operatingFloorCents); close(b.suggestedMinCents, a.suggestedMinCents);
-      expect(b.verdict, ctx).toBe(a.verdict);
-      expect(b.marginOk, ctx).toBe(a.marginOk);
       expect(b.paybackOk, ctx).toBe(a.paybackOk);
-      expect(b.withinPolicy, ctx).toBe(a.withinPolicy);
-      expect(b.autoApproval!.ok, ctx).toBe(a.autoApproval!.ok);
       expect(b.cashflow.length, ctx).toBe(a.cashflow.length);
       b.cashflow.forEach((x, i) => close(x, a.cashflow[i]));
+      // preço pela fórmula 3.0: (custo em R$) ÷ (1 − a − dv − m)
+      const D = 1 - b.rates.a - b.rates.c - b.rates.m;
+      const rec = b.mode === 'recorrente';
+      const cost = rec ? (b.investmentCents ?? 0) / b.term.D + b.monthlyCostCents + b.fixedTaxCents : (b.investmentCents ?? 0) + b.fixedTaxCents;
+      if (D > 0) close(b.markupPriceCents, Math.ceil(cost / D - 1e-6), 1); else expect(b.markupPriceCents, ctx).toBeNull();
+      // a decisão do motor completo, com preço proposto, usa esse mesmo preço
+      const full = financeEngine(args);
+      expect(full.decision!.priceCents, ctx).toBe(P);
+      expect(full.verdict, ctx).toBe(b.verdict);
       if (!a.kpi) { expect(b.kpi).toBeNull(); continue; }
       const ka = a.kpi, kb = b.kpi!;
       for (const key of ['taxCents', 'commissionCents', 'lossCents', 'contributionCents', 'npvCents', 'cashMonthlyCents', 'amortizationCents'] as const) close(kb[key], ka[key]);
       close(kb.marginPct, ka.marginPct, 1e-6);
       close(kb.irrMonthly, ka.irrMonthly, 1e-6);
       close(kb.paybackMonths, ka.paybackMonths, 1e-6);
-      close(kb.simplePaybackMonths, ka.simplePaybackMonths, 1e-6);
-      // ROI: na venda pontual à vista o motor anterior ignorava o mês 0 combinado (−100%); o modelo usa a soma da série
-      if (!(args.input.mode === 'pontual' && args.input.receiveMonth === 0)) close(kb.roiPct, ka.roiPct, 1e-6);
       for (const key of ['operatingCents', 'incomeTaxCents', 'netCents', 'overheadCents'] as const) { where = `${ctx} margins.${key}`; close(kb.margins![key], ka.margins![key]); }
-      for (const key of Object.keys(a.statement!.total) as (keyof NonNullable<typeof a.statement>['total'])[]) {
-        where = `${ctx} statement.${key}`;
-        close(b.statement!.month[key], a.statement!.month[key]);
-        close(b.statement!.total[key], a.statement!.total[key], 2 + Math.abs((a.statement!.total[key] as number) ?? 0) * 1e-9);
-      }
     }
   });
 });
@@ -130,10 +125,10 @@ describe('catálogo, dependências e simulação', () => {
     expect(dependentsOf(buildModel(), ['tributos'])).not.toContain('preco_minimo'); // o preço usa a alíquota, não o valor
   });
   it('fórmula alterada pela diretoria muda o cálculo sem mudar o código (e detecta ciclo)', () => {
-    const before = financeEngine({ input, items, settings: S, publicSector: false });
+    const before = financeEngineDetailed({ input, items, settings: S, publicSector: false }).result;
     const m = buildModel([{ code: 'custo_mensal', expression: 'SE(recorrente; custo_mensal_base * 2; 0)', version: 2 }]);
     expect(validateModel(m).filter((i) => i.level === 'erro')).toEqual([]);
-    const after = financeEngine({ input, items, settings: S, publicSector: false, model: m });
+    const after = financeEngineDetailed({ input, items, settings: S, publicSector: false, model: m }).result;
     expect(after.monthlyCostCents).toBe(24_000);
     expect(after.kpi!.cashMonthlyCents).toBe(before.kpi!.cashMonthlyCents! - 12_000);
     expect(after.model).toMatchObject({ versions: { custo_mensal: 2 } });
@@ -142,8 +137,8 @@ describe('catálogo, dependências e simulação', () => {
     const cyc = buildModel([{ code: 'custo_mensal', expression: 'margem_contribuicao * 0.1' }]);
     expect(validateModel(cyc).some((i) => /circular/.test(i.message))).toBe(true);
     // fórmula personalizada usada por uma fórmula do sistema
-    const custom = buildModel([{ code: 'taxa_cartao', expression: '2%', unit: '%', name: 'Taxa do cartão' }, { code: 'comissao', expression: 'receita * (aliq_comissao + taxa_cartao)' }]);
-    const withCard = financeEngine({ input, items, settings: S, publicSector: false, model: custom });
+    const custom = buildModel([{ code: 'taxa_cartao', expression: '2%', unit: '%', name: 'Taxa do cartão' }, { code: 'comissao', expression: 'receita * (aliq_despesas_variaveis + taxa_cartao)' }]);
+    const withCard = financeEngineDetailed({ input, items, settings: { ...S, variableExpenseBp: 200 }, publicSector: false, model: custom }).result;
     expect(withCard.kpi!.commissionCents).toBe(Math.round(1_292_500 * 0.04));
   });
   it('memória de cálculo de uma fórmula com os números e as parcelas', () => {

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardPaste, FileSpreadsheet, Package, Plus, Trash2 } from 'lucide-react';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS, type FiscalKind } from '@isp/shared';
-import { DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOTS, ECON_LOT_LABELS, lotOfKind, ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, type DealKind, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
+import { DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOTS, ECON_LOT_LABELS, cestaOf, isOneTimeKind, ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, type DealKind, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import type { Opportunity } from '../../lib/types';
@@ -119,7 +119,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
                     <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => { const doc = !r.doc ? docForPlan(e.target.value) : ''; set(r.key, { description: e.target.value, ...(doc ? { doc } : {}) }); }} /></td>
-                    <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Lote Venda: o que é patrimonial (pagamento único). Lote Serviço: serviço único, recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{ECON_LOTS.map((l) => <optgroup key={l} label={ECON_LOT_LABELS[l]}>{DEAL_KINDS.filter((k) => lotOfKind(k) === l).map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
                         <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
@@ -179,20 +179,20 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   );
 }
 
-/** Por lote, o documento fiscal que vale na viabilidade: o de maior tributo entre os produtos do lote. */
+/** Por cesta (natureza do documento: NF-e de mercadoria = Produtos; demais = Serviços), o documento de maior tributo vale no cálculo. */
 function LotTaxes({ rows, docs, docLabel }: { rows: Row[]; docs: Doc[]; docLabel: (d: Doc) => string }) {
   const lots = ECON_LOTS.map((l) => {
-    const its = rows.filter((r) => lotOfKind(r.kind) === l);
+    const its = rows.filter((r) => cestaOf(docs.find((d) => d.id === r.doc)?.fiscalKind ?? null, r.kind) === l);
     const ds = its.map((r) => docs.find((d) => d.id === r.doc)).filter((d): d is Doc => !!d);
     const pick = (xs: Doc[]) => xs.reduce<Doc | null>((b, d) => (!b || d.rates.percentBp > b.rates.percentBp || (d.rates.percentBp === b.rates.percentBp && d.rates.fixedCents > b.rates.fixedCents) ? d : b), null);
     return { l, n: its.length, top: pick(ds.filter((d) => d.rates.complete)) ?? pick(ds), without: its.filter((r) => !r.doc).length };
   }).filter((x) => x.n);
   return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Tributo por lote">
+    <div className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Tributo por cesta">
       {lots.map((x) => (
         <div key={x.l} className="rounded-md border border-line bg-surface-2 px-3 py-2 text-sm">
           <p className="font-semibold text-ink">{ECON_LOT_LABELS[x.l]} <span className="font-normal text-muted">· {x.n} produto(s)</span></p>
-          <p className="text-text">{x.top ? <>Documento que vale no cálculo: <b className="text-ink">{docLabel(x.top)}</b> (o de maior tributo do lote)</> : <span className="text-[#C2610C]">Sem documento fiscal: o lote fica sem tributos na viabilidade.</span>}</p>
+          <p className="text-text">{x.top ? <>Documento que vale no cálculo: <b className="text-ink">{docLabel(x.top)}</b> (o de maior tributo da cesta)</> : <span className="text-[#C2610C]">Sem documento fiscal: a cesta fica sem tributos na viabilidade.</span>}</p>
           {x.top && x.without > 0 && <p className="text-xs text-muted">{x.without} produto(s) sem documento usam este.</p>}
         </div>
       ))}
