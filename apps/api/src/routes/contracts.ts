@@ -5,7 +5,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
-  SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, type AlertKind, type Segment,
+  SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -318,7 +318,42 @@ export const contractRoutes = [
         pendingAccept: { n: tasks.filter((t) => t.acceptStatus === 'pendente').length, returned: tasks.filter((t) => t.acceptStatus === 'devolvida').length },
         atRisk: atRisk.sort((a, b) => b.monthlyCents - a.monthlyCents).slice(0, 8).map((r) => ({ id: r.id, clientName: r.clientName, number: r.number, endAt: r.endAt, daysLeft: r.daysLeft, monthlyCents: r.monthlyCents, reason: r.closureExpected ? 'Encerramento previsto' : 'Vence sem renovação concluída' })),
       };
+      // leituras para decisão: saúde de cada contrato, vencimentos pela situação da renovação, concentração, responsáveis e reajustes
+      const renewalOf = (r: (typeof active)[number]) => { const ps = renewOpen.filter((p) => p.contractId === r.id && p.cycleKey === r.endAt); return ps.some((p) => p.status === 'concluido') ? 'concluido' as const : ps.some((p) => p.status === 'aberto') ? 'aberto' as const : null; };
+      const overdueBy = new Map<string, number>();
+      for (const t of overdueTasks) overdueBy.set(t.contractId!, (overdueBy.get(t.contractId!) ?? 0) + 1);
+      const pc = active.map((r) => ({ id: r.id, endAt: r.endAt, monthlyCents: r.monthlyCents, closureExpected: r.closureExpected, renewal: renewalOf(r), overdue: r.pendencies.overdue, overdueTasks: overdueBy.get(r.id) ?? 0, erpStatus: latestBy.get(r.id)?.status ?? null }));
+      const pcBy = new Map(pc.map((x) => [x.id, x]));
+      const healthOf = (id: string) => contractHealth(pcBy.get(id)!, today);
+      const adjProcs = ids.length ? await app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status }).from(s.contractProcesses).where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : [];
+      const adjDue = adjustmentsDue(active.map((r) => ({ id: r.id, adjustmentBaseDate: r.adjustmentBaseDate, adjustmentIndex: r.adjustmentIndex, monthlyCents: r.monthlyCents, processes: adjProcs.filter((p) => p.contractId === r.id) })), today, 90);
+      const owners = new Map<string, { name: string; n: number; monthlyCents: number; riskCents: number; overdueTasks: number; pendencias: number; erpPending: number }>();
+      for (const r of active) {
+        const k = r.ownerName ?? 'Sem responsável';
+        const o = owners.get(k) ?? { name: k, n: 0, monthlyCents: 0, riskCents: 0, overdueTasks: 0, pendencias: 0, erpPending: 0 };
+        const h = healthOf(r.id);
+        o.n++; o.monthlyCents += r.monthlyCents;
+        if (h === 'em_risco') o.riskCents += r.monthlyCents;
+        if (h !== 'em_dia') o.pendencias++;
+        o.overdueTasks += overdueBy.get(r.id) ?? 0;
+        if (latestBy.get(r.id)?.status !== 'conferido_ixc') o.erpPending++;
+        owners.set(k, o);
+      }
+      const perClientMrr = new Map<string, { key: string; name: string; cents: number }>();
+      for (const r of active) { const x = perClientMrr.get(r.contactId) ?? { key: r.contactId, name: r.clientName, cents: 0 }; x.cents += r.monthlyCents; perClientMrr.set(r.contactId, x); }
+      const ctr = (r: (typeof active)[number]) => ({ id: r.id, clientName: r.clientName, number: r.number, ownerName: r.ownerName, monthlyCents: r.monthlyCents, endAt: r.endAt, daysLeft: r.daysLeft, stage: r.stage, nextAction: r.nextAction, nextActionAt: r.nextActionAt });
+      const decision = {
+        health: healthSummary(pc, today),
+        expiringPlan: expiringPlan(pc, today, 12),
+        pareto: pareto([...perClientMrr.values()], 10),
+        byOwner: [...owners.values()].sort((a, b) => b.monthlyCents - a.monthlyCents),
+        adjustmentsDue: adjDue.map((a) => { const r = active.find((x) => x.id === a.id)!; return { ...a, clientName: r.clientName, number: r.number }; }),
+        actionList: active.filter((r) => healthOf(r.id) !== 'em_dia').map((r) => ({ ...ctr(r), health: healthOf(r.id), renewal: renewalState(pcBy.get(r.id)!), overdue: r.pendencies.overdue, overdueTasks: overdueBy.get(r.id) ?? 0, erpStatus: latestBy.get(r.id)?.status ?? null }))
+          .sort((a, b) => HEALTH_STATES.indexOf(b.health) - HEALTH_STATES.indexOf(a.health) || b.monthlyCents - a.monthlyCents).slice(0, 30),
+        mrrTotal: active.reduce((a, r) => a + r.monthlyCents, 0),
+      };
       return {
+        decision,
         operations,
         expiringCents: { d30: within(30).reduce((a, r) => a + r.monthlyCents, 0), d60: within(60).reduce((a, r) => a + r.monthlyCents, 0), d90: within(90).reduce((a, r) => a + r.monthlyCents, 0) },
         period: { from, to, prevFrom, prevTo },

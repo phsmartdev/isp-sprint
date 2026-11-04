@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, Search, TrendingUp, Wallet } from 'lucide-react';
+import { Activity, AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Plus, Search, TrendingUp, Wallet } from 'lucide-react';
 import { BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_MENU_TABS, CONTRACT_TABS, CONTRACT_TAB_LABELS, type ContractStage, type ContractTab } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtInt } from '../../lib/format';
@@ -22,6 +22,7 @@ import { CommitmentPortfolio } from '../../features/contracts/CommitmentPortfoli
 import { ModelsTab } from '../../features/contracts/ModelsTab';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
 import { RaciPanel } from '../../features/contracts/RaciPanel';
+import { ContractLifeDrawer } from '../../features/contracts/ContractLife';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type ContractRow } from '../../features/contracts/shared';
 
 type View = ContractTab;
@@ -36,6 +37,7 @@ function Lista() {
   const { can } = useAuth();
   const [f, setF] = useUrlState({ q: '', stage: '', kind: '', btype: '', status: 'ativos', ownerId: '', exp: '', page: '1', size: '25' });
   const [search, setSearch] = useState(f.q);
+  const [life, setLife] = useState<string | null>(null);
   const dq = useDebounced(search, 300);
   useEffect(() => { if (dq !== f.q) setF({ q: dq }); }, [dq]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = useQuery({ queryKey: ['contracts', 'list', f], placeholderData: keepPreviousData, queryFn: () => api<{ items: ContractRow[]; total: number }>(`/contracts${qs({ q: f.q, stage: f.stage, kind: f.kind, billingType: f.btype, status: f.status, ownerId: f.ownerId, expiringDays: f.exp, page: f.page, pageSize: f.size })}`) });
@@ -64,7 +66,7 @@ function Lista() {
               <tbody>
                 {q.data!.items.map((r) => (
                   <tr key={r.id} className="cursor-pointer border-t border-line hover:bg-surface-2/60" onClick={() => nav(`/contracts/${r.id}`)}>
-                    <td className="px-4 py-3"><Link to={`/contracts/${r.id}`} className="font-semibold text-ink hover:underline" onClick={(e) => e.stopPropagation()}>{r.number}</Link><span className="block text-xs text-muted">CT-{r.code} · {BILLING_TYPE_LABELS[r.billingType]} · {KIND_LABEL[r.kind]}</span></td>
+                    <td className="px-4 py-3"><span className="flex items-center gap-2"><Link to={`/contracts/${r.id}`} className="font-semibold text-ink hover:underline" onClick={(e) => e.stopPropagation()}>{r.number}</Link><button type="button" className="rounded p-1 text-muted hover:bg-surface-2 hover:text-primary" title="Vida do contrato" aria-label={`Vida do contrato ${r.number}`} onClick={(e) => { e.stopPropagation(); setLife(r.id); }}><Activity className="h-4 w-4" /></button></span><span className="block text-xs text-muted">CT-{r.code} · {BILLING_TYPE_LABELS[r.billingType]} · {KIND_LABEL[r.kind]}</span></td>
                     <td className="px-4 py-3 text-ink">{r.clientName}</td>
                     <td className="px-4 py-3"><StageChip stage={r.stage} /></td>
                     <td className="px-4 py-3">{r.ownerName ?? '—'}</td>
@@ -81,6 +83,7 @@ function Lista() {
           <div className="px-4 py-3"><Pagination page={Number(f.page)} pageSize={Number(f.size)} total={q.data!.total} onPage={(p) => setF({ page: String(p) }, { resetPage: false })} onPageSize={(s) => setF({ size: String(s) })} noun="contratos" sizes={[25, 50, 100]} /></div>
         </div>
       )}
+      <ContractLifeDrawer id={life} onClose={() => setLife(null)} />
     </div>
   );
 }

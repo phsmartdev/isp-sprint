@@ -42,3 +42,4 @@ export * from './commitments';
 export * from './commitmentPlanning';
 export * from './playbook';
 export * from './contractErp';
+export * from './contractPortfolio';

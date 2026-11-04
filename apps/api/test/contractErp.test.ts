@@ -254,4 +254,15 @@ describe('Cadastro ERP', () => {
     ok(await carlos.put(`/contracts/${id}`, { adminOwnerId: ana.me.user.id }));
     expect(ok(await carlos.get(`/contracts/${id}`)).json().adminOwnerName).toBe('Ana Souza');
   });
+
+  it('painel para decisão: saúde soma o MRR, contratos que pedem ação, vencimentos pela renovação, concentração e responsáveis', async () => {
+    const d = ok(await carlos.get('/contracts/dashboard')).json();
+    const sum = d.decision.health.reduce((a: number, h: { monthlyCents: number }) => a + h.monthlyCents, 0);
+    expect(sum).toBe(d.monthlyCents);
+    expect(d.decision.health.map((h: { key: string }) => h.key)).toEqual(['em_dia', 'pendencia', 'divergente', 'em_risco']);
+    expect(d.decision.expiringPlan).toHaveLength(12);
+    expect(d.decision.actionList.every((r: { health: string }) => r.health !== 'em_dia')).toBe(true);
+    expect(d.decision.pareto.items[0].share).toBeGreaterThan(0);
+    expect(d.decision.byOwner.reduce((a: number, o: { n: number }) => a + o.n, 0)).toBe(d.active);
+  });
 });
