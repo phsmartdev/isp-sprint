@@ -97,6 +97,7 @@ export const dataAdminRoutes = [
           await tx.delete(s.contractClauses).where(eq(s.contractClauses.tenantId, t));
           await tx.delete(s.technicalCertificates).where(eq(s.technicalCertificates.tenantId, t));
           await tx.delete(s.contractDigests).where(eq(s.contractDigests.tenantId, t));
+          await tx.delete(s.contractNotifications).where(eq(s.contractNotifications.tenantId, t));
           await tx.delete(s.contractErpEvents).where(eq(s.contractErpEvents.tenantId, t));
           await tx.delete(s.contractErpRecords).where(eq(s.contractErpRecords.tenantId, t));
           await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));
@@ -124,6 +125,7 @@ export const dataAdminRoutes = [
           await tx.update(s.decisions).set({ followUpTaskId: null }).where(eq(s.decisions.tenantId, t));
           // impedimentos são registro dos rituais: ficam, só perdem o vínculo com o projeto apagado
           await tx.update(s.impediments).set({ projectId: null, milestoneId: null, taskId: null }).where(eq(s.impediments.tenantId, t));
+          await tx.delete(s.contractNotifications).where(and(eq(s.contractNotifications.tenantId, t), inArray(s.contractNotifications.activityId, acts)));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto

@@ -3,7 +3,7 @@
  * segregação de funções e a ficha de lançamento em PDF (timbrado da filial da venda).
  */
 import { createHash } from 'node:crypto';
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import {
   ERP_FIELDS, ERP_GROUPS, ERP_GROUP_LABELS, ERP_STATUS_LABELS, effectiveValue, erpIssues, personTypeOf, snapshotText,
@@ -69,10 +69,11 @@ export function hashSnapshot(values: Record<string, string | null>, items: reado
 }
 
 // ------------------------------------------------------------------ permissões (Playbook + segregação)
+/** Quem ocupa os papéis: parametrizado no cadastro de cada usuário (Configurações → Usuários). */
 async function holders(db: DbOrTx, tenantId: string, roles: PlaybookRole[]) {
-  const r = await db.select({ role: s.playbookRoleHolders.role, userId: s.playbookRoleHolders.userId }).from(s.playbookRoleHolders).where(eq(s.playbookRoleHolders.tenantId, tenantId));
-  const all = r.filter((x) => roles.includes(x.role as PlaybookRole));
-  return { defined: all.length > 0, users: new Set(all.map((x) => x.userId).filter((x): x is string => !!x)) };
+  const r = await db.select({ id: s.users.id }).from(s.users)
+    .where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), sql`${s.users.playbookRoles} && ${sql.raw(`ARRAY[${roles.map((x) => `'${x}'`).join(',')}]::text[]`)}`));
+  return { defined: r.length > 0, users: new Set(r.map((x) => x.id)) };
 }
 
 /**

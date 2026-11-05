@@ -38,7 +38,7 @@ beforeAll(async () => {
   ctx = await makeApp();
   [carlos, ana, lucas] = (await Promise.all(['carlos', 'ana', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client, Client];
 });
-afterAll(async () => { await ctx.db.execute(sql`update integrations set enabled = false where kind = 'ixc'`); await ctx.db.execute(sql`delete from playbook_role_holders`); server.close(); await ctx.close(); });
+afterAll(async () => { await ctx.db.execute(sql`update integrations set enabled = false where kind = 'ixc'`); await ctx.db.execute(sql`update users set playbook_roles = '{}'`); server.close(); await ctx.close(); });
 
 async function wonContract(name: string) {
   const plan = (await lucas.get('/meta/lookups')).json().plans[0];
@@ -65,16 +65,19 @@ describe('Playbook: matriz RACI, titulares em aberto e SLA', () => {
     // AC, TC e ANS do documento viraram ANC
     expect(p.matrix.find((x: { key: string }) => x.key === 'validacao_comercial').R).toEqual(['ANC']);
     expect(p.matrix.find((x: { key: string }) => x.key === 'atualizacao_final').A).toBe('ANC');
-    expect(p.roles.every((r: { holders: unknown[] }) => r.holders.length === 0)).toBe(true);
+    expect(p.roles.every((r: { users: unknown[]; actors: unknown[] }) => r.users.length === 0 && r.actors.length === 0)).toBe(true);
     expect(p.canManage).toBe(false);
     expect((await lucas.put('/contract-playbook/sla/cadastro_erp', { slaHours: 48 })).statusCode).toBe(403);
     ok(await carlos.put('/contract-playbook/sla/cadastro_erp', { slaHours: 48 }));
     expect((await carlos.put('/contract-playbook/sla/inexistente', { slaHours: 4 })).statusCode).toBe(404);
-    const ext = ok(await carlos.post('/contract-playbook/holders', { role: 'DIR', externalName: 'Diretor Fictício (externo)' }), 201).json();
-    expect((await carlos.post('/contract-playbook/holders', { role: 'DIR' })).statusCode).toBe(422);
+    // ator externo: papéis e canais; o canal exige o contato
+    expect((await carlos.post('/contract-external-actors', { name: 'Diretor Fictício', roles: ['DIR'], channels: ['email'] })).statusCode).toBe(422);
+    const ext = ok(await carlos.post('/contract-external-actors', { name: 'Diretor Fictício', organization: 'Holding Fictícia', email: 'diretor@ficticio.test', roles: ['DIR'], channels: ['email'] }), 201).json();
+    expect((await lucas.post('/contract-external-actors', { name: 'X Fictício', roles: [] })).statusCode).toBe(403);
     const after = ok(await carlos.get('/contract-playbook')).json();
-    expect(after.roles.find((r: { key: string }) => r.key === 'DIR').holders[0]).toMatchObject({ externalName: 'Diretor Fictício (externo)', userId: null });
-    ok(await carlos.del(`/contract-playbook/holders/${ext.id}`));
+    expect(after.roles.find((r: { key: string }) => r.key === 'DIR').actors[0]).toMatchObject({ name: 'Diretor Fictício', channels: ['email'] });
+    ok(await carlos.put(`/contract-external-actors/${ext.id}`, { name: 'Diretor Fictício', roles: ['DIR'], channels: [], active: false }));
+    expect(ok(await carlos.get('/contract-playbook')).json().roles.find((r: { key: string }) => r.key === 'DIR').actors).toHaveLength(0);
   });
 
   it('tarefa transferida exige aceite; devolver volta para quem enviou; SLA da atividade vira prazo; evidência para concluir', async () => {
@@ -191,9 +194,9 @@ describe('Cadastro ERP', () => {
     expect(pdf.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
     expect(ok(await lucas.get(`/contracts/${id}/erp/${rid}/secret`)).json().secret).toBe('Senha#Central1');
     // com Assistente Comercial definido no Playbook, só ele (ou a gestão Total) vê a senha
-    const asc = ok(await carlos.post('/contract-playbook/holders', { role: 'ASC', userId: lucas.me.user.id }), 201).json();
+    ok(await carlos.patch(`/admin/users/${lucas.me.user.id}`, { playbookRoles: ['ASC'] }));
     expect((await ana.get(`/contracts/${id}/erp/${rid}/secret`)).statusCode).toBe(403);
-    ok(await carlos.del(`/contract-playbook/holders/${asc.id}`));
+    ok(await carlos.patch(`/admin/users/${lucas.me.user.id}`, { playbookRoles: [] }));
     expect((await cur()).events[0].action).toBe('senha_visualizada');
     ok(await act(lucas, 'release'));
     expect((await act(lucas, 'launch')).statusCode).toBe(422);
@@ -242,16 +245,27 @@ describe('Cadastro ERP', () => {
   });
 
   it('com titulares no Playbook, a conferência é da Supervisão (ou Gerência) definida', async () => {
-    const h = ok(await carlos.post('/contract-playbook/holders', { role: 'SC', userId: ana.me.user.id }), 201).json();
+    ok(await carlos.patch(`/admin/users/${ana.me.user.id}`, { playbookRoles: ['SC'] }));
     const g = ok(await carlos.get(`/contracts/${id}/erp`)).json();
     expect(g.current.can.review).toBe(false);
     expect(ok(await ana.get(`/contracts/${id}/erp`)).json().current.can.review).toBe(true);
-    ok(await carlos.del(`/contract-playbook/holders/${h.id}`));
+    ok(await carlos.patch(`/admin/users/${ana.me.user.id}`, { playbookRoles: [] }));
   });
 
   it('responsável administrativo do contrato fica em aberto até ser designado', async () => {
     expect(ok(await carlos.get(`/contracts/${id}`)).json().adminOwnerName).toBeNull();
     ok(await carlos.put(`/contracts/${id}`, { adminOwnerId: ana.me.user.id }));
     expect(ok(await carlos.get(`/contracts/${id}`)).json().adminOwnerName).toBe('Ana Souza');
+  });
+
+  it('painel para decisão: saúde soma o MRR, contratos que pedem ação, vencimentos pela renovação, concentração e responsáveis', async () => {
+    const d = ok(await carlos.get('/contracts/dashboard')).json();
+    const sum = d.decision.health.reduce((a: number, h: { monthlyCents: number }) => a + h.monthlyCents, 0);
+    expect(sum).toBe(d.monthlyCents);
+    expect(d.decision.health.map((h: { key: string }) => h.key)).toEqual(['em_dia', 'pendencia', 'divergente', 'em_risco']);
+    expect(d.decision.expiringPlan).toHaveLength(12);
+    expect(d.decision.actionList.every((r: { health: string }) => r.health !== 'em_dia')).toBe(true);
+    expect(d.decision.pareto.items[0].share).toBeGreaterThan(0);
+    expect(d.decision.byOwner.reduce((a: number, o: { n: number }) => a + o.n, 0)).toBe(d.active);
   });
 });

@@ -624,6 +624,13 @@
       "when": 1793826340879,
       "tag": "0088_playbook_cadastro_erp",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1793836339400,
+      "tag": "0089_avisos_por_responsabilidade",
+      "breakpoints": true
     }
   ]
 }

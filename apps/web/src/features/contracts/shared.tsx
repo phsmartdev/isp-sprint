@@ -13,7 +13,7 @@ export type Version = {
   signedAt: string | null; startAt: string | null; endAt: string | null; termMonths: number | null; activationAt: string | null; billingStartAt: string | null; renewalAt: string | null;
   monthlyCents: number; totalCents: number | null; billingDay: number | null; billingTerms: string | null; items: ContractItem[];
   guarantee: Guarantee | null; publicTerms: PublicTerms | null; adjustmentIndex: string | null; adjustmentBaseDate: string | null; adjustmentRule: string | null; specialConditions: string | null;
-  createdAt: string; createdBy: string | null;
+  createdAt: string; createdBy: string | null; effectiveFrom?: string | null;
 };
 export type StepState = { doneAt: string; doneBy: string; doneByName: string; note: string | null; value: Record<string, unknown> | null; skipped?: boolean };
 export type Process = { id: string; kind: 'implantacao' | 'renovacao' | 'reajuste' | 'encerramento'; cycleKey: string; status: 'aberto' | 'concluido' | 'cancelado'; steps: Record<string, StepState>; data: Record<string, unknown>; dueAt: string | null; outcome: string | null; openedAt: string; closedAt: string | null };
@@ -29,7 +29,7 @@ export type ContractDetail = {
   commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; commercialOwnerName: string | null; operationalOwnerName: string | null; csmName: string | null; adminOwnerId: string | null; adminOwnerName: string | null;
   validatedAt: string | null; validatedByName: string | null; erpRef: string | null; renewed: boolean; closureExpected: boolean; closureReason: string | null; closureAt: string | null; legalLimitAt: string | null;
   closedAt: string | null; archivedAt: string | null; archiveLocation: string | null; archiveResponsibleName: string | null; finalNote: string | null; nextAction: string | null; nextActionAt: string | null;
-  currentVersion: number; current: Version; versions: Version[];
+  currentVersion: number; current: Version; versions: Version[]; stageChangedAt?: string | null;
   contact: { id: string; name: string; document: string | null; email: string | null; phone: string | null; segment: string; city: string | null };
   address: { street: string | null; number: string | null; district: string | null; city: string | null; state: string | null } | null;
   opportunity: { id: string; code: number; title: string; stage: string; handoffStage: string | null } | null;

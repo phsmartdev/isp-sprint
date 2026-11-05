@@ -44,6 +44,7 @@ import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
+import { PublicNoticePage } from './pages/PublicNotice';
 import { KpiBoardPage } from './pages/KpiBoardPage';
 
 // Configurações carregam sob demanda: o código de cada tela só baixa quando ela é aberta
@@ -53,6 +54,7 @@ const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then
 const AdminResultsSettings = lazy(() => import('./pages/admin/ResultsSettings').then((m) => ({ default: m.AdminResultsSettings })));
 const AdminAbmSettings = lazy(() => import('./pages/admin/AbmSettings').then((m) => ({ default: m.AdminAbmSettings })));
 const AdminPerformanceSettings = lazy(() => import('./pages/admin/PerformanceSettings').then((m) => ({ default: m.AdminPerformanceSettings })));
+const AdminContractResponsibilities = lazy(() => import('./pages/admin/ContractResponsibilities').then((m) => ({ default: m.AdminContractResponsibilities })));
 const AdminApprovalSettings = lazy(() => import('./pages/admin/ApprovalSettings').then((m) => ({ default: m.AdminApprovalSettings })));
 const AdminOverview = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminOverview })));
 const AdminUsers = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminUsers })));
@@ -97,6 +99,7 @@ export function App() {
       <Route path="/k/:token" element={<PublicKickoffPage />} />
       <Route path="/j/:token" element={<PublicJourneyPage />} />
       <Route path="/p/:token" element={<PublicSurveyPage />} />
+      <Route path="/r/:token" element={<PublicNoticePage />} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route path="/painel/indicadores" element={<RequireAuth><Gate module="inteligencia"><KpiBoardPage /></Gate></RequireAuth>} />
@@ -162,6 +165,7 @@ export function App() {
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<Navigate to="/settings/modulos?cfg=contratos" replace />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
+          <Route path="contratos-responsabilidades" element={<AdminContractResponsibilities />} />
           <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
           <Route path="resultados" element={<AdminResultsSettings />} />

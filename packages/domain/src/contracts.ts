@@ -127,12 +127,18 @@ export function allowedContractTabs(denied: ContractTabAccess, profiles: string[
  * Seções do Painel. Perfil da carteira, estratificações e o gráfico de vencimentos em 12 meses saíram em 04/11/2026:
  * não ajudavam a decidir nem a operar. No lugar entrou "Operação" (o que exige ação).
  */
-export const DASHBOARD_SECTIONS = ['indicadores', 'operacao', 'etapas', 'clientes', 'faturamento', 'executivo'] as const;
+export const DASHBOARD_SECTIONS = ['indicadores', 'desempenho', 'saude', 'acao', 'vencimentos', 'reajustes', 'responsaveis', 'clientes', 'operacao', 'etapas', 'faturamento', 'executivo'] as const;
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 export const DASHBOARD_SECTION_LABELS: Record<DashboardSection, string> = {
   indicadores: 'Indicadores (total, MRR, vencendo em 30/60/90 dias, receita em risco)',
-  operacao: 'Operação: Cadastro ERP, divergências, reajustes, pendências e contratos em risco',
-  clientes: 'Maiores clientes e medição com saldo baixo',
+  desempenho: 'Desempenho da operação (renovação no prazo, reajustes, SLA, aceite, Cadastro ERP) nos últimos 12 meses',
+  saude: 'Saúde da carteira (receita por situação) e indicadores operacionais',
+  acao: 'Contratos que pedem ação (clique abre a vida do contrato)',
+  vencimentos: 'Receita que vence em 12 meses, pela situação da renovação',
+  reajustes: 'Reajustes dos próximos 90 dias',
+  responsaveis: 'Carteira por responsável (receita, risco, pendências e Cadastro ERP)',
+  operacao: 'Cadastro ERP por situação',
+  clientes: 'Concentração por cliente (Pareto) e medição com saldo baixo',
   etapas: 'Etapas, próximos vencimentos e notificações',
   faturamento: 'Faturamento por tipo no período',
   executivo: 'Visão executiva (carteira, backlog, dependência e receita em risco)',

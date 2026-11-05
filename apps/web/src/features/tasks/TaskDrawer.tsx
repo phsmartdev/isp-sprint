@@ -7,7 +7,7 @@ import { Ban, CheckCircle2, Download, Lock, Paperclip, Plus, Trash2, Undo2, X } 
 import {
   RECURRENCE_FREQS, RECURRENCE_LABELS, TASK_MANUAL_STATUSES, TASK_STATUS_LABELS, fmtMinutes, parseMinutes,
   type Recurrence, type RecurrenceFreq, type TaskStatus,
-  RACI_MATRIX, RACI_PHASES, RACI_PHASE_LABELS,
+  RACI_MATRIX, RACI_PHASES, RACI_PHASE_LABELS, NOTIFY_EVENT_LABELS,
 } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
@@ -33,6 +33,7 @@ type Detail = TaskItem & {
 };
 
 const EVENT_LABELS: Record<string, string> = {
+  accepted: 'aceitou a demanda', returned: 'devolveu a demanda', aviso_confirmado: 'confirmou o recebimento do aviso', aviso_respondido: 'respondeu ao aviso',
   created: 'criou a tarefa', completed: 'concluiu', reopened: 'reabriu', status: 'mudou a situação', cancelled: 'cancelou', assigned: 'reatribuiu', rescheduled: 'reagendou',
   updated: 'editou', checklist: 'atualizou o checklist', submitted: 'enviou para aprovação', approved: 'aprovou a entrega', rejected: 'devolveu a entrega',
   dependency: 'mudou dependências', file: 'anexou arquivo', file_removed: 'retirou arquivo', moved: 'moveu no quadro', removed: 'removeu',
@@ -198,6 +199,7 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
       <Dependencies t={t} onOpen={onOpen} />
       <Time t={t} />
       <Files t={t} />
+      {t.contractId && <Notices t={t} />}
       <Comments t={t} />
       <section>
         <h3 className="mb-2 text-base font-bold text-ink">Histórico</h3>
@@ -383,6 +385,30 @@ function Time({ t }: { t: Detail }) {
           <FormField label="O que foi feito" htmlFor="tm-note" className="min-w-[160px] flex-1"><Input id="tm-note" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></FormField>
           <Button type="submit" variant="secondary" disabled={!mins} loading={add.isPending}>Registrar</Button>
         </form>
+      )}
+    </section>
+  );
+}
+
+type NoticeRow = { id: string; event: string; raciLetter: string | null; role: string | null; recipientName: string; channel: string; status: string; error: string | null; sentAt: string; confirmedAt: string | null; responseText: string | null };
+const NOTICE_STATUS: Record<string, string> = { enviado: 'enviado', falhou: 'falhou', nao_configurado: 'canal não configurado', sem_contato: 'sem contato cadastrado' };
+/** Avisos da atividade de contrato por nível de responsabilidade, com a confirmação de recebimento. */
+function Notices({ t }: { t: Detail }) {
+  const q = useQuery({ queryKey: ['task-notices', t.id, t.rowVersion], queryFn: () => api<{ items: NoticeRow[] }>(`/tasks/${t.id}/notices`) });
+  const items = q.data?.items ?? [];
+  return (
+    <section aria-label="Avisos enviados">
+      <h3 className="mb-2 text-sm font-bold text-ink">Avisos enviados {items.length > 0 && <span className="font-normal text-muted">· {items.filter((x) => x.confirmedAt).length} de {items.length} confirmados</span>}</h3>
+      {!items.length ? <p className="text-sm text-muted">Nenhum aviso enviado.</p> : (
+        <ul className="divide-y divide-line text-sm">{items.map((n) => (
+          <li key={n.id} className="py-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className="min-w-0"><span className="font-semibold text-ink">{n.recipientName}</span> <span className="text-xs text-muted">{n.raciLetter ? `(${n.raciLetter})` : n.event === 'escalada' ? '(escalonamento)' : ''} · {NOTIFY_EVENT_LABELS[n.event as keyof typeof NOTIFY_EVENT_LABELS] ?? 'Escalonamento'} · {n.channel === 'email' ? 'e-mail' : 'WhatsApp'}</span></span>
+              <span className={clsx('text-xs font-semibold', n.confirmedAt ? 'text-success' : n.status === 'enviado' ? 'text-muted' : 'text-danger')} title={n.error ?? undefined}>{n.confirmedAt ? `confirmado ${fmtDateTime(n.confirmedAt)}` : NOTICE_STATUS[n.status] ?? n.status}</span>
+            </div>
+            {n.responseText && <p className="mt-0.5 text-xs text-text">Resposta: “{n.responseText}”</p>}
+          </li>
+        ))}</ul>
       )}
     </section>
   );

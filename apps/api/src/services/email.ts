@@ -53,6 +53,8 @@ export type SendInput = {
   cc?: string | null;
   createdBy?: string | null;
   replyTo?: string | null;
+  /** HTML pronto (ex.: e-mail com botão); sem ele, o texto vira HTML simples */
+  html?: string;
 };
 export type SendResult = { ok: true; messageId: string; id: string } | { ok: false; error: string; id: string; notConfigured?: boolean };
 
@@ -135,7 +137,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
         replyTo: input.replyTo ?? cfg.replyTo ?? undefined,
         subject,
         text: input.text,
-        html: textToHtml(input.text),
+        html: input.html ?? textToHtml(input.text),
         attachments: input.attachments,
       }),
       25_000,
