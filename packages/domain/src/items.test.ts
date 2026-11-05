@@ -61,27 +61,30 @@ describe('itens da oportunidade', () => {
 describe('produtos do contrato a partir da oportunidade ou planilha', () => {
   it('oportunidade: lance, desconto, cobrança e quantidade fracionada', async () => {
     const { contractItemFromOpportunity } = await import('./items');
-    expect(contractItemFromOpportunity({ description: 'Link 500M', qtyMilli: 2000, unitCents: 150000, discountCents: 0, surchargeCents: 0, dealKind: 'recorrencia' })).toEqual({ planId: null, description: 'Link 500M', qty: 2, unitCents: 150000, recurring: true });
-    expect(contractItemFromOpportunity({ description: 'Instalação', qtyMilli: 1000, unitCents: 200000, discountCents: 50000, dealKind: 'servico' })).toMatchObject({ qty: 1, unitCents: 150000, recurring: false });
-    expect(contractItemFromOpportunity({ description: 'Fibra', unit: 'km', qtyMilli: 2500, unitCents: 1000, dealKind: 'venda' })).toEqual({ planId: null, description: 'Fibra (2,5 Km)', qty: 1, unitCents: 2500, recurring: false });
-    expect(contractItemFromOpportunity({ description: 'Câmera', qtyMilli: 3000, unitCents: 999, bidUnitCents: 900, dealKind: 'locacao' })).toMatchObject({ qty: 3, unitCents: 900, recurring: true });
+    expect(contractItemFromOpportunity({ description: 'Link 500M', qtyMilli: 2000, unitCents: 150000, discountCents: 0, surchargeCents: 0, dealKind: 'recorrencia' })).toEqual({ planId: null, description: 'Link 500M', qty: 2, unitCents: 150000, kind: 'recorrente' });
+    expect(contractItemFromOpportunity({ description: 'Instalação', qtyMilli: 1000, unitCents: 200000, discountCents: 50000, dealKind: 'servico' })).toMatchObject({ qty: 1, unitCents: 150000, kind: 'venda' });
+    expect(contractItemFromOpportunity({ description: 'Fibra', unit: 'km', qtyMilli: 2500, unitCents: 1000, dealKind: 'venda' })).toEqual({ planId: null, description: 'Fibra (2,5 Km)', qty: 1, unitCents: 2500, kind: 'venda' });
+    expect(contractItemFromOpportunity({ description: 'Câmera', qtyMilli: 3000, unitCents: 999, bidUnitCents: 900, dealKind: 'locacao' })).toMatchObject({ qty: 3, unitCents: 900, kind: 'recorrente' });
     expect(contractItemFromOpportunity({ description: 'Licença', qtyMilli: 3000, unitCents: 1000, discountCents: 1 })).toMatchObject({ qty: 1, unitCents: 2999, description: 'Licença (3)' });
+    expect(contractItemFromOpportunity({ description: 'Consumo da ata', unit: 'rs', qtyMilli: 1000, unitCents: 500000 })).toMatchObject({ kind: 'consumo' });
   });
   it('planilha: colunas em qualquer ordem, cobrança opcional e linhas recusadas com motivo', async () => {
     const { parseContractItemsTable } = await import('./items');
     const r = parseContractItemsTable([
-      ['Valor unitário', 'Descrição', 'Qtd', 'Cobrança'],
+      ['Valor unitário', 'Descrição', 'Qtd', 'Classificação'],
       ['1.500,00', 'Link dedicado', '2', 'Mensal'],
       ['2000', 'Instalação', '1', 'Única'],
       ['x', 'Erro', '1', 'Mensal'],
       ['10', 'Outro', '1', 'Trimestral'],
+      ['300', 'Horas técnicas', '1', 'Consumo'],
     ]);
     expect(r.items).toEqual([
-      { planId: null, description: 'Link dedicado', qty: 2, unitCents: 150000, recurring: true },
-      { planId: null, description: 'Instalação', qty: 1, unitCents: 200000, recurring: false },
+      { planId: null, description: 'Link dedicado', qty: 2, unitCents: 150000, kind: 'recorrente' },
+      { planId: null, description: 'Instalação', qty: 1, unitCents: 200000, kind: 'venda' },
+      { planId: null, description: 'Horas técnicas', qty: 1, unitCents: 30000, kind: 'consumo' },
     ]);
     expect(r.errors.map((e) => e.row)).toEqual([4, 5]);
-    expect(parseContractItemsTable([['Descrição', 'Qtd', 'Valor'], ['Link', '1', '10']]).items[0]).toMatchObject({ recurring: true, unitCents: 1000 });
+    expect(parseContractItemsTable([['Descrição', 'Qtd', 'Valor'], ['Link', '1', '10']]).items[0]).toMatchObject({ kind: 'recorrente', unitCents: 1000 });
     expect(parseContractItemsTable([['Nome', 'Preço']]).missing).toEqual(['Quantidade']);
   });
 });

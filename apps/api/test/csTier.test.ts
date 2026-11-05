@@ -11,7 +11,7 @@ afterAll(async () => ctx.close());
 async function wonOpp(contactId: string | null, name: string, saleKind: string, items: { description: string; unit: string; qtyMilli: number; unitCents: number }[]) {
   const lk = ok(await carlos.get('/meta/lookups')).json();
   const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
-  const o = ok(await carlos.post('/opportunities', { ...(contactId ? { contactId } : { newContact: { name, segment: 'governamental' } }), pipelineId: corp.id, saleKind, branchId: lk.branches[0].id }), 201).json();
+  const o = ok(await carlos.post('/opportunities', { ...(contactId ? { contactId } : { newContact: { name, segment: 'governamental' } }), pipelineId: corp.id, saleKind, branchId: lk.branches[0].id, ...(saleKind === 'licitacao' ? { custom: { tipo_disputa: 'Aberta', lance_inicial: 1000, lance_minimo: 800 } } : {}) }), 201).json();
   const r = ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items })).json();
   const won = corp.stages.find((st: { kind: string }) => st.kind === 'won');
   ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: won.key, rowVersion: r.rowVersion, confirm: true }));

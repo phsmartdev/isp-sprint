@@ -4,13 +4,13 @@ import { AlertTriangle, ClipboardPaste, Download, FileSpreadsheet, Plus, Trash2 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { Modal } from '../../components/ui/overlay';
-import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, parseContractItemsTable, type ContractItemDraft, endFromTerm, toCents, SECTORS, SECTOR_LABELS, type LegalRegime, type ReportTerms, type Sector } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, parseContractItemsTable, type ContractItemDraft, CONTRACT_ITEM_KINDS, CONTRACT_ITEM_KIND_LABELS, itemKindOf, type ContractItemKind, endFromTerm, toCents, SECTORS, SECTOR_LABELS, type LegalRegime, type ReportTerms, type Sector } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { Button, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version } from './shared';
 
-type ItemRow = { planId: string; description: string; qty: string; unit: string; recurring: boolean };
+type ItemRow = { planId: string; description: string; qty: string; unit: string; kind: ContractItemKind };
 export type FormState = {
   kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
@@ -26,7 +26,7 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
   return {
     kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
-    items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), recurring: i.recurring !== false })),
+    items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), kind: itemKindOf(i) })),
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null),
     // automático quando vazio ou igual ao cálculo pelos itens; valor diferente informado à mão continua manual
     ...(() => { const c = contractValuesFromItems(v.items ?? [], v.termMonths ?? null); return { monthlyAuto: v.monthlyCents == null || v.monthlyCents === c.monthlyCents, totalAuto: v.totalCents == null || v.totalCents === c.totalCents }; })(), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
@@ -38,7 +38,7 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
 }
 
 const nul = (s: string) => (s.trim() ? s.trim() : null);
-const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.description.trim()).map((r) => ({ planId: r.planId || null, description: r.description.trim(), qty: Math.max(1, Number(r.qty) || 1), unitCents: toCents(r.unit) ?? 0, recurring: r.recurring }));
+const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.description.trim()).map((r) => ({ planId: r.planId || null, description: r.description.trim(), qty: Math.max(1, Number(r.qty) || 1), unitCents: toCents(r.unit) ?? 0, kind: r.kind }));
 /** Mensal e global calculados pelos itens (recorrentes × prazo + únicos uma vez). */
 export const autoValues = (f: Pick<FormState, 'items' | 'termMonths'>) => contractValuesFromItems(itemsOf(f.items), f.termMonths ? Number(f.termMonths) : null);
 
@@ -69,7 +69,7 @@ export function payloadOf(f: FormState) {
   };
 }
 
-const toRow = (i: ContractItemDraft): ItemRow => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), recurring: i.recurring });
+const toRow = (i: ContractItemDraft): ItemRow => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), kind: i.kind });
 type Source = { id: string; code: number; title: string; stage: string; items: ContractItemDraft[] };
 
 /** Trazer os produtos: da oportunidade do cliente, de planilha (Excel/CSV) ou colando do Excel. */
@@ -81,7 +81,7 @@ function ItemsImport({ contactId, onItems }: { contactId: string | null; onItems
   const sources = useQuery({ queryKey: ['contract-item-sources', contactId], enabled: picking && !!contactId, queryFn: () => api<{ items: Source[] }>(`/contracts/item-sources?contactId=${contactId}`) });
   const add = (table: (string | number | null)[][], from: string) => {
     const r = parseContractItemsTable(table);
-    if (r.missing.length) { setMsg({ tone: 'warning', text: `${from}: faltam as colunas ${r.missing.join(', ')}. A primeira linha precisa ter os títulos, em qualquer ordem: Descrição, Quantidade e Valor unitário (obrigatórias) e Cobrança (Mensal ou Única, opcional; sem ela o item é mensal).` }); return; }
+    if (r.missing.length) { setMsg({ tone: 'warning', text: `${from}: faltam as colunas ${r.missing.join(', ')}. A primeira linha precisa ter os títulos, em qualquer ordem: Descrição, Quantidade e Valor unitário (obrigatórias) e Classificação (Recorrente, Venda ou Consumo, opcional; sem ela o item é recorrente).` }); return; }
     onItems(r.items.map(toRow), 'somar');
     setMsg({ tone: r.errors.length ? 'warning' : 'info', text: `${from}: ${r.items.length} item(ns) incluído(s)${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira antes de salvar.` });
   };
@@ -111,7 +111,7 @@ function ItemsImport({ contactId, onItems }: { contactId: string | null; onItems
       {msg && <div className="mt-2"><Notice tone={msg.tone}>{msg.text}</Notice></div>}
       <Modal open={pasting} onClose={() => setPasting(false)} title="Colar do Excel"
         footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!paste.trim()} onClick={() => { add(paste.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); }}>Incluir itens</Button></>}>
-        <p className="mb-2 text-sm text-muted">Copie as linhas no Excel com a linha de títulos: Descrição, Quantidade e Valor unitário (em qualquer ordem) e, se quiser, Cobrança (Mensal ou Única).</p>
+        <p className="mb-2 text-sm text-muted">Copie as linhas no Excel com a linha de títulos: Descrição, Quantidade e Valor unitário (em qualquer ordem) e, se quiser, Classificação (Recorrente, Venda ou Consumo).</p>
         <Textarea aria-label="Itens colados" rows={9} value={paste} onChange={(e) => setPaste(e.target.value)} />
       </Modal>
       <Modal open={picking} onClose={() => setPicking(false)} title="Trazer produtos da oportunidade" size="lg" footer={<Button onClick={() => setPicking(false)}>Fechar</Button>}>
@@ -121,13 +121,13 @@ function ItemsImport({ contactId, onItems }: { contactId: string | null; onItems
             return (
               <li key={o.id} className="rounded-md border border-line p-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0"><p className="font-semibold text-ink">OP-{o.code} · {o.title}</p><p className="text-xs text-muted">{o.items.length} item(ns) · {fmtBRL(v.monthlyCents)}/mês{v.oneTimeCents ? ` + ${fmtBRL(v.oneTimeCents)} único` : ''}</p></div>
+                  <div className="min-w-0"><p className="font-semibold text-ink">OP-{o.code} · {o.title}</p><p className="text-xs text-muted">{o.items.length} item(ns) · {fmtBRL(v.monthlyCents)}/mês{v.oneTimeCents ? ` + ${fmtBRL(v.oneTimeCents)} venda` : ''}{v.consumptionCents ? ` + ${fmtBRL(v.consumptionCents)} consumo` : ''}</p></div>
                   <span className="flex gap-2">
                     <Button size="sm" variant="primary" onClick={() => { onItems(o.items.map(toRow), 'substituir'); setMsg({ tone: 'info', text: `${o.items.length} item(ns) da OP-${o.code} no lugar dos itens anteriores. Confira antes de salvar.` }); setPicking(false); }}>Usar estes itens</Button>
                     <Button size="sm" onClick={() => { onItems(o.items.map(toRow), 'somar'); setMsg({ tone: 'info', text: `${o.items.length} item(ns) da OP-${o.code} somados aos itens. Confira antes de salvar.` }); setPicking(false); }}>Somar</Button>
                   </span>
                 </div>
-                <ul className="mt-2 space-y-0.5 text-xs text-text">{o.items.slice(0, 6).map((i, k) => <li key={k}>{i.qty} × {i.description} · {fmtBRL(i.unitCents)} · {i.recurring ? 'mensal' : 'única'}</li>)}{o.items.length > 6 && <li className="text-muted">+{o.items.length - 6} item(ns)</li>}</ul>
+                <ul className="mt-2 space-y-0.5 text-xs text-text">{o.items.slice(0, 6).map((i, k) => <li key={k}>{i.qty} × {i.description} · {fmtBRL(i.unitCents)} · {CONTRACT_ITEM_KIND_LABELS[i.kind].toLowerCase()}</li>)}{o.items.length > 6 && <li className="text-muted">+{o.items.length - 6} item(ns)</li>}</ul>
               </li>
             );
           })}</ul>
@@ -232,25 +232,25 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
               <FormField label="Descrição" htmlFor={`cf-id-${i}`}><Input id={`cf-id-${i}`} value={r.description} onChange={(e) => setItem(i, { description: e.target.value })} /></FormField>
               <FormField label="Qtd." htmlFor={`cf-iq-${i}`}><Input id={`cf-iq-${i}`} inputMode="numeric" value={r.qty} onChange={(e) => setItem(i, { qty: e.target.value.replace(/\D/g, '') })} /></FormField>
               <FormField label="Valor unitário (R$)" htmlFor={`cf-iu-${i}`}><Input id={`cf-iu-${i}`} inputMode="decimal" value={r.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></FormField>
-              <FormField label="Cobrança" htmlFor={`cf-ir-${i}`}>
-                <Select id={`cf-ir-${i}`} value={r.recurring ? 'mensal' : 'unica'} onChange={(e) => setItem(i, { recurring: e.target.value === 'mensal' })}><option value="mensal">Mensal</option><option value="unica">Única</option></Select>
+              <FormField label="Classificação" htmlFor={`cf-ir-${i}`}>
+                <Select id={`cf-ir-${i}`} value={r.kind} title="Recorrente: mensalidade. Venda: pagamento único. Consumo: valor estimado sob demanda/medição." onChange={(e) => setItem(i, { kind: e.target.value as ContractItemKind })}>{CONTRACT_ITEM_KINDS.map((k) => <option key={k} value={k}>{CONTRACT_ITEM_KIND_LABELS[k]}</option>)}</Select>
               </FormField>
               <Button variant="ghost" aria-label={`Remover ${r.description || 'item'}`} onClick={() => onChange({ items: f.items.filter((_, j) => j !== i) })} icon={<Trash2 className="h-4 w-4 text-danger" />} />
             </li>
           ))}
         </ul>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => onChange({ items: [...f.items, { planId: '', description: '', qty: '1', unit: '', recurring: true }] })}>Adicionar item</Button>
-          <p className="text-sm text-muted">Recorrentes: <span className="num font-semibold text-ink">{fmtBRL(auto.monthlyCents)}</span>/mês{auto.oneTimeCents > 0 && <> · Cobrança única: <span className="num font-semibold text-ink">{fmtBRL(auto.oneTimeCents)}</span></>}</p>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => onChange({ items: [...f.items, { planId: '', description: '', qty: '1', unit: '', kind: 'recorrente' }] })}>Adicionar item</Button>
+          <p className="text-sm text-muted">Recorrente: <span className="num font-semibold text-ink">{fmtBRL(auto.monthlyCents)}</span>/mês{auto.oneTimeCents > 0 && <> · Venda: <span className="num font-semibold text-ink">{fmtBRL(auto.oneTimeCents)}</span></>}{auto.consumptionCents > 0 && <> · Consumo: <span className="num font-semibold text-ink">{fmtBRL(auto.consumptionCents)}</span></>}</p>
         </div>
       </fieldset>
 
       <Fieldset title="Valores e faturamento">
         {f.billingType === 'medicao' && !editing && <FormField label="Saldo contratado (R$)" htmlFor="cf-balance" required hint="Crédito inicial do contrato; as oportunidades consomem esse saldo."><Input id="cf-balance" inputMode="decimal" value={f.initialBalance} onChange={(e) => onChange({ initialBalance: e.target.value })} placeholder="100.000,00" /></FormField>}
         <AutoValue id="cf-monthly" label={f.billingType === 'recorrente' ? 'Valor mensal (R$)' : 'Valor mensal estimado (R$)'} auto={f.monthlyAuto} autoCents={auto.monthlyCents} value={f.monthly}
-          autoHint="Automático: soma dos itens de cobrança mensal." onManual={(monthly) => onChange({ monthly, monthlyAuto: false })} onAuto={() => onChange({ monthlyAuto: true, monthly: '' })} />
+          autoHint="Automático: soma dos itens recorrentes." onManual={(monthly) => onChange({ monthly, monthlyAuto: false })} onAuto={() => onChange({ monthlyAuto: true, monthly: '' })} />
         <AutoValue id="cf-total" label="Valor global (R$)" auto={f.totalAuto} autoCents={auto.totalCents} value={f.total}
-          autoHint={auto.totalCents == null ? 'Informe o prazo (meses) para calcular.' : `Automático: mensal × ${f.termMonths} meses${auto.oneTimeCents ? ' + itens de cobrança única (uma vez)' : ''}.`} onManual={(total) => onChange({ total, totalAuto: false })} onAuto={() => onChange({ totalAuto: true, total: '' })} />
+          autoHint={auto.totalCents == null ? 'Informe o prazo (meses) para calcular.' : `Automático: recorrente × ${f.termMonths} meses${auto.oneTimeCents || auto.consumptionCents ? ' + venda e consumo (uma vez)' : ''}.`} onManual={(total) => onChange({ total, totalAuto: false })} onAuto={() => onChange({ totalAuto: true, total: '' })} />
         <FormField label="Dia de faturamento" htmlFor="cf-bday"><Input id="cf-bday" inputMode="numeric" value={f.billingDay} onChange={(e) => onChange({ billingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })} /></FormField>
         <FormField label="Condições de faturamento" htmlFor="cf-bterms" className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-bterms" className="min-h-[60px]" value={f.billingTerms} onChange={(e) => onChange({ billingTerms: e.target.value })} placeholder="Ex.: fatura mensal, vencimento em 30 dias, medição até o dia 5" /></FormField>
       </Fieldset>

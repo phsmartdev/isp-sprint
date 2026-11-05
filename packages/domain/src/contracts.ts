@@ -485,9 +485,13 @@ export function docStatus(expiresOn: string | null | undefined, today: string): 
 }
 
 // ------------------------------------------------------------------ aditivos (limite legal) e reajuste por índice oficial
-export const AMENDMENT_KINDS = ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'] as const;
+/** Finalidades de um termo aditivo. Um aditivo pode ter várias (ex.: prorrogação + reajuste + supressão). */
+export const AMENDMENT_KINDS = ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'] as const;
 export type AmendmentKind = (typeof AMENDMENT_KINDS)[number];
-export const AMENDMENT_LABELS: Record<AmendmentKind, string> = { acrescimo: 'Acréscimo de valor/quantidade', supressao: 'Supressão', prazo: 'Prorrogação de prazo', reequilibrio: 'Reequilíbrio econômico-financeiro', outro: 'Outro' };
+export const AMENDMENT_LABELS: Record<AmendmentKind, string> = {
+  acrescimo: 'Acréscimo de valor/quantidade', supressao: 'Supressão', prazo: 'Prorrogação de prazo', reajuste: 'Reajuste',
+  reequilibrio: 'Reequilíbrio econômico-financeiro', itens: 'Alteração dos itens', outro: 'Outro',
+};
 
 /** Valor original do contrato (base do limite): valor global da 1ª versão; sem ele, mensal × prazo. */
 export function originalValue(v: { totalCents: number | null; monthlyCents: number; termMonths: number | null }) {
@@ -619,15 +623,28 @@ export function concentration(values: { key: string; name: string; cents: number
 }
 
 /**
- * Valores do contrato a partir dos itens: mensal = soma dos itens recorrentes; global = mensal × prazo (meses) + itens
- * de cobrança única (somados uma única vez). Sem prazo, o global fica sem cálculo (null). Item sem a marcação é recorrente.
+ * Classificação do item do contrato (decisão de 05/11/2026):
+ * - recorrente: mensalidade (entra no valor mensal e na recorrência);
+ * - venda: pagamento único (equipamento, instalação, serviço pontual);
+ * - consumo: valor estimado consumido sob demanda/medição (não é recorrência).
  */
-export function contractValuesFromItems(items: readonly { qty: number; unitCents: number; recurring?: boolean }[], termMonths: number | null | undefined) {
+export const CONTRACT_ITEM_KINDS = ['recorrente', 'venda', 'consumo'] as const;
+export type ContractItemKind = (typeof CONTRACT_ITEM_KINDS)[number];
+export const CONTRACT_ITEM_KIND_LABELS: Record<ContractItemKind, string> = { recorrente: 'Recorrente', venda: 'Venda', consumo: 'Consumo' };
+/** Classificação do item (itens antigos: marcação "recurring"; sem nada, recorrente). */
+export const itemKindOf = (i: { kind?: string | null; recurring?: boolean }): ContractItemKind =>
+  (CONTRACT_ITEM_KINDS as readonly string[]).includes(i.kind ?? '') ? (i.kind as ContractItemKind) : i.recurring === false ? 'venda' : 'recorrente';
+
+/**
+ * Valores do contrato a partir dos itens: mensal (recorrência) = só os itens recorrentes; global = mensal × prazo (meses)
+ * + vendas + consumo (somados uma única vez). Sem prazo, o global fica sem cálculo (null).
+ */
+export function contractValuesFromItems(items: readonly { qty: number; unitCents: number; kind?: string | null; recurring?: boolean }[], termMonths: number | null | undefined) {
   const line = (i: { qty: number; unitCents: number }) => Math.max(0, i.qty) * Math.max(0, i.unitCents);
-  const monthlyCents = items.filter((i) => i.recurring !== false).reduce((a, i) => a + line(i), 0);
-  const oneTimeCents = items.filter((i) => i.recurring === false).reduce((a, i) => a + line(i), 0);
-  const totalCents = termMonths && termMonths > 0 ? monthlyCents * termMonths + oneTimeCents : null;
-  return { monthlyCents, oneTimeCents, totalCents };
+  const sum = (k: ContractItemKind) => items.filter((i) => itemKindOf(i) === k).reduce((a, i) => a + line(i), 0);
+  const monthlyCents = sum('recorrente'), oneTimeCents = sum('venda'), consumptionCents = sum('consumo');
+  const totalCents = termMonths && termMonths > 0 ? monthlyCents * termMonths + oneTimeCents + consumptionCents : null;
+  return { monthlyCents, oneTimeCents, consumptionCents, totalCents };
 }
 
 

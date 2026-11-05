@@ -641,6 +641,23 @@ export const opportunityItems = pgTable('opportunity_items', {
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'servico', 'recorrencia', 'locacao'])) }));
 
+/**
+ * Catálogo de produtos e serviços das negociações: cada item lançado ou importado numa oportunidade fica salvo
+ * (descrição, medida, último valor, tipo e documento fiscal) para ser reaproveitado nas próximas.
+ */
+export const productCatalog = pgTable('product_catalog', {
+  id: id(),
+  tenantId: tenantId(),
+  description: text('description').notNull(),
+  unit: text('unit').notNull().default('un'),
+  lastUnitCents: bigint('last_unit_cents', { mode: 'number' }).notNull().default(0),
+  dealKind: text('deal_kind').notNull().default('recorrencia'),
+  fiscalDocTypeId: uuid('fiscal_doc_type_id'),
+  timesUsed: integer('times_used').notNull().default(1),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('product_catalog_desc_uq').on(t.tenantId, sql`lower(${t.description})`) }));
+
 /** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
 export const bidParticipants = pgTable('bid_participants', {
   id: id(),
@@ -1324,8 +1341,8 @@ export const contracts = pgTable(
   }),
 );
 
-/** recurring: cobrança mensal (padrão) ou única (false, entra uma vez no valor global). */
-export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number; recurring?: boolean };
+/** kind: recorrente (mensal), venda (única) ou consumo (estimado, sob demanda). Itens antigos podem ter só recurring. */
+export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number; kind?: 'recorrente' | 'venda' | 'consumo'; recurring?: boolean };
 export type ContractGuarantee = { type: string; amountCents: number | null; insurer: string | null; policy: string | null; expiresAt: string | null; renewalAt: string | null };
 export type ContractPublicTerms = { agency: string | null; processNumber: string | null; modality: string | null; commitmentNote: string | null; budgetLine: string | null; extensionMaxMonths: number | null };
 
@@ -1767,9 +1784,13 @@ export const contractAmendments = pgTable('contract_amendments', {
   acordo: boolean('acordo').notNull().default(false),
   description: text('description').notNull(),
   version: integer('version'),
+  /** Um aditivo com várias finalidades grava uma linha por finalidade com o mesmo grupo (e a mesma versão). */
+  groupId: uuid('group_id'),
+  /** Reajuste aplicado neste aditivo (%, ex.: 4.5). */
+  adjustmentPct: doublePrecision('adjustment_pct'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
-}, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'])) }));
+}, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'])) }));
 
 /** Notas de empenho do contrato público: valor empenhado e saldo (faturado contra ele pelo extrato). Anulação não apaga. */
 export const contractCommitments = pgTable('contract_commitments', {

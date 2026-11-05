@@ -6,7 +6,7 @@ import { MoneyToggle } from '../../lib/privacy';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { BILLING_TYPE_HINTS, DEFAULT_DASHBOARD, type BillingType, type ContractStage, type DashboardConfig, type DashboardSection } from '@isp/domain';
+import { BILLING_TYPE_HINTS, DASHBOARD_SECTION_LABELS, DEFAULT_DASHBOARD, type BillingType, type ContractStage, type DashboardConfig, type DashboardSection } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtBRLCompact, fmtDate, fmtInt, fmtPct } from '../../lib/format';
 import { useUrlState } from '../../lib/hooks';
@@ -15,7 +15,8 @@ import { DateRange } from '../../components/ui/DateRange';
 import { DaysLeft, MoneyRows, TYPE_COLOR, type ContractRow } from './shared';
 import { FitText } from '../../components/ui/FitText';
 import { ContractLifeDrawer } from './ContractLife';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { ArrangeButton, useArrangement } from '../Arrange';
 
 type Exec = {
   contractedAnnualCents: number; backlogCents: number; publicAnnualCents: number;
@@ -484,6 +485,10 @@ export function ContractsDashboard() {
   const [health, setHealth] = useState<Health | null>(null);
   const [life, setLife] = useState<string | null>(null);
   const view = useQuery({ queryKey: ['contracts', 'view'], queryFn: () => api<{ dashboard: DashboardConfig }>('/contracts/view'), staleTime: 60_000 });
+  // o padrão vem da configuração da empresa; cada pessoa pode reorganizar o seu painel
+  const base = (view.data?.dashboard ?? DEFAULT_DASHBOARD);
+  const baseKeys = useMemo(() => base.order.filter((k) => !base.hidden.includes(k)), [base]);
+  const arr = useArrangement('contratos-painel', baseKeys, DASHBOARD_SECTION_LABELS);
   if (q.isLoading || view.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
@@ -545,9 +550,9 @@ export function ContractsDashboard() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-xl font-bold text-ink">Painel</h2><p className="text-xs text-muted">Atualizado em {new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</p></div>
-        <div className="flex flex-wrap items-center gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
+        <div className="flex flex-wrap items-center gap-3"><ArrangeButton a={arr} /><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
       </div>
-      {cfg.order.filter((k) => !cfg.hidden.includes(k) && typeof sections[k] === 'function').map((k) => <div key={k}>{sections[k]()}</div>)}
+      {arr.order.filter((k) => typeof sections[k as DashboardSection] === 'function' && (arr.editing || !arr.isHidden(k))).map((k) => <div key={k} className={arr.cls(k)}>{arr.bar(k)}{sections[k as DashboardSection]()}</div>)}
       <ContractLifeDrawer id={life} onClose={() => setLife(null)} />
     </div>
   );

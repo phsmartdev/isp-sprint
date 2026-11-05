@@ -184,9 +184,11 @@ describe('valores do contrato pelos itens', () => {
   it('mensal soma só recorrentes; global = mensal × prazo + únicos uma vez', async () => {
     const { contractValuesFromItems } = await import('./contracts');
     const items = [{ qty: 2, unitCents: 50000 }, { qty: 1, unitCents: 30000, recurring: true }, { qty: 1, unitCents: 200000, recurring: false }];
-    expect(contractValuesFromItems(items, 12)).toEqual({ monthlyCents: 130000, oneTimeCents: 200000, totalCents: 130000 * 12 + 200000 });
+    expect(contractValuesFromItems(items, 12)).toEqual({ monthlyCents: 130000, oneTimeCents: 200000, consumptionCents: 0, totalCents: 130000 * 12 + 200000 });
     expect(contractValuesFromItems(items, null).totalCents).toBeNull();
-    expect(contractValuesFromItems([], 12)).toEqual({ monthlyCents: 0, oneTimeCents: 0, totalCents: 0 });
+    expect(contractValuesFromItems([], 12)).toEqual({ monthlyCents: 0, oneTimeCents: 0, consumptionCents: 0, totalCents: 0 });
+    // consumo e venda entram uma vez no global; recorrência é só o recorrente
+    expect(contractValuesFromItems([{ qty: 1, unitCents: 1000, kind: 'recorrente' }, { qty: 1, unitCents: 500, kind: 'venda' }, { qty: 2, unitCents: 300, kind: 'consumo' }], 12)).toEqual({ monthlyCents: 1000, oneTimeCents: 500, consumptionCents: 600, totalCents: 12000 + 500 + 600 });
   });
 });
 

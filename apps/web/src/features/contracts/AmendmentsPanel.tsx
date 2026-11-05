@@ -5,8 +5,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Plus } from 'lucide-react';
-import { AMENDMENT_KINDS, AMENDMENT_LABELS, type AmendmentKind } from '@isp/domain';
+import { Plus, Trash2 } from 'lucide-react';
+import { AMENDMENT_KINDS, AMENDMENT_LABELS, CONTRACT_ITEM_KINDS, CONTRACT_ITEM_KIND_LABELS, contractValuesFromItems, itemKindOf, toCents, type AmendmentKind, type ContractItemKind } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { Button, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
@@ -14,7 +14,9 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { MoneyInput } from '../DealFields';
 import { errMsg, todayIso, type ContractDetail } from './shared';
 
-type Amendment = { id: string; number: string; kind: AmendmentKind; label: string; signedOn: string; valueDeltaCents: number; monthlyDeltaCents: number; newEndAt: string | null; reforma: boolean; acordo: boolean; description: string; version: number };
+type Amendment = { id: string; number: string; kind: AmendmentKind; label: string; signedOn: string; valueDeltaCents: number; monthlyDeltaCents: number; newEndAt: string | null; reforma: boolean; acordo: boolean; description: string; version: number; groupId: string | null; adjustmentPct: number | null };
+/** Linhas do mesmo aditivo (várias finalidades) juntas. */
+const groups = (list: Amendment[]) => { const m = new Map<string, Amendment[]>(); for (const a of list) { const k = a.groupId ?? a.id; m.set(k, [...(m.get(k) ?? []), a]); } return [...m.entries()].map(([key, rows]) => ({ key, rows })); };
 type Use = { cents: number; share: number | null; remainingCents: number };
 type Data = { items: Amendment[]; limits: { baseCents: number; limitPct: number; capCents: number; acrescimo: Use; supressao: Use }; legalLimit: boolean; canManage: boolean };
 
@@ -57,21 +59,27 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
           ? `Contrato público: o sistema bloqueia acréscimo acima de ${Math.round(d.limits.limitPct * 100)}% do valor inicial${d.limits.limitPct === 0.5 ? ' (reforma)' : ' (50% em reforma de edifício ou equipamento)'} e supressão acima de 25% sem acordo entre as partes.`
           : 'Contrato privado: os percentuais servem de referência, sem bloqueio.'}</p>
       </div>
-      {!d.items.length ? <EmptyState title="Nenhum aditivo registrado" description="Acréscimos, supressões, prorrogações e reequilíbrios entram aqui e atualizam o contrato." /> : (
+      {!d.items.length ? <EmptyState title="Nenhum aditivo registrado" description="Acréscimos, supressões, prorrogações, reajustes e mudanças de itens entram aqui e geram uma nova versão do contrato." /> : (
         <ol className="space-y-2">
-          {[...d.items].reverse().map((a) => (
-            <li key={a.id} className="border border-line p-3">
+          {groups(d.items).reverse().map((g) => (
+            <li key={g.key} className="border border-line p-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-semibold text-ink">Aditivo {a.number} · {a.label}</span>
-                <span className="num text-xs text-muted">{fmtDate(a.signedOn)} · versão {a.version}</span>
+                <span className="font-semibold text-ink">Aditivo {g.rows[0]!.number} · {g.rows.map((a) => a.label).join(' + ')}</span>
+                <span className="num text-xs text-muted">{fmtDate(g.rows[0]!.signedOn)} · versão {g.rows[0]!.version}</span>
               </div>
-              <p className="mt-1 text-sm text-text">{a.description}</p>
+              <p className="mt-1 text-sm text-text">{g.rows[0]!.description}</p>
               <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-muted">
-                {a.valueDeltaCents !== 0 && <span className={clsx('num', a.valueDeltaCents < 0 ? 'text-danger' : 'text-[#15803D]')}>Valor {a.valueDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.valueDeltaCents))}{d.limits.baseCents ? ` (${pctTxt(Math.abs(a.valueDeltaCents) / d.limits.baseCents)})` : ''}</span>}
-                {a.monthlyDeltaCents !== 0 && <span className="num">Mensal {a.monthlyDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.monthlyDeltaCents))}</span>}
-                {a.newEndAt && <span>Novo término {fmtDate(a.newEndAt)}</span>}
-                {a.reforma && <span>Reforma (limite de 50%)</span>}
-                {a.acordo && <span>Por acordo entre as partes</span>}
+                {g.rows.map((a) => (
+                  <span key={a.id} className="contents">
+                    {a.valueDeltaCents !== 0 && <span className={clsx('num', a.valueDeltaCents < 0 ? 'text-danger' : 'text-[#15803D]')}>{AMENDMENT_LABELS[a.kind]}: valor {a.valueDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.valueDeltaCents))}{d.limits.baseCents ? ` (${pctTxt(Math.abs(a.valueDeltaCents) / d.limits.baseCents)})` : ''}</span>}
+                    {a.monthlyDeltaCents !== 0 && <span className="num">{AMENDMENT_LABELS[a.kind]}: mensal {a.monthlyDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.monthlyDeltaCents))}</span>}
+                    {a.adjustmentPct != null && <span className="num">Reajuste {a.adjustmentPct.toLocaleString('pt-BR')}%</span>}
+                    {a.newEndAt && <span>Novo término {fmtDate(a.newEndAt)}</span>}
+                    {a.kind === 'itens' && <span>Itens atualizados</span>}
+                    {a.reforma && <span>Reforma (limite de 50%)</span>}
+                    {a.acordo && <span>Por acordo entre as partes</span>}
+                  </span>
+                ))}
               </p>
             </li>
           ))}
@@ -83,49 +91,107 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
   );
 }
 
+type ItemDraft = { description: string; qty: string; unit: string; kind: ContractItemKind };
+const PURPOSE_HINT: Partial<Record<AmendmentKind, string>> = {
+  acrescimo: 'Aumenta valor ou quantidade (conta no limite legal).', supressao: 'Reduz valor ou quantidade (conta no limite legal).', prazo: 'Estende a vigência.',
+  reajuste: 'Aplica o percentual aos itens e ao valor mensal.', reequilibrio: 'Recompõe o equilíbrio econômico-financeiro.', itens: 'Inclui, retira ou muda os itens do contrato.', outro: 'Outra alteração (só registro).',
+};
+
 function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [number, setNumber] = useState(String(d.items.length + 1));
-  const [kind, setKind] = useState<AmendmentKind>('acrescimo');
+  const [number, setNumber] = useState(String(new Set(d.items.map((x) => x.groupId ?? x.id)).size + 1));
+  const [kinds, setKinds] = useState<AmendmentKind[]>([]);
   const [signedOn, setSignedOn] = useState(todayIso());
-  const [value, setValue] = useState<number | null>(null);
-  const [monthly, setMonthly] = useState<number | null>(null);
+  const [vals, setVals] = useState<Record<'acrescimo' | 'supressao' | 'reequilibrio', { value: number | null; monthly: number | null }>>({ acrescimo: { value: null, monthly: null }, supressao: { value: null, monthly: null }, reequilibrio: { value: null, monthly: null } });
+  const [pct, setPct] = useState('');
   const [newEndAt, setNewEndAt] = useState('');
   const [reforma, setReforma] = useState(false);
   const [acordo, setAcordo] = useState(false);
   const [description, setDescription] = useState('');
+  const [items, setItems] = useState<ItemDraft[]>(() => c.current.items.map((i) => ({ description: i.description, qty: String(i.qty), unit: (i.unitCents / 100).toFixed(2).replace('.', ','), kind: itemKindOf(i) })));
   const [error, setError] = useState<string | null>(null);
+  const has = (k: AmendmentKind) => kinds.includes(k);
+  const toggle = (k: AmendmentKind) => setKinds((x) => (x.includes(k) ? x.filter((y) => y !== k) : [...x, k]));
   const cents = (v: number | null) => (v === null ? 0 : Math.round(v * 100));
-  const money = kind === 'acrescimo' || kind === 'supressao' || kind === 'reequilibrio';
-  const remaining = kind === 'acrescimo' ? (reforma ? Math.max(0, Math.round(d.limits.baseCents * 0.5) - d.limits.acrescimo.cents) : d.limits.acrescimo.remainingCents) : kind === 'supressao' ? d.limits.supressao.remainingCents : null;
-  const over = d.legalLimit && remaining !== null && cents(value) > remaining && !(kind === 'supressao' && acordo);
+  const remainingAdd = reforma ? Math.max(0, Math.round(d.limits.baseCents * 0.5) - d.limits.acrescimo.cents) : d.limits.acrescimo.remainingCents;
+  const overAdd = d.legalLimit && has('acrescimo') && cents(vals.acrescimo.value) > remainingAdd;
+  const overSup = d.legalLimit && has('supressao') && !acordo && cents(vals.supressao.value) > d.limits.supressao.remainingCents;
+  const parsedItems = items.filter((i) => i.description.trim()).map((i) => ({ planId: null, description: i.description.trim(), qty: Math.max(1, Number(i.qty) || 1), unitCents: toCents(i.unit) ?? 0, kind: i.kind }));
+  const newMonthly = contractValuesFromItems(parsedItems, null).monthlyCents;
+  const pctNum = pct.trim() ? Number(pct.replace(',', '.')) : NaN;
   const save = useMutation({
-    mutationFn: () => api(`/contracts/${c.id}/amendments`, { method: 'POST', body: { number: number.trim(), kind, signedOn, valueDeltaCents: money ? cents(value) : 0, monthlyDeltaCents: money ? cents(monthly) : 0, newEndAt: newEndAt || null, reforma: kind === 'acrescimo' && reforma, acordo: kind === 'supressao' && acordo, description: description.trim() } }),
-    onSuccess: () => { for (const k of ['contract-amendments', 'contract', 'contracts', 'contract-ledger', 'contract-consumption']) void qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Aditivo ${number} registrado` }); onClose(); },
+    mutationFn: () => {
+      const purposes: Record<string, unknown> = {};
+      for (const k of ['acrescimo', 'supressao', 'reequilibrio'] as const) if (has(k)) purposes[k] = { valueCents: cents(vals[k].value), monthlyCents: cents(vals[k].monthly) };
+      if (has('prazo')) purposes.prazo = { newEndAt };
+      if (has('reajuste')) purposes.reajuste = { pct: pctNum };
+      if (has('itens')) purposes.itens = true;
+      if (has('outro')) purposes.outro = true;
+      return api(`/contracts/${c.id}/amendments`, { method: 'POST', body: { number: number.trim(), signedOn, description: description.trim(), reforma: has('acrescimo') && reforma, acordo: has('supressao') && acordo, purposes, ...(has('itens') ? { items: parsedItems } : {}) } });
+    },
+    onSuccess: () => { for (const k of ['contract-amendments', 'contract', 'contracts', 'contract-ledger', 'contract-consumption']) void qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Aditivo ${number} registrado: nova versão do contrato` }); onClose(); },
     onError: (e) => setError(errMsg(e)),
   });
-  const ready = number.trim() && description.trim().length >= 5 && (!money || kind === 'reequilibrio' || cents(value) > 0) && (kind !== 'prazo' || newEndAt) && !over;
+  const ready = number.trim() && description.trim().length >= 5 && kinds.length > 0 && !overAdd && !overSup
+    && (!has('acrescimo') || cents(vals.acrescimo.value) > 0) && (!has('supressao') || cents(vals.supressao.value) > 0)
+    && (!has('prazo') || !!newEndAt) && (!has('reajuste') || Number.isFinite(pctNum)) && (!has('itens') || parsedItems.length > 0);
+  const setItem = (i: number, p: Partial<ItemDraft>) => setItems((x) => x.map((r, j) => (j === i ? { ...r, ...p } : r)));
   return (
-    <Modal open onClose={onClose} title="Registrar termo aditivo" size="lg" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} disabled={!ready} onClick={() => save.mutate()}>Registrar aditivo</Button></>}>
-      <div className="space-y-3">
+    <Modal open onClose={onClose} title="Registrar termo aditivo" size="xl" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} disabled={!ready} onClick={() => { setError(null); save.mutate(); }}>Registrar aditivo</Button></>}>
+      <div className="space-y-4">
         {error && <p role="alert" className="bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormField label="Número do aditivo" htmlFor="am-number" required><Input id="am-number" value={number} maxLength={40} onChange={(e) => setNumber(e.target.value)} /></FormField>
-          <FormField label="Tipo" htmlFor="am-kind" required><Select id="am-kind" value={kind} onChange={(e) => setKind(e.target.value as AmendmentKind)}>{AMENDMENT_KINDS.map((k) => <option key={k} value={k}>{AMENDMENT_LABELS[k]}</option>)}</Select></FormField>
           <FormField label="Assinado em" htmlFor="am-signed" required><Input id="am-signed" type="date" value={signedOn} onChange={(e) => setSignedOn(e.target.value)} /></FormField>
         </div>
-        {money && (
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold text-ink">Finalidades (marque todas que o aditivo tem)</legend>
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">{AMENDMENT_KINDS.map((k) => (
+            <label key={k} className={clsx('flex cursor-pointer items-start gap-2 rounded-sm border px-3 py-2 text-sm', has(k) ? 'border-primary bg-primary-soft' : 'border-line')}>
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={has(k)} onChange={() => toggle(k)} />
+              <span><span className="block font-semibold text-ink">{AMENDMENT_LABELS[k]}</span><span className="text-xs text-muted">{PURPOSE_HINT[k]}</span></span>
+            </label>
+          ))}</div>
+        </fieldset>
+        {(['acrescimo', 'supressao', 'reequilibrio'] as const).filter(has).map((k) => (
+          <div key={k} className="rounded-md border border-line p-3">
+            <p className="mb-2 text-sm font-semibold text-ink">{AMENDMENT_LABELS[k]}</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label={k === 'supressao' ? 'Valor suprimido' : k === 'acrescimo' ? 'Valor acrescido' : 'Valor do reequilíbrio'} htmlFor={`am-v-${k}`} required={k !== 'reequilibrio'} hint={k === 'acrescimo' ? `Disponível no limite: ${fmtBRL(remainingAdd)}` : k === 'supressao' ? `Disponível no limite: ${fmtBRL(d.limits.supressao.remainingCents)}` : undefined}><MoneyInput id={`am-v-${k}`} value={vals[k].value} onChange={(v) => setVals((x) => ({ ...x, [k]: { ...x[k], value: v } }))} /></FormField>
+              <FormField label="Diferença no valor mensal" htmlFor={`am-m-${k}`} hint={has('itens') ? 'Com "Alteração dos itens", o mensal sai dos itens' : 'Deixe vazio se a mensalidade não muda'}><MoneyInput id={`am-m-${k}`} value={vals[k].monthly} onChange={(v) => setVals((x) => ({ ...x, [k]: { ...x[k], monthly: v } }))} /></FormField>
+            </div>
+            {k === 'acrescimo' && <label className="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={reforma} onChange={(e) => setReforma(e.target.checked)} />Reforma de edifício ou equipamento (limite de 50%)</label>}
+            {k === 'supressao' && <label className="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={acordo} onChange={(e) => setAcordo(e.target.checked)} />Supressão por acordo entre as partes (pode passar de 25%)</label>}
+          </div>
+        ))}
+        {(overAdd || overSup) && <p role="alert" className="bg-danger-soft px-3 py-2 text-sm text-danger">Acima do limite legal de {overAdd ? 'acréscimo' : 'supressão'}.</p>}
+        {(has('prazo') || has('reajuste')) && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <FormField label={kind === 'supressao' ? 'Valor suprimido' : 'Valor acrescido'} htmlFor="am-value" required={kind !== 'reequilibrio'} hint={remaining !== null ? `Disponível no limite: ${fmtBRL(remaining)}` : undefined}><MoneyInput id="am-value" value={value} onChange={setValue} /></FormField>
-            <FormField label="Diferença no valor mensal" htmlFor="am-monthly" hint="Deixe vazio se a mensalidade não muda"><MoneyInput id="am-monthly" value={monthly} onChange={setMonthly} /></FormField>
+            {has('prazo') && <FormField label="Novo término" htmlFor="am-end" required hint={c.current.endAt ? `Término atual: ${fmtDate(c.current.endAt)}` : undefined}><Input id="am-end" type="date" value={newEndAt} onChange={(e) => setNewEndAt(e.target.value)} /></FormField>}
+            {has('reajuste') && <FormField label="Reajuste (%)" htmlFor="am-pct" required hint="Aplicado aos itens e ao valor mensal. Ex.: 4,5"><Input id="am-pct" inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} /></FormField>}
           </div>
         )}
-        {over && <p role="alert" className="bg-danger-soft px-3 py-2 text-sm text-danger">Acima do limite legal: restam {fmtBRL(remaining ?? 0)} para {kind === 'acrescimo' ? 'acréscimo' : 'supressão'}.</p>}
-        {kind === 'acrescimo' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={reforma} onChange={(e) => setReforma(e.target.checked)} />Reforma de edifício ou equipamento (limite de 50%)</label>}
-        {kind === 'supressao' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={acordo} onChange={(e) => setAcordo(e.target.checked)} />Supressão por acordo entre as partes (pode passar de 25%)</label>}
-        <FormField label="Novo término" htmlFor="am-end" required={kind === 'prazo'} hint={c.current.endAt ? `Término atual: ${fmtDate(c.current.endAt)}` : undefined}><Input id="am-end" type="date" value={newEndAt} onChange={(e) => setNewEndAt(e.target.value)} /></FormField>
-        <FormField label="Objeto do aditivo" htmlFor="am-desc" required><Textarea id="am-desc" rows={3} value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: inclusão de 2 pontos de acesso na unidade Centro" /></FormField>
+        {has('itens') && (
+          <div className="rounded-md border border-line p-3">
+            <p className="mb-1 text-sm font-semibold text-ink">Itens do contrato depois do aditivo</p>
+            <p className="mb-2 text-xs text-muted">Edite, inclua ou retire. O contrato passa a valer com esta lista (nova versão); a anterior fica no histórico.{has('reajuste') ? ' O reajuste é aplicado sobre estes valores.' : ''}</p>
+            <ul className="space-y-2">{items.map((r, i) => (
+              <li key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_70px_120px_130px_auto] sm:items-end">
+                <FormField label="Descrição" htmlFor={`am-id-${i}`}><Input id={`am-id-${i}`} value={r.description} onChange={(e) => setItem(i, { description: e.target.value })} /></FormField>
+                <FormField label="Qtd." htmlFor={`am-iq-${i}`}><Input id={`am-iq-${i}`} inputMode="numeric" value={r.qty} onChange={(e) => setItem(i, { qty: e.target.value.replace(/\D/g, '') })} /></FormField>
+                <FormField label="Valor unitário" htmlFor={`am-iu-${i}`}><Input id={`am-iu-${i}`} inputMode="decimal" value={r.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></FormField>
+                <FormField label="Classificação" htmlFor={`am-ik-${i}`}><Select id={`am-ik-${i}`} value={r.kind} onChange={(e) => setItem(i, { kind: e.target.value as ContractItemKind })}>{CONTRACT_ITEM_KINDS.map((k) => <option key={k} value={k}>{CONTRACT_ITEM_KIND_LABELS[k]}</option>)}</Select></FormField>
+                <Button variant="ghost" aria-label={`Retirar ${r.description || 'item'}`} icon={<Trash2 className="h-4 w-4 text-danger" />} onClick={() => setItems((x) => x.filter((_, j) => j !== i))} />
+              </li>
+            ))}</ul>
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+              <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setItems((x) => [...x, { description: '', qty: '1', unit: '', kind: 'recorrente' }])}>Incluir item</Button>
+              <p className="text-sm text-muted">Recorrente: <b className="num text-ink">{fmtBRL(newMonthly)}</b>/mês (atual {fmtBRL(c.current.monthlyCents)})</p>
+            </div>
+          </div>
+        )}
+        <FormField label="Objeto do aditivo" htmlFor="am-desc" required><Textarea id="am-desc" rows={3} value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: prorrogação por 12 meses com reajuste IPCA e supressão de 1 ponto" /></FormField>
       </div>
     </Modal>
   );

@@ -278,5 +278,23 @@ describe('aditivos e reajuste pelo índice oficial', () => {
     const sug = ok(await carlos.get(`/contracts/${id}/adjustment-suggestion?anniversary=${today}`)).json();
     expect(sug).toMatchObject({ ok: true, index: 'IPCA', pct: 4.907, currentCents: 120_000, newCents: Math.round(120_000 * 1.04907), source: 'Banco Central (SGS)' });
     expect(sug.monthly).toHaveLength(12);
+    // um aditivo, várias finalidades: prorrogação + reajuste + supressão + itens → uma nova versão
+    const before = (await carlos.get(`/contracts/${id}`)).json();
+    expect((await carlos.post(`/contracts/${id}/amendments`, { number: '3', signedOn: today, description: 'Sem finalidade', purposes: {} })).statusCode).toBe(422);
+    expect((await carlos.post(`/contracts/${id}/amendments`, { number: '3', signedOn: today, description: 'Itens sem lista', purposes: { itens: true } })).statusCode).toBe(422);
+    const r3 = ok(await carlos.post(`/contracts/${id}/amendments`, {
+      number: '3', signedOn: today, description: 'Prorrogação com reajuste, supressão e troca de itens',
+      purposes: { prazo: { newEndAt: addDays(today, 800) }, reajuste: { pct: 10 }, supressao: { valueCents: 10_000, monthlyCents: 0 }, itens: true },
+      items: [{ description: 'Link dedicado 200 Mbps', qty: 2, unitCents: 50_000, kind: 'recorrente' }, { description: 'Roteador', qty: 1, unitCents: 30_000, kind: 'venda' }],
+    }), 201).json();
+    const after = (await carlos.get(`/contracts/${id}`)).json();
+    expect(after.current.version).toBe(before.current.version + 1);
+    expect(after.current.endAt).toBe(addDays(today, 800));
+    expect(after.current.items).toEqual([expect.objectContaining({ description: 'Link dedicado 200 Mbps', unitCents: 55_000, kind: 'recorrente' }), expect.objectContaining({ description: 'Roteador', unitCents: 33_000, kind: 'venda' })]);
+    expect(after.current.monthlyCents).toBe(110_000); // só o recorrente, reajustado em 10%
+    am = ok(await carlos.get(`/contracts/${id}/amendments`)).json();
+    const group = am.items.filter((x: { groupId: string }) => x.groupId === r3.groupId);
+    expect(group.map((x: { kind: string }) => x.kind).sort()).toEqual(['itens', 'prazo', 'reajuste', 'supressao']);
+    expect(am.limits.supressao.cents).toBe(10_000);
   });
 });

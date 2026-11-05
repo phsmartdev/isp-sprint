@@ -64,7 +64,7 @@ export function defineRoute<B extends ZodTypeAny = ZodTypeAny, Q extends ZodType
 function parse<T extends ZodTypeAny>(schema: T | undefined, value: unknown, where: string) {
   if (!schema) return undefined;
   const r = schema.safeParse(value ?? {});
-  if (!r.success) throw unprocessable(`Parâmetros inválidos em ${where}.`, zodToProblemErrors(r.error));
+  if (!r.success) throw unprocessable(where === "corpo" ? "Confira os dados informados." : `Parâmetros inválidos em ${where}.`, zodToProblemErrors(r.error));
   return r.data;
 }
 

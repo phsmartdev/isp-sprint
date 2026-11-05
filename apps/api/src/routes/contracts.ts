@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
-  SECTORS, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
+  SECTORS, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
@@ -31,7 +31,8 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD'
 const optDay = day.nullable().optional();
 const optText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v ? v : v === '' ? null : v));
 const uuid = z.string().uuid();
-const Item = z.object({ planId: uuid.nullable().default(null), description: z.string().trim().min(2).max(200), qty: z.number().int().min(1).max(100_000), unitCents: z.number().int().min(0).max(10_000_000_000), recurring: z.boolean().default(true) });
+const Item = z.object({ planId: uuid.nullable().default(null), description: z.string().trim().min(2).max(200), qty: z.number().int().min(1).max(100_000), unitCents: z.number().int().min(0).max(1_000_000_000_000), kind: z.enum(CONTRACT_ITEM_KINDS).optional(), recurring: z.boolean().optional() })
+  .transform(({ recurring, ...i }) => ({ ...i, kind: itemKindOf({ kind: i.kind, recurring }) }));
 const Guarantee = z.object({ type: z.string().trim().min(2).max(80), amountCents: z.number().int().min(0).nullable().default(null), insurer: optText(120).default(null), policy: optText(80).default(null), expiresAt: day.nullable().default(null), renewalAt: day.nullable().default(null) }).nullable();
 const PublicTerms = z.object({ agency: optText(200).default(null), processNumber: optText(80).default(null), modality: optText(80).default(null), commitmentNote: optText(80).default(null), budgetLine: optText(200).default(null), extensionMaxMonths: z.number().int().min(1).max(600).nullable().default(null) }).nullable();
 const VersionFields = z.object({
@@ -39,8 +40,8 @@ const VersionFields = z.object({
   object: z.string().trim().min(3).max(2000),
   signedAt: optDay, startAt: optDay, endAt: optDay, termMonths: z.number().int().min(1).max(600).nullable().optional(),
   activationAt: optDay, billingStartAt: optDay, renewalAt: optDay,
-  monthlyCents: z.number().int().min(0).max(10_000_000_000),
-  totalCents: z.number().int().min(0).max(1_000_000_000_000).nullable().optional(),
+  monthlyCents: z.number().int().min(0).max(1_000_000_000_000),
+  totalCents: z.number().int().min(0).max(100_000_000_000_000).nullable().optional(),
   billingDay: z.number().int().min(1).max(31).nullable().optional(),
   billingTerms: optText(2000),
   items: z.array(Item).max(50).default([]),
@@ -72,8 +73,8 @@ async function opportunityContractItems(db: DbOrTx, tenantId: string, opportunit
   if (rows.length) return rows.map((r) => contractItemFromOpportunity(r));
   if (!plan) return [];
   return plan.products.length
-    ? plan.products.map((p) => ({ planId: plan.id, description: `${plan.invoiceServiceName ?? plan.name} · ${p.name}`, qty: p.qty || 1, unitCents: p.unitPriceCents, recurring: true }))
-    : [{ planId: plan.id, description: plan.invoiceServiceName ?? plan.name, qty: 1, unitCents: plan.priceCents, recurring: true }];
+    ? plan.products.map((p) => ({ planId: plan.id, description: `${plan.invoiceServiceName ?? plan.name} · ${p.name}`, qty: p.qty || 1, unitCents: p.unitPriceCents, kind: 'recorrente' as const }))
+    : [{ planId: plan.id, description: plan.invoiceServiceName ?? plan.name, qty: 1, unitCents: plan.priceCents, kind: 'recorrente' as const }];
 }
 
 function normalizeVersion<T extends Partial<z.infer<typeof VersionFields>>>(v: T): T {
@@ -747,7 +748,7 @@ export const contractRoutes = [
           const endAt = patch.endAt === undefined ? cur.endAt : (patch.endAt as string | null);
           if (patch.endAt !== undefined && patch.endAt !== cur.endAt && patch.renewalAt === undefined && endAt) patch.renewalAt = addDays(endAt, 1);
           if (startAt && endAt && endAt < startAt) throw unprocessable('O término da vigência é anterior ao início.', [{ path: 'version.endAt', message: 'Término antes do início' }]);
-          if (patch.items && patch.monthlyCents === undefined) patch.monthlyCents = contractValuesFromItems(patch.items as { qty: number; unitCents: number; recurring?: boolean }[], null).monthlyCents;
+          if (patch.items && patch.monthlyCents === undefined) patch.monthlyCents = contractValuesFromItems(patch.items as { qty: number; unitCents: number; kind?: string }[], null).monthlyCents;
           if (patch.reportTerms !== undefined) patch.reportTerms = normalizeVersion({ reportTerms: patch.reportTerms as ReportTerms | null }).reportTerms;
           if ((patch.reportTerms as ReportTerms | null)?.validatorId) await assertUsers(tx, auth, [(patch.reportTerms as ReportTerms).validatorId]);
           const r = await newVersion(tx, c, auth.userId, patch as VersionPatch, 'edicao', body.reason ?? 'Ajuste no cadastro antes da validação');

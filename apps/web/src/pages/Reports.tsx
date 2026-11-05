@@ -18,6 +18,7 @@ import { stageColor } from '../components/badges';
 import { PortsReport } from '../features/PortsReport';
 import { CommissionsReport } from '../features/CommissionsReport';
 import { MoneyToggle } from '../lib/privacy';
+import { ArrangeButton, useArrangement } from '../features/Arrange';
 import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 
 type Overview = {
@@ -42,6 +43,9 @@ const KPI_LOOK = [
   { icon: <Clock3 className="h-7 w-7" />, tone: 'orange' as const },
 ];
 
+const REPORT_BLOCKS = ['evo', 'orig', 'status', 'plan', 'team', 'latest'] as const;
+const REPORT_BLOCK_LABELS: Record<string, string> = {"evo": "Evolução de vendas", "orig": "Origem dos leads", "status": "Status das oportunidades", "plan": "Vendas por plano", "team": "Equipe", "latest": "Últimas vendas"};
+
 export function ReportsPage() {
   const nav = useNavigate();
   const { can } = useAuth();
@@ -58,6 +62,8 @@ export function ReportsPage() {
   const show = (s: string) => f.tab === 'geral' || f.tab === s;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
+  // cada pessoa organiza a visão geral (ordem e o que aparece)
+  const arr = useArrangement('relatorios-geral', REPORT_BLOCKS, REPORT_BLOCK_LABELS);
   const TABS = [{ key: 'geral', label: 'Visão geral' }, { key: 'vendas', label: 'Vendas' }, { key: 'leads', label: 'Leads' }, { key: 'oportunidades', label: 'Oportunidades' }, { key: 'clientes', label: 'Contas' }, { key: 'atividades', label: 'Atividades' }, { key: 'comissoes', label: 'Comissões' }, { key: 'portas', label: 'Portas CTO' }];
   const TV_TABS = TABS.filter((t) => ['geral', 'vendas', 'leads', 'oportunidades', 'atividades'].includes(t.key) || (t.key === 'clientes' && can('clientes')));
 
@@ -71,6 +77,7 @@ export function ReportsPage() {
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
             <MoneyToggle />
+            {f.tab === 'geral' && <ArrangeButton a={arr} />}
             <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
@@ -112,7 +119,7 @@ export function ReportsPage() {
       {d && f.tab !== 'clientes' && f.tab !== 'atividades' && f.tab !== 'comissoes' && f.tab !== 'portas' && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           {show('vendas') && (
-            <section className="card p-5 xl:col-span-7" aria-labelledby="h-evo">
+            <section className={clsx("card p-5 xl:col-span-7", arr.cls('evo'))} style={arr.style('evo')} aria-labelledby="h-evo">{arr.bar('evo')}
               <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                 <h2 id="h-evo" className="text-lg font-bold text-ink">Evolução de vendas</h2>
                 <Legend items={[{ label: 'Valor vendido (R$)', color: CHART.value }, { label: 'Quantidade de vendas', color: CHART.revenue }]} />
@@ -129,13 +136,13 @@ export function ReportsPage() {
             </section>
           )}
           {show('leads') && (
-            <section className="card p-5 xl:col-span-5" aria-labelledby="h-orig">
+            <section className={clsx("card p-5 xl:col-span-5", arr.cls('orig'))} style={arr.style('orig')} aria-labelledby="h-orig">{arr.bar('orig')}
               <h2 id="h-orig" className="mb-3 text-lg font-bold text-ink">Origem dos leads</h2>
               <Donut ariaLabel="Origem dos leads do período" items={d.origins.items.map((o) => ({ label: o.source, value: o.n, share: o.share }))} centerValue={fmtInt(d.origins.total)} centerLabel="leads" />
             </section>
           )}
           {show('oportunidades') && (
-            <section className="card p-5 xl:col-span-4" aria-labelledby="h-status">
+            <section className={clsx("card p-5 xl:col-span-4", arr.cls('status'))} style={arr.style('status')} aria-labelledby="h-status">{arr.bar('status')}
               <div className="mb-3 flex items-center justify-between gap-2">
                 <h2 id="h-status" className="text-lg font-bold text-ink">Status das oportunidades</h2>
                 {(lookups.data?.pipelines.filter((x) => x.allowed).length ?? 0) > 1 && (
@@ -160,13 +167,13 @@ export function ReportsPage() {
             </section>
           )}
           {show('vendas') && (
-            <section className="card p-5 xl:col-span-4" aria-labelledby="h-plan">
+            <section className={clsx("card p-5 xl:col-span-4", arr.cls('plan'))} style={arr.style('plan')} aria-labelledby="h-plan">{arr.bar('plan')}
               <h2 id="h-plan" className="mb-4 text-lg font-bold text-ink">Vendas por plano</h2>
               {d.plans.total === 0 ? <p className="text-sm text-muted">Nenhuma venda no período.</p> : <BarRows color="#8DB7FF" items={d.plans.items.map((x) => ({ label: x.plan, value: x.n, share: x.share }))} />}
             </section>
           )}
           {show('vendas') && (
-            <section className="card p-5 xl:col-span-4" aria-labelledby="h-team">
+            <section className={clsx("card p-5 xl:col-span-4", arr.cls('team'))} style={arr.style('team')} aria-labelledby="h-team">{arr.bar('team')}
               <div className="mb-3 flex items-center justify-between">
                 <h2 id="h-team" className="text-lg font-bold text-ink">{d.team.ranking ? 'Desempenho da equipe' : 'Meu desempenho'}</h2>
                 <span className="rounded-sm border border-line px-3 py-1.5 text-xs text-text">{teamMetric === 'vendas' ? 'Vendas fechadas' : ''}</span>
@@ -188,7 +195,7 @@ export function ReportsPage() {
             </section>
           )}
           {show('vendas') && (
-            <section className="card overflow-hidden xl:col-span-12" aria-labelledby="h-latest">
+            <section className={clsx("card overflow-hidden xl:col-span-12", arr.cls('latest'))} style={arr.style('latest')} aria-labelledby="h-latest">{arr.bar('latest')}
               <div className="flex items-center justify-between px-5 pb-2 pt-4">
                 <h2 id="h-latest" className="text-lg font-bold text-ink">Últimas vendas</h2>
                 <Link to="/opportunities?view=lista&status=encerradas" className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">Ver todas <ArrowRight className="h-4 w-4" /></Link>
