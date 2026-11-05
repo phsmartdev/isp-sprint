@@ -85,3 +85,14 @@ describe('recursos', () => {
     expect(purchasePending({ kind: 'consumo', financeCheck: false, legalReview: false, directorSigned: false, quotes: 0 })).toEqual(['Checagem prévia com o Financeiro', 'Cotação do setor de Compras']);
   });
 });
+
+describe('recorrência do item planejado', () => {
+  it('uma vez, todo mês e parcelado (centavos na última parcela), atravessando o ano', async () => {
+    const { recurrencePlan } = await import('./budget');
+    expect(recurrencePlan('2026-11', 'unico', 12, 5000)).toEqual([{ month: '2026-11', index: 1, total: 1, cents: 5000 }]);
+    expect(recurrencePlan('2026-11', 'mensal', 3, 1000).map((x) => [x.month, x.cents])).toEqual([['2026-11', 1000], ['2026-12', 1000], ['2027-01', 1000]]);
+    const p = recurrencePlan('2026-12', 'parcelado', 3, 1000);
+    expect(p.map((x) => x.cents)).toEqual([333, 333, 334]);
+    expect(p.reduce((t, x) => t + x.cents, 0)).toBe(1000);
+  });
+});

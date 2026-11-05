@@ -209,3 +209,18 @@ export function purchasePending(p: { kind: PurchaseKind; financeCheck: boolean; 
   if (p.kind === 'especifica' && !p.directorSigned) out.push('Assinatura da Diretoria Comercial (ou liberação por escrito)');
   return out;
 }
+
+// ------------------------------------------------------------------ recorrência e parcelamento do item planejado
+export const RECURRENCES = ['unico', 'mensal', 'parcelado'] as const;
+export type Recurrence = (typeof RECURRENCES)[number];
+export const RECURRENCE_LABELS: Record<Recurrence, string> = { unico: 'Uma vez', mensal: 'Todo mês', parcelado: 'Parcelado' };
+export const addMonth = (m: string, n: number) => { const d = new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+/**
+ * Meses e valores de um item planejado: uma vez (o valor no mês); todo mês (o valor em cada mês);
+ * parcelado (o total dividido nos meses, sobra de centavos na última parcela).
+ */
+export function recurrencePlan(start: string, kind: Recurrence, months: number, amountCents: number) {
+  const n = kind === 'unico' ? 1 : Math.max(1, Math.min(36, Math.floor(months)));
+  const each = kind === 'parcelado' ? Math.floor(amountCents / n) : amountCents;
+  return Array.from({ length: n }, (_, i) => ({ month: addMonth(start, i), index: i + 1, total: n, cents: kind === 'parcelado' && i === n - 1 ? amountCents - each * (n - 1) : each }));
+}

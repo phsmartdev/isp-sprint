@@ -4341,6 +4341,11 @@ export const budgetLines = pgTable('budget_lines', {
   itemType: text('item_type').notNull().default('outro'),
   supplierId: uuid('supplier_id'),
   resourceId: uuid('resource_id'),
+  /** Recorrência/parcelamento: as linhas de um mesmo item compartilham a série (1 de 12, 2 de 12…). */
+  recurrence: text('recurrence').notNull().default('unico'),
+  seriesId: uuid('series_id'),
+  seriesIndex: integer('series_index').notNull().default(1),
+  seriesTotal: integer('series_total').notNull().default(1),
   status: text('status').notNull().default('rascunho'),
   decisionNote: text('decision_note'),
   decidedBy: uuid('decided_by').references(() => users.id),
@@ -4349,7 +4354,7 @@ export const budgetLines = pgTable('budget_lines', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   deletedAt: ts('deleted_at'),
-}, (t) => ({ idx: index('budget_lines_idx').on(t.tenantId, t.costCenterId, t.month), statusCk: check('budget_lines_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'])), amountCk: check('budget_lines_amount_ck', sql`amount_cents > 0`) }));
+}, (t) => ({ idx: index('budget_lines_idx').on(t.tenantId, t.costCenterId, t.month), seriesIdx: index('budget_lines_series_idx').on(t.seriesId), recCk: check('budget_lines_recurrence_ck', inList('recurrence', ['unico', 'mensal', 'parcelado'])), statusCk: check('budget_lines_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'])), amountCk: check('budget_lines_amount_ck', sql`amount_cents > 0`) }));
 
 /** Budget Guardião: ajuste dentro do trimestre (até 15% com justificativa; acima, Diretoria). A decisão fica também no histórico (budget_events). */
 export const budgetAdjustments = pgTable('budget_adjustments', {
