@@ -81,12 +81,11 @@ function serialize(d: ControlData, st: ReturnType<typeof controlState>) {
     return { ...c, sourceName: c.sourceId ? sourceName.get(c.sourceId) ?? null : c.source, items: its, valueV4: its.reduce((a, i) => a + i.valueV4, 0), balanceV4: c.cancelledAt ? 0 : its.reduce((a, i) => a + i.balanceV4, 0), suppressedV4: its.reduce((a, i) => a + i.moves.filter((m) => m.kind === 'supressao').reduce((t, m) => t + (m.value4 ?? value4(m.qty4, i.price4)), 0), 0),
       /** consumo em R$ acima do valor da nota (preço reajustado sem reforço de valor) */ valueDeficitV4: c.cancelledAt ? 0 : its.reduce((a, i) => a + Math.max(0, -i.balanceV4), 0), reempenhadaEm: linked.map((id) => ({ id, number: num(id) })), substitui: replaces.map((id) => ({ id, number: num(id) })) };
   });
-  // pendências estruturadas (PF05): sem empenho, executado sem nota fiscal
+  // pendências estruturadas (PF05): sem empenho, reforço de valor e retroativo (a nota fiscal é do Financeiro)
   const pendencias = [
     ...measurements.filter((m) => m.status !== 'cancelada' && !m.superseded && m.uncoveredV4 > 0).map((m) => ({ kind: 'aguardando_empenho', label: 'Aguardando empenho', measurementId: m.id, title: m.title, competence: m.competence, valueV4: m.uncoveredV4, since: m.createdAt })),
     // empenho em R$ insuficiente (o preço subiu e a NE não foi reforçada em valor)
     ...commitments.filter((c) => c.valueDeficitV4 > 0).map((c) => ({ kind: 'reforco_valor', label: 'Reforço de valor da NE', measurementId: c.id, title: `${c.number}: consumo acima do valor empenhado`, competence: `${c.fiscalYear}-12`, valueV4: c.valueDeficitV4, since: c.createdAt })),
-    ...measurements.filter((m) => m.status === 'atestada' && !m.superseded).map((m) => ({ kind: 'sem_nf', label: 'Executado sem nota fiscal', measurementId: m.id, title: m.title, competence: m.competence, valueV4: m.valueV4, since: m.attestedAt ?? m.createdAt })),
     // PF05.3: retroativo de reajuste a cobrar, por medição
     ...d.raw.retros.filter((x) => x.status === 'pendente').flatMap((x) => {
       const m = measurements.find((y) => y.id === x.measurementId);

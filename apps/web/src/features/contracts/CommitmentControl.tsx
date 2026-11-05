@@ -1,6 +1,6 @@
 /**
  * Gestão de Contratos → Controle de Empenhos: a planilha de controle dentro do sistema, feita para qualquer pessoa ler.
- * Quatro números no topo (contratado, empenhado, executado, faturado), alertas em linguagem simples e, embaixo, itens,
+ * Quatro números no topo (contratado, empenhado, executado, saldo a medir); vai até a medição (a NF é do Financeiro), alertas em linguagem simples e, embaixo, itens,
  * empenhos, medições e pendências. Todo saldo é calculado pela API a partir do histórico; nada é digitado.
  */
 import { useMemo, useRef, useState } from 'react';
@@ -28,7 +28,6 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
   if (q.isLoading || !q.data) return <div className="card p-5"><LoadingRows /></div>;
   const d = q.data;
   const t = d.totals;
-  const notInvoiced = Math.max(0, t.executed - t.invoiced);
   const empty = !d.lines.length;
   return (
     <div className="space-y-4">
@@ -55,19 +54,17 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
               <Big label="Contratado" value={money(t.contracted)} hint="Valor total dos itens do contrato" />
               <Big label="Empenhado" value={money(t.committed)} hint={t.toCommit > 0 ? `Falta empenhar ${money(t.toCommit)}` : 'Todo o contrato tem empenho'} warn={t.toCommit > 0} />
               <Big label="Executado" value={money(t.executed + t.pending)} hint={`${(t.executionPct ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% do contrato${t.pending ? ` · ${money(t.pending)} em medição aberta` : ''}`} />
-              <Big label="Faturado" value={money(t.invoiced)} hint={notInvoiced > 0 ? `${money(notInvoiced)} medido e ainda sem nota` : 'Tudo o que foi atestado tem nota'} warn={notInvoiced > 0} />
+              <Big label="Saldo a medir" value={money(Math.max(0, t.contracted - t.executed - t.pending))} hint="Contratado que ainda não foi medido" />
             </dl>
             {/* barra do contrato */}
             <div className="mt-4">
               <div className="flex h-3 overflow-hidden rounded-full bg-surface-2" aria-hidden>
-                <span className="bg-success" style={{ width: `${pctOf(t.invoiced, t.contracted)}%` }} />
-                <span className="bg-[#F59E0B]" style={{ width: `${pctOf(notInvoiced, t.contracted)}%` }} />
+                <span className="bg-success" style={{ width: `${pctOf(t.executed, t.contracted)}%` }} />
                 <span className="bg-primary/60" style={{ width: `${pctOf(t.pending, t.contracted)}%` }} />
                 <span className="bg-[#8B5CF6]/60" style={{ width: `${pctOf(t.reserved, t.contracted)}%` }} />
               </div>
               <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text">
-                <Legend cls="bg-success" label="Faturado" value={money(t.invoiced)} />
-                <Legend cls="bg-[#F59E0B]" label="Atestado sem nota" value={money(notInvoiced)} />
+                <Legend cls="bg-success" label="Medido (atestado)" value={money(t.executed)} />
                 <Legend cls="bg-primary/60" label="Medição aberta" value={money(t.pending)} />
                 <Legend cls="bg-[#8B5CF6]/60" label="Reservado na pipeline" value={money(t.reserved)} />
                 <Legend cls="bg-surface-2 border border-line" label="Livre" value={money(Math.max(0, t.available))} />
@@ -348,7 +345,6 @@ function Measurements({ d, contractId }: { d: Data; contractId: string }) {
                   {m.status === 'elaboracao' && <Button size="sm" variant="ghost" onClick={() => setEdit(m)}>Editar</Button>}
                   {m.status === 'elaboracao' && <Button size="sm" icon={<Send className="h-4 w-4" />} onClick={() => act.mutate({ m, action: 'enviar' })}>Enviar ao órgão</Button>}
                   {['elaboracao', 'enviada'].includes(m.status) && <Button size="sm" icon={<ShieldCheck className="h-4 w-4" />} onClick={() => act.mutate({ m, action: 'atestar' })}>Atestada</Button>}
-                  {m.status === 'atestada' && <Button size="sm" variant="primary" icon={<Receipt className="h-4 w-4" />} onClick={() => setInvoice(m)}>Faturar (NF)</Button>}
                   <Button size="sm" variant="ghost" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setRevise(m)}>Revisar</Button>
                   {['elaboracao', 'enviada'].includes(m.status) && <Button size="sm" variant="ghost" onClick={() => { const r = prompt('Motivo do cancelamento'); if (r && r.trim().length >= 5) act.mutate({ m, action: 'cancelar', reason: r }); }}>Cancelar</Button>}
                 </div>
@@ -457,7 +453,7 @@ function Pendencias({ d, contractId }: { d: Data; contractId: string }) {
   const [retroNf, setRetroNf] = useState(false);
   const retros = d.pendencias.filter((p) => p.kind === 'retroativo');
   const chosen = retros.filter((p) => pick[p.retroId!]);
-  if (!d.pendencias.length) return <div className="p-5"><EmptyState icon={<CheckCircle2 className="h-8 w-8 text-success" />} title="Sem pendências" description="Tudo o que foi executado tem empenho e nota fiscal." /></div>;
+  if (!d.pendencias.length) return <div className="p-5"><EmptyState icon={<CheckCircle2 className="h-8 w-8 text-success" />} title="Sem pendências" description="Tudo o que foi medido tem empenho." /></div>;
   const total = d.pendencias.reduce((a, p) => a + p.valueV4, 0);
   return (
     <div className="p-4">

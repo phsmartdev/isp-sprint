@@ -268,9 +268,8 @@ export function ContractsPanel({ a }: { a: Analysis }) {
 
 // ------------------------------------------------------------------ classificação
 
-const DIM: ['classKey' | 'category' | 'profile' | 'payerProfile' | 'potential' | 'risk', string][] = [
-  ['classKey', 'Classe estratégica'], ['category', 'Categoria'], ['profile', 'Perfil do cliente'], ['payerProfile', 'Perfil pagador'], ['potential', 'Potencial comercial'], ['risk', 'Risco'],
-];
+// classificação da conta: só a Classe estratégica (o IPC fica na conta, no Sucesso do Cliente)
+const DIM: ['classKey', string][] = [['classKey', 'Classe estratégica']];
 export function ClassificationPanel({ a }: { a: Analysis }) {
   const toast = useToast();
   const c = a.classification?.current ?? null;
