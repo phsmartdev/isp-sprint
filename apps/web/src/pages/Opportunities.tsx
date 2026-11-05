@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core';
 import { BarChart3, CheckCircle2, ClipboardList, Clock3, Columns3, List, Maximize2, Minimize2, MoreVertical, Plus, Search, Send, SlidersHorizontal, UserRound } from 'lucide-react';
 import { api, qs } from '../lib/api';
-import { fmtBRL, fmtRelativeShort } from '../lib/format';
+import { fmtBRL, fmtInt, fmtRelativeShort } from '../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../lib/hooks';
 import type { Kpi, LookupStage, Opportunity, Paged, PipelineStage } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
@@ -46,7 +46,7 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
   );
 }
 
-function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
+const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
   const nav = useNavigate();
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
@@ -120,7 +120,7 @@ function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onM
       </>)}
     </li>
   );
-}
+});
 
 function Column({ stage, children, onAdd, index, compact }: { stage: PipelineStage; children: React.ReactNode; onAdd: () => void; index: number; compact?: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.key });
@@ -146,7 +146,7 @@ export function OpportunitiesPage() {
   const { can } = useAuth();
   const lookups = useLookups();
   const nav = useNavigate();
-  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', pipelineId: '', from: '', to: '', view: 'kanban', status: 'abertas', page: '1', size: '10' });
+  const [f, setF] = useUrlState({ q: '', ownerId: '', sourceId: '', planId: '', pipelineId: '', from: '', to: '', view: 'kanban', status: 'abertas', stage: '', page: '1', size: '10' });
   const [advanced, setAdvanced] = useState(false);
   const advRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -169,12 +169,15 @@ export function OpportunitiesPage() {
   const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
   const currentPipelineId = f.pipelineId || pipe.data?.pipeline.id || journeys.find((p) => p.isDefault)?.id || '';
   const stageList = (pipelineId: string) => lookups.data?.pipelines.find((p) => p.id === pipelineId)?.stages ?? [];
-  const list = useQuery({ queryKey: ['opportunities', 'list', f], enabled: !kanban, placeholderData: keepPreviousData, queryFn: () => api<Paged<Opportunity>>(`/opportunities${qs({ ...filters, status: f.status, page: f.page, pageSize: f.size })}`) });
+  const list = useQuery({ queryKey: ['opportunities', 'list', f], enabled: !kanban, placeholderData: keepPreviousData, queryFn: () => api<Paged<Opportunity>>(`/opportunities${qs({ ...filters, status: f.status, stage: f.stage, page: f.page, pageSize: f.size })}`) });
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
   const stages = pipe.data?.stages ?? [];
+  const canMove = can('oportunidades');
 
+  const moveRef = useRef<(opp: Opportunity, to: string) => void>(() => {});
+  const stableMove = useCallback((opp: Opportunity, to: string) => moveRef.current(opp, to), []);
   const requestMove = (opp: Opportunity, to: string) => {
     if (opp.stage === to) return;
     const list = stageList(opp.pipelineId);
@@ -184,6 +187,7 @@ export function OpportunitiesPage() {
     if (needsDialog(req)) setPending(req);
     else transition.mutate({ opp, payload: { toStage: to } });
   };
+  moveRef.current = requestMove;
   const onDragEnd = (e: DragEndEvent) => {
     const opp = e.active.data.current?.opp as Opportunity | undefined;
     const to = e.over?.id as string | undefined;
@@ -220,7 +224,7 @@ export function OpportunitiesPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3" role="search">
         <div className="flex rounded-md border border-line bg-surface p-1" role="group" aria-label="Visualização">
-          <button aria-pressed={kanban} onClick={() => setF({ view: 'kanban' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><Columns3 className="h-5 w-5" />Kanban</button>
+          <button aria-pressed={kanban} onClick={() => setF({ view: 'kanban', stage: '' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><Columns3 className="h-5 w-5" />Kanban</button>
           <button aria-pressed={!kanban} onClick={() => setF({ view: 'lista' })} className={clsx('flex items-center gap-2 rounded-sm px-4 py-2 text-md', !kanban ? 'bg-primary-soft font-semibold text-primary' : 'text-ink')}><List className="h-5 w-5" />Lista</button>
         </div>
         {kanban && <Button size="lg" aria-pressed={fit} aria-label={fit ? 'Colunas largas' : 'Ajustar à tela'} icon={fit ? <Maximize2 className="h-5 w-5" /> : <Minimize2 className="h-5 w-5" />} onClick={() => setFitPersist(!fit)} title={fit ? 'Colunas largas (rolagem para o lado)' : 'Ajustar à tela: todas as etapas numa tela só'} />}
@@ -279,6 +283,13 @@ export function OpportunitiesPage() {
         </div>
       </div>
 
+      {!kanban && f.stage && (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted">Filtrando pela etapa</span>
+          <Chip tone="blue">{stageList(f.pipelineId || currentPipelineId).find((x) => x.key === f.stage)?.name ?? f.stage}</Chip>
+          <button type="button" className="link text-sm" onClick={() => setF({ stage: '', page: '1' })}>Limpar</button>
+        </p>
+      )}
       {kanban ? (
         pipe.isLoading ? <div className="card"><LoadingRows /></div> : pipe.isError ? <ErrorState error={pipe.error} onRetry={() => pipe.refetch()} /> : (
           <DndContext sensors={sensors} onDragEnd={onDragEnd} accessibility={{ announcements, screenReaderInstructions: { draggable: 'Pressione espaço para pegar o cartão, use as setas para escolher a coluna e espaço para soltar. Esc cancela. Também é possível usar o menu do cartão.' } }}>
@@ -286,8 +297,13 @@ export function OpportunitiesPage() {
               {stages.map((s, i) => (
                 <Column key={s.key} stage={s} index={i} compact={fit} onAdd={() => nav(`/opportunities/new${qs({ pipelineId: currentPipelineId })}`)}>
                   <ul className={clsx('flex min-h-[120px] flex-col', fit ? 'gap-1.5' : 'gap-3')}>
-                    {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={requestMove} canMove={can('oportunidades')} stages={stageList(c.pipelineId)} />)}
+                    {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={stableMove} canMove={canMove} stages={stageList(c.pipelineId)} />)}
                     {s.cards.length === 0 && <li className="rounded-md border border-dashed border-line-strong/60 px-3 py-6 text-center text-sm text-muted">Nenhuma oportunidade</li>}
+                    {s.count > s.cards.length && (
+                      <li><button type="button" className="w-full rounded-md border border-dashed border-line-strong/60 px-2 py-2 text-center text-xs font-semibold text-primary hover:bg-white/60" onClick={() => setF({ view: 'lista', status: 'abertas', stage: s.key, pipelineId: currentPipelineId, page: '1' })}>
+                        Mostrando {s.cards.length} de {fmtInt(s.count)} · ver todas na Lista
+                      </button></li>
+                    )}
                   </ul>
                 </Column>
               ))}

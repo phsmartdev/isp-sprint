@@ -1,17 +1,17 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { Button, FormField, Input, Select, Textarea } from '../../components/ui/primitives';
 import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version } from './shared';
 
-type ItemRow = { planId: string; description: string; qty: string; unit: string };
+type ItemRow = { planId: string; description: string; qty: string; unit: string; recurring: boolean };
 export type FormState = {
   kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
-  items: ItemRow[]; monthly: string; total: string; billingDay: string; billingTerms: string;
+  items: ItemRow[]; monthly: string; total: string; monthlyAuto: boolean; totalAuto: boolean; billingDay: string; billingTerms: string;
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
   agency: string; processNumber: string; modality: string; commitmentNote: string; budgetLine: string; extensionMax: string;
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
@@ -22,8 +22,10 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
   return {
     kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
-    items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents) })),
-    monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
+    items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), recurring: i.recurring !== false })),
+    monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null),
+    // automático quando vazio ou igual ao cálculo pelos itens; valor diferente informado à mão continua manual
+    ...(() => { const c = contractValuesFromItems(v.items ?? [], v.termMonths ?? null); return { monthlyAuto: v.monthlyCents == null || v.monthlyCents === c.monthlyCents, totalAuto: v.totalCents == null || v.totalCents === c.totalCents }; })(), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
     hasGuarantee: !!g, gType: g?.type ?? '', gAmount: dec(g?.amountCents ?? null), gInsurer: g?.insurer ?? '', gPolicy: g?.policy ?? '', gExpires: g?.expiresAt ?? '', gRenewal: g?.renewalAt ?? '',
     agency: p?.agency ?? '', processNumber: p?.processNumber ?? '', modality: p?.modality ?? '', commitmentNote: p?.commitmentNote ?? '', budgetLine: p?.budgetLine ?? '', extensionMax: p?.extensionMaxMonths ? String(p.extensionMaxMonths) : '',
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
@@ -31,16 +33,18 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
 }
 
 const nul = (s: string) => (s.trim() ? s.trim() : null);
-const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.description.trim()).map((r) => ({ planId: r.planId || null, description: r.description.trim(), qty: Math.max(1, Number(r.qty) || 1), unitCents: toCents(r.unit) ?? 0 }));
+const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.description.trim()).map((r) => ({ planId: r.planId || null, description: r.description.trim(), qty: Math.max(1, Number(r.qty) || 1), unitCents: toCents(r.unit) ?? 0, recurring: r.recurring }));
+/** Mensal e global calculados pelos itens (recorrentes × prazo + únicos uma vez). */
+export const autoValues = (f: Pick<FormState, 'items' | 'termMonths'>) => contractValuesFromItems(itemsOf(f.items), f.termMonths ? Number(f.termMonths) : null);
 
 /** Monta o corpo para a API. Erros de digitação de valores voltam como mensagem. */
 export function payloadOf(f: FormState) {
   const items = itemsOf(f.items);
-  const itemsTotal = items.reduce((a, i) => a + i.qty * i.unitCents, 0);
-  const monthlyCents = f.monthly.trim() ? toCents(f.monthly) : f.billingType === 'medicao' ? 0 : itemsTotal;
+  const auto = autoValues(f);
+  const monthlyCents = !f.monthlyAuto && f.monthly.trim() ? toCents(f.monthly) : f.billingType === 'medicao' && !auto.monthlyCents ? 0 : auto.monthlyCents;
   if (monthlyCents === null) throw new Error('Valor mensal inválido. Use o formato 1.500,00.');
-  const totalCents = f.total.trim() ? toCents(f.total) : null;
-  if (f.total.trim() && totalCents === null) throw new Error('Valor global inválido.');
+  const totalCents = !f.totalAuto && f.total.trim() ? toCents(f.total) : f.totalAuto ? (items.length ? auto.totalCents : null) : null;
+  if (!f.totalAuto && f.total.trim() && totalCents === null) throw new Error('Valor global inválido.');
   const guarantee: Guarantee | null = f.hasGuarantee ? { type: f.gType.trim() || 'Seguro-garantia', amountCents: f.gAmount.trim() ? toCents(f.gAmount) : null, insurer: nul(f.gInsurer), policy: nul(f.gPolicy), expiresAt: nul(f.gExpires), renewalAt: nul(f.gRenewal) } : null;
   const publicTerms: PublicTerms | null = f.kind === 'publico' ? { agency: nul(f.agency), processNumber: nul(f.processNumber), modality: nul(f.modality), commitmentNote: nul(f.commitmentNote), budgetLine: nul(f.budgetLine), extensionMaxMonths: f.extensionMax ? Number(f.extensionMax) : null } : null;
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
@@ -54,6 +58,17 @@ export function payloadOf(f: FormState) {
       items, guarantee, publicTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
     },
   };
+}
+
+/** Campo de valor calculado pelos itens: mostra o cálculo; digitar passa a valor manual, com volta ao automático. */
+function AutoValue({ id, label, auto, autoCents, value, autoHint, onManual, onAuto }: { id: string; label: string; auto: boolean; autoCents: number | null; value: string; autoHint: string; onManual: (v: string) => void; onAuto: () => void }) {
+  return (
+    <div className="space-y-1">
+      <label htmlFor={id} className="block text-sm font-semibold text-ink">{label}</label>
+      <Input id={id} inputMode="decimal" aria-describedby={`${id}-h`} value={auto ? (autoCents == null ? '' : dec(autoCents)) : value} onChange={(e) => onManual(e.target.value)} className={auto ? 'bg-surface-2' : undefined} />
+      <p id={`${id}-h`} className="text-xs text-muted">{auto ? autoHint : <>Valor informado manualmente. <button type="button" className="link" onClick={onAuto}>Calcular automaticamente</button></>}</p>
+    </div>
+  );
 }
 
 function Fieldset({ title, children, hint }: { title: string; children: React.ReactNode; hint?: string }) {
@@ -71,7 +86,7 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
   const f = value;
   const users = lookups.data?.users ?? [];
   const plans = lookups.data?.plans ?? [];
-  const itemsTotal = useMemo(() => itemsOf(f.items).reduce((a, i) => a + i.qty * i.unitCents, 0), [f.items]);
+  const auto = useMemo(() => autoValues(f), [f.items, f.termMonths]); // eslint-disable-line react-hooks/exhaustive-deps
   const setItem = (i: number, p: Partial<ItemRow>) => onChange({ items: f.items.map((r, j) => (j === i ? { ...r, ...p } : r)) });
   const setStart = (startAt: string) => { const patch: Partial<FormState> = { startAt }; if (startAt && f.termMonths) { patch.endAt = endFromTerm(startAt, Number(f.termMonths)); patch.renewalAt = addDays(patch.endAt, 1); } onChange(patch); };
   const setTerm = (termMonths: string) => { const patch: Partial<FormState> = { termMonths }; if (f.startAt && termMonths) { patch.endAt = endFromTerm(f.startAt, Number(termMonths)); patch.renewalAt = addDays(patch.endAt, 1); } onChange(patch); };
@@ -129,7 +144,7 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
         <legend className="px-1 text-md font-bold text-ink">Produtos e serviços</legend>
         <ul className="space-y-2">
           {f.items.map((r, i) => (
-            <li key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_minmax(0,1fr)_80px_130px_auto] sm:items-end">
+            <li key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_minmax(0,1fr)_80px_130px_140px_auto] sm:items-end">
               <FormField label="Plano" htmlFor={`cf-ip-${i}`}>
                 <Select id={`cf-ip-${i}`} value={r.planId} onChange={(e) => { const p = plans.find((x) => x.id === e.target.value); setItem(i, { planId: e.target.value, ...(p && !r.description ? { description: p.name, unit: dec(p.priceCents) } : {}) }); }}>
                   <option value="">Sem plano</option>
@@ -139,20 +154,25 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
               <FormField label="Descrição" htmlFor={`cf-id-${i}`}><Input id={`cf-id-${i}`} value={r.description} onChange={(e) => setItem(i, { description: e.target.value })} /></FormField>
               <FormField label="Qtd." htmlFor={`cf-iq-${i}`}><Input id={`cf-iq-${i}`} inputMode="numeric" value={r.qty} onChange={(e) => setItem(i, { qty: e.target.value.replace(/\D/g, '') })} /></FormField>
               <FormField label="Valor unitário (R$)" htmlFor={`cf-iu-${i}`}><Input id={`cf-iu-${i}`} inputMode="decimal" value={r.unit} onChange={(e) => setItem(i, { unit: e.target.value })} /></FormField>
+              <FormField label="Cobrança" htmlFor={`cf-ir-${i}`}>
+                <Select id={`cf-ir-${i}`} value={r.recurring ? 'mensal' : 'unica'} onChange={(e) => setItem(i, { recurring: e.target.value === 'mensal' })}><option value="mensal">Mensal</option><option value="unica">Única</option></Select>
+              </FormField>
               <Button variant="ghost" aria-label={`Remover ${r.description || 'item'}`} onClick={() => onChange({ items: f.items.filter((_, j) => j !== i) })} icon={<Trash2 className="h-4 w-4 text-danger" />} />
             </li>
           ))}
         </ul>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <Button icon={<Plus className="h-4 w-4" />} onClick={() => onChange({ items: [...f.items, { planId: '', description: '', qty: '1', unit: '' }] })}>Adicionar item</Button>
-          <p className="text-sm text-muted">Soma dos itens: <span className="num font-semibold text-ink">{fmtBRL(itemsTotal)}</span>/mês</p>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => onChange({ items: [...f.items, { planId: '', description: '', qty: '1', unit: '', recurring: true }] })}>Adicionar item</Button>
+          <p className="text-sm text-muted">Recorrentes: <span className="num font-semibold text-ink">{fmtBRL(auto.monthlyCents)}</span>/mês{auto.oneTimeCents > 0 && <> · Cobrança única: <span className="num font-semibold text-ink">{fmtBRL(auto.oneTimeCents)}</span></>}</p>
         </div>
       </fieldset>
 
       <Fieldset title="Valores e faturamento">
         {f.billingType === 'medicao' && !editing && <FormField label="Saldo contratado (R$)" htmlFor="cf-balance" required hint="Crédito inicial do contrato; as oportunidades consomem esse saldo."><Input id="cf-balance" inputMode="decimal" value={f.initialBalance} onChange={(e) => onChange({ initialBalance: e.target.value })} placeholder="100.000,00" /></FormField>}
-        <FormField label={f.billingType === 'recorrente' ? 'Valor mensal (R$)' : 'Valor mensal estimado (R$)'} htmlFor="cf-monthly" hint={f.billingType === 'recorrente' ? 'Em branco usa a soma dos itens.' : 'Opcional: referência para a carteira.'}><Input id="cf-monthly" inputMode="decimal" value={f.monthly} onChange={(e) => onChange({ monthly: e.target.value })} placeholder={dec(itemsTotal)} /></FormField>
-        <FormField label="Valor global (R$)" htmlFor="cf-total"><Input id="cf-total" inputMode="decimal" value={f.total} onChange={(e) => onChange({ total: e.target.value })} /></FormField>
+        <AutoValue id="cf-monthly" label={f.billingType === 'recorrente' ? 'Valor mensal (R$)' : 'Valor mensal estimado (R$)'} auto={f.monthlyAuto} autoCents={auto.monthlyCents} value={f.monthly}
+          autoHint="Automático: soma dos itens de cobrança mensal." onManual={(monthly) => onChange({ monthly, monthlyAuto: false })} onAuto={() => onChange({ monthlyAuto: true, monthly: '' })} />
+        <AutoValue id="cf-total" label="Valor global (R$)" auto={f.totalAuto} autoCents={auto.totalCents} value={f.total}
+          autoHint={auto.totalCents == null ? 'Informe o prazo (meses) para calcular.' : `Automático: mensal × ${f.termMonths} meses${auto.oneTimeCents ? ' + itens de cobrança única (uma vez)' : ''}.`} onManual={(total) => onChange({ total, totalAuto: false })} onAuto={() => onChange({ totalAuto: true, total: '' })} />
         <FormField label="Dia de faturamento" htmlFor="cf-bday"><Input id="cf-bday" inputMode="numeric" value={f.billingDay} onChange={(e) => onChange({ billingDay: e.target.value.replace(/\D/g, '').slice(0, 2) })} /></FormField>
         <FormField label="Condições de faturamento" htmlFor="cf-bterms" className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-bterms" className="min-h-[60px]" value={f.billingTerms} onChange={(e) => onChange({ billingTerms: e.target.value })} placeholder="Ex.: fatura mensal, vencimento em 30 dias, medição até o dia 5" /></FormField>
       </Fieldset>

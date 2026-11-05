@@ -97,6 +97,9 @@ export async function opportunityKpis(db: DbOrTx, auth: AuthContext, module: 'op
   ];
 }
 
+/** Cards por coluna no Kanban: o resto da etapa fica na Lista (contagem e valor continuam com o total). */
+const PIPELINE_CARDS = 60;
+
 export const opportunityRoutes = [
   defineRoute({
     method: 'GET',
@@ -145,16 +148,25 @@ export const opportunityRoutes = [
       const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const where = filters(auth, { ...query, pipelineId: pipe.id });
       where.push(OPEN);
-      const rows = await opportunityQuery(app.db).where(and(...where)).orderBy(desc(s.opportunities.updatedAt)).limit(1000);
+      // contagem e valor de TODAS as oportunidades da etapa; cards limitados por coluna (o quadro fica leve com milhares)
+      const open = pipe.stages.filter((st) => st.kind === 'open');
+      const [totals, perStage] = await Promise.all([
+        app.db.select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, v: sql<string>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
+          .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).where(and(...where)).groupBy(s.opportunities.stage),
+        Promise.all(open.map((st) => opportunityQuery(app.db).where(and(...where, eq(s.opportunities.stage, st.key))).orderBy(desc(s.opportunities.updatedAt)).limit(PIPELINE_CARDS))),
+      ]);
+      const rows = perStage.flat();
+      const totalOf = new Map(totals.map((t) => [t.stage, { n: Number(t.n), v: Number(t.v) }]));
       const now = new Date();
       // Sucesso do Cliente trabalha por conta: cada card traz a lista de contratos vigentes da conta
       const ctrs = pipe.key === CS_KEY ? groupBy(await accountContracts(app.db, auth.tenantId, [...new Set(rows.map((r) => r.contactId))]), (c) => c.contactId) : null;
       const dto = (r: (typeof rows)[number]) => ({ ...opportunityDto(r, now), ...(ctrs ? { accountContracts: (ctrs.get(r.contactId) ?? []).map((c) => ({ id: c.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, stage: c.stage, endAt: c.endAt })) } : {}) });
       return {
         pipeline: { id: pipe.id, key: pipe.key, name: pipe.name },
-        stages: pipe.stages.filter((st) => st.kind === 'open').map((st) => {
-          const cards = rows.filter((r) => r.stage === st.key).map(dto);
-          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: false, count: cards.length, valueCents: cards.reduce((a, c) => a + (c.valueCents ?? 0), 0), cards };
+        stages: open.map((st, i) => {
+          const cards = perStage[i]!.map(dto);
+          const t = totalOf.get(st.key);
+          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: false, count: t?.n ?? 0, valueCents: t?.v ?? 0, cards };
         }),
         terminalStages: pipe.stages.filter((st) => st.kind !== 'open').map((st) => ({ key: st.key, name: st.name })),
         generatedAt: now.toISOString(),
