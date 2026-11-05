@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "active" boolean DEFAULT true NOT NULL;

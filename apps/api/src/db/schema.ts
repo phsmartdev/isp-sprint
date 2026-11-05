@@ -168,6 +168,8 @@ export const teams = pgTable(
     id: id(),
     tenantId: tenantId(),
     name: text('name').notNull(),
+    /** Time inativo some das escolhas (cadastro de usuário, filtros); quem já é membro continua vinculado. */
+    active: boolean('active').notNull().default(true),
     /** Gestão de Resultados: unidade organizacional a que o time pertence e líder substituto */
     orgUnitId: uuid('org_unit_id'),
     substituteLeadId: uuid('substitute_lead_id'),
@@ -1355,6 +1357,8 @@ export const contractVersions = pgTable(
     items: jsonb('items').$type<ContractItem[]>().notNull().default([]),
     guarantee: jsonb('guarantee').$type<ContractGuarantee | null>(),
     publicTerms: jsonb('public_terms').$type<ContractPublicTerms | null>(),
+    /** Relatório mensal exigido pelo contrato (setor que envia, validador, dia do envio, antecedência do alerta). */
+    reportTerms: jsonb('report_terms').$type<import('@isp/domain').ReportTerms | null>(),
     adjustmentIndex: text('adjustment_index'),
     adjustmentBaseDate: date('adjustment_base_date', { mode: 'string' }),
     adjustmentRule: text('adjustment_rule'),
@@ -1455,7 +1459,7 @@ export const contractNotifications = pgTable('contract_notifications', {
   tokenUq: uniqueIndex('contract_notifications_token_uq').on(t.token),
   dedupeUq: uniqueIndex('contract_notifications_dedupe_uq').on(t.tenantId, t.dedupeKey),
   actIdx: index('contract_notifications_act_idx').on(t.tenantId, t.activityId),
-  channelCk: check('contract_notifications_channel_ck', inList('channel', ['email', 'whatsapp'])),
+  channelCk: check('contract_notifications_channel_ck', inList('channel', ['email', 'whatsapp', 'glpi'])),
   statusCk: check('contract_notifications_status_ck', inList('status', ['enviado', 'falhou', 'nao_configurado', 'sem_contato'])),
 }));
 

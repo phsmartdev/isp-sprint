@@ -6,7 +6,9 @@ import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
+  SECTORS, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
+import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -44,6 +46,7 @@ const VersionFields = z.object({
   items: z.array(Item).max(50).default([]),
   guarantee: Guarantee.optional(),
   publicTerms: PublicTerms.optional(),
+  reportTerms: z.object({ required: z.boolean(), sector: z.enum(SECTORS).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
   adjustmentIndex: optText(60), adjustmentBaseDate: optDay, adjustmentRule: optText(1000),
   specialConditions: optText(4000),
 });
@@ -68,7 +71,12 @@ function normalizeVersion<T extends Partial<z.infer<typeof VersionFields>>>(v: T
   if (out.startAt && out.termMonths && !out.endAt) out.endAt = endFromTerm(out.startAt, out.termMonths);
   if (out.endAt && out.renewalAt === undefined) out.renewalAt = addDays(out.endAt, 1);
   if (out.startAt && out.endAt && out.endAt < out.startAt) throw unprocessable('O término da vigência é anterior ao início.', [{ path: 'version.endAt', message: 'Término antes do início' }]);
-  if (out.items?.length && out.monthlyCents === undefined) out.monthlyCents = out.items.reduce((a, i) => a + i.qty * i.unitCents, 0);
+  if (out.items?.length && out.monthlyCents === undefined) out.monthlyCents = contractValuesFromItems(out.items, null).monthlyCents;
+  if (out.reportTerms) {
+    const errs = reportTermsIssues(out.reportTerms);
+    if (errs.length) throw unprocessable(errs[0]!.message, errs.map((e) => ({ ...e, path: `version.${e.path}` })));
+    if (!out.reportTerms.required) out.reportTerms = { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
+  }
   return out;
 }
 
@@ -178,6 +186,7 @@ export const contractRoutes = [
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const ver = normalizeVersion(body.version);
+      if (ver.reportTerms?.validatorId) await assertUsers(app.db, auth, [ver.reportTerms.validatorId]);
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
@@ -185,7 +194,7 @@ export const contractRoutes = [
           commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, adminOwnerId: body.adminOwnerId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
-        await tx.insert(s.contractVersions).values({ ...ver, tenantId: auth.tenantId, contractId: c!.id, version: 1, changeKind: 'cadastro', reason: 'Cadastro inicial', guarantee: ver.guarantee ?? null, publicTerms: ver.publicTerms ?? null, createdBy: auth.userId } as typeof s.contractVersions.$inferInsert);
+        await tx.insert(s.contractVersions).values({ ...ver, tenantId: auth.tenantId, contractId: c!.id, version: 1, changeKind: 'cadastro', reason: 'Cadastro inicial', guarantee: ver.guarantee ?? null, publicTerms: ver.publicTerms ?? null, reportTerms: ver.reportTerms ?? null, createdBy: auth.userId } as typeof s.contractVersions.$inferInsert);
         if (body.billingType === 'medicao' && body.initialBalanceCents > 0) {
           await tx.insert(s.contractLedger).values({ tenantId: auth.tenantId, contractId: c!.id, kind: 'credito', amountCents: body.initialBalanceCents, occurredOn: ver.signedAt ?? new Date().toISOString().slice(0, 10), description: 'Saldo inicial do contrato', createdBy: auth.userId });
         }
@@ -194,6 +203,7 @@ export const contractRoutes = [
         return c!;
       });
       await audit(app.db, req, { action: 'contract.create', entityType: 'contract', entityId: c.id, metadata: { number: ver.number, opportunityId: body.opportunityId } });
+      if (ver.reportTerms?.required) await reportOnboarding(app.db, app.config, c.id);
       reply.code(201);
       return { id: c.id };
     },
@@ -708,13 +718,17 @@ export const contractRoutes = [
           const endAt = patch.endAt === undefined ? cur.endAt : (patch.endAt as string | null);
           if (patch.endAt !== undefined && patch.endAt !== cur.endAt && patch.renewalAt === undefined && endAt) patch.renewalAt = addDays(endAt, 1);
           if (startAt && endAt && endAt < startAt) throw unprocessable('O término da vigência é anterior ao início.', [{ path: 'version.endAt', message: 'Término antes do início' }]);
-          if (patch.items && patch.monthlyCents === undefined) patch.monthlyCents = (patch.items as { qty: number; unitCents: number }[]).reduce((a, i) => a + i.qty * i.unitCents, 0);
+          if (patch.items && patch.monthlyCents === undefined) patch.monthlyCents = contractValuesFromItems(patch.items as { qty: number; unitCents: number; recurring?: boolean }[], null).monthlyCents;
+          if (patch.reportTerms !== undefined) patch.reportTerms = normalizeVersion({ reportTerms: patch.reportTerms as ReportTerms | null }).reportTerms;
+          if ((patch.reportTerms as ReportTerms | null)?.validatorId) await assertUsers(tx, auth, [(patch.reportTerms as ReportTerms).validatorId]);
           const r = await newVersion(tx, c, auth.userId, patch as VersionPatch, 'edicao', body.reason ?? 'Ajuste no cadastro antes da validação');
           version = r.version;
         }
         return { version, changedHeader };
       });
       await audit(app.db, req, { action: 'contract.update', entityType: 'contract', entityId: c.id, metadata: { version: out.version, header: out.changedHeader, reason: body.reason } });
+      // relatório mensal exigido com configuração nova: avisa a inclusão na rotina (uma vez por configuração)
+      if ((body.version as { reportTerms?: ReportTerms | null } | undefined)?.reportTerms?.required) await reportOnboarding(app.db, app.config, c.id);
       return { ok: true, version: out.version };
     },
   }),

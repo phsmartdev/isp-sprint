@@ -1,7 +1,7 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, endFromTerm, toCents, SECTORS, SECTOR_LABELS, type LegalRegime, type ReportTerms, type Sector } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { Button, FormField, Input, Select, Textarea } from '../../components/ui/primitives';
@@ -12,6 +12,7 @@ export type FormState = {
   kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
   items: ItemRow[]; monthly: string; total: string; monthlyAuto: boolean; totalAuto: boolean; billingDay: string; billingTerms: string;
+  hasReport: boolean; rSector: string; rValidator: string; rDueDay: string; rAlertDays: string;
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
   agency: string; processNumber: string; modality: string; commitmentNote: string; budgetLine: string; extensionMax: string;
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
@@ -26,6 +27,7 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null),
     // automático quando vazio ou igual ao cálculo pelos itens; valor diferente informado à mão continua manual
     ...(() => { const c = contractValuesFromItems(v.items ?? [], v.termMonths ?? null); return { monthlyAuto: v.monthlyCents == null || v.monthlyCents === c.monthlyCents, totalAuto: v.totalCents == null || v.totalCents === c.totalCents }; })(), billingDay: v.billingDay ? String(v.billingDay) : '', billingTerms: v.billingTerms ?? '',
+    hasReport: !!v.reportTerms?.required, rSector: v.reportTerms?.sector ?? '', rValidator: v.reportTerms?.validatorId ?? '', rDueDay: v.reportTerms?.dueDay ? String(v.reportTerms.dueDay) : '', rAlertDays: v.reportTerms?.alertDaysBefore != null ? String(v.reportTerms.alertDaysBefore) : '',
     hasGuarantee: !!g, gType: g?.type ?? '', gAmount: dec(g?.amountCents ?? null), gInsurer: g?.insurer ?? '', gPolicy: g?.policy ?? '', gExpires: g?.expiresAt ?? '', gRenewal: g?.renewalAt ?? '',
     agency: p?.agency ?? '', processNumber: p?.processNumber ?? '', modality: p?.modality ?? '', commitmentNote: p?.commitmentNote ?? '', budgetLine: p?.budgetLine ?? '', extensionMax: p?.extensionMaxMonths ? String(p.extensionMaxMonths) : '',
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
@@ -47,6 +49,10 @@ export function payloadOf(f: FormState) {
   if (!f.totalAuto && f.total.trim() && totalCents === null) throw new Error('Valor global inválido.');
   const guarantee: Guarantee | null = f.hasGuarantee ? { type: f.gType.trim() || 'Seguro-garantia', amountCents: f.gAmount.trim() ? toCents(f.gAmount) : null, insurer: nul(f.gInsurer), policy: nul(f.gPolicy), expiresAt: nul(f.gExpires), renewalAt: nul(f.gRenewal) } : null;
   const publicTerms: PublicTerms | null = f.kind === 'publico' ? { agency: nul(f.agency), processNumber: nul(f.processNumber), modality: nul(f.modality), commitmentNote: nul(f.commitmentNote), budgetLine: nul(f.budgetLine), extensionMaxMonths: f.extensionMax ? Number(f.extensionMax) : null } : null;
+  if (f.hasReport && (!f.rSector || !f.rValidator || !f.rDueDay)) throw new Error('Relatório mensal: informe o setor responsável pelo envio, quem valida e o dia do envio.');
+  const reportTerms: ReportTerms = f.hasReport
+    ? { required: true, sector: f.rSector as Sector, validatorId: f.rValidator, dueDay: Number(f.rDueDay), alertDaysBefore: f.rAlertDays.trim() === '' ? null : Number(f.rAlertDays) }
+    : { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
@@ -55,7 +61,7 @@ export function payloadOf(f: FormState) {
     version: {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
-      items, guarantee, publicTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
+      items, guarantee, publicTerms, reportTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
     },
   };
 }
@@ -205,6 +211,30 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
             <FormField label="Renovação da garantia" htmlFor="cf-gren"><Input id="cf-gren" type="date" value={f.gRenewal} onChange={(e) => onChange({ gRenewal: e.target.value })} /></FormField>
           </div>
         )}
+      </fieldset>
+
+      <fieldset className="rounded-md border border-line p-4">
+        <legend className="px-1 text-md font-bold text-ink">Envio de relatório</legend>
+        <label className="mb-3 flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={f.hasReport} onChange={(e) => onChange({ hasReport: e.target.checked })} />Necessário relatório mensal?</label>
+        {f.hasReport ? (
+          <>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <FormField label="Setor responsável pelo envio" htmlFor="cf-rsector" required>
+                <Select id="cf-rsector" value={f.rSector} onChange={(e) => onChange({ rSector: e.target.value })}><option value="">Escolha o setor</option>{SECTORS.map((x) => <option key={x} value={x}>{SECTOR_LABELS[x]}</option>)}</Select>
+              </FormField>
+              <FormField label="Responsável por validar" htmlFor="cf-rval" required>
+                <Select id="cf-rval" value={f.rValidator} onChange={(e) => onChange({ rValidator: e.target.value })}><option value="">Escolha a pessoa</option>{users.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>
+              </FormField>
+              <FormField label="Prazo de envio mensal (dia)" htmlFor="cf-rday" required hint="Dia do mês. Em meses mais curtos vale o último dia.">
+                <Input id="cf-rday" inputMode="numeric" placeholder="ex.: 10" value={f.rDueDay} onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(0, 2); onChange({ rDueDay: d && Number(d) > 31 ? '31' : d }); }} />
+              </FormField>
+              <FormField label="Alertar quantos dias antes" htmlFor="cf-ralert" hint="Em branco: sem lembrete antes do prazo.">
+                <Input id="cf-ralert" inputMode="numeric" placeholder="em aberto" value={f.rAlertDays} onChange={(e) => onChange({ rAlertDays: e.target.value.replace(/\D/g, '').slice(0, 2) })} />
+              </FormField>
+            </div>
+            <p className="mt-2 text-xs text-muted">Ao salvar, o setor e quem valida recebem o aviso de que o relatório entrou na rotina; depois, o lembrete chega antes de cada prazo. As mensagens (e-mail, WhatsApp e GLPI) são os modelos de Configurações → Comunicação de contratos → Relatório mensal.</p>
+          </>
+        ) : <p className="text-xs text-muted">Sem relatório mensal: o contrato segue para salvar.</p>}
       </fieldset>
 
       {f.kind === 'publico' && (

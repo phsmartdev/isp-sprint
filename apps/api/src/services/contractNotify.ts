@@ -105,7 +105,7 @@ ${o.reply ? `<p style="margin:20px 0 0;font-size:13px"><a href="${esc(o.reply)}"
 </td></tr></table></td></tr></table>${o.pixel ? `<img src="${esc(o.pixel)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;opacity:0" />` : ''}</body></html>`;
 }
 
-async function zapiCfg(db: DbOrTx, tenantId: string) {
+export async function zapiCfg(db: DbOrTx, tenantId: string) {
   const z = await integrationRow(db, tenantId, 'zapi');
   const tok = z.secrets.instanceToken ? decryptSecret(z.secrets.instanceToken) : null;
   if (!z.enabled || !z.config.instanceId || !tok) return null;

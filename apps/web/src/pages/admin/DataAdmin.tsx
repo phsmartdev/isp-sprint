@@ -86,7 +86,7 @@ function ClearCard() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const isAdmin = me?.profiles.includes('gerencia');
+  const isAdmin = me?.profiles.includes('gerencia') || me?.profiles.includes('administrador');
   const clear = useMutation({
     mutationFn: () => api<{ counts: Record<string, number> }>('/admin/clear-base', { method: 'POST', body: { password, confirm, scopes } }),
     onSuccess: (r) => {

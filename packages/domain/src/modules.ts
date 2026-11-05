@@ -195,11 +195,11 @@ export const SENSITIVE_ACTION_LABELS: Record<SensitiveAction, string> = {
 
 /** Padrão por perfil. Os perfis anteriores à Etapa 1 mantêm tudo (nenhuma mudança de comportamento). */
 export const DEFAULT_ACTIONS: Record<string, Record<SensitiveAction, boolean>> = {
+  administrador: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: true },
   vendedor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
   supervisor: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
   gerencia: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: true },
-  gestao_contratos: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
-  implantacao: { ver_financeiro: false, exportar: false, validar_contrato: false, editar_valores_contrato: false, arquivar: false, aprovar_viabilidade: false },
+  analista: { ver_financeiro: true, exportar: true, validar_contrato: true, editar_valores_contrato: true, arquivar: true, aprovar_viabilidade: false },
 };
 /** Vários perfis: vale a permissão se QUALQUER perfil permitir (mesma regra do maior nível na matriz). */
 export function mergeActions(rows: { action: string; allowed: boolean }[]): Record<SensitiveAction, boolean> {

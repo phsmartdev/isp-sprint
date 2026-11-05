@@ -91,7 +91,7 @@ async function execute(ctx: Ctx, automationName: string, opportunityId: string, 
     if (action.para === 'cliente') to = o.contactEmail ? [o.contactEmail] : [];
     if (action.para === 'responsavel') to = [o.ownerEmail];
     if (action.para === 'gerencia') {
-      const r = await db.execute<{ email: string }>(sql`select u.email from users u where u.tenant_id = ${tenantId} and u.active and exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = u.id and r.key = 'gerencia')`);
+      const r = await db.execute<{ email: string }>(sql`select u.email from users u where u.tenant_id = ${tenantId} and u.active and exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = u.id and r.key in ('gerencia', 'administrador'))`);
       to = r.rows.map((x) => x.email);
     }
     if (!to.length) return { skipped: 'sem destinatário com e-mail' };

@@ -12,7 +12,7 @@ export type Version = {
   id: string; version: number; changeKind: string; reason: string | null; number: string; object: string;
   signedAt: string | null; startAt: string | null; endAt: string | null; termMonths: number | null; activationAt: string | null; billingStartAt: string | null; renewalAt: string | null;
   monthlyCents: number; totalCents: number | null; billingDay: number | null; billingTerms: string | null; items: ContractItem[];
-  guarantee: Guarantee | null; publicTerms: PublicTerms | null; adjustmentIndex: string | null; adjustmentBaseDate: string | null; adjustmentRule: string | null; specialConditions: string | null;
+  guarantee: Guarantee | null; publicTerms: PublicTerms | null; reportTerms?: import('@isp/domain').ReportTerms | null; adjustmentIndex: string | null; adjustmentBaseDate: string | null; adjustmentRule: string | null; specialConditions: string | null;
   createdAt: string; createdBy: string | null; effectiveFrom?: string | null;
 };
 export type StepState = { doneAt: string; doneBy: string; doneByName: string; note: string | null; value: Record<string, unknown> | null; skipped?: boolean };

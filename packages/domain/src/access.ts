@@ -41,16 +41,22 @@ export function allowedLevels(m: Module): readonly AccessLevel[] {
   return m === 'configuracoes' ? ['nenhum', 'total'] : ACCESS_LEVELS;
 }
 
-export const PROFILE_KEYS = ['vendedor', 'supervisor', 'gerencia', 'gestao_contratos', 'implantacao'] as const;
+/**
+ * Perfis de acesso (decisão de 05/11/2026): Administrador, Gerência, Supervisor, Analista e Vendedor.
+ * "Gestão de contratos" e "Implantação" viraram Analista (com as permissões que eram de Gestão de contratos).
+ */
+export const PROFILE_KEYS = ['administrador', 'gerencia', 'supervisor', 'analista', 'vendedor'] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
-export const PROFILE_LABELS: Record<ProfileKey, string> = { vendedor: 'Vendedor', supervisor: 'Supervisor', gerencia: 'Gerência', gestao_contratos: 'Gestão de contratos', implantacao: 'Implantação' };
+export const PROFILE_LABELS: Record<ProfileKey, string> = { administrador: 'Administrador', gerencia: 'Gerência', supervisor: 'Supervisor', analista: 'Analista', vendedor: 'Vendedor' };
+/** Perfis que administram o sistema (Configurações sempre em Total; não podem tirar o próprio acesso). */
+export const ADMIN_PROFILES: readonly ProfileKey[] = ['administrador', 'gerencia'];
 
 export const DEFAULT_ACCESS: Record<ProfileKey, Record<Module, AccessLevel>> = {
+  administrador: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', configuracoes: 'total' },
   vendedor: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', projetos: 'proprio', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', orcamento: 'nenhum', configuracoes: 'nenhum' },
   supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', projetos: 'equipe', desempenho: 'equipe', resultados: 'equipe', inteligencia: 'equipe', email: 'equipe', orcamento: 'proprio', configuracoes: 'nenhum' },
   gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', configuracoes: 'total' },
-  gestao_contratos: { inicio: 'proprio', leads: 'nenhum', oportunidades: 'proprio', clientes: 'total', atividades: 'proprio', relatorios: 'nenhum', campanhas: 'nenhum', contratos: 'total', projetos: 'equipe', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', orcamento: 'nenhum', configuracoes: 'nenhum' },
-  implantacao: { inicio: 'proprio', leads: 'nenhum', oportunidades: 'nenhum', clientes: 'proprio', atividades: 'proprio', relatorios: 'nenhum', campanhas: 'nenhum', contratos: 'total', projetos: 'total', desempenho: 'nenhum', resultados: 'nenhum', inteligencia: 'nenhum', email: 'nenhum', orcamento: 'nenhum', configuracoes: 'nenhum' },
+  analista: { inicio: 'proprio', leads: 'nenhum', oportunidades: 'proprio', clientes: 'total', atividades: 'proprio', relatorios: 'nenhum', campanhas: 'nenhum', contratos: 'total', projetos: 'equipe', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', orcamento: 'nenhum', configuracoes: 'nenhum' },
 };
 
 export function atLeast(level: AccessLevel | undefined, min: AccessLevel) {

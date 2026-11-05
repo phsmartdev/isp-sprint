@@ -22,11 +22,15 @@ beforeAll(async () => {
   [carlos, lucas] = (await Promise.all(['carlos', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client];
   tenantId = carlos.me.tenant.id;
   lucasTeam = ((await ctx.db.execute(sql`select team_id from team_memberships where user_id = ${lucas.me.user.id} limit 1`)).rows[0] as { team_id: string }).team_id;
-  const u = ok(await carlos.post('/admin/users', { name: 'Implantação Fictícia', email: `impl-${stamp}@yepnet.test`, profile: 'implantacao', sectors: ['implantacao'] }), 201).json();
+  // perfil Analista restrito como o antigo perfil Implantação: sem CRM e sem financeiro, exportação ou exclusão
+  ok(await carlos.put('/admin/security', { profile: 'analista', module: 'oportunidades', level: 'nenhum' }));
+  for (const action of ['ver_financeiro', 'exportar', 'arquivar']) ok(await carlos.put('/admin/actions', { profile: 'analista', action, allowed: false }));
+  const u = ok(await carlos.post('/admin/users', { name: 'Implantação Fictícia', email: `impl-${stamp}@yepnet.test`, profile: 'analista', sectors: ['implantacao'] }), 201).json();
   impl = await login(ctx.app, `impl-${stamp}@yepnet.test`, u.temporaryPassword);
   contractId = ((await ctx.db.execute(sql`select id from contracts where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string }).id;
 });
 afterAll(async () => {
+  await carlos.put('/admin/security', { profile: 'analista', module: 'oportunidades', level: 'proprio' });
   await ctx.db.execute(sql`delete from tenant_modules where tenant_id = ${tenantId}`);
   await ctx.db.execute(sql`delete from module_grants where tenant_id = ${tenantId}`);
   await ctx.db.execute(sql`delete from action_policies where role_id in (select id from roles where tenant_id = ${tenantId})`);
@@ -43,9 +47,9 @@ describe('Etapa 1: módulos de negócio', () => {
     expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(8);
   });
 
-  it('perfil Implantação: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {
+  it('perfil Analista restrito: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {
     const me = ok(await impl.get('/me')).json();
-    expect(me.profiles).toEqual(['implantacao']);
+    expect(me.profiles).toEqual(['analista']);
     expect(me.actions).toMatchObject({ ver_financeiro: false, exportar: false, arquivar: false });
     const c = ok(await impl.get(`/contracts/${contractId}`));
     expect(c.headers['x-isp-financeiro']).toBe('oculto');

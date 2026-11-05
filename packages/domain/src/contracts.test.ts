@@ -189,3 +189,24 @@ describe('valores do contrato pelos itens', () => {
     expect(contractValuesFromItems([], 12)).toEqual({ monthlyCents: 0, oneTimeCents: 0, totalCents: 0 });
   });
 });
+
+describe('relatório mensal', () => {
+  it('próximo prazo: dia do mês (limitado ao fim do mês) ou o do mês seguinte', async () => {
+    const { nextReportDue } = await import('./contracts');
+    expect(nextReportDue(10, '2026-11-05')).toBe('2026-11-10');
+    expect(nextReportDue(10, '2026-11-10')).toBe('2026-11-10');
+    expect(nextReportDue(10, '2026-11-11')).toBe('2026-12-10');
+    expect(nextReportDue(31, '2027-02-01')).toBe('2027-02-28');
+    expect(nextReportDue(5, '2026-12-20')).toBe('2027-01-05');
+  });
+  it('alerta X dias antes, um por mês; sem antecedência não alerta; termos incompletos acusam', async () => {
+    const { dueAlerts, reportTermsIssues, DEFAULT_CONTRACT_SETTINGS } = await import('./contracts');
+    const base = { today: '2026-11-07', stage: 'vigente' as const, endAt: '2027-11-04', closureExpected: false, closureAt: null, guaranteeExpiresAt: null, adjustmentBaseDate: null, signedAt: null, activationAt: '2026-01-01', validatedAt: null, hasSignedContractDoc: true, provisioningDone: true, openSignatureSince: null };
+    const report = { required: true, sector: 'financeiro' as const, validatorId: 'x', dueDay: 10, alertDaysBefore: 3 };
+    expect(dueAlerts({ ...base, report }, DEFAULT_CONTRACT_SETTINGS).filter((a) => a.kind === 'relatorio_mensal')).toEqual([{ kind: 'relatorio_mensal', cycleKey: '2026-11', dueAt: '2026-11-10' }]);
+    expect(dueAlerts({ ...base, today: '2026-11-06', report }, DEFAULT_CONTRACT_SETTINGS).some((a) => a.kind === 'relatorio_mensal')).toBe(false);
+    expect(dueAlerts({ ...base, report: { ...report, alertDaysBefore: null } }, DEFAULT_CONTRACT_SETTINGS).some((a) => a.kind === 'relatorio_mensal')).toBe(false);
+    expect(reportTermsIssues({ required: true, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null }).map((x) => x.path)).toEqual(['reportTerms.sector', 'reportTerms.validatorId', 'reportTerms.dueDay']);
+    expect(reportTermsIssues({ required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null })).toEqual([]);
+  });
+});
