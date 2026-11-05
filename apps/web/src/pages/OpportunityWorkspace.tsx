@@ -602,7 +602,8 @@ export function OpportunityWorkspacePage() {
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
   const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
-  const econ = useQuery({ queryKey: ['economics', id], enabled: !!id, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
+  const econOn = feature('crm.viabilidade');
+  const econ = useQuery({ queryKey: ['economics', id], enabled: !!id && econOn, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
@@ -765,7 +766,7 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
-            { key: 'viabilidade', label: 'Viabilidade econômica' },
+            ...(econOn ? [{ key: 'viabilidade' as const, label: 'Viabilidade econômica' }] : []),
             ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(origin.data?.thread ? [{ key: 'email' as const, label: 'E-mail' }] : []),
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
@@ -777,7 +778,7 @@ export function OpportunityWorkspacePage() {
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
-          {centerTab === 'viabilidade' && <EconomicsTab oppId={opp.id} />}
+          {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
@@ -806,7 +807,7 @@ export function OpportunityWorkspacePage() {
   const right = (
     <div className="space-y-4">
       {/* resultado do motor financeiro salvo; sem ele, o atalho para a aba */}
-      {econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
+      {!econOn ? null : econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
         <section className="card p-5">
           <h2 className="text-md font-bold text-ink">Viabilidade econômica</h2>
           <p className="mt-1 text-sm text-muted">Ainda não calculada. Informe investimento, custos e prazo na aba Viabilidade econômica.</p>

@@ -52,13 +52,13 @@ const KPI_LOOK = [
 export function IntelligencePage() {
   const p0 = defaultPeriod();
   const [f, setF] = useUrlState({ from: p0.from, to: p0.to, v: 'indicadores', tag: '' });
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const q = useQuery({ queryKey: ['intelligence', f.from, f.to], enabled: f.v === 'comercial', queryFn: () => api<Data>(`/intelligence/overview${qs({ from: f.from, to: f.to })}`) });
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TABS = [{ key: 'indicadores', label: 'Indicadores principais' }, { key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, { key: 'economia', label: 'Viabilidade econômica' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'concorrentes', label: 'Concorrentes' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
+  const TABS = [{ key: 'indicadores', label: 'Indicadores principais' }, { key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, ...(feature('crm.viabilidade') ? [{ key: 'economia', label: 'Viabilidade econômica' }] : []), { key: 'atas', label: 'Atas de registro de preços' }, { key: 'concorrentes', label: 'Concorrentes' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
   return (
     <div className="w-full">
       <PageHeader
@@ -83,7 +83,7 @@ export function IntelligencePage() {
         onChange={(v) => setF({ v })}
         tabs={TABS}
       />
-      {f.v === 'indicadores' ? <KpiPanel /> : f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'concorrentes' ? <CompetitorsPanel /> : f.v === 'economia' ? <EconomicsConsolidated /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
+      {f.v === 'indicadores' ? <KpiPanel /> : f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'concorrentes' ? <CompetitorsPanel /> : f.v === 'economia' && feature('crm.viabilidade') ? <EconomicsConsolidated /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
       {f.v === 'comercial' && (<div className="mt-6">
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
       <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
