@@ -20,7 +20,7 @@ import { useState } from 'react';
 type Exec = {
   contractedAnnualCents: number; backlogCents: number; publicAnnualCents: number;
   backlogByType: { type: BillingType; label: string; cents: number }[];
-  risk: { days: number; n: number; monthlyCents: number; annualCents: number }[];
+  risk: { days: number; n: number; monthlyCents: number; annualCents: number; closureN: number; closureCents: number }[];
   concentration: { totalCents: number; top1: { key: string; name: string; cents: number } | null; top1Share: number | null; top5Share: number | null; hhi: number | null; level: 'baixa' | 'moderada' | 'alta' | null };
 };
 const CONC_LABEL = { baixa: 'Concentração baixa', moderada: 'Concentração moderada', alta: 'Concentração alta' } as const;
@@ -91,7 +91,7 @@ type Dash = {
   portfolio: { avgTicketCents: number | null; avgAgeMonths: number | null; avgRemainingMonths: number | null; renewalPipelineCents: number; publicShare: number | null };
   byStage: { stage: ContractStage; label: string; n: number; monthlyCents: number }[];
   active: number; archived: number; pendingValidation: number; monthlyCents: number; globalCents: number;
-  expiring: { d30: number; d60: number; d90: number }; atRisk: { n: number; monthlyCents: number; expiredN: number; expiredCents: number };
+  expiring: { d30: number; d60: number; d90: number }; expiringMix: Record<'d30' | 'd60' | 'd90', MixItem[]>; atRisk: { n: number; monthlyCents: number; expiredN: number; expiredCents: number };
   alerts: { open: number; overdue: number; byKind: { kind: string; label: string; n: number }[] };
   nextExpiring: ContractRow[]; attention: ContractRow[];
 };
@@ -113,6 +113,41 @@ const ERP_ORDER: [string, string][] = [
   ['nao_iniciado', 'Não iniciado'], ['em_preenchimento', 'Em preenchimento'], ['aguardando_conferencia', 'Aguardando conferência'], ['devolvido', 'Devolvido'],
   ['aprovado', 'Aprovado'], ['aguardando_lancamento', 'Aguardando lançamento'], ['lancado', 'Lançado no IXC'], ['divergente', 'Divergente'], ['conferido_ixc', 'Conferido no IXC'],
 ];
+type MixItem = { id: string; clientName: string; number: string | null; monthlyCents: number };
+const MIX_COLORS = ['#B07F00', '#E0A400', '#F2C94C', '#F7DD8F'];
+
+/** Representatividade de cada contrato no valor que vence na janela: barra segmentada + os maiores com %. */
+function ExpiringMix({ items }: { items: MixItem[] }) {
+  const total = items.reduce((a, r) => a + r.monthlyCents, 0);
+  if (!items.length) return <p className="mt-2 text-[11px] text-muted">Nenhum contrato vence.</p>;
+  if (!total) return <p className="mt-2 text-[11px] text-muted">Sem valor mensal informado.</p>;
+  const top = items.slice(0, 3), rest = items.slice(3);
+  const restShare = rest.reduce((a, r) => a + r.monthlyCents, 0) / total;
+  return (
+    <div className="mt-1.5 flex min-w-0 flex-1 flex-col gap-1.5">
+      <span className="flex h-2 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden>
+        {items.map((r, i) => <span key={r.id} className="h-full border-r border-white/70 last:border-r-0" style={{ width: `${(r.monthlyCents / total) * 100}%`, background: MIX_COLORS[Math.min(i, MIX_COLORS.length - 1)] }} />)}
+      </span>
+      <ul className="space-y-0.5 text-[11px]">
+        {top.map((r, i) => (
+          <li key={r.id} className="flex min-w-0 items-center gap-1.5" title={`${r.clientName}${r.number ? ` · ${r.number}` : ''}`}>
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: MIX_COLORS[i] }} aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-text">{r.clientName}</span>
+            <span className="num shrink-0 font-semibold text-ink">{fmtPct(r.monthlyCents / total)}</span>
+          </li>
+        ))}
+        {rest.length > 0 && (
+          <li className="flex min-w-0 items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: MIX_COLORS[3] }} aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-muted">+{rest.length} outro(s)</span>
+            <span className="num shrink-0 font-semibold text-ink">{fmtPct(restShare)}</span>
+          </li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
 const pct = (a: number, b: number) => (b ? fmtPct(a / b) : '—');
 const monthShort = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace('.', '');
 
@@ -175,14 +210,14 @@ function Headline({ d, money }: { d: Dash; money: Money }) {
         <Rows rows={[['Ticket médio', money(d.portfolio.avgTicketCents)], ['Carteira 12 meses', money(d.executive.contractedAnnualCents)], ['Falta faturar (backlog)', money(d.executive.backlogCents)]]} />
       </Tile>
       <div className="sm:col-span-2 xl:col-span-2">
-        <Tile label="Vencendo · clique para ver a lista" accent="#E0A400">
-          <div className="mt-2 grid flex-1 grid-cols-3 gap-2">
+        <Tile label="Vencendo · representatividade de cada contrato" accent="#E0A400"
+          sub="Pela data de vencimento do contrato. Valores e encerramentos previstos em Receita em risco por janela.">
+          <div className="mt-2 grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
             {([30, 60, 90] as const).map((n) => (
               <Link key={n} to={`/contracts?t=lista&exp=${n}`} className="flex min-w-0 flex-col rounded-md border border-line p-2.5 hover:border-primary" aria-label={`${d.expiring[`d${n}`]} contratos vencendo em até ${n} dias: ver lista`}>
                 <span className="text-[11px] font-semibold text-muted">até {n} dias</span>
                 <FitText as="span" className="num block text-[26px] font-extrabold leading-tight text-ink">{d.expiring[`d${n}`]}</FitText>
-                <FitText as="span" min={9} className="num block text-[11px] text-muted" title={`${fmtBRL(d.expiringCents[`d${n}`])}/mês`}>{money(d.expiringCents[`d${n}`])}/mês</FitText>
-                <span className="mt-auto block h-1 rounded-full bg-surface-2 pt-0"><span className="block h-1 rounded-full bg-[#E0A400]" style={{ width: `${Math.min(100, (d.expiringCents[`d${n}`] / mrr) * 100)}%` }} /></span>
+                <ExpiringMix items={d.expiringMix?.[`d${n}`] ?? []} />
               </Link>
             ))}
           </div>
@@ -201,8 +236,8 @@ function Headline({ d, money }: { d: Dash; money: Money }) {
 function RiskWindows({ d, money }: { d: Dash; money: Money }) {
   const mrr = d.monthlyCents || 1;
   const cards = [
-    ...(d.atRisk.expiredN ? [{ k: 'vencidos', label: 'Já vencidos sem renovação', n: d.atRisk.expiredN, monthlyCents: d.atRisk.expiredCents, annualCents: null as number | null }] : []),
-    ...d.executive.risk.map((r) => ({ k: String(r.days), label: `Vence em até ${r.days} dias`, n: r.n, monthlyCents: r.monthlyCents, annualCents: r.annualCents as number | null })),
+    ...(d.atRisk.expiredN ? [{ k: 'vencidos', label: 'Já vencidos sem renovação', n: d.atRisk.expiredN, monthlyCents: d.atRisk.expiredCents, annualCents: null as number | null, closureN: 0 }] : []),
+    ...d.executive.risk.map((r) => ({ k: String(r.days), label: `Vence em até ${r.days} dias`, n: r.n, monthlyCents: r.monthlyCents, annualCents: r.annualCents as number | null, closureN: r.closureN ?? 0 })),
   ];
   return (
     <section className="card p-5" aria-label="Receita em risco por janela">
@@ -215,7 +250,7 @@ function RiskWindows({ d, money }: { d: Dash; money: Money }) {
           <div key={c.k} className={clsx('flex min-w-0 flex-col rounded-md border p-4', c.k === 'vencidos' ? 'border-danger/40 bg-danger-soft/40' : 'border-line')}>
             <p className="text-xs font-bold uppercase tracking-wide text-muted">{c.label}</p>
             <FitText className="num mt-2 text-2xl font-extrabold leading-none text-ink" title={`${fmtBRL(c.monthlyCents)}/mês`}>{money(c.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></FitText>
-            <p className="num mt-1 text-xs text-muted">{c.n} contrato(s){c.annualCents != null ? ` · ${money(c.annualCents)}/ano` : ''} · {pct(c.monthlyCents, mrr)} do MRR</p>
+            <p className="num mt-1 text-xs text-muted">{c.n} contrato(s){c.closureN ? ` (${c.n - c.closureN} sem renovação + ${c.closureN} encerramento previsto)` : ''}{c.annualCents != null ? ` · ${money(c.annualCents)}/ano` : ''} · {pct(c.monthlyCents, mrr)} do MRR</p>
             <span className="mt-auto block h-1.5 rounded-full bg-surface-2 pt-0" aria-hidden><span className="mt-3 block h-1.5 rounded-full bg-danger" style={{ width: `${Math.min(100, (c.monthlyCents / mrr) * 100 * 2)}%` }} /></span>
           </div>
         ))}

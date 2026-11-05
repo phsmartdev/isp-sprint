@@ -406,6 +406,8 @@ export const contractRoutes = [
         monthlyCents: active.reduce((a, r) => a + r.monthlyCents, 0),
         globalCents: active.reduce((a, r) => a + (r.totalCents ?? r.monthlyCents * (r.termMonths ?? 12)), 0),
         expiring: { d30: within(30).length, d60: within(60).length, d90: within(90).length },
+        // representatividade de cada contrato no valor que vence na janela (maior primeiro)
+        expiringMix: Object.fromEntries(([30, 60, 90] as const).map((n) => [`d${n}`, within(n).sort((a, b) => b.monthlyCents - a.monthlyCents).map((r) => ({ id: r.id, clientName: r.clientName, number: r.number, monthlyCents: r.monthlyCents }))])),
         atRisk: { n: atRisk.length, monthlyCents: atRisk.reduce((a, r) => a + r.monthlyCents, 0),
           // já vencidos e ainda ativos, sem renovação concluída nem encerramento decidido (entram no total, não nas janelas)
           expiredN: atRisk.filter((r) => !r.closureExpected && r.endAt && r.endAt < today).length,

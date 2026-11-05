@@ -594,7 +594,8 @@ export function revenueAtRisk(list: { endAt: string | null; closureExpected: boo
       const when = r.closureExpected ? (r.closureAt ?? r.endAt) : r.renewed ? null : r.endAt;
       return !!when && when <= limit && (when >= today || r.closureExpected);
     });
-    return { days, n: hit.length, monthlyCents: hit.reduce((t, r) => t + r.monthlyCents, 0), annualCents: hit.reduce((t, r) => t + r.annualCents, 0) };
+    const closing = hit.filter((r) => r.closureExpected);
+    return { days, n: hit.length, monthlyCents: hit.reduce((t, r) => t + r.monthlyCents, 0), annualCents: hit.reduce((t, r) => t + r.annualCents, 0), closureN: closing.length, closureCents: closing.reduce((t, r) => t + r.monthlyCents, 0) };
   });
 }
 /** Concentração da carteira por cliente: participação do maior, dos 5 maiores e o índice HHI (0 a 10.000). */
