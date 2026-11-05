@@ -1445,12 +1445,116 @@ export const contractNotifications = pgTable('contract_notifications', {
   confirmIp: text('confirm_ip'),
   responseText: text('response_text'),
   respondedAt: ts('responded_at'),
+  /** rastreio de abertura do e-mail (pixel): primeira e última abertura e quantas vezes */
+  openedAt: ts('opened_at'),
+  lastOpenedAt: ts('last_opened_at'),
+  openCount: integer('open_count').notNull().default(0),
+  openUa: text('open_ua'),
 }, (t) => ({
   tokenUq: uniqueIndex('contract_notifications_token_uq').on(t.token),
   dedupeUq: uniqueIndex('contract_notifications_dedupe_uq').on(t.tenantId, t.dedupeKey),
   actIdx: index('contract_notifications_act_idx').on(t.tenantId, t.activityId),
   channelCk: check('contract_notifications_channel_ck', inList('channel', ['email', 'whatsapp'])),
   statusCk: check('contract_notifications_status_ck', inList('status', ['enviado', 'falhou', 'nao_configurado', 'sem_contato'])),
+}));
+
+// --------------------------------------------------------------- esteira de comunicação de contratos
+
+/** Template de comunicação (e-mail e WhatsApp) com variáveis; publicar grava uma versão imutável. */
+export const commTemplates = pgTable('comm_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  channels: text('channels').array().notNull().default(sql`'{}'::text[]`),
+  subject: text('subject').notNull().default(''),
+  body: text('body').notNull().default(''),
+  whatsapp: text('whatsapp').notNull().default(''),
+  /** 'texto' (formatado, montado na moldura) ou 'html' (construído pela empresa) */
+  format: text('format').notNull().default('texto'),
+  /** no HTML: usar a moldura institucional (cabeçalho e rodapé) em volta */
+  layout: boolean('layout').notNull().default(true),
+  status: text('status').notNull().default('rascunho'),
+  version: integer('version').notNull().default(0),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+}, (t) => ({ idx: index('comm_templates_idx').on(t.tenantId), statusCk: check('comm_templates_status_ck', inList('status', ['rascunho', 'publicado', 'arquivado'])) }));
+
+export const commTemplateVersions = pgTable('comm_template_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  templateId: uuid('template_id').notNull().references(() => commTemplates.id),
+  version: integer('version').notNull(),
+  channels: text('channels').array().notNull(),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  whatsapp: text('whatsapp').notNull(),
+  format: text('format').notNull().default('texto'),
+  layout: boolean('layout').notNull().default(true),
+  publishedBy: uuid('published_by').references(() => users.id),
+  publishedAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('comm_template_versions_uq').on(t.templateId, t.version) }));
+
+/** Esteira (fluxo) desenhada pela empresa. O rascunho é editável; a versão publicada é a que roda. */
+export const commFlows = pgTable('comm_flows', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  graph: jsonb('graph').$type<import('@isp/domain').CommGraph>().notNull(),
+  publishedGraph: jsonb('published_graph').$type<import('@isp/domain').CommGraph | null>(),
+  version: integer('version').notNull().default(0),
+  active: boolean('active').notNull().default(false),
+  publishedAt: ts('published_at'),
+  publishedBy: uuid('published_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: rowVersion(),
+}, (t) => ({ idx: index('comm_flows_idx').on(t.tenantId, t.active) }));
+
+/** Uma execução da esteira num contrato, num ciclo (a data do gatilho). */
+export const commRuns = pgTable('comm_runs', {
+  id: id(),
+  tenantId: tenantId(),
+  flowId: uuid('flow_id').notNull().references(() => commFlows.id),
+  flowVersion: integer('flow_version').notNull(),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  anchorDate: date('anchor_date', { mode: 'string' }).notNull(),
+  status: text('status').notNull().default('ativo'),
+  startedAt: createdAt(),
+  finishedAt: ts('finished_at'),
+}, (t) => ({
+  uq: uniqueIndex('comm_runs_uq').on(t.flowId, t.contractId, t.anchorDate),
+  statusCk: check('comm_runs_status_ck', inList('status', ['ativo', 'concluido', 'cancelado'])),
+  ctrIdx: index('comm_runs_ctr_idx').on(t.tenantId, t.contractId),
+}));
+
+/** Cada passo da execução: espera, envio (com aprovação), condição, tarefa, fim. */
+export const commRunSteps = pgTable('comm_run_steps', {
+  id: id(),
+  tenantId: tenantId(),
+  runId: uuid('run_id').notNull().references(() => commRuns.id),
+  nodeId: text('node_id').notNull(),
+  nodeType: text('node_type').notNull(),
+  label: text('label').notNull(),
+  status: text('status').notNull().default('agendado'),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  /** envio: o que vai sair (já com as variáveis), para quem e por qual canal */
+  preview: jsonb('preview').$type<{ raw?: { subject: string; body: string; whatsapp: string; format?: string; layout?: boolean }; vars?: Record<string, string | null>; subject: string; html: string; text: string; whatsapp: string; recipients: { name: string; email: string | null; phone: string | null; kind: string; userId: string | null; actorId: string | null }[]; channels: string[]; templateId: string; templateVersion: number } | null>(),
+  approverRole: text('approver_role'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  result: jsonb('result').$type<Record<string, unknown> | null>(),
+  notificationIds: uuid('notification_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  doneAt: ts('done_at'),
+  createdAt: createdAt(),
+}, (t) => ({
+  runIdx: index('comm_run_steps_run_idx').on(t.runId),
+  pendIdx: index('comm_run_steps_pend_idx').on(t.tenantId, t.status, t.dueOn),
+  statusCk: check('comm_run_steps_status_ck', inList('status', ['agendado', 'aguardando_aprovacao', 'enviado', 'rejeitado', 'concluido', 'falhou', 'cancelado'])),
 }));
 
 /** Prazo (SLA, em horas) por atividade da matriz RACI. Sem registro ou nulo = sem SLA (em aberto). */

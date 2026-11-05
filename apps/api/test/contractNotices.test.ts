@@ -1,6 +1,6 @@
 /**
  * Avisos de atividades de contrato por nível de responsabilidade (R/A/C/I + escalonamento), papéis no cadastro do
- * usuário, atores externos com canais e o botão "Confirmar recebimento" (com resposta do ator externo).
+ * usuário, atores externos com canais, rastreio de abertura do e-mail (pixel) e resposta do ator externo pelo link.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
@@ -12,7 +12,7 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client;
 const sent: { to: string; subject: string; text: string; html?: string }[] = [];
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
-const tokenIn = (m: { text: string }) => /\/r\/([A-Za-z0-9_-]+)/.exec(m.text)?.[1];
+const tokenIn = (m: { html?: string }) => /\/public\/open\/([A-Za-z0-9_-]+)/.exec(m.html ?? '')?.[1];
 let contractId = '', actorId = '';
 
 beforeAll(async () => {
@@ -56,25 +56,35 @@ describe('avisos por nível de responsabilidade com confirmação de recebimento
       'Ana Souza|A|email|enviado', 'Financeiro Terceirizado Fictício|C|email|enviado', 'Financeiro Terceirizado Fictício|C|whatsapp|nao_configurado', 'Lucas Lima|R|email|enviado',
     ]);
     const m = sent.find((x) => x.to === 'fin@terceiro.test')!;
-    expect(m.html).toContain('Confirmar recebimento');
+    expect(m.html).not.toContain('Confirmar recebimento');
+    expect(m.html).toContain('Responder'); // ator externo responde pelo link
+    expect(sent.find((x) => x.to === 'lucas@yepnet.test')!.html).not.toContain('Responder'); // usuário do sistema não
     expect(m.html).toContain('Consultado (C)');
     expect(tokenIn(m)).toBeTruthy();
   });
 
-  it('link público: confirma recebimento (usuário) e registra a resposta do ator externo', async () => {
+  it('pixel registra a abertura (primeira, última e contagem); o ator externo responde pelo link', async () => {
     const tokUser = tokenIn(sent.find((x) => x.to === 'lucas@yepnet.test')!)!;
     const tokActor = tokenIn(sent.find((x) => x.to === 'fin@terceiro.test')!)!;
-    const anon = (m: 'GET' | 'POST', url: string, payload?: unknown) => ctx.app.inject({ method: m, url: `/api/v1${url}`, payload: payload as never, headers: { origin: 'http://localhost:5173' } });
+    const anon = (m: 'GET' | 'POST', url: string, payload?: unknown) => ctx.app.inject({ method: m, url: `/api/v1${url}`, payload: payload as never, headers: { origin: 'http://localhost:5173', 'user-agent': 'Cliente de e-mail fictício' } });
+    const px = await anon('GET', `/public/open/${tokUser}`);
+    expect(px.statusCode).toBe(200);
+    expect(px.headers['content-type']).toBe('image/gif');
+    expect(px.headers['cache-control']).toMatch(/no-store/);
+    await anon('GET', `/public/open/${tokUser}`);
+    expect((await anon('GET', '/public/open/token-invalido-xxxxxxxxxxxx')).statusCode).toBe(200); // o pixel nunca quebra o e-mail
     expect((await anon('GET', '/public/notices/token-invalido-xxxxxxxxxxxx')).statusCode).toBe(404);
-    const g = ok(await anon('GET', `/public/notices/${tokUser}`)).json();
-    expect(g).toMatchObject({ recipientName: 'Lucas Lima', role: 'Responsável pela execução (R)', canRespond: false, confirmedAt: null });
-    ok(await anon('POST', `/public/notices/${tokUser}/confirm`, {}));
+    expect(ok(await anon('GET', `/public/notices/${tokUser}`)).json()).toMatchObject({ recipientName: 'Lucas Lima', role: 'Responsável pela execução (R)', canRespond: false });
+    expect(ok(await anon('GET', `/public/notices/${tokActor}`)).json().canRespond).toBe(true);
     ok(await anon('POST', `/public/notices/${tokActor}/confirm`, { response: 'Recebido. Envio o provisionamento até sexta.' }));
-    const n = ok(await carlos.get(`/tasks/${taskId}/notices`)).json().items as { recipientName: string; channel: string; confirmedAt: string | null; responseText: string | null }[];
-    expect(n.find((x) => x.recipientName === 'Lucas Lima')!.confirmedAt).toBeTruthy();
+    const n = ok(await carlos.get(`/tasks/${taskId}/notices`)).json().items as { recipientName: string; channel: string; openedAt: string | null; lastOpenedAt: string | null; openCount: number; responseText: string | null }[];
+    const lucasN = n.find((x) => x.recipientName === 'Lucas Lima')!;
+    expect(lucasN.openedAt).toBeTruthy();
+    expect(lucasN.openCount).toBe(3); // 2 pelo pixel + 1 pela página do link
     expect(n.find((x) => x.recipientName === 'Financeiro Terceirizado Fictício' && x.channel === 'email')).toMatchObject({ responseText: 'Recebido. Envio o provisionamento até sexta.' });
     const tl = ok(await carlos.get(`/contracts/${contractId}/timeline`)).json();
     expect(tl.items.some((i: { title: string }) => /respondeu ao aviso/.test(i.title))).toBe(true);
+    expect(tl.items.filter((i: { title: string }) => /Lucas Lima abriu/.test(i.title))).toHaveLength(1); // só a primeira abertura vai para o histórico
   });
 
   it('vencida avisa R e A; escalonamento pelo atraso vai ao papel configurado; rodar de novo não repete', async () => {

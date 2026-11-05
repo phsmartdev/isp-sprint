@@ -74,8 +74,8 @@ async function recipientsFor(db: DbOrTx, task: Task, letters: readonly RaciLette
 const fmtDay = (d: Date | null) => (d ? d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'sem prazo');
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-/** E-mail institucional com o botão de confirmação (texto puro como alternativa). */
-export function noticeHtml(o: { title: string; lines: string[]; link: string; external: boolean }) {
+/** E-mail institucional do aviso: abertura rastreada por pixel; quem está fora do sistema recebe o link para responder. */
+export function noticeHtml(o: { title: string; lines: string[]; pixel: string | null; reply: string | null }) {
   const rows = o.lines.map((l) => `<p style="margin:0 0 8px;color:#334155;font-size:14px;line-height:1.5">${esc(l)}</p>`).join('');
   return `<!doctype html><html><body style="margin:0;background:#F1F5F9;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F5F9;padding:24px 0"><tr><td align="center">
@@ -83,10 +83,8 @@ export function noticeHtml(o: { title: string; lines: string[]; link: string; ex
 <tr><td style="background:#1F3A5F;padding:16px 24px;color:#ffffff;font-size:16px;font-weight:bold">Gestão de Contratos</td></tr>
 <tr><td style="padding:24px">
 <h1 style="margin:0 0 16px;font-size:18px;color:#0F172A">${esc(o.title)}</h1>${rows}
-<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 8px"><tr><td style="background:#2F5986;border-radius:6px">
-<a href="${esc(o.link)}" style="display:inline-block;padding:12px 22px;color:#ffffff;font-size:15px;font-weight:bold;text-decoration:none">Confirmar recebimento</a></td></tr></table>
-<p style="margin:12px 0 0;color:#64748B;font-size:12px">${o.external ? 'Pelo mesmo botão você pode responder (aceite, dúvida ou impedimento).' : 'A confirmação fica registrada no histórico da atividade.'} Se o botão não abrir, copie: ${esc(o.link)}</p>
-</td></tr></table></td></tr></table></body></html>`;
+${o.reply ? `<p style="margin:20px 0 0;font-size:13px"><a href="${esc(o.reply)}" style="color:#2F5986;font-weight:bold">Responder (aceite, dúvida ou impedimento)</a></p>` : ''}
+</td></tr></table></td></tr></table>${o.pixel ? `<img src="${esc(o.pixel)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px;opacity:0" />` : ''}</body></html>`;
 }
 
 async function zapiCfg(db: DbOrTx, tenantId: string) {
@@ -136,13 +134,14 @@ export async function notifyTask(db: DbOrTx, config: Config, taskId: string, eve
         let status: 'enviado' | 'falhou' | 'nao_configurado' | 'sem_contato' = 'sem_contato';
         let error: string | null = null;
         if (to && channel === 'email') {
-          const res = await sendAlert(db, { tenantId: task.tenantId, kind: 'contrato_atividade', to, subject: title, text: `${lines.join('\n')}\n\nConfirme o recebimento: ${link}`, html: noticeHtml({ title, lines, link, external: r.kind === 'actor' }), contractId: task.contractId });
+          const reply = r.kind === 'actor' ? link : null;
+          const res = await sendAlert(db, { tenantId: task.tenantId, kind: 'contrato_atividade', to, subject: title, text: reply ? `${lines.join('\n')}\n\nResponder: ${reply}` : lines.join('\n'), html: noticeHtml({ title, lines, pixel: publicLink(config, `/api/v1/public/open/${token}`), reply }), contractId: task.contractId });
           status = res && 'ok' in res && res.ok ? 'enviado' : res && 'notConfigured' in res && res.notConfigured ? 'nao_configurado' : 'falhou';
           error = res && !res.ok ? res.error ?? null : null;
         } else if (to && channel === 'whatsapp') {
           if (!zapi) { status = 'nao_configurado'; error = 'WhatsApp (Z-API) não configurado.'; }
           else {
-            try { await sendZapiText(zapi, to, `*${title}*\n${lines.join('\n')}\n\nConfirme o recebimento${r.kind === 'actor' ? ' ou responda' : ''}: ${link}`); status = 'enviado'; }
+            try { await sendZapiText(zapi, to, `*${title}*\n${lines.join('\n')}\n\nLeia${r.kind === 'actor' ? ' e responda' : ''} por aqui: ${link}`); status = 'enviado'; }
             catch (e) { status = 'falhou'; error = (e as Error).message.slice(0, 300); }
           }
         } else error = channel === 'email' ? 'Sem e-mail cadastrado.' : 'Sem WhatsApp cadastrado.';
@@ -186,6 +185,6 @@ export async function runContractTaskNotices(db: DbOrTx, config: Config, now = n
 /** Avisos de uma atividade (para a gaveta da tarefa e auditoria). */
 export async function noticesOf(db: DbOrTx, tenantId: string, activityIds: string[]) {
   if (!activityIds.length) return [];
-  return db.select({ id: s.contractNotifications.id, activityId: s.contractNotifications.activityId, event: s.contractNotifications.event, raciLetter: s.contractNotifications.raciLetter, role: s.contractNotifications.role, recipientName: s.contractNotifications.recipientName, channel: s.contractNotifications.channel, status: s.contractNotifications.status, error: s.contractNotifications.error, sentAt: s.contractNotifications.sentAt, confirmedAt: s.contractNotifications.confirmedAt, responseText: s.contractNotifications.responseText, respondedAt: s.contractNotifications.respondedAt, actorId: s.contractNotifications.actorId })
+  return db.select({ id: s.contractNotifications.id, activityId: s.contractNotifications.activityId, event: s.contractNotifications.event, raciLetter: s.contractNotifications.raciLetter, role: s.contractNotifications.role, recipientName: s.contractNotifications.recipientName, channel: s.contractNotifications.channel, status: s.contractNotifications.status, error: s.contractNotifications.error, sentAt: s.contractNotifications.sentAt, confirmedAt: s.contractNotifications.confirmedAt, openedAt: s.contractNotifications.openedAt, lastOpenedAt: s.contractNotifications.lastOpenedAt, openCount: s.contractNotifications.openCount, responseText: s.contractNotifications.responseText, respondedAt: s.contractNotifications.respondedAt, actorId: s.contractNotifications.actorId })
     .from(s.contractNotifications).where(and(eq(s.contractNotifications.tenantId, tenantId), inArray(s.contractNotifications.activityId, activityIds))).orderBy(sql`${s.contractNotifications.sentAt} desc`);
 }

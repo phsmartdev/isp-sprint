@@ -20,6 +20,7 @@ import { CommitmentControl } from '../../features/contracts/CommitmentControl';
 import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
 import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { ErpPanel } from '../../features/contracts/ErpPanel';
+import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
@@ -220,7 +221,7 @@ export function ContractDetailPage() {
           {tab === 'extrato' && <LedgerPanel c={c} />}
           {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} onGenerate={() => setGenerate(true)} onSign={setSign} />}
           {tab === 'versoes' && <VersionsPanel c={c} />}
-          {tab === 'notificacoes' && <AlertsPanel c={c} />}
+          {tab === 'notificacoes' && <div className="space-y-6"><ContractCommRuns contractId={c.id} /><AlertsPanel c={c} /></div>}
           {tab === 'historico' && <TimelinePanel c={c} />}
           {tab === 'pessoas' && <EntityPeoplePanel entity="contrato" entityId={c.id} compact />}
           {tab === 'projetos' && <WorkLinks prefill={{ contractId: c.id, contactId: c.contactId, label: `CT-${c.code} · ${c.contact.name}`, kind: 'implantacao', name: `Implantação ${c.contact.name}` }} />}

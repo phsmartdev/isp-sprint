@@ -54,6 +54,7 @@ const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then
 const AdminResultsSettings = lazy(() => import('./pages/admin/ResultsSettings').then((m) => ({ default: m.AdminResultsSettings })));
 const AdminAbmSettings = lazy(() => import('./pages/admin/AbmSettings').then((m) => ({ default: m.AdminAbmSettings })));
 const AdminPerformanceSettings = lazy(() => import('./pages/admin/PerformanceSettings').then((m) => ({ default: m.AdminPerformanceSettings })));
+const AdminContractComms = lazy(() => import('./pages/admin/ContractComms').then((m) => ({ default: m.AdminContractComms })));
 const AdminContractResponsibilities = lazy(() => import('./pages/admin/ContractResponsibilities').then((m) => ({ default: m.AdminContractResponsibilities })));
 const AdminApprovalSettings = lazy(() => import('./pages/admin/ApprovalSettings').then((m) => ({ default: m.AdminApprovalSettings })));
 const AdminOverview = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminOverview })));
@@ -166,6 +167,7 @@ export function App() {
           <Route path="contracts" element={<Navigate to="/settings/modulos?cfg=contratos" replace />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
           <Route path="contratos-responsabilidades" element={<AdminContractResponsibilities />} />
+          <Route path="contratos-comunicacao" element={<AdminContractComms />} />
           <Route path="customer-success" element={<AdminCsSettings />} />
           <Route path="desempenho" element={<AdminPerformanceSettings />} />
           <Route path="resultados" element={<AdminResultsSettings />} />

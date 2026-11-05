@@ -98,6 +98,8 @@ export const dataAdminRoutes = [
           await tx.delete(s.technicalCertificates).where(eq(s.technicalCertificates.tenantId, t));
           await tx.delete(s.contractDigests).where(eq(s.contractDigests.tenantId, t));
           await tx.delete(s.contractNotifications).where(eq(s.contractNotifications.tenantId, t));
+          await tx.delete(s.commRunSteps).where(eq(s.commRunSteps.tenantId, t));
+          await tx.delete(s.commRuns).where(eq(s.commRuns.tenantId, t));
           await tx.delete(s.contractErpEvents).where(eq(s.contractErpEvents.tenantId, t));
           await tx.delete(s.contractErpRecords).where(eq(s.contractErpRecords.tenantId, t));
           await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));
