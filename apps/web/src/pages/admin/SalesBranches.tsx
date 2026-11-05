@@ -13,7 +13,7 @@ import { Button, Chip, ErrorState, Input, LoadingRows, Select, Tabs } from '../.
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 
-type Row = { id: string | null; name: string; active: boolean; fiscalKinds: FiscalKind[]; cnpj: string | null; taxRegime: TaxRegime | null; city: string | null; state: string | null };
+type Row = { id: string | null; name: string; active: boolean; fiscalKinds: FiscalKind[]; cnpj: string | null; taxRegime: TaxRegime | null; city: string | null; state: string | null; ibgeCode: string | null };
 type Tax = { name: string; percent: string; fixed: string; active: boolean; validFrom: string; validTo: string };
 type Doc = { key: string; id: string | null; fiscalKind: FiscalKind; code: string; name: string; active: boolean; taxes: Tax[]; version?: number | null; versionAt?: string | null };
 type SavedDoc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; active: boolean; version?: number | null; versionAt?: string | null; taxes: { name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[] };
@@ -101,7 +101,7 @@ export function AdminSalesBranches() {
   const q = useQuery({ queryKey: ['admin', 'sales-branches'], queryFn: () => api<{ items: Row[] }>('/admin/sales-branches') });
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState('');
-  useEffect(() => { if (q.data) setRows(q.data.items.map((r) => ({ id: r.id, name: r.name, active: r.active, fiscalKinds: r.fiscalKinds ?? [], cnpj: r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : null, taxRegime: r.taxRegime ?? null, city: r.city ?? null, state: r.state ?? null }))); }, [q.data]);
+  useEffect(() => { if (q.data) setRows(q.data.items.map((r) => ({ id: r.id, name: r.name, active: r.active, fiscalKinds: r.fiscalKinds ?? [], cnpj: r.cnpj ? r.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : null, taxRegime: r.taxRegime ?? null, city: r.city ?? null, state: r.state ?? null, ibgeCode: r.ibgeCode ?? null }))); }, [q.data]);
   const save = useMutation({
     mutationFn: () => api('/admin/sales-branches', { method: 'PUT', body: { items: rows.filter((r) => r.name.trim()) } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'sales-branches'] }); void qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: 'Filiais salvas' }); },
@@ -124,7 +124,7 @@ export function AdminSalesBranches() {
                     <Input aria-label={`Nome da filial ${i + 1}`} className="max-w-sm flex-1" value={r.name} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={r.active} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, active: e.target.checked } : x)))} />Ativa</label>
                   </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_200px_minmax(0,1fr)_72px]" role="group" aria-label={`Emitente ${r.name || i + 1}`}>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_200px_minmax(0,1fr)_72px_110px]" role="group" aria-label={`Emitente ${r.name || i + 1}`}>
                     <Input aria-label={`CNPJ da filial ${i + 1}`} placeholder="CNPJ" value={r.cnpj ?? ''} onChange={(e) => patch(i, { cnpj: e.target.value || null })} />
                     <Select aria-label={`Regime tributário da filial ${i + 1}`} value={r.taxRegime ?? ''} onChange={(e) => patch(i, { taxRegime: (e.target.value || null) as TaxRegime | null })}>
                       <option value="">Regime tributário</option>
@@ -132,6 +132,7 @@ export function AdminSalesBranches() {
                     </Select>
                     <Input aria-label={`Município da filial ${i + 1}`} placeholder="Município" value={r.city ?? ''} onChange={(e) => patch(i, { city: e.target.value || null })} />
                     <Input aria-label={`UF da filial ${i + 1}`} placeholder="UF" maxLength={2} className="uppercase" value={r.state ?? ''} onChange={(e) => patch(i, { state: e.target.value.toUpperCase() || null })} />
+                    <Input aria-label={`Código IBGE do município da filial ${i + 1}`} placeholder="IBGE" inputMode="numeric" maxLength={7} value={r.ibgeCode ?? ''} onChange={(e) => patch(i, { ibgeCode: e.target.value.replace(/\D/g, '') || null })} />
                   </div>
                   <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                     <legend className="mb-1 text-xs font-semibold text-muted">Tipos fiscais {r.fiscalKinds.length ? '' : '(nenhum marcado = todos)'}</legend>
@@ -141,7 +142,7 @@ export function AdminSalesBranches() {
               ))}
             </ul>
             <div className="mt-4 flex flex-wrap justify-between gap-2">
-              <Button variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...rows, { id: null, name: '', active: true, fiscalKinds: [], cnpj: null, taxRegime: null, city: null, state: null }])}>Adicionar filial</Button>
+              <Button variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...rows, { id: null, name: '', active: true, fiscalKinds: [], cnpj: null, taxRegime: null, city: null, state: null, ibgeCode: null }])}>Adicionar filial</Button>
               <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar filiais</Button>
             </div>
           </>

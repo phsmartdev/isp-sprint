@@ -469,6 +469,8 @@ export const salesBranches = pgTable('sales_branches', {
   taxRegime: text('tax_regime'),
   city: text('city'),
   state: text('state'),
+  /** código IBGE do município do emitente (7 dígitos): chave do envelope fiscal padrão da filial */
+  ibgeCode: text('ibge_code'),
   /** Tipos fiscais que a filial emite (venda, prestação de serviço, aluguel); vazio = todos. */
   fiscalKinds: text('fiscal_kinds').array().notNull().default(sql`'{}'::text[]`),
   createdAt: createdAt(),
@@ -5142,6 +5144,27 @@ export const econSettingsVersions = pgTable('econ_settings_versions', {
   createdBy: uuid('created_by'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('econ_settings_versions_idx').on(t.tenantId, t.validFrom, t.createdAt) }));
+
+/**
+ * Envelope fiscal por vigência (Reforma Tributária): tributos da nota por tipo de documento, alíquota efetiva sobre o
+ * lucro e retenções na fonte de cada emitente (filial) e município IBGE, por ano. Append-only: cada publicação é uma
+ * nova linha e vale a mais recente de cada chave (filial, município, ano); as anteriores ficam no histórico.
+ */
+export const fiscalEnvelopes = pgTable('fiscal_envelopes', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id),
+  ibgeCode: text('ibge_code').notNull(),
+  municipality: text('municipality'),
+  year: integer('year').notNull(),
+  values: jsonb('values').$type<Record<string, unknown>>().notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('fiscal_envelopes_idx').on(t.tenantId, t.branchId, t.ibgeCode, t.year, t.createdAt),
+  ibgeCk: check('fiscal_envelopes_ibge_ck', sql`ibge_code ~ '^[0-9]{7}$'`),
+  yearCk: check('fiscal_envelopes_year_ck', sql`year between 2020 and 2100`),
+}));
 
 /** Versões dos tributos de cada documento fiscal (append-only): cada mudança gera a próxima; o cálculo guarda a versão usada. */
 export const fiscalDocVersions = pgTable('fiscal_doc_versions', {

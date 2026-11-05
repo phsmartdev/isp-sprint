@@ -377,7 +377,8 @@ export function applyFiscalEnvelope(args: EngineArgs): { args: EngineArgs; info:
   const profit = env.values.profitTaxBp;
   const settings = profit != null ? { ...args.settings, incomeTaxBp: profit } : args.settings;
   if (profit == null) warnings.push(`O envelope fiscal ${env.year} não tem a alíquota efetiva sobre o lucro: IR/CSLL pelos parâmetros de viabilidade.`);
-  const retentions = Object.entries(env.values.retentions ?? {}).filter(([, v]) => v != null && v > 0).map(([code, bp]) => ({ code, label: ENVELOPE_RETENTIONS[code as EnvelopeRetention] ?? code, bp: bp! }));
+  const rv = env.values.retentions ?? {};
+  const retentions = (Object.keys(ENVELOPE_RETENTIONS) as EnvelopeRetention[]).filter((c) => (rv[c] ?? 0) > 0).map((code) => ({ code, label: ENVELOPE_RETENTIONS[code], bp: rv[code]! }));
   const info: FiscalContextInfo = {
     ...base, envelope: { id: env.id, year: env.year, municipality: env.municipality ?? null }, basket,
     profitTaxBp: settings.incomeTaxBp ?? null, profitTaxSource: profit != null ? 'envelope' : base.profitTaxSource, retentions,

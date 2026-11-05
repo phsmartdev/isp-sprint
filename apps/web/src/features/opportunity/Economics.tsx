@@ -9,7 +9,7 @@ import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  buildModel, type FinOverride, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  buildModel, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -25,7 +25,9 @@ type Data = {
   modelOverrides?: FinOverride[];
   /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
   result: EconResult | null; stale: boolean; editable: boolean;
-  emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null } | null;
+  emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null; ibgeCode?: string | null } | null;
+  /** envelope fiscal por vigência (a prévia escolhe a chave ativa como o servidor) */
+  fiscal?: FiscalArgs;
   /** parâmetros vigentes; null = a empresa ainda não informou em Configurações → Viabilidade */
   settingsVersion: { id: string; validFrom: string } | null;
   status: EconStatus; canDecide: boolean; decisions: { id: string; snapshotId: string; action: 'enviada' | 'aprovada' | 'devolvida'; reason: string | null; actorName: string | null; createdAt: string }[];
@@ -340,6 +342,13 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
           {r.withReservations && <Chip tone="yellow">Calculável com ressalvas</Chip>}
         </div>
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
+        {r.fiscal && (
+          <p className="mt-1 text-xs text-muted" aria-label="Envelope fiscal da simulação">
+            {r.fiscal.envelope
+              ? <>Envelope fiscal {r.fiscal.envelope.year} ({r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'}) · {r.fiscal.envelope.municipality ?? `IBGE ${r.fiscal.ibgeCode}`} · tributos da nota {r.fiscal.basket.map((b) => `${b.kind} ${pct(b.bp / 100, 2)}`).join(' · ')} · IRPJ/CSLL {pct((r.fiscal.profitTaxBp ?? 0) / 100, 2)}{r.fiscal.retentions.length ? ' · retenções fora do cálculo' : ''}</>
+              : <>Vigência fiscal {r.fiscal.year} sem envelope: tributos dos documentos fiscais e IR/CSLL dos parâmetros.</>}
+          </p>
+        )}
       </div>
       <PriceBasis r={r} per={per} settings={settings} compact={compact} />
       {r.deal?.cells && <CellsTable r={r} compact={compact} />}
@@ -639,13 +648,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
   const catalog = catQ.data?.items ?? [];
-  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string } | null>(null);
+  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string; ibge: string } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
     if (q.data?.input && !f) {
       const i = q.data.input;
-      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null) };
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null), fiscalYear: i.fiscalYear ? String(i.fiscalYear) : '', ibge: i.municipalityIbge ?? '' };
       setF(init);
       setBase(formKey(init));
     }
@@ -655,10 +664,11 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     capex: fromLines(f.capex), extraInitialCents: parseMoney(f.extra) ?? -1, opex: fromLines(f.opex),
     commissionBp: null, variableBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
     salePriceCents: f.salePrice.trim() ? parseMoney(f.salePrice) : null,
+    fiscalYear: f.fiscalYear.length === 4 ? Number(f.fiscalYear) : null, municipalityIbge: f.ibge.length === 7 ? f.ibge : null,
   } : null), [f]);
   const invalid = !input || [input.variableBp ?? null, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
-  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel }) : null), [q.data, input, invalid, liveModel]);
+  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel, fiscal: q.data.fiscal }) : null), [q.data, input, invalid, liveModel]);
   const save = useMutation({
     mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
     onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
@@ -753,6 +763,12 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
                 </>
               </FormField>
             )}
+            <FormField label="Vigência fiscal (ano)" htmlFor="ec-fy" hint={`Chave do envelope fiscal: até 2026 regime atual (PIS/COFINS); de 2027 em diante Reforma Tributária (CBS/IBS). Em branco = ${d.fiscal?.today.slice(0, 4) ?? 'ano corrente'}.`}>
+              <Input id="ec-fy" inputMode="numeric" placeholder={d.fiscal?.today.slice(0, 4) ?? ''} value={f.fiscalYear} disabled={dis} invalid={!!f.fiscalYear && f.fiscalYear.length !== 4} onChange={(e) => set({ fiscalYear: e.target.value.replace(/\D/g, '').slice(0, 4) })} />
+            </FormField>
+            <FormField label="Município do envelope (IBGE)" htmlFor="ec-ibge" hint={d.fiscal?.defaultIbge ? `Em branco = o da filial emitente (${d.fiscal.defaultIbge}).` : 'A filial emitente está sem código IBGE (Configurações → Filiais).'}>
+              <Input id="ec-ibge" inputMode="numeric" placeholder={d.fiscal?.defaultIbge ?? ''} value={f.ibge} disabled={dis} invalid={!!f.ibge && f.ibge.length !== 7} onChange={(e) => set({ ibge: e.target.value.replace(/\D/g, '').slice(0, 7) })} />
+            </FormField>
             <FormField label="Margem de contribuição (%)" htmlFor="ec-mar" error={mOut ? `Fora dos limites: o cálculo usa ${bpText(Math.min(Math.max(mNow, mPiso), mTeto ?? 10_000))}%.` : undefined} hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%. Em branco vale a sugestão.`}>
               <Input id="ec-mar" inputMode="decimal" placeholder={bpText(mSug)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin)) || mOut} onChange={(e) => set({ margin: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
             </FormField>

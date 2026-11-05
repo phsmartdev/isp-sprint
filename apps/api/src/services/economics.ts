@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
+import { defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -22,6 +22,13 @@ export async function econSettingsOf(db: DbOrTx, tenantId: string, on = today())
     .where(and(eq(s.econSettingsVersions.tenantId, tenantId), lte(s.econSettingsVersions.validFrom, on)))
     .orderBy(desc(s.econSettingsVersions.validFrom), desc(s.econSettingsVersions.createdAt)).limit(1);
   return r ? { id: r.id, validFrom: r.validFrom, createdAt: r.createdAt, createdBy: r.createdBy, settings: r.values as unknown as EconSettings } : null;
+}
+
+/** Envelopes fiscais da empresa (todas as publicações; a escolha da chave ativa é do motor). */
+export async function fiscalEnvelopesOf(db: DbOrTx, tenantId: string, branchId?: string | null): Promise<FiscalEnvelope[]> {
+  const rows = await db.select().from(s.fiscalEnvelopes).where(branchId ? and(eq(s.fiscalEnvelopes.tenantId, tenantId), eq(s.fiscalEnvelopes.branchId, branchId)) : eq(s.fiscalEnvelopes.tenantId, tenantId))
+    .orderBy(asc(s.fiscalEnvelopes.branchId), asc(s.fiscalEnvelopes.ibgeCode), desc(s.fiscalEnvelopes.year), desc(s.fiscalEnvelopes.createdAt));
+  return rows.map((r) => ({ id: r.id, branchId: r.branchId, ibgeCode: r.ibgeCode, municipality: r.municipality, year: r.year, values: r.values as unknown as FiscalEnvelopeValues, createdAt: r.createdAt }));
 }
 
 export async function econSettingsHistory(db: DbOrTx, tenantId: string) {
@@ -78,14 +85,15 @@ type Opp = { id: string; tenantId: string; contactId: string; branchId: string |
 
 /** Tudo que o cálculo precisa: itens com a resolução fiscal, parâmetros vigentes, segmento e o que foi salvo. */
 export async function economicsContext(db: DbOrTx, opp: Opp) {
-  const [version, items, docs, [contact], [saved], [branch], fm] = await Promise.all([
+  const [version, items, docs, [contact], [saved], [branch], fm, envelopes] = await Promise.all([
     econSettingsOf(db, opp.tenantId),
     db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, opp.tenantId))).orderBy(asc(s.opportunityItems.position)),
     fiscalDocsOf(db, opp.tenantId),
     db.select({ segment: s.contacts.segment, nature: s.contacts.nature }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1),
     db.select().from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1),
-    opp.branchId ? db.select({ name: s.salesBranches.name, cnpj: s.salesBranches.cnpj, taxRegime: s.salesBranches.taxRegime, city: s.salesBranches.city, state: s.salesBranches.state }).from(s.salesBranches).where(eq(s.salesBranches.id, opp.branchId)).limit(1) : Promise.resolve([]),
+    opp.branchId ? db.select({ name: s.salesBranches.name, cnpj: s.salesBranches.cnpj, taxRegime: s.salesBranches.taxRegime, city: s.salesBranches.city, state: s.salesBranches.state, ibgeCode: s.salesBranches.ibgeCode }).from(s.salesBranches).where(eq(s.salesBranches.id, opp.branchId)).limit(1) : Promise.resolve([]),
     modelFor(db, opp.tenantId),
+    opp.branchId ? fiscalEnvelopesOf(db, opp.tenantId, opp.branchId) : Promise.resolve([] as FiscalEnvelope[]),
   ]);
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
@@ -102,13 +110,15 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)),
     /** modelo de fórmulas vigente (Financial Studio): padrão do sistema + fórmulas publicadas */
     model: fm.model, modelOverrides: fm.overrides,
+    /** envelope fiscal por vigência (Reforma Tributária): publicações da filial; a chave ativa sai da simulação (ano e município) */
+    fiscal: { envelopes, branchId: opp.branchId, defaultIbge: branch?.ibgeCode ?? null, today: today() },
   };
 }
 export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 
 /** null = sem parâmetros vigentes (a empresa ainda não informou em Configurações → Viabilidade). */
 export const computeEconomics = (ctx: EconContext, input?: EconInput) =>
-  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model }) : null;
+  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal }) : null;
 
 /**
  * O resultado salvo deixou de valer? Recalcula as mesmas entradas com os itens, tributos, parâmetros e motor de hoje
@@ -134,7 +144,8 @@ export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, acto
   await db.insert(s.opportunityEconomics).values({ opportunityId: opp.id, tenantId: opp.tenantId, input, result, updatedBy: actorId, updatedAt: now })
     .onConflictDoUpdate({ target: s.opportunityEconomics.opportunityId, set: { input, result, updatedBy: actorId, updatedAt: now } });
   // a fotografia guarda a versão de cada fórmula publicada usada (o histórico não muda com publicações futuras)
-  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
+  const envUsed = result.fiscal?.envelope ? ctx.fiscal.envelopes.find((e) => e.id === result.fiscal!.envelope!.id) ?? null : null;
+  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, fiscalEnvelope: envUsed ? { id: envUsed.id, year: envUsed.year, ibgeCode: envUsed.ibgeCode, values: envUsed.values } : null, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
   await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId: ctx.settingsVersion?.id ?? null, sha256: snapshotHash({ input, settings, result }) });
   return result;
 }

@@ -21,6 +21,7 @@ export const salesBranchRoutes = [
     body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), name: z.string().trim().min(2).max(80), active: z.boolean(), fiscalKinds: z.array(z.enum(FISCAL_KINDS)).max(FISCAL_KINDS.length).default([]),
       cnpj: z.string().trim().max(20).nullable().default(null), taxRegime: z.enum(TAX_REGIMES).nullable().default(null),
       city: z.string().trim().max(80).nullable().default(null), state: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).nullable().default(null),
+      ibgeCode: z.string().trim().regex(/^\d{7}$/, 'Código IBGE do município com 7 dígitos').nullable().default(null),
     })).max(30) }),
     handler: async ({ app, auth, body, req }) => app.db.transaction(async (tx) => {
       const names = body.items.map((i) => i.name.toLowerCase());
@@ -28,7 +29,7 @@ export const salesBranchRoutes = [
       if (!body.items.some((i) => i.active)) throw unprocessable('Deixe pelo menos uma filial ativa.');
       const badCnpj = body.items.find((i) => i.cnpj && !isValidCnpj(i.cnpj));
       if (badCnpj) throw unprocessable(`CNPJ inválido na filial ${badCnpj.name}.`);
-      const emitter = (i: (typeof body.items)[number]) => ({ cnpj: i.cnpj ? i.cnpj.replace(/\D/g, '') : null, taxRegime: i.taxRegime, city: i.city || null, state: i.state || null });
+      const emitter = (i: (typeof body.items)[number]) => ({ cnpj: i.cnpj ? i.cnpj.replace(/\D/g, '') : null, taxRegime: i.taxRegime, city: i.city || null, state: i.state || null, ibgeCode: i.ibgeCode || null });
       for (const [position, it] of body.items.entries()) {
         if (it.id) await tx.update(s.salesBranches).set({ name: it.name, active: it.active, position, fiscalKinds: it.fiscalKinds, ...emitter(it) }).where(and(eq(s.salesBranches.id, it.id), eq(s.salesBranches.tenantId, auth.tenantId)));
         else await tx.insert(s.salesBranches).values({ tenantId: auth.tenantId, name: it.name, active: it.active, position, fiscalKinds: it.fiscalKinds, ...emitter(it) });
