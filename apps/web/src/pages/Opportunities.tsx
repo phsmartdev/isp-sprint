@@ -48,9 +48,11 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
 
 const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
   const nav = useNavigate();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove || opp.stage === 'ganha' || opp.stage === 'perdida' });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
-  const tag = opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null;
+  // venda fechada/perdida aparece na etapa em que a ação aconteceu, marcada e sem arrastar
+  const closed = opp.stage === 'ganha' ? { tone: 'green' as const, label: 'Venda fechada' } : opp.stage === 'perdida' ? { tone: 'red' as const, label: 'Perdida' } : null;
+  const tag = closed ?? (opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null);
   return (
     <li
       ref={setNodeRef}
@@ -71,7 +73,7 @@ const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp
         <>
           <div className="flex items-start gap-1">
             <p className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-semibold leading-snug text-ink" title={opp.title}>{opp.title || opp.contactName}</p>
-            {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
+            {canMove && opp.stage !== 'ganha' && opp.stage !== 'perdida' && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
           </div>
           {opp.title && opp.title !== opp.contactName && <p className="truncate text-2xs text-muted" title={opp.contactName}>{opp.contactName}</p>}
           <div className="mt-1.5 flex items-center gap-1.5 text-2xs text-muted">
@@ -95,7 +97,7 @@ const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp
           <p className="num mt-1 text-sm font-bold text-ink">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : <span className="font-medium text-muted">Sem plano</span>}</p>
         </div>
         <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={24} />
-        {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
+        {canMove && opp.stage !== 'ganha' && opp.stage !== 'perdida' && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
       </div>
       {opp.accountContracts && (
         <div className="mt-2.5 border-t border-line pt-2" aria-label={`Contratos de ${opp.contactName}`}>
