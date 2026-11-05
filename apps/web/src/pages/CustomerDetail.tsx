@@ -16,6 +16,7 @@ import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, Input, Loadin
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
+import { AccountContracts } from '../features/contracts/AccountContracts';
 import { IxcFinance, IxcOrders } from '../features/ixc/IxcPanels';
 
 type Detail = {
@@ -141,9 +142,7 @@ function CustomerCustomFields({ contactId, initial }: { contactId: string; initi
   );
 }
 
-const FUTURE_TABS: Record<string, string> = {
-  contratos: 'Os contratos desta conta estão na Gestão de Contratos (busque pelo nome da conta na Lista).',
-};
+const FUTURE_TABS: Record<string, string> = {};
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams();
@@ -233,6 +232,7 @@ export function CustomerDetailPage() {
             </dl>
           )}
           {tab === 'sucesso' && <Account360 contactId={c.id} />}
+          {tab === 'contratos' && <AccountContracts contactId={c.id} />}
           {tab === 'projetos' && <WorkLinks prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}

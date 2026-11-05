@@ -102,3 +102,14 @@ describe('distribuição da carteira entre CSMs', () => {
     expect(r.assign.get('b')).toBe('luiz');
   });
 });
+
+describe('tabela no slide', () => {
+  it('cabe inteira ou corta deixando uma linha para o aviso', async () => {
+    const { slideTableFit } = await import('./cs');
+    expect(slideTableFit(68, 5)).toEqual({ show: 5, cut: 0 });
+    const big = slideTableFit(68, 100);
+    expect(big.show).toBeGreaterThan(5);
+    expect(big.show + big.cut).toBe(100);
+    expect(slideTableFit(68, big.show + 2).cut).toBeGreaterThan(0);
+  });
+});

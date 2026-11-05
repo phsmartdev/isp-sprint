@@ -2656,6 +2656,8 @@ export const csPresentations = pgTable('cs_presentations', {
   journeyId: uuid('journey_id').notNull().references(() => csJourneys.id),
   version: integer('version').notNull(),
   slides: jsonb('slides').$type<Record<string, unknown>[]>().notNull(),
+  /** Marca do cliente no rodapé dos slides (opcional; imagem pequena em data URL). A marca da BK é fixa. */
+  branding: jsonb('branding').$type<{ clientLogo?: string | null }>().notNull().default({}),
   note: text('note'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),

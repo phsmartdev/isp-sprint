@@ -12,6 +12,7 @@ import { api, ApiError } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
 import { Breadcrumb, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea, type Tone } from '../../components/ui/primitives';
+import { PublicShell } from '../../components/layout/PublicShell';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
@@ -315,21 +316,21 @@ export function PublicSurveyPage() {
     onSuccess: (r) => setThanks(r.thanks),
     onError: (e) => { if (e instanceof ApiError) setErrs({ ...e.fieldErrors(), _: e.problem.detail ?? e.problem.title }); },
   });
-  const shell = (body: React.ReactNode) => <div className="min-h-screen bg-bg"><header className="bg-navy-active px-4 py-4 sm:px-8"><p className="font-display text-lg font-bold text-white">BKT</p></header><main className="mx-auto max-w-2xl p-4 sm:p-8">{body}</main></div>;
+  const shell = (body: React.ReactNode) => <PublicShell kicker="Pesquisa de satisfação">{body}</PublicShell>;
   if (q.isLoading) return shell(<LoadingRows rows={4} />);
   if (q.isError) return shell(<ErrorState error={q.error} />);
   if (thanks) return shell(<div className="card p-8 text-center" role="status"><h1 className="font-display text-2xl font-bold text-ink">{thanks}</h1><p className="mt-2 text-sm text-muted">Pode fechar esta página.</p></div>);
   const d = q.data!;
   const scale = (key: string, from: number, to: number, lo: string, hi: string) => (
-    <div><div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Nota">{Array.from({ length: to - from + 1 }, (_, i) => from + i).map((n) => <button key={n} type="button" role="radio" aria-checked={a[key] === n} onClick={() => setA({ ...a, [key]: n })} className={clsx('num h-11 min-w-11 rounded-md border px-2 text-base font-bold', a[key] === n ? 'border-primary bg-primary text-white' : 'border-line bg-surface hover:border-primary')}>{n}</button>)}</div><p className="mt-1 flex justify-between text-xs text-muted"><span>{lo}</span><span>{hi}</span></p></div>
+    <div><div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Nota">{Array.from({ length: to - from + 1 }, (_, i) => from + i).map((n) => <button key={n} type="button" role="radio" aria-checked={a[key] === n} onClick={() => setA({ ...a, [key]: n })} className={clsx('num h-11 min-w-11 rounded-md border px-2 text-base font-bold transition-colors', a[key] === n ? 'border-navy bg-navy text-white ring-2 ring-lime ring-offset-1' : 'border-line bg-surface text-ink hover:border-primary hover:bg-primary-soft')}>{n}</button>)}</div><p className="mt-1 flex justify-between text-xs text-muted"><span>{lo}</span><span>{hi}</span></p></div>
   );
   return shell(
     <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); setErrs({}); m.mutate(); }} noValidate>
       <div><h1 className="font-display text-2xl font-bold text-ink sm:text-3xl">{d.title}</h1>{d.respondentName && <p className="mt-1 text-sm text-muted">Olá, {d.respondentName.split(' ')[0]}{d.account ? ` · ${d.account}` : ''}</p>}{d.intro && <p className="mt-2 text-text">{d.intro}</p>}</div>
       {d.questions.map((qq, i) => (
-        <fieldset key={qq.key} className={clsx('card space-y-3 p-4', errs[qq.key] && 'border-danger')}>
+        <fieldset key={qq.key} className={clsx('card space-y-3 border-l-4 border-l-primary p-4', errs[qq.key] && 'border-danger border-l-danger')}>
           <legend className="sr-only">{qq.text}</legend>
-          <p className="font-semibold text-ink" aria-hidden><span className="num text-muted">{i + 1}.</span> {qq.text}{qq.required && <span className="text-danger"> *</span>}</p>
+          <p className="font-semibold text-ink" aria-hidden><span className="num text-primary">{i + 1}.</span> {qq.text}{qq.required && <span className="text-danger"> *</span>}</p>
           {qq.type === 'nps' ? scale(qq.key, 0, 10, 'Nada provável', 'Muito provável') : qq.type === 'csat' ? scale(qq.key, 1, 5, 'Muito insatisfeito', 'Muito satisfeito') : qq.type === 'escala' ? scale(qq.key, 1, 5, 'Pouco', 'Muito')
             : qq.type === 'sim_nao' ? <div className="flex gap-4">{[true, false].map((v) => <label key={String(v)} className="flex items-center gap-2"><input type="radio" name={qq.key} checked={a[qq.key] === v} onChange={() => setA({ ...a, [qq.key]: v })} />{v ? 'Sim' : 'Não'}</label>)}</div>
             : qq.type === 'escolha' ? <div className="space-y-1.5">{qq.options?.map((o) => <label key={o.key} className="flex items-center gap-2"><input type="radio" name={qq.key} checked={a[qq.key] === o.key} onChange={() => setA({ ...a, [qq.key]: o.key })} />{o.label}</label>)}</div>

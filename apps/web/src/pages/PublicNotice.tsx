@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { CheckCircle2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { PublicShell } from '../components/layout/PublicShell';
 import { fmtDate, fmtDateTime } from '../lib/format';
 import { Button, ErrorState, FormField, LoadingRows, Textarea } from '../components/ui/primitives';
 
@@ -17,7 +18,7 @@ export function PublicNoticePage() {
   const q = useQuery({ queryKey: ['public-notice', token], retry: false, queryFn: () => api<Notice>(`/public/notices/${token}`) });
   const [response, setResponse] = useState('');
   const m = useMutation({ mutationFn: () => api<{ responseText: string | null }>(`/public/notices/${token}/confirm`, { method: 'POST', body: { response: response.trim() } }), onSuccess: () => q.refetch() });
-  const shell = (body: React.ReactNode) => <div className="min-h-screen bg-bg"><header className="bg-navy-active px-4 py-4 sm:px-8"><p className="font-display text-lg font-bold text-white">BKT · Gestão de Contratos</p></header><main className="mx-auto max-w-xl p-4 sm:p-8">{body}</main></div>;
+  const shell = (body: React.ReactNode) => <PublicShell kicker="Gestão de Contratos" width="max-w-xl">{body}</PublicShell>;
   if (q.isLoading) return shell(<LoadingRows rows={4} />);
   if (q.isError) return shell(<ErrorState error={q.error} />);
   const d = q.data!;

@@ -1,0 +1,1 @@
+ALTER TABLE "cs_presentations" ADD COLUMN "branding" jsonb DEFAULT '{}'::jsonb NOT NULL;
