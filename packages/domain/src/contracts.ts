@@ -101,15 +101,15 @@ export type ContractSettings = typeof DEFAULT_CONTRACT_SETTINGS & { financeEmail
 
 // ------------------------------------------------------------------ abas e painel
 /** Abas da Gestão de Contratos, na ordem do menu. Cada aba é uma permissão por perfil (Configurações → Módulos e liberação → Contratos). */
-export const CONTRACT_TABS = ['atencao', 'painel', 'funil', 'lista', 'modelos', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios', 'responsabilidades'] as const;
+/** Telas do módulo. Parâmetros (modelos, responsabilidades) ficam em Configurações, não aqui (04/11/2026). */
+export const CONTRACT_TABS = ['painel', 'atencao', 'lista', 'funil', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const;
 export type ContractTab = (typeof CONTRACT_TABS)[number];
 export const CONTRACT_TAB_LABELS: Record<ContractTab, string> = {
-  atencao: 'Central de atenção', painel: 'Painel', funil: 'Funil', lista: 'Lista', modelos: 'Modelos de contratos e propostas', atestados: 'Atestados',
+  atencao: 'Central de atenção', painel: 'Painel', funil: 'Funil', lista: 'Lista de contratos', atestados: 'Atestados',
   atas: 'Atas de registro de preços', empenhos: 'Controle de Empenhos', calendario: 'Calendário', relatorios: 'Relatórios',
-  responsabilidades: 'Responsabilidades (RACI)',
 };
 /** Abas que viram submenu de Gestão de Contratos na barra lateral; as demais ficam juntas no item "Contratos". */
-export const CONTRACT_MENU_TABS = ['painel', 'funil', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const satisfies readonly ContractTab[];
+export const CONTRACT_MENU_TABS = ['painel', 'atencao', 'lista', 'funil', 'atestados', 'atas', 'empenhos', 'calendario', 'relatorios'] as const satisfies readonly ContractTab[];
 export const isContractTab = (t: unknown): t is ContractTab => CONTRACT_TABS.includes(t as ContractTab);
 /** Abas negadas por perfil (chave = perfil). Sem registro = todas liberadas, como antes. */
 export type ContractTabAccess = Partial<Record<string, ContractTab[]>>;
@@ -127,31 +127,33 @@ export function allowedContractTabs(denied: ContractTabAccess, profiles: string[
  * Seções do Painel. Perfil da carteira, estratificações e o gráfico de vencimentos em 12 meses saíram em 04/11/2026:
  * não ajudavam a decidir nem a operar. No lugar entrou "Operação" (o que exige ação).
  */
-export const DASHBOARD_SECTIONS = ['indicadores', 'desempenho', 'saude', 'acao', 'vencimentos', 'reajustes', 'responsaveis', 'clientes', 'operacao', 'etapas', 'faturamento', 'executivo'] as const;
+export const DASHBOARD_SECTIONS = ['indicadores', 'risco', 'desempenho', 'saude', 'acao', 'vencimentos', 'reajustes', 'clientes', 'etapas', 'faturamento', 'executivo'] as const;
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 export const DASHBOARD_SECTION_LABELS: Record<DashboardSection, string> = {
   indicadores: 'Indicadores (total, MRR, vencendo em 30/60/90 dias, receita em risco)',
+  risco: 'Receita em risco por janela (já vencidos, 30, 60, 90 e 180 dias)',
   desempenho: 'Desempenho da operação (renovação no prazo, reajustes, SLA, aceite, Cadastro ERP) nos últimos 12 meses',
-  saude: 'Saúde da carteira (receita por situação) e indicadores operacionais',
+  saude: 'Saúde da carteira, Cadastro ERP por situação e indicadores operacionais',
   acao: 'Contratos que pedem ação (clique abre a vida do contrato)',
   vencimentos: 'Receita que vence em 12 meses, pela situação da renovação',
-  reajustes: 'Reajustes dos próximos 90 dias',
-  responsaveis: 'Carteira por responsável (receita, risco, pendências e Cadastro ERP)',
-  operacao: 'Cadastro ERP por situação',
+  reajustes: 'Reajustes dos próximos 90 dias e carteira por responsável',
   clientes: 'Concentração por cliente (Pareto) e medição com saldo baixo',
   etapas: 'Etapas, próximos vencimentos e notificações',
   faturamento: 'Faturamento por tipo no período',
-  executivo: 'Visão executiva (carteira, backlog, dependência e receita em risco)',
+  executivo: 'Visão executiva (carteira, backlog e dependência dos maiores clientes)',
 };
-export type DashboardConfig = { order: DashboardSection[]; hidden: DashboardSection[]; compactValues: boolean };
+export type DashboardConfig = { order: DashboardSection[]; hidden: DashboardSection[]; compactValues: boolean; layout?: number };
+/** Versão do arranjo padrão: ordem gravada antes desta versão volta ao padrão novo (as seções ocultas são mantidas). */
+export const DASHBOARD_LAYOUT = 3;
 /** Padrão: faturamento e visão executiva no fim do painel. */
-export const DEFAULT_DASHBOARD: DashboardConfig = { order: [...DASHBOARD_SECTIONS], hidden: [], compactValues: true };
+export const DEFAULT_DASHBOARD: DashboardConfig = { order: [...DASHBOARD_SECTIONS], hidden: [], compactValues: true, layout: DASHBOARD_LAYOUT };
 /** Lê a configuração gravada: ignora seções desconhecidas e acrescenta no fim as que faltarem (seções novas). */
 export function normalizeDashboard(v: unknown): DashboardConfig {
   const x = (v && typeof v === 'object' ? v : {}) as Partial<Record<keyof DashboardConfig, unknown>>;
   const known = (a: unknown) => (Array.isArray(a) ? a.filter((k): k is DashboardSection => DASHBOARD_SECTIONS.includes(k as DashboardSection)) : []);
-  const order = [...new Set(known(x.order))];
+  const order = x.layout === DASHBOARD_LAYOUT ? [...new Set(known(x.order))] : [];
   return {
+    layout: DASHBOARD_LAYOUT,
     order: [...order, ...DASHBOARD_SECTIONS.filter((k) => !order.includes(k))],
     hidden: [...new Set(known(x.hidden))],
     compactValues: typeof x.compactValues === 'boolean' ? x.compactValues : DEFAULT_DASHBOARD.compactValues,

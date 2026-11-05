@@ -35,8 +35,9 @@ const NAV: NavEntry[] = [
     { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades' },
   ] },
   { key: 'contratos', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, children: [
-    { to: '/contracts', label: 'Contratos', module: 'contratos' },
     { to: '/contracts?t=painel', label: 'Painel', module: 'contratos', contractTab: 'painel' },
+    { to: '/contracts?t=atencao', label: 'Central de atenção', module: 'contratos', contractTab: 'atencao' },
+    { to: '/contracts?t=lista', label: 'Lista de contratos', module: 'contratos', contractTab: 'lista' },
     { to: '/contracts?t=funil', label: 'Funil', module: 'contratos', contractTab: 'funil' },
     { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados' },
     { to: '/contracts?t=atas', label: 'Atas de Registro de Preço', module: 'contratos', contractTab: 'atas', feature: 'contratos.atas' },
@@ -131,8 +132,10 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const currentTab = new URLSearchParams(loc.search).get('t');
   const leafActive = (c: NavLeaf) => {
     const [path, query] = c.to.split('?');
+    // a ficha de um contrato (/contracts/:id) acende "Lista de contratos"; /contracts sem aba abre o Painel
+    if (c.to === '/contracts?t=lista' && loc.pathname.startsWith('/contracts/')) return true;
+    if (c.to === '/contracts?t=painel' && loc.pathname === '/contracts' && !(CONTRACT_MENU_TABS as readonly string[]).includes(currentTab ?? '')) return true;
     if (query) return loc.pathname === path && currentTab === new URLSearchParams(query).get('t');
-    if (c.to === '/contracts') return loc.pathname.startsWith('/contracts/') || (loc.pathname === '/contracts' && !(CONTRACT_MENU_TABS as readonly string[]).includes(currentTab ?? ''));
     return loc.pathname === c.to || loc.pathname.startsWith(`${c.to}/`);
   };
   const approvals = useApprovalCount().data?.toDecide ?? 0;

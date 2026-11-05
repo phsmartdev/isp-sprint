@@ -19,15 +19,13 @@ import { AttentionCenter } from '../../features/contracts/AttentionCenter';
 import { FullReport } from '../../features/contracts/FullReport';
 import { AtasTab } from '../../features/arp/AtasTab';
 import { CommitmentPortfolio } from '../../features/contracts/CommitmentPortfolio';
-import { ModelsTab } from '../../features/contracts/ModelsTab';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
-import { RaciPanel } from '../../features/contracts/RaciPanel';
 import { ContractLifeDrawer } from '../../features/contracts/ContractLife';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type ContractRow } from '../../features/contracts/shared';
 
 type View = ContractTab;
 /** Ordem do menu definida no domínio (Funil logo depois do Painel); cada aba é uma permissão por perfil. */
-const TABS: { key: View; label: string }[] = CONTRACT_TABS.map((key) => ({ key, label: key === 'modelos' ? 'Modelos' : CONTRACT_TAB_LABELS[key] }));
+const TABS: { key: View; label: string }[] = CONTRACT_TABS.map((key) => ({ key, label: CONTRACT_TAB_LABELS[key] }));
 const STAGE_COLOR: Record<ContractStage, string> = { cadastro_validacao: '#E0A400', implantacao: '#7C3AED', vigente: '#16A34A', renovacao: '#2F5986', reajuste: '#EA7A0C', encerramento: '#DC2626', arquivado: '#64748B' };
 
 // ------------------------------------------------------------------ lista
@@ -257,8 +255,8 @@ export function ContractsPage() {
   const { feature } = useAuth();
   const cfg = useQuery({ queryKey: ['contracts', 'view'], queryFn: () => api<{ tabs: View[] }>('/contracts/view'), staleTime: 60_000 });
   const allowed = cfg.data?.tabs;
-  const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'modelos' || feature('contratos.modelos')) && (t.key !== 'atas' || feature('contratos.atas')));
-  const [f, setF] = useUrlState({ t: 'atencao' });
+  const tabs = TABS.filter((t) => (!allowed || allowed.includes(t.key)) && (t.key !== 'atas' || feature('contratos.atas')));
+  const [f, setF] = useUrlState({ t: 'painel' });
   // submenus da barra lateral (Painel, Funil…) abrem sozinhos; o item "Contratos" fica com as demais abas
   const isMenu = (t: View) => (CONTRACT_MENU_TABS as readonly View[]).includes(t);
   const mainTabs = tabs.filter((t) => !isMenu(t.key));
@@ -281,7 +279,7 @@ export function ContractsPage() {
       {tv.active && view && <TvBar title="Gestão de Contratos" period={new Date().toLocaleDateString('pt-BR')} tabs={TV_TABS} tab={view} onTab={(t) => setF({ t })} onExit={tv.exit} queryKeys={[['contracts'], ['contract-dashboard'], ['contract-report'], ['arps'], ['commitment-portfolio']]} />}
       {cfg.isLoading ? <div className="card"><LoadingRows /></div> : cfg.isError ? <ErrorState error={cfg.error} onRetry={() => cfg.refetch()} /> : !view ? (
         <div className="card"><EmptyState title="Nenhuma aba liberada" description="Seu perfil não tem acesso a nenhuma aba da Gestão de Contratos. Fale com a administração (Configurações → Módulos e liberação → Contratos)." /></div>
-      ) : isMenu(view) ? <h2 className="mb-4 text-xl font-bold text-ink">{CONTRACT_TAB_LABELS[view]}</h2>
+      ) : isMenu(view) ? (view === 'painel' ? null : <h2 className="mb-4 text-xl font-bold text-ink">{CONTRACT_TAB_LABELS[view]}</h2>)
         : shownTabs.length > 1 ? <Tabs<View> label="Áreas da gestão de contratos" className="mb-5" value={view} onChange={(t) => setF({ t })} tabs={shownTabs} /> : null}
       {view === 'atencao' && <AttentionCenter />}
       {view === 'painel' && <ContractsDashboard />}
@@ -292,8 +290,6 @@ export function ContractsPage() {
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
       {view === 'relatorios' && <Relatorios />}
-      {view === 'responsabilidades' && <RaciPanel />}
-      {view === 'modelos' && <ModelsTab />}
       </TvArea>
     </div>
   );

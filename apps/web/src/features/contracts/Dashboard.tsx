@@ -30,7 +30,6 @@ const CONC_TONE = { baixa: 'text-success', moderada: 'text-[#C2610C]', alta: 'te
 type Money = (cents?: number | null) => string;
 
 function Executive({ e, money }: { e: Exec; money: Money }) {
-  const maxRisk = Math.max(1, ...e.risk.map((r) => r.monthlyCents));
   const c = e.concentration;
   return (
     <section aria-label="Visão executiva" className="space-y-3">
@@ -53,22 +52,6 @@ function Executive({ e, money }: { e: Exec; money: Money }) {
             <p className="truncate text-xs text-muted" title={c.top1.name}>{c.top1.name} · 5 maiores somam {fmtPct(c.top5Share)}</p>
             {c.level && <p className={clsx('mt-1 text-xs font-semibold', CONC_TONE[c.level])}>{CONC_LABEL[c.level]} (HHI {fmtInt(c.hhi ?? 0)})</p>}
           </>}
-        </div>
-      </div>
-      <div className="card p-4">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="font-bold text-ink">Receita em risco</h3>
-          <p className="text-xs text-muted">Contratos que terminam na janela sem renovação concluída, mais os com encerramento previsto.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {e.risk.map((r) => (
-            <div key={r.days} className="min-w-0 border border-line p-3">
-              <p className="text-xs font-semibold text-muted">Em {r.days} dias</p>
-              <FitText className="num text-lg font-extrabold text-ink" title={`${fmtBRL(r.monthlyCents)}/mês`}>{money(r.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></FitText>
-              <p className="num text-xs text-muted" title={`${fmtBRL(r.annualCents)}/ano`}>{r.n} contrato(s) · {money(r.annualCents)}/ano</p>
-              <div className="mt-2 h-1.5 bg-surface-2" aria-hidden><div className="h-1.5 bg-danger" style={{ width: `${(r.monthlyCents / maxRisk) * 100}%`, opacity: 0.45 + 0.55 * (1 - r.days / 180) }} /></div>
-            </div>
-          ))}
         </div>
       </div>
     </section>
@@ -108,7 +91,7 @@ type Dash = {
   portfolio: { avgTicketCents: number | null; avgAgeMonths: number | null; avgRemainingMonths: number | null; renewalPipelineCents: number; publicShare: number | null };
   byStage: { stage: ContractStage; label: string; n: number; monthlyCents: number }[];
   active: number; archived: number; pendingValidation: number; monthlyCents: number; globalCents: number;
-  expiring: { d30: number; d60: number; d90: number }; atRisk: { n: number; monthlyCents: number };
+  expiring: { d30: number; d60: number; d90: number }; atRisk: { n: number; monthlyCents: number; expiredN: number; expiredCents: number };
   alerts: { open: number; overdue: number; byKind: { kind: string; label: string; n: number }[] };
   nextExpiring: ContractRow[]; attention: ContractRow[];
 };
@@ -133,14 +116,18 @@ const ERP_ORDER: [string, string][] = [
 const pct = (a: number, b: number) => (b ? fmtPct(a / b) : '—');
 const monthShort = (m: string) => new Date(`${m}-01T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit', timeZone: 'UTC' }).replace('.', '');
 
+function Rows({ rows }: { rows: [string, string][] }) {
+  return <dl className="mt-3 space-y-1 border-t border-line pt-2 text-xs">{rows.map(([l, v]) => <div key={l} className="flex justify-between gap-2"><dt className="truncate text-muted">{l}</dt><dd className="num shrink-0 font-semibold text-ink">{v}</dd></div>)}</dl>;
+}
+
 function Tile({ label, value, full, sub, children, accent }: { label: string; value?: React.ReactNode; full?: string; sub?: React.ReactNode; children?: React.ReactNode; accent?: string }) {
   return (
-    <div className="card relative min-w-0 overflow-hidden p-4">
-      {accent && <span className="absolute inset-y-0 left-0 w-1" style={{ background: accent }} aria-hidden />}
-      <p className="text-sm font-semibold text-muted">{label}</p>
-      {value !== undefined && <FitText className="num mt-1 text-[28px] font-extrabold leading-tight text-ink" title={full}>{value}</FitText>}
-      {sub && <div className="mt-0.5 text-xs text-muted">{sub}</div>}
+    <div className="card relative flex h-full min-w-0 flex-col overflow-hidden p-5">
+      {accent && <span className="absolute inset-x-0 top-0 h-1" style={{ background: accent }} aria-hidden />}
+      <p className="text-xs font-bold uppercase tracking-wide text-muted">{label}</p>
+      {value !== undefined && <FitText className="num mt-2 text-[30px] font-extrabold leading-none text-ink" title={full}>{value}</FitText>}
       {children}
+      {sub && <div className="mt-auto pt-3 text-xs leading-snug text-muted">{sub}</div>}
     </div>
   );
 }
@@ -148,30 +135,30 @@ function Tile({ label, value, full, sub, children, accent }: { label: string; va
 /** Desempenho da operação: indicadores de resultado do processo (sem meta definida, sem cor de julgamento). */
 function Performance({ p, money }: { p: Dash['performance']; money: Money }) {
   const fmt = (m: Perf) => (m.value == null ? '—' : m.unit === 'pct' ? fmtPct(m.value) : m.unit === 'brl' ? money(m.value) : `${(Math.round(m.value * 10) / 10).toLocaleString('pt-BR')} ${m.unit === 'dias' ? 'dias' : 'h'}`);
+  const base = (m: Perf) => (m.den == null ? (m.value == null ? 'sem base na janela' : '') : m.den ? `${m.num} de ${m.den}` : 'sem base na janela');
   const main = p.metrics.filter((m) => ['renovacao_prazo', 'reajuste'].includes(m.key));
   const rest = p.metrics.filter((m) => !['renovacao_prazo', 'reajuste'].includes(m.key));
   return (
     <section className="card p-5" aria-label="Desempenho da operação de contratos">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-bold text-ink">Desempenho da operação de contratos</h3>
-        <p className="text-xs text-muted">Últimos 12 meses · passe o mouse para ver como cada um é calculado</p>
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">Desempenho da operação de contratos</h3>
+        <p className="text-xs text-muted">Últimos 12 meses · passe o mouse em cada indicador para ver o cálculo</p>
       </div>
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <div className="grid grid-cols-2 gap-3">{main.map((m) => (
-          <div key={m.key} className="min-w-0 rounded-md border border-line p-4" title={m.hint}>
-            <p className="text-sm font-semibold text-muted">{m.label}</p>
-            <p className="num mt-1 text-3xl font-extrabold text-ink">{fmt(m)}</p>
-            {m.den != null && <p className="num text-xs text-muted">{m.den ? `${m.num} de ${m.den}` : 'sem base na janela'}</p>}
-            {m.value != null && m.unit === 'pct' && <span className="mt-2 block h-1.5 rounded-full bg-surface-2" aria-hidden><span className="block h-1.5 rounded-full bg-[#2F5986]" style={{ width: `${Math.min(100, m.value * 100)}%` }} /></span>}
-            <p className="mt-2 text-[11px] leading-snug text-muted">{m.hint}</p>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {main.map((m) => (
+          <div key={m.key} className="flex min-w-0 flex-col rounded-md border border-line p-5 md:row-span-2 xl:row-span-3" title={m.hint}>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted">{m.label}</p>
+            <p className="num mt-3 text-5xl font-extrabold leading-none text-ink">{fmt(m)}</p>
+            <p className="num mt-2 text-sm text-muted">{base(m)}</p>
+            <span className="mt-auto block h-2 rounded-full bg-surface-2 pt-0" aria-hidden><span className="block h-2 rounded-full bg-[#2F5986]" style={{ width: `${m.value == null ? 0 : Math.min(100, m.value * 100)}%` }} /></span>
           </div>
-        ))}</div>
-        <dl className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 xl:grid-cols-3">{rest.map((m) => (
-          <div key={m.key} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-line py-2" title={m.hint}>
-            <dt className="min-w-0 text-sm text-text">{m.label}{m.den != null && m.den > 0 && <span className="num block text-[11px] text-muted">{m.num} de {m.den}</span>}</dt>
-            <dd className="num shrink-0 text-lg font-extrabold text-ink">{fmt(m)}</dd>
+        ))}
+        {rest.map((m) => (
+          <div key={m.key} className="flex min-w-0 flex-col justify-between rounded-md bg-surface-2/70 p-3" title={m.hint}>
+            <p className="text-xs leading-snug text-text">{m.label}</p>
+            <p className="num mt-2 text-2xl font-extrabold leading-none text-ink">{fmt(m)}{m.den != null && m.den > 0 && <span className="ml-1.5 text-[11px] font-semibold text-muted">{m.num}/{m.den}</span>}</p>
           </div>
-        ))}</dl>
+        ))}
       </div>
     </section>
   );
@@ -180,71 +167,107 @@ function Performance({ p, money }: { p: Dash['performance']; money: Money }) {
 function Headline({ d, money }: { d: Dash; money: Money }) {
   const mrr = d.monthlyCents || 1;
   return (
-    <section aria-label="Indicadores principais" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-      <Tile label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} accent="#2F5986" />
-      <Tile label="MRR contratos" value={money(d.monthlyCents)} full={fmtBRL(d.monthlyCents)} sub={`ticket médio ${money(d.portfolio.avgTicketCents)} · carteira 12 meses ${money(d.executive.contractedAnnualCents)}`} accent="#16A34A" />
-      <div className="sm:col-span-2 xl:col-span-2"><Tile label="Vencendo (clique para ver a lista)" accent="#E0A400">
-        <div className="mt-2 grid grid-cols-3 gap-2">
-          {([30, 60, 90] as const).map((n) => (
-            <Link key={n} to={`/contracts?t=lista&exp=${n}`} className="group min-w-0 rounded-md border border-line p-2 hover:border-primary" aria-label={`${d.expiring[`d${n}`]} contratos vencendo em até ${n} dias: ver lista`}>
-              <p className="text-[11px] font-semibold text-muted">até {n} dias</p>
-              <p className="num text-xl font-extrabold text-ink">{d.expiring[`d${n}`]}</p>
-              <p className="num truncate text-[11px] text-muted" title={`${fmtBRL(d.expiringCents[`d${n}`])}/mês`}>{money(d.expiringCents[`d${n}`])}/mês</p>
-              <span className="mt-1 block h-1 rounded-full bg-surface-2"><span className="block h-1 rounded-full bg-[#E0A400]" style={{ width: `${Math.min(100, (d.expiringCents[`d${n}`] / mrr) * 100)}%` }} /></span>
-            </Link>
-          ))}
-        </div>
-      </Tile></div>
+    <section aria-label="Indicadores principais" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <Tile label="Contratos ativos" value={fmtInt(d.active)} sub={`${d.pendingValidation} aguardando validação · ${d.archived} arquivados`} accent="#2F5986">
+        <Rows rows={d.byStage.filter((x) => ['implantacao', 'vigente', 'renovacao', 'reajuste', 'encerramento'].includes(x.stage) && x.n > 0).map((x) => [x.label, fmtInt(x.n)])} />
+      </Tile>
+      <Tile label="MRR contratos" value={money(d.monthlyCents)} full={fmtBRL(d.monthlyCents)} accent="#16A34A">
+        <Rows rows={[['Ticket médio', money(d.portfolio.avgTicketCents)], ['Carteira 12 meses', money(d.executive.contractedAnnualCents)], ['Falta faturar (backlog)', money(d.executive.backlogCents)]]} />
+      </Tile>
+      <div className="sm:col-span-2 xl:col-span-2">
+        <Tile label="Vencendo · clique para ver a lista" accent="#E0A400">
+          <div className="mt-2 grid flex-1 grid-cols-3 gap-2">
+            {([30, 60, 90] as const).map((n) => (
+              <Link key={n} to={`/contracts?t=lista&exp=${n}`} className="flex min-w-0 flex-col rounded-md border border-line p-2.5 hover:border-primary" aria-label={`${d.expiring[`d${n}`]} contratos vencendo em até ${n} dias: ver lista`}>
+                <span className="text-[11px] font-semibold text-muted">até {n} dias</span>
+                <span className="num text-[26px] font-extrabold leading-tight text-ink">{d.expiring[`d${n}`]}</span>
+                <span className="num truncate text-[11px] text-muted" title={`${fmtBRL(d.expiringCents[`d${n}`])}/mês`}>{money(d.expiringCents[`d${n}`])}/mês</span>
+                <span className="mt-auto block h-1 rounded-full bg-surface-2 pt-0"><span className="block h-1 rounded-full bg-[#E0A400]" style={{ width: `${Math.min(100, (d.expiringCents[`d${n}`] / mrr) * 100)}%` }} /></span>
+              </Link>
+            ))}
+          </div>
+        </Tile>
+      </div>
       <Tile label="Receita em risco" value={<>{money(d.atRisk.monthlyCents)}<span className="text-sm font-semibold text-muted">/mês</span></>} full={fmtBRL(d.atRisk.monthlyCents)} accent="#DC2626"
-        sub={<>{d.atRisk.n} contrato(s) · <strong className="text-danger">{pct(d.atRisk.monthlyCents, d.monthlyCents)}</strong> do MRR</>}>
-        <span className="mt-2 block h-1.5 rounded-full bg-surface-2" aria-hidden><span className="block h-1.5 rounded-full bg-danger" style={{ width: `${Math.min(100, (d.atRisk.monthlyCents / mrr) * 100)}%` }} /></span>
-        <p className="mt-1 text-[11px] text-muted">vence em até 90 dias sem renovação concluída, ou encerramento previsto</p>
+        sub={<>{d.atRisk.n} contrato(s){d.atRisk.expiredN ? `, ${d.atRisk.expiredN} já vencido(s) sem renovação` : ''}<br />vence em até 90 dias sem renovação concluída, ou encerramento previsto</>}>
+        <p className="num mt-2 text-sm"><strong className="text-danger">{pct(d.atRisk.monthlyCents, d.monthlyCents)}</strong> <span className="text-muted">do MRR</span></p>
+        <span className="mt-1.5 block h-1.5 rounded-full bg-surface-2" aria-hidden><span className="block h-1.5 rounded-full bg-danger" style={{ width: `${Math.min(100, (d.atRisk.monthlyCents / mrr) * 100)}%` }} /></span>
       </Tile>
     </section>
   );
 }
 
-/** Saúde: a receita mensal repartida pela situação que mais pede atenção em cada contrato. */
+/** Receita em risco por janela (acumulada), com os já vencidos à parte: soma o mesmo total do cartão principal. */
+function RiskWindows({ d, money }: { d: Dash; money: Money }) {
+  const mrr = d.monthlyCents || 1;
+  const cards = [
+    ...(d.atRisk.expiredN ? [{ k: 'vencidos', label: 'Já vencidos sem renovação', n: d.atRisk.expiredN, monthlyCents: d.atRisk.expiredCents, annualCents: null as number | null }] : []),
+    ...d.executive.risk.map((r) => ({ k: String(r.days), label: `Vence em até ${r.days} dias`, n: r.n, monthlyCents: r.monthlyCents, annualCents: r.annualCents as number | null })),
+  ];
+  return (
+    <section className="card p-5" aria-label="Receita em risco por janela">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">Receita em risco por janela</h3>
+        <p className="text-xs text-muted">Sem renovação concluída ou com encerramento previsto · janelas acumuladas</p>
+      </div>
+      <div className={clsx('grid grid-cols-2 gap-3', cards.length === 5 ? 'md:grid-cols-5' : 'md:grid-cols-4')}>
+        {cards.map((c) => (
+          <div key={c.k} className={clsx('flex min-w-0 flex-col rounded-md border p-4', c.k === 'vencidos' ? 'border-danger/40 bg-danger-soft/40' : 'border-line')}>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted">{c.label}</p>
+            <FitText className="num mt-2 text-2xl font-extrabold leading-none text-ink" title={`${fmtBRL(c.monthlyCents)}/mês`}>{money(c.monthlyCents)}<span className="text-xs font-semibold text-muted">/mês</span></FitText>
+            <p className="num mt-1 text-xs text-muted">{c.n} contrato(s){c.annualCents != null ? ` · ${money(c.annualCents)}/ano` : ''} · {pct(c.monthlyCents, mrr)} do MRR</p>
+            <span className="mt-auto block h-1.5 rounded-full bg-surface-2 pt-0" aria-hidden><span className="mt-3 block h-1.5 rounded-full bg-danger" style={{ width: `${Math.min(100, (c.monthlyCents / mrr) * 100 * 2)}%` }} /></span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Saúde: a receita mensal repartida pela situação que mais pede atenção; Cadastro ERP logo abaixo; indicadores ao lado. */
 function HealthSection({ d, money, filter, setFilter }: { d: Dash; money: Money; filter: Health | null; setFilter: (h: Health | null) => void }) {
   const h = d.decision.health;
   const total = h.reduce((a, x) => a + x.monthlyCents, 0) || 1;
   const o = d.operations;
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-      <section className="card p-5 xl:col-span-2" aria-label="Saúde da carteira">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="font-bold text-ink">Saúde da carteira</h3>
-          <p className="text-xs text-muted">Receita mensal por situação · clique para filtrar os contratos abaixo</p>
-        </div>
-        <div className="flex h-7 w-full gap-[2px] overflow-hidden rounded" role="img" aria-label={h.map((x) => `${x.label}: ${pct(x.monthlyCents, total)}`).join('; ')}>
-          {h.map((x) => x.monthlyCents > 0 && (
-            <button key={x.key} type="button" title={`${x.label}: ${fmtBRL(x.monthlyCents)}/mês · ${x.n} contrato(s)`} onClick={() => setFilter(filter === x.key ? null : x.key)}
-              className={clsx('h-full transition-opacity first:rounded-l last:rounded-r', filter && filter !== x.key && 'opacity-30')} style={{ width: `${(x.monthlyCents / total) * 100}%`, background: HEALTH_COLOR[x.key], minWidth: 6 }} aria-label={`Filtrar: ${x.label}`} />
-          ))}
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
-          {h.map((x) => (
-            <button key={x.key} type="button" onClick={() => setFilter(filter === x.key ? null : x.key)} aria-pressed={filter === x.key}
-              className={clsx('min-w-0 rounded-md border p-3 text-left transition', filter === x.key ? 'border-primary bg-primary-soft/40' : 'border-line hover:border-line-strong')}>
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-text"><span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: HEALTH_COLOR[x.key] }} aria-hidden />{HEALTH_SHORT[x.key]}</span>
-              <span className="num mt-1 block text-lg font-extrabold text-ink" title={fmtBRL(x.monthlyCents)}>{money(x.monthlyCents)}</span>
-              <span className="num text-xs text-muted">{x.n} contrato(s) · {pct(x.monthlyCents, total)}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="card p-5" aria-label="Indicadores operacionais">
-        <h3 className="mb-3 font-bold text-ink">Indicadores operacionais</h3>
-        <dl className="space-y-3">
+      <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
+        <section className="card p-5" aria-label="Saúde da carteira">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-base font-bold text-ink">Saúde da carteira</h3>
+            <p className="text-xs text-muted">Receita mensal por situação · clique para filtrar os contratos abaixo</p>
+          </div>
+          <div className="flex h-8 w-full gap-[2px] overflow-hidden rounded" role="img" aria-label={h.map((x) => `${x.label}: ${pct(x.monthlyCents, total)}`).join('; ')}>
+            {h.map((x) => x.monthlyCents > 0 && (
+              <button key={x.key} type="button" title={`${x.label}: ${fmtBRL(x.monthlyCents)}/mês · ${x.n} contrato(s)`} onClick={() => setFilter(filter === x.key ? null : x.key)}
+                className={clsx('h-full transition-opacity first:rounded-l last:rounded-r', filter && filter !== x.key && 'opacity-30')} style={{ width: `${(x.monthlyCents / total) * 100}%`, background: HEALTH_COLOR[x.key], minWidth: 6 }} aria-label={`Filtrar: ${x.label}`} />
+            ))}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {h.map((x) => (
+              <button key={x.key} type="button" onClick={() => setFilter(filter === x.key ? null : x.key)} aria-pressed={filter === x.key}
+                className={clsx('min-w-0 rounded-md border p-3 text-left transition', filter === x.key ? 'border-primary bg-primary-soft/40' : 'border-line hover:border-line-strong')}>
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-text"><span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: HEALTH_COLOR[x.key] }} aria-hidden />{HEALTH_SHORT[x.key]}</span>
+                <span className="num mt-1 block truncate text-xl font-extrabold text-ink" title={fmtBRL(x.monthlyCents)}>{money(x.monthlyCents)}</span>
+                <span className="num text-xs text-muted">{x.n} contrato(s) · {pct(x.monthlyCents, total)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        <ErpPipeline o={o} />
+      </div>
+      <section className="card flex h-full flex-col p-5" aria-label="Indicadores operacionais">
+        <h3 className="mb-2 text-base font-bold text-ink">Indicadores operacionais</h3>
+        <dl className="flex flex-1 flex-col justify-around">
           {[
             ['Contratos com divergência', o.divergence.share == null ? '—' : fmtPct(o.divergence.share), `${o.divergence.n} com Cadastro ERP divergente do IXC`, o.divergence.n > 0],
-            ['Reajustes elegíveis efetivados', pct(o.adjustments.applied, o.adjustments.eligible), `${o.adjustments.applied} de ${o.adjustments.eligible} com data-base nos últimos 12 meses`, o.adjustments.eligible > o.adjustments.applied],
+            ['Contratos ativos sem Cadastro ERP', fmtInt(o.erp.withoutRecord), 'cadastro no IXC ainda não preparado no sistema', false],
             ['Pendências com prazo vencido', fmtInt(o.overdueTasks.n), 'tarefas ligadas a contratos', o.overdueTasks.n > 0],
             ['Transferências sem aceite', fmtInt(o.pendingAccept.n), `${o.pendingAccept.returned} devolvida(s) aguardando tratamento`, o.pendingAccept.n > 0],
           ].map(([l, v, hint, warn]) => (
-            <div key={l as string} className="flex items-start justify-between gap-3 border-b border-line pb-2 last:border-0">
-              <div className="min-w-0"><dt className="text-sm text-text">{l}</dt><dd className="text-xs text-muted">{hint}</dd></div>
-              <span className={clsx('num shrink-0 text-xl font-extrabold', warn ? 'text-danger' : 'text-ink')}>{v}</span>
+            <div key={l as string} className="flex items-center justify-between gap-3 border-b border-line py-3 last:border-0">
+              <div className="min-w-0"><dt className="text-sm font-semibold text-text">{l}</dt><dd className="text-xs text-muted">{hint}</dd></div>
+              <span className={clsx('num shrink-0 text-3xl font-extrabold', warn ? 'text-danger' : 'text-ink')}>{v}</span>
             </div>
           ))}
         </dl>
@@ -324,7 +347,7 @@ const ADJ_LABEL = { a_iniciar: 'A iniciar', em_andamento: 'Em andamento', aplica
 function Adjustments({ list, money, onOpen }: { list: Decision['adjustmentsDue']; money: Money; onOpen: (id: string) => void }) {
   const base = list.filter((a) => a.status !== 'aplicado').reduce((s, a) => s + a.monthlyCents, 0);
   return (
-    <section className="card p-5" aria-label="Reajustes dos próximos 90 dias">
+    <section className="card h-full p-5" aria-label="Reajustes dos próximos 90 dias">
       <h3 className="font-bold text-ink">Reajustes dos próximos 90 dias</h3>
       <p className="mb-2 text-xs text-muted">{list.length ? <>Base de <strong className="text-ink">{money(base)}/mês</strong> ainda a reajustar. Prepare o cálculo antes da data-base.</> : 'Aniversários da data-base nos próximos 90 dias.'}</p>
       {!list.length ? <p className="py-4 text-sm text-muted">Nenhum reajuste na janela.</p> : (
@@ -343,7 +366,7 @@ function Adjustments({ list, money, onOpen }: { list: Decision['adjustmentsDue']
 function Owners({ list, money }: { list: Decision['byOwner']; money: Money }) {
   const max = Math.max(1, ...list.map((o) => o.monthlyCents));
   return (
-    <section className="card p-5" aria-label="Carteira por responsável">
+    <section className="card h-full p-5" aria-label="Carteira por responsável">
       <h3 className="font-bold text-ink">Carteira por responsável</h3>
       <p className="mb-2 text-xs text-muted">Quanto cada um carrega e onde está o risco.</p>
       <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm">
@@ -460,9 +483,8 @@ export function ContractsDashboard() {
     saude: () => <HealthSection d={d} money={money} filter={health} setFilter={setHealth} />,
     acao: () => <ActionList rows={d.decision.actionList} filter={health} setFilter={setHealth} money={money} onOpen={setLife} />,
     vencimentos: () => <ExpiringChart plan={d.decision.expiringPlan} money={money} />,
-    reajustes: () => <Adjustments list={d.decision.adjustmentsDue} money={money} onOpen={setLife} />,
-    responsaveis: () => <Owners list={d.decision.byOwner} money={money} />,
-    operacao: () => <ErpPipeline o={d.operations} />,
+    reajustes: () => <div className="grid grid-cols-1 gap-4 xl:grid-cols-2"><Adjustments list={d.decision.adjustmentsDue} money={money} onOpen={setLife} /><Owners list={d.decision.byOwner} money={money} /></div>,
+    risco: () => <RiskWindows d={d} money={money} />,
     clientes: () => <Concentration d={d} money={money} />,
     etapas: () => (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -486,8 +508,11 @@ export function ContractsDashboard() {
   };
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
-      {cfg.order.filter((k) => !cfg.hidden.includes(k)).map((k) => <div key={k}>{sections[k]()}</div>)}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-xl font-bold text-ink">Painel</h2><p className="text-xs text-muted">Atualizado em {new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</p></div>
+        <div className="flex flex-wrap items-center gap-3"><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
+      </div>
+      {cfg.order.filter((k) => !cfg.hidden.includes(k) && typeof sections[k] === 'function').map((k) => <div key={k}>{sections[k]()}</div>)}
       <ContractLifeDrawer id={life} onClose={() => setLife(null)} />
     </div>
   );
