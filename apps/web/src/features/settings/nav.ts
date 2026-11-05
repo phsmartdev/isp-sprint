@@ -21,6 +21,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     { to: '/settings/journeys', label: 'Jornadas e automações', desc: 'Funis, etapas, quem trabalha em cada um e automações.', admin: true, keywords: 'pipeline etapas funil' },
     { to: '/settings/sources', label: 'Canais de entrada', desc: 'Por onde o cliente chega: WhatsApp, site, telefone.', admin: true, keywords: 'origem lead' },
     { to: '/settings/fields', label: 'Campos personalizados', desc: 'Campos extras em contas, oportunidades e contratos.', admin: true },
+    { to: '/settings/contratos-comunicacao', label: 'Comunicação de contratos', desc: 'Esteiras de comunicação (fluxo com setas) e templates de e-mail e WhatsApp, com aprovação de cada envio.', admin: true, keywords: 'esteira fluxo template email whatsapp comunicação aviso aprovação' },
     { to: '/settings/contratos-responsabilidades', label: 'Responsabilidades de contratos', desc: 'Atores externos e canais, SLA por atividade e avisos por nível de responsabilidade (R, A, C, I e escalonamento).', admin: true, keywords: 'playbook raci papel ator externo aviso alerta escalonamento sla confirmação' },
     { to: '/settings/approvals', label: 'Aprovações e alçadas', desc: 'Quem aprova desconto e condição especial, e até quanto.', admin: true, keywords: 'desconto alçada' },
     { to: '/settings/modelos', label: 'Modelos', desc: 'Propostas, contratos, timbrado das filiais, instrução e e-mails automáticos.', admin: true, keywords: 'proposta contrato timbrado papel logo filial email alerta instrução playbook' },

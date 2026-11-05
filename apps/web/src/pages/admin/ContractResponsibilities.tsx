@@ -51,7 +51,7 @@ function RulesEditor({ rules }: { rules: NotifyRules }) {
     <section className="card p-5" aria-label="Avisos por nível de responsabilidade">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div><h2 className="font-bold text-ink">Avisos por nível de responsabilidade</h2>
-          <p className="text-sm text-muted">Quem recebe cada aviso das atividades de contrato, pela matriz RACI da atividade. Todo aviso por e-mail ou WhatsApp leva o botão “Confirmar recebimento”.</p></div>
+          <p className="text-sm text-muted">Quem recebe cada aviso das atividades de contrato, pela matriz RACI da atividade. A abertura de cada e-mail é rastreada (quando e quantas vezes); pelo WhatsApp vai um link, e o acesso conta como leitura.</p></div>
         <Button variant="primary" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate()}>Salvar regras</Button>
       </div>
       <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">

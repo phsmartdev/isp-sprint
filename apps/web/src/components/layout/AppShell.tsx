@@ -38,6 +38,7 @@ const NAV: NavEntry[] = [
     { to: '/contracts?t=painel', label: 'Painel', module: 'contratos', contractTab: 'painel' },
     { to: '/contracts?t=atencao', label: 'Central de atenção', module: 'contratos', contractTab: 'atencao' },
     { to: '/contracts?t=lista', label: 'Lista de contratos', module: 'contratos', contractTab: 'lista' },
+    { to: '/contracts?t=comunicacoes', label: 'Comunicações', module: 'contratos', contractTab: 'comunicacoes' },
     { to: '/contracts?t=funil', label: 'Funil', module: 'contratos', contractTab: 'funil' },
     { to: '/contracts?t=atestados', label: 'Atestados', module: 'contratos', contractTab: 'atestados' },
     { to: '/contracts?t=atas', label: 'Atas de Registro de Preço', module: 'contratos', contractTab: 'atas', feature: 'contratos.atas' },

@@ -631,6 +631,27 @@
       "when": 1793836339400,
       "tag": "0089_avisos_por_responsabilidade",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1793846530219,
+      "tag": "0090_esteira_comunicacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1793847541264,
+      "tag": "0091_template_html",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1793847698256,
+      "tag": "0092_rastreio_abertura",
+      "breakpoints": true
     }
   ]
 }

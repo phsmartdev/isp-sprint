@@ -36,6 +36,7 @@ import { contractTemplateRoutes } from './routes/contractTemplates';
 import { playbookRoutes } from './routes/playbook';
 import { contractErpRoutes } from './routes/contractErp';
 import { publicNoticeRoutes } from './routes/publicNotices';
+import { commRoutes } from './routes/comm';
 import { authRecoveryRoutes } from './routes/authRecovery';
 import { approvalRoutes } from './routes/approvals';
 import { negotiationRoutes } from './routes/negotiation';
@@ -211,6 +212,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...playbookRoutes,
     ...contractErpRoutes,
     ...publicNoticeRoutes,
+    ...commRoutes,
     ...authRecoveryRoutes,
     ...approvalRoutes,
     ...negotiationRoutes,

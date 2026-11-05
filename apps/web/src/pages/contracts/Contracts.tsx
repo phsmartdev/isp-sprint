@@ -21,6 +21,7 @@ import { AtasTab } from '../../features/arp/AtasTab';
 import { CommitmentPortfolio } from '../../features/contracts/CommitmentPortfolio';
 import { CertificatesLibrary } from '../../features/contracts/ExecutionPanel';
 import { ContractLifeDrawer } from '../../features/contracts/ContractLife';
+import { CommApprovals } from '../../features/contracts/CommApprovals';
 import { DaysLeft, KIND_LABEL, MoneyRows, PendBadge, StageChip, errMsg, todayIso, type ContractRow } from '../../features/contracts/shared';
 
 type View = ContractTab;
@@ -290,6 +291,7 @@ export function ContractsPage() {
       {view === 'funil' && <Funil />}
       {view === 'calendario' && <Calendario />}
       {view === 'relatorios' && <Relatorios />}
+      {view === 'comunicacoes' && <CommApprovals />}
       </TvArea>
     </div>
   );
