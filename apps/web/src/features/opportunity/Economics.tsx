@@ -226,30 +226,73 @@ function PriceRuler({ r }: { r: EconResult }) {
   );
 }
 
-/** Desdobramento financeiro da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro (mesma conta da exportação). */
+/**
+ * Desdobramento financeiro da oportunidade: o que entra (+), o que sai (−) e os resultados (=). Na recorrente, o mês do
+ * período de amortização (1..D), o mês depois do payback (D+1..N, sem amortização) e o contrato (soma exata dos meses).
+ * O % de cada resultado é sobre a receita da própria coluna (mesma conta da exportação).
+ */
 function Dre({ r }: { r: EconResult }) {
-  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
+  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1, D = r.term.D;
   const k = r.kpi!;
   const rows = econDre(r, fmtBRL);
+  const after = rec && !!r.statement?.after;
+  const from = r.statement?.afterFrom ?? D + 1;
   const money = (v: number) => (v < 0 ? `− ${fmtBRL(-v)}` : fmtBRL(Math.abs(v)));
   const signCls = { '+': 'text-[rgb(var(--chart-in))]', '−': 'text-[rgb(var(--chart-out))]', '=': 'text-muted' };
+  const cell = (v: number | null | undefined, p: number | null | undefined, tone?: boolean) => (
+    <td className={clsx('num py-1 pr-1 text-right align-top', tone && v != null && (v < 0 ? 'text-danger' : 'text-success'))}>
+      {v == null ? <span className="text-muted">—</span> : money(v)}
+      {p != null && <span className="block text-2xs font-normal text-muted">{pct(p, 2)}</span>}
+    </td>
+  );
+  const rc = r.recommendation;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[420px] text-sm">
+      <table className="w-full min-w-[520px] text-sm">
         <caption className="mb-1 text-left text-xs font-semibold text-muted">Desdobramento financeiro</caption>
-        <thead className="text-2xs text-muted"><tr><th className="w-6" /><th className="py-1 text-left font-medium" />{rec && <th className="py-1 text-right font-medium">Por mês</th>}<th className="py-1 text-right font-medium">{rec ? `No contrato (${N} meses)` : 'Na venda'}</th></tr></thead>
+        <thead className="text-2xs text-muted"><tr>
+          <th className="w-6" /><th className="py-1 text-left font-medium" />
+          {rec && <th className="py-1 pr-1 text-right font-medium">{after ? `Por mês (1–${D}, com amortização)` : 'Por mês'}</th>}
+          {after && <th className="py-1 pr-1 text-right font-medium">Por mês ({from}–{N}, sem amortização)</th>}
+          <th className="py-1 pr-1 text-right font-medium">{rec ? `No contrato (${N} meses)` : 'Na venda'}</th>
+        </tr></thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.label} className={clsx(row.sign === '=' && 'border-t border-line', row.strong && 'font-semibold text-ink', row.tone && 'bg-surface-2')}>
-              <td className={clsx('py-1 pl-1 text-center font-bold', signCls[row.sign])} aria-label={row.sign === '+' ? 'soma' : row.sign === '−' ? 'dedução' : 'resultado'}>{row.sign}</td>
-              <td className="py-1">{row.label}{row.note && <span className="ml-1.5 text-2xs font-normal text-muted">{row.note}</span>}</td>
-              {rec && <td className="num py-1 text-right">{row.month == null ? <span className="text-muted">—</span> : money(row.month)}</td>}
-              <td className={clsx('num py-1 pr-1 text-right', row.tone && (row.total < 0 ? 'text-danger' : 'text-success'))}>{money(row.total)}</td>
+              <td className={clsx('py-1 pl-1 text-center align-top font-bold', signCls[row.sign])} aria-label={row.sign === '+' ? 'soma' : row.sign === '−' ? 'dedução' : 'resultado'}>{row.sign}</td>
+              <td className="py-1 align-top">{row.label}{row.note && <span className="block text-2xs font-normal text-muted">{row.note}</span>}</td>
+              {rec && cell(row.month, row.pct?.month, row.tone)}
+              {after && cell(row.after, row.pct?.after, row.tone)}
+              {cell(row.total, row.pct?.total, row.tone)}
             </tr>
           ))}
         </tbody>
       </table>
       {k.npvCents != null && <p className="mt-1 text-xs text-muted">Em valor de hoje, descontando a TMA de {pct(r.rates.r * 100, 2)} ao mês, o resultado é <b className="num text-ink">{money(k.npvCents)}</b> (VPL).</p>}
+      {rec && after && (r.investmentCents ?? 0) > 0 && (
+        <p className="mt-1 text-xs text-muted">
+          O investimento é devolvido com a TMA em {D} {D === 1 ? 'mês' : 'meses'} (parcela da anuidade). O payback de caixa
+          {k.paybackMonths == null ? ' não fecha no prazo' : <> é <b className="num text-ink">{k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses</b></>}: sai antes de {D} porque a margem de contribuição também entra no caixa.
+        </p>
+      )}
+      {rc && (
+        <div className="mt-3 border border-line p-3 text-xs" aria-label="Recomendação pela margem líquida alvo">
+          <p className="text-sm font-semibold text-ink">Recomendação pela margem líquida alvo de {pct(rc.netTargetPct, 2)}</p>
+          {rc.contributionPct == null ? (
+            <p className="mt-1 text-muted">Informe despesas fixas e IR/CSLL em Configurações → Viabilidade para calcular a margem recomendada.</p>
+          ) : (
+            <>
+              <p className="mt-1 text-text">
+                Margem de contribuição recomendada <b className="num text-ink">{pct(rc.contributionPct, 2)}</b>
+                {rc.priceCents != null ? <> · preço <b className="num text-ink">{fmtBRL(rc.priceCents)}{rec ? '/mês' : ''}</b>{rc.oneTimePriceCents != null && <> + <b className="num text-ink">{fmtBRL(rc.oneTimePriceCents)}</b> no pagamento único</>}</> : <span className="text-danger"> · não cabe no markup com os tributos e despesas variáveis</span>}
+              </p>
+              <p className="mt-0.5 font-mono text-2xs text-muted">
+                {pct(rc.netTargetPct, 2)} ÷ (1 − {pct(rc.params.incomeTaxPct ?? 0, 2)}) = {pct(rc.operatingNeededPct ?? 0, 2)} + fixas {pct(rc.params.overheadPct ?? 0, 2)} + glosa {pct(rc.params.glosaPct, 2)} + inadimplência {pct(rc.params.badDebtPct, 2)}
+              </p>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
+import { annuityFactor } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -55,13 +56,15 @@ describe('viabilidade econômica', () => {
     expect(saved.result.rates.a).toBeCloseTo(0.2, 8);
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
-    // FINANCE-3.0: sem comissão; preço sugerido = (30.000 ÷ 6 + 2.000) ÷ (1 − 20% − 35%) = 15.555,56/mês
-    expect(saved.result.engineVersion).toBe('FINANCE-3.0');
-    expect(saved.result.suggestedCents).toBe(1_555_556);
+    // FINANCE-3.1: preço sugerido = (parcela da anuidade de 30.000 pela TMA em 6 meses + 2.000) ÷ (1 − 20% − 35%)
+    expect(saved.result.engineVersion).toBe('FINANCE-3.1');
+    const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
+    expect(Math.abs(saved.result.suggestedCents - (parc + 200_000) / 0.45)).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(35, 2);
-    // decisão no proposto (total dos produtos, 10.000): caixa do mês = 10.000 − 2.000 − 2.000 = 6.000; MC = 6.000 − 5.000 = 1.000 (10%)
+    expect(saved.recomendacao_viabilidade ?? null).toBeNull(); // sem margem líquida alvo nos parâmetros
+    // decisão no proposto (total dos produtos, 10.000): caixa do mês = 10.000 − 2.000 − 2.000 = 6.000; MC = 6.000 − parcela
     expect(saved.result.decision).toMatchObject({ basis: 'proposto', source: 'itens', priceCents: 1_000_000 });
-    expect(saved.result.decision.marginPct).toBeCloseTo(10, 6);
+    expect(saved.result.decision.marginPct).toBeCloseTo(((600_000 - parc) / 1_000_000) * 100, 6);
     expect(saved.result.decision.paybackMonths).toBeCloseTo(3_000_000 / 600_000, 4);
     expect(saved.result.verdict).not.toBe('fora_politica');
     expect(saved.history).toHaveLength(1);
@@ -99,6 +102,20 @@ describe('viabilidade econômica', () => {
     expect(ap2.json().detail).toMatch(/mudou desde que foi salva/);
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().stale).toBe(false);
+
+    // margem líquida alvo publicada em Configurações → Viabilidade → recomendacao_viabilidade (só parâmetros, sem valor fixo)
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, netMarginTargetBp: 4000, overheadBp: 2000, lossPrivateBp: 300, badDebtBp: 100, incomeTaxBp: 1500 }), 201);
+    const withTarget = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
+    const rv = withTarget.recomendacao_viabilidade;
+    expect(rv['margem_liquida_alvo_%']).toBe(40);
+    expect(rv['margem_contrib_recomendada_%']).toBeCloseTo(71.06, 2);
+    expect(rv.parametros_utilizados).toMatchObject({ 'taxa_rateio_fixo_%': 20, 'glosa_%': 3, 'inadimplencia_%': 1 });
+    // TMA 0: parcela = 30.000 ÷ 6; preço = (5.000 + 2.000) ÷ (1 − 20% − 71,06%)
+    expect(rv['preco_mensal_recomendado_R$']).toBeCloseTo(7_000 / (1 - 0.2 - (0.4 / 0.85 + 0.24)), 1);
+    expect(withTarget.result.statement.after.amortization).toBe(0);
+    expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(71.06, 2);
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
 
     // sem "ver financeiro": só o veredito; não preenche; consolidado bloqueado
     ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'ver_financeiro', allowed: false }));

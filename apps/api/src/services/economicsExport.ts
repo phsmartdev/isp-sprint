@@ -66,8 +66,11 @@ export function buildEconCsv(run: Run, h: RunHeader) {
     ['Memória de cálculo', 'Fórmula', 'Valor'],
     ...memoryOf(run).flatMap((st, n) => [[`${n + 1}. ${st.title}`], ...st.rows.map((x) => [x.label, x.formula ?? '', x.value]), ...(st.note ? [[st.note]] : [])]),
     [],
-    ['Desdobramento financeiro', 'Por mês (R$)', r.mode === 'recorrente' ? `No contrato, ${r.term.N} meses (R$)` : 'Na venda (R$)'],
-    ...econDre(r, money).map((d) => [`${d.sign} ${d.label}`, cents(d.month), cents(d.total)]),
+    ...(() => {
+      const rec = r.mode === 'recorrente', aft = rec && !!r.statement?.after, D = r.term.D, from = r.statement?.afterFrom ?? D + 1;
+      const head = ['Desdobramento financeiro', ...(rec ? [aft ? `Por mês 1-${D} (R$)` : 'Por mês (R$)', ...(aft ? [`Por mês ${from}-${r.term.N} (R$)`] : [])] : []), rec ? `No contrato, ${r.term.N} meses (R$)` : 'Na venda (R$)', ...(rec ? [aft ? `% mês 1-${D}` : '% mês', ...(aft ? [`% mês ${from}-${r.term.N}`] : [])] : []), '% total'];
+      return [head, ...econDre(r, money).map((d) => [`${d.sign} ${d.label}`, ...(rec ? [cents(d.month), ...(aft ? [cents(d.after ?? null)] : [])] : []), cents(d.total), ...(rec ? [d.pct?.month == null ? '' : pct(d.pct.month), ...(aft ? [d.pct?.after == null ? '' : pct(d.pct.after)] : [])] : []), d.pct?.total == null ? '' : pct(d.pct.total)])];
+    })(),
     [], ['Produto', 'Documento fiscal', 'Versão dos tributos', 'Peso na receita', 'Tributos %', 'Tributo fixo (R$)'],
     ...r.items.map((i) => [i.description, i.doc ?? 'sem documento', i.docVersion ?? '', pct(i.weight * 100), pct(i.percentBp / 100), cents(i.fixedCents)]),
     [], ['Custo', 'Tipo', 'Quantidade', 'Valor unitário (R$)', 'Origem'],
@@ -162,17 +165,30 @@ export async function buildEconPdf(run: Run, h: RunHeader, letterhead?: Letterhe
   const dre = econDre(r, money);
   if (dre.length) {
     section('Desdobramento financeiro');
-    const c1 = W - M - 130, c2 = W - M;
-    need(14); if (r.mode === 'recorrente') right('Por mês', c1, 9, font, muted); right(r.mode === 'recorrente' ? `No contrato (${r.term.N} meses)` : 'Na venda', c2, 9, font, muted); y -= 15;
+    const rec = r.mode === 'recorrente', aft = rec && !!r.statement?.after, D = r.term.D, from = r.statement?.afterFrom ?? D + 1;
+    const c2 = W - M, c1a = W - M - 100, c1 = aft ? W - M - 200 : W - M - 130;
+    need(14);
+    if (rec) right(aft ? `Mês 1-${D}` : 'Por mês', c1, 9, font, muted);
+    if (aft) right(`Mês ${from}-${r.term.N}`, c1a, 9, font, muted);
+    right(rec ? `Contrato (${r.term.N} meses)` : 'Na venda', c2, 9, font, muted); y -= 15;
+    const maxLabel = aft ? 46 : 70;
     for (const d of dre) {
       need(15);
       if (d.sign === '=') page.drawLine({ start: { x: M, y: y + 11 }, end: { x: W - M, y: y + 11 }, thickness: 0.6, color: line });
       const f = d.strong ? bold : font;
       // Helvetica (WinAnsi) não tem o sinal de menos tipográfico
       text(d.sign === '−' ? '-' : d.sign, M, 10, bold, d.sign === '+' ? rgb(0.22, 0.52, 0.83) : d.sign === '−' ? rgb(0.83, 0.46, 0.17) : muted);
-      text(`${d.label}${d.note ? `  (${d.note})` : ''}`.replace(/−/g, '-'), M + 16, 10, f);
-      if (r.mode === 'recorrente') right(d.month == null ? '—' : money(d.month), c1, 10, f);
+      const lbl = `${d.label}${d.note && !aft ? `  (${d.note})` : ''}`.replace(/−/g, '-');
+      text(lbl.length > maxLabel ? `${lbl.slice(0, maxLabel - 1)}…` : lbl, M + 16, aft ? 9 : 10, f);
+      if (rec) right(d.month == null ? '—' : money(d.month), c1, 10, f);
+      if (aft) right(d.after == null ? '—' : money(d.after), c1a, 10, f);
       right(money(d.total), c2, 10, f, d.tone ? (d.total < 0 ? rgb(0.82, 0.2, 0.2) : rgb(0.1, 0.55, 0.3)) : ink);
+      if (d.pct) {
+        y -= 10;
+        if (rec && d.pct.month != null) right(pct(d.pct.month), c1, 8, font, muted);
+        if (aft && d.pct.after != null) right(pct(d.pct.after), c1a, 8, font, muted);
+        if (d.pct.total != null) right(pct(d.pct.total), c2, 8, font, muted);
+      }
       y -= 15;
     }
   }
