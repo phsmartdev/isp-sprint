@@ -2,7 +2,9 @@
  * Mapa único de Configurações: grupos por assunto, usados no menu lateral, nas abas do topo e na Visão geral.
  * `admin` = exige Configurações (Total); `match` = outros caminhos que pertencem à mesma página.
  */
-export type SettingsItem = { to: string; label: string; desc: string; admin: boolean; keywords?: string };
+import type { FeatureKey } from '@isp/domain';
+
+export type SettingsItem = { to: string; label: string; desc: string; admin: boolean; keywords?: string; /** some quando a funcionalidade está desligada na empresa */ feature?: FeatureKey };
 export type SettingsGroup = { key: string; label: string; desc: string; items: SettingsItem[] };
 
 export const SETTINGS_GROUPS: SettingsGroup[] = [
@@ -28,8 +30,8 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   ] },
   { key: 'ofertas', label: 'Ofertas e viabilidade', desc: 'O que se vende, por quanto, de onde e com qual custo.', items: [
     { to: '/settings/plans', label: 'Planos e produtos', desc: 'Planos, produtos, comissão e documento fiscal padrão.', admin: true, keywords: 'preço produto' },
-    { to: '/settings/viability', label: 'Viabilidade', desc: 'Motor financeiro e catálogo de custos.', admin: true, keywords: 'tma margem payback custo capex opex comissão contingência despesas ir csll' },
-    { to: '/settings/financial-studio', label: 'Financial Studio', desc: 'Fórmulas do motor financeiro: editar, simular o impacto, versionar e publicar.', admin: true, keywords: 'fórmula formula editor simulação impacto versão vpl tir roi payback modelo financeiro' },
+    { to: '/settings/viability', label: 'Viabilidade', desc: 'Motor financeiro, envelope fiscal por vigência e catálogo de custos.', admin: true, feature: 'crm.viabilidade', keywords: 'tma margem payback custo capex opex comissão contingência despesas ir csll reforma tributária cbs ibs envelope' },
+    { to: '/settings/financial-studio', label: 'Financial Studio', desc: 'Fórmulas do motor financeiro: editar, simular o impacto, versionar e publicar.', admin: true, feature: 'crm.viabilidade', keywords: 'fórmula formula editor simulação impacto versão vpl tir roi payback modelo financeiro' },
     { to: '/settings/filiais', label: 'Filiais e documentos fiscais', desc: 'Emitentes (CNPJ, regime), tipos fiscais e tributos.', admin: true, keywords: 'cnpj imposto tributo nota fiscal' },
     { to: '/settings/area', label: 'Área de atendimento', desc: 'Regiões e condomínios atendidos.', admin: true, keywords: 'cobertura condomínio' },
   ] },
@@ -60,8 +62,8 @@ export function settingsLocate(pathname: string) {
 }
 
 /** Itens que a pessoa vê (sem Configurações Total, só o próprio perfil). */
-export const visibleGroups = (isAdmin: boolean) =>
-  SETTINGS_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => isAdmin || !i.admin) })).filter((g) => g.items.length);
+export const visibleGroups = (isAdmin: boolean, featureOn: (f: FeatureKey) => boolean = () => true) =>
+  SETTINGS_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => (isAdmin || !i.admin) && (!i.feature || featureOn(i.feature))) })).filter((g) => g.items.length);
 
 /** Busca por nome, descrição ou palavra-chave, sem acento. */
 export function settingsSearch(groups: SettingsGroup[], q: string) {

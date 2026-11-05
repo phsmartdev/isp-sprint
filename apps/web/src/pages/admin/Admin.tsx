@@ -40,9 +40,9 @@ function uptime(s: number) {
 
 /** Todas as configurações, agrupadas por assunto, com busca por nome ou palavra-chave. */
 function SettingsDirectory() {
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const [q, setQ] = useState('');
-  const groups = settingsSearch(visibleGroups(can('configuracoes', 'total')), q);
+  const groups = settingsSearch(visibleGroups(can('configuracoes', 'total'), feature), q);
   return (
     <section className="card p-5" aria-labelledby="h-all-settings">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

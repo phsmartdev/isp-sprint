@@ -157,8 +157,8 @@ export function App() {
           <Route path="journeys" element={<AdminJourneys />} />
           <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
           <Route path="area" element={<AdminArea />} />
-          <Route path="viability" element={<AdminViability />} />
-          <Route path="financial-studio" element={<AdminFinancialStudio />} />
+          <Route path="viability" element={<EconGate><AdminViability /></EconGate>} />
+          <Route path="financial-studio" element={<EconGate><AdminFinancialStudio /></EconGate>} />
           <Route path="modelos" element={<AdminModels />} />
           <Route path="instructions" element={<Navigate to="/settings/modelos?aba=instrucao" replace />} />
           <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
@@ -187,5 +187,17 @@ export function App() {
         <Route path="*" element={<div className="card"><EmptyState title="Esta página não existe" description="Confira o endereço ou volte para o início." /></div>} />
       </Route>
     </Routes>
+  );
+}
+
+/** Viabilidade econômica é uma funcionalidade do CRM que a empresa liga ou desliga (Configurações → Permissões → Módulos e liberação). */
+function EconGate({ children }: { children: ReactNode }) {
+  const { feature } = useAuth();
+  if (feature('crm.viabilidade')) return <>{children}</>;
+  return (
+    <section className="card p-5">
+      <h2 className="text-md font-bold text-ink">Viabilidade econômica desligada</h2>
+      <p className="mt-1 text-sm text-muted">Esta funcionalidade do CRM não está liberada na empresa. Quem administra liga em Configurações → Permissões → Módulos e liberação, no módulo CRM.</p>
+    </section>
   );
 }

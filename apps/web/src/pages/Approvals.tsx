@@ -5,6 +5,7 @@ import { Scale } from 'lucide-react';
 import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDateTime } from '../lib/format';
 import { useUrlState } from '../lib/hooks';
+import { useAuth } from '../auth/AuthProvider';
 import { Chip, EmptyState, ErrorState, LoadingRows, Tabs, type Tone } from '../components/ui/primitives';
 import { PageHeader } from '../components/layout/PageHeader';
 import { pct } from '../features/approval/Panels';
@@ -48,12 +49,13 @@ function EconomicsQueue() {
 
 export function ApprovalsPage() {
   const nav = useNavigate();
+  const { feature } = useAuth();
   const [f, setF] = useUrlState({ status: 'pendentes' });
   const q = useQuery({ queryKey: ['approvals', f.status], queryFn: () => api<{ items: Item[]; toDecide: number; myLevelLabel: string }>(`/approvals${qs({ status: f.status })}`) });
   return (
     <div className="w-full">
       <PageHeader icon={<Scale className="h-9 w-9" strokeWidth={2.4} />} title="Aprovações" subtitle={q.data ? `Sua alçada: ${q.data.myLevelLabel}. ${q.data.toDecide} pedido(s) aguardando você.` : 'Negociações aguardando decisão.'} />
-      <EconomicsQueue />
+      {feature('crm.viabilidade') && <EconomicsQueue />}
       <Tabs label="Situação" className="mb-4" value={f.status} onChange={(s) => setF({ status: s })} tabs={[{ key: 'pendentes', label: 'Pendentes' }, { key: 'todas', label: 'Todas' }]} />
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
       {!q.data ? <div className="card"><LoadingRows /></div> : q.data.items.length === 0 ? <div className="card"><EmptyState title={f.status === 'pendentes' ? 'Nada aguardando decisão' : 'Nenhum pedido de aprovação'} description="Os pedidos aparecem aqui quando um vendedor solicita aprovação na oportunidade." /></div> : (

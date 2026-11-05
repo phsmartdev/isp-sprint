@@ -91,9 +91,9 @@ function useOpenActivities() {
 
 /** Configuração no menu: grupos por assunto; só o grupo da página aberta fica expandido (os outros abrem com um clique). */
 function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const loc = useLocation();
-  const groups = visibleGroups(can('configuracoes', 'total'));
+  const groups = visibleGroups(can('configuracoes', 'total'), feature);
   const current = settingsLocate(loc.pathname)?.group.key ?? groups[0]?.key;
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => setOpen(null), [current]);

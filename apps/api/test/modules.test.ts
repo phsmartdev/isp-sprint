@@ -112,6 +112,24 @@ describe('Etapa 1: módulos de negócio', () => {
     ok(await setModule('contratos', { enabled: true }));
   });
 
+  it('viabilidade econômica é opção do CRM: desligada, some a aba/parâmetros/Financial Studio e a trava da aprovação; o CRM segue', async () => {
+    const opp = ((await ctx.db.execute(sql`select id from opportunities where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string }).id;
+    ok(await setModule('crm', { enabled: true, disabledFeatures: ['crm.viabilidade'] }));
+    try {
+      for (const url of [`/opportunities/${opp}/economics`, '/admin/viability/econ', '/admin/viability/envelopes', '/finance-studio/catalog', '/economics/pending', '/cost-items', '/intelligence/economics']) {
+        const r = await carlos.get(url);
+        expect(r.statusCode, url).toBe(403);
+        expect(r.json().detail, url).toMatch(/Viabilidade econômica.*desligada/);
+      }
+      expect((await carlos.get('/me')).json().disabledFeatures).toContain('crm.viabilidade');
+      ok(await carlos.get(`/opportunities/${opp}`));
+      ok(await carlos.get('/admin/fiscal-docs')); // documentos fiscais seguem (itens e propostas)
+    } finally {
+      ok(await setModule('crm', { enabled: true }));
+    }
+    ok(await carlos.get(`/opportunities/${opp}/economics`));
+  });
+
   it('ações sensíveis por perfil: negar exportar ao vendedor bloqueia a planilha e fica na auditoria', async () => {
     ok(await carlos.put('/admin/actions', { profile: 'vendedor', action: 'exportar', allowed: false }));
     expect(ok(await carlos.get('/admin/actions')).json().matrix.vendedor.exportar).toBe(false);

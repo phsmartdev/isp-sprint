@@ -55,6 +55,7 @@ export const FEATURES = [
   { key: 'crm.sucesso_cliente', module: 'crm', label: 'Sucesso do Cliente (jornadas, kickoff, pesquisas)', needs: ['oportunidades'] },
   { key: 'crm.email', module: 'crm', label: 'E-mail corporativo' },
   { key: 'crm.chamados', module: 'crm', label: 'Chamados no GLPI a partir da negociação', needs: ['oportunidades'] },
+  { key: 'crm.viabilidade', module: 'crm', label: 'Viabilidade econômica (motor financeiro, envelope fiscal, Financial Studio e decisão da viabilidade)', needs: ['oportunidades'] },
   { key: 'marketing.leads', module: 'marketing', label: 'Leads' },
   { key: 'marketing.abm', module: 'marketing', label: 'ABM', needs: ['leads', 'campanhas'] },
   { key: 'marketing.campanhas', module: 'marketing', label: 'Campanhas' },
@@ -92,6 +93,15 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/accounts/:id/plays', feature: 'marketing.abm' },
   { prefix: '/accounts/:id/play-runs', feature: 'marketing.abm' },
   { prefix: '/play-runs', feature: 'marketing.abm' },
+  // CRM: viabilidade econômica (aba da oportunidade, decisão, parâmetros, envelope fiscal, custos e Financial Studio)
+  { prefix: '/opportunities/:id/economics', feature: 'crm.viabilidade' },
+  { prefix: '/economics', feature: 'crm.viabilidade' },
+  { prefix: '/admin/viability/econ', feature: 'crm.viabilidade' },
+  { prefix: '/admin/viability/envelopes', feature: 'crm.viabilidade' },
+  { prefix: '/admin/cost-items', feature: 'crm.viabilidade' },
+  { prefix: '/cost-items', feature: 'crm.viabilidade' },
+  { prefix: '/finance-studio', feature: 'crm.viabilidade' },
+  { prefix: '/intelligence/economics', feature: 'crm.viabilidade' },
   // CRM dentro de módulos técnicos compartilhados
   { prefix: '/cs', feature: 'crm.sucesso_cliente' },
   { prefix: '/surveys', feature: 'crm.sucesso_cliente' },
