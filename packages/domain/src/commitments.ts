@@ -202,10 +202,8 @@ export function commitmentAlerts(args: { today: string; lines: CLine[]; bal: Lin
   if (totals.uncovered > 0) out.push({ level: 'alto', key: 'aguardando_empenho', text: `${fmt(totals.uncovered)} executados sem cobertura de empenho (aguardando empenho).` });
   const age = args.agingDays ?? DEFAULT_AGING_DAYS;
   const day = (d: string) => Math.floor(new Date(`${d}T12:00:00Z`).getTime() / 86_400_000);
-  const notInvoiced = args.measurements.filter((m) => counts(m) && m.status === 'atestada');
-  const old = notInvoiced.filter((m) => day(args.today) - day((m.attestedAt ?? m.createdAt).slice(0, 10)) > age);
-  if (old.length) out.push({ level: 'alto', key: 'sem_faturar', text: `${old.length} medição(ões) atestada(s) há mais de ${age} dias sem nota fiscal: ${old.slice(0, 3).map((m) => m.title).join(', ')}.` });
-  else if (notInvoiced.length) out.push({ level: 'medio', key: 'atestada_sem_nf', text: `${notInvoiced.length} medição(ões) atestada(s) aguardando nota fiscal.` });
+  // 05/11/2026: o controle vai até a medição atestada; a nota fiscal é processo do Financeiro (sem alerta de NF aqui)
+  void age;
   if (totals.contracted > 0 && totals.toCommit > 0) {
     const pct = (totals.toCommit / totals.contracted) * 100;
     const limit = args.toCommitAlertPct;

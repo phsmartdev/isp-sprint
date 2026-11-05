@@ -120,7 +120,7 @@ function SurveyDialog({ contactId, kinds, open, onClose }: { contactId: string; 
   );
 }
 
-function IpcDialog({ contactId, sn, open, onClose }: { contactId: string; sn: Snapshot; open: boolean; onClose: () => void }) {
+export function IpcDialog({ contactId, sn, open, onClose }: { contactId: string; sn: Snapshot; open: boolean; onClose: () => void }) {
   const [levels, setLevels] = useState<Record<string, string>>(() => Object.fromEntries(IPC_CRITERIA.map((k) => [k, sn.ipc.levels[k] ?? ''])));
   const [just, setJust] = useState('');
   const [ev, setEv] = useState('');
