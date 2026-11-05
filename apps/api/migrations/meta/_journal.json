@@ -708,6 +708,13 @@
       "when": 1793908678100,
       "tag": "0100_pausar_negociacao",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793917224716,
+      "tag": "0101_fiscal_envelopes",
+      "breakpoints": true
     }
   ]
 }

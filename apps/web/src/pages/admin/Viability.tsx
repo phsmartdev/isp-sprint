@@ -11,6 +11,7 @@ import { api, ApiError } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
+import { FiscalEnvelopes } from './FiscalEnvelopes';
 
 const dec = (n: number | null | undefined) => (n === null || n === undefined ? '' : (n / 100).toFixed(2).replace('.', ',').replace(/,00$/, ''));
 const numOrNull = (s: string) => (s.trim() === '' ? null : toCents(s));
@@ -127,7 +128,7 @@ function EconEngine() {
       {!cur && <div className="mt-3"><Notice tone="warning">A viabilidade econômica não calcula até você preencher e publicar.</Notice></div>}
 
       <p className="mt-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-text" aria-label="Como o cálculo usa os parâmetros">
-        Preço exato = (investimento ÷ payback + custos mensais + tributo fixo) ÷ (1 − tributos − comissão − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
+        Preço exato = (parcela do investimento pela TMA no payback + custos mensais + tributo fixo) ÷ (1 − tributos da nota − despesas variáveis − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -249,6 +250,7 @@ export function AdminViability() {
   return (
     <div className="space-y-4">
       <EconEngine />
+      <FiscalEnvelopes />
       <CostCatalog />
     </div>
   );

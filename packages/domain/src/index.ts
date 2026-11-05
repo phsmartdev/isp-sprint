@@ -38,6 +38,7 @@ export * from './ixc';
 export * from './finance';
 export * from './formula';
 export * from './financeModel';
+export * from './fiscalEnvelope';
 export * from './commitments';
 export * from './commitmentPlanning';
 export * from './playbook';

@@ -1,7 +1,7 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_KINDS, ENVELOPE_RETENTIONS, ENVELOPE_TAXES, ENVELOPE_KIND_LABELS, FISCAL_REGIME_LABELS, envelopeTaxesOf, fiscalEnvelopeErrors, regimeOfYear, REFORM_FIRST_YEAR, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -21,6 +21,7 @@ const EconBody = z.object({
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
   commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
+  fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(), municipalityIbge: z.string().regex(/^\d{7}$/).nullable().optional(),
 });
 
 export const economicsRoutes = [
@@ -53,6 +54,62 @@ export const economicsRoutes = [
       await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
       reply.code(201);
       return { id: v!.id, validFrom, ...values };
+    },
+  }),
+
+  // ------------------------------------------------------------------ envelope fiscal por vigência (Reforma Tributária)
+  defineRoute({
+    method: 'GET', url: '/admin/viability/envelopes/schema', summary: 'Campos do envelope fiscal da chave temporal (ano): regime atual até 2026, Reforma Tributária de 2027 em diante', tag: 'Viabilidade', ...ADMIN,
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100) }),
+    handler: async ({ query }) => {
+      const regime = regimeOfYear(query.year);
+      return {
+        year: query.year, regime, regimeLabel: FISCAL_REGIME_LABELS[regime], reformFirstYear: REFORM_FIRST_YEAR,
+        kinds: ENVELOPE_KINDS.map((k) => ({ key: k, label: ENVELOPE_KIND_LABELS[k] })),
+        taxes: envelopeTaxesOf(regime).map((c) => ({ key: c, label: ENVELOPE_TAXES[c].label, layer: 1 })),
+        profitTax: { key: 'profitTaxBp', label: 'Alíquota efetiva sobre o lucro (IRPJ + CSLL)', layer: 2 },
+        retentions: Object.entries(ENVELOPE_RETENTIONS).map(([key, label]) => ({ key, label, layer: 3 })),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/admin/viability/envelopes', summary: 'Envelopes fiscais por filial, município (IBGE) e vigência: o vigente de cada chave e o histórico de publicações', tag: 'Viabilidade', ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const rows = await app.db.select({ e: s.fiscalEnvelopes, by: s.users.name, branch: s.salesBranches.name }).from(s.fiscalEnvelopes)
+        .leftJoin(s.users, eq(s.users.id, s.fiscalEnvelopes.createdBy)).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.fiscalEnvelopes.branchId))
+        .where(eq(s.fiscalEnvelopes.tenantId, auth.tenantId)).orderBy(desc(s.fiscalEnvelopes.createdAt)).limit(500);
+      const seen = new Set<string>();
+      const items = rows.map(({ e, by, branch }) => {
+        const key = `${e.branchId}|${e.ibgeCode}|${e.year}`;
+        const current = !seen.has(key); seen.add(key);
+        return { id: e.id, branchId: e.branchId, branchName: branch, ibgeCode: e.ibgeCode, municipality: e.municipality, year: e.year, regime: regimeOfYear(e.year), values: e.values, createdAt: e.createdAt, createdByName: by, current };
+      });
+      return { items, today: today() };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/viability/envelopes', summary: 'Publica o envelope fiscal de uma chave (filial + município IBGE + ano); a publicação anterior da chave fica no histórico', tag: 'Viabilidade', ...ADMIN,
+    body: z.object({
+      branchId: z.string().uuid(), ibgeCode: z.string().regex(/^\d{7}$/, 'Código IBGE com 7 dígitos'), municipality: z.string().trim().max(80).nullable().optional(), year: z.number().int().min(2020).max(2100),
+      values: z.object({
+        taxes: z.record(z.string(), z.record(z.string(), bp.nullable())),
+        profitTaxBp: bp.nullable(),
+        retentions: z.record(z.string(), bp.nullable()).optional(),
+        note: z.string().trim().max(300).nullable().optional(),
+      }),
+    }),
+    handler: async ({ app, auth, body, req, reply }) => {
+      const [br] = await app.db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(and(eq(s.salesBranches.id, body.branchId), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
+      if (!br) throw unprocessable('Filial não encontrada.');
+      // só os campos do regime da vigência ficam guardados (nulos saem)
+      const clean = (o?: Record<string, number | null>) => Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v != null)) as Record<string, number>;
+      const values: FiscalEnvelopeValues = { taxes: Object.fromEntries(Object.entries(body.values.taxes).map(([k, v]) => [k, clean(v)]).filter(([, v]) => Object.keys(v as object).length)), profitTaxBp: body.values.profitTaxBp, retentions: clean(body.values.retentions), note: body.values.note ?? null };
+      const e = fiscalEnvelopeErrors({ year: body.year, ibgeCode: body.ibgeCode, values });
+      if (e.length) throw unprocessable(e.join(' '));
+      const [v] = await app.db.insert(s.fiscalEnvelopes).values({ tenantId: auth.tenantId, branchId: body.branchId, ibgeCode: body.ibgeCode, municipality: body.municipality ?? null, year: body.year, values: values as unknown as Record<string, unknown>, createdBy: auth.userId }).returning({ id: s.fiscalEnvelopes.id });
+      await audit(app.db, req, { action: 'viability.envelope', entityType: 'viability', entityId: v!.id, metadata: { branchId: body.branchId, ibgeCode: body.ibgeCode, year: body.year, regime: regimeOfYear(body.year), values } });
+      reply.code(201);
+      return { id: v!.id, year: body.year, regime: regimeOfYear(body.year), values };
     },
   }),
 
