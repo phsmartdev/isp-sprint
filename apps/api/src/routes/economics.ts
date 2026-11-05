@@ -1,7 +1,7 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -35,7 +35,7 @@ export const economicsRoutes = [
   defineRoute({
     method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
     body: z.object({
-      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp,
+      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(),
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       variableExpenseBp: bp.nullable().optional(),
       paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean(),
@@ -211,7 +211,7 @@ export const economicsRoutes = [
         return { financeHidden: true, publicSector: ctx.publicSector, saved: ctx.saved, stale, editable: false, history, input: null, items: [], settings: null, settingsVersion: null, branchDocs: [], ...decision, canDecide: false,
           result: savedResult ? { verdict: savedResult.verdict, mode: savedResult.mode, withReservations: savedResult.withReservations, withinPolicy: savedResult.withinPolicy } : null };
       }
-      return { ...rest, financeHidden: false, result: savedResult, stale, history, editable: open, ...decision };
+      return { ...rest, financeHidden: false, result: savedResult, recomendacao_viabilidade: savedResult ? viabilityRecommendationPayload(savedResult.recommendation, savedResult.mode) : null, stale, history, editable: open, ...decision };
     },
   }),
   defineRoute({
@@ -228,7 +228,7 @@ export const economicsRoutes = [
       const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
       await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
-      return { result, history: await economicsHistory(app.db, auth.tenantId, opp.id) };
+      return { result, recomendacao_viabilidade: viabilityRecommendationPayload(result.recommendation, result.mode), history: await economicsHistory(app.db, auth.tenantId, opp.id) };
     },
   }),
   defineRoute({

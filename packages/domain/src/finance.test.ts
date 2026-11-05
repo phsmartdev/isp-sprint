@@ -66,12 +66,14 @@ describe('piso, preço recomendado e indicadores', () => {
     const st = { ...S, tmaMonthlyBp: 150, marginTargetBp: 3500, variableExpenseBp: 500, lossPrivateBp: 200, contingencyOpexBp: 1000 };
     const r = financeEngine({ input, items: items([200_000, 1000]), settings: st, publicSector: false });
     expect(r.term).toMatchObject({ N: 24, Dalvo: 6, D: 6 });
-    // C = 300.000 ÷ 6 + 40.000 × 1,10 = 94.000; D = 1 − (10% + 5% + 35%) = 50% → 188.000
-    near(r.suggestedCents!, 188_000);
-    expect(r.kpi!.marginPct).toBeCloseTo(35, 6);
+    // 3.1: C = parcela da anuidade (300.000 × k(1+k)^6 ÷ ((1+k)^6 − 1), k = 1,5%) + 40.000 × 1,10; D = 1 − (10% + 5% + 35%) = 50%
+    const parc = 300_000 / annuityFactor(0.015, 6);
+    near(parc, (300_000 * 0.015 * 1.015 ** 6) / (1.015 ** 6 - 1), 1e-6);
+    near(r.suggestedCents!, (parc + 44_000) / 0.5);
+    expect(r.kpi!.marginPct).toBeCloseTo(35, 2); // centavos arredondados (preço para cima, parcela no centavo)
     expect(r.decision).toMatchObject({ basis: 'proposto', source: 'itens', priceCents: 200_000 });
     // no proposto (200.000): MC = P − tributos − dv − custo − amortização
-    expect(r.decision!.marginPct).toBeCloseTo(((200_000 - 20_000 - 10_000 - 44_000 - 50_000) / 200_000) * 100, 6);
+    expect(r.decision!.marginPct).toBeCloseTo(((200_000 - 20_000 - 10_000 - 44_000 - parc) / 200_000) * 100, 6);
     const p = evalAt({ input, items: items([200_000, 1000]), settings: st, publicSector: false });
     // fluxo mensal = P − glosa − tributos − despesas variáveis − custos (glosa só aqui)
     const fc = 200_000 - 4_000 - 20_000 - 10_000 - 44_000;
@@ -191,14 +193,16 @@ describe('decisões da diretoria (29/10)', () => {
     expect(b.warnings.join(' ')).toMatch(/acima do teto/);
     // no preço mínimo do payback de 12 meses, o retorno real passa do teto de 6: fora da política
     const atMin = financeEngine({ input: rec({ paybackMonths: 12, priceCents: b.suggestedMinCents }), items: it0, settings: S, publicSector: false });
-    expect(atMin.kpi!.margins!.amortizationCents).toBe(Math.round(atMin.investmentCents! / 12));
+    expect(atMin.kpi!.margins!.amortizationCents).toBe(Math.round(atMin.investmentCents! / annuityFactor(0.015, 12)));
     expect(atMin.paybackOk).toBe(false);
   });
   it('a trava usa o payback descontado: 5,9 meses simples passa de 6 com TMA de 3%', () => {
     // I = 500.000, MC = 85.000/mês → simples 5,88; descontado a 3% passa de 6
     const r = financeEngine({ input: rec(), items: items([85_000, 0]), settings: { ...S, marginTargetBp: 0, tmaMonthlyBp: 300 }, publicSector: false });
-    expect(r.kpi!.simplePaybackMonths!).toBeLessThan(6);
-    expect(r.kpi!.paybackMonths!).toBeGreaterThan(6);
+    expect(r.decision!.priceCents).toBe(85_000);
+    expect(r.decision!.paybackMonths!).toBeGreaterThan(6);
+    // 3.1: no sugerido com margem 0 a parcela da anuidade fecha o payback descontado em exatamente D = 6 meses
+    near(r.kpi!.paybackMonths!, 6, 1e-3);
     expect(r.paybackOk).toBe(false);
     expect(r.verdict === 'fora_politica' || r.verdict === 'abaixo_minimo').toBe(true);
   });
@@ -296,19 +300,26 @@ describe('TMA alta (caso real de 29/10: 50% ao mês)', () => {
 describe('cadeia de margens', () => {
   const rec = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Roteador', qtyMilli: 1000, unitCents: 120_000 }], opex: [{ description: 'Link', qtyMilli: 1000, unitCents: 20_000 }] };
   it('contribuição (com a amortização no payback) → operacional (− glosa − despesas fixas) → líquida (− IR/CSLL)', () => {
-    // P = 100.000, tributos 10%, comissão 5%, custo 20.000, investimento 120.000 em 6 meses → MC = 45.000
+    // P = 100.000, tributos 10%, dv 5%, custo 20.000, investimento 120.000 pela anuidade (TMA 1,5%) em 6 meses
     const r = evalAt({ input: rec, items: items([100_000, 1000]), settings: { ...S, variableExpenseBp: 500, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
     const m = r.kpi!.margins!;
-    expect(r.kpi!.contributionCents).toBe(45_000);
-    expect(m.amortizationCents).toBe(20_000);
+    const am = Math.round(120_000 / annuityFactor(0.015, 6)); // 21.063
+    expect(am).toBe(21_063);
+    expect(m.amortizationCents).toBe(am);
+    expect(r.kpi!.contributionCents).toBe(65_000 - am);
     expect(m.overheadCents).toBe(10_000);
-    expect(m.operatingCents).toBe(35_000);
-    expect(m.incomeTaxCents).toBe(11_900);
-    expect(m.netCents).toBe(23_100);
+    expect(m.operatingCents).toBe(55_000 - am);
+    expect(m.incomeTaxCents).toBe(Math.round((55_000 - am) * 0.34));
+    expect(m.netCents).toBe(55_000 - am - Math.round((55_000 - am) * 0.34));
+    // depois do payback (mês 7) a amortização zera e a margem sobe
+    expect(r.statement!.afterFrom).toBe(7);
+    expect(r.statement!.after).toMatchObject({ amortization: 0, contribution: 65_000, operating: 55_000, incomeTax: 18_700, net: 36_300 });
     const dre = econDre(r, String);
     expect(dre.map((x) => x.label)).toEqual(expect.arrayContaining(['Margem de contribuição', 'Margem operacional', 'IR/CSLL', 'Margem líquida']));
     // no contrato: o investimento sai uma vez; IR mês a mês (meses 1–6 com amortização, 7–12 sem)
-    expect(dre.find((x) => x.label === 'Margem líquida')!.total).toBe(12 * 65_000 - 120_000 - 12 * 10_000 - (6 * 11_900 + 6 * 18_700));
+    const net1 = 55_000 - am - Math.round((55_000 - am) * 0.34);
+    expect(dre.find((x) => x.label === 'Margem líquida')!.total).toBe(6 * net1 + 6 * 36_300);
+    expect(r.statement!.total.net).toBe(6 * net1 + 6 * 36_300);
   });
   it('IR/CSLL só sobre resultado operacional positivo', () => {
     const r = evalAt({ input: rec, items: items([30_000, 1000]), settings: { ...S, overheadBp: 1000, incomeTaxBp: 3400 }, publicSector: false });
@@ -461,5 +472,56 @@ describe('comparativo com o modelo antigo', () => {
     const hi = financeEngine({ input: { ...input, marginTargetBp: 4000 }, items: items([0, 1000]), settings: { ...S, marginTargetBp: 2000, marginMaxBp: 6000 }, publicSector: false });
     expect(hi.suggestedCents!).toBeGreaterThan(lo.suggestedCents!);
     expect(hi.suggestedMinCents).toBe(lo.suggestedMinCents);
+  });
+});
+
+describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alvo', () => {
+  const st: EconSettings = { ...S, tmaMonthlyBp: 150, marginTargetBp: 2000, marginSuggestedBp: 3000, marginMaxBp: 9000, variableExpenseBp: 0, lossPrivateBp: 300, badDebtBp: 100, overheadBp: 2000, incomeTaxBp: 1500 };
+  const input = { ...emptyEconInput(), termMonths: 12, paybackMonths: 3, capex: [{ description: 'Implantação', qtyMilli: 1000, unitCents: 5_847_700 }] };
+  it('parcela do investimento = I × k(1+k)^D ÷ ((1+k)^D − 1); com margem zero o payback descontado fecha em D', () => {
+    const r = financeEngine({ input: { ...input, marginTargetBp: 0 }, items: items([0, 0]), settings: { ...st, marginTargetBp: 0, marginSuggestedBp: 0, lossPrivateBp: 0, badDebtBp: 0 }, publicSector: false });
+    const k = 0.015, P = (5_847_700 * k * (1 + k) ** 3) / ((1 + k) ** 3 - 1);
+    expect(r.kpi!.margins!.amortizationCents).toBe(Math.round(P));
+    near(r.kpi!.paybackMonths!, 3, 1e-3);
+  });
+  it('amortização zera a partir de D+1; DRE consolidada = soma exata dos meses; % com o mesmo sinal do valor', () => {
+    const d = financeEngineDetailed({ input, items: items([0, 1000]), settings: st, publicSector: false });
+    const s = d.result.statement!;
+    expect(s.afterFrom).toBe(4);
+    expect(s.after!.amortization).toBe(0);
+    expect(s.after!.contribution).toBeGreaterThan(s.month.contribution);
+    // MC % do período de amortização = margem escolhida (30%)
+    expect((s.month.contribution / s.month.revenue) * 100).toBeCloseTo(30, 2);
+    // total = 3 meses de amortização + 9 meses sem
+    for (const f of ['revenue', 'tax', 'amortization', 'contribution', 'risk', 'overhead', 'operating', 'incomeTax', 'net'] as const) expect(s.total[f]).toBe(3 * s.month[f]! + 9 * s.after![f]!);
+    expect(s.total.net).toBe(s.total.revenue - s.total.tax - s.total.commission - s.total.opex - s.total.amortization - s.total.risk - s.total.overhead! - s.total.incomeTax!);
+    const dre = econDre(d.result, String);
+    const net = dre.find((x) => x.label === 'Margem líquida')!;
+    expect(net.total).toBe(s.total.net);
+    expect(net.pct!.total).toBeCloseTo((s.total.net! / s.total.revenue) * 100, 10);
+    for (const row of dre.filter((x) => x.pct)) for (const c of ['month', 'after', 'total'] as const) {
+      const v = c === 'total' ? row.total : row[c];
+      if (row.pct![c] != null && v != null) expect(Math.sign(row.pct![c]!)).toBe(Math.sign(v));
+    }
+  });
+  it('recomendação: MO = alvo ÷ (1 − IR); MC = MO + fixas + glosa + inadimplência, tudo dos parâmetros (40% → 71,06%)', () => {
+    const r = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
+    const rc = r.recommendation!;
+    expect(rc.operatingNeededPct!).toBeCloseTo(47.0588, 3);
+    expect(rc.contributionPct!).toBeCloseTo(71.0588, 3);
+    expect(rc.params).toEqual({ overheadPct: 20, glosaPct: 3, badDebtPct: 1, incomeTaxPct: 15 });
+    // 1 − 10% − 0% − 71,06% = 18,94%; preço = (parcela da anuidade) ÷ 18,94%
+    near(rc.priceCents!, (5_847_700 / annuityFactor(0.015, 3)) / (1 - 0.1 - (0.4 / 0.85 + 0.2 + 0.03 + 0.01)), 1);
+    // nesse preço a margem líquida dos meses 1..D fica no alvo
+    const at = evalAt({ input: { ...input, priceCents: rc.priceCents }, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
+    expect(at.kpi!.margins!.netPct!).toBeCloseTo(40, 1);
+    // muda o parâmetro → muda a recomendação (sem valor fixo no código)
+    const r2 = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000, overheadBp: 4000 }, publicSector: false });
+    expect(r2.recommendation!.contributionPct!).toBeCloseTo(91.0588, 3);
+    expect(r2.recommendation!.priceCents).toBeNull();
+    expect(r2.warnings.join(' ')).toMatch(/não cabe no markup/);
+  });
+  it('sem margem líquida alvo nos parâmetros: sem recomendação', () => {
+    expect(financeEngine({ input, items: items([0, 1000]), settings: st, publicSector: false }).recommendation ?? null).toBeNull();
   });
 });
