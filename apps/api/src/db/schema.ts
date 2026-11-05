@@ -1562,6 +1562,8 @@ export const raciSettings = pgTable('raci_settings', {
   tenantId: tenantId(),
   activityKey: text('activity_key').notNull(),
   slaHours: integer('sla_hours'),
+  /** Responsáveis nomeados por letra (R/A/C/I): {R: [{kind:'user'|'actor', id}]}. Letra vazia = vale o papel da matriz. */
+  assignees: jsonb('assignees').$type<import('@isp/domain').RaciAssignees>().notNull().default({}),
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 }, (t) => ({ pk: uniqueIndex('raci_settings_pk').on(t.tenantId, t.activityKey), slaCk: check('raci_settings_sla_ck', sql`sla_hours is null or sla_hours > 0`) }));

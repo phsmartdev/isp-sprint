@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
-  PLAYBOOK_ROLES, PLAYBOOK_ROLE_LABELS, type PlaybookRole,
+  PLAYBOOK_INTERNAL_ROLES, PLAYBOOK_ROLE_LABELS, type PlaybookRole,
 } from '@isp/domain';
 import type { BrandSlot } from '@isp/shared';
 import { api, ApiError, qs } from '../../lib/api';
@@ -258,9 +258,9 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       </fieldset>
       <fieldset>
         <legend className="mb-1 text-sm font-semibold text-ink">Papéis no Playbook Comercial (contratos)</legend>
-        <p className="mb-2 text-xs text-muted">Definem a responsabilidade da pessoa na matriz RACI: quem confere o Cadastro ERP e quem recebe os avisos de cada atividade de contrato (R, A, C, I e escalonamento).</p>
+        <p className="mb-2 text-xs text-muted">Definem a responsabilidade da pessoa na matriz RACI: quem confere o Cadastro ERP e quem recebe os avisos de cada atividade de contrato (R, A, C, I e escalonamento). Financeiro, Operação/T.I., Jurídico e as lideranças são atores externos, cadastrados em Configurações → Responsabilidades de contratos.</p>
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-          {PLAYBOOK_ROLES.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.playbookRoles.includes(x)} onChange={() => set('playbookRoles', form.playbookRoles.includes(x) ? form.playbookRoles.filter((y) => y !== x) : [...form.playbookRoles, x])} /><span className="num w-24 shrink-0 text-xs font-semibold text-muted">{x.replace('_', ' ')}</span>{PLAYBOOK_ROLE_LABELS[x]}</label>)}
+          {PLAYBOOK_INTERNAL_ROLES.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.playbookRoles.includes(x)} onChange={() => set('playbookRoles', form.playbookRoles.includes(x) ? form.playbookRoles.filter((y) => y !== x) : [...form.playbookRoles, x])} /><span className="num w-24 shrink-0 text-xs font-semibold text-muted">{x.replace('_', ' ')}</span>{PLAYBOOK_ROLE_LABELS[x]}</label>)}
         </div>
       </fieldset>
       {user && (

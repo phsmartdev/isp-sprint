@@ -8,7 +8,8 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import {
-  NOTIFY_EVENT_LABELS, RACI_LETTER_LABELS, PLAYBOOK_ROLE_LABELS, escalationReached, normalizeNotifyRules, raciRow, rolesToNotify,
+  NOTIFY_EVENT_LABELS, RACI_LETTER_LABELS, PLAYBOOK_ROLE_LABELS, escalationReached, letterSource, normalizeAssignees, normalizeNotifyRules, raciRow, rolesToNotify,
+  type RaciPerson,
   type NotifyEvent, type NotifyRules, type PlaybookRole, type RaciLetter,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -43,17 +44,34 @@ async function holdersOf(db: DbOrTx, tenantId: string, roles: PlaybookRole[], le
 
 type Task = typeof s.activities.$inferSelect;
 
+/** Pessoas indicadas nominalmente numa atividade (ativas). */
+async function peopleOf(db: DbOrTx, tenantId: string, people: RaciPerson[], letter: RaciLetter): Promise<Recipient[]> {
+  const uIds = people.filter((p) => p.kind === 'user').map((p) => p.id), aIds = people.filter((p) => p.kind === 'actor').map((p) => p.id);
+  const [us, as] = await Promise.all([
+    uIds.length ? db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), inArray(s.users.id, uIds))) : [],
+    aIds.length ? db.select().from(s.contractExternalActors).where(and(eq(s.contractExternalActors.tenantId, tenantId), eq(s.contractExternalActors.active, true), inArray(s.contractExternalActors.id, aIds))) : [],
+  ]);
+  return [
+    ...us.map((u) => ({ kind: 'user' as const, id: u.id, name: u.name, email: u.email, phone: u.phone, channels: ['email' as const], letter, role: null })),
+    ...as.map((a) => ({ kind: 'actor' as const, id: a.id, name: a.name, email: a.email, phone: a.whatsapp, channels: a.channels.filter((c): c is 'email' | 'whatsapp' => c === 'email' || c === 'whatsapp'), letter, role: null })),
+  ];
+}
+
 async function recipientsFor(db: DbOrTx, task: Task, letters: readonly RaciLetter[]): Promise<Recipient[]> {
   const row = raciRow(task.raciKey);
+  const [cfg] = row ? await db.select({ assignees: s.raciSettings.assignees }).from(s.raciSettings).where(and(eq(s.raciSettings.tenantId, task.tenantId), eq(s.raciSettings.activityKey, row.key))).limit(1) : [];
+  const assignees = normalizeAssignees(cfg?.assignees);
   const out: Recipient[] = [];
   for (const { letter, roles } of rolesToNotify(row, letters)) {
+    const src = letterSource(assignees, letter);
     if (letter === 'R') {
-      // R é quem executa: o dono da tarefa (e atores externos do papel R, que não têm tarefa no sistema)
+      // R é quem executa: o dono da tarefa, mais os indicados na atividade (ou os atores externos do papel R)
       const [u] = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone }).from(s.users).where(eq(s.users.id, task.ownerId)).limit(1);
       if (u) out.push({ kind: 'user', id: u.id, name: u.name, email: u.email, phone: u.phone, channels: ['email'], letter: 'R', role: null });
-      out.push(...(await holdersOf(db, task.tenantId, roles, 'R')).filter((x) => x.kind === 'actor'));
+      out.push(...(src.by === 'pessoas' ? await peopleOf(db, task.tenantId, src.people, 'R') : (await holdersOf(db, task.tenantId, roles, 'R')).filter((x) => x.kind === 'actor')));
       continue;
     }
+    if (src.by === 'pessoas') { out.push(...(await peopleOf(db, task.tenantId, src.people, letter))); continue; }
     if (!row && letter === 'A' && task.contractId) {
       // atividade fora da matriz: o A é o responsável administrativo do contrato (ou o comercial)
       const [c] = await db.select({ a: s.contracts.adminOwnerId, c: s.contracts.commercialOwnerId }).from(s.contracts).where(eq(s.contracts.id, task.contractId)).limit(1);

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   LEAD_STATUSES, OPPORTUNITY_REASONS, LOSS_REASONS, ACTIVITY_TYPES, ACTIVITY_PRIORITIES, SEGMENTS, CUSTOMER_LIFECYCLES,
-  MODULES, ACCESS_LEVELS, PROFILE_KEYS, SECTORS, PLAYBOOK_ROLES,
+  MODULES, ACCESS_LEVELS, PROFILE_KEYS, SECTORS, PLAYBOOK_INTERNAL_ROLES,
 } from '@isp/domain';
 
 const trimmed = (max: number) => z.string().trim().max(max);
@@ -266,7 +266,7 @@ export const UserCreate = z.object({
   teamIds: z.array(uuid).max(20).default([]),
   leadTeamIds: z.array(uuid).max(20).default([]),
   sectors: z.array(z.enum(SECTORS)).max(10).default([]),
-  playbookRoles: z.array(z.enum(PLAYBOOK_ROLES)).max(13).default([]),
+  playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).default([]),
 });
 export const UserUpdate = z.object({
   name: trimmed(120).min(2).optional(),
@@ -284,7 +284,7 @@ export const UserUpdate = z.object({
   goalLeads: z.number().int().min(0).max(100_000).optional(),
   sectors: z.array(z.enum(SECTORS)).max(10).optional(),
   /** papéis do Playbook Comercial (contratos) que a pessoa ocupa */
-  playbookRoles: z.array(z.enum(PLAYBOOK_ROLES)).max(13).optional(),
+  playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).optional(),
 });
 const ProductCommission = z.object({ kind: z.enum(['percent', 'fixo']), value: z.number().int().min(0).max(10_000_000) }).nullable().default(null);
 export const PlanProductItem = z.object({
