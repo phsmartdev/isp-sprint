@@ -11,7 +11,7 @@ import { ContractForm, formFrom, payloadOf, type FormState } from '../../feature
 import { errMsg, type Version } from '../../features/contracts/shared';
 
 type Prefill = {
-  opportunity: { id: string; code: number; title: string; stage: string };
+  opportunity: { id: string; code: number; title: string; stage: string; contactId: string };
   client: { name: string; document: string | null; segment: string; email: string | null; phone: string | null };
   existingContractId: string | null; won: boolean;
   suggestion: { kind: 'publico' | 'privado'; legalRegime: 'privado' | 'lei_14133'; commercialOwnerId: string; version: Partial<Version> };
@@ -69,7 +69,7 @@ export function NewContractPage() {
           )}
         </section>
       )}
-      <ContractForm value={f} onChange={(x) => setF((cur) => ({ ...cur, ...x }))} />
+      <ContractForm value={f} contactId={p?.opportunity.contactId ?? contact?.id ?? null} onChange={(x) => setF((cur) => ({ ...cur, ...x }))} />
       <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t border-line bg-bg/95 py-3 backdrop-blur">
         <Button onClick={() => nav(-1)}>Cancelar</Button>
         <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} loading={create.isPending} disabled={(!oppId && !contact) || !!p?.existingContractId || (p && !p.won) || !f.number.trim() || !f.object.trim() || !f.commercialOwnerId} onClick={() => { setError(null); create.mutate(); }}>Cadastrar contrato</Button>
