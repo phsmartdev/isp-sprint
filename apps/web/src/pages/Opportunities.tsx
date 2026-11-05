@@ -60,8 +60,11 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   // venda fechada/perdida aparece na etapa em que a ação aconteceu, marcada e sem arrastar
   const closed = opp.stage === 'ganha' ? { tone: 'green' as const, label: 'Venda fechada' } : opp.stage === 'perdida' ? { tone: 'red' as const, label: 'Perdida' } : null;
-  const pausedTag = opp.paused ? { tone: 'yellow' as const, label: opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada' } : null;
+  // no cartão compacto a data vai sem o ano quando é o ano corrente (cabe na coluna estreita); a data completa fica no title
+  const untilShort = opp.pausedUntil ? (opp.pausedUntil.slice(0, 4) === String(new Date().getFullYear()) ? fmtDate(opp.pausedUntil).slice(0, 5) : fmtDate(opp.pausedUntil)) : null;
+  const pausedTag = opp.paused ? { tone: 'yellow' as const, label: opp.pausedUntil ? `Pausada até ${compact ? untilShort : fmtDate(opp.pausedUntil)}` : 'Pausada', title: opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}${opp.pauseReason ? ` · ${opp.pauseReason}` : ''}` : opp.pauseReason ?? undefined } : null;
   const tag = closed ?? pausedTag ?? (opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null);
+  const tagTitle = tag === pausedTag ? pausedTag?.title : tag?.label;
   return (
     <li
       ref={setNodeRef}
@@ -97,7 +100,7 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
             <span className="min-w-0 flex-1 truncate" title={opp.nextAction ?? undefined}>{opp.nextAction ?? 'Sem tarefa'}</span>
             {opp.nextActionAt && <span className="num shrink-0 whitespace-nowrap">{fmtRelativeShort(opp.nextActionAt)}</span>}
           </div>
-          {tag && <div className="mt-1"><Chip tone={tag.tone}>{tag.label}</Chip></div>}
+          {tag && <div className="mt-1 min-w-0"><Chip tone={tag.tone} title={tagTitle} className="max-w-full !whitespace-normal break-words !px-1.5 !py-0.5 text-left !text-2xs leading-tight">{tag.label}</Chip></div>}
         </>
       ) : (<>
       <div className="flex items-start gap-2">
@@ -127,7 +130,7 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
         </div>
       )}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        {tag ? <Chip tone={tag.tone}>{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
+        {tag ? <Chip tone={tag.tone} title={tagTitle} className="max-w-full !whitespace-normal break-words text-left">{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
         <span className={clsx('ml-auto shrink-0 whitespace-nowrap text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
       </div>
       </>)}
