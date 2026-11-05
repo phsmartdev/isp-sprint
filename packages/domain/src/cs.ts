@@ -303,3 +303,22 @@ export const CS_ALERT_KEYS: Record<string, string> = {
   upgrade_identificado: 'Upgrade identificado', expansao_sem_acao: 'Potencial de expansão sem ação', negociacao_sem_acompanhamento: 'Negociação sem acompanhamento', mudanca_ipc: 'Mudança relevante no IPC',
   aumento_criticidade: 'Aumento de criticidade', queda_saude: 'Queda de saúde', ocorrencia_relevante: 'Ocorrência relevante', risco_cancelamento: 'Risco de cancelamento', ipc_revisao: 'Revisão do IPC', satisfacao_desatualizada: 'Satisfação desatualizada',
 };
+
+// ------------------------------------------------------------------ apresentação de kickoff
+/** Tabelas que um slide pode puxar dos dados do CRM (em vez da tabela digitada). */
+export const SLIDE_TABLE_SOURCES = ['produtos', 'marcos'] as const;
+export type SlideTableSource = (typeof SLIDE_TABLE_SOURCES)[number];
+export const SLIDE_TABLE_SOURCE_LABELS: Record<SlideTableSource, string> = { produtos: 'Produtos e serviços do contrato', marcos: 'Marcos da jornada (cronograma)' };
+/** Área padrão das informações no slide (abaixo do título), em %. */
+export const DEFAULT_SLIDE_FRAME = { x: 5, y: 20, w: 90, h: 68 } as const;
+/**
+ * Quantas linhas de tabela cabem no frame. Tamanhos em % da largura do slide (16:9 → altura = 56,25% da largura):
+ * cabeçalho e linhas têm altura fixa; com corte, sobra uma linha para o aviso "ver lista completa".
+ */
+export function slideTableFit(frameH: number, total: number, rowH = 2.7, headH = 3.1) {
+  const avail = (frameH / 100) * 56.25 - headH;
+  const all = Math.max(0, Math.floor(avail / rowH));
+  if (total <= all) return { show: total, cut: 0 };
+  const show = Math.max(1, all - 1);
+  return { show, cut: total - show };
+}

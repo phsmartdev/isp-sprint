@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AlertTriangle, ArrowDown, ArrowUp, CalendarCheck, Check, Copy, Eye, EyeOff, FileDown, Link2, MonitorPlay, Plus, RefreshCw, Route as RouteIcon, Save } from 'lucide-react';
-import { JOURNEY_PHASES, JOURNEY_PHASE_LABELS, type JourneyPhase } from '@isp/domain';
+import { JOURNEY_PHASES, JOURNEY_PHASE_LABELS, SLIDE_TABLE_SOURCES, SLIDE_TABLE_SOURCE_LABELS, type JourneyPhase } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate, fmtDateTime, isoToLocalInput } from '../../lib/format';
 import { Breadcrumb, Button, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
@@ -18,7 +18,7 @@ type Milestone = { id: string; phase: JourneyPhase; key: string; title: string; 
 type Data = {
   journey: { id: string; contactId: string; contractId: string | null; templateName: string; status: string; startedAt: string; isNewCustomer: boolean; kickoffAt: string | null; kickoffNotes: string | null; shared: boolean; shareExpiresAt: string | null };
   client: { id: string; name: string }; contract: { id: string; number: string; endAt: string | null } | null; csmName: string | null; canEdit: boolean;
-  milestones: Milestone[]; presentation: { id: string; version: number; slides: Slide[]; note: string | null; createdAt: string } | null;
+  milestones: Milestone[]; presentation: { id: string; version: number; slides: Slide[]; note: string | null; createdAt: string; branding?: { clientLogo?: string | null } } | null; tables?: Record<string, string[][]>;
   versions: { id: string; version: number; note: string | null; createdAt: string; by: string | null }[]; users: { id: string; name: string }[];
 };
 
@@ -93,14 +93,24 @@ function Editor({ d, onChanged }: { d: Data; onChanged: () => void }) {
   const [note, setNote] = useState('');
   const [tplName, setTplName] = useState('');
   const [shareUrl, setShareUrl] = useState<string | null>(null);
-  useEffect(() => { setSlides(d.presentation?.slides ?? []); setDirty(false); }, [d.presentation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [clientLogo, setClientLogo] = useState<string | null>(d.presentation?.branding?.clientLogo ?? null);
+  const [logoErr, setLogoErr] = useState<string | null>(null);
+  useEffect(() => { setSlides(d.presentation?.slides ?? []); setClientLogo(d.presentation?.branding?.clientLogo ?? null); setDirty(false); }, [d.presentation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ctx = { tables: d.tables, clientLogo };
+  const onLogo = (f: File) => {
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(f.type)) return setLogoErr('Envie PNG, JPG, WebP ou SVG.');
+    if (f.size > 400_000) return setLogoErr('Imagem acima de 400 KB. Use um arquivo menor.');
+    const r = new FileReader();
+    r.onload = () => { setClientLogo(String(r.result)); setLogoErr(null); setDirty(true); };
+    r.readAsDataURL(f);
+  };
   const templates = useQuery({ queryKey: ['cs-slide-templates'], queryFn: () => api<{ items: { id: string; name: string; slides: Slide[] }[] }>('/cs/slide-templates') });
   const cur = slides[sel];
   const pending = useMemo(() => slides.filter((x) => !x.hidden).flatMap((x) => x.pending.map((p) => `${x.title}: ${p}`)), [slides]);
   const upd = (p: Partial<Slide>) => { setSlides(slides.map((x, i) => (i === sel ? { ...x, ...p } : x))); setDirty(true); };
   const move = (dir: -1 | 1) => { const j = sel + dir; if (j < 0 || j >= slides.length) return; const n = [...slides]; [n[sel], n[j]] = [n[j]!, n[sel]!]; setSlides(n); setSel(j); setDirty(true); };
   const save = useMutation({
-    mutationFn: (regenerate: boolean) => api(`/cs/journeys/${d.journey.id}/presentation`, { method: 'POST', body: { slides, note, regenerate } }),
+    mutationFn: (regenerate: boolean) => api(`/cs/journeys/${d.journey.id}/presentation`, { method: 'POST', body: { slides, note, regenerate, branding: { clientLogo } } }),
     onSuccess: (_, regen) => { setNote(''); setDirty(false); onChanged(); toast({ tone: 'success', message: regen ? 'Apresentação regerada com os dados atuais do CRM (nova versão)' : 'Nova versão salva' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -137,7 +147,8 @@ function Editor({ d, onChanged }: { d: Data; onChanged: () => void }) {
         </ol>
         {cur && (
           <div className="space-y-4">
-            <SlideView s={cur} client={d.client.name} />
+            <SlideView s={cur} client={d.client.name} ctx={ctx} onFrame={d.canEdit ? (frame) => upd({ frame }) : undefined} />
+            {d.canEdit && <p className="-mt-2 text-xs text-muted">Arraste o retângulo tracejado para mover a área das informações e o canto para mudar o tamanho. Título, marca da BK e marca do cliente ficam fora dela.{cur.frame ? <> <button type="button" className="font-semibold text-primary hover:underline" onClick={() => upd({ frame: null })}>Restaurar área padrão</button></> : null}</p>}
             {d.canEdit && (
               <div className="card space-y-3 p-4">
                 <div className="flex flex-wrap items-end gap-3">
@@ -150,7 +161,19 @@ function Editor({ d, onChanged }: { d: Data; onChanged: () => void }) {
                   </div>
                 </div>
                 {cur.layout === 'tabela' ? (
-                  <FormField label="Tabela (uma linha por registro; colunas separadas por ;)" htmlFor="sl-table"><Textarea id="sl-table" rows={8} value={(cur.table ?? []).map((r) => r.join(' ; ')).join('\n')} onChange={(e) => upd({ table: e.target.value.split('\n').map((l) => l.split(';').map((c) => c.trim())) })} /></FormField>
+                  <div className="space-y-3">
+                    <FormField label="Origem da tabela" htmlFor="sl-src" hint="Pelas variáveis, a tabela acompanha o CRM (contrato e jornada) sempre que for apresentada.">
+                      <Select id="sl-src" value={cur.source ?? ''} onChange={(e) => upd({ source: (e.target.value || null) as Slide['source'] })}>
+                        <option value="">Manual (digitada ou colada do Excel)</option>
+                        {SLIDE_TABLE_SOURCES.map((k) => <option key={k} value={k}>{SLIDE_TABLE_SOURCE_LABELS[k]}</option>)}
+                      </Select>
+                    </FormField>
+                    {cur.source ? (
+                      <p className="text-sm text-muted">{(d.tables?.[cur.source]?.length ?? 1) - 1} linha(s) vindas do CRM. Se passar do tamanho da área, o slide mostra o que cabe e oferece a lista completa em PDF.</p>
+                    ) : (
+                      <FormField label="Tabela manual (1ª linha = títulos; colunas separadas por ; ou coladas do Excel)" htmlFor="sl-table"><Textarea id="sl-table" rows={8} value={(cur.table ?? []).map((r) => r.join(' ; ')).join('\n')} onChange={(e) => upd({ table: e.target.value.split('\n').map((l) => l.split(l.includes('\t') ? '\t' : ';').map((c) => c.trim())) })} /></FormField>
+                    )}
+                  </div>
                 ) : (
                   <FormField label={cur.layout === 'duas_colunas' ? 'Conteúdo (separe as colunas com uma linha só com |; tópicos começam com "- ")' : 'Conteúdo (tópicos começam com "- ")'} htmlFor="sl-body"><Textarea id="sl-body" rows={8} value={cur.body} onChange={(e) => upd({ body: e.target.value })} /></FormField>
                 )}
@@ -163,6 +186,15 @@ function Editor({ d, onChanged }: { d: Data; onChanged: () => void }) {
       {d.canEdit && (
         <div className="card flex flex-wrap items-end gap-3 p-4">
           <FormField label="Descrição da versão" htmlFor="sl-note" className="min-w-[240px] flex-1"><Input id="sl-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: ajustes após revisão com o comercial" /></FormField>
+          <div className="flex items-end gap-2">
+            <FormField label="Marca do cliente (rodapé, opcional)" htmlFor="sl-logo" error={logoErr ?? undefined}>
+              <span className="flex items-center gap-2">
+                {clientLogo && <img src={clientLogo} alt="Marca do cliente" className="h-9 max-w-[120px] rounded-sm border border-line object-contain p-0.5" />}
+                <label className="inline-flex h-10 cursor-pointer items-center rounded-md border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">{clientLogo ? 'Trocar' : 'Enviar imagem'}<input id="sl-logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogo(f); e.target.value = ''; }} /></label>
+                {clientLogo && <Button variant="ghost" size="sm" onClick={() => { setClientLogo(null); setDirty(true); }}>Remover</Button>}
+              </span>
+            </FormField>
+          </div>
           <Button variant="primary" icon={<Save className="h-4 w-4" />} disabled={!dirty} loading={save.isPending && save.variables === false} onClick={() => save.mutate(false)}>Salvar nova versão</Button>
           <Button variant="secondary" icon={<RefreshCw className="h-4 w-4" />} loading={save.isPending && save.variables === true} onClick={() => save.mutate(true)}>Regerar com dados do CRM</Button>
           {!!templates.data?.items.length && <Select aria-label="Aplicar modelo" className="w-auto" defaultValue="" onChange={(e) => { const t = templates.data!.items.find((x) => x.id === e.target.value); if (t) { setSlides(t.slides.map((x, i) => (i === 0 ? { ...x, body: slides[0]?.body ?? x.body } : x))); setSel(0); setDirty(true); } }}><option value="">Aplicar modelo…</option>{templates.data.items.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select>}
@@ -171,7 +203,7 @@ function Editor({ d, onChanged }: { d: Data; onChanged: () => void }) {
         </div>
       )}
       {d.versions.length > 1 && <details className="card p-4 text-sm"><summary className="cursor-pointer font-semibold text-ink">Versões ({d.versions.length})</summary><ul className="mt-2 space-y-1">{d.versions.map((v) => <li key={v.id}>v{v.version} · {fmtDateTime(v.createdAt)} · {v.by ?? 'Sistema'}{v.note ? ` · ${v.note}` : ''}</li>)}</ul></details>}
-      {presenting && <Presenter slides={slides} client={d.client.name} onClose={() => setPresenting(false)} />}
+      {presenting && <Presenter slides={slides} client={d.client.name} ctx={ctx} onClose={() => setPresenting(false)} />}
     </section>
   );
 }
@@ -227,7 +259,7 @@ export function KickoffPrintPage() {
   return (
     <div className="mx-auto max-w-[1100px] space-y-6 bg-white p-4 print:p-0">
       <style>{'@page { size: A4 landscape; margin: 8mm } .cs-slide { break-after: page; }'}</style>
-      {(q.data.presentation?.slides ?? []).filter((x) => !x.hidden).map((x) => <div key={x.id} className="cs-slide"><SlideView s={x} client={q.data!.client.name} /></div>)}
+      {(q.data.presentation?.slides ?? []).filter((x) => !x.hidden).map((x) => <div key={x.id} className="cs-slide"><SlideView s={x} client={q.data!.client.name} ctx={{ tables: q.data!.tables, clientLogo: q.data!.presentation?.branding?.clientLogo ?? null }} /></div>)}
     </div>
   );
 }
@@ -235,7 +267,7 @@ export function KickoffPrintPage() {
 /** Link autorizado para o cliente (sem login). */
 export function PublicKickoffPage() {
   const { token = '' } = useParams();
-  const q = useQuery({ queryKey: ['public-kickoff', token], retry: false, queryFn: () => api<{ client: string; slides: Slide[] }>(`/public/kickoff/${token}`) });
+  const q = useQuery({ queryKey: ['public-kickoff', token], retry: false, queryFn: () => api<{ client: string; slides: Slide[]; tables?: Record<string, string[][]>; branding?: { clientLogo?: string | null } }>(`/public/kickoff/${token}`) });
   const [i, setI] = useState(0);
   if (q.isLoading) return <p className="p-6 text-sm">Carregando…</p>;
   if (q.isError) return <div className="mx-auto max-w-md p-8"><ErrorState error={q.error} /></div>;
@@ -243,7 +275,7 @@ export function PublicKickoffPage() {
   return (
     <div className="min-h-screen bg-navy p-4 sm:p-8">
       <div className="mx-auto max-w-5xl space-y-4">
-        {s[i] && <SlideView s={s[i]!} client={q.data!.client} />}
+        {s[i] && <SlideView s={s[i]!} client={q.data!.client} ctx={{ tables: q.data!.tables, clientLogo: q.data!.branding?.clientLogo ?? null }} />}
         <div className="flex items-center justify-center gap-4 text-white">
           <Button variant="secondary" size="sm" disabled={i === 0} onClick={() => setI(i - 1)}>Anterior</Button>
           <span className="num text-sm">{i + 1} / {s.length}</span>

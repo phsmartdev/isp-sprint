@@ -11,7 +11,7 @@ import type { DbOrTx } from '../db/client';
 import type { AuthContext } from '../http/context';
 import { audit } from '../services/audit';
 import { level, ownerScope } from '../services/scope';
-import { atLeast, milestoneChanges } from '@isp/domain';
+import { CONTRACT_ITEM_KIND_LABELS, JOURNEY_PHASE_LABELS, SLIDE_TABLE_SOURCES, atLeast, itemKindOf, milestoneChanges } from '@isp/domain';
 import { logMilestone } from '../services/journeyTrail';
 import {
   accountIds, addDays, alertsFor, csConfigOf, explain, generateCadence, hashToken, newShareToken, openMilestoneTasks, recomputeAccounts, regenerateKickoff, runCsDaily, snapshotOf, startJourney, syncAlerts, todayIso, type Snapshot,
@@ -57,6 +57,20 @@ async function followUps(db: DbOrTx, tenantId: string, contactIds: string[], fro
       or(and(isNotNull(s.activities.csPlannedAt), gte(s.activities.csPlannedAt, from), lte(s.activities.csPlannedAt, to)), and(isNull(s.activities.csPlannedAt), gte(s.activities.completedAt, new Date(`${from}T00:00:00Z`)), lte(s.activities.completedAt, new Date(`${to}T23:59:59Z`))))));
 }
 const cov = (items: Awaited<ReturnType<typeof followUps>>, tol: number) => coverage(items.map((i) => ({ plannedAt: i.plannedAt ?? '', completedAt: i.completedAt?.toISOString() ?? null, validated: !!i.result, weight: i.weight ?? 1, cadence: !!i.cadenceKey && !!i.plannedAt })), tol);
+
+/** Tabelas pelas variáveis do CRM para os slides: produtos do contrato e marcos da jornada (linha 0 = títulos). */
+async function slideTables(db: DbOrTx, j: { id: string; contractId: string | null }): Promise<Record<string, string[][]>> {
+  const brlOf = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const dOf = (d: string | Date | null) => (d ? new Date(typeof d === 'string' ? `${d.slice(0, 10)}T12:00:00Z` : d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '—');
+  const out: Record<string, string[][]> = {};
+  if (j.contractId) {
+    const [v] = await db.select({ items: s.contractVersions.items }).from(s.contracts).innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion))).where(eq(s.contracts.id, j.contractId)).limit(1);
+    out.produtos = [['Item', 'Qtd.', 'Valor unitário', 'Classificação', 'Total'], ...(v?.items ?? []).map((i) => [i.description, String(i.qty), brlOf(i.unitCents), CONTRACT_ITEM_KIND_LABELS[itemKindOf(i)], brlOf(i.qty * i.unitCents)])];
+  }
+  const ms = await db.select({ title: s.csMilestones.title, phase: s.csMilestones.phase, plannedAt: s.csMilestones.plannedAt, doneAt: s.csMilestones.doneAt }).from(s.csMilestones).where(eq(s.csMilestones.journeyId, j.id)).orderBy(asc(s.csMilestones.position));
+  out.marcos = [['Marco', 'Fase', 'Previsto', 'Situação'], ...ms.map((m) => [m.title, JOURNEY_PHASE_LABELS[m.phase as keyof typeof JOURNEY_PHASE_LABELS] ?? m.phase, dOf(m.plannedAt), m.doneAt ? `Concluído em ${dOf(m.doneAt)}` : 'Previsto'])];
+  return out;
+}
 
 export const csRoutes = [
   // ------------------------------------------------------------------ configuração
@@ -570,7 +584,7 @@ export const csRoutes = [
       const [contract] = j.contractId ? await app.db.select({ id: s.contracts.id, number: s.contractVersions.number, endAt: s.contractVersions.endAt }).from(s.contracts).innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion))).where(eq(s.contracts.id, j.contractId)).limit(1) : [];
       const [csm] = j.csmId ? await app.db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, j.csmId)).limit(1) : [];
       const users = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name));
-      return { journey: { ...j, shareTokenHash: undefined, shared: !!j.shareTokenHash && !!j.shareExpiresAt && j.shareExpiresAt > new Date() }, client: x.contact, contract: contract ?? null, csmName: csm?.name ?? null, canEdit: x.canEdit, milestones: ms.map(({ m, owner }) => ({ ...m, ownerName: owner })), presentation: cur ?? null, versions, users };
+      return { journey: { ...j, shareTokenHash: undefined, shared: !!j.shareTokenHash && !!j.shareExpiresAt && j.shareExpiresAt > new Date() }, client: x.contact, contract: contract ?? null, csmName: csm?.name ?? null, canEdit: x.canEdit, milestones: ms.map(({ m, owner }) => ({ ...m, ownerName: owner })), presentation: cur ?? null, versions, users, tables: await slideTables(app.db, j) };
     },
   }),
   defineRoute({
@@ -594,14 +608,27 @@ export const csRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/cs/journeys/:id/presentation', summary: 'Salva nova versão da apresentação (não altera os dados oficiais do contrato)', tag: 'Sucesso do Cliente', module: 'clientes', params: IdParams, bodyLimit: 2_000_000,
-    body: z.object({ slides: z.array(z.object({ id: z.string().max(60), key: z.string().max(60), title: z.string().max(200), layout: z.enum(['capa', 'texto', 'duas_colunas', 'tabela', 'encerramento']), body: z.string().max(8000), table: z.array(z.array(z.string().max(500)).max(8)).max(40).optional(), hidden: z.boolean(), pending: z.array(z.string().max(200)).max(40) })).min(1).max(60), note: z.string().trim().max(300).default(''), regenerate: z.boolean().default(false) }),
+    body: z.object({
+      slides: z.array(z.object({
+        id: z.string().max(60), key: z.string().max(60), title: z.string().max(200), layout: z.enum(['capa', 'texto', 'duas_colunas', 'tabela', 'encerramento']), body: z.string().max(8000),
+        table: z.array(z.array(z.string().max(500)).max(12)).max(300).optional(), hidden: z.boolean(), pending: z.array(z.string().max(200)).max(40),
+        /** área das informações no slide, em % (x, y, largura, altura) */
+        frame: z.object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100), w: z.number().min(5).max(100), h: z.number().min(5).max(100) }).nullable().optional(),
+        /** tabela pelas variáveis do CRM (produtos do contrato, marcos da jornada) em vez da tabela manual */
+        source: z.enum(SLIDE_TABLE_SOURCES).nullable().optional(),
+      })).min(1).max(60),
+      branding: z.object({ clientLogo: z.string().max(600_000).regex(/^data:image\/(png|jpeg|webp|svg\+xml);base64,/, 'Envie PNG, JPG, WebP ou SVG').nullable().optional() }).optional(),
+      note: z.string().trim().max(300).default(''), regenerate: z.boolean().default(false),
+    }),
     handler: async ({ app, auth, params, body, reply }) => {
       const [j] = await app.db.select().from(s.csJourneys).where(and(eq(s.csJourneys.id, params.id), eq(s.csJourneys.tenantId, auth.tenantId))).limit(1);
       if (!j) throw notFound('Jornada não encontrada.');
       requireEdit(await account(app.db, auth, j.contactId));
       if (body.regenerate) { await regenerateKickoff(app.db, auth.tenantId, j.id, auth.userId, body.note || 'Regerada com os dados atuais do CRM'); reply.code(201); return { ok: true }; }
       const [last] = await app.db.select({ v: s.csPresentations.version }).from(s.csPresentations).where(eq(s.csPresentations.journeyId, j.id)).orderBy(desc(s.csPresentations.version)).limit(1);
-      await app.db.insert(s.csPresentations).values({ tenantId: auth.tenantId, journeyId: j.id, version: (last?.v ?? 0) + 1, slides: body.slides as unknown as Record<string, unknown>[], note: body.note || null, createdBy: auth.userId });
+      const [prev] = await app.db.select({ branding: s.csPresentations.branding }).from(s.csPresentations).where(eq(s.csPresentations.journeyId, j.id)).orderBy(desc(s.csPresentations.version)).limit(1);
+      const branding = body.branding ?? prev?.branding ?? {};
+      await app.db.insert(s.csPresentations).values({ tenantId: auth.tenantId, journeyId: j.id, version: (last?.v ?? 0) + 1, slides: body.slides as unknown as Record<string, unknown>[], branding, note: body.note || null, createdBy: auth.userId });
       reply.code(201);
       return { version: (last?.v ?? 0) + 1 };
     },
@@ -674,8 +701,9 @@ export const csRoutes = [
     handler: async ({ app, params }) => {
       const [j] = await app.db.select({ id: s.csJourneys.id, exp: s.csJourneys.shareExpiresAt, client: s.contacts.name }).from(s.csJourneys).innerJoin(s.contacts, eq(s.contacts.id, s.csJourneys.contactId)).where(eq(s.csJourneys.shareTokenHash, hashToken(params.token))).limit(1);
       if (!j || !j.exp || j.exp < new Date()) throw new AppError(404, 'Link expirado ou inválido', 'Peça um novo link ao seu gerente de sucesso.');
-      const [p] = await app.db.select({ slides: s.csPresentations.slides }).from(s.csPresentations).where(eq(s.csPresentations.journeyId, j.id)).orderBy(desc(s.csPresentations.version)).limit(1);
-      return { client: j.client, slides: ((p?.slides ?? []) as { hidden?: boolean }[]).filter((x) => !x.hidden).map((x) => ({ ...x, pending: [] })) };
+      const [p] = await app.db.select({ slides: s.csPresentations.slides, branding: s.csPresentations.branding }).from(s.csPresentations).where(eq(s.csPresentations.journeyId, j.id)).orderBy(desc(s.csPresentations.version)).limit(1);
+      const [jj] = await app.db.select().from(s.csJourneys).where(eq(s.csJourneys.id, j.id)).limit(1);
+      return { client: j.client, slides: ((p?.slides ?? []) as { hidden?: boolean }[]).filter((x) => !x.hidden).map((x) => ({ ...x, pending: [] })), branding: p?.branding ?? {}, tables: await slideTables(app.db, jj!) };
     },
   }),
 ];

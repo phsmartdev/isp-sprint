@@ -694,6 +694,13 @@
       "when": 1793904717061,
       "tag": "0098_aditivo_varias_finalidades",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1793906935542,
+      "tag": "0099_apresentacao_marca_cliente",
+      "breakpoints": true
     }
   ]
 }

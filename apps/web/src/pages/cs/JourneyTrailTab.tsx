@@ -10,6 +10,7 @@ import { fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
+import { PublicShell } from '../../components/layout/PublicShell';
 import { JourneyPresenter, JourneyTrail, TrailLegend, type TrailData, type TrailStop } from '../../features/cs/JourneyTrail';
 
 type Ev = { id: string; milestoneId: string; type: MilestoneEventType; payload: { from?: unknown; to?: unknown; via?: string; reconstituido?: boolean }; actorName: string; fromName?: string | null; toName?: string | null; createdAt: string };
@@ -181,7 +182,7 @@ export function PublicJourneyPage() {
     onSuccess: (r) => { setErr(null); setUnlocked(r); },
     onError: (e) => setErr(e instanceof ApiError ? (e.problem.detail ?? e.problem.title) : 'Não foi possível validar o código.'),
   });
-  const shell = (body: React.ReactNode) => <div className="min-h-screen bg-bg"><header className="bg-navy px-4 py-4 sm:px-8"><p className="font-display text-lg font-bold text-white">BKT</p></header><main className="mx-auto max-w-6xl p-4 sm:p-8">{body}</main></div>;
+  const shell = (body: React.ReactNode) => <PublicShell kicker="Jornada do cliente" width="max-w-6xl">{body}</PublicShell>;
   if (q.isLoading) return shell(<LoadingRows rows={4} />);
   if (q.isError) return shell(<div className="mx-auto max-w-md"><ErrorState error={q.error} /></div>);
   const r = unlocked ?? (q.data!.needsCode ? null : q.data!);
