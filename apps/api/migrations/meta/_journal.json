@@ -652,6 +652,13 @@
       "when": 1793847698256,
       "tag": "0092_rastreio_abertura",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1793878563795,
+      "tag": "0093_responsaveis_por_atividade",
+      "breakpoints": true
     }
   ]
 }

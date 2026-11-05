@@ -71,13 +71,13 @@ describe('Playbook: matriz RACI, titulares em aberto e SLA', () => {
     ok(await carlos.put('/contract-playbook/sla/cadastro_erp', { slaHours: 48 }));
     expect((await carlos.put('/contract-playbook/sla/inexistente', { slaHours: 4 })).statusCode).toBe(404);
     // ator externo: papéis e canais; o canal exige o contato
-    expect((await carlos.post('/contract-external-actors', { name: 'Diretor Fictício', roles: ['DIR'], channels: ['email'] })).statusCode).toBe(422);
-    const ext = ok(await carlos.post('/contract-external-actors', { name: 'Diretor Fictício', organization: 'Holding Fictícia', email: 'diretor@ficticio.test', roles: ['DIR'], channels: ['email'] }), 201).json();
+    expect((await carlos.post('/contract-external-actors', { name: 'Jurídico Fictício', roles: ['JUR'], channels: ['email'] })).statusCode).toBe(422);
+    const ext = ok(await carlos.post('/contract-external-actors', { name: 'Jurídico Fictício', organization: 'Escritório Fictício', email: 'juridico@ficticio.test', roles: ['JUR'], channels: ['email'] }), 201).json();
     expect((await lucas.post('/contract-external-actors', { name: 'X Fictício', roles: [] })).statusCode).toBe(403);
     const after = ok(await carlos.get('/contract-playbook')).json();
-    expect(after.roles.find((r: { key: string }) => r.key === 'DIR').actors[0]).toMatchObject({ name: 'Diretor Fictício', channels: ['email'] });
-    ok(await carlos.put(`/contract-external-actors/${ext.id}`, { name: 'Diretor Fictício', roles: ['DIR'], channels: [], active: false }));
-    expect(ok(await carlos.get('/contract-playbook')).json().roles.find((r: { key: string }) => r.key === 'DIR').actors).toHaveLength(0);
+    expect(after.roles.find((r: { key: string }) => r.key === 'JUR').actors[0]).toMatchObject({ name: 'Jurídico Fictício', channels: ['email'] });
+    ok(await carlos.put(`/contract-external-actors/${ext.id}`, { name: 'Jurídico Fictício', roles: ['JUR'], channels: [], active: false }));
+    expect(ok(await carlos.get('/contract-playbook')).json().roles.find((r: { key: string }) => r.key === 'JUR').actors).toHaveLength(0);
   });
 
   it('tarefa transferida exige aceite; devolver volta para quem enviou; SLA da atividade vira prazo; evidência para concluir', async () => {

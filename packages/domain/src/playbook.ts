@@ -26,6 +26,14 @@ export const PLAYBOOK_ROLE_LABELS: Record<PlaybookRole, string> = {
   RESP_JURIDICO: 'Responsável Jurídico',
 };
 
+/**
+ * Decisão de 05/11/2026: estes papéis são ocupados por ATORES EXTERNOS (sem login), cadastrados em Configurações →
+ * Responsabilidades de contratos. Os demais (internos) ficam no cadastro do usuário.
+ */
+export const PLAYBOOK_EXTERNAL_ROLES = ['FIN', 'OP', 'JUR', 'LID_TECNICA', 'LID_FINANCEIRO', 'LID_OP', 'RESP_JURIDICO'] as const satisfies readonly PlaybookRole[];
+export const PLAYBOOK_INTERNAL_ROLES = ['GC', 'SC', 'ANC', 'ASC', 'CS', 'DIR'] as const satisfies readonly PlaybookRole[];
+export const isExternalRole = (r: PlaybookRole) => (PLAYBOOK_EXTERNAL_ROLES as readonly string[]).includes(r);
+
 export const RACI_PHASES = ['formalizacao', 'cadastro_ativacao', 'vigencia', 'financeira', 'encerramento'] as const;
 export type RaciPhase = (typeof RACI_PHASES)[number];
 export const RACI_PHASE_LABELS: Record<RaciPhase, string> = {
@@ -166,4 +174,31 @@ export function rolesToNotify(row: RaciRow | null, letters: readonly RaciLetter[
 /** Níveis de escalonamento já atingidos por uma atividade vencida há `overdueHours`. */
 export function escalationReached(overdueHours: number, levels: readonly EscalationLevel[]) {
   return levels.map((l, i) => ({ ...l, index: i })).filter((l) => overdueHours >= l.afterHours);
+}
+
+// ------------------------------------------------------------------ responsáveis nomeados por atividade
+/** Pessoa indicada numa letra da RACI de uma atividade: usuário do sistema ou ator externo. */
+export type RaciPerson = { kind: 'user' | 'actor'; id: string };
+/** Responsáveis nomeados por letra. Letra sem ninguém indicado = vale quem ocupa o papel da matriz. */
+export type RaciAssignees = Partial<Record<RaciLetter, RaciPerson[]>>;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function normalizeAssignees(v: unknown): RaciAssignees {
+  const x = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const out: RaciAssignees = {};
+  for (const l of RACI_LETTERS) {
+    const arr = Array.isArray(x[l]) ? (x[l] as unknown[]) : [];
+    const seen = new Set<string>();
+    const list = arr.filter((p): p is RaciPerson => !!p && typeof p === 'object' && ((p as RaciPerson).kind === 'user' || (p as RaciPerson).kind === 'actor') && UUID.test(String((p as RaciPerson).id)))
+      .map((p) => ({ kind: p.kind, id: p.id.toLowerCase() }))
+      .filter((p) => (seen.has(`${p.kind}:${p.id}`) ? false : (seen.add(`${p.kind}:${p.id}`), true)));
+    if (list.length) out[l] = l === 'A' ? list.slice(0, 1) : list.slice(0, 10);
+  }
+  return out;
+}
+
+/** Fonte de quem recebe numa letra: as pessoas indicadas na atividade, ou (sem indicação) os titulares dos papéis. */
+export function letterSource(assignees: RaciAssignees, letter: RaciLetter): { by: 'pessoas'; people: RaciPerson[] } | { by: 'papel' } {
+  const p = assignees[letter];
+  return p && p.length ? { by: 'pessoas', people: p } : { by: 'papel' };
 }

@@ -26,6 +26,7 @@ afterAll(async () => {
   await carlos.put('/admin/smtp', { host: 'smtp.exemplo.test', port: 587, secure: false, username: 'u', fromName: 'Yepnet', fromEmail: 'contratos@yepnet.test', replyTo: null, enabled: false });
   setTransportFactory(null);
   await ctx.db.execute(sql`update users set playbook_roles = '{}'`);
+  await ctx.db.execute(sql`update raci_settings set assignees = '{}'::jsonb`);
   await ctx.db.execute(sql`update contract_external_actors set active = false`);
   await ctx.close();
 });
@@ -35,9 +36,12 @@ describe('responsabilidades no cadastro do usuário e atores externos', () => {
     ok(await carlos.patch(`/admin/users/${ana.me.user.id}`, { playbookRoles: ['SC'] }));
     ok(await carlos.patch(`/admin/users/${carlos.me.user.id}`, { playbookRoles: ['GC'] }));
     expect((await carlos.patch(`/admin/users/${ana.me.user.id}`, { playbookRoles: ['XYZ'] })).statusCode).toBe(422);
+    expect((await carlos.patch(`/admin/users/${ana.me.user.id}`, { playbookRoles: ['FIN'] })).statusCode).toBe(422); // FIN é ator externo
+    expect((await carlos.post('/contract-external-actors', { name: 'Diretor Fictício', roles: ['DIR'], channels: [] })).statusCode).toBe(422); // DIR é interno
     actorId = ok(await carlos.post('/contract-external-actors', { name: 'Financeiro Terceirizado Fictício', organization: 'Contabilidade Fictícia', email: 'fin@terceiro.test', whatsapp: '(79) 99999-1111', roles: ['FIN'], channels: ['email', 'whatsapp'] }), 201).json().id;
     const p = ok(await lucas.get('/contract-playbook')).json();
     expect(p.roles.find((r: { key: string }) => r.key === 'SC').users.map((u: { name: string }) => u.name)).toEqual(['Ana Souza']);
+    expect(p.roles.filter((r: { external: boolean }) => r.external).map((r: { key: string }) => r.key)).toEqual(['FIN', 'OP', 'JUR', 'LID_TECNICA', 'LID_FINANCEIRO', 'LID_OP', 'RESP_JURIDICO']);
     expect(p.roles.find((r: { key: string }) => r.key === 'FIN').actors[0]).toMatchObject({ name: 'Financeiro Terceirizado Fictício', channels: ['email', 'whatsapp'] });
     expect(p.actors[0].email).toBeUndefined(); // contato do ator só para quem parametriza
     expect(p.rules).toMatchObject({ events: { criada: ['R'], vencida: ['R', 'A'], concluida: ['A', 'I'] }, dueSoonHours: null, escalation: [] });
@@ -103,6 +107,23 @@ describe('avisos por nível de responsabilidade com confirmação de recebimento
     ok(await lucas.patch(`/tasks/${taskId}`, { status: 'concluida', rowVersion: t.rowVersion }));
     const n = ok(await carlos.get(`/tasks/${taskId}/notices`)).json().items as { recipientName: string; event: string; raciLetter: string }[];
     expect(n.filter((x) => x.event === 'concluida').map((x) => `${x.recipientName}|${x.raciLetter}`).sort()).toEqual(['Ana Souza|A', 'Carlos Silva|I']);
+  });
+});
+
+describe('responsáveis nomeados por ação', () => {
+  it('indicar pessoas numa letra substitui o papel da matriz nos avisos; A é uma pessoa só', async () => {
+    expect((await lucas.put('/contract-playbook/assignees/cadastro_erp', { assignees: {} })).statusCode).toBe(403);
+    expect((await carlos.put('/contract-playbook/assignees/cadastro_erp', { assignees: { A: [{ kind: 'user', id: carlos.me.user.id }, { kind: 'user', id: ana.me.user.id }] } })).statusCode).toBe(422);
+    expect((await carlos.put('/contract-playbook/assignees/nao_existe', { assignees: {} })).statusCode).toBe(404);
+    expect((await carlos.put('/contract-playbook/assignees/cadastro_erp', { assignees: { C: [{ kind: 'actor', id: '00000000-0000-4000-8000-000000000000' }] } })).statusCode).toBe(422);
+    ok(await carlos.put('/contract-playbook/assignees/cadastro_erp', { assignees: { A: [{ kind: 'user', id: carlos.me.user.id }], C: [], I: [{ kind: 'actor', id: actorId }] } }));
+    const row = ok(await carlos.get('/contract-playbook')).json().matrix.find((x: { key: string }) => x.key === 'cadastro_erp');
+    expect(row.assignees).toMatchObject({ A: [{ name: 'Carlos Silva', kind: 'user' }], I: [{ name: 'Financeiro Terceirizado Fictício', kind: 'actor' }] });
+    expect(row.assignees.C).toBeUndefined();
+    const id = ok(await carlos.post('/tasks', { title: 'Cadastrar contrato no ERP (responsáveis)', ownerId: lucas.me.user.id, contractId, raciKey: 'cadastro_erp' }), 201).json().id;
+    const n = ok(await carlos.get(`/tasks/${id}/notices`)).json().items as { recipientName: string; raciLetter: string; channel: string; event: string }[];
+    // criada avisa R, A e C: A agora é Carlos (indicado), não a SC; C segue o papel (FIN = ator externo)
+    expect([...new Set(n.filter((x) => x.event === 'criada').map((x) => `${x.recipientName}|${x.raciLetter}`))].sort()).toEqual(['Carlos Silva|A', 'Financeiro Terceirizado Fictício|C', 'Lucas Lima|R']);
   });
 });
 
