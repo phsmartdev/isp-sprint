@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
-  SECTORS, contractValuesFromItems, reportTermsIssues, type ReportTerms,
+  SECTORS, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
@@ -66,6 +66,16 @@ const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null),
 const UpdateBody = Header.partial().extend({ version: VersionFields.partial().optional(), reason: z.string().trim().max(500).optional() });
 
 /** Datas derivadas: término pelo prazo e renovação prevista no dia seguinte ao término. */
+/** Produtos lançados na oportunidade (com lance, desconto e cobrança); sem itens, os produtos do plano. */
+async function opportunityContractItems(db: DbOrTx, tenantId: string, opportunityId: string, plan: typeof s.plans.$inferSelect | null) {
+  const rows = await db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opportunityId), eq(s.opportunityItems.tenantId, tenantId))).orderBy(asc(s.opportunityItems.position));
+  if (rows.length) return rows.map((r) => contractItemFromOpportunity(r));
+  if (!plan) return [];
+  return plan.products.length
+    ? plan.products.map((p) => ({ planId: plan.id, description: `${plan.invoiceServiceName ?? plan.name} · ${p.name}`, qty: p.qty || 1, unitCents: p.unitPriceCents, recurring: true }))
+    : [{ planId: plan.id, description: plan.invoiceServiceName ?? plan.name, qty: 1, unitCents: plan.priceCents, recurring: true }];
+}
+
 function normalizeVersion<T extends Partial<z.infer<typeof VersionFields>>>(v: T): T {
   const out = { ...v };
   if (out.startAt && out.termMonths && !out.endAt) out.endAt = endFromTerm(out.startAt, out.termMonths);
@@ -145,9 +155,7 @@ export const contractRoutes = [
       if (!o) throw notFound('Oportunidade não encontrada.');
       const [existing] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
       const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
-      const items = plan
-        ? (plan.products.length ? plan.products.map((p) => ({ planId: plan.id, description: `${plan.invoiceServiceName ?? plan.name} · ${p.name}`, qty: p.qty || 1, unitCents: p.unitPriceCents })) : [{ planId: plan.id, description: plan.invoiceServiceName ?? plan.name, qty: 1, unitCents: plan.priceCents }])
-        : [];
+      const items = await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
       const publico = o.segment === 'governamental';
       return {
         opportunity: { id: o.id, code: o.code, stage: o.stage, title: o.title, wonAt: o.wonAt, contactId: o.contactId, customerId: o.customerId },
@@ -156,9 +164,30 @@ export const contractRoutes = [
         won: o.stage === 'ganha',
         suggestion: {
           kind: publico ? 'publico' : 'privado', legalRegime: publico ? 'lei_14133' : 'privado', commercialOwnerId: o.ownerId,
-          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: items.reduce((a, i) => a + i.qty * i.unitCents, 0) || (o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12 },
+          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12 },
         },
       };
+    },
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/contracts/item-sources',
+    summary: 'Oportunidades do cliente com produtos lançados, para trazer os itens ao contrato',
+    tag: 'Contratos',
+    module: 'contratos',
+    query: z.object({ contactId: uuid }),
+    handler: async ({ app, auth, query }) => {
+      const rows = await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage, planId: s.opportunities.planId, updatedAt: s.opportunities.updatedAt })
+        .from(s.opportunities).where(and(eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.contactId, query.contactId), isNull(s.opportunities.deletedAt), canManage(auth) ? undefined : oppVisibility(auth)))
+        .orderBy(desc(s.opportunities.updatedAt)).limit(30);
+      const out = [];
+      for (const o of rows) {
+        const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
+        const items = await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
+        if (items.length) out.push({ id: o.id, code: o.code, title: o.title, stage: o.stage, items });
+      }
+      return { items: out };
     },
   }),
 

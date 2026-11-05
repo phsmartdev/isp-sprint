@@ -57,3 +57,31 @@ describe('itens da oportunidade', () => {
     expect(parseItemsTable([['Item', 'Quantidade', 'Valor'], ['Instalação', '1', '300']]).items[0]).toMatchObject({ description: 'Instalação', notes: null });
   });
 });
+
+describe('produtos do contrato a partir da oportunidade ou planilha', () => {
+  it('oportunidade: lance, desconto, cobrança e quantidade fracionada', async () => {
+    const { contractItemFromOpportunity } = await import('./items');
+    expect(contractItemFromOpportunity({ description: 'Link 500M', qtyMilli: 2000, unitCents: 150000, discountCents: 0, surchargeCents: 0, dealKind: 'recorrencia' })).toEqual({ planId: null, description: 'Link 500M', qty: 2, unitCents: 150000, recurring: true });
+    expect(contractItemFromOpportunity({ description: 'Instalação', qtyMilli: 1000, unitCents: 200000, discountCents: 50000, dealKind: 'servico' })).toMatchObject({ qty: 1, unitCents: 150000, recurring: false });
+    expect(contractItemFromOpportunity({ description: 'Fibra', unit: 'km', qtyMilli: 2500, unitCents: 1000, dealKind: 'venda' })).toEqual({ planId: null, description: 'Fibra (2,5 Km)', qty: 1, unitCents: 2500, recurring: false });
+    expect(contractItemFromOpportunity({ description: 'Câmera', qtyMilli: 3000, unitCents: 999, bidUnitCents: 900, dealKind: 'locacao' })).toMatchObject({ qty: 3, unitCents: 900, recurring: true });
+    expect(contractItemFromOpportunity({ description: 'Licença', qtyMilli: 3000, unitCents: 1000, discountCents: 1 })).toMatchObject({ qty: 1, unitCents: 2999, description: 'Licença (3)' });
+  });
+  it('planilha: colunas em qualquer ordem, cobrança opcional e linhas recusadas com motivo', async () => {
+    const { parseContractItemsTable } = await import('./items');
+    const r = parseContractItemsTable([
+      ['Valor unitário', 'Descrição', 'Qtd', 'Cobrança'],
+      ['1.500,00', 'Link dedicado', '2', 'Mensal'],
+      ['2000', 'Instalação', '1', 'Única'],
+      ['x', 'Erro', '1', 'Mensal'],
+      ['10', 'Outro', '1', 'Trimestral'],
+    ]);
+    expect(r.items).toEqual([
+      { planId: null, description: 'Link dedicado', qty: 2, unitCents: 150000, recurring: true },
+      { planId: null, description: 'Instalação', qty: 1, unitCents: 200000, recurring: false },
+    ]);
+    expect(r.errors.map((e) => e.row)).toEqual([4, 5]);
+    expect(parseContractItemsTable([['Descrição', 'Qtd', 'Valor'], ['Link', '1', '10']]).items[0]).toMatchObject({ recurring: true, unitCents: 1000 });
+    expect(parseContractItemsTable([['Nome', 'Preço']]).missing).toEqual(['Quantidade']);
+  });
+});

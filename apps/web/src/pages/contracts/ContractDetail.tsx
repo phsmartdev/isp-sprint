@@ -45,7 +45,7 @@ function EditDrawer({ c, onClose }: { c: ContractDetail; onClose: () => void }) 
   return (
     <Drawer open onClose={onClose} title={`Editar contrato ${c.current.number}`} width="lg" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={() => { setError(null); save.mutate(); }}>Salvar</Button></>}>
       {error && <p role="alert" className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
-      <ContractForm value={f} onChange={(p) => setF((x) => ({ ...x, ...p }))} editing validated={!!c.validatedAt} />
+      <ContractForm value={f} contactId={c.contactId} onChange={(p) => setF((x) => ({ ...x, ...p }))} editing validated={!!c.validatedAt} />
     </Drawer>
   );
 }

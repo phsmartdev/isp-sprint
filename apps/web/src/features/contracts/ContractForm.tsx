@@ -1,10 +1,13 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
-import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, endFromTerm, toCents, SECTORS, SECTOR_LABELS, type LegalRegime, type ReportTerms, type Sector } from '@isp/domain';
+import { AlertTriangle, ClipboardPaste, Download, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../lib/api';
+import { Modal } from '../../components/ui/overlay';
+import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, contractValuesFromItems, parseContractItemsTable, type ContractItemDraft, endFromTerm, toCents, SECTORS, SECTOR_LABELS, type LegalRegime, type ReportTerms, type Sector } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL, fmtDate } from '../../lib/format';
-import { Button, FormField, Input, Select, Textarea } from '../../components/ui/primitives';
+import { Button, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version } from './shared';
 
 type ItemRow = { planId: string; description: string; qty: string; unit: string; recurring: boolean };
@@ -66,6 +69,74 @@ export function payloadOf(f: FormState) {
   };
 }
 
+const toRow = (i: ContractItemDraft): ItemRow => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), recurring: i.recurring });
+type Source = { id: string; code: number; title: string; stage: string; items: ContractItemDraft[] };
+
+/** Trazer os produtos: da oportunidade do cliente, de planilha (Excel/CSV) ou colando do Excel. */
+function ItemsImport({ contactId, onItems }: { contactId: string | null; onItems: (rows: ItemRow[], mode: 'somar' | 'substituir') => void }) {
+  const [msg, setMsg] = useState<{ tone: 'info' | 'warning'; text: string } | null>(null);
+  const [pasting, setPasting] = useState(false);
+  const [paste, setPaste] = useState('');
+  const [picking, setPicking] = useState(false);
+  const sources = useQuery({ queryKey: ['contract-item-sources', contactId], enabled: picking && !!contactId, queryFn: () => api<{ items: Source[] }>(`/contracts/item-sources?contactId=${contactId}`) });
+  const add = (table: (string | number | null)[][], from: string) => {
+    const r = parseContractItemsTable(table);
+    if (r.missing.length) { setMsg({ tone: 'warning', text: `${from}: faltam as colunas ${r.missing.join(', ')}. A primeira linha precisa ter os títulos, em qualquer ordem: Descrição, Quantidade e Valor unitário (obrigatórias) e Cobrança (Mensal ou Única, opcional; sem ela o item é mensal).` }); return; }
+    onItems(r.items.map(toRow), 'somar');
+    setMsg({ tone: r.errors.length ? 'warning' : 'info', text: `${from}: ${r.items.length} item(ns) incluído(s)${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira antes de salvar.` });
+  };
+  const onFile = async (file: File) => {
+    try {
+      if (/\.xlsx?$/i.test(file.name)) {
+        const { default: readXlsx } = await import('read-excel-file');
+        add((await readXlsx(file)) as (string | number | null)[][], file.name);
+      } else {
+        const text = await file.text();
+        const first = text.split('\n')[0] ?? '';
+        const sep = text.includes('\t') ? '\t' : first.split(';').length > first.split(',').length ? ';' : ',';
+        add(text.split(/\r?\n/).map((l) => l.split(sep).map((c) => c.replace(/^"|"$/g, ''))), file.name);
+      }
+    } catch { setMsg({ tone: 'warning', text: `Não foi possível ler ${file.name}. Use Excel (.xlsx) ou CSV.` }); }
+  };
+  return (
+    <div className="mb-3">
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" icon={<Download className="h-4 w-4" />} disabled={!contactId} title={contactId ? undefined : 'Escolha o cliente primeiro'} onClick={() => setPicking(true)}>Trazer da oportunidade</Button>
+        <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">
+          <FileSpreadsheet className="h-4 w-4" aria-hidden />Importar planilha
+          <input type="file" accept=".xlsx,.xls,.csv,.txt" className="sr-only" aria-label="Importar planilha de produtos do contrato" onChange={(e) => { const file = e.target.files?.[0]; if (file) void onFile(file); e.target.value = ''; }} />
+        </label>
+        <Button size="sm" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => { setPaste(''); setPasting(true); }}>Colar do Excel</Button>
+      </div>
+      {msg && <div className="mt-2"><Notice tone={msg.tone}>{msg.text}</Notice></div>}
+      <Modal open={pasting} onClose={() => setPasting(false)} title="Colar do Excel"
+        footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!paste.trim()} onClick={() => { add(paste.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); }}>Incluir itens</Button></>}>
+        <p className="mb-2 text-sm text-muted">Copie as linhas no Excel com a linha de títulos: Descrição, Quantidade e Valor unitário (em qualquer ordem) e, se quiser, Cobrança (Mensal ou Única).</p>
+        <Textarea aria-label="Itens colados" rows={9} value={paste} onChange={(e) => setPaste(e.target.value)} />
+      </Modal>
+      <Modal open={picking} onClose={() => setPicking(false)} title="Trazer produtos da oportunidade" size="lg" footer={<Button onClick={() => setPicking(false)}>Fechar</Button>}>
+        {sources.isLoading ? <LoadingRows rows={3} /> : !sources.data?.items.length ? <p className="text-sm text-muted">Nenhuma oportunidade deste cliente tem produtos lançados.</p> : (
+          <ul className="space-y-2">{sources.data.items.map((o) => {
+            const v = contractValuesFromItems(o.items, null);
+            return (
+              <li key={o.id} className="rounded-md border border-line p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0"><p className="font-semibold text-ink">OP-{o.code} · {o.title}</p><p className="text-xs text-muted">{o.items.length} item(ns) · {fmtBRL(v.monthlyCents)}/mês{v.oneTimeCents ? ` + ${fmtBRL(v.oneTimeCents)} único` : ''}</p></div>
+                  <span className="flex gap-2">
+                    <Button size="sm" variant="primary" onClick={() => { onItems(o.items.map(toRow), 'substituir'); setMsg({ tone: 'info', text: `${o.items.length} item(ns) da OP-${o.code} no lugar dos itens anteriores. Confira antes de salvar.` }); setPicking(false); }}>Usar estes itens</Button>
+                    <Button size="sm" onClick={() => { onItems(o.items.map(toRow), 'somar'); setMsg({ tone: 'info', text: `${o.items.length} item(ns) da OP-${o.code} somados aos itens. Confira antes de salvar.` }); setPicking(false); }}>Somar</Button>
+                  </span>
+                </div>
+                <ul className="mt-2 space-y-0.5 text-xs text-text">{o.items.slice(0, 6).map((i, k) => <li key={k}>{i.qty} × {i.description} · {fmtBRL(i.unitCents)} · {i.recurring ? 'mensal' : 'única'}</li>)}{o.items.length > 6 && <li className="text-muted">+{o.items.length - 6} item(ns)</li>}</ul>
+              </li>
+            );
+          })}</ul>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
 /** Campo de valor calculado pelos itens: mostra o cálculo; digitar passa a valor manual, com volta ao automático. */
 function AutoValue({ id, label, auto, autoCents, value, autoHint, onManual, onAuto }: { id: string; label: string; auto: boolean; autoCents: number | null; value: string; autoHint: string; onManual: (v: string) => void; onAuto: () => void }) {
   return (
@@ -87,7 +158,7 @@ function Fieldset({ title, children, hint }: { title: string; children: React.Re
   );
 }
 
-export function ContractForm({ value, onChange, editing, validated }: { value: FormState; onChange: (patch: Partial<FormState>) => void; editing?: boolean; validated?: boolean }) {
+export function ContractForm({ value, onChange, editing, validated, contactId }: { value: FormState; onChange: (patch: Partial<FormState>) => void; editing?: boolean; validated?: boolean; contactId?: string | null }) {
   const lookups = useLookups();
   const f = value;
   const users = lookups.data?.users ?? [];
@@ -148,6 +219,7 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
 
       <fieldset className="rounded-md border border-line p-4">
         <legend className="px-1 text-md font-bold text-ink">Produtos e serviços</legend>
+        <ItemsImport contactId={contactId ?? null} onItems={(list, mode) => onChange({ items: mode === 'substituir' ? list : [...f.items.filter((x) => x.description.trim()), ...list] })} />
         <ul className="space-y-2">
           {f.items.map((r, i) => (
             <li key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-[180px_minmax(0,1fr)_80px_130px_140px_auto] sm:items-end">

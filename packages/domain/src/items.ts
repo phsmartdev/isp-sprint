@@ -125,3 +125,58 @@ export function parseItemsTable(rows: (string | number | null)[][]): { items: It
   });
   return { items, errors, missing: [] };
 }
+
+// ------------------------------------------------------------------ itens do contrato a partir da oportunidade ou de planilha
+/** Item do contrato: quantidade inteira, valor unitário e cobrança mensal (recorrente) ou única. */
+export type ContractItemDraft = { planId: string | null; description: string; qty: number; unitCents: number; recurring: boolean };
+
+const fmtQty = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+/**
+ * Converte um item da oportunidade (quantidade em milésimos, desconto, acréscimo, lance) para o contrato.
+ * Vale o lance quando houver (licitação). Quantidade fracionada ou total que não divide por igual vira 1 × total,
+ * com a quantidade original na descrição (o valor da linha nunca muda).
+ */
+export function contractItemFromOpportunity(i: { description: string; unit?: string | null; qtyMilli: number; unitCents: number; discountCents?: number; surchargeCents?: number; bidUnitCents?: number | null; dealKind?: string | null }): ContractItemDraft {
+  const unitCents = i.bidUnitCents ?? i.unitCents;
+  const total = itemTotal({ qtyMilli: i.qtyMilli, unitCents, discountCents: i.discountCents ?? 0, surchargeCents: i.surchargeCents ?? 0 });
+  const recurring = !(i.dealKind === 'venda' || i.dealKind === 'servico');
+  const whole = i.qtyMilli % 1000 === 0 && i.qtyMilli > 0 ? i.qtyMilli / 1000 : null;
+  const description = i.description.trim().slice(0, 200);
+  if (whole && total % whole === 0) return { planId: null, description, qty: whole, unitCents: total / whole, recurring };
+  const unitLabel = i.unit && i.unit !== 'un' ? ` ${ITEM_UNIT_LABELS[i.unit as ItemUnit] ?? i.unit}` : '';
+  return { planId: null, description: `${description} (${fmtQty(i.qtyMilli)}${unitLabel})`.slice(0, 200), qty: 1, unitCents: total, recurring };
+}
+
+/** "Mensal", "recorrente", "locação" = mensal; "única", "venda", "serviço", "instalação" = cobrança única. */
+export function parseRecurring(raw: unknown): boolean | null {
+  const t = itemHeader(raw);
+  if (!t) return null;
+  if (/^(unic|pagamento unico|venda|servico|instalac|avulso|pontual|one)/.test(t)) return false;
+  if (/^(mensal|recorr|locac|aluguel|assinatura|mes)/.test(t)) return true;
+  return null;
+}
+
+/**
+ * Lê a planilha (ou o colado do Excel) dos produtos do contrato: mesmas colunas dos itens da oportunidade
+ * (Descrição, Quantidade e Valor unitário obrigatórias, em qualquer ordem) e a coluna opcional "Cobrança"
+ * (Mensal ou Única; sem a coluna, o item é mensal). Linhas recusadas voltam com o motivo.
+ */
+export function parseContractItemsTable(rows: (string | number | null)[][]): { items: ContractItemDraft[]; errors: { row: number; message: string }[]; missing: string[] } {
+  const clean = rows.filter((r) => r.some((c) => String(c ?? '').trim()));
+  const head = (clean[0] ?? []).map(itemHeader);
+  const ci = head.findIndex((h) => /^(cobranca|tipo de cobranca|forma de cobranca|recorrencia|periodicidade|tipo)$/.test(h));
+  const base = parseItemsTable(ci < 0 ? clean : clean.map((r) => r.filter((_, j) => j !== ci)));
+  if (base.missing.length) return { items: [], errors: [], missing: base.missing };
+  // as linhas aceitas mantêm a ordem: casa cada item com a sua linha de origem para ler a cobrança
+  const rejected = new Set(base.errors.map((e) => e.row));
+  const sourceRows = clean.slice(1).map((r, k) => ({ r, row: k + 2 })).filter((x) => !rejected.has(x.row));
+  const errors = [...base.errors];
+  const items: ContractItemDraft[] = [];
+  base.items.forEach((it, k) => {
+    const src = sourceRows[k]!;
+    const rec = ci < 0 ? true : parseRecurring(src.r[ci]);
+    if (ci >= 0 && rec === null && String(src.r[ci] ?? '').trim()) { errors.push({ row: src.row, message: 'Cobrança deve ser Mensal ou Única.' }); return; }
+    items.push({ ...contractItemFromOpportunity({ ...it, dealKind: rec === false ? 'venda' : 'recorrencia' }), description: contractItemFromOpportunity(it).description });
+  });
+  return { items, errors: errors.sort((a, b) => a.row - b.row), missing: [] };
+}
