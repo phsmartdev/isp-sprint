@@ -29,7 +29,7 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD'
 const optDay = day.nullable().optional();
 const optText = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v ? v : v === '' ? null : v));
 const uuid = z.string().uuid();
-const Item = z.object({ planId: uuid.nullable().default(null), description: z.string().trim().min(2).max(200), qty: z.number().int().min(1).max(100_000), unitCents: z.number().int().min(0).max(10_000_000_000) });
+const Item = z.object({ planId: uuid.nullable().default(null), description: z.string().trim().min(2).max(200), qty: z.number().int().min(1).max(100_000), unitCents: z.number().int().min(0).max(10_000_000_000), recurring: z.boolean().default(true) });
 const Guarantee = z.object({ type: z.string().trim().min(2).max(80), amountCents: z.number().int().min(0).nullable().default(null), insurer: optText(120).default(null), policy: optText(80).default(null), expiresAt: day.nullable().default(null), renewalAt: day.nullable().default(null) }).nullable();
 const PublicTerms = z.object({ agency: optText(200).default(null), processNumber: optText(80).default(null), modality: optText(80).default(null), commitmentNote: optText(80).default(null), budgetLine: optText(200).default(null), extensionMaxMonths: z.number().int().min(1).max(600).nullable().default(null) }).nullable();
 const VersionFields = z.object({

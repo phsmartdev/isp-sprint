@@ -22,9 +22,12 @@ export function useTransitionMutation() {
         qc.setQueryData<PipelineData>(key, {
           ...data,
           stages: data.stages.map((s) => {
+            // a coluna traz só parte dos cards: contagem e valor (totais da etapa) mudam pelo card movido
+            const had = s.cards.some((c) => c.id === opp.id) || s.key === opp.stage;
             const cards = s.cards.filter((c) => c.id !== opp.id);
-            if (s.key === payload.toStage) cards.unshift(moved);
-            return { ...s, cards, count: cards.length, valueCents: cards.reduce((a, c) => a + (c.valueCents ?? 0), 0) };
+            const v = opp.valueCents ?? 0;
+            if (s.key === payload.toStage) { cards.unshift(moved); return { ...s, cards, count: s.count + 1, valueCents: s.valueCents + v }; }
+            return had ? { ...s, cards, count: Math.max(0, s.count - 1), valueCents: s.valueCents - v } : s;
           }),
         });
       }

@@ -5,7 +5,7 @@ import { ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import { Chip } from '../../components/ui/primitives';
 
-export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number };
+export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number; recurring?: boolean };
 export type Guarantee = { type: string; amountCents: number | null; insurer: string | null; policy: string | null; expiresAt: string | null; renewalAt: string | null };
 export type PublicTerms = { agency: string | null; processNumber: string | null; modality: string | null; commitmentNote: string | null; budgetLine: string | null; extensionMaxMonths: number | null };
 export type Version = {

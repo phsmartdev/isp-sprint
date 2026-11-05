@@ -179,3 +179,13 @@ describe('abas e painel de contratos', () => {
     expect(normalizeDashboard(null).order.slice(-2)).toEqual(['faturamento', 'executivo']);
   });
 });
+
+describe('valores do contrato pelos itens', () => {
+  it('mensal soma só recorrentes; global = mensal × prazo + únicos uma vez', async () => {
+    const { contractValuesFromItems } = await import('./contracts');
+    const items = [{ qty: 2, unitCents: 50000 }, { qty: 1, unitCents: 30000, recurring: true }, { qty: 1, unitCents: 200000, recurring: false }];
+    expect(contractValuesFromItems(items, 12)).toEqual({ monthlyCents: 130000, oneTimeCents: 200000, totalCents: 130000 * 12 + 200000 });
+    expect(contractValuesFromItems(items, null).totalCents).toBeNull();
+    expect(contractValuesFromItems([], 12)).toEqual({ monthlyCents: 0, oneTimeCents: 0, totalCents: 0 });
+  });
+});

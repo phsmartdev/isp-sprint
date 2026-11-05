@@ -611,3 +611,15 @@ export function concentration(values: { key: string; name: string; cents: number
     level: (hhi >= 2500 ? 'alta' : hhi >= 1500 ? 'moderada' : 'baixa') as 'baixa' | 'moderada' | 'alta',
   };
 }
+
+/**
+ * Valores do contrato a partir dos itens: mensal = soma dos itens recorrentes; global = mensal × prazo (meses) + itens
+ * de cobrança única (somados uma única vez). Sem prazo, o global fica sem cálculo (null). Item sem a marcação é recorrente.
+ */
+export function contractValuesFromItems(items: readonly { qty: number; unitCents: number; recurring?: boolean }[], termMonths: number | null | undefined) {
+  const line = (i: { qty: number; unitCents: number }) => Math.max(0, i.qty) * Math.max(0, i.unitCents);
+  const monthlyCents = items.filter((i) => i.recurring !== false).reduce((a, i) => a + line(i), 0);
+  const oneTimeCents = items.filter((i) => i.recurring === false).reduce((a, i) => a + line(i), 0);
+  const totalCents = termMonths && termMonths > 0 ? monthlyCents * termMonths + oneTimeCents : null;
+  return { monthlyCents, oneTimeCents, totalCents };
+}
