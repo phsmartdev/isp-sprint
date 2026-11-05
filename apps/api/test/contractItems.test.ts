@@ -19,8 +19,8 @@ describe('produtos do contrato a partir da oportunidade', () => {
     ] }));
     const pre = ok(await carlos.get(`/contracts/prefill?opportunityId=${o.id}`)).json();
     expect(pre.suggestion.version.items).toEqual([
-      { planId: null, description: 'Link dedicado 500 Mbps', qty: 2, unitCents: 150_000, recurring: true },
-      { planId: null, description: 'Instalação', qty: 1, unitCents: 150_000, recurring: false },
+      { planId: null, description: 'Link dedicado 500 Mbps', qty: 2, unitCents: 150_000, kind: 'recorrente' },
+      { planId: null, description: 'Instalação', qty: 1, unitCents: 150_000, kind: 'venda' },
     ]);
     expect(pre.suggestion.version.monthlyCents).toBe(300_000);
     const src = ok(await carlos.get(`/contracts/item-sources?contactId=${o.contactId}`)).json();

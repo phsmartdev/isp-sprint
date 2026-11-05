@@ -1324,8 +1324,8 @@ export const contracts = pgTable(
   }),
 );
 
-/** recurring: cobrança mensal (padrão) ou única (false, entra uma vez no valor global). */
-export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number; recurring?: boolean };
+/** kind: recorrente (mensal), venda (única) ou consumo (estimado, sob demanda). Itens antigos podem ter só recurring. */
+export type ContractItem = { planId: string | null; description: string; qty: number; unitCents: number; kind?: 'recorrente' | 'venda' | 'consumo'; recurring?: boolean };
 export type ContractGuarantee = { type: string; amountCents: number | null; insurer: string | null; policy: string | null; expiresAt: string | null; renewalAt: string | null };
 export type ContractPublicTerms = { agency: string | null; processNumber: string | null; modality: string | null; commitmentNote: string | null; budgetLine: string | null; extensionMaxMonths: number | null };
 

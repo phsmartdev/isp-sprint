@@ -7,7 +7,7 @@ import { ContractJourney } from '../../features/cs/ContractJourney';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSignature, Pencil } from 'lucide-react';
-import { CONTRACT_STAGES, CONTRACT_STAGE_LABELS, LEGAL_REGIME_LABELS, type ContractStage } from '@isp/domain';
+import { CONTRACT_STAGES, CONTRACT_STAGE_LABELS, LEGAL_REGIME_LABELS, type ContractStage, CONTRACT_ITEM_KIND_LABELS, itemKindOf } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Breadcrumb, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
@@ -201,8 +201,8 @@ export function ContractDetailPage() {
                 <h2 className="mb-2 font-bold text-ink">Produtos e serviços</h2>
                 {!v.items.length ? <p className="text-sm text-muted">Nenhum item.</p> : (
                   <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm">
-                    <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 font-medium">Item</th><th className="px-3 py-2 text-right font-medium">Qtd.</th><th className="px-3 py-2 text-right font-medium">Unitário</th><th className="px-3 py-2 text-right font-medium">Total/mês</th></tr></thead>
-                    <tbody>{v.items.map((i, k) => <tr key={k} className="border-t border-line"><td className="px-3 py-2 text-ink">{i.description}</td><td className="num px-3 py-2 text-right">{i.qty}</td><td className="num px-3 py-2 text-right">{fmtBRL(i.unitCents)}</td><td className="num px-3 py-2 text-right font-semibold">{fmtBRL(i.qty * i.unitCents)}</td></tr>)}</tbody>
+                    <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 font-medium">Item</th><th className="px-3 py-2 text-right font-medium">Qtd.</th><th className="px-3 py-2 text-right font-medium">Unitário</th><th className="px-3 py-2 text-right font-medium">Total</th></tr></thead>
+                    <tbody>{v.items.map((i, k) => <tr key={k} className="border-t border-line"><td className="px-3 py-2 text-ink">{i.description}<span className="ml-2 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{CONTRACT_ITEM_KIND_LABELS[itemKindOf(i)]}</span></td><td className="num px-3 py-2 text-right">{i.qty}</td><td className="num px-3 py-2 text-right">{fmtBRL(i.unitCents)}</td><td className="num px-3 py-2 text-right font-semibold">{fmtBRL(i.qty * i.unitCents)}</td></tr>)}</tbody>
                   </table></div>
                 )}
               </div>

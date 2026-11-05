@@ -128,7 +128,7 @@ export function parseItemsTable(rows: (string | number | null)[][]): { items: It
 
 // ------------------------------------------------------------------ itens do contrato a partir da oportunidade ou de planilha
 /** Item do contrato: quantidade inteira, valor unitário e cobrança mensal (recorrente) ou única. */
-export type ContractItemDraft = { planId: string | null; description: string; qty: number; unitCents: number; recurring: boolean };
+export type ContractItemDraft = { planId: string | null; description: string; qty: number; unitCents: number; kind: 'recorrente' | 'venda' | 'consumo' };
 
 const fmtQty = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 /**
@@ -139,32 +139,34 @@ const fmtQty = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { maxim
 export function contractItemFromOpportunity(i: { description: string; unit?: string | null; qtyMilli: number; unitCents: number; discountCents?: number; surchargeCents?: number; bidUnitCents?: number | null; dealKind?: string | null }): ContractItemDraft {
   const unitCents = i.bidUnitCents ?? i.unitCents;
   const total = itemTotal({ qtyMilli: i.qtyMilli, unitCents, discountCents: i.discountCents ?? 0, surchargeCents: i.surchargeCents ?? 0 });
-  const recurring = !(i.dealKind === 'venda' || i.dealKind === 'servico');
+  // venda/serviço = pagamento único; valor em R$ (unidade "R$") = consumo; recorrência/locação = recorrente
+  const kind: ContractItemDraft['kind'] = i.dealKind === 'consumo' ? 'consumo' : i.dealKind === 'venda' || i.dealKind === 'servico' ? 'venda' : i.unit === 'rs' && i.dealKind !== 'recorrencia' && i.dealKind !== 'locacao' ? 'consumo' : 'recorrente';
   const whole = i.qtyMilli % 1000 === 0 && i.qtyMilli > 0 ? i.qtyMilli / 1000 : null;
   const description = i.description.trim().slice(0, 200);
-  if (whole && total % whole === 0) return { planId: null, description, qty: whole, unitCents: total / whole, recurring };
+  if (whole && total % whole === 0) return { planId: null, description, qty: whole, unitCents: total / whole, kind };
   const unitLabel = i.unit && i.unit !== 'un' ? ` ${ITEM_UNIT_LABELS[i.unit as ItemUnit] ?? i.unit}` : '';
-  return { planId: null, description: `${description} (${fmtQty(i.qtyMilli)}${unitLabel})`.slice(0, 200), qty: 1, unitCents: total, recurring };
+  return { planId: null, description: `${description} (${fmtQty(i.qtyMilli)}${unitLabel})`.slice(0, 200), qty: 1, unitCents: total, kind };
 }
 
-/** "Mensal", "recorrente", "locação" = mensal; "única", "venda", "serviço", "instalação" = cobrança única. */
-export function parseRecurring(raw: unknown): boolean | null {
+/** Classificação pelo texto: "Recorrente"/"Mensal"/"Locação"; "Venda"/"Única"/"Instalação"; "Consumo"/"Medição"/"Sob demanda". */
+export function parseItemKind(raw: unknown): ContractItemDraft['kind'] | null {
   const t = itemHeader(raw);
   if (!t) return null;
-  if (/^(unic|pagamento unico|venda|servico|instalac|avulso|pontual|one)/.test(t)) return false;
-  if (/^(mensal|recorr|locac|aluguel|assinatura|mes)/.test(t)) return true;
+  if (/^(consum|medic|sob demanda|demanda|franquia|estimat)/.test(t)) return 'consumo';
+  if (/^(unic|pagamento unico|venda|servico|instalac|avulso|pontual|one)/.test(t)) return 'venda';
+  if (/^(mensal|recorr|locac|aluguel|assinatura|mes)/.test(t)) return 'recorrente';
   return null;
 }
 
 /**
  * Lê a planilha (ou o colado do Excel) dos produtos do contrato: mesmas colunas dos itens da oportunidade
- * (Descrição, Quantidade e Valor unitário obrigatórias, em qualquer ordem) e a coluna opcional "Cobrança"
- * (Mensal ou Única; sem a coluna, o item é mensal). Linhas recusadas voltam com o motivo.
+ * (Descrição, Quantidade e Valor unitário obrigatórias, em qualquer ordem) e a coluna opcional "Classificação"
+ * (Recorrente, Venda ou Consumo; sem a coluna, o item é recorrente). Linhas recusadas voltam com o motivo.
  */
 export function parseContractItemsTable(rows: (string | number | null)[][]): { items: ContractItemDraft[]; errors: { row: number; message: string }[]; missing: string[] } {
   const clean = rows.filter((r) => r.some((c) => String(c ?? '').trim()));
   const head = (clean[0] ?? []).map(itemHeader);
-  const ci = head.findIndex((h) => /^(cobranca|tipo de cobranca|forma de cobranca|recorrencia|periodicidade|tipo)$/.test(h));
+  const ci = head.findIndex((h) => /^(classificacao|cobranca|tipo de cobranca|forma de cobranca|recorrencia|periodicidade|tipo)$/.test(h));
   const base = parseItemsTable(ci < 0 ? clean : clean.map((r) => r.filter((_, j) => j !== ci)));
   if (base.missing.length) return { items: [], errors: [], missing: base.missing };
   // as linhas aceitas mantêm a ordem: casa cada item com a sua linha de origem para ler a cobrança
@@ -174,9 +176,9 @@ export function parseContractItemsTable(rows: (string | number | null)[][]): { i
   const items: ContractItemDraft[] = [];
   base.items.forEach((it, k) => {
     const src = sourceRows[k]!;
-    const rec = ci < 0 ? true : parseRecurring(src.r[ci]);
-    if (ci >= 0 && rec === null && String(src.r[ci] ?? '').trim()) { errors.push({ row: src.row, message: 'Cobrança deve ser Mensal ou Única.' }); return; }
-    items.push({ ...contractItemFromOpportunity({ ...it, dealKind: rec === false ? 'venda' : 'recorrencia' }), description: contractItemFromOpportunity(it).description });
+    const kind = ci < 0 ? 'recorrente' : parseItemKind(src.r[ci]) ?? (String(src.r[ci] ?? '').trim() ? null : 'recorrente');
+    if (!kind) { errors.push({ row: src.row, message: 'Classificação deve ser Recorrente, Venda ou Consumo.' }); return; }
+    items.push({ ...contractItemFromOpportunity({ ...it, dealKind: kind === 'recorrente' ? 'recorrencia' : kind }), description: contractItemFromOpportunity(it).description, kind });
   });
   return { items, errors: errors.sort((a, b) => a.row - b.row), missing: [] };
 }
