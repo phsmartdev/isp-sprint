@@ -1,5 +1,6 @@
 import { annuityFactor, irr as irrOf, npv as npvOf, paybackMonths as paybackOf, type FValue } from './formula';
 import { buildModel, runModel, type FinBase, type FinModel, type ModelRun } from './financeModel';
+import { ENVELOPE_KINDS, ENVELOPE_RETENTIONS, envelopeTaxBp, FISCAL_REGIME_LABELS, pickFiscalEnvelope, regimeOfYear, type EnvelopeKind, type EnvelopeRetention, type FiscalContextInfo, type FiscalEnvelope } from './fiscalEnvelope';
 /**
  * Motor financeiro da viabilidade econômica (especificação FINANCE-1.0 a 1.3, "ENT_MotorFinanceiroViabilidade").
  * Funções puras. Dinheiro em centavos; percentuais de entrada em pontos-base (1% = 100); frações internas (0,35 = 35%).
@@ -24,9 +25,12 @@ export type FiscalTax = { name: string; percentBp: number; fixedCents: number; a
 export type FiscalDoc = { id: string; branchId: string; code: string; name: string; active: boolean; taxes: FiscalTax[] };
 
 /** Tributos do documento que valem hoje: alíquota somada (aᵢ) e valor fixo por faturamento (Fᵢ). */
+/** Retenção na fonte (IRRF, CSRF, ISS/PIS/COFINS/CSLL retidos, INSS retido): camada 3, nunca entra no preço nem na DRE. */
+export const isWithholdingTax = (name: string) => /\b(irrf|csrf)\b|retid|reten[cç]/i.test(name.normalize('NFC'));
 export function fiscalDocRates(doc: Pick<FiscalDoc, 'taxes' | 'active'>, today: string) {
-  const live = doc.active ? doc.taxes.filter((t) => t.active && (!t.validFrom || t.validFrom <= today) && (!t.validTo || t.validTo >= today)) : [];
-  return { percentBp: live.reduce((s, t) => s + t.percentBp, 0), fixedCents: live.reduce((s, t) => s + t.fixedCents, 0), taxes: live.map((t) => t.name), complete: live.length > 0 };
+  const all = doc.active ? doc.taxes.filter((t) => t.active && (!t.validFrom || t.validFrom <= today) && (!t.validTo || t.validTo >= today)) : [];
+  const live = all.filter((t) => !isWithholdingTax(t.name));
+  return { percentBp: live.reduce((s, t) => s + t.percentBp, 0), fixedCents: live.reduce((s, t) => s + t.fixedCents, 0), taxes: live.map((t) => t.name), complete: live.length > 0, withholdings: all.filter((t) => isWithholdingTax(t.name)).map((t) => t.name) };
 }
 export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTax[] }) {
   const e: string[] = [];
@@ -43,7 +47,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.1';
+export const ENGINE_VERSION = 'FINANCE-3.2';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -125,6 +129,10 @@ export type EconInput = {
   /** payback que o vendedor define (meses), até o teto do segmento; null = o teto */ paybackMonths?: number | null;
   /** P informado; null = itens da oportunidade (na negociação mista, é o preço mensal) */ priceCents: number | null;
   /** negociação mista: preço informado da parte de venda (pagamento único); null = itens de venda */ salePriceCents?: number | null;
+  /** chave temporal da simulação (ano de vigência do envelope fiscal); null = ano corrente */
+  fiscalYear?: number | null;
+  /** município (IBGE) do envelope fiscal; null = o da filial emitente */
+  municipalityIbge?: string | null;
 };
 export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
 export const costLineTotal = (l: CostLine) => Math.round((l.qtyMilli * l.unitCents) / 1000);
@@ -144,6 +152,8 @@ export function econInputErrors(i: EconInput) {
   for (const l of i.capex) if (l.impact && !(COST_IMPACTS as readonly string[]).includes(l.impact)) e.push(`Impacto inválido em ${l.description}.`);
   for (const l of [...i.capex, ...i.opex]) if (l.kind && !(DEAL_KINDS as readonly string[]).includes(l.kind)) e.push(`Tipo de negociação inválido em ${l.description}.`);
   if (i.salePriceCents != null && (!Number.isInteger(i.salePriceCents) || i.salePriceCents < 0)) e.push('Preço da venda inválido.');
+  if (i.fiscalYear != null && !(Number.isInteger(i.fiscalYear) && i.fiscalYear >= 2020 && i.fiscalYear <= 2100)) e.push('Vigência fiscal inválida.');
+  if (i.municipalityIbge != null && !/^\d{7}$/.test(i.municipalityIbge)) e.push('Código IBGE do município com 7 dígitos.');
   return e;
 }
 
@@ -255,6 +265,8 @@ export type EconResult = {
   autoApproval?: { ok: boolean; checks: { label: string; ok: boolean }[] };
   /** (Financial Studio) modelo de fórmulas usado: chave e versão de cada fórmula alterada pela diretoria */
   model?: { key: string; versions: Record<string, number> };
+  /** (3.2) envelope fiscal da simulação: vigência, regime, carga da nota por tipo, alíquota sobre o lucro e retenções (fora do cálculo) */
+  fiscal?: FiscalContextInfo;
 };
 
 export type EconRecommendation = {
@@ -330,8 +342,58 @@ export const monthlyTma = (st: Pick<EconSettings, 'tmaMonthlyBp' | 'tmaAnnualBp'
  *    inadimplência, tributos, comissão e custos; VPL e payback pela TMA (anual → mensal), TIR e ROI;
  * 4. decisão: preço mínimo, margem e payback; aprovação automática quando VPL > 0 e TIR > TMA, senão alçada.
  */
-export type EngineArgs = { input: EconInput; items: EconItem[]; settings: EconSettings; publicSector: boolean; model?: FinModel };
-export function financeEngine(args0: EngineArgs): EconResult {
+export type FiscalArgs = { envelopes: FiscalEnvelope[]; branchId: string | null; defaultIbge: string | null; today: string };
+export type EngineArgs = { input: EconInput; items: EconItem[]; settings: EconSettings; publicSector: boolean; model?: FinModel; fiscal?: FiscalArgs };
+
+/**
+ * Aplica o envelope fiscal da chave temporal ativa: a carga da nota de cada documento vira a soma dos tributos do
+ * envelope para o tipo do documento (camada 1) e o IR/CSLL vira a alíquota efetiva sobre o lucro do envelope (camada 2).
+ * As retenções na fonte do envelope ficam só no resultado, para o contas a receber (camada 3). A matemática do motor não muda.
+ */
+export function applyFiscalEnvelope(args: EngineArgs): { args: EngineArgs; info: FiscalContextInfo | null; warnings: string[] } {
+  const f = args.fiscal;
+  if (!f) return { args, info: null, warnings: [] };
+  const year = args.input.fiscalYear ?? Number(f.today.slice(0, 4));
+  const ibge = args.input.municipalityIbge ?? f.defaultIbge;
+  const env = pickFiscalEnvelope(f.envelopes, { branchId: f.branchId, ibgeCode: ibge, year });
+  const warnings: string[] = [];
+  const reg = regimeOfYear(year);
+  const base: FiscalContextInfo = { year, regime: reg, branchId: f.branchId, ibgeCode: ibge, envelope: null, basket: [], profitTaxBp: args.settings.incomeTaxBp ?? null, profitTaxSource: args.settings.incomeTaxBp != null ? 'parametros' : null, retentions: [] };
+  if (!env) {
+    if (f.envelopes.length || reg === 'reforma') warnings.push(`Sem envelope fiscal de ${year} (${FISCAL_REGIME_LABELS[reg]}) para ${!f.branchId ? 'a venda sem filial emitente' : !ibge ? 'a filial sem código IBGE' : `a filial no município ${ibge}`}: valem os tributos dos documentos fiscais e o IR/CSLL dos parâmetros.`);
+    return { args, info: base, warnings };
+  }
+  const basket: FiscalContextInfo['basket'] = [];
+  for (const k of ENVELOPE_KINDS) { const b = envelopeTaxBp(env, k); if (b) basket.push({ kind: k, bp: b.bp, parts: b.parts.map((p) => ({ code: p.code, label: p.label, bp: p.bp })) }); }
+  const missing = new Set<string>();
+  const items = args.items.map((i) => {
+    const kind = (i.doc?.fiscalKind ?? null) as EnvelopeKind | null;
+    if (!i.doc || !kind || !(ENVELOPE_KINDS as readonly string[]).includes(kind)) return i;
+    const b = basket.find((x) => x.kind === kind);
+    if (!b) { missing.add(kind); return i; }
+    return { ...i, doc: { ...i.doc, percentBp: b.bp, complete: true, name: `${i.doc.name} · envelope ${env.year}` } };
+  });
+  for (const k of missing) warnings.push(`O envelope fiscal ${env.year} não tem tributos de ${k}: esses produtos usam os tributos do documento fiscal.`);
+  const profit = env.values.profitTaxBp;
+  const settings = profit != null ? { ...args.settings, incomeTaxBp: profit } : args.settings;
+  if (profit == null) warnings.push(`O envelope fiscal ${env.year} não tem a alíquota efetiva sobre o lucro: IR/CSLL pelos parâmetros de viabilidade.`);
+  const retentions = Object.entries(env.values.retentions ?? {}).filter(([, v]) => v != null && v > 0).map(([code, bp]) => ({ code, label: ENVELOPE_RETENTIONS[code as EnvelopeRetention] ?? code, bp: bp! }));
+  const info: FiscalContextInfo = {
+    ...base, envelope: { id: env.id, year: env.year, municipality: env.municipality ?? null }, basket,
+    profitTaxBp: settings.incomeTaxBp ?? null, profitTaxSource: profit != null ? 'envelope' : base.profitTaxSource, retentions,
+  };
+  return { args: { ...args, items, settings }, info, warnings };
+}
+
+export function financeEngine(args: EngineArgs): EconResult {
+  const fx = applyFiscalEnvelope(args);
+  const r = financeEngineCore(fx.args);
+  if (!fx.info) return r;
+  return { ...r, fiscal: fx.info, warnings: [...new Set([...fx.warnings, ...r.warnings])] };
+}
+
+function financeEngineCore(args0: EngineArgs): EconResult {
+
   const inp0 = args0.input;
   const kindOf = (i: EconItem): DealKind => i.kind ?? (inp0.mode === 'pontual' ? 'venda' : 'recorrencia');
   const lotOfItem = (i: EconItem) => cestaOf(i.doc?.fiscalKind ?? null, kindOf(i));
@@ -1016,6 +1078,11 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
       ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
+      ...(r.fiscal ? [
+        { label: `Envelope fiscal ${r.fiscal.year} (${r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'})`, formula: r.fiscal.envelope ? `município IBGE ${r.fiscal.ibgeCode}${r.fiscal.envelope.municipality ? ` (${r.fiscal.envelope.municipality})` : ''} · chave ${r.fiscal.envelope.year} · ${r.fiscal.basket.map((b) => `${b.kind}: ${b.parts.map((x) => `${x.label} ${pc(x.bp / 100)}`).join(' + ')}`).join(' · ')}` : 'sem envelope para a chave: tributos dos documentos fiscais', value: r.fiscal.envelope ? 'na carga da nota' : '—' },
+        { label: 'Alíquota efetiva sobre o lucro (IRPJ/CSLL)', formula: r.fiscal.profitTaxSource === 'envelope' ? `envelope ${r.fiscal.envelope?.year}` : 'parâmetros de viabilidade', value: r.fiscal.profitTaxBp == null ? '—' : pc(r.fiscal.profitTaxBp / 100) },
+        ...(r.fiscal.retentions.length ? [{ label: 'Retenções na fonte (fora do cálculo)', formula: `${r.fiscal.retentions.map((x) => `${x.label} ${pc(x.bp / 100)}`).join(' + ')}: contas a receber e compensação, não entram no preço nem na DRE`, value: '—' }] : []),
+      ] : []),
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Despesas variáveis (dv)', formula: 'sobre o preço; sem comissão', value: pc(c * 100) },
       { label: `Glosa, setor ${r.publicSector ? 'público' : 'privado'}`, formula: 'só no fluxo de caixa, fora do preço', value: pc(glosa * 100) },
