@@ -146,6 +146,8 @@ describe('central de atenção e painel executivo', () => {
     ], today);
     expect(r.map((x) => x.n)).toEqual([1, 2, 2, 3]);
     expect(r[3]).toMatchObject({ monthlyCents: 160, annualCents: 1920 });
+    expect(r[0]).toMatchObject({ closureN: 0 });
+    expect(r[1]).toMatchObject({ closureN: 1, closureCents: 10 });
   });
   it('concentração: HHI e participação', () => {
     const c = concentration([{ key: 'a', name: 'A', cents: 50 }, { key: 'b', name: 'B', cents: 30 }, { key: 'c', name: 'C', cents: 20 }]);
