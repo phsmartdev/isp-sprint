@@ -7,6 +7,7 @@ import clsx from 'clsx';
 import {
   ArrowRight, Bell, Box, CalendarClock, ChevronRight, CircleHelp, Clock, Database, FileText, Filter, Image as ImageIcon, KeyRound, MessageSquare, Monitor,
   Palette, Plus, RefreshCw, Settings, Trash2, Upload, UserPlus, Users, Workflow,
+  Pencil,
 } from 'lucide-react';
 import {
   BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
@@ -179,7 +180,43 @@ async function fileToBase64(file: File) {
 }
 const IMG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
-function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams: { id: string; name: string }[]; users?: AdminUser[]; onDone: (temp?: string) => void }) {
+type Team = { id: string; name: string; active?: boolean };
+
+/** Time na lista: renomear, ativar ou inativar (inativo sai das escolhas; os membros continuam vinculados). */
+function TeamRow({ t, members }: { t: Team; members: number }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [name, setName] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: (body: { name?: string; active?: boolean }) => api(`/admin/teams/${t.id}`, { method: 'PATCH', body }),
+    onSuccess: (_r, b) => { setName(null); qc.invalidateQueries({ queryKey: ['admin', 'users'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: b.active === undefined ? 'Time renomeado' : b.active ? 'Time ativado' : 'Time inativado' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const active = t.active !== false;
+  return (
+    <li className={clsx('flex flex-wrap items-center gap-2 px-3 py-2 text-sm', !active && 'bg-surface-2/60')}>
+      {name !== null ? (
+        <form className="flex flex-1 flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim().length >= 2 && name.trim() !== t.name) m.mutate({ name: name.trim() }); else setName(null); }}>
+          <Input aria-label={`Novo nome do time ${t.name}`} className="max-w-xs" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+          <Button size="sm" type="submit" variant="primary" loading={m.isPending}>Salvar</Button>
+          <Button size="sm" type="button" onClick={() => setName(null)}>Cancelar</Button>
+        </form>
+      ) : (
+        <>
+          <span className={clsx('min-w-0 flex-1 font-semibold', active ? 'text-ink' : 'text-muted')}>{t.name}</span>
+          <span className="text-xs text-muted">{members} membro(s)</span>
+          {active ? <Chip tone="green">Ativo</Chip> : <Chip>Inativo</Chip>}
+          <Button size="sm" variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setName(t.name)}>Editar</Button>
+          <Button size="sm" variant="ghost" loading={m.isPending} onClick={() => m.mutate({ active: !active })}>{active ? 'Inativar' : 'Ativar'}</Button>
+        </>
+      )}
+    </li>
+  );
+}
+
+function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminUser; teams: Team[]; users?: AdminUser[]; onDone: (temp?: string) => void }) {
+  // time inativo não aparece para escolha, salvo se a pessoa já faz parte (para poder desmarcar)
+  const teams = allTeams.filter((t) => t.active !== false || user?.teamIds.includes(t.id) || user?.leadTeamIds?.includes(t.id));
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();
@@ -225,7 +262,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
                 <li key={t.id} className={`rounded-sm border px-3 py-2 text-sm ${lead ? 'border-primary bg-primary-soft' : 'border-line'}`}>
                   <label className="flex items-center gap-2 font-semibold text-ink">
                     <input type="checkbox" checked={lead} onChange={() => { set('leadTeamIds', lead ? form.leadTeamIds.filter((x) => x !== t.id) : [...form.leadTeamIds, t.id]); set('teamIds', lead ? form.teamIds.filter((x) => x !== t.id) : [...new Set([...form.teamIds, t.id])]); }} />
-                    {t.name}
+                    {t.name}{t.active === false && <span className="text-xs font-normal text-muted">(inativo)</span>}
                   </label>
                   <p className="ml-6 text-xs text-muted">{people.length ? people.map((x) => x.name).join(', ') : 'Ninguém neste time ainda'}</p>
                 </li>
@@ -242,7 +279,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
               const member = form.teamIds.includes(t.id);
               return (
                 <li key={t.id} className="rounded-sm border border-line px-3 py-2 text-sm">
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={member} onChange={() => { set('teamIds', member ? form.teamIds.filter((x) => x !== t.id) : [...form.teamIds, t.id]); set('leadTeamIds', []); }} />{t.name}</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={member} onChange={() => { set('teamIds', member ? form.teamIds.filter((x) => x !== t.id) : [...form.teamIds, t.id]); set('leadTeamIds', []); }} />{t.name}{t.active === false && <span className="text-xs text-muted">(inativo)</span>}</label>
                 </li>
               );
             })}
@@ -282,7 +319,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
 export function AdminUsers() {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['admin', 'users'], queryFn: () => api<{ users: AdminUser[]; teams: { id: string; name: string }[] }>('/admin/users') });
+  const q = useQuery({ queryKey: ['admin', 'users'], queryFn: () => api<{ users: AdminUser[]; teams: Team[] }>('/admin/users') });
   const [editing, setEditing] = useState<AdminUser | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
   const [temp, setTemp] = useState<{ name: string; password: string } | null>(null);
   const [newTeam, setNewTeam] = useState('');
@@ -349,7 +386,7 @@ export function AdminUsers() {
       </section>
       <section className="card p-5">
         <h2 className="mb-2 text-md font-bold text-ink">Times</h2>
-        <ul className="mb-3 flex flex-wrap gap-2">{teams.map((t) => <li key={t.id}><Chip tone="blue">{t.name}</Chip></li>)}</ul>
+        <ul className="mb-3 divide-y divide-line rounded-md border border-line">{teams.map((t) => <TeamRow key={t.id} t={t} members={users.filter((u) => u.teamIds.includes(t.id)).length} />)}</ul>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (newTeam.trim().length >= 2) team.mutate(); }}>
           <Input aria-label="Nome do novo time" className="max-w-xs" value={newTeam} onChange={(e) => setNewTeam(e.target.value)} placeholder="Nome do novo time" />
           <Button type="submit" icon={<Plus className="h-4 w-4" />} loading={team.isPending}>Criar time</Button>

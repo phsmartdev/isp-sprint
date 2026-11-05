@@ -12,6 +12,7 @@ import * as s from '../db/schema';
 import { consumptionOf } from './contractLedger';
 import { runCompanyDocAlerts } from './companyDocs';
 import { adjustmentSuggestion } from './indices';
+import { sendReportMessage } from './contractReports';
 import { addEvent, contractSettingsOf, contractSummary, createTask, mailTo, openProcess, sectorOwners, setStage, userById, type ContractRow } from './contracts';
 
 type Settings = Awaited<ReturnType<typeof contractSettingsOf>>;
@@ -46,6 +47,7 @@ async function inputFor(db: DbOrTx, c: ContractRow, today: string) {
       consumption: cons?.indicator ?? null,
       isPublic: c.kind === 'publico',
       commitments: cons?.commitments ? cons.commitments.filter((x) => !x.cancelledAt).map((x) => ({ id: x.id, number: x.number, share: x.share, available: x.available })) : null,
+      report: v!.reportTerms ?? null,
     },
     cons,
   };
@@ -178,6 +180,14 @@ async function act(db: DbOrTx, config: Config, c: ContractRow, a: DueAlert, cfg:
       detail = what;
       break;
     }
+    case 'relatorio_mensal': {
+      const t = sum.v.reportTerms;
+      const people = t?.sector ? await sectorOwners(db, c.tenantId, [t.sector], [c.commercialOwnerId]) : [];
+      await taskFor(people, `Enviar relatório mensal: contrato ${sum.v.number} – ${client}`, `Prazo de envio ${when}. Depois do envio, quem valida confere o relatório.\n\n${sum.text}`, a.dueAt, 'alta');
+      const r = await sendReportMessage(db, config, c, 'lembrete', a.cycleKey, today);
+      detail = `Relatório mensal com prazo ${when}.${'skipped' in r && r.skipped === 'sem_modelo' ? ' Modelo de lembrete não configurado: só a tarefa foi criada.' : ` ${r.sent} aviso(s) enviado(s).`}`;
+      break;
+    }
     case 'implantacao': {
       const ops = await sectorOwners(db, c.tenantId, ['implantacao'], [c.operationalOwnerId, c.commercialOwnerId]);
       await taskFor(ops, `Implantação atrasada: ${client}`, `Sem ativação técnica registrada.\n\n${sum.text}`, today, 'alta');
@@ -231,6 +241,7 @@ export async function runContractAlerts(db: DbOrTx, config: Config, opts: { tena
         case 'esgotamento': return !input.consumption?.exhaustBeforeEnd;
         case 'empenho_baixo': return !input.commitments?.some((x) => x.id === e.cycleKey && x.available > 0 && (x.share ?? 0) >= 0.8);
         case 'sem_empenho': return !!input.commitments?.some((x) => x.available > 0);
+        case 'relatorio_mensal': return !input.report?.required;
         default: return false;
       }
     };

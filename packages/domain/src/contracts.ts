@@ -160,7 +160,7 @@ export function normalizeDashboard(v: unknown): DashboardConfig {
   };
 }
 
-export const ALERT_KINDS = ['renovacao', 'reajuste', 'garantia', 'documento_pendente', 'assinatura', 'provisionamento', 'implantacao', 'encerramento_90', 'encerramento_30', 'consumo_acelerado', 'consumo_lento', 'saldo_baixo', 'esgotamento', 'empenho_baixo', 'sem_empenho'] as const;
+export const ALERT_KINDS = ['renovacao', 'reajuste', 'garantia', 'documento_pendente', 'assinatura', 'provisionamento', 'implantacao', 'encerramento_90', 'encerramento_30', 'consumo_acelerado', 'consumo_lento', 'saldo_baixo', 'esgotamento', 'empenho_baixo', 'sem_empenho', 'relatorio_mensal'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const ALERT_LABELS: Record<AlertKind, string> = {
   renovacao: 'Renovação',
@@ -178,6 +178,7 @@ export const ALERT_LABELS: Record<AlertKind, string> = {
   esgotamento: 'Saldo acaba antes da vigência',
   empenho_baixo: 'Empenho perto do fim',
   sem_empenho: 'Sem empenho com saldo',
+  relatorio_mensal: 'Relatório mensal a enviar',
 };
 
 export type AlertInput = {
@@ -200,6 +201,8 @@ export type AlertInput = {
   /** Contrato público: empenhos com saldo (null quando não se aplica). */
   commitments?: { id: string; number: string; share: number | null; available: number }[] | null;
   isPublic?: boolean;
+  /** Relatório mensal exigido pelo contrato (null quando não se aplica). */
+  report?: ReportTerms | null;
 };
 export type DueAlert = { kind: AlertKind; cycleKey: string; dueAt: string };
 
@@ -246,6 +249,9 @@ export function dueAlerts(i: AlertInput, cfg: Pick<typeof DEFAULT_CONTRACT_SETTI
     for (const c of i.commitments) if (c.share !== null && c.share >= 0.8 && c.available > 0) out.push({ kind: 'empenho_baixo', cycleKey: c.id, dueAt: addDays(i.today, 10) });
     if (!i.commitments.some((c) => c.available > 0)) out.push({ kind: 'sem_empenho', cycleKey: i.today.slice(0, 4), dueAt: addDays(i.today, 5) });
   }
+  // relatório mensal: um alerta por mês, X dias antes do prazo de envio (sem antecedência definida, não alerta)
+  const rd = i.report?.required && i.report.dueDay && i.report.alertDaysBefore != null ? nextReportDue(i.report.dueDay, i.today) : null;
+  if (rd && (i.stage === 'vigente' || i.stage === 'renovacao' || i.stage === 'reajuste' || i.stage === 'implantacao') && i.today >= addDays(rd, -i.report!.alertDaysBefore!)) out.push({ kind: 'relatorio_mensal', cycleKey: rd.slice(0, 7), dueAt: rd });
   if (i.openSignatureSince && i.today >= addDays(i.openSignatureSince.slice(0, 10), cfg.signatureSlaDays)) out.push({ kind: 'assinatura', cycleKey: i.openSignatureSince.slice(0, 10), dueAt: addDays(i.openSignatureSince.slice(0, 10), cfg.signatureSlaDays) });
   return out;
 }
@@ -543,7 +549,7 @@ export const ATTENTION_LEVEL_LABELS: Record<AttentionLevel, string> = { critica:
 /** Gravidade de cada notificação antes do prazo. Vencida sobe um nível. */
 export const ALERT_BASE_LEVEL: Record<AlertKind, AttentionLevel> = {
   renovacao: 'alta', reajuste: 'media', garantia: 'alta', documento_pendente: 'media', assinatura: 'alta', provisionamento: 'alta', implantacao: 'alta',
-  encerramento_90: 'alta', encerramento_30: 'critica', consumo_acelerado: 'alta', consumo_lento: 'media', saldo_baixo: 'alta', esgotamento: 'critica', empenho_baixo: 'alta', sem_empenho: 'critica',
+  encerramento_90: 'alta', encerramento_30: 'critica', consumo_acelerado: 'alta', consumo_lento: 'media', saldo_baixo: 'alta', esgotamento: 'critica', empenho_baixo: 'alta', sem_empenho: 'critica', relatorio_mensal: 'media',
 };
 const up = (l: AttentionLevel): AttentionLevel => (l === 'media' ? 'alta' : 'critica');
 /** Nível final: vencido sobe um nível; a 3 dias do prazo, "atenção" vira "alto". */
@@ -623,3 +629,45 @@ export function contractValuesFromItems(items: readonly { qty: number; unitCents
   const totalCents = termMonths && termMonths > 0 ? monthlyCents * termMonths + oneTimeCents : null;
   return { monthlyCents, oneTimeCents, totalCents };
 }
+
+
+// ------------------------------------------------------------------ relatório mensal do contrato
+/** Relatório mensal exigido pelo contrato: setor que envia, quem valida, dia do mês do envio e antecedência do alerta. */
+export type ReportTerms = { required: boolean; sector: Sector | null; validatorId: string | null; dueDay: number | null; alertDaysBefore: number | null };
+
+/** Prazo de envio deste mês (dia limitado ao fim do mês); se já passou, o do mês seguinte. */
+export function nextReportDue(dueDay: number, today: string): string {
+  const at = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number) as [number, number];
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return `${ym}-${String(Math.min(Math.max(1, dueDay), last)).padStart(2, '0')}`;
+  };
+  const cur = at(today.slice(0, 7));
+  if (cur >= today) return cur;
+  const [y, m] = today.slice(0, 7).split('-').map(Number) as [number, number];
+  return at(m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`);
+}
+
+/** Termos válidos para salvar: exigido pede setor, validador e dia do envio. */
+export function reportTermsIssues(t: ReportTerms | null | undefined): { path: string; message: string }[] {
+  if (!t?.required) return [];
+  const out: { path: string; message: string }[] = [];
+  if (!t.sector) out.push({ path: 'reportTerms.sector', message: 'Informe o setor responsável pelo envio.' });
+  if (!t.validatorId) out.push({ path: 'reportTerms.validatorId', message: 'Informe quem valida o relatório.' });
+  if (!t.dueDay) out.push({ path: 'reportTerms.dueDay', message: 'Informe o dia do envio mensal.' });
+  return out;
+}
+
+/** Mensagens da rotina de relatório: aviso de inclusão na rotina e lembrete antes do prazo. */
+export const REPORT_MESSAGE_KINDS = ['inicio_rotina', 'lembrete'] as const;
+export type ReportMessageKind = (typeof REPORT_MESSAGE_KINDS)[number];
+export const REPORT_MESSAGE_LABELS: Record<ReportMessageKind, string> = { inicio_rotina: 'Inclusão na rotina', lembrete: 'Lembrete antes do envio' };
+export const REPORT_CHANNELS = ['email', 'whatsapp', 'glpi'] as const;
+export type ReportChannel = (typeof REPORT_CHANNELS)[number];
+export const REPORT_CHANNEL_LABELS: Record<ReportChannel, string> = { email: 'E-mail', whatsapp: 'WhatsApp', glpi: 'Chamado no GLPI' };
+export const REPORT_VARIABLES = [
+  ['destinatario', 'Nome de quem recebe'], ['cliente', 'Nome do cliente'], ['contrato', 'Número do contrato'], ['codigo', 'Código CT'], ['objeto', 'Objeto do contrato'],
+  ['setor', 'Setor responsável pelo envio'], ['validador', 'Quem valida'], ['dia_envio', 'Dia do envio mensal'], ['proximo_envio', 'Próximo prazo de envio'], ['dias_para_envio', 'Dias até o prazo'], ['empresa', 'Nome da empresa'],
+] as const;
+export type ReportMessage = { channels: ReportChannel[]; subject: string; body: string; whatsapp: string; glpi: { entityId: number | null; groupId: number | null; categoryId: number | null } };
+export type ReportMessages = Partial<Record<ReportMessageKind, ReportMessage>>;

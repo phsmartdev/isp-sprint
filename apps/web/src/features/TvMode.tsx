@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { ListChecks, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
 import clsx from 'clsx';
 import { MoneyToggle } from '../lib/privacy';
 
@@ -56,16 +56,42 @@ export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExi
   const [refreshedAt, setRefreshedAt] = useState(() => new Date());
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  // telas que entram na rotação: escolha lembrada neste navegador (por apresentação)
+  const storeKey = `isp:tv-tabs:${title}`;
+  const [chosen, setChosen] = useState<T[]>(() => {
+    try { const v = JSON.parse(localStorage.getItem(storeKey) ?? 'null') as T[] | null; if (Array.isArray(v)) return v.filter((k) => tabs.some((x) => x.key === k)); } catch { /* sem armazenamento */ }
+    return tabs.map((x) => x.key);
+  });
+  const [picking, setPicking] = useState(false);
+  const pickRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!picking) return;
+    const close = (e: MouseEvent) => { if (!pickRef.current?.contains(e.target as Node)) setPicking(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [picking]);
+  const toggle = (k: T) => setChosen((cur) => {
+    const next = cur.includes(k) ? cur.filter((x) => x !== k) : tabs.map((x) => x.key).filter((x) => x === k || cur.includes(x));
+    try { localStorage.setItem(storeKey, JSON.stringify(next)); } catch { /* sem armazenamento */ }
+    return next;
+  });
+  const cycle = tabs.filter((x) => chosen.includes(x.key));
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 15_000); return () => clearInterval(t); }, []);
   useEffect(() => {
     const t = setInterval(() => { for (const k of queryKeys) void qc.invalidateQueries({ queryKey: k }); setRefreshedAt(new Date()); }, REFRESH_MINUTES * 60_000);
     return () => clearInterval(t);
   }, [qc, queryKeys]);
   useEffect(() => {
-    if (!rotate || tabs.length < 2) return;
-    const t = setInterval(() => { const i = tabs.findIndex((x) => x.key === tabRef.current); onTab(tabs[(i + 1) % tabs.length]!.key); }, ROTATE_SECONDS * 1000);
+    if (!rotate || cycle.length < 2) return;
+    const t = setInterval(() => {
+      // próxima tela escolhida depois da atual (na ordem das abas), mesmo que a atual esteja fora da seleção
+      const order = tabs.map((x) => x.key);
+      const at = order.indexOf(tabRef.current);
+      const next = [...order.slice(at + 1), ...order.slice(0, at + 1)].find((k) => chosen.includes(k));
+      if (next) onTab(next);
+    }, ROTATE_SECONDS * 1000);
     return () => clearInterval(t);
-  }, [rotate, tabs, onTab]);
+  }, [rotate, cycle.length, chosen, tabs, onTab]);
   const time = (d: Date) => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   return (
     <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg bg-navy px-6 py-4 text-white">
@@ -79,6 +105,26 @@ export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExi
           <input type="checkbox" className="h-4 w-4 accent-[#4FBBFF]" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />
           <RefreshCw className="h-4 w-4" aria-hidden />Alternar abas ({ROTATE_SECONDS}s)
         </label>
+        {tabs.length > 1 && (
+          <div ref={pickRef} className="relative">
+            <button type="button" aria-expanded={picking} aria-haspopup="true" onClick={() => setPicking((v) => !v)} className="inline-flex h-10 items-center gap-2 rounded-md bg-white/10 px-3 text-sm font-semibold hover:bg-white/15">
+              <ListChecks className="h-4 w-4" aria-hidden />Telas ({cycle.length}/{tabs.length})
+            </button>
+            {picking && (
+              <div role="group" aria-label="Telas exibidas na rotação" className="absolute right-0 top-12 z-20 w-64 rounded-md bg-surface p-3 text-ink shadow-overlay ring-1 ring-line">
+                <p className="mb-2 text-xs font-semibold text-muted">Telas exibidas na rotação</p>
+                <ul className="max-h-[50vh] space-y-1 overflow-y-auto">
+                  {tabs.map((x) => (
+                    <li key={x.key}><label className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-1 text-sm hover:bg-surface-2">
+                      <input type="checkbox" className="h-4 w-4 accent-primary" checked={chosen.includes(x.key)} onChange={() => toggle(x.key)} />{x.label}
+                    </label></li>
+                  ))}
+                </ul>
+                {cycle.length < 2 && <p className="mt-2 text-xs text-warning">Escolha ao menos 2 telas para alternar.</p>}
+              </div>
+            )}
+          </div>
+        )}
         <MoneyToggle compact className="border-white/20 bg-white/10 text-white hover:bg-white/15" />
         <button type="button" onClick={onExit} className="inline-flex h-10 items-center gap-2 rounded-md bg-lime px-3 text-sm font-bold text-navy hover:brightness-95">
           <Minimize2 className="h-4 w-4" aria-hidden />Sair (Esc)

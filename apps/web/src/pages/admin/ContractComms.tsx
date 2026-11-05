@@ -11,6 +11,7 @@ import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, No
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { CommFlowEditor } from './CommFlowEditor';
+import { ReportMessagesAdmin } from './ReportMessages';
 
 type Flow = { id: string; name: string; description: string | null; graph: CommGraph; publishedGraph: CommGraph | null; version: number; active: boolean; publishedAt: string | null; runs: Record<string, number>; draftChanged: boolean };
 type Tpl = { id: string; name: string; channels: ('email' | 'whatsapp')[]; subject: string; body: string; whatsapp: string; format: 'texto' | 'html'; layout: boolean; status: string; version: number; rowVersion: number; updatedAt: string };
@@ -165,12 +166,14 @@ function Templates() {
 
 export function AdminContractComms() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get('aba') === 'templates' ? 'templates' : 'esteiras';
+  const aba = params.get('aba');
+  const tab = aba === 'templates' ? 'templates' : aba === 'relatorio' ? 'relatorio' : 'esteiras';
   return (
     <div className="space-y-4">
-      <Tabs<'esteiras' | 'templates'> label="Comunicação de contratos" value={tab} onChange={(k) => setParams({ aba: k }, { replace: true })} tabs={[{ key: 'esteiras', label: 'Esteiras' }, { key: 'templates', label: 'Templates' }]} />
+      <Tabs<'esteiras' | 'templates' | 'relatorio'> label="Comunicação de contratos" value={tab} onChange={(k) => setParams({ aba: k }, { replace: true })} tabs={[{ key: 'esteiras', label: 'Esteiras' }, { key: 'templates', label: 'Templates' }, { key: 'relatorio', label: 'Relatório mensal' }]} />
       <div className={clsx(tab !== 'esteiras' && 'hidden')}>{tab === 'esteiras' && <Flows />}</div>
       {tab === 'templates' && <Templates />}
+      {tab === 'relatorio' && <ReportMessagesAdmin />}
     </div>
   );
 }

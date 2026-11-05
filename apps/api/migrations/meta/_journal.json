@@ -659,6 +659,20 @@
       "when": 1793878563795,
       "tag": "0093_responsaveis_por_atividade",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1793884682554,
+      "tag": "0094_relatorio_mensal",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1793885303859,
+      "tag": "0095_times_ativos",
+      "breakpoints": true
     }
   ]
 }

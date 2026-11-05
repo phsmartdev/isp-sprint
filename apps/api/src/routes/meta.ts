@@ -29,7 +29,7 @@ export const metaRoutes = [
         app.db.select({ id: s.leadSources.id, name: s.leadSources.name }).from(s.leadSources).where(and(eq(s.leadSources.tenantId, t), eq(s.leadSources.active, true))).orderBy(asc(s.leadSources.name)),
         app.db.select({ id: s.campaigns.id, name: s.campaigns.name, sourceId: s.campaigns.sourceId }).from(s.campaigns).where(and(eq(s.campaigns.tenantId, t), eq(s.campaigns.active, true))).orderBy(asc(s.campaigns.name)),
         pipelinesOf(app.db, t),
-        app.db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(eq(s.teams.tenantId, t)).orderBy(asc(s.teams.name)),
+        app.db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(and(eq(s.teams.tenantId, t), eq(s.teams.active, true))).orderBy(asc(s.teams.name)),
         app.db
           .select({ id: s.plans.id, name: s.plans.name, line: s.plans.line, segment: s.plans.segment, priceCents: s.plans.priceCents, speedMbps: s.plans.speedMbps, fiscalDocCode: s.plans.fiscalDocCode })
           .from(s.plans)

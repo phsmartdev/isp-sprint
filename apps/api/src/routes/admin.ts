@@ -312,6 +312,26 @@ export const adminRoutes = [
     },
   }),
 
+  defineRoute({
+    method: 'PATCH',
+    url: '/admin/teams/:id',
+    summary: 'Edita o nome do time ou ativa/inativa (inativo sai das escolhas; os membros continuam vinculados)',
+    tag: 'Administração',
+    ...ADMIN,
+    params: IdParams,
+    body: z.object({ name: z.string().trim().min(2).max(60).optional(), active: z.boolean().optional() }),
+    handler: async ({ app, auth, params, body }) => {
+      if (body.name) {
+        const [dup] = await app.db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), sql`lower(${s.teams.name}) = lower(${body.name})`, sql`${s.teams.id} <> ${params.id}`)).limit(1);
+        if (dup) throw unprocessable('Já existe um time com esse nome.', [{ path: 'name', message: 'Nome em uso' }]);
+      }
+      const [t] = await app.db.update(s.teams).set({ ...(body.name ? { name: body.name } : {}), ...(body.active !== undefined ? { active: body.active } : {}) })
+        .where(and(eq(s.teams.id, params.id), eq(s.teams.tenantId, auth.tenantId))).returning();
+      if (!t) throw notFound('Time não encontrado.');
+      return t;
+    },
+  }),
+
   // ------------------------------------------------------------------ segurança
   defineRoute({
     method: 'GET',
