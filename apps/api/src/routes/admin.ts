@@ -5,7 +5,7 @@ import { z } from 'zod';
 import {
   BRAND_SLOTS, ImageUpload, PasswordChange, PlanUpsert, SecurityUpdate, SourceUpsert, UserCreate, UserUpdate,
 } from '@isp/shared';
-import { DEFAULT_ACCESS, MODULES, PROFILE_KEYS, PROFILE_LABELS, allowedLevels, type AccessLevel, type Module, type ProfileKey } from '@isp/domain';
+import { ADMIN_PROFILES, DEFAULT_ACCESS, MODULES, PROFILE_KEYS, PROFILE_LABELS, allowedLevels, type AccessLevel, type Module, type ProfileKey } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -176,7 +176,7 @@ export const adminRoutes = [
           id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, phone: s.users.phone, active: s.users.active, ipBypass: s.users.ipBypass, lastLoginAt: s.users.lastLoginAt,
           goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, playbookRoles: s.users.playbookRoles, createdAt: s.users.createdAt,
           hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")`,
-          profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'gerencia' then 0 when 'supervisor' then 1 else 2 end limit 1)`,
+          profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'administrador' then 0 when 'gerencia' then 1 when 'supervisor' then 2 when 'analista' then 3 else 4 end limit 1)`,
         })
         .from(s.users)
         .where(eq(s.users.tenantId, auth.tenantId))
@@ -233,8 +233,8 @@ export const adminRoutes = [
     handler: async ({ app, auth, params, body, req }) => {
       await app.db.transaction(async (tx) => {
         const u = await userRow(tx, auth, params.id);
-        if (params.id === auth.userId && (body.active === false || (body.profile && body.profile !== 'gerencia'))) {
-          throw unprocessable('Você não pode remover o próprio acesso de gerência nem se desativar.');
+        if (params.id === auth.userId && (body.active === false || (body.profile && !ADMIN_PROFILES.includes(body.profile)))) {
+          throw unprocessable('Você não pode remover o próprio acesso de administração nem se desativar.');
         }
         if (body.email && body.email !== u.email.toLowerCase()) {
           const [exists] = await tx.select({ id: s.users.id }).from(s.users).where(sql`lower(${s.users.email}) = ${body.email} and ${s.users.id} <> ${u.id}`).limit(1);
@@ -369,8 +369,8 @@ export const adminRoutes = [
     body: SecurityUpdate,
     handler: async ({ app, auth, body, req }) => {
       if (!allowedLevels(body.module).includes(body.level)) throw unprocessable('Nível não disponível para este módulo.', [{ path: 'level', message: 'Configurações aceita apenas Sem acesso ou Total' }]);
-      if (body.profile === 'gerencia' && body.module === 'configuracoes' && body.level !== 'total') {
-        throw unprocessable('A Gerência precisa manter acesso total a Configurações, senão ninguém conseguiria administrar a plataforma.');
+      if (ADMIN_PROFILES.includes(body.profile) && body.module === 'configuracoes' && body.level !== 'total') {
+        throw unprocessable(`${PROFILE_LABELS[body.profile as ProfileKey]} precisa manter acesso total a Configurações, senão ninguém conseguiria administrar a plataforma.`);
       }
       return app.db.transaction(async (tx) => {
         const roles = await ensureRoles(tx, auth.tenantId);

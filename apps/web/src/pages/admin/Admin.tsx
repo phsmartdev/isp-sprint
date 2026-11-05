@@ -272,8 +272,8 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
         </fieldset>
       ) : (
         <fieldset>
-          <legend className="mb-1 text-sm font-semibold text-ink">{form.profile === 'gerencia' ? 'Times (opcional)' : 'Time de que faz parte'}</legend>
-          <p className="mb-2 text-xs text-muted">{form.profile === 'gerencia' ? 'A gerência vê todos os times.' : 'O supervisor deste time vê o trabalho desta pessoa.'}</p>
+          <legend className="mb-1 text-sm font-semibold text-ink">{form.profile === 'gerencia' || form.profile === 'administrador' ? 'Times (opcional)' : 'Time de que faz parte'}</legend>
+          <p className="mb-2 text-xs text-muted">{form.profile === 'gerencia' || form.profile === 'administrador' ? 'Vê todos os times.' : 'O supervisor deste time vê o trabalho desta pessoa.'}</p>
           <ul className="space-y-1.5">
             {teams.map((t) => {
               const member = form.teamIds.includes(t.id);
@@ -368,7 +368,7 @@ export function AdminUsers() {
                       <span><span className="block font-semibold text-ink">{u.name}</span><span className="block text-xs text-muted">{u.email}{u.jobTitle ? ` · ${u.jobTitle}` : ''}</span></span>
                     </span>
                   </td>
-                  <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'gerencia' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
+                  <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'administrador' ? 'red' : u.profile === 'gerencia' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
                   <td className="px-5 py-3 text-text">{u.teamIds.map((t) => `${teamName(t)}${u.leadTeamIds.includes(t) ? ' (lidera)' : ''}`).join(', ') || '—'}</td>
                   <td className="px-5 py-3 text-text">{u.sectors?.map((x) => SECTOR_LABELS[x]).join(', ') || '—'}</td>
                   <td className="num px-5 py-3 text-text">{u.goalSales} / {u.goalProposals} / {u.goalLeads}</td>
@@ -490,7 +490,7 @@ export function AdminSecurity() {
                   <th scope="row" className="px-5 py-3 font-semibold text-ink">{MODULE_LABELS[mod.key]}</th>
                   {d.profiles.map((p) => {
                     const lvl = d.matrix[p.key][mod.key];
-                    const locked = p.key === 'gerencia' && mod.key === 'configuracoes';
+                    const locked = (p.key === 'gerencia' || p.key === 'administrador') && mod.key === 'configuracoes';
                     return (
                       <td key={p.key} className="px-5 py-2.5">
                         <select
@@ -498,7 +498,7 @@ export function AdminSecurity() {
                           className={clsx('h-9 w-full max-w-[170px] rounded-sm border px-2 text-sm font-semibold', LEVEL_TONE[lvl])}
                           value={lvl}
                           disabled={locked || m.isPending}
-                          title={locked ? 'A Gerência mantém acesso total a Configurações' : undefined}
+                          title={locked ? 'Administrador e Gerência mantêm acesso total a Configurações' : undefined}
                           onChange={(e) => m.mutate({ profile: p.key, module: mod.key, level: e.target.value as AccessLevel })}
                         >
                           {mod.allowed.map((l) => <option key={l} value={l}>{LEVEL_LABELS[l]}{d.defaults[p.key][mod.key] === l ? ' (padrão)' : ''}</option>)}

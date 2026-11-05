@@ -11,7 +11,7 @@ import { level } from './scope';
 export const isBudgetAdmin = (auth: AuthContext) => level(auth, 'orcamento') === 'total';
 
 /** Supervisão (perfil Supervisor sem nível Total): lança e dá baixa, mas não exclui nem muda valor. */
-export const isBudgetRestricted = (auth: AuthContext) => !isBudgetAdmin(auth) && auth.profiles.includes('supervisor') && !auth.profiles.includes('gerencia');
+export const isBudgetRestricted = (auth: AuthContext) => !isBudgetAdmin(auth) && auth.profiles.includes('supervisor') && !auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador');
 
 export async function costCentersOf(db: DbOrTx, auth: AuthContext, includeInactive = false) {
   const all = await db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code);
