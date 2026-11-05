@@ -485,9 +485,13 @@ export function docStatus(expiresOn: string | null | undefined, today: string): 
 }
 
 // ------------------------------------------------------------------ aditivos (limite legal) e reajuste por índice oficial
-export const AMENDMENT_KINDS = ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'] as const;
+/** Finalidades de um termo aditivo. Um aditivo pode ter várias (ex.: prorrogação + reajuste + supressão). */
+export const AMENDMENT_KINDS = ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'] as const;
 export type AmendmentKind = (typeof AMENDMENT_KINDS)[number];
-export const AMENDMENT_LABELS: Record<AmendmentKind, string> = { acrescimo: 'Acréscimo de valor/quantidade', supressao: 'Supressão', prazo: 'Prorrogação de prazo', reequilibrio: 'Reequilíbrio econômico-financeiro', outro: 'Outro' };
+export const AMENDMENT_LABELS: Record<AmendmentKind, string> = {
+  acrescimo: 'Acréscimo de valor/quantidade', supressao: 'Supressão', prazo: 'Prorrogação de prazo', reajuste: 'Reajuste',
+  reequilibrio: 'Reequilíbrio econômico-financeiro', itens: 'Alteração dos itens', outro: 'Outro',
+};
 
 /** Valor original do contrato (base do limite): valor global da 1ª versão; sem ele, mensal × prazo. */
 export function originalValue(v: { totalCents: number | null; monthlyCents: number; termMonths: number | null }) {

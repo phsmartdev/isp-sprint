@@ -687,6 +687,13 @@
       "when": 1793903900888,
       "tag": "0097_catalogo_de_produtos",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1793904717061,
+      "tag": "0098_aditivo_varias_finalidades",
+      "breakpoints": true
     }
   ]
 }

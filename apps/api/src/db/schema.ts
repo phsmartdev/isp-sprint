@@ -1784,9 +1784,13 @@ export const contractAmendments = pgTable('contract_amendments', {
   acordo: boolean('acordo').notNull().default(false),
   description: text('description').notNull(),
   version: integer('version'),
+  /** Um aditivo com várias finalidades grava uma linha por finalidade com o mesmo grupo (e a mesma versão). */
+  groupId: uuid('group_id'),
+  /** Reajuste aplicado neste aditivo (%, ex.: 4.5). */
+  adjustmentPct: doublePrecision('adjustment_pct'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
-}, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reequilibrio', 'outro'])) }));
+}, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'])) }));
 
 /** Notas de empenho do contrato público: valor empenhado e saldo (faturado contra ele pelo extrato). Anulação não apaga. */
 export const contractCommitments = pgTable('contract_commitments', {
