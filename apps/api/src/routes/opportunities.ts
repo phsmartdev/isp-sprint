@@ -144,22 +144,28 @@ export const opportunityRoutes = [
   defineRoute({
     method: 'GET',
     url: '/pipeline',
-    summary: 'Kanban: etapas abertas com contagem, valor e cards',
+    summary: 'Kanban: etapas do funil com contagem, valor e cards (fechadas e perdidas na etapa em que a ação aconteceu)',
     tag: 'Oportunidades',
     module: 'oportunidades',
     query: FilterQuery,
     handler: async ({ app, auth, query }) => {
       const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const where = filters(auth, { ...query, pipelineId: pipe.id });
-      // colunas pela situação escolhida: em aberto (padrão), venda fechada, perdidas ou todas
-      const wantKind = { abertas: ['open'], ganhas: ['won'], perdidas: ['lost'], todas: ['open', 'won', 'lost'] }[query.status];
-      const open = pipe.stages.filter((st) => wantKind.includes(st.kind));
-      where.push(open.length ? inArray(s.opportunities.stage, open.map((st) => st.key)) : sql`false`);
-      // contagem e valor de TODAS as oportunidades da etapa; cards limitados por coluna (o quadro fica leve com milhares)
+      // colunas: sempre as etapas abertas do funil. Venda fechada e perdida aparecem na etapa em que a ação aconteceu
+      // (a etapa de onde saíram para "ganha"/"perdida", pelo histórico); sem histórico, na última etapa aberta.
+      const open = pipe.stages.filter((st) => st.kind === 'open');
+      const want = { abertas: ['open'], ganhas: ['won'], perdidas: ['lost'], todas: ['open', 'won', 'lost'] }[query.status];
+      const keys = pipe.stages.filter((st) => want.includes(st.kind)).map((st) => st.key);
+      where.push(keys.length ? inArray(s.opportunities.stage, keys) : sql`false`);
+      const openKeys = sql.raw(`ARRAY[${open.map((st) => `'${st.key.replace(/'/g, "''")}'`).join(',') || "''"}]::text[]`);
+      const lastOpen = open.at(-1)?.key ?? '';
+      const closedFrom = sql`(select e.from_value from opportunity_events e where e.opportunity_id = ${s.opportunities.id} and e.type = 'stage_changed' and e.to_value = ${s.opportunities.stage} order by e.occurred_at desc limit 1)`;
+      const colOf = sql<string>`case when ${s.opportunities.stage} = any(${openKeys}) then ${s.opportunities.stage} else coalesce((select x from (select ${closedFrom} as x) t where x = any(${openKeys})), ${lastOpen}) end`;
+      // contagem e valor de TODAS as oportunidades da coluna; cards limitados por coluna (o quadro fica leve com milhares)
       const [totals, perStage] = await Promise.all([
-        app.db.select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, v: sql<string>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
-          .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).where(and(...where)).groupBy(s.opportunities.stage),
-        Promise.all(open.map((st) => opportunityQuery(app.db).where(and(...where, eq(s.opportunities.stage, st.key))).orderBy(desc(s.opportunities.updatedAt)).limit(PIPELINE_CARDS))),
+        app.db.select({ stage: colOf, n: sql<number>`count(*)::int`, v: sql<string>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
+          .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).where(and(...where)).groupBy(sql`1`),
+        Promise.all(open.map((st) => opportunityQuery(app.db).where(and(...where, sql`${colOf} = ${st.key}`)).orderBy(desc(s.opportunities.updatedAt)).limit(PIPELINE_CARDS))),
       ]);
       const rows = perStage.flat();
       const totalOf = new Map(totals.map((t) => [t.stage, { n: Number(t.n), v: Number(t.v) }]));
@@ -172,7 +178,7 @@ export const opportunityRoutes = [
         stages: open.map((st, i) => {
           const cards = perStage[i]!.map(dto);
           const t = totalOf.get(st.key);
-          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: st.kind !== 'open', count: t?.n ?? 0, valueCents: t?.v ?? 0, cards };
+          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: false, count: t?.n ?? 0, valueCents: t?.v ?? 0, cards };
         }),
         terminalStages: pipe.stages.filter((st) => st.kind !== 'open').map((st) => ({ key: st.key, name: st.name })),
         generatedAt: now.toISOString(),
