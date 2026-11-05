@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, Phone, Scale, Send, UserRound, XCircle } from 'lucide-react';
+import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
@@ -35,6 +35,7 @@ import { ActivityComposer } from '../features/ActivityComposer';
 import { ActivityRow } from '../features/ActivityRow';
 import { TransitionDialog, isClosed, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
+import { OppActionDialog, type OppAction } from '../features/OppActionDialog';
 import { AddressFields, CustomFieldsEditor, emptyAddress, type AddressValue, type CustomValues, type KitValue } from '../features/DealFields';
 import { MeasurementBox } from '../features/MeasurementBox';
 import { ContractItemsBox } from '../features/ContractItemsBox';
@@ -586,6 +587,7 @@ export function OpportunityWorkspacePage() {
   const a = useAutosave(q.data);
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
+  const [oppAction, setOppAction] = useState<OppAction | null>(null);
   const [scheduling, setScheduling] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
@@ -851,9 +853,12 @@ export function OpportunityWorkspacePage() {
           <>
             <Button className="!bg-success !text-white hover:!opacity-90" icon={<CheckCircle2 className="h-4 w-4" />} onClick={() => requestMove('ganha')}>Venda fechada</Button>
             <Button variant="danger" icon={<XCircle className="h-4 w-4" />} onClick={() => requestMove('perdida')}>Venda perdida</Button>
+            <Button icon={opp.paused ? <PlayCircle className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />} onClick={() => setOppAction(opp.paused ? 'retomar' : 'pausar')}>{opp.paused ? 'Retomar negociação' : 'Pausar negociação'}</Button>
           </>
         )}
-        {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? ' — mude a etapa para reabrir.' : '. Reabrir é com a supervisão.'}</span>}
+        {editable && opp.paused && <span className="rounded-sm bg-[#FFF6D6] px-2 py-0.5 text-xs font-bold text-[#9A6B00]" title={opp.pauseReason ?? undefined}>{opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada'}</span>}
+        {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? '' : '. Reabrir é com a supervisão.'}</span>}
+        {isClosed(opp.stage) && canReopen && <Button variant="primary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOppAction('reabrir')}>Reabrir negociação</Button>}
       </div>
 
       <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
@@ -879,6 +884,7 @@ export function OpportunityWorkspacePage() {
       <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
       <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => { const kind = pending?.toKind; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => { void q.refetch(); celebrate(kind); } }); }} />
+      {oppAction && <OppActionDialog act={{ opp, kind: oppAction }} stages={stages} onClose={() => setOppAction(null)} />}
       <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
     </div>
   );

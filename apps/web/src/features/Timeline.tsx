@@ -8,7 +8,7 @@ import clsx from 'clsx';
 import { MessageSquareText } from 'lucide-react';
 import { ACTIVITY_TYPE_LABELS, LOSS_REASON_LABELS, STAGE_LABELS, type ActivityType, type LossReason, type OpportunityStage } from '@isp/domain';
 import { api } from '../lib/api';
-import { fmtBRL, fmtDateTime } from '../lib/format';
+import { fmtBRL, fmtDate, fmtDateTime } from '../lib/format';
 import type { TimelineItem } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, ErrorState, LoadingRows } from '../components/ui/primitives';
@@ -37,7 +37,7 @@ function category(i: TimelineItem): Category {
   if (i.kind === 'activity') return 'atividades';
   if (i.type === 'comment') return 'comentarios';
   if (i.type === 'updated' || i.type === 'assigned') return 'alteracoes';
-  if (i.type === 'stage_changed' || i.type === 'reopened') return 'etapas';
+  if (['stage_changed', 'reopened', 'paused', 'resumed'].includes(i.type)) return 'etapas';
   if (i.type.startsWith('approval_')) return 'aprovacoes';
   if (['whatsapp_sent', 'email_sent', 'attachment_added', 'attachment_removed'].includes(i.type)) return 'envios';
   return 'outros';
@@ -69,6 +69,8 @@ function describe(i: TimelineItem): string {
       return `Etapa: ${st(i.fromValue)} → ${st(i.toValue)}${loss ? ` (motivo: ${LOSS_REASON_LABELS[loss]})` : ''}`;
     }
     case 'reopened': return `Reaberta: ${st(i.fromValue)} → ${st(i.toValue)}`;
+    case 'paused': return `Negociação pausada${i.toValue ? ` até ${fmtDate(i.toValue)}` : ''}`;
+    case 'resumed': return 'Negociação retomada';
     case 'assigned': return 'Responsável alterado';
     case 'updated': return 'Alterou a negociação';
     case 'attachment_added': return `Anexo adicionado${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}`;

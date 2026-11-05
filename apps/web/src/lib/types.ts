@@ -81,6 +81,8 @@ export type Lead = {
 
 export type AccountContract = { id: string; number: string; object: string; monthlyCents: number; billingType: string; kind: string; stage: string; endAt: string | null };
 export type Opportunity = {
+  /** Negociação pausada (fica na etapa, sem cobrança de próxima ação) */
+  paused?: boolean; pausedUntil?: string | null; pauseReason?: string | null;
   /** Funil Sucesso do Cliente (por conta): contratos vigentes da conta */
   accountContracts?: AccountContract[];
   id: string;

@@ -43,10 +43,11 @@ const FilterQuery = z.object({
   from: z.string().date().optional(),
   to: z.string().date().optional(),
   /** Kanban: colunas em aberto (padrão), de venda fechada, de perdidas ou todas */
-  status: z.enum(['abertas', 'ganhas', 'perdidas', 'todas']).default('abertas'),
+  status: z.enum(['abertas', 'pausadas', 'ganhas', 'perdidas', 'todas']).default('abertas'),
 });
 
 const OPEN = sql`${s.opportunities.stage} not in ('ganha','perdida')`;
+const PAUSED = sql`${s.opportunities.pausedAt} is not null and (${s.opportunities.pausedUntil} is null or ${s.opportunities.pausedUntil} >= current_date)`;
 
 function filters(auth: AuthContext, f: { q?: string; ownerId?: string; sourceId?: string; planId?: string; pipelineId?: string; from?: string; to?: string }) {
   const where: SQL[] = [oppVisibility(auth)];
@@ -125,6 +126,7 @@ export const opportunityRoutes = [
       if (query.status === 'abertas') where.push(OPEN);
       if (query.status === 'encerradas') where.push(inArray(s.opportunities.stage, TERMINAL_STAGES as unknown as string[]));
       if (query.status === 'ganhas') where.push(eq(s.opportunities.stage, 'ganha'));
+      if (query.status === 'pausadas') where.push(OPEN, PAUSED);
       if (query.status === 'perdidas') where.push(eq(s.opportunities.stage, 'perdida'));
       const cond = and(...where);
       const col = SORTS[query.sort];
@@ -154,7 +156,8 @@ export const opportunityRoutes = [
       // colunas: sempre as etapas abertas do funil. Venda fechada e perdida aparecem na etapa em que a ação aconteceu
       // (a etapa de onde saíram para "ganha"/"perdida", pelo histórico); sem histórico, na última etapa aberta.
       const open = pipe.stages.filter((st) => st.kind === 'open');
-      const want = { abertas: ['open'], ganhas: ['won'], perdidas: ['lost'], todas: ['open', 'won', 'lost'] }[query.status];
+      const want = { abertas: ['open'], pausadas: ['open'], ganhas: ['won'], perdidas: ['lost'], todas: ['open', 'won', 'lost'] }[query.status];
+      if (query.status === 'pausadas') where.push(PAUSED);
       const keys = pipe.stages.filter((st) => want.includes(st.kind)).map((st) => st.key);
       where.push(keys.length ? inArray(s.opportunities.stage, keys) : sql`false`);
       const openKeys = sql.raw(`ARRAY[${open.map((st) => `'${st.key.replace(/'/g, "''")}'`).join(',') || "''"}]::text[]`);
@@ -309,6 +312,50 @@ export const opportunityRoutes = [
 
   defineRoute({
     method: 'POST',
+    url: '/opportunities/:id/pause',
+    summary: 'Pausa a negociação (fica na etapa, sem cobrança de próxima ação) com motivo e, se quiser, data para retomar',
+    tag: 'Oportunidades',
+    module: 'oportunidades',
+    params: IdParams,
+    body: z.object({ reason: z.string().trim().min(5, 'Explique o motivo da pausa').max(500), until: z.string().date().nullable().default(null), rowVersion: z.number().int() }),
+    handler: async ({ app, auth, params, body }) => {
+      const today = new Date().toISOString().slice(0, 10);
+      if (body.until && body.until <= today) throw unprocessable('A data para retomar precisa ser depois de hoje.', [{ path: 'until', message: 'Data no futuro' }]);
+      return app.db.transaction(async (tx) => {
+        const cur = await loadOpportunity(tx, auth, params.id);
+        if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+        if (TERMINAL_STAGES.includes(cur.stage as OpportunityStage)) throw unprocessable('Negociação encerrada não é pausada. Reabra antes.');
+        const [u] = await tx.update(s.opportunities).set({ pausedAt: new Date(), pausedUntil: body.until, pauseReason: body.reason, pausedBy: auth.userId, updatedAt: new Date(), rowVersion: bumpVersion() })
+          .where(and(eq(s.opportunities.id, cur.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
+        if (!u) throw conflict(cur.rowVersion);
+        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: cur.id, type: 'paused', actorId: auth.userId, toValue: body.until, reason: body.reason, rowVersion: u.rowVersion });
+        return { ok: true, rowVersion: u.rowVersion };
+      });
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/opportunities/:id/resume',
+    summary: 'Retoma a negociação pausada',
+    tag: 'Oportunidades',
+    module: 'oportunidades',
+    params: IdParams,
+    body: z.object({ rowVersion: z.number().int() }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const cur = await loadOpportunity(tx, auth, params.id);
+      if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+      if (!cur.pausedAt) throw unprocessable('A negociação não está pausada.');
+      const [u] = await tx.update(s.opportunities).set({ pausedAt: null, pausedUntil: null, pauseReason: null, pausedBy: null, updatedAt: new Date(), rowVersion: bumpVersion() })
+        .where(and(eq(s.opportunities.id, cur.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
+      if (!u) throw conflict(cur.rowVersion);
+      await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: cur.id, type: 'resumed', actorId: auth.userId, rowVersion: u.rowVersion });
+      return { ok: true, rowVersion: u.rowVersion };
+    }),
+  }),
+
+  defineRoute({
+    method: 'POST',
     url: '/opportunities/:id/transition',
     summary: 'Muda a etapa do funil com regras de servidor (409 versão, 422 regra)',
     tag: 'Oportunidades',
@@ -356,6 +403,8 @@ export const opportunityRoutes = [
             portReleaseReason: body.toStage === 'ganha' ? null : undefined,
             lostAt: body.toStage === 'perdida' ? now : reopening ? null : undefined,
             lossReason: body.toStage === 'perdida' ? body.lossReason : reopening ? null : undefined,
+            // encerrar tira a pausa (a pausa é só de negociação em aberto)
+            ...(TERMINAL_STAGES.includes(body.toStage as OpportunityStage) ? { pausedAt: null, pausedUntil: null, pauseReason: null, pausedBy: null } : {}),
             updatedAt: now,
             rowVersion: bumpVersion(),
           })
