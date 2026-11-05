@@ -3,7 +3,7 @@ import { latestActivityScripts } from './activityScripts';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ensureSalesBranches } from '../services/opportunities';
-import { getActiveInstruction, ensureRetiredSaleFields, ensureSaleTypeForm, pipelineAllowed, pipelinesOf } from '../services/instructions';
+import { getActiveInstruction, ensureBidFields, ensureRetiredSaleFields, ensureSaleTypeForm, pipelineAllowed, pipelinesOf } from '../services/instructions';
 import { level } from '../services/scope';
 
 export const metaRoutes = [
@@ -18,6 +18,7 @@ export const metaRoutes = [
       await getActiveInstruction(app.db, t);
       await ensureSaleTypeForm(app.db, t);
       await ensureRetiredSaleFields(app.db, t);
+      await ensureBidFields(app.db, t);
       await ensureSalesBranches(app.db, t);
       const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, fiscalKinds: s.salesBranches.fiscalKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
       const [users, sources, campaigns, pipes, teams, plans] = await Promise.all([

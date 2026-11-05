@@ -17,7 +17,7 @@ afterAll(async () => ctx.close());
 async function newOpp(saleKind: string) {
   const lk = ok(await lucas.get('/meta/lookups')).json();
   const p = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
-  return ok(await lucas.post('/opportunities', { newContact: { name: `Conta Pregão ${Date.now().toString(36)}`, segment: 'governamental' }, pipelineId: p.id, saleKind, branchId: lk.branches[0].id }), 201).json();
+  return ok(await lucas.post('/opportunities', { newContact: { name: `Conta Pregão ${Date.now().toString(36)}`, segment: 'governamental' }, pipelineId: p.id, saleKind, branchId: lk.branches[0].id, ...(saleKind === 'licitacao' ? { custom: { tipo_disputa: 'Aberta', lance_inicial: 1000, lance_minimo: 800 } } : {}) }), 201).json();
 }
 
 describe('Participantes da licitação', () => {
@@ -84,5 +84,22 @@ describe('Participantes da licitação', () => {
     expect((await lucas.put(`/opportunities/${o.id}/bid-participants/ours`, { rowVersion: r.rowVersion, items: [{ lot: '1', bidCents: 1 }, { lot: '1', bidCents: 2 }] })).statusCode).toBe(422);
     const tl = ok(await lucas.get(`/opportunities/${o.id}/timeline`)).json();
     expect(JSON.stringify(tl.items)).toMatch(/nosso lance/);
+  });
+});
+
+describe('cadastro da licitação', () => {
+  it('pede tipo de disputa (Aberta, Fechada, Fechada-Aberta, Aberta-Fechada), lance inicial e lance mínimo', async () => {
+    const lk = ok(await lucas.get('/meta/lookups')).json();
+    const p = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
+    const field = (k: string) => p.fields.find((f: { key: string }) => f.key === k);
+    expect(field('tipo_disputa')).toMatchObject({ required: true, options: ['Aberta', 'Fechada', 'Fechada-Aberta', 'Aberta-Fechada'] });
+    expect(field('lance_inicial')).toMatchObject({ required: true, type: 'moeda' });
+    expect(field('lance_minimo')).toMatchObject({ required: true, type: 'moeda' });
+    const base = { newContact: { name: `Órgão Disputa ${Date.now().toString(36)}`, segment: 'governamental' }, pipelineId: p.id, saleKind: 'licitacao', branchId: lk.branches[0].id };
+    const r = await lucas.post('/opportunities', base);
+    expect(r.statusCode).toBe(422);
+    expect(r.json().errors.map((e: { path: string }) => e.path)).toEqual(expect.arrayContaining(['custom.tipo_disputa', 'custom.lance_inicial', 'custom.lance_minimo']));
+    expect((await lucas.post('/opportunities', { ...base, custom: { tipo_disputa: 'Dispensa', lance_inicial: 1000, lance_minimo: 800 } })).statusCode).toBe(422);
+    ok(await lucas.post('/opportunities', { ...base, custom: { tipo_disputa: 'Fechada-Aberta', lance_inicial: 1000, lance_minimo: 800 } }), 201);
   });
 });

@@ -8,7 +8,7 @@
  * O modelo exportado sempre junta os dois, então reflete exatamente o que está em uso.
  */
 import { and, asc, eq, inArray, notInArray, sql } from 'drizzle-orm';
-import { defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEYS, saleTypeFields, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
+import { BID_DISPUTE_MODES, defaultInstruction, INSTRUCTION_README, parseInstruction, SALE_TYPE_KEYS, saleTypeFields, type Automation, type Instruction, type InstructionJourney } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -290,6 +290,38 @@ export async function ensureSaleTypeForm(db: DbOrTx, tenantId: string) {
     const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
     await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
     await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Tipos de venda viram opções de formulário do funil Corporativo (Licitação, Adesão à Ata, Consumo de Contrato, Venda Consultiva).', 'Corporativo: CNPJ e Nº de colaboradores saem dos campos (CNPJ fica na conta); etapas deixam de exigir próxima ação e roteiro.'], activatedAt: new Date() });
+    return true;
+  });
+}
+
+/**
+ * Licitação (05/11/2026): "Tipo de disputa" passa a ser o modo de disputa (Aberta, Fechada, Fechada-Aberta,
+ * Aberta-Fechada) e o cadastro pede Lance inicial e Lance mínimo. Ajusta a instrução ativa uma vez (nova versão).
+ */
+export async function ensureBidFields(db: DbOrTx, tenantId: string) {
+  const [corp] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, 'empresarial'), eq(s.pipelines.active, true))).limit(1);
+  if (!corp) return false;
+  const fields = await db.select({ key: s.pipelineFields.key, options: s.pipelineFields.options }).from(s.pipelineFields).where(and(eq(s.pipelineFields.pipelineId, corp.id), eq(s.pipelineFields.active, true)));
+  const disputa = fields.find((x) => x.key === 'tipo_disputa');
+  const ok = (!disputa || BID_DISPUTE_MODES.every((m) => disputa.options.includes(m))) && fields.some((x) => x.key === 'lance_inicial') && fields.some((x) => x.key === 'lance_minimo');
+  if (ok) return false;
+  return (db as unknown as { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + tenantId}))`);
+    const active = await getActiveInstruction(tx, tenantId);
+    const tpl = saleTypeFields();
+    const pick = (k: string) => tpl.find((c) => c.chave === k)!;
+    const jornadas = active.content.jornadas.map((j) => {
+      if (j.chave !== 'empresarial') return j;
+      const campos = j.campos.filter((c) => !['lance_inicial', 'lance_minimo'].includes(c.chave)).map((c) => (c.chave === 'tipo_disputa' ? { ...c, tipo: 'lista' as const, opcoes: [...BID_DISPUTE_MODES], obrigatorio: true } : c));
+      const at = campos.findIndex((c) => c.chave === 'tipo_disputa');
+      const extra = [pick('lance_inicial'), pick('lance_minimo')];
+      return { ...j, campos: at >= 0 ? [...campos.slice(0, at + 1), ...extra, ...campos.slice(at + 1)] : [pick('tipo_disputa'), ...extra, ...campos] };
+    });
+    const content = { ...active.content, _leia_me: undefined, versao: undefined, jornadas };
+    await applyJourneys(tx, tenantId, content.jornadas);
+    const [m] = await tx.select({ v: sql<number>`max(${s.businessInstructions.version})` }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, tenantId));
+    await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, tenantId), eq(s.businessInstructions.status, 'ativa')));
+    await tx.insert(s.businessInstructions).values({ tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content, changes: ['Licitação: Tipo de disputa passa a ser Aberta, Fechada, Fechada-Aberta ou Aberta-Fechada; o cadastro pede Lance inicial e Lance mínimo.'], activatedAt: new Date() });
     return true;
   });
 }

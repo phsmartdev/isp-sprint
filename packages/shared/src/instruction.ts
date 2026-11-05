@@ -292,12 +292,18 @@ export const INSTRUCTION_README = [
  * Campos de cada tipo de venda (diretriz de UX de 23/10), dentro do funil Corporativo. Configuração inicial:
  * rótulos, ordem, opções, obrigatoriedade e tipos de cada campo mudam em Configurações → Jornadas.
  */
+/** Modos de disputa da licitação. */
+export const BID_DISPUTE_MODES = ['Aberta', 'Fechada', 'Fechada-Aberta', 'Aberta-Fechada'] as const;
+
 export function saleTypeFields(): CustomField[] {
   const f = (chave: string, rotulo: string, tiposVenda: SaleTypeKey[], tipo: (typeof FIELD_TYPES)[number] = 'texto', opcoes: string[] = []): CustomField => ({ chave, rotulo, tipo, opcoes, obrigatorio: false, tiposVenda });
   const L: SaleTypeKey[] = ['licitacao'], A: SaleTypeKey[] = ['adesao_ata'], C: SaleTypeKey[] = ['consumo_contrato'], V: SaleTypeKey[] = ['venda_consultiva'];
   return [
     f('tipo_lancamento', 'Tipo de lançamento', L, 'lista', ['Licitação publicada', 'Análise de TR', 'Pedido de cotação', 'Apoio ao TR']),
-    f('tipo_disputa', 'Tipo de disputa', L, 'lista', ['Licitação', 'Dispensa', 'Inexigibilidade', 'Outros']),
+    // modo de disputa (Lei 14.133) e lances do cadastro (decisão de 05/11/2026)
+    { ...f('tipo_disputa', 'Tipo de disputa', L, 'lista', [...BID_DISPUTE_MODES]), obrigatorio: true },
+    { ...f('lance_inicial', 'Lance inicial', L, 'moeda'), obrigatorio: true },
+    { ...f('lance_minimo', 'Lance mínimo', L, 'moeda'), obrigatorio: true },
     // modalidade do pregão logo abaixo do tipo de disputa; classificação interna, separada do "tipo de disputa" que o comercial vê (Lei 14.133: modalidades e contratação direta)
     f('modalidade_interna', 'Modalidade (classificação interna)', L, 'lista', ['Pregão', 'Concorrência', 'Concurso', 'Leilão', 'Diálogo competitivo', 'Dispensa', 'Inexigibilidade']),
     f('objeto', 'Objeto', ['licitacao', 'adesao_ata'], 'texto_longo'),
