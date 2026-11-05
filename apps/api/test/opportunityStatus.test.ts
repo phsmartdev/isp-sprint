@@ -42,3 +42,29 @@ describe('situação das oportunidades', () => {
     expect(p.every((o) => o.stage === 'perdida')).toBe(true);
   });
 });
+
+describe('pausar e reabrir negociação', () => {
+  it('pausa com motivo (some da cobrança), aparece em "pausadas", retoma; encerrada reabre com motivo', async () => {
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
+    const o = ok(await carlos.post('/opportunities', { newContact: { name: `Cliente Pausa ${Date.now().toString(36)}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: lk.branches[0].id }), 201).json();
+    expect((await carlos.post(`/opportunities/${o.id}/pause`, { reason: 'x', rowVersion: o.rowVersion })).statusCode).toBe(422);
+    const until = new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10);
+    const p = ok(await carlos.post(`/opportunities/${o.id}/pause`, { reason: 'Cliente pediu para retomar após o orçamento', until, rowVersion: o.rowVersion })).json();
+    let d = ok(await carlos.get(`/opportunities/${o.id}`)).json();
+    expect(d).toMatchObject({ paused: true, pausedUntil: until, pauseReason: 'Cliente pediu para retomar após o orçamento', overdue: false });
+    const list = ok(await carlos.get(`/opportunities?status=pausadas&pageSize=100&pipelineId=${corp.id}`)).json().items as { id: string }[];
+    expect(list.map((x) => x.id)).toContain(o.id);
+    ok(await carlos.post(`/opportunities/${o.id}/resume`, { rowVersion: p.rowVersion }));
+    d = ok(await carlos.get(`/opportunities/${o.id}`)).json();
+    expect(d.paused).toBe(false);
+    // perdida e reaberta (com motivo) volta para uma etapa aberta
+    const lost = corp.stages.find((st: { kind: string }) => st.kind === 'lost');
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: lost.key, lossReason: lk.lossReasons?.[0]?.key ?? 'preco', confirm: true, rowVersion: d.rowVersion }));
+    d = ok(await carlos.get(`/opportunities/${o.id}`)).json();
+    const first = corp.stages.find((st: { kind: string }) => st.kind === 'open');
+    expect((await carlos.post(`/opportunities/${o.id}/transition`, { toStage: first.key, rowVersion: d.rowVersion })).statusCode).toBe(422);
+    ok(await carlos.post(`/opportunities/${o.id}/transition`, { toStage: first.key, reason: 'Cliente voltou a negociar', rowVersion: d.rowVersion }));
+    expect(ok(await carlos.get(`/opportunities/${o.id}`)).json().stage).toBe(first.key);
+  });
+});

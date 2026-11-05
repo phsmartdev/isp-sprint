@@ -215,6 +215,7 @@ export const opportunitySelect = {
   notes: s.opportunities.notes,
   lossReason: s.opportunities.lossReason,
   stageChangedAt: s.opportunities.stageChangedAt,
+  pausedAt: s.opportunities.pausedAt, pausedUntil: s.opportunities.pausedUntil, pauseReason: s.opportunities.pauseReason,
   wonAt: s.opportunities.wonAt,
   lostAt: s.opportunities.lostAt,
   sprintStartedAt: s.opportunities.sprintStartedAt,
@@ -277,11 +278,14 @@ export type OpportunityRow = Awaited<ReturnType<typeof loadOpportunity>>;
 
 export function opportunityDto(r: OpportunityRow, now = new Date()) {
   const open = r.stage !== 'ganha' && r.stage !== 'perdida';
+  // pausa vale até retomar ou até a data informada (depois dela, volta a contar sozinha)
+  const paused = open && !!r.pausedAt && (!r.pausedUntil || r.pausedUntil >= now.toISOString().slice(0, 10));
   return {
     ...r,
+    paused,
     ageDays: Math.floor((now.getTime() - r.createdAt.getTime()) / 86_400_000),
     daysInStage: Math.floor((now.getTime() - r.stageChangedAt.getTime()) / 86_400_000),
-    overdue: open && !!r.nextActionAt && r.nextActionAt < now,
+    overdue: open && !paused && !!r.nextActionAt && r.nextActionAt < now,
     missingNextAction: open && !r.nextAction && !r.nextActionAt,
   };
 }

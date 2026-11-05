@@ -1,22 +1,25 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type Announcements, type DragEndEvent } from '@dnd-kit/core';
 import { BarChart3, CheckCircle2, ClipboardList, Clock3, Columns3, List, Maximize2, Minimize2, MoreVertical, Plus, Search, Send, SlidersHorizontal, UserRound } from 'lucide-react';
-import { api, qs } from '../lib/api';
-import { fmtBRL, fmtInt, fmtRelativeShort } from '../lib/format';
+import { api, ApiError, qs } from '../lib/api';
+import { fmtBRL, fmtDate, fmtInt, fmtRelativeShort } from '../lib/format';
 import { useDebounced, useLookups, useUrlState } from '../lib/hooks';
 import type { Kpi, LookupStage, Opportunity, Paged, PipelineStage } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
-import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Pagination, Select } from '../components/ui/primitives';
+import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, KpiCard, LoadingRows, Pagination, Select, Textarea } from '../components/ui/primitives';
+import { Modal, useToast } from '../components/ui/overlay';
 import { DateRange } from '../components/ui/DateRange';
 import { PageHeader } from '../components/layout/PageHeader';
 import { CLOSING_TAG, SourceChip, StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { TransitionDialog, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
+import { OppActionDialog, type OppAction } from '../features/OppActionDialog';
 
-function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: string) => void; stages: LookupStage[] }) {
+function CardMenu({ opp, onMove, stages, onAction }: { opp: Opportunity; onMove: (to: string) => void; stages: LookupStage[]; onAction: (k: OppAction) => void }) {
+  const closed = opp.stage === 'ganha' || opp.stage === 'perdida';
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -31,8 +34,12 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
       </button>
       {open && (
         <ul role="menu" className="absolute right-0 z-30 mt-1 w-52 rounded-md border border-line bg-surface py-1 text-sm shadow-overlay">
-          <li className="px-3 py-1 text-xs text-muted">Mover para</li>
-          {stages.filter((s) => s.key !== opp.stage).map((s, i) => (
+          {closed ? (
+            <li><button role="menuitem" className="w-full px-3 py-1.5 text-left font-semibold text-primary hover:bg-surface-2" onClick={() => { setOpen(false); onAction('reabrir'); }}>Reabrir negociação</button></li>
+          ) : (<>
+          <li><button role="menuitem" className="w-full px-3 py-1.5 text-left font-semibold text-ink hover:bg-surface-2" onClick={() => { setOpen(false); onAction(opp.paused ? 'retomar' : 'pausar'); }}>{opp.paused ? 'Retomar negociação' : 'Pausar negociação'}</button></li>
+          <li className="mt-1 border-t border-line px-3 pb-1 pt-2 text-xs text-muted">Mover para</li>
+          {stages.filter((s) => s.key !== opp.stage && s.kind === 'open').map((s, i) => (
             <li key={s.key}>
               <button role="menuitem" className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-2" onClick={() => { setOpen(false); onMove(s.key); }}>
                 <span className="h-2.5 w-2.5 rounded-circle" style={{ background: stageColor(s.key, s.color, i) }} aria-hidden />
@@ -40,25 +47,29 @@ function CardMenu({ opp, onMove, stages }: { opp: Opportunity; onMove: (to: stri
               </button>
             </li>
           ))}
+          </>)}
         </ul>
       )}
     </div>
   );
 }
 
-const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
+const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages, compact }: { opp: Opportunity; onMove: (o: Opportunity, to: string) => void; onAction: (o: Opportunity, k: OppAction, column?: string) => void; column?: string; canMove: boolean; stages: LookupStage[]; compact?: boolean }) {
   const nav = useNavigate();
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove || opp.stage === 'ganha' || opp.stage === 'perdida' });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: opp.id, data: { opp }, disabled: !canMove || opp.stage === 'ganha' || opp.stage === 'perdida' || !!opp.paused });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   // venda fechada/perdida aparece na etapa em que a ação aconteceu, marcada e sem arrastar
   const closed = opp.stage === 'ganha' ? { tone: 'green' as const, label: 'Venda fechada' } : opp.stage === 'perdida' ? { tone: 'red' as const, label: 'Perdida' } : null;
-  const tag = closed ?? (opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null);
+  const pausedTag = opp.paused ? { tone: 'yellow' as const, label: opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada' } : null;
+  const tag = closed ?? pausedTag ?? (opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null);
   return (
     <li
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
+      // sem arrastar (encerrada/pausada) o cartão segue clicável e o menu, ativo
+      aria-disabled={undefined}
       aria-roledescription="cartão arrastável"
       aria-label={`${opp.contactName}, ${opp.planName ?? 'sem plano'}. Espaço para pegar e setas para mover; Enter abre.`}
       onKeyDown={(e) => {
@@ -73,7 +84,7 @@ const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp
         <>
           <div className="flex items-start gap-1">
             <p className="line-clamp-2 min-w-0 flex-1 break-words text-xs font-semibold leading-snug text-ink" title={opp.title}>{opp.title || opp.contactName}</p>
-            {canMove && opp.stage !== 'ganha' && opp.stage !== 'perdida' && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
+            {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} onAction={(k) => onAction(opp, k, column)} />}
           </div>
           {opp.title && opp.title !== opp.contactName && <p className="truncate text-2xs text-muted" title={opp.contactName}>{opp.contactName}</p>}
           <div className="mt-1.5 flex items-center gap-1.5 text-2xs text-muted">
@@ -97,7 +108,7 @@ const Card = memo(function Card({ opp, onMove, canMove, stages, compact }: { opp
           <p className="num mt-1 text-sm font-bold text-ink">{opp.valueCents !== null ? fmtBRL(opp.valueCents) : <span className="font-medium text-muted">Sem plano</span>}</p>
         </div>
         <Avatar name={opp.ownerName} userId={opp.ownerId} hasPhoto={opp.ownerHasAvatar} size={24} />
-        {canMove && opp.stage !== 'ganha' && opp.stage !== 'perdida' && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} />}
+        {canMove && <CardMenu opp={opp} stages={stages} onMove={(to) => onMove(opp, to)} onAction={(k) => onAction(opp, k, column)} />}
       </div>
       {opp.accountContracts && (
         <div className="mt-2.5 border-t border-line pt-2" aria-label={`Contratos de ${opp.contactName}`}>
@@ -192,6 +203,10 @@ export function OpportunitiesPage() {
     else transition.mutate({ opp, payload: { toStage: to } });
   };
   moveRef.current = requestMove;
+  const [act, setAct] = useState<{ opp: Opportunity; kind: OppAction; column?: string } | null>(null);
+  const actRef = useRef<(o: Opportunity, k: OppAction, column?: string) => void>(() => {});
+  actRef.current = (o, k, column) => setAct({ opp: o, kind: k, column });
+  const stableAction = useCallback((o: Opportunity, k: OppAction, column?: string) => actRef.current(o, k, column), []);
   const onDragEnd = (e: DragEndEvent) => {
     const opp = e.active.data.current?.opp as Opportunity | undefined;
     const to = e.over?.id as string | undefined;
@@ -240,6 +255,7 @@ export function OpportunitiesPage() {
         )}
         <Select aria-label="Situação" className="h-12 w-auto min-w-[190px] font-semibold" value={kanban ? kanbanStatus : f.status} onChange={(e) => setF({ status: e.target.value, page: '1' })}>
           <option value="abertas">Em aberto</option>
+          <option value="pausadas">Pausadas</option>
           <option value="ganhas">Venda fechada</option>
           <option value="perdidas">Perdidas</option>
           {!kanban && <option value="encerradas">Encerradas (fechadas e perdidas)</option>}
@@ -299,7 +315,7 @@ export function OpportunitiesPage() {
               {stages.map((s, i) => (
                 <Column key={s.key} stage={s} index={i} compact={fit} onAdd={() => nav(`/opportunities/new${qs({ pipelineId: currentPipelineId })}`)}>
                   <ul className={clsx('flex min-h-[120px] flex-col', fit ? 'gap-1.5' : 'gap-3')}>
-                    {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={stableMove} canMove={canMove} stages={stageList(c.pipelineId)} />)}
+                    {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={stableMove} onAction={stableAction} column={s.key} canMove={canMove} stages={stageList(c.pipelineId)} />)}
                     {s.cards.length === 0 && <li className="rounded-md border border-dashed border-line-strong/60 px-3 py-6 text-center text-sm text-muted">Nenhuma oportunidade</li>}
                     {s.count > s.cards.length && (
                       <li><button type="button" className="w-full rounded-md border border-dashed border-line-strong/60 px-2 py-2 text-center text-xs font-semibold text-primary hover:bg-white/60" onClick={() => setF({ view: 'lista', status: 'todas', stage: s.key, pipelineId: currentPipelineId, page: '1' })}>
@@ -347,6 +363,7 @@ export function OpportunitiesPage() {
         onCancel={() => setPending(null)}
         onConfirm={(payload) => { if (pending) transition.mutate({ opp: pending.opp, payload }, { onSettled: () => setPending(null) }); }}
       />
+      {act && <OppActionDialog act={act} stages={stageList(act.opp.pipelineId)} onClose={() => setAct(null)} />}
     </div>
   );
 }

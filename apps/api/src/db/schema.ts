@@ -576,6 +576,11 @@ export const opportunities = pgTable(
     arpId: uuid('arp_id'),
     /** Pós-venda: 'sucesso_cliente' quando o contrato foi cadastrado e validado. */
     handoffStage: text('handoff_stage'),
+    /** Negociação pausada (continua na etapa, fora da cobrança de próxima ação) até retomar ou até a data. */
+    pausedAt: ts('paused_at'),
+    pausedUntil: date('paused_until', { mode: 'string' }),
+    pauseReason: text('pause_reason'),
+    pausedBy: uuid('paused_by'),
     /** Chave da etapa dentro da jornada (pipeline_stages.key). 'ganha' e 'perdida' são reservadas. */
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
