@@ -43,7 +43,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.0';
+export const ENGINE_VERSION = 'FINANCE-3.1';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -71,10 +71,12 @@ export type EconSettings = {
   legacyOneTimeX100?: number | null; legacyRecurringX100?: number | null;
   /** (3.0) despesas variáveis % sobre o preço, no divisor do markup; sem valor = 0. A comissão não é mais usada. */
   variableExpenseBp?: number | null;
+  /** (3.1) margem líquida alvo da Direção: gera a margem de contribuição recomendada (MO = alvo ÷ (1 − IR); MC = MO + fixas + glosa + inadimplência) */
+  netMarginTargetBp?: number | null;
 };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
-  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : []), ...(s.netMarginTargetBp != null ? [['Margem líquida alvo', s.netMarginTargetBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
   for (const [k, v] of [['Teto da margem', s.marginMaxBp], ['Sugestão de margem', s.marginSuggestedBp], ['TMA anual', s.tmaAnnualBp], ['Inflação anual', s.inflationAnnualBp], ['Inadimplência', s.badDebtBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 100_000)) e.push(`${k} inválida.`);
   if (s.marginMaxBp != null && s.marginMaxBp < s.marginTargetBp) e.push('O teto da margem precisa ser maior ou igual ao piso.');
   if (s.marginSuggestedBp != null && (s.marginSuggestedBp < s.marginTargetBp || (s.marginMaxBp != null && s.marginSuggestedBp > s.marginMaxBp))) e.push('A sugestão de margem precisa ficar entre o piso e o teto.');
@@ -236,7 +238,16 @@ export type EconResult = {
   };
   cashflow: number[];
   /** (v2) desdobramento: 1º mês e contrato inteiro (com o reajuste) */
-  statement?: { month: EconStatement; total: EconStatement };
+  /**
+   * (v2) desdobramento: 1º mês e contrato inteiro (com o reajuste). (3.1) after = 1º mês depois do payback (D+1), com a
+   * amortização zerada; o total é a soma exata dos meses 1..N já arredondados (cada linha "=" é conta das linhas acima).
+   */
+  statement?: { month: EconStatement; after?: EconStatement | null; total: EconStatement; afterFrom?: number | null };
+  /**
+   * (3.1) recomendação pela margem líquida alvo (só parâmetros de Configurações → Viabilidade): margem operacional
+   * necessária = alvo ÷ (1 − IR/CSLL); margem de contribuição recomendada = MO + despesas fixas + glosa + inadimplência.
+   */
+  recommendation?: EconRecommendation | null;
   /** política: margem mínima atingida e payback descontado dentro do limite do segmento */
   marginOk: boolean | null; paybackOk: boolean | null;
   verdict: EconVerdict; withinPolicy: boolean | null; withReservations: boolean; warnings: string[];
@@ -245,6 +256,52 @@ export type EconResult = {
   /** (Financial Studio) modelo de fórmulas usado: chave e versão de cada fórmula alterada pela diretoria */
   model?: { key: string; versions: Record<string, number> };
 };
+
+export type EconRecommendation = {
+  netTargetPct: number; operatingNeededPct: number | null; contributionPct: number | null;
+  /** preço (mensal na recorrente, total na pontual) com a margem recomendada no markup; null = margem não cabe no divisor */
+  priceCents: number | null; oneTimePriceCents?: number | null;
+  params: { overheadPct: number | null; glosaPct: number; badDebtPct: number; incomeTaxPct: number | null };
+  feasible: boolean;
+};
+
+/** Payload `recomendacao_viabilidade` (chaves do documento de correções da Direção). */
+export function viabilityRecommendationPayload(r: EconRecommendation | null | undefined, mode: EconMode) {
+  if (!r) return null;
+  const p2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
+  return {
+    'margem_liquida_alvo_%': p2(r.netTargetPct),
+    'margem_operacional_necessaria_%': p2(r.operatingNeededPct),
+    'margem_contrib_recomendada_%': p2(r.contributionPct),
+    [mode === 'pontual' ? 'preco_venda_recomendado_R$' : 'preco_mensal_recomendado_R$']: r.priceCents == null ? null : r.priceCents / 100,
+    ...(r.oneTimePriceCents != null ? { 'preco_venda_recomendado_R$': r.oneTimePriceCents / 100 } : {}),
+    parametros_utilizados: { 'taxa_rateio_fixo_%': p2(r.params.overheadPct), 'glosa_%': p2(r.params.glosaPct), 'inadimplencia_%': p2(r.params.badDebtPct), 'irpj_csll_%': p2(r.params.incomeTaxPct) },
+    viavel: r.feasible,
+  };
+}
+
+/**
+ * Desdobramento com soma exata: cada componente é arredondado no mês e as linhas "=" saem das linhas acima
+ * (contribuição = receita − tributos − despesas variáveis − custo mensal − amortização; operacional = contribuição −
+ * risco − fixas; líquida = operacional − IR/CSLL). O total é a soma dos meses, então a DRE consolidada fecha centavo a centavo.
+ */
+export function statementOfPeriods(periods: Record<string, FValue[]>, months: number): { rows: EconStatement[]; total: EconStatement } {
+  const at = (code: string, k: number) => { const x = periods[code]?.[k]; return typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : null; };
+  const rows: EconStatement[] = [];
+  for (let k = 0; k < months; k++) {
+    const revenue = at('receita', k) ?? 0, tax = at('tributos', k) ?? 0, commission = at('comissao', k) ?? 0, opex = at('custo_mensal', k) ?? 0, amortization = at('amortizacao', k) ?? 0, risk = at('risco', k) ?? 0;
+    const overhead = at('despesas_fixas', k);
+    const contribution = revenue - tax - commission - opex - amortization;
+    const operating = overhead == null ? null : contribution - risk - overhead;
+    const irRaw = at('ir_csll', k);
+    const incomeTax = operating == null || irRaw == null ? null : operating > 0 ? irRaw : 0;
+    const net = operating == null || incomeTax == null ? null : operating - incomeTax;
+    rows.push({ revenue, tax, commission, opex, amortization, contribution, risk, overhead, operating, incomeTax, net });
+  }
+  const f = (key: keyof EconStatement) => { const v = rows.map((x) => x[key]); return v.some((y) => y == null) ? null : (v as number[]).reduce((s, y) => s + y, 0); };
+  const total: EconStatement = { revenue: f('revenue') ?? 0, tax: f('tax') ?? 0, commission: f('commission') ?? 0, opex: f('opex') ?? 0, amortization: f('amortization') ?? 0, contribution: f('contribution') ?? 0, risk: f('risk') ?? 0, overhead: f('overhead'), operating: f('operating'), incomeTax: f('incomeTax'), net: f('net') };
+  return { rows, total };
+}
 
 /** Contribuição → operacional → líquida, no mesmo período da contribuição (mês na recorrente). */
 export function marginChain(P: number, contribution: number, amortization: number, st: Pick<EconSettings, 'overheadBp' | 'incomeTaxBp'>, risk = 0) {
@@ -505,7 +562,18 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
       roiPct: inv > 0 ? (flows.reduce((t, x) => t + x, 0) / inv) * 100 : null,
     } : null,
     cashflow: flows.map(Math.round),
-    statement: (() => { const tot = sumStmt(parts.map((p) => p.statement?.total)); const mon = sumStmt(monthParts.map((p) => p.statement?.month)) ?? base.statement?.month; return tot && mon ? { month: mon, total: tot } : undefined; })(),
+    statement: (() => {
+      const tot = sumStmt(parts.map((p) => p.statement?.total)); const mon = sumStmt(monthParts.map((p) => p.statement?.month)) ?? base.statement?.month;
+      const aft = monthParts.length && monthParts.every((p) => p.statement?.after) ? sumStmt(monthParts.map((p) => p.statement!.after!)) ?? null : null;
+      return tot && mon ? { month: mon, after: aft, afterFrom: aft ? base.statement?.afterFrom ?? null : null, total: tot } : undefined;
+    })(),
+    recommendation: (() => {
+      const rec0 = parts.find((p) => p.recommendation)?.recommendation;
+      if (!rec0) return base.recommendation ?? null;
+      const sumP = (xs: EconResult[]) => (xs.length && xs.every((p) => p.recommendation?.priceCents != null) ? xs.reduce((t, p) => t + p.recommendation!.priceCents!, 0) : null);
+      const uniParts = parts.filter((_, k) => cells[k]!.ritmo === 'unico');
+      return { ...rec0, priceCents: hasM ? sumP(monthParts) : sumP(uniParts), oneTimePriceCents: hasM && uniParts.length ? sumP(uniParts) : null, feasible: parts.every((p) => p.recommendation?.feasible) };
+    })(),
     paybackOk, marginOk, verdict, withinPolicy: priced ? paybackOk !== false && marginOk === true : null,
     withReservations: parts.some((p) => p.withReservations), warnings: [...new Set([...parts.flatMap((p) => p.warnings), ...warnings])],
     autoApproval: { ok: checks.every((x) => x.ok) && parts.every((p) => !!p.autoApproval), checks },
@@ -585,6 +653,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     aliq_comissao: 0, aliq_despesas_variaveis: c, aliq_glosa: glosa, aliq_inadimplencia: badDebt, margem: m, margem_piso: mMin,
     tma_anual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null, tma_mensal_informada: bp(st.tmaMonthlyBp), inflacao_anual: st.inflationAnnualBp != null ? bp(st.inflationAnnualBp) : null,
     aliq_despesas_fixas: st.overheadBp != null ? bp(st.overheadBp) : null, aliq_ir: st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null,
+    margem_liquida_alvo: st.netMarginTargetBp != null ? bp(st.netMarginTargetBp) : null,
     prazo: N, payback: D, teto_payback: Dalvo, mes_recebimento: d, preco: null,
   };
   const numv = (x: FValue | undefined) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
@@ -622,14 +691,12 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     run = runModel(fm, { ...base, preco: P });
     const v = run.values;
     flows = run.fluxo;
-    const R = (x: number) => Math.round(x);
     const R0 = (x: FValue | undefined) => { const y = numv(x); return y == null ? null : Math.round(y); };
-    const sum = (code: string) => { const xs = run!.periods[code] ?? []; return xs.length && xs.every((x) => typeof x === 'number') ? (xs as number[]).reduce((s2, x) => s2 + x, 0) : null; };
     const month = (code: string) => R0(v[code]);
-    statement = {
-      month: { revenue: R(P), tax: month('tributos') ?? 0, commission: month('comissao') ?? 0, opex: month('custo_mensal') ?? 0, amortization: month('amortizacao') ?? 0, contribution: month('margem_contribuicao') ?? 0, risk: month('risco') ?? 0, overhead: month('despesas_fixas'), operating: month('margem_operacional'), incomeTax: month('ir_csll'), net: month('margem_liquida') },
-      total: { revenue: R0(sum('receita')) ?? 0, tax: R0(sum('tributos')) ?? 0, commission: R0(sum('comissao')) ?? 0, opex: R0(sum('custo_mensal')) ?? 0, amortization: R0(sum('amortizacao')) ?? 0, contribution: R0(sum('margem_contribuicao')) ?? 0, risk: R0(sum('risco')) ?? 0, overhead: R0(sum('despesas_fixas')), operating: R0(sum('margem_operacional')), incomeTax: R0(sum('ir_csll')), net: R0(sum('margem_liquida')) },
-    };
+    const months = rec ? N : 1;
+    const sp = statementOfPeriods(run.periods, months);
+    const afterFrom = rec && D < N ? D + 1 : null;
+    statement = { month: sp.rows[0]!, after: afterFrom ? sp.rows[afterFrom - 1]! : null, afterFrom, total: sp.total };
     const mcPct = numv(v.margem_contribuicao_pct);
     const ir = numv(v.tir);
     kpi = {
@@ -638,13 +705,25 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
       npvCents: R0(v.vpl) ?? 0, irrMonthly: ir, irrAnnual: ir === null ? null : (1 + ir) ** 12 - 1,
       paybackMonths: numv(v.payback_descontado), simplePaybackMonths: numv(v.payback_simples),
       margins: {
-        contributionPct: (mcPct ?? 0) * 100, amortizationCents: month('amortizacao') ?? 0, overheadCents: month('despesas_fixas'),
-        operatingCents: month('margem_operacional'), operatingPct: numv(v.margem_operacional) == null ? null : (numv(v.margem_operacional)! / P) * 100,
-        incomeTaxCents: month('ir_csll'), netCents: month('margem_liquida'), netPct: numv(v.margem_liquida) == null ? null : (numv(v.margem_liquida)! / P) * 100,
+        contributionPct: (mcPct ?? 0) * 100, amortizationCents: statement.month.amortization, overheadCents: statement.month.overhead,
+        operatingCents: statement.month.operating, operatingPct: statement.month.operating == null ? null : (statement.month.operating / statement.month.revenue) * 100,
+        incomeTaxCents: statement.month.incomeTax, netCents: statement.month.net, netPct: statement.month.net == null ? null : (statement.month.net / statement.month.revenue) * 100,
       },
       cashMonthlyCents: month('fluxo_caixa') ?? 0, amortizationCents: month('amortizacao') ?? 0, roiPct: numv(v.roi) == null ? null : numv(v.roi)! * 100,
     };
     for (const w of run.warnings) if (!w.includes('Divisão por zero') && !warnings.includes(`Fórmula ${w}`)) warnings.push(`Fórmula ${w}`);
+  }
+  let recommendation: EconRecommendation | null = null;
+  if (st.netMarginTargetBp != null) {
+    const mo = numv(pre.values.margem_operacional_necessaria), mc = numv(pre.values.margem_contrib_recomendada), pr = numv(pre.values.preco_margem_liquida_alvo);
+    const fixas = st.overheadBp != null ? bp(st.overheadBp) : null, irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null;
+    recommendation = {
+      netTargetPct: bp(st.netMarginTargetBp) * 100, operatingNeededPct: mo == null ? null : mo * 100, contributionPct: mc == null ? null : mc * 100,
+      priceCents: roundUp(pr), params: { overheadPct: fixas == null ? null : fixas * 100, glosaPct: glosa * 100, badDebtPct: badDebt * 100, incomeTaxPct: irA == null ? null : irA * 100 },
+      feasible: pr != null,
+    };
+    if (mc == null) warnings.push('Margem líquida alvo informada, mas faltam despesas fixas ou IR/CSLL em Configurações → Viabilidade: sem margem de contribuição recomendada.');
+    else if (pr == null) warnings.push(`A margem de contribuição recomendada (${(mc * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%) não cabe no markup com os tributos e despesas variáveis: a margem líquida alvo não é alcançável por preço.`);
   }
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
   if (st.inflationAnnualBp == null && rec && N > 12) warnings.push('Inflação anual não informada: a receita não é reajustada depois do 12º mês.');
@@ -685,7 +764,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
     marginPriceCents: roundUp(marginPrice), recommendedCents: roundUp(recP), markupPriceCents: roundUp(markupPrice), operatingFloorCents: roundUp(opFloor), suggestedMinCents: roundUp(suggested),
     suggestedCents: roundUp(sugP),
-    kpi, cashflow: flows.map(Math.round), statement,
+    kpi, cashflow: flows.map(Math.round), statement, recommendation,
     marginOk, paybackOk, verdict, withinPolicy, withReservations, warnings,
     autoApproval: { ok: boolv(v.aprovacao_automatica) && checks.every((x) => x.ok), checks },
     model: { key: fm.key, versions },
@@ -768,46 +847,48 @@ export function parseCostTable(rows: (string | number | null | undefined)[][]): 
   return { lines, errors, missing: [] };
 }
 
-export type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; total: number; strong?: boolean; tone?: boolean; note?: string };
+/** Linha da DRE: month = 1º mês (meses 1..D na recorrente), after = 1º mês depois do payback (D+1..N), total = soma exata dos N meses; pct = % sobre a receita da mesma coluna. */
+export type DreRow = { sign: '+' | '−' | '='; label: string; month: number | null; after?: number | null; total: number; strong?: boolean; tone?: boolean; note?: string; pct?: { month: number | null; after: number | null; total: number | null } };
 
 /**
- * DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=), por mês e no contrato inteiro.
- * Mesma conta na tela e na exportação. `fmt` formata o tributo fixo no rótulo.
- */
-/**
- * Desdobramento financeiro: o que entra (+), o que sai (−) e os resultados (=), no 1º mês e no contrato inteiro
- * (com o reajuste). Cálculos de versões anteriores do motor usam o desdobramento da época.
+ * DRE da oportunidade: o que entra (+), o que sai (−) e os resultados (=). Na recorrente: mês do período de
+ * amortização (1..D), mês depois do payback (D+1..N, amortização zero) e o contrato (soma exata dos N meses). Cada %
+ * é sobre a receita da própria coluna, então o sinal do % acompanha o do valor.
  */
 export function econDre(r: EconResult, fmt: (c: number) => string): DreRow[] {
   const s = r.statement;
   if (!s || !r.kpi || r.priceCents == null) return econDreV1(r, fmt);
-  const rec = r.mode === 'recorrente', N = rec ? r.term.N : 1;
+  const rec = r.mode === 'recorrente';
   const pc = (v: number, d = 2) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: d })}%`;
-  const per = (x: number | null, P = r.priceCents!) => (x == null ? '' : `${pc((x / P) * 100, 1)} da receita`);
+  const A = rec ? s.after ?? null : null;
   const M = (v: number | null) => (rec ? v : null);
-  const opexBase = r.opexBaseCents, opexCont = r.opexContingencyCents;
+  const pctOf = (v: number | null, rev: number | null | undefined) => (v == null || rev == null || rev <= 0 ? null : (v / rev) * 100);
+  const pct = (f: keyof EconStatement) => ({ month: rec ? pctOf(s.month[f], s.month.revenue) : null, after: A ? pctOf(A[f], A.revenue) : null, total: pctOf(s.total[f], s.total.revenue) });
+  const row = (sign: DreRow['sign'], label: string, f: keyof EconStatement, extra: Partial<DreRow> = {}): DreRow => {
+    const neg = sign === '−' ? -1 : 1;
+    const val = (x: number | null) => (x == null ? null : neg * x || 0);
+    return { sign, label, month: M(val(s.month[f])), after: A ? val(A[f]) : null, total: val(s.total[f]) ?? 0, ...(sign === '=' ? { pct: pct(f) } : {}), ...extra };
+  };
+  const D = r.term.D;
+  const opexNote = r.opexContingencyCents > 0 ? `inclui contingência de ${fmt(r.opexContingencyCents)}/mês` : undefined;
   const rows: DreRow[] = [
-    { sign: '+', label: 'Receita bruta', month: M(s.month.revenue), total: s.total.revenue, note: rec && r.rates.inflationMonthly ? 'reajuste após o 12º mês' : undefined },
-    { sign: '−', label: `Tributos (${pc(r.rates.a * 100)}${r.fixedTaxCents ? ` + ${fmt(r.fixedTaxCents)}` : ''})`, month: M(-s.month.tax), total: -s.total.tax },
-    { sign: '−', label: `Comissão (${pc(r.rates.c * 100)})`, month: M(-s.month.commission), total: -s.total.commission },
-    ...(rec && opexBase > 0 ? [{ sign: '−' as const, label: 'Custos operacionais', month: -opexBase, total: -opexBase * N }] : []),
-    ...(rec && opexCont > 0 ? [{ sign: '−' as const, label: 'Contingência dos custos mensais', month: -opexCont, total: -opexCont * N }] : []),
-    ...((r.investmentCents ?? 0) > 0 ? [{ sign: '−' as const, label: rec ? `Investimento amortizado no payback (${fmt(r.investmentCents!)} em ${r.term.D} meses)` : 'Investimento e despesas de entrega', month: M(-s.month.amortization), total: -s.total.amortization }] : []),
-    { sign: '=', label: 'Margem de contribuição', month: M(s.month.contribution), total: s.total.contribution, strong: true, note: per(s.month.contribution) },
-    ...(s.month.risk > 0 ? [{ sign: '−' as const, label: `Glosa e inadimplência (${pc(r.rates.g * 100)})`, month: M(-s.month.risk), total: -s.total.risk }] : []),
+    row('+', 'Receita bruta', 'revenue', { note: rec && r.rates.inflationMonthly ? 'reajuste após o 12º mês' : undefined }),
+    row('−', `Tributos (${pc(r.rates.a * 100)}${r.fixedTaxCents ? ` + ${fmt(r.fixedTaxCents)}` : ''})`, 'tax'),
+    ...(s.total.commission ? [row('−', `Despesas variáveis (${pc(r.rates.c * 100)})`, 'commission')] : []),
+    ...(rec && s.total.opex ? [row('−', 'Custos operacionais', 'opex', { note: opexNote })] : []),
+    ...((r.investmentCents ?? 0) > 0 ? [row('−', rec ? `Amortização do investimento (${fmt(r.investmentCents!)} pela TMA em ${D} ${D === 1 ? 'mês' : 'meses'})` : 'Investimento e despesas de entrega', 'amortization', rec ? { note: s.afterFrom ? `parcela da anuidade nos meses 1–${D}; zero a partir do mês ${s.afterFrom}` : `parcela da anuidade nos meses 1–${D}` } : {})] : []),
+    row('=', 'Margem de contribuição', 'contribution', { strong: true }),
+    ...(s.total.risk ? [row('−', `Glosa e inadimplência (${pc(r.rates.g * 100)})`, 'risk')] : []),
   ];
   if (s.month.operating != null && s.total.operating != null) {
-    rows.push(
-      { sign: '−', label: 'Despesas fixas rateadas', month: M(-(s.month.overhead ?? 0)), total: -(s.total.overhead ?? 0) },
-      { sign: '=', label: 'Margem operacional', month: M(s.month.operating), total: s.total.operating, strong: true, note: per(s.month.operating) },
-    );
+    rows.push(row('−', 'Despesas fixas rateadas', 'overhead'), row('=', 'Margem operacional', 'operating', { strong: true }));
     if (s.month.incomeTax != null && s.total.incomeTax != null && s.total.net != null) rows.push(
-      { sign: '−', label: 'IR/CSLL', month: M(-s.month.incomeTax), total: -s.total.incomeTax },
-      { sign: '=', label: 'Margem líquida', month: M(s.month.net), total: s.total.net, strong: true, tone: true, note: `${per(s.month.net)} · ${s.total.net >= 0 ? 'lucro' : 'prejuízo'}` },
+      row('−', 'IR/CSLL', 'incomeTax', { note: 'sobre a margem operacional positiva' }),
+      row('=', 'Margem líquida', 'net', { strong: true, tone: true, note: s.total.net >= 0 ? 'lucro' : 'prejuízo' }),
     );
   } else {
     const res = s.total.contribution - s.total.risk;
-    rows.push({ sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, total: res, strong: true, tone: true, note: `${res >= 0 ? 'lucro' : 'prejuízo'} · sem despesas fixas e IR/CSLL (não informados)` });
+    rows.push({ sign: '=', label: rec ? 'Resultado do contrato' : 'Resultado da venda', month: null, after: null, total: res, strong: true, tone: true, pct: { month: null, after: null, total: pctOf(res, s.total.revenue) }, note: `${res >= 0 ? 'lucro' : 'prejuízo'} · sem despesas fixas e IR/CSLL (não informados)` });
   }
   return rows;
 }
@@ -946,16 +1027,28 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
         : { label: 'Recebimento', value: d ? `mês ${d}` : 'à vista' },
     ],
   });
-  const costTxt = rec ? `(I + E) ÷ D + O + F = ${money(Inv)} ÷ ${D} + ${money(O)} + ${money(F)}` : `I + E + F = ${money(Inv)} + ${money(F)}`;
+  // 3.1: o investimento entra pela parcela da anuidade da TMA no payback; cálculos salvos antes usam (I + E) ÷ D
+  const annuity = !/^FINANCE-(1|2|3\.0)/.test(r.engineVersion ?? '') && !!r.statement && 'afterFrom' in r.statement;
+  const parc = rec ? (annuity ? (Inv > 0 && D > 0 ? Inv / annuityFactor(rt, D) : 0) : Inv / Math.max(1, D)) : 0;
+  const factor = rec && D > 0 ? (rt === 0 ? 1 / D : (rt * (1 + rt) ** D) / ((1 + rt) ** D - 1)) : 0;
+  const costTxt = rec ? `P_inv + O + F = ${money(Math.round(parc))} + ${money(O)} + ${money(F)}` : `I + E + F = ${money(Inv)} + ${money(F)}`;
   const prices: MemoryRow[] = [
-    ...(rec ? [{ label: 'Custo mensal consolidado (C)', formula: `investimento amortizado (I + E) ÷ payback + custo mensal protegido O = ${money(Inv)} ÷ ${D} + ${money(O)}`, value: money(Inv / D + O) }] : []),
+    ...(rec && annuity ? [{ label: 'Parcela do investimento (P_inv)', formula: `I × [k(1+k)^D ÷ ((1+k)^D - 1)] = ${money(Inv)} × [${pc(rt * 100, 3)} × (1+${pc(rt * 100, 3)})^${D} ÷ ((1+${pc(rt * 100, 3)})^${D} - 1)] = ${money(Inv)} × ${num(factor, 6)}`, value: `${money(Math.round(parc))}/mês nos meses 1–${D}`, strong: true }] : []),
+    ...(rec ? [{ label: 'Custo mensal consolidado (C)', formula: annuity ? `parcela do investimento + custo mensal protegido O = ${money(Math.round(parc))} + ${money(O)}` : `investimento amortizado (I + E) ÷ payback + custo mensal protegido O = ${money(Inv)} ÷ ${D} + ${money(O)}`, value: money(Math.round(parc) + O) }] : []),
     { label: 'Divisor do markup (D)', formula: `1 - (tributos da cesta + despesas variáveis + margem) = 1 - (${pc(a * 100)} + ${pc(c * 100)} + ${pc(m * 100)})`, value: pc((bMk - m) * 100) },
     { label: 'Preço sugerido', formula: `(${costTxt}) ÷ D`, value: `${money(r.suggestedCents ?? r.markupPriceCents)}${rec ? '/mês' : ''}`, strong: true },
     { label: 'Preço mínimo (margem no piso)', formula: `mesmo numerador ÷ (1 - ${pc(a * 100)} - ${pc(c * 100)} - ${pc(mMin * 100)})`, value: money(r.suggestedMinCents ?? r.marginPriceCents) },
     ...(r.decision?.basis === 'proposto' ? [{ label: 'Preço proposto (base da aprovação)', formula: r.decision.source === 'itens' ? 'total dos produtos' : 'informado na negociação', value: `${money(r.decision.priceCents)}${rec ? '/mês' : ''}`, strong: true }] : []),
   ];
-  void b; void rt; void annuityFactor;
-  steps.push({ key: 'preco', title: 'Precificação (markup divisor, FINANCE-3.0)', desc: 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices });
+  void b;
+  const rc = r.recommendation;
+  if (rc) prices.push(
+    { label: 'Margem operacional necessária', formula: `margem líquida alvo ÷ (1 - IR/CSLL) = ${pc(rc.netTargetPct)} ÷ (1 - ${rc.params.incomeTaxPct == null ? '—' : pc(rc.params.incomeTaxPct)})`, value: rc.operatingNeededPct == null ? '—' : pc(rc.operatingNeededPct) },
+    { label: 'Margem de contribuição recomendada', formula: `MO + despesas fixas + glosa + inadimplência = ${rc.operatingNeededPct == null ? '—' : pc(rc.operatingNeededPct)} + ${rc.params.overheadPct == null ? '—' : pc(rc.params.overheadPct)} + ${pc(rc.params.glosaPct)} + ${pc(rc.params.badDebtPct)}`, value: rc.contributionPct == null ? '—' : pc(rc.contributionPct), strong: true },
+    { label: 'Preço com a margem recomendada', formula: rc.contributionPct == null ? 'sem margem recomendada' : `(${costTxt}) ÷ (1 - ${pc(a * 100)} - ${pc(c * 100)} - ${pc(rc.contributionPct)})`, value: rc.priceCents == null ? 'a margem não cabe no divisor' : `${money(rc.priceCents)}${rec ? '/mês' : ''}`, ok: rc.feasible },
+  );
+  const pbNote = rec && annuity && k ? `Payback do investimento na precificação = ${D} ${D === 1 ? 'mês' : 'meses'} (a parcela pela TMA devolve I com juros em exatamente D meses). O payback de caixa (${k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses`}) sai menor porque a margem de contribuição também entra no caixa; ele só é igual a D com margem zero.` : undefined;
+  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
 
   const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
   const cmp = fx ? econCompare(r, opts.legacy ?? {}) : null;

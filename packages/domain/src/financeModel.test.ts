@@ -1,3 +1,4 @@
+import { annuityFactor } from './formula';
 import { describe, expect, it } from 'vitest';
 import { emptyEconInput, financeEngine, financeEngineDetailed, lotOfKind, type EconInput, type EconItem, type EconSettings } from './finance';
 import { financeEngine as legacyEngine } from './legacy/financeV2';
@@ -66,7 +67,9 @@ describe('compatibilidade: no mesmo preço, o fluxo e os indicadores seguem o mo
       // preço pela fórmula 3.0: (custo em R$) ÷ (1 − a − dv − m)
       const D = 1 - b.rates.a - b.rates.c - b.rates.m;
       const rec = b.mode === 'recorrente';
-      const cost = rec ? (b.investmentCents ?? 0) / b.term.D + b.monthlyCostCents + b.fixedTaxCents : (b.investmentCents ?? 0) + b.fixedTaxCents;
+      // 3.1: na recorrente o investimento entra pela parcela da anuidade da TMA no payback (I ÷ ANUIDADE(k; D))
+      const parcela = rec ? ((b.investmentCents ?? 0) === 0 ? 0 : (b.investmentCents ?? 0) / annuityFactor(b.rates.r, b.term.D)) : 0;
+      const cost = rec ? parcela + b.monthlyCostCents + b.fixedTaxCents : (b.investmentCents ?? 0) + b.fixedTaxCents;
       if (D > 0) close(b.markupPriceCents, Math.ceil(cost / D - 1e-6), 1); else expect(b.markupPriceCents, ctx).toBeNull();
       // a decisão do motor completo, com preço proposto, usa esse mesmo preço
       const full = financeEngine(args);
@@ -74,11 +77,15 @@ describe('compatibilidade: no mesmo preço, o fluxo e os indicadores seguem o mo
       expect(full.verdict, ctx).toBe(b.verdict);
       if (!a.kpi) { expect(b.kpi).toBeNull(); continue; }
       const ka = a.kpi, kb = b.kpi!;
-      for (const key of ['taxCents', 'commissionCents', 'lossCents', 'contributionCents', 'npvCents', 'cashMonthlyCents', 'amortizationCents'] as const) close(kb[key], ka[key]);
-      close(kb.marginPct, ka.marginPct, 1e-6);
+      // caixa, VPL, TIR e payback não mudam (a amortização não é caixa); a DRE muda só pela parcela da anuidade
+      for (const key of ['taxCents', 'commissionCents', 'lossCents', 'npvCents', 'cashMonthlyCents'] as const) close(kb[key], ka[key]);
       close(kb.irrMonthly, ka.irrMonthly, 1e-6);
       close(kb.paybackMonths, ka.paybackMonths, 1e-6);
-      for (const key of ['operatingCents', 'incomeTaxCents', 'netCents', 'overheadCents'] as const) { where = `${ctx} margins.${key}`; close(kb.margins![key], ka.margins![key]); }
+      if (rec) close(kb.amortizationCents, parcela, 1); else close(kb.amortizationCents, ka.amortizationCents);
+      const s = b.statement!;
+      expect(s.month.contribution, ctx).toBe(s.month.revenue - s.month.tax - s.month.commission - s.month.opex - s.month.amortization);
+      for (const key of ['revenue', 'tax', 'amortization', 'contribution', 'risk', 'overhead', 'operating', 'incomeTax', 'net'] as const) if (s.total[key] != null && !rec) expect(s.total[key], ctx).toBe(s.month[key]);
+      if (rec && s.after) expect(s.after.amortization, ctx).toBe(0);
     }
   });
 });
