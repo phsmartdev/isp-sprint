@@ -42,6 +42,8 @@ const FilterQuery = z.object({
   /** período de criação da oportunidade (dia no fuso de São Paulo) */
   from: z.string().date().optional(),
   to: z.string().date().optional(),
+  /** Kanban: colunas em aberto (padrão), de venda fechada, de perdidas ou todas */
+  status: z.enum(['abertas', 'ganhas', 'perdidas', 'todas']).default('abertas'),
 });
 
 const OPEN = sql`${s.opportunities.stage} not in ('ganha','perdida')`;
@@ -122,6 +124,8 @@ export const opportunityRoutes = [
       if (query.stage) where.push(eq(s.opportunities.stage, query.stage));
       if (query.status === 'abertas') where.push(OPEN);
       if (query.status === 'encerradas') where.push(inArray(s.opportunities.stage, TERMINAL_STAGES as unknown as string[]));
+      if (query.status === 'ganhas') where.push(eq(s.opportunities.stage, 'ganha'));
+      if (query.status === 'perdidas') where.push(eq(s.opportunities.stage, 'perdida'));
       const cond = and(...where);
       const col = SORTS[query.sort];
       const [rows, [{ total } = { total: 0 }]] = await Promise.all([
@@ -147,9 +151,11 @@ export const opportunityRoutes = [
     handler: async ({ app, auth, query }) => {
       const pipe = await resolvePipeline(app.db, auth.tenantId, { pipelineId: query.pipelineId, userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const where = filters(auth, { ...query, pipelineId: pipe.id });
-      where.push(OPEN);
+      // colunas pela situação escolhida: em aberto (padrão), venda fechada, perdidas ou todas
+      const wantKind = { abertas: ['open'], ganhas: ['won'], perdidas: ['lost'], todas: ['open', 'won', 'lost'] }[query.status];
+      const open = pipe.stages.filter((st) => wantKind.includes(st.kind));
+      where.push(open.length ? inArray(s.opportunities.stage, open.map((st) => st.key)) : sql`false`);
       // contagem e valor de TODAS as oportunidades da etapa; cards limitados por coluna (o quadro fica leve com milhares)
-      const open = pipe.stages.filter((st) => st.kind === 'open');
       const [totals, perStage] = await Promise.all([
         app.db.select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, v: sql<string>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
           .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).where(and(...where)).groupBy(s.opportunities.stage),
@@ -166,7 +172,7 @@ export const opportunityRoutes = [
         stages: open.map((st, i) => {
           const cards = perStage[i]!.map(dto);
           const t = totalOf.get(st.key);
-          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: false, count: t?.n ?? 0, valueCents: t?.v ?? 0, cards };
+          return { key: st.key as OpportunityStage, name: st.name, color: st.color, requirements: st.requirements, isTerminal: st.kind !== 'open', count: t?.n ?? 0, valueCents: t?.v ?? 0, cards };
         }),
         terminalStages: pipe.stages.filter((st) => st.kind !== 'open').map((st) => ({ key: st.key, name: st.name })),
         generatedAt: now.toISOString(),

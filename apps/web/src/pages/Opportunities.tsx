@@ -126,7 +126,7 @@ function Column({ stage, children, onAdd, index, compact }: { stage: PipelineSta
   const { setNodeRef, isOver } = useDroppable({ id: stage.key });
   const c = stageColor(stage.key, stage.color, index);
   return (
-    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} style={{ background: `${c}14` }} className={clsx('flex flex-1 basis-0 flex-col rounded-lg', compact ? 'min-w-[128px] p-1.5' : 'min-w-[214px] p-2.5', isOver && 'ring-2 ring-primary')}>
+    <section ref={setNodeRef} aria-labelledby={`col-${stage.key}`} style={{ background: `${c}14` }} className={clsx('flex max-w-[420px] flex-1 basis-0 flex-col rounded-lg', compact ? 'min-w-[128px] p-1.5' : 'min-w-[214px] p-2.5', isOver && 'ring-2 ring-primary')}>
       <header className={clsx('px-1', compact ? 'mb-2' : 'mb-3')}>
         <div className="flex items-center justify-between gap-1">
           <h2 id={`col-${stage.key}`} className={clsx('flex min-w-0 items-center gap-1.5 font-bold text-ink', compact ? 'text-sm' : 'text-lg')}>
@@ -164,9 +164,11 @@ export function OpportunitiesPage() {
   const [fit, setFit] = useState(() => { try { return localStorage.getItem('isp:kanban-fit') !== '0'; } catch { return true; } });
   const setFitPersist = (v: boolean) => { setFit(v); try { localStorage.setItem('isp:kanban-fit', v ? '1' : '0'); } catch { /* sem armazenamento */ } };
   const filters = { q: f.q, ownerId: f.ownerId, sourceId: f.sourceId, planId: f.planId, pipelineId: f.pipelineId, from: f.from, to: f.to };
-  const advancedCount = [f.ownerId, f.sourceId, f.planId, !kanban && f.status !== 'abertas' ? f.status : ''].filter(Boolean).length;
+  const advancedCount = [f.ownerId, f.sourceId, f.planId].filter(Boolean).length;
+  // Kanban não tem a situação "encerradas" (ganhas + perdidas em colunas próprias): vira "todas"
+  const kanbanStatus = f.status === 'encerradas' ? 'todas' : f.status;
   const summary = useQuery({ queryKey: ['opportunities', 'summary'], queryFn: () => api<{ kpis: Kpi[] }>('/opportunities/summary') });
-  const pipe = useQuery({ queryKey: ['pipeline', filters], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs(filters)}`) });
+  const pipe = useQuery({ queryKey: ['pipeline', filters, kanbanStatus], enabled: kanban, queryFn: () => api<{ pipeline: { id: string; name: string }; stages: PipelineStage[] }>(`/pipeline${qs({ ...filters, status: kanbanStatus })}`) });
   const currentPipelineId = f.pipelineId || pipe.data?.pipeline.id || journeys.find((p) => p.isDefault)?.id || '';
   const stageList = (pipelineId: string) => lookups.data?.pipelines.find((p) => p.id === pipelineId)?.stages ?? [];
   const list = useQuery({ queryKey: ['opportunities', 'list', f], enabled: !kanban, placeholderData: keepPreviousData, queryFn: () => api<Paged<Opportunity>>(`/opportunities${qs({ ...filters, status: f.status, stage: f.stage, page: f.page, pageSize: f.size })}`) });
@@ -234,6 +236,13 @@ export function OpportunitiesPage() {
             <option value="todas">Todos os funis (lista)</option>
           </Select>
         )}
+        <Select aria-label="Situação" className="h-12 w-auto min-w-[190px] font-semibold" value={kanban ? kanbanStatus : f.status} onChange={(e) => setF({ status: e.target.value, page: '1' })}>
+          <option value="abertas">Em aberto</option>
+          <option value="ganhas">Venda fechada</option>
+          <option value="perdidas">Perdidas</option>
+          {!kanban && <option value="encerradas">Encerradas (fechadas e perdidas)</option>}
+          <option value="todas">Todas</option>
+        </Select>
         <div className="relative min-w-[180px] flex-1 lg:max-w-[320px]">
           <label htmlFor="op-q" className="sr-only">Buscar oportunidades</label>
           <Search className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-muted" aria-hidden />
@@ -265,15 +274,6 @@ export function OpportunitiesPage() {
                   {lookups.data?.plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </Select>
               </FormField>
-              {!kanban && (
-                <FormField label="Situação" htmlFor="af-status">
-                  <Select id="af-status" value={f.status} onChange={(e) => setF({ status: e.target.value })}>
-                    <option value="abertas">Abertas</option>
-                    <option value="encerradas">Encerradas</option>
-                    <option value="todas">Todas</option>
-                  </Select>
-                </FormField>
-              )}
               <div className="flex justify-between gap-2 pt-1">
                 <Button size="sm" variant="ghost" onClick={() => { setSearch(''); setF({ q: '', ownerId: '', sourceId: '', planId: '', from: '', to: '', status: 'abertas' }); }}>Limpar todos os filtros</Button>
                 <Button size="sm" variant="primary" onClick={() => setAdvanced(false)}>Fechar</Button>
@@ -300,7 +300,7 @@ export function OpportunitiesPage() {
                     {s.cards.map((c) => <Card key={c.id} opp={c} compact={fit} onMove={stableMove} canMove={canMove} stages={stageList(c.pipelineId)} />)}
                     {s.cards.length === 0 && <li className="rounded-md border border-dashed border-line-strong/60 px-3 py-6 text-center text-sm text-muted">Nenhuma oportunidade</li>}
                     {s.count > s.cards.length && (
-                      <li><button type="button" className="w-full rounded-md border border-dashed border-line-strong/60 px-2 py-2 text-center text-xs font-semibold text-primary hover:bg-white/60" onClick={() => setF({ view: 'lista', status: 'abertas', stage: s.key, pipelineId: currentPipelineId, page: '1' })}>
+                      <li><button type="button" className="w-full rounded-md border border-dashed border-line-strong/60 px-2 py-2 text-center text-xs font-semibold text-primary hover:bg-white/60" onClick={() => setF({ view: 'lista', status: 'todas', stage: s.key, pipelineId: currentPipelineId, page: '1' })}>
                         Mostrando {s.cards.length} de {fmtInt(s.count)} · ver todas na Lista
                       </button></li>
                     )}

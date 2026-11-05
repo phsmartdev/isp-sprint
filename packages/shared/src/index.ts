@@ -104,7 +104,8 @@ export const OpportunityListQuery = PageQuery.extend({
   /** período de criação (AAAA-MM-DD, fuso de São Paulo) */
   from: z.string().date().optional(),
   to: z.string().date().optional(),
-  status: z.enum(['abertas', 'encerradas', 'todas']).default('abertas'),
+  /** situação: em aberto, venda fechada (ganhas), perdidas, encerradas (ganhas + perdidas) ou todas */
+  status: z.enum(['abertas', 'ganhas', 'perdidas', 'encerradas', 'todas']).default('abertas'),
   sort: z.enum(OPPORTUNITY_SORTS).default('updated_at'),
   dir: z.enum(['asc', 'desc']).default('desc'),
 });
