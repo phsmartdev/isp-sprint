@@ -5,6 +5,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { Tabs } from '../../components/ui/primitives';
 import { AdminContractTemplates, AdminProposalTemplates } from './ProposalTemplates';
+import { TemplatesManager } from '../../features/contracts/SignaturePanels';
 import { AdminEmail } from './Email';
 import { AdminInstructions } from './Instructions';
 import { AdminTaskScripts } from './TaskScripts';
@@ -29,7 +30,7 @@ export function AdminModels() {
       <div><h1 className="text-xl font-bold text-ink">Modelos</h1><p className="text-sm text-muted">Contratos, propostas, timbrado das filiais, e-mails, a instrução do negócio e os roteiros de cada tipo de tarefa.</p></div>
       <Tabs label="Modelos" value={tab} onChange={(k) => setSearch({ aba: k }, { replace: true })} tabs={[...TABS]} />
       <div>
-        {tab === 'contratos' && <AdminContractTemplates />}
+        {tab === 'contratos' && <div className="space-y-6"><AdminContractTemplates /><TemplatesManager /></div>}
         {tab === 'propostas' && <AdminProposalTemplates />}
         {tab === 'timbrado' && <AdminLetterheads />}
         {tab === 'emails' && <AdminEmail />}

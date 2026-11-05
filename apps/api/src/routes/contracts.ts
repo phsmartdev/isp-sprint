@@ -406,7 +406,10 @@ export const contractRoutes = [
         monthlyCents: active.reduce((a, r) => a + r.monthlyCents, 0),
         globalCents: active.reduce((a, r) => a + (r.totalCents ?? r.monthlyCents * (r.termMonths ?? 12)), 0),
         expiring: { d30: within(30).length, d60: within(60).length, d90: within(90).length },
-        atRisk: { n: atRisk.length, monthlyCents: atRisk.reduce((a, r) => a + r.monthlyCents, 0) },
+        atRisk: { n: atRisk.length, monthlyCents: atRisk.reduce((a, r) => a + r.monthlyCents, 0),
+          // já vencidos e ainda ativos, sem renovação concluída nem encerramento decidido (entram no total, não nas janelas)
+          expiredN: atRisk.filter((r) => !r.closureExpected && r.endAt && r.endAt < today).length,
+          expiredCents: atRisk.filter((r) => !r.closureExpected && r.endAt && r.endAt < today).reduce((a, r) => a + r.monthlyCents, 0) },
         alerts: { open: alerts.length, overdue: alerts.filter((a) => a.dueAt && a.dueAt < today).length, byKind: Object.entries(alerts.reduce<Record<string, number>>((m, a) => ((m[a.kind] = (m[a.kind] ?? 0) + 1), m), {})).map(([kind, n]) => ({ kind, label: ALERT_LABELS[kind as AlertKind] ?? kind, n })) },
         nextExpiring: within(120).sort((a, b) => (a.endAt! < b.endAt! ? -1 : 1)).slice(0, 8),
         attention: rows.filter((r) => r.pendencies.overdue > 0).slice(0, 8),
@@ -899,7 +902,7 @@ export const contractRoutes = [
     min: 'total',
     body: z.object({
       tabAccess: z.record(z.enum(PROFILE_KEYS), z.array(z.enum(CONTRACT_TABS)).max(CONTRACT_TABS.length)),
-      dashboard: z.object({ order: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), hidden: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), compactValues: z.boolean() }),
+      dashboard: z.object({ order: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), hidden: z.array(z.enum(DASHBOARD_SECTIONS)).max(DASHBOARD_SECTIONS.length), compactValues: z.boolean(), layout: z.number().int().optional() }),
     }),
     handler: async ({ app, auth, body, req }) => {
       const before = await contractViewOf(app.db, auth.tenantId);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS as C, adjustedCents, allowedContractTabs, normalizeDashboard, documentName, dueAlerts, endFromTerm, fillSubject, nextAnniversary, type AlertInput } from './contracts';
+import { CONTRACT_TABS, DASHBOARD_LAYOUT, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS as C, adjustedCents, allowedContractTabs, normalizeDashboard, documentName, dueAlerts, endFromTerm, fillSubject, nextAnniversary, type AlertInput } from './contracts';
 
 const base: AlertInput = { today: '2026-10-19', stage: 'vigente', endAt: null, closureExpected: false, closureAt: null, guaranteeExpiresAt: null, adjustmentBaseDate: null, signedAt: '2025-01-10', activationAt: '2025-02-01', validatedAt: null, hasSignedContractDoc: true, provisioningDone: true, openSignatureSince: null };
 const kinds = (i: Partial<AlertInput>) => dueAlerts({ ...base, ...i }, C).map((a) => a.kind);
@@ -163,10 +163,13 @@ describe('abas e painel de contratos', () => {
     expect(allowedContractTabs(d, ['vendedor', 'implantacao'])).toContain('relatorios');
     expect(allowedContractTabs(d, ['vendedor', 'implantacao'])).not.toContain('painel');
     expect(allowedContractTabs(d, [])).toEqual([...CONTRACT_TABS]);
-    expect(CONTRACT_TABS.indexOf('funil')).toBe(CONTRACT_TABS.indexOf('painel') + 1);
+    expect(CONTRACT_TABS).not.toContain('modelos' as never); // parâmetros ficam em Configurações
   });
   it('painel: completa seções que faltam e ignora as desconhecidas', () => {
-    const n = normalizeDashboard({ order: ['executivo', 'xpto', 'executivo'], hidden: ['clientes', 'nada'], compactValues: false });
+    // ordem gravada num arranjo anterior volta ao padrão novo; as ocultas ficam
+    expect(normalizeDashboard({ order: ['executivo'], hidden: ['clientes'] }).order[0]).toBe('indicadores');
+    expect(normalizeDashboard({ order: ['executivo'], hidden: ['clientes'] }).hidden).toEqual(['clientes']);
+    const n = normalizeDashboard({ layout: DASHBOARD_LAYOUT, order: ['executivo', 'xpto', 'executivo'], hidden: ['clientes', 'nada'], compactValues: false });
     expect(n.order[0]).toBe('executivo');
     expect([...n.order].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
     expect(n.hidden).toEqual(['clientes']);

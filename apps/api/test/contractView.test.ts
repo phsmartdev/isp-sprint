@@ -16,8 +16,8 @@ afterAll(async () => { await ctx.close(); });
 describe('abas e painel de contratos', () => {
   it('sem configuração todas as abas ficam liberadas e o painel usa o padrão', async () => {
     const v = ok(await lucas.get('/contracts/view')).json();
-    expect(v.tabs.indexOf('funil')).toBe(v.tabs.indexOf('painel') + 1);
-    expect(v.tabs).toContain('modelos');
+    expect(v.tabs.slice(0, 3)).toEqual(['painel', 'atencao', 'lista']);
+    expect(v.tabs).not.toContain('modelos');
     expect(v.tabs).not.toContain('habilitacao');
     for (const gone of ['renovacoes', 'reajustes', 'encerramentos', 'notificacoes']) expect(v.tabs).not.toContain(gone);
     expect(v.dashboard).toEqual(DEFAULT_DASHBOARD);
