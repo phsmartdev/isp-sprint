@@ -48,7 +48,7 @@ function Executive({ e, money }: { e: Exec; money: Money }) {
         <div className="card p-4">
           <p className="text-sm text-muted">Dependência dos maiores clientes</p>
           {!c.top1 ? <p className="mt-2 text-sm text-muted">Sem dados.</p> : <>
-            <p className="num flex flex-wrap items-baseline gap-x-2 text-2xl font-extrabold text-ink">{fmtPct(c.top1Share)} <span className="text-sm font-semibold text-muted">no maior cliente</span></p>
+            <FitText className="num text-2xl font-extrabold text-ink">{fmtPct(c.top1Share)} <span className="text-sm font-semibold text-muted">no maior cliente</span></FitText>
             <p className="truncate text-xs text-muted" title={c.top1.name}>{c.top1.name} · 5 maiores somam {fmtPct(c.top5Share)}</p>
             {c.level && <p className={clsx('mt-1 text-xs font-semibold', CONC_TONE[c.level])}>{CONC_LABEL[c.level]} (HHI {fmtInt(c.hhi ?? 0)})</p>}
           </>}
@@ -148,7 +148,7 @@ function Performance({ p, money }: { p: Dash['performance']; money: Money }) {
         {main.map((m) => (
           <div key={m.key} className="flex min-w-0 flex-col rounded-md border border-line p-5 md:row-span-2 xl:row-span-3" title={m.hint}>
             <p className="text-xs font-bold uppercase tracking-wide text-muted">{m.label}</p>
-            <p className="num mt-3 text-5xl font-extrabold leading-none text-ink">{fmt(m)}</p>
+            <FitText className="num mt-3 text-5xl font-extrabold leading-none text-ink">{fmt(m)}</FitText>
             <p className="num mt-2 text-sm text-muted">{base(m)}</p>
             <span className="mt-auto block h-2 rounded-full bg-surface-2 pt-0" aria-hidden><span className="block h-2 rounded-full bg-[#2F5986]" style={{ width: `${m.value == null ? 0 : Math.min(100, m.value * 100)}%` }} /></span>
           </div>
@@ -156,7 +156,7 @@ function Performance({ p, money }: { p: Dash['performance']; money: Money }) {
         {rest.map((m) => (
           <div key={m.key} className="flex min-w-0 flex-col justify-between rounded-md bg-surface-2/70 p-3" title={m.hint}>
             <p className="text-xs leading-snug text-text">{m.label}</p>
-            <p className="num mt-2 text-2xl font-extrabold leading-none text-ink">{fmt(m)}{m.den != null && m.den > 0 && <span className="ml-1.5 text-[11px] font-semibold text-muted">{m.num}/{m.den}</span>}</p>
+            <FitText className="num mt-2 text-2xl font-extrabold leading-none text-ink">{fmt(m)}{m.den != null && m.den > 0 && <span className="ml-1.5 text-[11px] font-semibold text-muted">{m.num}/{m.den}</span>}</FitText>
           </div>
         ))}
       </div>
@@ -180,8 +180,8 @@ function Headline({ d, money }: { d: Dash; money: Money }) {
             {([30, 60, 90] as const).map((n) => (
               <Link key={n} to={`/contracts?t=lista&exp=${n}`} className="flex min-w-0 flex-col rounded-md border border-line p-2.5 hover:border-primary" aria-label={`${d.expiring[`d${n}`]} contratos vencendo em até ${n} dias: ver lista`}>
                 <span className="text-[11px] font-semibold text-muted">até {n} dias</span>
-                <span className="num text-[26px] font-extrabold leading-tight text-ink">{d.expiring[`d${n}`]}</span>
-                <span className="num truncate text-[11px] text-muted" title={`${fmtBRL(d.expiringCents[`d${n}`])}/mês`}>{money(d.expiringCents[`d${n}`])}/mês</span>
+                <FitText as="span" className="num block text-[26px] font-extrabold leading-tight text-ink">{d.expiring[`d${n}`]}</FitText>
+                <FitText as="span" min={9} className="num block text-[11px] text-muted" title={`${fmtBRL(d.expiringCents[`d${n}`])}/mês`}>{money(d.expiringCents[`d${n}`])}/mês</FitText>
                 <span className="mt-auto block h-1 rounded-full bg-surface-2 pt-0"><span className="block h-1 rounded-full bg-[#E0A400]" style={{ width: `${Math.min(100, (d.expiringCents[`d${n}`] / mrr) * 100)}%` }} /></span>
               </Link>
             ))}
@@ -248,7 +248,7 @@ function HealthSection({ d, money, filter, setFilter }: { d: Dash; money: Money;
               <button key={x.key} type="button" onClick={() => setFilter(filter === x.key ? null : x.key)} aria-pressed={filter === x.key}
                 className={clsx('min-w-0 rounded-md border p-3 text-left transition', filter === x.key ? 'border-primary bg-primary-soft/40' : 'border-line hover:border-line-strong')}>
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-text"><span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: HEALTH_COLOR[x.key] }} aria-hidden />{HEALTH_SHORT[x.key]}</span>
-                <span className="num mt-1 block truncate text-xl font-extrabold text-ink" title={fmtBRL(x.monthlyCents)}>{money(x.monthlyCents)}</span>
+                <FitText as="span" className="num mt-1 block text-xl font-extrabold text-ink" title={fmtBRL(x.monthlyCents)}>{money(x.monthlyCents)}</FitText>
                 <span className="num text-xs text-muted">{x.n} contrato(s) · {pct(x.monthlyCents, total)}</span>
               </button>
             ))}
