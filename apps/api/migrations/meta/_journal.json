@@ -680,6 +680,13 @@
       "when": 1793887822311,
       "tag": "0096_perfis_de_acesso",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1793903900888,
+      "tag": "0097_catalogo_de_produtos",
+      "breakpoints": true
     }
   ]
 }

@@ -641,6 +641,23 @@ export const opportunityItems = pgTable('opportunity_items', {
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'servico', 'recorrencia', 'locacao'])) }));
 
+/**
+ * Catálogo de produtos e serviços das negociações: cada item lançado ou importado numa oportunidade fica salvo
+ * (descrição, medida, último valor, tipo e documento fiscal) para ser reaproveitado nas próximas.
+ */
+export const productCatalog = pgTable('product_catalog', {
+  id: id(),
+  tenantId: tenantId(),
+  description: text('description').notNull(),
+  unit: text('unit').notNull().default('un'),
+  lastUnitCents: bigint('last_unit_cents', { mode: 'number' }).notNull().default(0),
+  dealKind: text('deal_kind').notNull().default('recorrencia'),
+  fiscalDocTypeId: uuid('fiscal_doc_type_id'),
+  timesUsed: integer('times_used').notNull().default(1),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('product_catalog_desc_uq').on(t.tenantId, sql`lower(${t.description})`) }));
+
 /** Licitação: empresas participantes, lances por lote e vencedor(es). O ranking é calculado (menor lance). */
 export const bidParticipants = pgTable('bid_participants', {
   id: id(),

@@ -18,6 +18,7 @@ import { errMsg } from '../contracts/shared';
 type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean };
+type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
 type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind };
 
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
@@ -56,6 +57,9 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const editable = !!q.data?.editable;
   const set = (k: string, patch: Partial<Row>) => setRows(cur.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   // documentos fiscais da filial da oportunidade (agrupados por tipo fiscal); o produto do catálogo sugere o seu documento padrão
+  // catálogo: itens já usados nas negociações (preenche medida, valor, tipo e documento ao escolher)
+  const catalogQ = useQuery({ queryKey: ['product-catalog'], queryFn: () => api<{ items: CatalogItem[] }>('/product-catalog'), staleTime: 60_000 });
+  const catalog = catalogQ.data?.items ?? [];
   const docsQ = useQuery({ queryKey: ['fiscal-docs'], queryFn: () => api<{ items: Doc[] }>('/fiscal-docs'), staleTime: 60_000 });
   const docs = (docsQ.data?.items ?? []).filter((d) => (!opp.branchId || d.branchId === opp.branchId));
   const plans = useLookups().data?.plans ?? [];
@@ -68,7 +72,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       if (bad >= 0) throw new Error(`Confira o item ${bad + 1}: produto, quantidade e valores.`);
       return api<Opportunity>(`/opportunities/${opp.id}/items`, { method: 'PUT', body: { rowVersion: opp.rowVersion, items: parsed, ...(bid ? { bidMode, bidGlobalCents: bidMode === 'global' ? parseMoney(bidGlobal) : null } : {}) } });
     },
-    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); setRows(null); void qc.invalidateQueries({ queryKey: ['opp-items', opp.id] }); void qc.invalidateQueries({ queryKey: ['economics', opp.id] }); void qc.invalidateQueries({ queryKey: ['timeline', opp.id] }); toast({ tone: 'success', message: 'Produtos e serviços salvos' }); },
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); setRows(null); void qc.invalidateQueries({ queryKey: ['product-catalog'] }); void qc.invalidateQueries({ queryKey: ['opp-items', opp.id] }); void qc.invalidateQueries({ queryKey: ['economics', opp.id] }); void qc.invalidateQueries({ queryKey: ['timeline', opp.id] }); toast({ tone: 'success', message: 'Produtos e serviços salvos' }); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'A oportunidade mudou enquanto você editava. Aguarde salvar os outros campos e tente de novo.' : errMsg(e) }),
   });
 
@@ -118,7 +122,12 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                 const lt = lineTotal(parsed[i]!);
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
-                    <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => { const doc = !r.doc ? docForPlan(e.target.value) : ''; set(r.key, { description: e.target.value, ...(doc ? { doc } : {}) }); }} /></td>
+                    <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => {
+                      const v = e.target.value;
+                      const c = catalog.find((x) => x.description.toLowerCase() === v.trim().toLowerCase());
+                      const doc = !r.doc ? (c?.fiscalDocTypeId ?? docForPlan(v)) : '';
+                      set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
+                    }} /></td>
                     <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
@@ -144,7 +153,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
         </div>
       )}
       {!!cur.length && <LotTaxes rows={cur} docs={docs} docLabel={docLabel} />}
-      <datalist id="items-catalog">{plans.map((p) => <option key={p.id} value={p.name} />)}</datalist>
+      <datalist id="items-catalog">{catalog.map((c) => <option key={c.id} value={c.description}>{`${money(c.lastUnitCents)} · ${DEAL_KIND_LABELS[c.dealKind as DealKind] ?? ''}`}</option>)}{plans.filter((p) => !catalog.some((c) => c.description.toLowerCase() === p.name.toLowerCase())).map((p) => <option key={p.id} value={p.name} />)}</datalist>
       {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
       {bid && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md bg-surface-2 p-3 text-sm" role="radiogroup" aria-label="Lance da licitação">

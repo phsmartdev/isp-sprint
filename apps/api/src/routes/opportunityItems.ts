@@ -2,7 +2,7 @@
  * Produtos e serviços da oportunidade: a lista inteira é salva de uma vez (conferida no servidor), o total vira o
  * valor da oportunidade e cada mudança entra no histórico. Licitação guarda o lance por item ou global.
  */
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS } from '@isp/domain';
 import { defineRoute } from '../http/route';
@@ -27,6 +27,17 @@ export async function isBid(db: Parameters<typeof pipelinesOf>[0], tenantId: str
 }
 
 export const opportunityItemRoutes = [
+  defineRoute({
+    method: 'GET', url: '/product-catalog', summary: 'Catálogo de produtos e serviços já usados nas negociações (busca pela descrição)', tag: 'Oportunidades', module: 'oportunidades',
+    query: z.object({ q: z.string().trim().max(100).optional() }),
+    handler: async ({ app, auth, query }) => {
+      const t = query.q ? `%${query.q.replace(/[%_\\]/g, '\\$&')}%` : null;
+      const items = await app.db.select({ id: s.productCatalog.id, description: s.productCatalog.description, unit: s.productCatalog.unit, lastUnitCents: s.productCatalog.lastUnitCents, dealKind: s.productCatalog.dealKind, fiscalDocTypeId: s.productCatalog.fiscalDocTypeId, timesUsed: s.productCatalog.timesUsed })
+        .from(s.productCatalog).where(and(eq(s.productCatalog.tenantId, auth.tenantId), t ? ilike(s.productCatalog.description, t) : undefined))
+        .orderBy(desc(s.productCatalog.timesUsed), asc(s.productCatalog.description)).limit(300);
+      return { items };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/opportunities/:id/items', summary: 'Produtos e serviços da oportunidade, com totais e lance (licitação)', tag: 'Oportunidades', module: 'oportunidades', params: OppParams,
     handler: async ({ app, auth, params }) => {
@@ -68,6 +79,18 @@ export const opportunityItemRoutes = [
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
             discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, dealKind: it.dealKind, createdBy: auth.userId,
           })));
+        }
+        // cada item lançado/importado fica no catálogo para as próximas negociações (último valor e tipo usados)
+        const seen = new Set<string>();
+        for (const it of body.items) {
+          const key = it.description.trim().toLowerCase();
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          await tx.execute(sql`
+            insert into product_catalog (tenant_id, description, unit, last_unit_cents, deal_kind, fiscal_doc_type_id)
+            values (${auth.tenantId}, ${it.description.trim().slice(0, 300)}, ${it.unit}, ${it.unitCents}, ${it.dealKind}, ${it.fiscalDocTypeId ?? null})
+            on conflict (tenant_id, lower(description)) do update set unit = excluded.unit, last_unit_cents = excluded.last_unit_cents, deal_kind = excluded.deal_kind,
+              fiscal_doc_type_id = coalesce(excluded.fiscal_doc_type_id, product_catalog.fiscal_doc_type_id), times_used = product_catalog.times_used + 1, last_used_at = now()`);
         }
         const totals = itemsTotals(body.items.map((i) => ({ ...i, bidUnitCents: bid ? i.bidUnitCents ?? null : null })));
         // com itens, o valor da oportunidade é a soma deles; sem itens, volta ao plano (se houver)
