@@ -55,6 +55,8 @@ export const users = pgTable(
     goalLeads: integer('goal_leads').notNull().default(0),
     /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
+    /** Papéis do Playbook Comercial que a pessoa ocupa (GC, SC, ANC, ASC...): parametrizado no cadastro do usuário. */
+    playbookRoles: text('playbook_roles').array().notNull().default(sql`'{}'::text[]`),
     /** Conta Google vinculada no primeiro login com Google (identificador "sub"). */
     googleSub: text('google_sub'),
     createdAt: createdAt(),
@@ -1397,6 +1399,58 @@ export const playbookRoleHolders = pgTable('playbook_role_holders', {
   idx: index('playbook_role_holders_idx').on(t.tenantId, t.role),
   oneCk: check('playbook_role_holders_one_ck', sql`(user_id is null) <> (external_name is null)`),
   userUq: uniqueIndex('playbook_role_holders_user_uq').on(t.tenantId, t.role, t.userId).where(sql`user_id is not null`),
+}));
+
+/** Atores externos do Playbook (sem login): papéis que ocupam e por onde são avisados. */
+export const contractExternalActors = pgTable('contract_external_actors', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  organization: text('organization'),
+  email: text('email'),
+  whatsapp: text('whatsapp'),
+  channels: text('channels').array().notNull().default(sql`'{}'::text[]`),
+  roles: text('roles').array().notNull().default(sql`'{}'::text[]`),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ idx: index('contract_external_actors_idx').on(t.tenantId, t.active) }));
+
+/**
+ * Avisos de atividades de contrato por nível de responsabilidade (R/A/C/I e escalonamento), por canal.
+ * Cada aviso tem um token para o botão "Confirmar recebimento" (e a resposta do ator externo).
+ */
+export const contractNotifications = pgTable('contract_notifications', {
+  id: id(),
+  tenantId: tenantId(),
+  contractId: uuid('contract_id').references(() => contracts.id),
+  activityId: uuid('activity_id').references(() => activities.id),
+  event: text('event').notNull(),
+  raciLetter: text('raci_letter'),
+  role: text('role'),
+  userId: uuid('user_id').references(() => users.id),
+  actorId: uuid('actor_id').references(() => contractExternalActors.id),
+  recipientName: text('recipient_name').notNull(),
+  channel: text('channel').notNull(),
+  toAddress: text('to_address'),
+  status: text('status').notNull(),
+  error: text('error'),
+  token: text('token').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  title: text('title').notNull(),
+  sentAt: ts('sent_at').notNull().defaultNow(),
+  confirmedAt: ts('confirmed_at'),
+  confirmIp: text('confirm_ip'),
+  responseText: text('response_text'),
+  respondedAt: ts('responded_at'),
+}, (t) => ({
+  tokenUq: uniqueIndex('contract_notifications_token_uq').on(t.token),
+  dedupeUq: uniqueIndex('contract_notifications_dedupe_uq').on(t.tenantId, t.dedupeKey),
+  actIdx: index('contract_notifications_act_idx').on(t.tenantId, t.activityId),
+  channelCk: check('contract_notifications_channel_ck', inList('channel', ['email', 'whatsapp'])),
+  statusCk: check('contract_notifications_status_ck', inList('status', ['enviado', 'falhou', 'nao_configurado', 'sem_contato'])),
 }));
 
 /** Prazo (SLA, em horas) por atividade da matriz RACI. Sem registro ou nulo = sem SLA (em aberto). */

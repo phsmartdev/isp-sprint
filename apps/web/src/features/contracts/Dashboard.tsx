@@ -94,7 +94,9 @@ type Decision = {
   adjustmentsDue: { id: string; date: string; days: number; index: string | null; monthlyCents: number; status: 'aplicado' | 'em_andamento' | 'a_iniciar'; clientName: string; number: string }[];
   actionList: ActionRow[]; mrrTotal: number;
 };
+type Perf = { key: string; label: string; value: number | null; unit: 'pct' | 'dias' | 'horas' | 'brl'; num?: number; den?: number; hint: string; goodHigh: boolean };
 type Dash = {
+  performance: { windowDays: number; metrics: Perf[] };
   decision: Decision;
   operations: Ops; expiringCents: { d30: number; d60: number; d90: number };
   executive: Exec;
@@ -140,6 +142,38 @@ function Tile({ label, value, full, sub, children, accent }: { label: string; va
       {sub && <div className="mt-0.5 text-xs text-muted">{sub}</div>}
       {children}
     </div>
+  );
+}
+
+/** Desempenho da operação: indicadores de resultado do processo (sem meta definida, sem cor de julgamento). */
+function Performance({ p, money }: { p: Dash['performance']; money: Money }) {
+  const fmt = (m: Perf) => (m.value == null ? '—' : m.unit === 'pct' ? fmtPct(m.value) : m.unit === 'brl' ? money(m.value) : `${(Math.round(m.value * 10) / 10).toLocaleString('pt-BR')} ${m.unit === 'dias' ? 'dias' : 'h'}`);
+  const main = p.metrics.filter((m) => ['renovacao_prazo', 'reajuste'].includes(m.key));
+  const rest = p.metrics.filter((m) => !['renovacao_prazo', 'reajuste'].includes(m.key));
+  return (
+    <section className="card p-5" aria-label="Desempenho da operação de contratos">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-bold text-ink">Desempenho da operação de contratos</h3>
+        <p className="text-xs text-muted">Últimos 12 meses · passe o mouse para ver como cada um é calculado</p>
+      </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="grid grid-cols-2 gap-3">{main.map((m) => (
+          <div key={m.key} className="min-w-0 rounded-md border border-line p-4" title={m.hint}>
+            <p className="text-sm font-semibold text-muted">{m.label}</p>
+            <p className="num mt-1 text-3xl font-extrabold text-ink">{fmt(m)}</p>
+            {m.den != null && <p className="num text-xs text-muted">{m.den ? `${m.num} de ${m.den}` : 'sem base na janela'}</p>}
+            {m.value != null && m.unit === 'pct' && <span className="mt-2 block h-1.5 rounded-full bg-surface-2" aria-hidden><span className="block h-1.5 rounded-full bg-[#2F5986]" style={{ width: `${Math.min(100, m.value * 100)}%` }} /></span>}
+            <p className="mt-2 text-[11px] leading-snug text-muted">{m.hint}</p>
+          </div>
+        ))}</div>
+        <dl className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 xl:grid-cols-3">{rest.map((m) => (
+          <div key={m.key} className="flex min-w-0 items-baseline justify-between gap-2 border-b border-line py-2" title={m.hint}>
+            <dt className="min-w-0 text-sm text-text">{m.label}{m.den != null && m.den > 0 && <span className="num block text-[11px] text-muted">{m.num} de {m.den}</span>}</dt>
+            <dd className="num shrink-0 text-lg font-extrabold text-ink">{fmt(m)}</dd>
+          </div>
+        ))}</dl>
+      </div>
+    </section>
   );
 }
 
@@ -422,6 +456,7 @@ export function ContractsDashboard() {
     ),
     executivo: () => <Executive e={d.executive} money={money} />,
     indicadores: () => <Headline d={d} money={money} />,
+    desempenho: () => <Performance p={d.performance} money={money} />,
     saude: () => <HealthSection d={d} money={money} filter={health} setFilter={setHealth} />,
     acao: () => <ActionList rows={d.decision.actionList} filter={health} setFilter={setHealth} money={money} onOpen={setLife} />,
     vencimentos: () => <ExpiringChart plan={d.decision.expiringPlan} money={money} />,

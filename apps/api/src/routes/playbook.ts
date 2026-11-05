@@ -1,76 +1,76 @@
 /**
- * Playbook Comercial: matriz RACI (fixa, do documento), titulares dos papéis e SLA por atividade.
- * Titulares e SLA começam em aberto; quem administra Contratos preenche quando a empresa definir.
+ * Playbook Comercial: matriz RACI (fixa, do documento), quem ocupa cada papel, SLA por atividade, regras de aviso por
+ * nível de responsabilidade e atores externos.
+ * Parametrização: papéis de cada pessoa no CADASTRO DO USUÁRIO (Configurações → Usuários); SLA, avisos e atores
+ * externos em Configurações → Responsabilidades de contratos. A aba do módulo só consulta.
  */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PLAYBOOK_ROLES, PLAYBOOK_ROLE_LABELS, RACI_KEYS, RACI_MATRIX, RACI_PHASES, RACI_PHASE_LABELS, isPlaybookRole } from '@isp/domain';
+import {
+  NOTIFY_EVENTS, PLAYBOOK_ROLES, PLAYBOOK_ROLE_LABELS, RACI_KEYS, RACI_LETTERS, RACI_MATRIX, RACI_PHASES, RACI_PHASE_LABELS, normalizeNotifyRules,
+} from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
 import { level } from '../services/scope';
-import { assertUsersActive } from '../services/tasks';
 import { isAdmin } from '../services/contracts';
+import { notifyRulesOf } from '../services/contractNotify';
+import { waPhone } from '../services/whatsapp';
 
 export const canManagePlaybook = (auth: AuthContext) => isAdmin(auth) || level(auth, 'contratos') === 'total';
-const guard = (auth: AuthContext) => { if (!canManagePlaybook(auth)) throw forbidden('Só a gerência de contratos ou a administração altera titulares e prazos.'); };
+const guard = (auth: AuthContext) => { if (!canManagePlaybook(auth)) throw forbidden('Só a administração ou quem tem nível Total em Contratos parametriza responsabilidades.'); };
+
+const Actor = z.object({
+  name: z.string().trim().min(2).max(120),
+  organization: z.string().trim().max(120).nullable().optional(),
+  email: z.string().trim().toLowerCase().email('E-mail inválido').max(200).nullable().optional().or(z.literal('').transform(() => null)),
+  whatsapp: z.string().trim().max(30).nullable().optional(),
+  channels: z.array(z.enum(['email', 'whatsapp'])).max(2).default([]),
+  roles: z.array(z.enum(PLAYBOOK_ROLES)).max(13).default([]),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  active: z.boolean().optional(),
+});
+function checkActor(b: z.infer<typeof Actor>) {
+  if (b.channels.includes('email') && !b.email) throw unprocessable('Informe o e-mail para avisar por e-mail.', [{ path: 'email', message: 'Obrigatório no canal e-mail' }]);
+  if (b.channels.includes('whatsapp') && !waPhone(b.whatsapp)) throw unprocessable('Informe o WhatsApp com DDD para avisar por WhatsApp.', [{ path: 'whatsapp', message: 'Número inválido' }]);
+}
+
+async function rulesSave(db: Parameters<typeof notifyRulesOf>[0], tenantId: string, rules: unknown, userId: string) {
+  const [r] = await db.select({ settings: s.contractSettings.settings }).from(s.contractSettings).where(eq(s.contractSettings.tenantId, tenantId)).limit(1);
+  const settings = { ...((r?.settings ?? {}) as Record<string, unknown>), notifyRules: rules };
+  await db.insert(s.contractSettings).values({ tenantId, settings, updatedBy: userId }).onConflictDoUpdate({ target: s.contractSettings.tenantId, set: { settings, updatedBy: userId, updatedAt: new Date() } });
+}
 
 export const playbookRoutes = [
   defineRoute({
     method: 'GET',
     url: '/contract-playbook',
-    summary: 'Matriz RACI do Playbook, titulares dos papéis (em aberto até serem definidos) e SLA por atividade',
+    summary: 'Matriz RACI, quem ocupa cada papel (usuários e atores externos), SLA por atividade e regras de aviso',
     tag: 'Contratos',
     module: 'contratos',
     handler: async ({ app, auth }) => {
-      const [holders, sla] = await Promise.all([
-        app.db.select({ id: s.playbookRoleHolders.id, role: s.playbookRoleHolders.role, userId: s.playbookRoleHolders.userId, userName: s.users.name, externalName: s.playbookRoleHolders.externalName })
-          .from(s.playbookRoleHolders).leftJoin(s.users, eq(s.users.id, s.playbookRoleHolders.userId))
-          .where(eq(s.playbookRoleHolders.tenantId, auth.tenantId)).orderBy(asc(s.playbookRoleHolders.createdAt)),
+      const [users, actors, sla, rules] = await Promise.all([
+        app.db.select({ id: s.users.id, name: s.users.name, email: s.users.email, roles: s.users.playbookRoles }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), sql`cardinality(${s.users.playbookRoles}) > 0`)).orderBy(asc(s.users.name)),
+        app.db.select().from(s.contractExternalActors).where(eq(s.contractExternalActors.tenantId, auth.tenantId)).orderBy(asc(s.contractExternalActors.name)),
         app.db.select({ key: s.raciSettings.activityKey, slaHours: s.raciSettings.slaHours }).from(s.raciSettings).where(eq(s.raciSettings.tenantId, auth.tenantId)),
+        notifyRulesOf(app.db, auth.tenantId),
       ]);
       const slaOf = new Map(sla.map((x) => [x.key, x.slaHours]));
+      const manage = canManagePlaybook(auth);
       return {
-        roles: PLAYBOOK_ROLES.map((r) => ({ key: r, label: PLAYBOOK_ROLE_LABELS[r], holders: holders.filter((h) => h.role === r) })),
+        roles: PLAYBOOK_ROLES.map((r) => ({
+          key: r, label: PLAYBOOK_ROLE_LABELS[r],
+          users: users.filter((u) => u.roles.includes(r)).map((u) => ({ id: u.id, name: u.name })),
+          actors: actors.filter((a) => a.active && a.roles.includes(r)).map((a) => ({ id: a.id, name: a.name, organization: a.organization, channels: a.channels })),
+        })),
         phases: RACI_PHASES.map((p) => ({ key: p, label: RACI_PHASE_LABELS[p] })),
         matrix: RACI_MATRIX.map((x) => ({ ...x, slaHours: slaOf.get(x.key) ?? null })),
-        canManage: canManagePlaybook(auth),
+        rules,
+        // contato dos atores externos só para quem parametriza
+        actors: manage ? actors : actors.map((a) => ({ id: a.id, name: a.name, organization: a.organization, roles: a.roles, channels: a.channels, active: a.active })),
+        canManage: manage,
       };
-    },
-  }),
-
-  defineRoute({
-    method: 'POST',
-    url: '/contract-playbook/holders',
-    summary: 'Define um titular do papel: usuário do sistema ou ator externo (nome, sem login)',
-    tag: 'Contratos',
-    module: 'contratos',
-    body: z.object({ role: z.string(), userId: z.string().uuid().nullable().optional(), externalName: z.string().trim().min(2).max(120).nullable().optional() }),
-    handler: async ({ app, auth, body, reply }) => {
-      guard(auth);
-      if (!isPlaybookRole(body.role)) throw unprocessable('Papel desconhecido.', [{ path: 'role', message: 'Fora do Playbook' }]);
-      if (!body.userId === !body.externalName) throw unprocessable('Escolha um usuário ou informe o nome do ator externo.', [{ path: 'userId', message: 'Um dos dois' }]);
-      if (body.userId) await assertUsersActive(app.db, auth, [body.userId], 'userId');
-      const [h] = await app.db.insert(s.playbookRoleHolders).values({ tenantId: auth.tenantId, role: body.role, userId: body.userId ?? null, externalName: body.externalName ?? null, createdBy: auth.userId }).onConflictDoNothing().returning({ id: s.playbookRoleHolders.id });
-      if (!h) throw unprocessable('Esta pessoa já é titular do papel.');
-      reply.code(201);
-      return h;
-    },
-  }),
-
-  defineRoute({
-    method: 'DELETE',
-    url: '/contract-playbook/holders/:id',
-    summary: 'Remove um titular do papel (o papel volta a ficar em aberto se for o último)',
-    tag: 'Contratos',
-    module: 'contratos',
-    params: IdParams,
-    handler: async ({ app, auth, params }) => {
-      guard(auth);
-      const r = await app.db.delete(s.playbookRoleHolders).where(and(eq(s.playbookRoleHolders.id, params.id), eq(s.playbookRoleHolders.tenantId, auth.tenantId))).returning({ id: s.playbookRoleHolders.id });
-      if (!r.length) throw notFound('Titular não encontrado.');
-      return { ok: true };
     },
   }),
 
@@ -88,6 +88,57 @@ export const playbookRoutes = [
       await app.db.insert(s.raciSettings).values({ tenantId: auth.tenantId, activityKey: params.key, slaHours: body.slaHours, updatedBy: auth.userId })
         .onConflictDoUpdate({ target: [s.raciSettings.tenantId, s.raciSettings.activityKey], set: { slaHours: body.slaHours, updatedBy: auth.userId, updatedAt: new Date() } });
       return { key: params.key, slaHours: body.slaHours };
+    },
+  }),
+
+  defineRoute({
+    method: 'PUT',
+    url: '/contract-playbook/notify-rules',
+    summary: 'Regras de aviso por nível de responsabilidade: quem (R/A/C/I) recebe cada evento, antecedência e escalonamento',
+    tag: 'Contratos',
+    module: 'contratos',
+    body: z.object({
+      events: z.record(z.enum(NOTIFY_EVENTS), z.array(z.enum(RACI_LETTERS)).max(4)),
+      dueSoonHours: z.number().int().min(1).max(24 * 60).nullable(),
+      escalation: z.array(z.object({ afterHours: z.number().int().min(1).max(24 * 365), role: z.enum(PLAYBOOK_ROLES) })).max(5),
+    }),
+    handler: async ({ app, auth, body }) => {
+      guard(auth);
+      const rules = normalizeNotifyRules(body);
+      await rulesSave(app.db, auth.tenantId, rules, auth.userId);
+      return rules;
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/contract-external-actors',
+    summary: 'Cadastra ator externo do Playbook com os papéis e os canais de aviso',
+    tag: 'Contratos',
+    module: 'contratos',
+    body: Actor,
+    handler: async ({ app, auth, body, reply }) => {
+      guard(auth); checkActor(body);
+      const [a] = await app.db.insert(s.contractExternalActors).values({ tenantId: auth.tenantId, name: body.name, organization: body.organization ?? null, email: body.email ?? null, whatsapp: body.whatsapp ?? null, channels: body.channels, roles: body.roles, notes: body.notes ?? null, createdBy: auth.userId }).returning({ id: s.contractExternalActors.id });
+      reply.code(201);
+      return a!;
+    },
+  }),
+
+  defineRoute({
+    method: 'PUT',
+    url: '/contract-external-actors/:id',
+    summary: 'Atualiza ator externo (papéis, canais, contato, ativo)',
+    tag: 'Contratos',
+    module: 'contratos',
+    params: IdParams,
+    body: Actor,
+    handler: async ({ app, auth, params, body }) => {
+      guard(auth); checkActor(body);
+      const r = await app.db.update(s.contractExternalActors).set({ name: body.name, organization: body.organization ?? null, email: body.email ?? null, whatsapp: body.whatsapp ?? null, channels: body.channels, roles: body.roles, notes: body.notes ?? null, active: body.active ?? true, updatedAt: new Date() })
+        .where(and(eq(s.contractExternalActors.id, params.id), eq(s.contractExternalActors.tenantId, auth.tenantId))).returning({ id: s.contractExternalActors.id });
+      if (!r.length) throw notFound('Ator externo não encontrado.');
+      return { ok: true };
     },
   }),
 ];

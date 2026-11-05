@@ -118,3 +118,52 @@ export function taskSlaState(dueAt: Date | string | null, completedAt: Date | st
 export const ACCEPT_STATUSES = ['pendente', 'aceita', 'devolvida'] as const;
 export type AcceptStatus = (typeof ACCEPT_STATUSES)[number];
 export const ACCEPT_LABELS: Record<AcceptStatus, string> = { pendente: 'Aguardando aceite', aceita: 'Aceita', devolvida: 'Devolvida' };
+
+// ------------------------------------------------------------------ avisos por nível de responsabilidade
+export const RACI_LETTERS = ['R', 'A', 'C', 'I'] as const;
+export type RaciLetter = (typeof RACI_LETTERS)[number];
+export const RACI_LETTER_LABELS: Record<RaciLetter, string> = { R: 'Responsável pela execução (R)', A: 'Responsável final (A)', C: 'Consultado (C)', I: 'Informado (I)' };
+
+export const NOTIFY_EVENTS = ['criada', 'vence_em_breve', 'vencida', 'devolvida', 'concluida'] as const;
+export type NotifyEvent = (typeof NOTIFY_EVENTS)[number];
+export const NOTIFY_EVENT_LABELS: Record<NotifyEvent, string> = {
+  criada: 'Atividade criada ou transferida', vence_em_breve: 'Prazo perto de vencer', vencida: 'Prazo vencido', devolvida: 'Demanda devolvida sem aceite', concluida: 'Atividade concluída',
+};
+
+export type EscalationLevel = { afterHours: number; role: PlaybookRole };
+export type NotifyRules = { events: Record<NotifyEvent, RaciLetter[]>; dueSoonHours: number | null; escalation: EscalationLevel[] };
+
+/**
+ * Padrão tirado das definições da RACI do Playbook: R executa (recebe a atividade e os prazos), A responde pelo
+ * resultado (vê vencimento, devolução e conclusão), I é informado da conclusão. Antecedência do "perto de vencer"
+ * e escalonamento ficam EM ABERTO (sem valor inventado) até a empresa definir.
+ */
+export const DEFAULT_NOTIFY_RULES: NotifyRules = {
+  events: { criada: ['R'], vence_em_breve: ['R'], vencida: ['R', 'A'], devolvida: ['A'], concluida: ['A', 'I'] },
+  dueSoonHours: null,
+  escalation: [],
+};
+
+export function normalizeNotifyRules(v: unknown): NotifyRules {
+  const x = (v && typeof v === 'object' ? v : {}) as Partial<NotifyRules>;
+  const ev = (x.events ?? {}) as Partial<Record<NotifyEvent, unknown>>;
+  const letters = (a: unknown, d: RaciLetter[]) => (Array.isArray(a) ? [...new Set(a.filter((l): l is RaciLetter => RACI_LETTERS.includes(l as RaciLetter)))] : d);
+  const hours = typeof x.dueSoonHours === 'number' && x.dueSoonHours > 0 ? Math.round(x.dueSoonHours) : null;
+  const esc = Array.isArray(x.escalation) ? x.escalation.filter((e): e is EscalationLevel => !!e && typeof e.afterHours === 'number' && e.afterHours > 0 && isPlaybookRole(e.role)).map((e) => ({ afterHours: Math.round(e.afterHours), role: e.role })) : [];
+  return {
+    events: Object.fromEntries(NOTIFY_EVENTS.map((k) => [k, letters(ev[k], DEFAULT_NOTIFY_RULES.events[k])])) as Record<NotifyEvent, RaciLetter[]>,
+    dueSoonHours: hours,
+    escalation: esc.sort((a, b) => a.afterHours - b.afterHours),
+  };
+}
+
+/** Papéis do Playbook que recebem o aviso de um evento, pela linha da RACI da atividade (R fica com o dono da tarefa). */
+export function rolesToNotify(row: RaciRow | null, letters: readonly RaciLetter[]): { letter: RaciLetter; roles: PlaybookRole[] }[] {
+  if (!row) return letters.map((l) => ({ letter: l, roles: [] }));
+  return letters.map((l) => ({ letter: l, roles: l === 'A' ? [row.A] : [...row[l]] }));
+}
+
+/** Níveis de escalonamento já atingidos por uma atividade vencida há `overdueHours`. */
+export function escalationReached(overdueHours: number, levels: readonly EscalationLevel[]) {
+  return levels.map((l, i) => ({ ...l, index: i })).filter((l) => overdueHours >= l.afterHours);
+}

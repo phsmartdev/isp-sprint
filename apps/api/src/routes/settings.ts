@@ -18,6 +18,7 @@ import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../servic
 import { sendActivityDigests } from '../services/alerts';
 import { runIdleAutomations } from '../services/automations';
 import { runContractAlerts } from '../services/contractAlerts';
+import { runContractTaskNotices } from '../services/contractNotify';
 import { sendContractDigests } from '../services/contractAttention';
 import { audit } from '../services/audit';
 
@@ -282,6 +283,7 @@ export const settingsRoutes = [
       const digests = await sendActivityDigests(app.db, app.config);
       const idle = await runIdleAutomations(app.db, app.config);
       const contracts = await runContractAlerts(app.db, app.config);
+      const contractNotices = await runContractTaskNotices(app.db, app.config).catch((e) => ({ error: (e as Error).message }));
       const contractDigests = await sendContractDigests(app.db, app.config).catch((e) => ({ error: (e as Error).message }));
       const tenants = await app.db.select({ id: s.tenants.id }).from(s.tenants);
       const cs: Record<string, unknown> = {};
@@ -301,7 +303,7 @@ export const settingsRoutes = [
       }
       const glpi: Record<string, unknown> = {};
       for (const t of tenants) glpi[t.id] = await syncOpenTickets(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
-      return { ...digests, ...idle, ...contracts, contractDigests, customerSuccess: cs, businessEvents: events, results, glpi };
+      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, customerSuccess: cs, businessEvents: events, results, glpi };
     },
   }),
 ];

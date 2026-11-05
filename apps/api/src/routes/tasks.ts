@@ -14,6 +14,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { assertProjectLinks, dueAtOf, loadProject, todayLocal } from '../services/projects';
+import { notifyTask, noticesOf } from '../services/contractNotify';
 import { activityScope, applyStatus, assertAssignee, assertUsersActive, blockersOf, decideApproval, loadTask, taskEvent } from '../services/tasks';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
@@ -269,6 +270,8 @@ export const taskRoutes = [
         await taskEvent(tx, auth, a!.id, 'created', { parentId: parent?.id ?? null, delegatedTo: ownerId !== auth.userId ? ownerId : null, templateId: body.templateId ?? null, requireAccept: handoff || undefined, raciKey: b.raciKey ?? undefined, slaDue: slaDue?.toISOString() });
         return a!.id;
       });
+      // atividade de contrato: avisa por nível de responsabilidade (R/A/C/I)
+      await notifyTask(app.db, app.config, id, 'criada', { cycle: 'inicio' });
       reply.code(201);
       return { id };
     },
@@ -343,6 +346,8 @@ export const taskRoutes = [
         if (body.status === 'aguardando' && body.waitingOn !== undefined) await tx.update(s.activities).set({ waitingOn: body.waitingOn }).where(eq(s.activities.id, t.id));
         return { status: t.status, next: null };
       });
+      if (body.ownerId) await notifyTask(app.db, app.config, params.id, 'criada', { cycle: `para:${body.ownerId}:${Date.now()}` });
+      if (r.status === 'concluida' && body.status === 'concluida') await notifyTask(app.db, app.config, params.id, 'concluida');
       return { ok: true, ...r };
     },
   }),
@@ -543,7 +548,20 @@ export const taskRoutes = [
       await tx.update(s.activities).set({ acceptStatus: 'devolvida', returnReason: body.reason.trim(), ownerId: back, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, t.id));
       await taskEvent(tx, auth, t.id, 'returned', { reason: body.reason.trim(), to: back });
       return { acceptStatus: 'devolvida' as const };
-    }),
+    }).then(async (r) => { if (r.acceptStatus === 'devolvida') await notifyTask(app.db, app.config, params.id, 'devolvida', { cycle: String(Date.now()), reason: `Motivo: ${body.reason.trim()}` }); return r; }),
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/tasks/:id/notices',
+    summary: 'Avisos enviados da atividade de contrato: para quem, nível (R/A/C/I), canal, situação e confirmação de recebimento',
+    tag: 'Tarefas',
+    module: 'atividades',
+    params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const { t } = await loadTask(app.db, auth, params.id);
+      return { items: await noticesOf(app.db, auth.tenantId, [t.id]) };
+    },
   }),
 
   defineRoute({

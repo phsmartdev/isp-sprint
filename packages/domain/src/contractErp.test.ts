@@ -77,3 +77,17 @@ describe('Cadastro ERP', () => {
     expect(by).toEqual({ a_razao: 'ok', a_cnpj_cpf: 'ok', a_filial: 'divergente', a_cep: 'nao_lido', b_modelo: 'ok' });
   });
 });
+
+describe('avisos por nível de responsabilidade', () => {
+  it('regras normalizadas: letras válidas, antecedência e escalonamento em aberto por padrão', async () => {
+    const { normalizeNotifyRules, rolesToNotify, escalationReached, raciRow } = await import('./playbook');
+    const d = normalizeNotifyRules(null);
+    expect(d).toMatchObject({ dueSoonHours: null, escalation: [], events: { criada: ['R'], concluida: ['A', 'I'] } });
+    const r = normalizeNotifyRules({ events: { criada: ['R', 'X', 'A', 'A'] }, dueSoonHours: 0, escalation: [{ afterHours: 48, role: 'GC' }, { afterHours: 4, role: 'SC' }, { afterHours: 5, role: 'NADA' }] });
+    expect(r.events.criada).toEqual(['R', 'A']);
+    expect(r.dueSoonHours).toBeNull();
+    expect(r.escalation).toEqual([{ afterHours: 4, role: 'SC' }, { afterHours: 48, role: 'GC' }]);
+    expect(rolesToNotify(raciRow('cadastro_erp'), ['A', 'C', 'I'])).toEqual([{ letter: 'A', roles: ['SC'] }, { letter: 'C', roles: ['FIN'] }, { letter: 'I', roles: ['GC'] }]);
+    expect(escalationReached(10, r.escalation).map((l) => l.role)).toEqual(['SC']);
+  });
+});

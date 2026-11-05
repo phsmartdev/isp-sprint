@@ -5,7 +5,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
-  SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
+  SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -352,7 +352,36 @@ export const contractRoutes = [
           .sort((a, b) => HEALTH_STATES.indexOf(b.health) - HEALTH_STATES.indexOf(a.health) || b.monthlyCents - a.monthlyCents).slice(0, 30),
         mrrTotal: active.reduce((a, r) => a + r.monthlyCents, 0),
       };
+      // desempenho da operação de contratos (últimos 12 meses)
+      const perfFrom = new Date(Date.parse(`${addDays(today, -365)}T00:00:00Z`));
+      const [renewals, adjFull, ctTasks, transfers, erpRecs] = ids.length ? await Promise.all([
+        app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status, openedAt: s.contractProcesses.openedAt, closedAt: s.contractProcesses.closedAt }).from(s.contractProcesses).where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'renovacao'))),
+        app.db.select({ cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status, steps: s.contractProcesses.steps }).from(s.contractProcesses).where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))),
+        app.db.select({ dueAt: s.activities.dueAt, completedAt: s.activities.completedAt, createdAt: s.activities.createdAt, acceptedAt: s.activities.acceptedAt }).from(s.activities).where(and(inArray(s.activities.contractId, ids), isNull(s.activities.deletedAt), sql`(${s.activities.completedAt} >= ${perfFrom} or ${s.activities.acceptedAt} >= ${perfFrom})`)),
+        app.db.select({ type: s.activityEvents.type, n: sql<number>`count(*)::int` }).from(s.activityEvents).innerJoin(s.activities, eq(s.activities.id, s.activityEvents.activityId)).where(and(inArray(s.activities.contractId, ids), inArray(s.activityEvents.type, ['accepted', 'returned']), sql`${s.activityEvents.occurredAt} >= ${perfFrom}`)).groupBy(s.activityEvents.type),
+        app.db.select({ status: s.contractErpRecords.status, createdAt: s.contractErpRecords.createdAt, checkedAt: s.contractErpRecords.checkedAt, firstPass: s.contractErpRecords.firstPass, approvedAt: s.contractErpRecords.approvedAt }).from(s.contractErpRecords).where(and(inArray(s.contractErpRecords.contractId, ids), sql`${s.contractErpRecords.createdAt} >= ${perfFrom}`)),
+      ]) : [[], [], [], [], []];
+      const iso = (d: Date | string | null) => (d == null ? null : typeof d === 'string' ? d : d.toISOString());
+      const renewalKeys = new Set(renewals.map((r) => `${r.contractId}:${r.cycleKey}`));
+      const conferred = erpRecs.filter((r) => r.status === 'conferido_ixc' && r.checkedAt);
+      const decided = erpRecs.filter((r) => r.firstPass != null);
+      const performance = {
+        windowDays: 365,
+        metrics: contractPerformance({
+          today, windowDays: 365,
+          renewals: renewals.map((r) => ({ cycleKey: r.cycleKey, status: r.status, openedAt: iso(r.openedAt)!, closedAt: iso(r.closedAt) })),
+          expiredWithoutRenewal: active.filter((r) => r.endAt && r.endAt < today && r.endAt >= addDays(today, -365) && !r.closureExpected && !renewalKeys.has(`${r.id}:${r.endAt}`)).length,
+          adjustments: adjFull.map((a) => { const calc = (a.steps.calculo?.value ?? null) as { pct?: number; newCents?: number } | null; return { cycleKey: a.cycleKey, status: a.status, applied: a.status === 'concluido' && !!a.steps.aplicacao, pct: calc?.pct ?? null, newCents: calc?.newCents ?? null }; }),
+          tasks: ctTasks.map((t) => ({ dueAt: iso(t.dueAt), completedAt: iso(t.completedAt), createdAt: iso(t.createdAt)!, acceptedAt: iso(t.acceptedAt) })),
+          transfers: { accepted: transfers.find((x) => x.type === 'accepted')?.n ?? 0, returned: transfers.find((x) => x.type === 'returned')?.n ?? 0 },
+          erp: {
+            avgHours: conferred.length ? conferred.reduce((a, r) => a + (+r.checkedAt! - +r.createdAt) / 3_600_000, 0) / conferred.length : null,
+            firstPassRate: decided.length ? (decided.filter((r) => r.firstPass && r.approvedAt).length / decided.length) * 100 : null,
+          },
+        }),
+      };
       return {
+        performance,
         decision,
         operations,
         expiringCents: { d30: within(30).reduce((a, r) => a + r.monthlyCents, 0), d60: within(60).reduce((a, r) => a + r.monthlyCents, 0), d90: within(90).reduce((a, r) => a + r.monthlyCents, 0) },

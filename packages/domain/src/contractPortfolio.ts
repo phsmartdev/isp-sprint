@@ -104,3 +104,55 @@ export function termProgress(startAt: string | null, endAt: string | null, today
   if (total <= 0) return null;
   return Math.max(0, Math.min(1, diffDays(startAt, today) / total));
 }
+
+// ------------------------------------------------------------------ desempenho da operação de contratos
+export type PerfMetric = { key: string; label: string; value: number | null; unit: 'pct' | 'dias' | 'horas' | 'brl'; num?: number; den?: number; hint: string; goodHigh: boolean };
+
+export type PerfInput = {
+  today: string;
+  windowDays: number;
+  /** processos de renovação (cycleKey = término que está sendo renovado) */
+  renewals: { cycleKey: string; status: string; openedAt: string; closedAt: string | null }[];
+  /** contratos ainda ativos cujo término caiu na janela sem processo de renovação nem encerramento decidido */
+  expiredWithoutRenewal: number;
+  /** processos de reajuste (cycleKey = data-base); pct e newCents quando calculados */
+  adjustments: { cycleKey: string; status: string; applied: boolean; pct: number | null; newCents: number | null }[];
+  /** tarefas ligadas a contratos */
+  tasks: { dueAt: string | null; completedAt: string | null; createdAt: string; acceptedAt: string | null }[];
+  transfers: { accepted: number; returned: number };
+  erp: { avgHours: number | null; firstPassRate: number | null };
+};
+
+const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+const ratio = (n: number, d: number) => (d ? n / d : null);
+
+/** Indicadores de desempenho na janela (padrão: últimos 12 meses). Sem base, o valor é nulo (nunca zero inventado). */
+export function contractPerformance(x: PerfInput): PerfMetric[] {
+  const from = addDaysIso(x.today, -x.windowDays);
+  const inW = (d: string | null) => !!d && d.slice(0, 10) >= from && d.slice(0, 10) <= x.today;
+  const ren = x.renewals.filter((r) => r.status !== 'cancelado' && /^\d{4}-\d{2}-\d{2}$/.test(r.cycleKey) && inW(r.cycleKey));
+  const renDone = ren.filter((r) => r.status === 'concluido' && r.closedAt);
+  const onTime = renDone.filter((r) => r.closedAt!.slice(0, 10) <= r.cycleKey);
+  const renDen = ren.length + x.expiredWithoutRenewal;
+  const adj = x.adjustments.filter((a) => a.status !== 'cancelado' && /^\d{4}-\d{2}-\d{2}$/.test(a.cycleKey) && inW(a.cycleKey));
+  const applied = adj.filter((a) => a.applied);
+  const pcts = applied.map((a) => a.pct).filter((p): p is number => typeof p === 'number');
+  const added = applied.reduce((s, a) => s + (a.newCents && a.pct != null ? a.newCents - a.newCents / (1 + a.pct / 100) : 0), 0);
+  const doneTasks = x.tasks.filter((t) => t.completedAt && inW(t.completedAt) && t.dueAt);
+  const slaOk = doneTasks.filter((t) => t.completedAt! <= t.dueAt!);
+  const acceptH = x.tasks.filter((t) => t.acceptedAt && inW(t.acceptedAt)).map((t) => (Date.parse(t.acceptedAt!) - Date.parse(t.createdAt)) / 3_600_000);
+  const tr = x.transfers.accepted + x.transfers.returned;
+  return [
+    { key: 'renovacao_prazo', label: '% Renovação no prazo', value: ratio(onTime.length, renDen), unit: 'pct', num: onTime.length, den: renDen, goodHigh: true, hint: 'Renovações concluídas até o término do contrato ÷ contratos que terminaram na janela (inclui os que venceram sem renovação iniciada).' },
+    { key: 'reajuste', label: '% Reajuste efetivado', value: ratio(applied.length, adj.length), unit: 'pct', num: applied.length, den: adj.length, goodHigh: true, hint: 'Reajustes aplicados ÷ reajustes com data-base na janela.' },
+    { key: 'antecedencia', label: 'Antecedência média da renovação', value: avg(renDone.map((r) => diffDays(r.closedAt!.slice(0, 10), r.cycleKey))), unit: 'dias', goodHigh: true, hint: 'Dias entre a conclusão da renovação e o término do contrato (negativo = concluiu depois de vencer).' },
+    { key: 'ciclo_renovacao', label: 'Tempo médio de renovação', value: avg(renDone.map((r) => diffDays(r.openedAt.slice(0, 10), r.closedAt!.slice(0, 10)))), unit: 'dias', goodHigh: false, hint: 'Dias entre abrir e concluir o processo de renovação.' },
+    { key: 'reajuste_medio', label: 'Reajuste médio aplicado', value: pcts.length ? avg(pcts)! / 100 : null, unit: 'pct', goodHigh: true, hint: 'Média dos percentuais aplicados nos reajustes da janela.' },
+    { key: 'receita_reajuste', label: 'Receita mensal capturada por reajuste', value: applied.length ? Math.round(added) : null, unit: 'brl', goodHigh: true, hint: 'Quanto os reajustes aplicados na janela acrescentaram ao valor mensal.' },
+    { key: 'sla_atividades', label: '% Atividades no prazo', value: ratio(slaOk.length, doneTasks.length), unit: 'pct', num: slaOk.length, den: doneTasks.length, goodHigh: true, hint: 'Atividades de contrato concluídas até o prazo ÷ concluídas com prazo, na janela.' },
+    { key: 'aceite', label: 'Tempo médio de aceite', value: avg(acceptH), unit: 'horas', goodHigh: false, hint: 'Horas entre a transferência da demanda e o aceite de quem recebe.' },
+    { key: 'devolucao', label: '% Transferências devolvidas', value: ratio(x.transfers.returned, tr), unit: 'pct', num: x.transfers.returned, den: tr, goodHigh: false, hint: 'Demandas devolvidas sem aceite ÷ demandas respondidas (aceitas ou devolvidas) na janela.' },
+    { key: 'erp_ciclo', label: 'Tempo médio do Cadastro ERP', value: x.erp.avgHours == null ? null : x.erp.avgHours / 24, unit: 'dias', goodHigh: false, hint: 'Da abertura do Cadastro ERP até ficar Conferido no IXC.' },
+    { key: 'erp_primeira', label: '% Cadastro ERP aprovado na 1ª conferência', value: x.erp.firstPassRate == null ? null : x.erp.firstPassRate / 100, unit: 'pct', goodHigh: true, hint: 'Cadastros aprovados sem devolução ÷ cadastros conferidos.' },
+  ];
+}

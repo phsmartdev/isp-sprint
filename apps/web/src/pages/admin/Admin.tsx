@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import {
   BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
+  PLAYBOOK_ROLES, PLAYBOOK_ROLE_LABELS, type PlaybookRole,
 } from '@isp/domain';
 import type { BrandSlot } from '@isp/shared';
 import { api, ApiError, qs } from '../../lib/api';
@@ -166,7 +167,7 @@ export function AdminOverview() {
 // =================================================================== usuários
 type AdminUser = {
   id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; ipBypass?: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
-  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[];
+  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[]; playbookRoles?: PlaybookRole[];
 };
 
 async function fileToBase64(file: File) {
@@ -184,7 +185,7 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
   const { me } = useAuth();
   const [form, setForm] = useState({
     name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
-    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
+    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -193,8 +194,8 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors } });
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, playbookRoles: form.playbookRoles } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -253,6 +254,13 @@ function UserForm({ user, teams, users = [], onDone }: { user?: AdminUser; teams
         <p className="mb-2 text-xs text-muted">Definem quem recebe as tarefas e notificações dos contratos e quem conclui cada etapa. Setores de apoio enxergam todos os contratos.</p>
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
           {SECTORS.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sectors.includes(x)} onChange={() => set('sectors', form.sectors.includes(x) ? form.sectors.filter((y) => y !== x) : [...form.sectors, x])} />{SECTOR_LABELS[x]}</label>)}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="mb-1 text-sm font-semibold text-ink">Papéis no Playbook Comercial (contratos)</legend>
+        <p className="mb-2 text-xs text-muted">Definem a responsabilidade da pessoa na matriz RACI: quem confere o Cadastro ERP e quem recebe os avisos de cada atividade de contrato (R, A, C, I e escalonamento).</p>
+        <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          {PLAYBOOK_ROLES.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.playbookRoles.includes(x)} onChange={() => set('playbookRoles', form.playbookRoles.includes(x) ? form.playbookRoles.filter((y) => y !== x) : [...form.playbookRoles, x])} /><span className="num w-24 shrink-0 text-xs font-semibold text-muted">{x.replace('_', ' ')}</span>{PLAYBOOK_ROLE_LABELS[x]}</label>)}
         </div>
       </fieldset>
       {user && (

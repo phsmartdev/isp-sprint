@@ -127,10 +127,11 @@ export function allowedContractTabs(denied: ContractTabAccess, profiles: string[
  * Seções do Painel. Perfil da carteira, estratificações e o gráfico de vencimentos em 12 meses saíram em 04/11/2026:
  * não ajudavam a decidir nem a operar. No lugar entrou "Operação" (o que exige ação).
  */
-export const DASHBOARD_SECTIONS = ['indicadores', 'saude', 'acao', 'vencimentos', 'reajustes', 'responsaveis', 'clientes', 'operacao', 'etapas', 'faturamento', 'executivo'] as const;
+export const DASHBOARD_SECTIONS = ['indicadores', 'desempenho', 'saude', 'acao', 'vencimentos', 'reajustes', 'responsaveis', 'clientes', 'operacao', 'etapas', 'faturamento', 'executivo'] as const;
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 export const DASHBOARD_SECTION_LABELS: Record<DashboardSection, string> = {
   indicadores: 'Indicadores (total, MRR, vencendo em 30/60/90 dias, receita em risco)',
+  desempenho: 'Desempenho da operação (renovação no prazo, reajustes, SLA, aceite, Cadastro ERP) nos últimos 12 meses',
   saude: 'Saúde da carteira (receita por situação) e indicadores operacionais',
   acao: 'Contratos que pedem ação (clique abre a vida do contrato)',
   vencimentos: 'Receita que vence em 12 meses, pela situação da renovação',
