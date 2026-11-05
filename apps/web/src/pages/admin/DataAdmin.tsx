@@ -6,6 +6,7 @@ import { api, ApiError } from '../../lib/api';
 import { fmtInt } from '../../lib/format';
 import { useAuth } from '../../auth/AuthProvider';
 import { Button, FormField, Input, Notice } from '../../components/ui/primitives';
+import { useDebounced } from '../../lib/hooks';
 import { Modal, useToast } from '../../components/ui/overlay';
 
 type Preview = { total: number; valid: number; errors: { line: number; message: string }[]; errorCount: number; imported: { created: number; updated: number } | null };
@@ -77,6 +78,29 @@ function ImportCard() {
   );
 }
 
+type Kept = { id: string; label: string };
+/** Busca e escolhe registros que NÃO serão apagados (oportunidades ou contratos). */
+function KeepPicker({ kind, value, onChange }: { kind: 'opp' | 'ctr'; value: Kept[]; onChange: (v: Kept[]) => void }) {
+  const [q, setQ] = useState('');
+  const dq = useDebounced(q, 300);
+  const url = kind === 'opp' ? `/opportunities?status=todas&pageSize=10&q=${encodeURIComponent(dq)}` : `/contracts?pageSize=10&q=${encodeURIComponent(dq)}`;
+  const r = useQuery({ queryKey: ['keep-search', kind, dq], enabled: dq.length >= 2, queryFn: () => api<{ items: Record<string, unknown>[] }>(url) });
+  const label = (x: Record<string, unknown>) => kind === 'opp' ? `OP-${x.code} · ${x.contactName ?? ''}${x.title ? ` · ${x.title}` : ''}` : `CT-${x.code} · ${x.clientName ?? (x.contact as { name?: string } | undefined)?.name ?? ''}${x.number ? ` · ${x.number}` : ''}`;
+  const name = kind === 'opp' ? 'Oportunidades que ficam' : 'Contratos que ficam';
+  return (
+    <div>
+      <p className="mb-1 text-sm font-semibold text-ink">{name}</p>
+      {value.length > 0 && <ul className="mb-1.5 flex flex-wrap gap-1.5">{value.map((v) => <li key={v.id} className="inline-flex items-center gap-1 rounded-full border border-success/40 bg-success-soft py-0.5 pl-2.5 pr-1 text-xs text-ink">{v.label}<button type="button" aria-label={`Tirar ${v.label}`} className="rounded-full px-1 text-muted hover:text-danger" onClick={() => onChange(value.filter((x) => x.id !== v.id))}>×</button></li>)}</ul>}
+      <Input aria-label={`Buscar ${name.toLowerCase()}`} placeholder={kind === 'opp' ? 'Buscar oportunidade (cliente, código…)' : 'Buscar contrato (cliente, número…)'} value={q} onChange={(e) => setQ(e.target.value)} />
+      {dq.length >= 2 && r.data && (
+        <ul className="mt-1 max-h-40 divide-y divide-line overflow-y-auto rounded-md border border-line text-sm">
+          {r.data.items.length ? r.data.items.filter((x) => !value.some((v) => v.id === x.id)).map((x) => <li key={String(x.id)}><button type="button" className="w-full px-3 py-1.5 text-left hover:bg-surface-2" onClick={() => { onChange([...value, { id: String(x.id), label: label(x) }]); setQ(''); }}>{label(x)}</button></li>) : <li className="px-3 py-1.5 text-muted">Nada encontrado.</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ClearCard() {
   const { me } = useAuth();
   const qc = useQueryClient();
@@ -86,11 +110,13 @@ function ClearCard() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [keepOpps, setKeepOpps] = useState<Kept[]>([]);
+  const [keepCtrs, setKeepCtrs] = useState<Kept[]>([]);
   const isAdmin = me?.profiles.includes('gerencia') || me?.profiles.includes('administrador');
   const clear = useMutation({
-    mutationFn: () => api<{ counts: Record<string, number> }>('/admin/clear-base', { method: 'POST', body: { password, confirm, scopes } }),
+    mutationFn: () => api<{ counts: Record<string, number> }>('/admin/clear-base', { method: 'POST', body: { password, confirm, scopes, keep: { opportunityIds: keepOpps.map((x) => x.id), contractIds: keepCtrs.map((x) => x.id) } } }),
     onSuccess: (r) => {
-      setOpen(false); setPassword(''); setConfirm(''); setScopes([]);
+      setOpen(false); setPassword(''); setConfirm(''); setScopes([]); setKeepOpps([]); setKeepCtrs([]);
       qc.invalidateQueries();
       const c = r.counts;
       toast({ tone: 'success', message: `Base limpa: ${[c.clientes != null && `${c.clientes} clientes`, c.oportunidades != null && `${c.oportunidades} oportunidades`, c.leads != null && `${c.leads} leads`].filter(Boolean).join(', ')}.` });
@@ -102,7 +128,7 @@ function ClearCard() {
       <h2 className="flex items-center gap-2 text-lg font-bold text-danger"><AlertTriangle className="h-5 w-5" />Limpar base</h2>
       <p className="mb-3 max-w-3xl text-sm text-muted">Apaga de vez os dados escolhidos desta empresa, por exemplo os dados de demonstração antes de começar a usar de verdade. Usuários, planos, jornadas e configurações ficam. A auditoria registra quem limpou e quando. Não há como desfazer.</p>
       {!isAdmin ? <Notice tone="warning">Só a gerência pode limpar a base.</Notice> : <Button variant="danger" onClick={() => { setError(null); setOpen(true); }}>Limpar base…</Button>}
-      <Modal open={open} onClose={() => setOpen(false)} title="Limpar base" size="sm" footer={<><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="danger" loading={clear.isPending} disabled={!scopes.length || !password || confirm.trim().toUpperCase() !== CONFIRM} onClick={() => { setError(null); clear.mutate(); }}>Apagar definitivamente</Button></>}>
+      <Modal open={open} onClose={() => setOpen(false)} title="Limpar base" size="md" footer={<><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="danger" loading={clear.isPending} disabled={!scopes.length || !password || confirm.trim().toUpperCase() !== CONFIRM} onClick={() => { setError(null); clear.mutate(); }}>Apagar definitivamente</Button></>}>
         <div className="space-y-4">
           {error && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
           <fieldset>
@@ -114,6 +140,14 @@ function ClearCard() {
               </label>
             ))}
           </fieldset>
+          {(scopes.includes('comercial') || scopes.includes('clientes')) && (
+            <fieldset className="space-y-3 rounded-md border border-line p-3">
+              <legend className="px-1 text-sm font-semibold text-ink">Manter (não apagar)</legend>
+              <p className="text-xs text-muted">O que você escolher aqui fica, com o cliente, o contrato ou a oportunidade ligados e as atividades deles. Todo o resto do que foi marcado acima é apagado.</p>
+              <KeepPicker kind="opp" value={keepOpps} onChange={setKeepOpps} />
+              <KeepPicker kind="ctr" value={keepCtrs} onChange={setKeepCtrs} />
+            </fieldset>
+          )}
           <FormField label="Sua senha" htmlFor="cl-pass" required><Input id="cl-pass" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></FormField>
           <FormField label={`Digite ${CONFIRM} para confirmar`} htmlFor="cl-confirm" required><Input id="cl-confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={CONFIRM} autoComplete="off" /></FormField>
         </div>

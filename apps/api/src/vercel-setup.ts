@@ -1,6 +1,7 @@
 /**
  * Roda no build da Vercel: aplica as migrations no banco de DATABASE_URL e, se SEED_DEMO=true
- * e o banco ainda não tiver nenhuma empresa, cria a empresa fictícia de demonstração.
+ * e o banco ainda não tiver nenhuma empresa, cria a empresa fictícia de demonstração. Operação e KPIs fictícios
+ * só com OPS_DEMO=true / KPI_DEMO=true.
  * Nunca apaga dados.
  */
 import pg from 'pg';
@@ -39,9 +40,9 @@ async function main() {
   }
 }
 
-/** Indicadores principais da área: empresa sem nenhuma ficha de KPI recebe as fichas e resultados fictícios (marcados). KPI_DEMO=false desliga. */
+/** Indicadores principais de demonstração: só com KPI_DEMO=true (desligado por padrão: nunca recarrega dado fictício sozinho). */
 async function kpiDemo(url: string) {
-  if (process.env.KPI_DEMO === 'false') return;
+  if (process.env.KPI_DEMO !== 'true') return;
   const { db, pool } = createDb(url);
   try {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bahia' }).format(new Date());
@@ -52,9 +53,12 @@ async function kpiDemo(url: string) {
   } finally { await pool.end(); }
 }
 
-/** Operação fictícia (jan/2025 até hoje) na empresa de demonstração (usuários @yepnet.test), uma vez só. OPS_DEMO=false desliga. */
+/**
+ * Operação fictícia (jan/2025 até hoje) na empresa de demonstração: só com OPS_DEMO=true. Desligado por padrão — antes ela
+ * voltava a cada deploy depois de "Limpar base" (05/11/2026: a base passa a ter só dados reais).
+ */
 async function opsDemo(url: string) {
-  if (process.env.OPS_DEMO === 'false') return;
+  if (process.env.OPS_DEMO !== 'true') return;
   const { db, pool } = createDb(url);
   try {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bahia' }).format(new Date());
@@ -75,7 +79,7 @@ async function csByAccount(url: string) {
       const n = await consolidateAccountCards(db, t.id);
       if (n) console.log(`[setup] Sucesso do Cliente na empresa ${t.id}: ${n} card(s) repetido(s) juntado(s) no card da conta.`);
       const [demo] = (await db.execute<{ n: number }>(sql`select count(*)::int n from contacts where tenant_id = ${t.id} and source_system = ${OPS_SOURCE}`)).rows;
-      if (demo?.n && process.env.OPS_DEMO !== 'false') {
+      if (demo?.n && process.env.OPS_DEMO === 'true') {
         const c = await demoAccountCards(db, t.id);
         if (c) console.log(`[setup] Sucesso do Cliente na empresa ${t.id}: ${c} card(s) de conta da operação fictícia.`);
       }

@@ -1,6 +1,6 @@
 /** Base de clientes: modelo de planilha, importação com prévia e limpeza da base (gerência + senha). */
 import { customerFieldList } from '../services/customFields';
-import { or, and, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import { or, and, eq, inArray, isNull, notExists, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
@@ -55,7 +55,7 @@ export const dataAdminRoutes = [
     tag: 'Base de dados',
     ...ADMIN,
     rateLimit: () => ({ max: 5, timeWindow: '10 minutes' }),
-    body: z.object({ password: z.string().min(1).max(200), confirm: z.string(), scopes: z.array(z.enum(CLEAR_SCOPES)).min(1) }),
+    body: z.object({ password: z.string().min(1).max(200), confirm: z.string(), scopes: z.array(z.enum(CLEAR_SCOPES)).min(1), keep: z.object({ opportunityIds: z.array(z.string().uuid()).max(50).default([]), contractIds: z.array(z.string().uuid()).max(50).default([]) }).default({}) }),
     handler: async ({ app, auth, body, req }) => {
       if (!auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador')) throw forbidden('Só a administração ou a gerência pode limpar a base.');
       if (body.confirm.trim().toUpperCase() !== CONFIRM) throw unprocessable(`Digite exatamente "${CONFIRM}" para confirmar.`, [{ path: 'confirm', message: 'Frase de confirmação incorreta' }]);
@@ -66,112 +66,137 @@ export const dataAdminRoutes = [
       }
       const t = auth.tenantId;
       const counts: Record<string, number> = {};
+      // o que fica: oportunidades e contratos escolhidos, com os contratos/oportunidades ligados, o cliente, a conta e as atividades deles
+      const kOpps = new Set(body.keep.opportunityIds), kCtrs = new Set(body.keep.contractIds);
+      if (kOpps.size || kCtrs.size) {
+        const cs = kCtrs.size ? await app.db.select({ id: s.contracts.id, opp: s.contracts.opportunityId }).from(s.contracts).where(and(eq(s.contracts.tenantId, t), inArray(s.contracts.id, [...kCtrs]))) : [];
+        if (cs.length !== kCtrs.size) throw unprocessable('Contrato a manter não encontrado.');
+        for (const c of cs) if (c.opp) kOpps.add(c.opp);
+        const os = kOpps.size ? await app.db.select({ id: s.opportunities.id }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, t), inArray(s.opportunities.id, [...kOpps]))) : [];
+        if (os.length !== kOpps.size) throw unprocessable('Oportunidade a manter não encontrada.');
+        if (kOpps.size) for (const c of await app.db.select({ id: s.contracts.id }).from(s.contracts).where(and(eq(s.contracts.tenantId, t), inArray(s.contracts.opportunityId, [...kOpps])))) kCtrs.add(c.id);
+      }
+      const keepO = [...kOpps], keepC = [...kCtrs];
+      const people = keepO.length || keepC.length ? await app.db.execute<{ contact_id: string | null; customer_id: string | null; arp_id: string | null }>(sql`
+        select contact_id, customer_id, arp_id from opportunities where id = any(${sql.raw(`'{${keepO.join(',')}}'::uuid[]`)})
+        union select contact_id, customer_id, arp_id from contracts where id = any(${sql.raw(`'{${keepC.join(',')}}'::uuid[]`)})`) : { rows: [] };
+      const keepArps = [...new Set(people.rows.map((r) => r.arp_id).filter((x): x is string => !!x))];
+      const keepContacts = [...new Set(people.rows.map((r) => r.contact_id).filter((x): x is string => !!x))];
+      const keepCustomers = [...new Set(people.rows.map((r) => r.customer_id).filter((x): x is string => !!x))];
+      const keepActs = keepO.length || keepC.length ? (await app.db.select({ id: s.activities.id }).from(s.activities).where(and(eq(s.activities.tenantId, t), or(keepO.length ? inArray(s.activities.opportunityId, keepO) : undefined, keepC.length ? inArray(s.activities.contractId, keepC) : undefined)))).map((r) => r.id) : [];
+      // filtro de cada tabela: desta empresa e fora do que fica (linhas sem vínculo continuam saindo)
+      const out = (col: unknown, ids: string[]) => (ids.length && col ? or(isNull(col as never), notInArray(col as never, ids)) : undefined);
+      const sc = (tbl: object) => {
+        const x = tbl as Record<string, unknown>;
+        const own = tbl === s.contracts ? out(x.id, keepC) : tbl === s.opportunities ? out(x.id, keepO) : tbl === s.activities ? out(x.id, keepActs) : tbl === s.customers ? out(x.id, keepCustomers) : tbl === s.arps ? out(x.id, keepArps) : undefined;
+        return and(eq(x.tenantId as never, t), own, out(x.contractId, keepC), out(x.opportunityId, keepO), out(x.activityId, keepActs), out(x.customerId, keepCustomers), out(x.contactId, keepContacts), out(x.arpId, keepArps));
+      };
       await app.db.transaction(async (tx) => {
         await tx.execute(sql`select set_config('isp.allow_purge', 'on', true)`);
         const del = async (name: string, q: Promise<unknown[]>) => { counts[name] = (await q).length; };
         if (body.scopes.includes('comercial') || body.scopes.includes('clientes')) {
           // contratos dependem de oportunidades e clientes: saem junto, com todo o histórico deles
-          const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.tenantId, t));
+          const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(sc(s.contracts));
           // e-mails ficam (são correspondência real); só perdem o vínculo com contas e oportunidades apagadas
-          await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(eq(s.mailThreads.tenantId, t));
+          await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(sc(s.mailThreads));
           // ABM (depende de contatos)
-          for (const tbl of [s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          for (const tbl of [s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(sc(tbl));
           // Sucesso do Cliente (depende de contatos, contratos, oportunidades e atividades)
-          for (const tbl of [s.csJourneyLinkEvents, s.csJourneyLinks, s.csMilestoneEvents, s.csFiles, s.csVisits, s.csMilestones, s.csPresentations, s.csJourneys, s.csAlerts, s.csActionPlans, s.csSurveys, s.csAssessments, s.csAccounts]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          for (const tbl of [s.csJourneyLinkEvents, s.csJourneyLinks, s.csMilestoneEvents, s.csFiles, s.csVisits, s.csMilestones, s.csPresentations, s.csJourneys, s.csAlerts, s.csActionPlans, s.csSurveys, s.csAssessments, s.csAccounts]) await tx.delete(tbl).where(sc(tbl));
           // atas de registro de preços (dependem de oportunidades, contratos e contatos)
-          for (const tbl of [s.arpLedger, s.arpOpportunityLines, s.arpAllocations, s.arpItemChanges, s.arpDocuments, s.arpEvents, s.arpOperations, s.arpAdhesions, s.arpItems, s.arpAgencies]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          counts.atas = (await tx.delete(s.arps).where(eq(s.arps.tenantId, t)).returning({ id: s.arps.id })).length;
-          await tx.delete(s.contractAlerts).where(eq(s.contractAlerts.tenantId, t));
-          await tx.delete(s.contractLedger).where(eq(s.contractLedger.tenantId, t));
+          for (const tbl of [s.arpLedger, s.arpOpportunityLines, s.arpAllocations, s.arpItemChanges, s.arpDocuments, s.arpEvents, s.arpOperations, s.arpAdhesions, s.arpItems, s.arpAgencies]) await tx.delete(tbl).where(sc(tbl));
+          counts.atas = (await tx.delete(s.arps).where(sc(s.arps)).returning({ id: s.arps.id })).length;
+          await tx.delete(s.contractAlerts).where(sc(s.contractAlerts));
+          await tx.delete(s.contractLedger).where(sc(s.contractLedger));
           // controle de empenhos (depende de contratos, oportunidades e NEs)
-          for (const tbl of [s.contractOpportunityLines, s.contractAdjustmentRetros, s.contractLinePrices, s.contractMeasurementItems, s.contractMeasurements, s.contractAdjustments, s.contractCommitmentMoves, s.contractCommitmentItems, s.contractLineMoves]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          await tx.delete(s.contractCommitments).where(eq(s.contractCommitments.tenantId, t));
-          for (const tbl of [s.contractSourceShares, s.contractRevenueSources, s.contractLines]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          await tx.delete(s.contractAmendments).where(eq(s.contractAmendments.tenantId, t));
-          await tx.delete(s.contractYearValues).where(eq(s.contractYearValues.tenantId, t));
-          await tx.delete(s.contractSlaMeasurements).where(eq(s.contractSlaMeasurements.tenantId, t));
-          await tx.delete(s.contractSlas).where(eq(s.contractSlas.tenantId, t));
-          await tx.delete(s.contractOccurrenceUpdates).where(eq(s.contractOccurrenceUpdates.tenantId, t));
-          await tx.delete(s.contractOccurrences).where(eq(s.contractOccurrences.tenantId, t));
-          await tx.delete(s.contractParties).where(eq(s.contractParties.tenantId, t));
-          await tx.delete(s.contractClauses).where(eq(s.contractClauses.tenantId, t));
-          await tx.delete(s.technicalCertificates).where(eq(s.technicalCertificates.tenantId, t));
-          await tx.delete(s.contractDigests).where(eq(s.contractDigests.tenantId, t));
-          await tx.delete(s.contractNotifications).where(eq(s.contractNotifications.tenantId, t));
-          await tx.delete(s.commRunSteps).where(eq(s.commRunSteps.tenantId, t));
-          await tx.delete(s.commRuns).where(eq(s.commRuns.tenantId, t));
-          await tx.delete(s.contractErpEvents).where(eq(s.contractErpEvents.tenantId, t));
-          await tx.delete(s.contractErpRecords).where(eq(s.contractErpRecords.tenantId, t));
-          await tx.delete(s.contractSignatures).where(eq(s.contractSignatures.tenantId, t));
-          await tx.delete(s.contractDocuments).where(eq(s.contractDocuments.tenantId, t));
-          await tx.delete(s.contractProcesses).where(eq(s.contractProcesses.tenantId, t));
-          await tx.delete(s.contractEvents).where(eq(s.contractEvents.tenantId, t));
-          await tx.delete(s.contractVersions).where(eq(s.contractVersions.tenantId, t));
+          for (const tbl of [s.contractOpportunityLines, s.contractAdjustmentRetros, s.contractLinePrices, s.contractMeasurementItems, s.contractMeasurements, s.contractAdjustments, s.contractCommitmentMoves, s.contractCommitmentItems, s.contractLineMoves]) await tx.delete(tbl).where(sc(tbl));
+          await tx.delete(s.contractCommitments).where(sc(s.contractCommitments));
+          for (const tbl of [s.contractSourceShares, s.contractRevenueSources, s.contractLines]) await tx.delete(tbl).where(sc(tbl));
+          await tx.delete(s.contractAmendments).where(sc(s.contractAmendments));
+          await tx.delete(s.contractYearValues).where(sc(s.contractYearValues));
+          await tx.delete(s.contractSlaMeasurements).where(sc(s.contractSlaMeasurements));
+          await tx.delete(s.contractSlas).where(sc(s.contractSlas));
+          await tx.delete(s.contractOccurrenceUpdates).where(sc(s.contractOccurrenceUpdates));
+          await tx.delete(s.contractOccurrences).where(sc(s.contractOccurrences));
+          await tx.delete(s.contractParties).where(sc(s.contractParties));
+          await tx.delete(s.contractClauses).where(sc(s.contractClauses));
+          await tx.delete(s.technicalCertificates).where(sc(s.technicalCertificates));
+          await tx.delete(s.contractDigests).where(sc(s.contractDigests));
+          await tx.delete(s.contractNotifications).where(sc(s.contractNotifications));
+          await tx.delete(s.commRunSteps).where(sc(s.commRunSteps));
+          await tx.delete(s.commRuns).where(sc(s.commRuns));
+          await tx.delete(s.contractErpEvents).where(sc(s.contractErpEvents));
+          await tx.delete(s.contractErpRecords).where(sc(s.contractErpRecords));
+          await tx.delete(s.contractSignatures).where(sc(s.contractSignatures));
+          await tx.delete(s.contractDocuments).where(sc(s.contractDocuments));
+          await tx.delete(s.contractProcesses).where(sc(s.contractProcesses));
+          await tx.delete(s.contractEvents).where(sc(s.contractEvents));
+          await tx.delete(s.contractVersions).where(sc(s.contractVersions));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)));
-          await tx.update(s.activities).set({ contractId: null }).where(eq(s.activities.tenantId, t));
-          await del('contratos', tx.delete(s.contracts).where(eq(s.contracts.tenantId, t)).returning({ id: s.contracts.id }));
+          await tx.update(s.activities).set({ contractId: null }).where(sc(s.activities));
+          await del('contratos', tx.delete(s.contracts).where(sc(s.contracts)).returning({ id: s.contracts.id }));
         }
         if (body.scopes.includes('comercial')) {
-          const opps = tx.select({ id: s.opportunities.id }).from(s.opportunities).where(eq(s.opportunities.tenantId, t));
-          const acts = tx.select({ id: s.activities.id }).from(s.activities).where(eq(s.activities.tenantId, t));
+          const opps = tx.select({ id: s.opportunities.id }).from(s.opportunities).where(sc(s.opportunities));
+          const acts = tx.select({ id: s.activities.id }).from(s.activities).where(sc(s.activities));
           // eventos de negócio derivados do que está sendo apagado (o projetor recria o que restar)
-          for (const tbl of [s.businessEventReviews, s.businessEventCredits]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          await tx.delete(s.businessEvents).where(eq(s.businessEvents.tenantId, t));
-          await tx.delete(s.businessEventSync).where(eq(s.businessEventSync.tenantId, t));
-          for (const tbl of [s.activityDependencies, s.activityComments, s.activityTimeEntries, s.workFiles]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
+          for (const tbl of [s.businessEventReviews, s.businessEventCredits]) await tx.delete(tbl).where(sc(tbl));
+          await tx.delete(s.businessEvents).where(sc(s.businessEvents));
+          await tx.delete(s.businessEventSync).where(sc(s.businessEventSync));
+          for (const tbl of [s.activityDependencies, s.activityComments, s.activityTimeEntries, s.workFiles]) await tx.delete(tbl).where(sc(tbl));
           await tx.delete(s.activityReads).where(inArray(s.activityReads.activityId, acts));
           // ações 5W2H das intervenções são as próprias tarefas: saem junto (a intervenção e o histórico dela ficam)
-          await tx.delete(s.interventionActions).where(eq(s.interventionActions.tenantId, t));
+          await tx.delete(s.interventionActions).where(sc(s.interventionActions));
           // reuniões dos rituais e decisões só apontam para a atividade: perdem o vínculo, o registro de gestão fica
-          await tx.update(s.ritualMeetings).set({ activityId: null }).where(eq(s.ritualMeetings.tenantId, t));
-          await tx.update(s.decisions).set({ followUpTaskId: null }).where(eq(s.decisions.tenantId, t));
+          await tx.update(s.ritualMeetings).set({ activityId: null }).where(sc(s.ritualMeetings));
+          await tx.update(s.decisions).set({ followUpTaskId: null }).where(sc(s.decisions));
           // impedimentos são registro dos rituais: ficam, só perdem o vínculo com o projeto apagado
-          await tx.update(s.impediments).set({ projectId: null, milestoneId: null, taskId: null }).where(eq(s.impediments.tenantId, t));
+          await tx.update(s.impediments).set({ projectId: null, milestoneId: null, taskId: null }).where(sc(s.impediments));
           await tx.delete(s.contractNotifications).where(and(eq(s.contractNotifications.tenantId, t), inArray(s.contractNotifications.activityId, acts)));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
-          await del('atividades', tx.delete(s.activities).where(eq(s.activities.tenantId, t)).returning({ id: s.activities.id }));
+          await del('atividades', tx.delete(s.activities).where(sc(s.activities)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto
-          for (const tbl of [s.milestoneHomologations, s.projectRisks]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(eq(tbl.tenantId, t));
-          counts.projetos = (await tx.delete(s.projects).where(eq(s.projects.tenantId, t)).returning({ id: s.projects.id })).length;
-          await tx.delete(s.automationRuns).where(eq(s.automationRuns.tenantId, t));
+          for (const tbl of [s.milestoneHomologations, s.projectRisks]) await tx.delete(tbl).where(sc(tbl));
+          for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(sc(tbl));
+          counts.projetos = (await tx.delete(s.projects).where(sc(s.projects)).returning({ id: s.projects.id })).length;
+          await tx.delete(s.automationRuns).where(sc(s.automationRuns));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
-          await tx.delete(s.negotiationReads).where(eq(s.negotiationReads.tenantId, t));
-          await tx.delete(s.negotiationMessages).where(eq(s.negotiationMessages.tenantId, t));
+          await tx.delete(s.negotiationReads).where(sc(s.negotiationReads));
+          await tx.delete(s.negotiationMessages).where(sc(s.negotiationMessages));
           // chamados do GLPI ligados às oportunidades (o chamado continua existindo no GLPI)
-          await tx.delete(s.glpiTicketEvents).where(eq(s.glpiTicketEvents.tenantId, t));
-          await tx.delete(s.glpiTickets).where(eq(s.glpiTickets.tenantId, t));
-          await tx.delete(s.approvalDecisions).where(eq(s.approvalDecisions.tenantId, t));
-          await tx.delete(s.approvalRequests).where(eq(s.approvalRequests.tenantId, t));
+          await tx.delete(s.glpiTicketEvents).where(sc(s.glpiTicketEvents));
+          await tx.delete(s.glpiTickets).where(sc(s.glpiTickets));
+          await tx.delete(s.approvalDecisions).where(sc(s.approvalDecisions));
+          await tx.delete(s.approvalRequests).where(sc(s.approvalRequests));
           await tx.delete(s.opportunityAnswers).where(inArray(s.opportunityAnswers.opportunityId, opps));
           await tx.delete(s.opportunityAttachments).where(inArray(s.opportunityAttachments.opportunityId, opps));
-          await tx.delete(s.opportunityEconDecisions).where(eq(s.opportunityEconDecisions.tenantId, t));
-          await tx.delete(s.opportunityEconomicsSnapshots).where(eq(s.opportunityEconomicsSnapshots.tenantId, t));
-          await tx.delete(s.opportunityEconomics).where(eq(s.opportunityEconomics.tenantId, t));
-          await tx.delete(s.opportunityItems).where(eq(s.opportunityItems.tenantId, t));
-          await tx.delete(s.bidParticipants).where(eq(s.bidParticipants.tenantId, t));
-          await tx.delete(s.bidActions).where(eq(s.bidActions.tenantId, t));
-          await del('historico_oportunidades', tx.delete(s.opportunityEvents).where(eq(s.opportunityEvents.tenantId, t)).returning({ id: s.opportunityEvents.id }));
-          await del('oportunidades', tx.delete(s.opportunities).where(eq(s.opportunities.tenantId, t)).returning({ id: s.opportunities.id }));
-          await tx.update(s.integrationEvents).set({ leadId: null }).where(eq(s.integrationEvents.tenantId, t));
-          await del('leads', tx.delete(s.leads).where(eq(s.leads.tenantId, t)).returning({ id: s.leads.id }));
+          await tx.delete(s.opportunityEconDecisions).where(sc(s.opportunityEconDecisions));
+          await tx.delete(s.opportunityEconomicsSnapshots).where(sc(s.opportunityEconomicsSnapshots));
+          await tx.delete(s.opportunityEconomics).where(sc(s.opportunityEconomics));
+          await tx.delete(s.opportunityItems).where(sc(s.opportunityItems));
+          await tx.delete(s.bidParticipants).where(sc(s.bidParticipants));
+          await tx.delete(s.bidActions).where(sc(s.bidActions));
+          await del('historico_oportunidades', tx.delete(s.opportunityEvents).where(sc(s.opportunityEvents)).returning({ id: s.opportunityEvents.id }));
+          await del('oportunidades', tx.delete(s.opportunities).where(sc(s.opportunities)).returning({ id: s.opportunities.id }));
+          await tx.update(s.integrationEvents).set({ leadId: null }).where(sc(s.integrationEvents));
+          await del('leads', tx.delete(s.leads).where(sc(s.leads)).returning({ id: s.leads.id }));
         }
         if (body.scopes.includes('clientes')) {
           // oportunidades que sobrarem deixam de apontar para o cliente apagado
-          await tx.update(s.opportunities).set({ customerId: null }).where(eq(s.opportunities.tenantId, t));
-          const custs = tx.select({ id: s.customers.id }).from(s.customers).where(eq(s.customers.tenantId, t));
+          await tx.update(s.opportunities).set({ customerId: null }).where(sc(s.opportunities));
+          const custs = tx.select({ id: s.customers.id }).from(s.customers).where(sc(s.customers));
           await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), inArray(s.addresses.customerId, custs)));
-          await tx.delete(s.customerExternalIds).where(eq(s.customerExternalIds.tenantId, t));
-          await tx.delete(s.contactIdentityLinks).where(eq(s.contactIdentityLinks.tenantId, t));
-          await tx.delete(s.contactClassifications).where(eq(s.contactClassifications.tenantId, t));
-          await del('clientes', tx.delete(s.customers).where(eq(s.customers.tenantId, t)).returning({ id: s.customers.id }));
+          await tx.delete(s.customerExternalIds).where(sc(s.customerExternalIds));
+          await tx.delete(s.contactIdentityLinks).where(sc(s.contactIdentityLinks));
+          await tx.delete(s.contactClassifications).where(sc(s.contactClassifications));
+          await del('clientes', tx.delete(s.customers).where(sc(s.customers)).returning({ id: s.customers.id }));
         }
         // contatos que não estão mais em lead, oportunidade, cliente ou atividade
         const used = (tbl: typeof s.leads | typeof s.opportunities | typeof s.customers | typeof s.activities) => tx.select({ x: sql`1` }).from(tbl).where(eq((tbl as typeof s.leads).contactId, s.contacts.id));
         await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), isNull(s.addresses.customerId), notExists(tx.select({ x: sql`1` }).from(s.leads).where(eq(s.leads.contactId, s.addresses.contactId)))));
         await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.contactClassifications).where(eq(s.contactClassifications.contactId, s.contacts.id))), notExists(tx.select({ x: sql`1` }).from(s.contactIdentityLinks).where(or(eq(s.contactIdentityLinks.contactId, s.contacts.id), eq(s.contactIdentityLinks.otherContactId, s.contacts.id)))), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));
       });
-      await audit(app.db, req, { action: 'base.clear', entityType: 'tenant', entityId: t, metadata: { scopes: body.scopes, counts } });
+      await audit(app.db, req, { action: 'base.clear', entityType: 'tenant', entityId: t, metadata: { scopes: body.scopes, counts, keep: body.keep } });
       return { ok: true, counts };
     },
   }),
