@@ -97,6 +97,9 @@ const Badge = ({ dot, children }: { dot: string; children: ReactNode }) => <span
  * todos os quadros de indicadores usam ele. Proposto = o que vai na proposta (digitado ou o total dos produtos); a
  * decisão de aprovação vale para ele. Sem proposto, a aprovação usa o sugerido.
  */
+/** Valor em destaque: diminui quando o número é longo (milhões) para caber no cartão em telas menores. */
+const bigCls = (cents: number | null | undefined) => { const n = fmtBRL(cents ?? null).length; return n > 16 ? 'text-md' : n > 13 ? 'text-lg' : 'text-xl'; };
+
 function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string; settings?: EconSettings | null; compact?: boolean }) {
   const [cmp, setCmp] = useState(false);
   const d = r.decision;
@@ -111,22 +114,22 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
   const m = r.rates.m * 100;
   return (
     <div className="mt-3">
-      <div className={clsx('grid gap-2', !compact && 'sm:grid-cols-2')}>
-        <section className={clsx('border-2 p-3', SUG.border, SUG.soft)} aria-label="Preço sugerido">
+      <div className={clsx('grid gap-2', !compact && 'grid-cols-[repeat(auto-fit,minmax(230px,1fr))]')}>
+        <section className={clsx('min-w-0 border-2 p-3', SUG.border, SUG.soft)} aria-label="Preço sugerido">
           <Badge dot={SUG.dot}>Base dos indicadores</Badge>
           <p className="mt-1 text-xs font-semibold text-ink">Preço sugerido pelo motor</p>
-          <p className="num text-xl font-bold text-ink">{fmtBRL(sug)}<span className="text-xs font-normal text-muted">{per}</span></p>
+          <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(sug))}><span>{fmtBRL(sug)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
           {one != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(one)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
           <p className="mt-1 text-xs text-text">Margem {pct(m, 1)}{c.engine.markupPct != null && !r.deal ? ` · markup efetivo ${pct(c.engine.markupPct, 1)}` : ''}</p>
           <p className="mt-1 text-2xs text-muted">custos ÷ (1 − tributos {pct(r.rates.a * 100, 2)} − desp. variáveis {pct(r.rates.c * 100, 2)} − margem {pct(m, 1)}){r.deal ? ', por cesta' : ''}</p>
           <button type="button" className={clsx('mt-2 text-xs font-semibold hover:underline', SUG.text)} aria-expanded={cmp} onClick={() => setCmp((v) => !v)}>{cmp ? 'Fechar comparativo' : 'Comparar com o modelo antigo'}</button>
         </section>
-        <section className={clsx('border-2 p-3', proposed ? [tone.border, tone.soft] : 'border-dashed border-line bg-surface-2')} aria-label="Preço proposto">
+        <section className={clsx('min-w-0 border-2 p-3', proposed ? [tone.border, tone.soft] : 'border-dashed border-line bg-surface-2')} aria-label="Preço proposto">
           <Badge dot={proposed ? tone.dot : 'bg-line-strong'}>Base da aprovação</Badge>
           {proposed ? (
             <>
               <p className="mt-1 text-xs font-semibold text-ink">Preço proposto {d.source === 'itens' ? '(total dos produtos)' : '(digitado na negociação)'}</p>
-              <p className="num text-xl font-bold text-ink">{fmtBRL(d.priceCents)}<span className="text-xs font-normal text-muted">{per}</span></p>
+              <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(d.priceCents))}><span>{fmtBRL(d.priceCents)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
               {d.oneTimeCents != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(d.oneTimeCents)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
               <p className={clsx('mt-1 text-sm font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</p>
               <p className="text-xs text-text">Margem {pct(d.marginPct, 1)} · VPL {fmtBRL(d.npvCents)}{d.paybackMonths != null ? ` · payback ${months(d.paybackMonths)}` : ''}</p>
@@ -355,13 +358,13 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
       <div className="mt-3 flex items-center justify-between gap-2">
         <Badge dot={r.decision ? SUG.dot : 'bg-line-strong'}>{r.decision ? 'Indicadores no preço sugerido' : 'Indicadores'}</Badge>
       </div>
-      <dl className={clsx('mt-1.5 grid gap-2', compact ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-4')}>
-        <div className="border-l-2 border-primary/60 bg-surface-2 p-2.5"><dt className="text-xs text-muted">Margem de contribuição</dt><dd className={clsx('num font-bold', k && k.marginPct < (r.rates.mMin ?? r.rates.m) * 100 - 1e-6 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">piso {pct((r.rates.mMin ?? r.rates.m) * 100, 0)}</dd></div>
+      <dl className={clsx('mt-1.5 grid gap-2', compact ? 'grid-cols-[repeat(auto-fit,minmax(140px,1fr))]' : 'grid-cols-[repeat(auto-fit,minmax(150px,1fr))]')}>
+        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Margem de contribuição</dt><dd className={clsx('num font-bold', k && k.marginPct < (r.rates.mMin ?? r.rates.m) * 100 - 1e-6 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">piso {pct((r.rates.mMin ?? r.rates.m) * 100, 0)}</dd></div>
         {(() => { const c = econCompare(r, { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 }); return (
-          <div className="border-l-2 border-primary/60 bg-surface-2 p-2.5" title="(preço sugerido − custo) ÷ custo"><dt className="text-xs text-muted">Markup efetivo</dt><dd className="num font-bold text-ink">{r.deal ? '—' : pct(c.engine.markupPct, 1)}</dd><dd className="text-2xs text-muted">{r.deal ? 'por cesta no comparativo' : `sobre ${c.baseLabel}`}</dd></div>
+          <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]" title="(preço sugerido − custo) ÷ custo"><dt className="text-xs text-muted">Markup efetivo</dt><dd className="num font-bold text-ink">{r.deal ? '—' : pct(c.engine.markupPct, 1)}</dd><dd className="text-2xs text-muted">{r.deal ? 'por cesta no comparativo' : `sobre ${c.baseLabel}`}</dd></div>
         ); })()}
-        <div className="border-l-2 border-primary/60 bg-surface-2 p-2.5"><dt className="text-xs text-muted">Payback descontado</dt><dd className="num font-bold text-ink">{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
-        <div className="border-l-2 border-primary/60 bg-surface-2 p-2.5"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
+        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Payback descontado</dt><dd className="num font-bold text-ink">{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
+        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
       {k?.margins && <MarginChain m={k.margins} per={per} compact={compact} />}
       <PriceRuler r={r} />
