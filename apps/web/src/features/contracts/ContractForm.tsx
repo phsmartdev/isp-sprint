@@ -1,9 +1,9 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { BILLING_TYPES, BILLING_TYPE_HINTS, BILLING_TYPE_LABELS, type BillingType, LEGAL_REFERENCE_MONTHS, LEGAL_REGIME_LABELS, LEGAL_REGIMES, addMonths, addDays, endFromTerm, toCents, type LegalRegime } from '@isp/domain';
 import { useLookups } from '../../lib/hooks';
-import { fmtBRL } from '../../lib/format';
+import { fmtBRL, fmtDate } from '../../lib/format';
 import { Button, FormField, Input, Select, Textarea } from '../../components/ui/primitives';
 import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version } from './shared';
 
@@ -109,7 +109,13 @@ export function ContractForm({ value, onChange, editing, validated }: { value: F
         <FormField label="Início da vigência" htmlFor="cf-start" required><Input id="cf-start" type="date" value={f.startAt} onChange={(e) => setStart(e.target.value)} /></FormField>
         <FormField label="Prazo (meses)" htmlFor="cf-term"><Input id="cf-term" inputMode="numeric" value={f.termMonths} onChange={(e) => setTerm(e.target.value.replace(/\D/g, ''))} /></FormField>
         <FormField label="Término da vigência" htmlFor="cf-end" required><Input id="cf-end" type="date" value={f.endAt} onChange={(e) => onChange({ endAt: e.target.value, renewalAt: e.target.value ? addDays(e.target.value, 1) : '' })} /></FormField>
-        <FormField label="Renovação prevista" htmlFor="cf-renewal"><Input id="cf-renewal" type="date" value={f.renewalAt} onChange={(e) => onChange({ renewalAt: e.target.value })} /></FormField>
+        <FormField label="Renovação prevista" htmlFor="cf-renewal">
+          <Input id="cf-renewal" type="date" aria-describedby="cf-renewal-alert" value={f.renewalAt} onChange={(e) => onChange({ renewalAt: e.target.value })} />
+          <p id="cf-renewal-alert" className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2 py-1.5 text-xs text-ink">
+            <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+            <span><strong>Atenção:</strong> valide no contrato se a renovação é no exato dia{f.renewalAt ? ` (${fmtDate(f.renewalAt)})` : ''} ou um dia antes{f.renewalAt ? ` (${fmtDate(addDays(f.renewalAt, -1))})` : ''}.</span>
+          </p>
+        </FormField>
         <FormField label="Ativação técnica" htmlFor="cf-activation" hint="Deixe em branco: a implantação registra."><Input id="cf-activation" type="date" value={f.activationAt} onChange={(e) => onChange({ activationAt: e.target.value })} /></FormField>
         <FormField label="Início do faturamento" htmlFor="cf-billing" hint="Deixe em branco: o Financeiro registra."><Input id="cf-billing" type="date" value={f.billingStartAt} onChange={(e) => onChange({ billingStartAt: e.target.value })} /></FormField>
         {f.kind === 'publico' && (
