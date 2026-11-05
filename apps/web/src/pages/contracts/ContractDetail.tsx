@@ -22,6 +22,7 @@ import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { ErpPanel } from '../../features/contracts/ErpPanel';
 import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { ReportNotices, ReportTermsText } from '../../features/contracts/ReportNotices';
+import { ContractJourneySteps } from '../../features/contracts/ContractJourneySteps';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
@@ -142,6 +143,8 @@ export function ContractDetailPage() {
           {c.permissions.edit && c.validatedAt && c.stage !== 'arquivado' && <Button onClick={() => setMove(true)}>Mover no funil</Button>}
         </div>
       </header>
+
+      <ContractJourneySteps stage={c.stage} nextAction={c.nextAction} />
 
       <section aria-label="Situação" className="card mb-4 grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 xl:grid-cols-6">
         <Info label="Vigência">{fmtDate(v.startAt)} a {fmtDate(v.endAt)}</Info>

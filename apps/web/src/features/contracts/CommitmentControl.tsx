@@ -15,7 +15,7 @@ import { Button, Chip, EmptyState, FormField, Input, LoadingRows, Notice, Select
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from './shared';
 import { downloadCsv, money, monthLabel, parseNum, pctOf, price, qty, useRefresh, type CItem, type Commitment, type Data, type Line, type Measurement } from './commitmentShared';
-import { AdjustmentsTab, LineMoveModal, ProjectionsTab, RetroInvoiceModal, RolloverLinkNotice, RolloverModal, RulesPanel } from './CommitmentPlanning';
+import { AdjustmentsTab, LineMoveModal, ProjectionsTab, RetroInvoiceModal, RolloverLinkNotice, RolloverModal } from './CommitmentPlanning';
 
 const STATUS_TONE: Record<string, 'neutral' | 'blue' | 'green' | 'yellow' | 'red'> = { elaboracao: 'neutral', enviada: 'blue', atestada: 'yellow', faturada: 'green', cancelada: 'red' };
 
@@ -114,7 +114,6 @@ export function CommitmentControl({ contractId }: { contractId: string }) {
         </section>
       )}
 
-      {d.canManage && !empty && <RulesPanel d={d} contractId={contractId} />}
 
       {line && <LineDrawer d={d} line={d.lines.find((l) => l.id === line.id) ?? line} contractId={contractId} onClose={() => setLine(null)} />}
       {modal === 'import' && <ImportModal contractId={contractId} onClose={() => setModal(null)} />}
@@ -532,7 +531,7 @@ function CommitmentModal({ d, contractId, onClose }: { d: Data; contractId: stri
         <FormField label="Data de emissão" htmlFor="ne-d"><Input id="ne-d" type="date" value={v.issuedOn} onChange={(e) => setV({ ...v, issuedOn: e.target.value })} /></FormField>
         {d.sources.length ? (
           <FormField label={d.settings.allocation === 'rateio' ? 'Fonte de receita (obrigatória no rateio)' : 'Fonte de receita'} htmlFor="ne-s"><Select id="ne-s" value={v.sourceId} onChange={(e) => setV({ ...v, sourceId: e.target.value })}><option value="">—</option>{d.sources.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>
-        ) : <FormField label="Fonte de receita (opcional)" htmlFor="ne-s" hint="Cadastre as fontes em Regras do contrato"><Input id="ne-s" value={v.source} onChange={(e) => setV({ ...v, source: e.target.value })} placeholder="Ex.: Educação estadual" /></FormField>}
+        ) : <FormField label="Fonte de receita (opcional)" htmlFor="ne-s" hint="Opcional: de onde sai o recurso do empenho"><Input id="ne-s" value={v.source} onChange={(e) => setV({ ...v, source: e.target.value })} placeholder="Ex.: Educação estadual" /></FormField>}
       </div>
       <div className="mb-2 flex items-center gap-2"><Button size="sm" variant="ghost" onClick={fillAll}>Preencher com o que falta empenhar</Button><span className="text-xs text-muted">Informe a quantidade coberta e o código do item na nota.</span></div>
       <div className="max-h-[50vh] overflow-auto border border-line">
