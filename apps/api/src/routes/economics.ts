@@ -1,7 +1,7 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
-import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_KINDS, ENVELOPE_RETENTIONS, ENVELOPE_TAXES, ENVELOPE_KIND_LABELS, FISCAL_REGIME_LABELS, envelopeTaxesOf, fiscalEnvelopeErrors, regimeOfYear, REFORM_FIRST_YEAR, type FiscalEnvelopeValues } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -21,7 +21,7 @@ const EconBody = z.object({
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
   commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
-  fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(), municipalityIbge: z.string().regex(/^\d{7}$/).nullable().optional(),
+  fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(),
 });
 
 export const economicsRoutes = [
@@ -36,7 +36,7 @@ export const economicsRoutes = [
   defineRoute({
     method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
     body: z.object({
-      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(),
+      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       variableExpenseBp: bp.nullable().optional(),
       paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean(),
@@ -54,62 +54,6 @@ export const economicsRoutes = [
       await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
       reply.code(201);
       return { id: v!.id, validFrom, ...values };
-    },
-  }),
-
-  // ------------------------------------------------------------------ envelope fiscal por vigência (Reforma Tributária)
-  defineRoute({
-    method: 'GET', url: '/admin/viability/envelopes/schema', summary: 'Campos do envelope fiscal da chave temporal (ano): regime atual até 2026, Reforma Tributária de 2027 em diante', tag: 'Viabilidade', ...ADMIN,
-    query: z.object({ year: z.coerce.number().int().min(2020).max(2100) }),
-    handler: async ({ query }) => {
-      const regime = regimeOfYear(query.year);
-      return {
-        year: query.year, regime, regimeLabel: FISCAL_REGIME_LABELS[regime], reformFirstYear: REFORM_FIRST_YEAR,
-        kinds: ENVELOPE_KINDS.map((k) => ({ key: k, label: ENVELOPE_KIND_LABELS[k] })),
-        taxes: envelopeTaxesOf(regime).map((c) => ({ key: c, label: ENVELOPE_TAXES[c].label, layer: 1 })),
-        profitTax: { key: 'profitTaxBp', label: 'Alíquota efetiva sobre o lucro (IRPJ + CSLL)', layer: 2 },
-        retentions: Object.entries(ENVELOPE_RETENTIONS).map(([key, label]) => ({ key, label, layer: 3 })),
-      };
-    },
-  }),
-  defineRoute({
-    method: 'GET', url: '/admin/viability/envelopes', summary: 'Envelopes fiscais por filial, município (IBGE) e vigência: o vigente de cada chave e o histórico de publicações', tag: 'Viabilidade', ...ADMIN,
-    handler: async ({ app, auth }) => {
-      const rows = await app.db.select({ e: s.fiscalEnvelopes, by: s.users.name, branch: s.salesBranches.name }).from(s.fiscalEnvelopes)
-        .leftJoin(s.users, eq(s.users.id, s.fiscalEnvelopes.createdBy)).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.fiscalEnvelopes.branchId))
-        .where(eq(s.fiscalEnvelopes.tenantId, auth.tenantId)).orderBy(desc(s.fiscalEnvelopes.createdAt)).limit(500);
-      const seen = new Set<string>();
-      const items = rows.map(({ e, by, branch }) => {
-        const key = `${e.branchId}|${e.ibgeCode}|${e.year}`;
-        const current = !seen.has(key); seen.add(key);
-        return { id: e.id, branchId: e.branchId, branchName: branch, ibgeCode: e.ibgeCode, municipality: e.municipality, year: e.year, regime: regimeOfYear(e.year), values: e.values, createdAt: e.createdAt, createdByName: by, current };
-      });
-      return { items, today: today() };
-    },
-  }),
-  defineRoute({
-    method: 'POST', url: '/admin/viability/envelopes', summary: 'Publica o envelope fiscal de uma chave (filial + município IBGE + ano); a publicação anterior da chave fica no histórico', tag: 'Viabilidade', ...ADMIN,
-    body: z.object({
-      branchId: z.string().uuid(), ibgeCode: z.string().regex(/^\d{7}$/, 'Código IBGE com 7 dígitos'), municipality: z.string().trim().max(80).nullable().optional(), year: z.number().int().min(2020).max(2100),
-      values: z.object({
-        taxes: z.record(z.string(), z.record(z.string(), bp.nullable())),
-        profitTaxBp: bp.nullable(),
-        retentions: z.record(z.string(), bp.nullable()).optional(),
-        note: z.string().trim().max(300).nullable().optional(),
-      }),
-    }),
-    handler: async ({ app, auth, body, req, reply }) => {
-      const [br] = await app.db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(and(eq(s.salesBranches.id, body.branchId), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
-      if (!br) throw unprocessable('Filial não encontrada.');
-      // só os campos do regime da vigência ficam guardados (nulos saem)
-      const clean = (o?: Record<string, number | null>) => Object.fromEntries(Object.entries(o ?? {}).filter(([, v]) => v != null)) as Record<string, number>;
-      const values: FiscalEnvelopeValues = { taxes: Object.fromEntries(Object.entries(body.values.taxes).map(([k, v]) => [k, clean(v)]).filter(([, v]) => Object.keys(v as object).length)), profitTaxBp: body.values.profitTaxBp, retentions: clean(body.values.retentions), note: body.values.note ?? null };
-      const e = fiscalEnvelopeErrors({ year: body.year, ibgeCode: body.ibgeCode, values });
-      if (e.length) throw unprocessable(e.join(' '));
-      const [v] = await app.db.insert(s.fiscalEnvelopes).values({ tenantId: auth.tenantId, branchId: body.branchId, ibgeCode: body.ibgeCode, municipality: body.municipality ?? null, year: body.year, values: values as unknown as Record<string, unknown>, createdBy: auth.userId }).returning({ id: s.fiscalEnvelopes.id });
-      await audit(app.db, req, { action: 'viability.envelope', entityType: 'viability', entityId: v!.id, metadata: { branchId: body.branchId, ibgeCode: body.ibgeCode, year: body.year, regime: regimeOfYear(body.year), values } });
-      reply.code(201);
-      return { id: v!.id, year: body.year, regime: regimeOfYear(body.year), values };
     },
   }),
 
@@ -168,12 +112,44 @@ export const economicsRoutes = [
 
   // ------------------------------------------------------------------ documentos fiscais por filial (Configurações → Filiais)
   defineRoute({
-    method: 'GET', url: '/admin/fiscal-docs', summary: 'Documentos fiscais de todas as filiais, com os tributos', tag: 'Configurações', ...ADMIN,
-    handler: async ({ app, auth }) => ({ items: await fiscalDocsOf(app.db, auth.tenantId) }),
+    method: 'GET', url: '/admin/fiscal-docs', summary: 'Documentos fiscais de todas as filiais, com os tributos (com year: os do ano de vigência e de que ano vieram)', tag: 'Configurações', ...ADMIN,
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100).optional() }),
+    handler: async ({ app, auth, query }) => ({ items: await fiscalDocsOf(app.db, auth.tenantId, null, query.year ?? null), year: query.year ?? null, thisYear: Number(today().slice(0, 4)) }),
+  }),
+  // envelope temporal da empresa: DRE (alíquota efetiva sobre o lucro) e retenções na fonte, por ano
+  defineRoute({
+    method: 'GET', url: '/admin/fiscal-docs/:id/envelope', summary: 'DRE (alíquota efetiva sobre o lucro) e retenções na fonte da empresa no ano, com o histórico de publicações', tag: 'Configurações', ...ADMIN, params: IdParams,
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100) }),
+    handler: async ({ app, auth, params, query }) => {
+      const rows = await app.db.select({ e: s.fiscalEnvelopes, by: s.users.name }).from(s.fiscalEnvelopes).leftJoin(s.users, eq(s.users.id, s.fiscalEnvelopes.createdBy))
+        .where(and(eq(s.fiscalEnvelopes.tenantId, auth.tenantId), eq(s.fiscalEnvelopes.branchId, params.id), lte(s.fiscalEnvelopes.year, query.year))).orderBy(desc(s.fiscalEnvelopes.year), desc(s.fiscalEnvelopes.createdAt)).limit(50);
+      const cur = rows[0] ?? null;
+      return {
+        year: query.year, regime: regimeOfYear(query.year), regimeLabel: FISCAL_REGIME_LABELS[regimeOfYear(query.year)],
+        retentions: Object.entries(ENVELOPE_RETENTIONS).map(([key, label]) => ({ key, label })),
+        current: cur ? { id: cur.e.id, year: cur.e.year, values: cur.e.values, createdAt: cur.e.createdAt, createdByName: cur.by, inherited: cur.e.year !== query.year } : null,
+        history: rows.filter((r) => r.e.year === query.year).map((r) => ({ id: r.e.id, values: r.e.values, createdAt: r.e.createdAt, createdByName: r.by })),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/fiscal-docs/:id/envelope', summary: 'Publica a DRE (alíquota efetiva sobre o lucro) e as retenções na fonte da empresa para o ano; a anterior fica no histórico', tag: 'Configurações', ...ADMIN, params: IdParams,
+    body: z.object({ year: z.number().int().min(2020).max(2100), profitTaxBp: bp.nullable(), retentions: z.record(z.string(), bp.nullable()).default({}), note: z.string().trim().max(300).nullable().optional() }),
+    handler: async ({ app, auth, params, body, req, reply }) => {
+      const [br] = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name }).from(s.salesBranches).where(and(eq(s.salesBranches.id, params.id), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
+      if (!br) throw notFound('Filial não encontrada.');
+      const values: FiscalEnvelopeValues = { profitTaxBp: body.profitTaxBp, retentions: Object.fromEntries(Object.entries(body.retentions).filter(([, v]) => v != null)) as FiscalEnvelopeValues['retentions'], note: body.note ?? null };
+      const e = fiscalEnvelopeErrors({ year: body.year, values });
+      if (e.length) throw unprocessable(e.join(' '));
+      const [v] = await app.db.insert(s.fiscalEnvelopes).values({ tenantId: auth.tenantId, branchId: br.id, year: body.year, values: values as unknown as Record<string, unknown>, createdBy: auth.userId }).returning({ id: s.fiscalEnvelopes.id });
+      await audit(app.db, req, { action: 'viability.envelope', entityType: 'sales_branch', entityId: br.id, metadata: { branch: br.name, year: body.year, values } });
+      reply.code(201);
+      return { id: v!.id };
+    },
   }),
   defineRoute({
     method: 'PUT', url: '/admin/fiscal-docs/:id', summary: 'Salva os documentos fiscais de uma filial por tipo fiscal (venda, prestação de serviço, aluguel); o código é único no tipo fiscal da filial', tag: 'Configurações', ...ADMIN, params: IdParams,
-    body: z.object({ items: z.array(z.object({ id: z.string().uuid().nullable(), fiscalKind: z.enum(FISCAL_KINDS), code: z.string().trim().min(1).max(30), name: z.string().trim().min(2).max(80), active: z.boolean(), taxes: z.array(Tax).max(20) })).max(30) }),
+    body: z.object({ year: z.number().int().min(2020).max(2100).optional(), items: z.array(z.object({ id: z.string().uuid().nullable(), fiscalKind: z.enum(FISCAL_KINDS), code: z.string().trim().min(1).max(30), name: z.string().trim().min(2).max(80), active: z.boolean(), taxes: z.array(Tax).max(20) })).max(30) }),
     handler: async ({ app, auth, params, body, req }) => app.db.transaction(async (tx) => {
       const [br] = await tx.select({ id: s.salesBranches.id, name: s.salesBranches.name, fiscalKinds: s.salesBranches.fiscalKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.id, params.id), eq(s.salesBranches.tenantId, auth.tenantId))).limit(1);
       if (!br) throw notFound('Filial não encontrada.');
@@ -183,24 +159,32 @@ export const economicsRoutes = [
       if (notAllowed.length) throw unprocessable(`A filial ${br.name} não aceita ${[...new Set(notAllowed.map((i) => FISCAL_KIND_LABELS[i.fiscalKind]))].join(', ')}: libere o tipo fiscal na filial antes.`);
       for (const [i, d] of body.items.entries()) { const e = fiscalDocErrors(d); if (e.length) throw unprocessable(`Documento ${i + 1}: ${e.join(' ')}`); }
       const kept: string[] = [];
+      // envelope temporal: com year, os tributos vão para o ano (e também para o cadastro base quando é o ano corrente)
+      const year = body.year ?? null, thisYear = Number(today().slice(0, 4));
       for (const [position, d] of body.items.entries()) {
-        const values = { fiscalKind: d.fiscalKind, code: d.code.toUpperCase(), name: d.name, active: d.active, taxes: d.taxes, position, updatedBy: auth.userId, updatedAt: new Date() };
+        const base = { fiscalKind: d.fiscalKind, code: d.code.toUpperCase(), name: d.name, active: d.active, position, updatedBy: auth.userId, updatedAt: new Date() };
+        let byYear: Record<string, unknown> = {};
+        if (d.id) {
+          const [cur] = await tx.select({ taxesByYear: s.fiscalDocTypes.taxesByYear }).from(s.fiscalDocTypes).where(and(eq(s.fiscalDocTypes.id, d.id), eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id))).limit(1);
+          if (!cur) throw unprocessable('Documento não pertence a esta filial.');
+          byYear = (cur.taxesByYear ?? {}) as Record<string, unknown>;
+        }
+        const values = year == null ? { ...base, taxes: d.taxes } : { ...base, taxesByYear: { ...byYear, [String(year)]: d.taxes } as Record<string, typeof d.taxes>, ...(year === thisYear || !d.id ? { taxes: d.taxes } : {}) };
         if (d.id) {
           const [u] = await tx.update(s.fiscalDocTypes).set(values).where(and(eq(s.fiscalDocTypes.id, d.id), eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id))).returning({ id: s.fiscalDocTypes.id });
-          if (!u) throw unprocessable('Documento não pertence a esta filial.');
-          kept.push(u.id);
-          await recordFiscalDocVersion(tx, auth.tenantId, u.id, d.taxes, auth.userId);
+          kept.push(u!.id);
+          await recordFiscalDocVersion(tx, auth.tenantId, u!.id, d.taxes, auth.userId, year);
         } else {
-          const [n] = await tx.insert(s.fiscalDocTypes).values({ tenantId: auth.tenantId, branchId: br.id, ...values }).returning({ id: s.fiscalDocTypes.id });
+          const [n] = await tx.insert(s.fiscalDocTypes).values({ tenantId: auth.tenantId, branchId: br.id, taxes: d.taxes, ...values }).returning({ id: s.fiscalDocTypes.id });
           kept.push(n!.id);
-          await recordFiscalDocVersion(tx, auth.tenantId, n!.id, d.taxes, auth.userId);
+          await recordFiscalDocVersion(tx, auth.tenantId, n!.id, d.taxes, auth.userId, year);
         }
       }
       // documento tirado da lista só é desativado: itens antigos continuam apontando para ele
       await tx.update(s.fiscalDocTypes).set({ active: false, updatedBy: auth.userId, updatedAt: new Date() })
         .where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, br.id), ...(kept.length ? [notInArray(s.fiscalDocTypes.id, kept)] : [])));
       await audit(tx, req, { action: 'fiscal_docs.update', entityType: 'sales_branch', entityId: br.id, metadata: { branch: br.name, items: body.items.map((d) => ({ fiscalKind: d.fiscalKind, code: d.code, active: d.active, taxes: d.taxes.map((t) => `${t.name} ${t.percentBp / 100}%${t.fixedCents ? ` + R$ ${t.fixedCents / 100}` : ''}${t.active ? '' : ' (inativo)'}`) })) } });
-      return { items: await fiscalDocsOf(tx, auth.tenantId, br.id) };
+      return { items: await fiscalDocsOf(tx, auth.tenantId, br.id, year) };
     }),
   }),
   defineRoute({

@@ -40,7 +40,7 @@ test('DRE em três colunas com soma exata e recomendação pela margem líquida 
   await expect(panel.getByText('Por mês (1–3, com amortização)')).toBeVisible();
   await expect(panel.getByText('Por mês (4–12, sem amortização)')).toBeVisible();
   await expect(panel.getByText('No contrato (12 meses)')).toBeVisible();
-  await expect(panel.getByLabel('Recomendação pela margem líquida alvo')).toContainText('71,06%');
+  await expect(panel.getByRole('region', { name: 'Preço pela margem líquida (target seeking)' })).toContainText('71,06%');
   await expect(panel.getByText('Parcela do investimento (P_inv)')).toBeVisible();
   if (SHOTS) await panel.screenshot({ path: `${SHOTS}/finance31-dre.png` });
 });

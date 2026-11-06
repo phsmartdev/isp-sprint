@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { econCompare, financeEngineDetailed, parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings } from './finance';
+import { econCompare, financeEngineDetailed, parseCostTable, shiftMonth, consolidateCashflow, econDre, econHeadline, econMemory, emptyEconInput, financeEngine, fiscalDocRates, type EconItem, type EconSettings, applyNetMarginRule } from './finance';
 import { npv as npvF } from './formula';
 import { annuityFactor, irr, npv, paybackMonths } from './formula';
 
@@ -523,5 +523,43 @@ describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alv
   });
   it('sem margem líquida alvo nos parâmetros: sem recomendação', () => {
     expect(financeEngine({ input, items: items([0, 1000]), settings: st, publicSector: false }).recommendation ?? null).toBeNull();
+  });
+});
+
+describe('FINANCE-3.2: viabilidade pela faixa de margem líquida, recomendação de preço e payback do investimento', () => {
+  const st: EconSettings = { ...S, tmaMonthlyBp: 150, marginTargetBp: 2000, marginSuggestedBp: 3000, marginMaxBp: 9000, variableExpenseBp: 0, lossPrivateBp: 300, badDebtBp: 100, overheadBp: 2000, incomeTaxBp: 1500, netMarginMinBp: 1200, netMarginMaxBp: 2500 };
+  const input = { ...emptyEconInput(), termMonths: 12, paybackMonths: 3, capex: [{ description: 'Implantação', qtyMilli: 1000, unitCents: 5_847_700 }] };
+  it('payback do investimento no preço sugerido = D (contado do 1º faturamento), com 3 e com 4 meses', () => {
+    for (const D of [3, 4]) {
+      const r = financeEngine({ input: { ...input, paybackMonths: D }, items: items([0, 1000]), settings: st, publicSector: false });
+      near(r.kpi!.investmentPaybackMonths!, D, 2e-3);
+      expect(r.kpi!.paybackMonths!).toBeLessThan(D); // o de caixa inclui a margem
+    }
+  });
+  it('faixa: preço da margem mínima e da máxima (target seeking com o IR dos parâmetros); viável só dentro dela', () => {
+    const r = financeEngine({ input, items: items([0, 1000]), settings: st, publicSector: false });
+    const rg = r.recommendation!.range!;
+    expect(rg.min.contributionPct!).toBeCloseTo(12 / 0.85 + 24, 6);
+    expect(rg.max.contributionPct!).toBeCloseTo(25 / 0.85 + 24, 6);
+    expect(rg.max.priceCents!).toBeGreaterThan(rg.min.priceCents!);
+    const at = (P: number) => financeEngine({ input: { ...input, priceCents: P }, items: items([0, 1000]), settings: st, publicSector: false });
+    const mid = Math.round((rg.min.priceCents! + rg.max.priceCents!) / 2);
+    const vMid = at(mid);
+    expect(vMid.decision!.verdict).toBe('viavel');
+    expect(vMid.decision!.netMarginPct!).toBeGreaterThan(12);
+    expect(vMid.decision!.netMarginPct!).toBeLessThan(25);
+    expect(at(Math.round(rg.min.priceCents! * 0.9)).decision!.verdict).toBe('abaixo_faixa');
+    expect(at(Math.round(rg.max.priceCents! * 1.1)).decision!.verdict).toBe('acima_faixa');
+    // na margem mínima exata a margem líquida dos meses 1..D é 12%
+    near(at(rg.min.priceCents!).decision!.netMarginPct!, 12, 0.01);
+    // VPL, TIR e payback viram informação (veredito antigo guardado)
+    expect(vMid.decision!.policyVerdict).toBeDefined();
+  });
+  it('sem preço sugerido pelo motor (zero/nulo) a base da aprovação não diz viável', () => {
+    const r = financeEngine({ input: { ...emptyEconInput(), termMonths: 12, priceCents: 100_000 }, items: [], settings: st, publicSector: false });
+    if (!r.suggestedCents) expect(r.decision!.verdict).toBe('aguardando_sugerido');
+    else expect(r.decision!.verdict).not.toBe('aguardando_sugerido');
+    const z = applyNetMarginRule({ ...r, suggestedCents: 0, decision: { ...r.decision!, verdict: 'viavel' } }, st);
+    expect(z.decision!.verdict).toBe('aguardando_sugerido');
   });
 });

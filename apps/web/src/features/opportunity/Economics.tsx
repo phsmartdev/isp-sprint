@@ -25,7 +25,7 @@ type Data = {
   modelOverrides?: FinOverride[];
   /** resultado SALVO (consultar não recalcula); stale = produtos, tributos ou parâmetros mudaram desde então */
   result: EconResult | null; stale: boolean; editable: boolean;
-  emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null; ibgeCode?: string | null } | null;
+  emitter: { name: string; cnpj: string | null; taxRegime: string | null; city: string | null; state: string | null} | null;
   /** envelope fiscal por vigência (a prévia escolhe a chave ativa como o servidor) */
   fiscal?: FiscalArgs;
   /** parâmetros vigentes; null = a empresa ainda não informou em Configurações → Viabilidade */
@@ -43,6 +43,8 @@ const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange'
   viavel: { bar: 'border-success bg-success-soft', chip: 'green' }, abaixo_recomendado: { bar: 'border-primary bg-primary-soft', chip: 'blue' },
   fora_politica: { bar: 'border-warning bg-warning-soft', chip: 'orange' }, abaixo_minimo: { bar: 'border-danger bg-danger-soft', chip: 'red' },
   inviavel: { bar: 'border-danger bg-danger-soft', chip: 'red' }, sem_preco: { bar: 'border-line bg-surface-2', chip: 'neutral' },
+  abaixo_faixa: { bar: 'border-danger bg-danger-soft', chip: 'red' }, acima_faixa: { bar: 'border-warning bg-warning-soft', chip: 'orange' },
+  aguardando_sugerido: { bar: 'border-line bg-surface-2', chip: 'neutral' }, sem_margem_liquida: { bar: 'border-line bg-surface-2', chip: 'neutral' },
 };
 const pct = (v: number | null | undefined, digits = 1) => (v == null || !Number.isFinite(v) ? '—' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: digits })}%`);
 const months = (v: number | null | undefined) => (v == null ? 'não se paga' : v === 0 ? 'imediato' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses`);
@@ -89,6 +91,10 @@ const DEC: Record<EconVerdict, { dot: string; border: string; soft: string; text
   abaixo_minimo: { dot: 'bg-danger', border: 'border-danger/60', soft: 'bg-danger-soft/40', text: 'text-danger' },
   inviavel: { dot: 'bg-danger', border: 'border-danger/60', soft: 'bg-danger-soft/40', text: 'text-danger' },
   sem_preco: { dot: 'bg-line-strong', border: 'border-line', soft: 'bg-surface-2', text: 'text-muted' },
+  abaixo_faixa: { dot: 'bg-danger', border: 'border-danger/60', soft: 'bg-danger-soft/40', text: 'text-danger' },
+  acima_faixa: { dot: 'bg-warning', border: 'border-warning/60', soft: 'bg-warning-soft/40', text: 'text-[#C2610C]' },
+  aguardando_sugerido: { dot: 'bg-line-strong', border: 'border-line', soft: 'bg-surface-2', text: 'text-muted' },
+  sem_margem_liquida: { dot: 'bg-line-strong', border: 'border-line', soft: 'bg-surface-2', text: 'text-muted' },
 };
 const Badge = ({ dot, children }: { dot: string; children: ReactNode }) => <span className="inline-flex items-center gap-1.5 text-2xs font-bold uppercase tracking-wide text-muted"><span className={clsx('h-2.5 w-2.5 rounded-full', dot)} aria-hidden />{children}</span>;
 
@@ -132,13 +138,13 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
               <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(d.priceCents))}><span>{fmtBRL(d.priceCents)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
               {d.oneTimeCents != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(d.oneTimeCents)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
               <p className={clsx('mt-1 text-sm font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</p>
-              <p className="text-xs text-text">Margem {pct(d.marginPct, 1)} · VPL {fmtBRL(d.npvCents)}{d.paybackMonths != null ? ` · payback ${months(d.paybackMonths)}` : ''}</p>
+              {d.verdict !== 'aguardando_sugerido' && <p className="text-xs text-text">{d.netMarginPct != null ? <>Margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : <>Margem {pct(d.marginPct, 1)}</>}</p>}
               {diff != null && diff !== 0 && <p className="mt-1 text-2xs text-muted">{fmtBRL(Math.abs(diff))}{per} {diff > 0 ? 'acima' : 'abaixo'} do sugerido</p>}
             </>
           ) : (
             <>
               <p className="mt-1 text-xs font-semibold text-ink">Nenhum preço proposto</p>
-              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>.</p>
+              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
               <p className="mt-1 text-2xs text-muted">Para avaliar outro valor, informe o preço no passo 1 ou lance os valores dos produtos.</p>
             </>
           )}
@@ -146,6 +152,34 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
       </div>
       {cmp && <LegacyCompare r={r} legacy={legacy} />}
     </div>
+  );
+}
+
+/**
+ * Target seeking: o preço que entrega a margem líquida pedida nos meses 1..D, com IR/CSLL, despesas fixas, glosa e
+ * inadimplência dos parâmetros (IR/CSLL da empresa no ano, quando cadastrado). Faixa viável: da mínima à máxima.
+ */
+function TargetSeek({ r, per }: { r: EconResult; per: string }) {
+  const rc = r.recommendation;
+  if (!rc) return null;
+  const pts = rc.range ? [{ k: 'Margem líquida mínima', p: rc.range.min }, { k: 'Margem líquida máxima', p: rc.range.max }] : [{ k: 'Margem líquida alvo', p: { netPct: rc.netTargetPct, operatingPct: rc.operatingNeededPct, contributionPct: rc.contributionPct, priceCents: rc.priceCents, oneTimePriceCents: rc.oneTimePriceCents } }];
+  const ir = rc.params.incomeTaxPct;
+  return (
+    <section className="mt-3 border-2 border-primary/50 bg-primary/5 p-3" aria-label="Preço pela margem líquida (target seeking)">
+      <p className="text-sm font-bold text-ink">{rc.range ? 'Faixa de preço viável pela margem líquida' : 'Preço pela margem líquida alvo'}</p>
+      <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2">
+        {pts.map(({ k, p }) => (
+          <div key={k} className="min-w-0 border-l-4 border-primary bg-surface p-2.5">
+            <p className="text-xs text-muted">{k} {pct(p.netPct, 2)}</p>
+            <p className="num flex flex-wrap items-baseline whitespace-nowrap text-lg font-bold text-ink"><span>{p.priceCents == null ? 'não cabe no markup' : fmtBRL(p.priceCents)}</span>{p.priceCents != null && <span className="text-xs font-normal text-muted">{per}</span>}</p>
+            {p.oneTimePriceCents != null && <p className="num text-xs text-ink">+ {fmtBRL(p.oneTimePriceCents)} no pagamento único</p>}
+            <p className="text-2xs text-muted">margem de contribuição {pct(p.contributionPct, 2)} · operacional {pct(p.operatingPct, 2)}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 font-mono text-2xs text-muted">MO = margem líquida ÷ (1 − IR/CSLL {pct(ir, 2)}) · MC = MO + despesas fixas {pct(rc.params.overheadPct, 2)} + glosa {pct(rc.params.glosaPct, 2)} + inadimplência {pct(rc.params.badDebtPct, 2)} · preço = custos ÷ (1 − tributos − desp. variáveis − MC)</p>
+      {rc.range && <p className="mt-1 text-2xs text-muted">Viável entre os dois preços: abaixo do primeiro a margem líquida fica abaixo da mínima; acima do segundo, acima da máxima.</p>}
+    </section>
   );
 }
 
@@ -250,7 +284,6 @@ function Dre({ r }: { r: EconResult }) {
       {p != null && <span className="block text-2xs font-normal text-muted">{pct(p, 2)}</span>}
     </td>
   );
-  const rc = r.recommendation;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm">
@@ -279,24 +312,6 @@ function Dre({ r }: { r: EconResult }) {
           O investimento é devolvido com a TMA em {D} {D === 1 ? 'mês' : 'meses'} (parcela da anuidade). O payback de caixa
           {k.paybackMonths == null ? ' não fecha no prazo' : <> é <b className="num text-ink">{k.paybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses</b></>}: sai antes de {D} porque a margem de contribuição também entra no caixa.
         </p>
-      )}
-      {rc && (
-        <div className="mt-3 border border-line p-3 text-xs" aria-label="Recomendação pela margem líquida alvo">
-          <p className="text-sm font-semibold text-ink">Recomendação pela margem líquida alvo de {pct(rc.netTargetPct, 2)}</p>
-          {rc.contributionPct == null ? (
-            <p className="mt-1 text-muted">Informe despesas fixas e IR/CSLL em Configurações → Viabilidade para calcular a margem recomendada.</p>
-          ) : (
-            <>
-              <p className="mt-1 text-text">
-                Margem de contribuição recomendada <b className="num text-ink">{pct(rc.contributionPct, 2)}</b>
-                {rc.priceCents != null ? <> · preço <b className="num text-ink">{fmtBRL(rc.priceCents)}{rec ? '/mês' : ''}</b>{rc.oneTimePriceCents != null && <> + <b className="num text-ink">{fmtBRL(rc.oneTimePriceCents)}</b> no pagamento único</>}</> : <span className="text-danger"> · não cabe no markup com os tributos e despesas variáveis</span>}
-              </p>
-              <p className="mt-0.5 font-mono text-2xs text-muted">
-                {pct(rc.netTargetPct, 2)} ÷ (1 − {pct(rc.params.incomeTaxPct ?? 0, 2)}) = {pct(rc.operatingNeededPct ?? 0, 2)} + fixas {pct(rc.params.overheadPct ?? 0, 2)} + glosa {pct(rc.params.glosaPct, 2)} + inadimplência {pct(rc.params.badDebtPct, 2)}
-              </p>
-            </>
-          )}
-        </div>
       )}
     </div>
   );
@@ -341,19 +356,19 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
       <div className={clsx('border-l-4 p-3', TONE[r.verdict].bar)}>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-md font-bold text-ink">{ECON_VERDICT_LABELS[r.verdict]}</p>
+          {r.fiscal && <span className="inline-flex items-center border-2 border-primary bg-primary/10 px-2 py-0.5 text-sm font-bold text-primary" aria-label={`Resultado gerado com a vigência fiscal ${r.fiscal.year}`}>Vigência fiscal {r.fiscal.year} · {r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'}</span>}
           {r.decision && <Badge dot={r.decision.basis === 'proposto' ? DEC[r.verdict].dot : SUG.dot}>decisão no preço {r.decision.basis}</Badge>}
           {r.withReservations && <Chip tone="yellow">Calculável com ressalvas</Chip>}
         </div>
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
         {r.fiscal && (
           <p className="mt-1 text-xs text-muted" aria-label="Envelope fiscal da simulação">
-            {r.fiscal.envelope
-              ? <>Envelope fiscal {r.fiscal.envelope.year} ({r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'}) · {r.fiscal.envelope.municipality ?? `IBGE ${r.fiscal.ibgeCode}`} · tributos da nota {r.fiscal.basket.map((b) => `${b.kind} ${pct(b.bp / 100, 2)}`).join(' · ')} · IRPJ/CSLL {pct((r.fiscal.profitTaxBp ?? 0) / 100, 2)}{r.fiscal.retentions.length ? ' · retenções fora do cálculo' : ''}</>
-              : <>Vigência fiscal {r.fiscal.year} sem envelope: tributos dos documentos fiscais e IR/CSLL dos parâmetros.</>}
+            Tributos da nota {r.fiscal.docs.map((x) => `${x.name} ${pct(x.percentBp / 100, 2)}${x.fromYear != null && x.fromYear !== r.fiscal!.year ? ` (de ${x.fromYear})` : x.fromYear == null ? ' (cadastro atual)' : ''}`).join(' · ') || 'sem documento fiscal'} · IRPJ/CSLL {r.fiscal.profitTaxBp == null ? '—' : pct(r.fiscal.profitTaxBp / 100, 2)}{r.fiscal.profitTaxSource === 'envelope' ? ` (empresa, ${r.fiscal.envelope?.year})` : ' (parâmetros)'}{r.fiscal.retentions.length ? ` · retenções na fonte (${r.fiscal.retentions.map((x) => x.label.split(' ')[0]).join(', ')}) fora do cálculo` : ''}
           </p>
         )}
       </div>
       <PriceBasis r={r} per={per} settings={settings} compact={compact} />
+      <TargetSeek r={r} per={per} />
       {r.deal?.cells && <CellsTable r={r} compact={compact} />}
       <div className="mt-3 flex items-center justify-between gap-2">
         <Badge dot={r.decision ? SUG.dot : 'bg-line-strong'}>{r.decision ? 'Indicadores no preço sugerido' : 'Indicadores'}</Badge>
@@ -363,7 +378,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         {(() => { const c = econCompare(r, { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 }); return (
           <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]" title="(preço sugerido − custo) ÷ custo"><dt className="text-xs text-muted">Markup efetivo</dt><dd className="num font-bold text-ink">{r.deal ? '—' : pct(c.engine.markupPct, 1)}</dd><dd className="text-2xs text-muted">{r.deal ? 'por cesta no comparativo' : `sobre ${c.baseLabel}`}</dd></div>
         ); })()}
-        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Payback descontado</dt><dd className="num font-bold text-ink">{k ? months(k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">limite {r.term.Dalvo} meses · {r.publicSector ? 'público' : 'privado'}{k?.simplePaybackMonths != null ? ` · simples ${months(k.simplePaybackMonths)}` : ''}</dd></div>
+        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Payback do investimento</dt><dd className="num font-bold text-ink">{k ? months(k.investmentPaybackMonths !== undefined ? k.investmentPaybackMonths : k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">contado do 1º faturamento · pedido {r.term.D} meses{k?.investmentPaybackMonths !== undefined && k?.paybackMonths != null ? ` · de caixa ${months(k.paybackMonths)}` : ''}</dd></div>
         <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
       {k?.margins && <MarginChain m={k.margins} per={per} compact={compact} />}
@@ -651,13 +666,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
   const catalog = catQ.data?.items ?? [];
-  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string; ibge: string } | null>(null);
+  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
     if (q.data?.input && !f) {
       const i = q.data.input;
-      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null), fiscalYear: i.fiscalYear ? String(i.fiscalYear) : '', ibge: i.municipalityIbge ?? '' };
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null), fiscalYear: i.fiscalYear ? String(i.fiscalYear) : '' };
       setF(init);
       setBase(formKey(init));
     }
@@ -667,7 +682,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     capex: fromLines(f.capex), extraInitialCents: parseMoney(f.extra) ?? -1, opex: fromLines(f.opex),
     commissionBp: null, variableBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
     salePriceCents: f.salePrice.trim() ? parseMoney(f.salePrice) : null,
-    fiscalYear: f.fiscalYear.length === 4 ? Number(f.fiscalYear) : null, municipalityIbge: f.ibge.length === 7 ? f.ibge : null,
+    fiscalYear: f.fiscalYear.length === 4 ? Number(f.fiscalYear) : null,
   } : null), [f]);
   const invalid = !input || [input.variableBp ?? null, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
@@ -766,11 +781,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
                 </>
               </FormField>
             )}
-            <FormField label="Vigência fiscal (ano)" htmlFor="ec-fy" hint={`Chave do envelope fiscal: até 2026 regime atual (PIS/COFINS); de 2027 em diante Reforma Tributária (CBS/IBS). Em branco = ${d.fiscal?.today.slice(0, 4) ?? 'ano corrente'}.`}>
+            <FormField label="Vigência fiscal (ano)" htmlFor="ec-fy" hint={`Ano dos tributos dos documentos fiscais e do IR/CSLL da empresa (Filiais → Documentos fiscais). Em branco = ${d.fiscal?.today.slice(0, 4) ?? 'ano corrente'}.`}>
               <Input id="ec-fy" inputMode="numeric" placeholder={d.fiscal?.today.slice(0, 4) ?? ''} value={f.fiscalYear} disabled={dis} invalid={!!f.fiscalYear && f.fiscalYear.length !== 4} onChange={(e) => set({ fiscalYear: e.target.value.replace(/\D/g, '').slice(0, 4) })} />
-            </FormField>
-            <FormField label="Município do envelope (IBGE)" htmlFor="ec-ibge" hint={d.fiscal?.defaultIbge ? `Em branco = o da filial emitente (${d.fiscal.defaultIbge}).` : 'A filial emitente está sem código IBGE (Configurações → Filiais).'}>
-              <Input id="ec-ibge" inputMode="numeric" placeholder={d.fiscal?.defaultIbge ?? ''} value={f.ibge} disabled={dis} invalid={!!f.ibge && f.ibge.length !== 7} onChange={(e) => set({ ibge: e.target.value.replace(/\D/g, '').slice(0, 7) })} />
             </FormField>
             <FormField label="Margem de contribuição (%)" htmlFor="ec-mar" error={mOut ? `Fora dos limites: o cálculo usa ${bpText(Math.min(Math.max(mNow, mPiso), mTeto ?? 10_000))}%.` : undefined} hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%. Em branco vale a sugestão.`}>
               <Input id="ec-mar" inputMode="decimal" placeholder={bpText(mSug)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin)) || mOut} onChange={(e) => set({ margin: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />

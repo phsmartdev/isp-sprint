@@ -743,6 +743,13 @@
       "when": 1793930822790,
       "tag": "0105_estruturas",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1793964650254,
+      "tag": "0106_envelope_nos_documentos",
+      "breakpoints": true
     }
   ]
 }
