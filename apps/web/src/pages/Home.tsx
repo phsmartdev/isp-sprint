@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { SeloHighlight } from '../features/gamification/Gamification';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowRight, BarChart3, ClipboardList, Clock3, Home as HomeIcon, Mail, MoreVertical, Phone, Plus, Send, ShoppingBag, Users, Video, MessageCircle, CheckSquare, MapPin } from 'lucide-react';
@@ -79,6 +80,7 @@ export function HomePage() {
 
   return (
     <div className="w-full">
+      <SeloHighlight />
       <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[1.65rem] font-bold leading-tight text-ink">Olá, {first}!</h1>
