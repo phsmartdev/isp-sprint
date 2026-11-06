@@ -60,6 +60,7 @@ const NAV: NavEntry[] = [
     { to: '/times/intervencoes', label: 'Intervenções', module: 'resultados' },
     { to: '/times/rituais', label: 'Rituais', module: 'resultados' },
     { to: '/times/decisoes', label: 'Decisões e impedimentos', module: 'resultados' },
+    { to: '/times/ferias', label: 'Férias', module: 'resultados' },
     { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
