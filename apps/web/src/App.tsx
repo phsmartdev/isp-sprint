@@ -6,6 +6,7 @@ import { ResultsPage } from './pages/results/Results';
 import { InterventionsPage } from './pages/results/Interventions';
 import { AnalysisPage } from './pages/results/Analysis';
 import { RitualsPage } from './pages/results/Rituals';
+import { VacationsPage } from './pages/results/Vacations';
 import { MeetingPage } from './pages/results/Meeting';
 import { DecisionsPage } from './pages/results/Decisions';
 import { GoalsPage } from './pages/performance/Goals';
@@ -126,6 +127,7 @@ export function App() {
         <Route path="times/intervencoes" element={<Gate module="resultados"><InterventionsPage /></Gate>} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
         <Route path="times/rituais" element={<Gate module="resultados"><RitualsPage /></Gate>} />
+        <Route path="times/ferias" element={<Gate module="resultados"><VacationsPage /></Gate>} />
         <Route path="times/rituais/reunioes/:id" element={<Gate module="resultados"><MeetingPage /></Gate>} />
         <Route path="times/decisoes" element={<Gate module="resultados"><DecisionsPage /></Gate>} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />

@@ -82,6 +82,7 @@ import { accountRelationRoutes } from './routes/accountRelations';
 import { structureRoutes } from './routes/structures';
 import { interventionRoutes } from './routes/interventions';
 import { ritualRoutes } from './routes/rituals';
+import { vacationRoutes } from './routes/vacations';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -262,6 +263,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...structureRoutes,
     ...interventionRoutes,
     ...ritualRoutes,
+    ...vacationRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

@@ -757,6 +757,13 @@
       "when": 1793972405513,
       "tag": "0107_licitacao_preco_item",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1794005553365,
+      "tag": "0108_ferias",
+      "breakpoints": true
     }
   ]
 }

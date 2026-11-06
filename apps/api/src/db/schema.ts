@@ -5408,3 +5408,47 @@ export const financialFormulaEvents = pgTable('financial_formula_events', {
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('financial_formula_events_idx').on(t.tenantId, t.code, t.createdAt) }));
+
+// ---------------------------------------------------------------- Gestão de Times → Férias
+/** Regras de férias da empresa (versões append-only; vale a de maior versão). */
+export const vacationSettings = pgTable('vacation_settings', {
+  id: id(),
+  tenantId: tenantId(),
+  version: integer('version').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  note: text('note').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('vacation_settings_uq').on(t.tenantId, t.version) }));
+
+/** Admissão da pessoa (base dos períodos aquisitivos). */
+export const vacationPeople = pgTable('vacation_people', {
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  admissionDate: date('admission_date', { mode: 'string' }).notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.userId] }) }));
+
+/** Blocos de férias: sugerida (automática) → programada (confirmada pela liderança); cancelada fica guardada. Histórico em governance_events (entity = 'ferias'). */
+export const vacations = pgTable('vacations', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** início do período aquisitivo a que o bloco pertence */
+  periodStart: date('period_start', { mode: 'string' }).notNull(),
+  startDate: date('start_date', { mode: 'string' }).notNull(),
+  days: integer('days').notNull(),
+  status: text('status').notNull().default('sugerida'),
+  source: text('source').notNull().default('manual'),
+  note: text('note'),
+  /** aviso de N dias antes já enviado (pessoa e liderança) */
+  alertedAt: ts('alerted_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('vacations_tenant_idx').on(t.tenantId, t.startDate),
+  statusCk: check('vacations_status_ck', sql`status in ('sugerida','programada','cancelada')`),
+  daysCk: check('vacations_days_ck', sql`days between 1 and 60`),
+}));
