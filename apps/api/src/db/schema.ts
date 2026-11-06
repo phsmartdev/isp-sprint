@@ -640,6 +640,13 @@ export const opportunityItems = pgTable('opportunity_items', {
   notes: text('notes'),
   /** Licitação: valor do lance por unidade deste item. */
   bidUnitCents: bigint('bid_unit_cents', { mode: 'number' }),
+  /** Licitação, resultado do pregão: nosso preço unitário final (depois da disputa de lances). */
+  finalUnitCents: bigint('final_unit_cents', { mode: 'number' }),
+  /** Licitação, resultado: vencemos este item. */
+  winnerIsUs: boolean('winner_is_us').notNull().default(false),
+  /** Licitação, resultado: empresa vencedora do item (quando não fomos nós) e o preço unitário dela. */
+  winnerCompany: text('winner_company'),
+  winnerUnitCents: bigint('winner_unit_cents', { mode: 'number' }),
   /** Documento fiscal do item (da filial da oportunidade): define os tributos na viabilidade econômica. */
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   /** Tipo de negociação do item: venda (pagamento único), recorrência ou locação/aluguel (mensais). */

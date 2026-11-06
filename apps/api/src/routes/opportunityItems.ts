@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -74,8 +74,16 @@ export const opportunityItemRoutes = [
         const before = await tx.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, opp.id));
         const beforeTotals = itemsTotals(before);
         await tx.delete(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, auth.tenantId)));
+        // resultado do pregão por item (nosso final e vencedora) acompanha o item de mesma descrição ao salvar a lista
+        const prevRes = new Map<string, (typeof before)[number][]>();
+        for (const b of before) { const k = b.description.trim().toLowerCase(); prevRes.set(k, [...(prevRes.get(k) ?? []), b]); }
+        const carry = (desc: string) => {
+          const b = prevRes.get(desc.trim().toLowerCase())?.shift();
+          return b ? { finalUnitCents: b.finalUnitCents, winnerIsUs: b.winnerIsUs, winnerCompany: b.winnerCompany, winnerUnitCents: b.winnerUnitCents } : {};
+        };
         if (body.items.length) {
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
+            ...(bid ? carry(it.description) : {}),
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
             discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, dealKind: it.dealKind, createdBy: auth.userId,
           })));
@@ -110,6 +118,41 @@ export const opportunityItemRoutes = [
         });
       });
       return opportunityDto(await loadOpportunity(app.db, auth, params.id));
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/opportunities/:id/items/bid-results', summary: 'Licitação: resultado por item (nosso preço unitário final e o da empresa vencedora). Vale também depois do encerramento', tag: 'Oportunidades', module: 'oportunidades', params: OppParams,
+    body: z.object({ rowVersion: z.number().int(), items: z.array(z.object({ id: z.string().uuid(), finalUnitCents: cents.nullable(), winnerIsUs: z.boolean().default(false), winnerCompany: z.string().trim().max(200).nullable().optional(), winnerUnitCents: cents.nullable() })).max(300) }),
+    handler: async ({ app, auth, params, body }) => {
+      await app.db.transaction(async (tx) => {
+        const opp = await loadOpportunity(tx, auth, params.id);
+        if (opp.rowVersion !== body.rowVersion) throw conflict(opp.rowVersion);
+        if (!(await isBid(tx, auth.tenantId, opp))) throw unprocessable('Resultado por item é só para oportunidades do tipo Licitação.');
+        const rows = await tx.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, auth.tenantId)));
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        const fmt = (c: number | null) => (c == null ? '—' : (c / 100).toFixed(2));
+        const describe = (r: { description: string; finalUnitCents: number | null; winnerIsUs: boolean; winnerCompany: string | null; winnerUnitCents: number | null }) =>
+          `${r.description}: nosso ${fmt(r.finalUnitCents)}, vencedora ${r.winnerIsUs ? 'nós' : r.winnerCompany ?? '—'} ${r.winnerIsUs ? fmt(r.finalUnitCents) : fmt(r.winnerUnitCents)}`;
+        const from: string[] = [], to: string[] = [];
+        for (const [i, it] of body.items.entries()) {
+          const cur = byId.get(it.id);
+          if (!cur) throw unprocessable(`Item ${i + 1} não é desta oportunidade.`);
+          const next = { finalUnitCents: it.finalUnitCents, winnerIsUs: it.winnerIsUs, winnerCompany: it.winnerIsUs ? null : it.winnerCompany?.trim() || null, winnerUnitCents: it.winnerIsUs ? null : it.winnerUnitCents };
+          const err = bidItemResultError(next);
+          if (err) throw unprocessable(`${cur.description}: ${err}`, [{ path: `items.${i}`, message: err }]);
+          const a = describe(cur), b = describe({ ...cur, ...next });
+          if (a === b) continue;
+          from.push(a); to.push(b);
+          await tx.update(s.opportunityItems).set(next).where(and(eq(s.opportunityItems.id, cur.id), eq(s.opportunityItems.tenantId, auth.tenantId)));
+        }
+        const updated = await tx.update(s.opportunities).set({ updatedAt: new Date(), rowVersion: bumpVersion() })
+          .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
+        if (!updated.length) throw conflict(opp.rowVersion);
+        if (to.length) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: updated[0]!.rowVersion, payload: { changed: { 'resultado por item': { from: from.join('; '), to: to.join('; ') } } } });
+      });
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const rows = await app.db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, auth.tenantId))).orderBy(asc(s.opportunityItems.position));
+      return { rowVersion: opp.rowVersion, items: rows };
     },
   }),
 ];

@@ -750,6 +750,13 @@
       "when": 1793964650254,
       "tag": "0106_envelope_nos_documentos",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1793972405513,
+      "tag": "0107_licitacao_preco_item",
+      "breakpoints": true
     }
   ]
 }

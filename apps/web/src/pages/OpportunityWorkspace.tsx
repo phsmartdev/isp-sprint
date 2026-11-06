@@ -9,6 +9,7 @@ import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economic
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
+import { BidItemResults } from '../features/opportunity/BidItemResults';
 import { OriginEmail, useOriginEmail } from '../features/opportunity/OriginEmail';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -780,7 +781,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
           {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
-          {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
+          {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidItemResults oppId={opp.id} /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
             <div className="space-y-5">
