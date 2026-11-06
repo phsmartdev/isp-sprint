@@ -5452,3 +5452,25 @@ export const vacations = pgTable('vacations', {
   statusCk: check('vacations_status_ck', sql`status in ('sugerida','programada','cancelada')`),
   daysCk: check('vacations_days_ck', sql`days between 1 and 60`),
 }));
+
+// ---------------------------------------------------------------- Gestão de Times → Gamificação colaborativa
+/**
+ * Regras da gamificação (pontos por evento, pesos por hierarquia, faixas de dispersão, níveis) — versões append-only.
+ * Cada versão nasce proposta; só vale depois de aprovada (por quem administra e não propôs). Vale a aprovada mais recente.
+ */
+export const gamificationSettings = pgTable('gamification_settings', {
+  id: id(),
+  tenantId: tenantId(),
+  version: integer('version').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  note: text('note').notNull(),
+  status: text('status').notNull().default('proposta'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('gamification_settings_uq').on(t.tenantId, t.version),
+  statusCk: check('gamification_settings_status_ck', sql`status in ('proposta','aprovada','recusada')`),
+}));

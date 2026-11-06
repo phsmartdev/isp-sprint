@@ -1,5 +1,6 @@
 /** Gestão de Times — perspectivas Diretoria, Gestão e Liderança sobre a mesma base, no escopo de cada um. */
 import { useQuery } from '@tanstack/react-query';
+import { TeamPodiumAside } from '../../features/gamification/Gamification';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { Gauge } from 'lucide-react';
@@ -38,6 +39,8 @@ export function ResultsPage() {
   return (
     <div>
       <PageHeader icon={<Gauge />} title="Gestão de Times" subtitle="Estratégia, metas, indicadores e execução no escopo de quem responde por eles." />
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0">
       {!s.perspectives.length ? (
         <Notice tone="info">Você ainda não responde por uma diretoria, área ou time na estrutura de gestão. Aqui aparecem as suas metas; quem administra define responsáveis em Configuração → Gestão de Times.</Notice>
       ) : (
@@ -88,6 +91,9 @@ export function ResultsPage() {
           </section>
         </>
       )}
+      </div>
+      <TeamPodiumAside />
+      </div>
     </div>
   );
 }

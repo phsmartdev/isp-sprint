@@ -17,6 +17,7 @@ import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 import { AppErrorBoundary } from '../AppErrorBoundary';
+import { HeaderSelo } from '../../features/gamification/Gamification';
 
 type NavLeaf = {
   to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: 'approvals'; also?: string[];
@@ -61,6 +62,7 @@ const NAV: NavEntry[] = [
     { to: '/times/rituais', label: 'Rituais', module: 'resultados' },
     { to: '/times/decisoes', label: 'Decisões e impedimentos', module: 'resultados' },
     { to: '/times/ferias', label: 'Férias', module: 'resultados' },
+    { to: '/times/gamificacao', label: 'Gamificação', module: 'resultados' },
     { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
@@ -238,7 +240,8 @@ function UserMenu() {
   }, []);
   if (!me) return null;
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative flex items-center gap-1" ref={ref}>
+      <HeaderSelo />
       <button aria-label={`Conta de ${me.user.name}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((v) => !v)} className="flex items-center gap-3 rounded-md px-2 py-1 hover:bg-surface-2">
         <Avatar name={me.user.name} userId={me.user.id} hasPhoto={me.user.hasAvatar} size={44} />
         <span className="hidden text-left leading-tight md:block">
