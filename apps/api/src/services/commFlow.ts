@@ -109,6 +109,36 @@ export function commEmailHtml(o: { company: string; subject: string; bodyHtml: s
 </td></tr><tr><td style="padding:12px 24px;border-top:1px solid #E2E8F0;color:#94A3B8;font-size:11px">Mensagem enviada pela Gestão de Contratos.</td></tr></table></td></tr></table>${openPixel(o.pixel)}</body></html>`;
 }
 
+export type CommImage = { mime: string; data: Buffer; width?: number | null; height?: number | null };
+export type CommImages = { header?: CommImage | null; footer?: CommImage | null };
+const imgTag = (src: string, alt: string) => `<img src="${esc(src)}" alt="${esc(alt)}" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0" />`;
+
+/**
+ * Modelo genérico: cabeçalho em imagem, a área do corpo (com altura mínima, como uma folha) e o rodapé em imagem.
+ * inline = imagens como data URI (pré-visualização na tela); senão vão anexadas em linha (cid), que os leitores de
+ * e-mail mostram sem depender de link externo.
+ */
+export function modelEmailHtml(o: { company: string; bodyHtml: string; frameHeight: number; images: CommImages; inline?: boolean; pixel?: string | null; reply?: string | null }) {
+  const attachments: { filename: string; content: Buffer; contentType: string; cid: string }[] = [];
+  const src = (k: 'header' | 'footer') => {
+    const im = o.images[k];
+    if (!im) return null;
+    if (o.inline) return `data:${im.mime};base64,${im.data.toString('base64')}`;
+    const cid = `${k}@modelo`;
+    attachments.push({ filename: `${k === 'header' ? 'cabecalho' : 'rodape'}.${im.mime === 'image/png' ? 'png' : im.mime === 'image/gif' ? 'gif' : 'jpg'}`, content: im.data, contentType: im.mime, cid });
+    return `cid:${cid}`;
+  };
+  const h = src('header'), f = src('footer');
+  const html = `<!doctype html><html><body style="margin:0;background:#F1F5F9;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F5F9;padding:24px 0"><tr><td align="center">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid #E2E8F0">
+${h ? `<tr><td style="padding:0;line-height:0">${imgTag(h, `${o.company} · cabeçalho`)}</td></tr>` : ''}
+<tr><td valign="top" height="${o.frameHeight}" style="padding:24px;height:${o.frameHeight}px;vertical-align:top">${o.bodyHtml}${o.reply ? replyLink(o.reply) : ''}</td></tr>
+${f ? `<tr><td style="padding:0;line-height:0">${imgTag(f, `${o.company} · rodapé`)}</td></tr>` : ''}
+</table></td></tr></table>${openPixel(o.pixel)}</body></html>`;
+  return { html, attachments };
+}
+
 const stripTags = (h: string) => h.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
 /**
@@ -116,7 +146,12 @@ const stripTags = (h: string) => h.replace(/<style[\s\S]*?<\/style>/gi, '').repl
  * A abertura é rastreada por pixel; quem está fora do sistema recebe também o link "Responder".
  * No HTML, {{link_resposta}} marca onde vai o link de resposta (sem ele, entra no final).
  */
-export function buildEmail(o: { company: string; subject: string; body: string; format?: string; layout?: boolean; vars: Record<string, string | null | undefined>; pixel?: string | null; reply?: string | null }) {
+export function buildEmail(o: { company: string; subject: string; body: string; format?: string; layout?: boolean; vars: Record<string, string | null | undefined>; pixel?: string | null; reply?: string | null; images?: CommImages; frameHeight?: number; inline?: boolean }): { html: string; text: string; attachments?: { filename: string; content: Buffer; contentType: string; cid: string }[] } {
+  if (o.format === 'modelo') {
+    const text = renderComm(o.body, o.vars);
+    const m = modelEmailHtml({ company: o.company, bodyHtml: bodyToHtml(text), frameHeight: o.frameHeight ?? 320, images: o.images ?? {}, inline: o.inline, pixel: o.pixel, reply: o.reply });
+    return { html: m.html, text, attachments: m.attachments };
+  }
   if (o.format !== 'html') {
     const text = renderComm(o.body, o.vars);
     return { html: commEmailHtml({ company: o.company, subject: o.subject, bodyHtml: bodyToHtml(text), pixel: o.pixel, reply: o.reply }), text };
@@ -133,6 +168,15 @@ export function buildEmail(o: { company: string; subject: string; body: string; 
   return { html: doc, text };
 }
 
+/** Imagens do modelo (só da própria empresa). */
+export async function commImages(db: DbOrTx, tenantId: string, ids: { headerAssetId?: string | null; footerAssetId?: string | null }): Promise<CommImages> {
+  const want = [ids.headerAssetId, ids.footerAssetId].filter((x): x is string => !!x);
+  if (!want.length) return {};
+  const rows = await db.select({ id: s.commAssets.id, mime: s.commAssets.mime, data: s.commAssets.data, width: s.commAssets.width, height: s.commAssets.height }).from(s.commAssets).where(and(eq(s.commAssets.tenantId, tenantId), inArray(s.commAssets.id, want)));
+  const get = (id?: string | null) => { const r = id ? rows.find((x) => x.id === id) : null; return r ? { mime: r.mime, data: Buffer.from(r.data), width: r.width, height: r.height } : null; };
+  return { header: get(ids.headerAssetId), footer: get(ids.footerAssetId) };
+}
+
 async function publishedTemplate(db: DbOrTx, tenantId: string, templateId: string) {
   const [v] = await db.select().from(s.commTemplateVersions).where(and(eq(s.commTemplateVersions.tenantId, tenantId), eq(s.commTemplateVersions.templateId, templateId))).orderBy(desc(s.commTemplateVersions.version)).limit(1);
   return v ?? null;
@@ -146,9 +190,10 @@ async function buildPreview(db: DbOrTx, c: Contract, run: Run, node: CommNode) {
   // a pré-visualização usa o primeiro destinatário; no envio, {{destinatario}} sai com o nome de cada um
   const vars = await commVars(db, c, run.anchorDate, recipients[0]?.name ?? '');
   const subject = renderComm(t.subject, vars);
-  const mail = buildEmail({ company: await tenantName(db, c.tenantId), subject, body: t.body, format: t.format, layout: t.layout, vars });
+  const images = t.format === 'modelo' ? await commImages(db, c.tenantId, t) : {};
+  const mail = buildEmail({ company: await tenantName(db, c.tenantId), subject, body: t.body, format: t.format, layout: t.layout, vars, images, frameHeight: t.frameHeight, inline: true });
   return {
-    raw: { subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format, layout: t.layout }, vars,
+    raw: { subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format, layout: t.layout, headerAssetId: t.headerAssetId, footerAssetId: t.footerAssetId, frameHeight: t.frameHeight }, vars,
     subject, html: mail.html, text: mail.text, whatsapp: renderComm(t.whatsapp, vars),
     recipients, channels: (node.data.channels ?? []).filter((ch) => t.channels.includes(ch)), templateId: t.templateId, templateVersion: t.version,
   };
@@ -293,6 +338,7 @@ export async function decideStep(db: DbOrTx, config: Config, auth: AuthContext, 
   }
   const p = step.preview;
   const company = await tenantName(db, auth.tenantId);
+  const images = p.raw?.format === 'modelo' ? await commImages(db, auth.tenantId, p.raw) : {};
   const z = p.channels.includes('whatsapp') ? await zapi(db, auth.tenantId) : null;
   const ids: string[] = [];
   const report: { name: string; channel: string; status: string }[] = [];
@@ -316,8 +362,8 @@ export async function decideStep(db: DbOrTx, config: Config, auth: AuthContext, 
       let status: 'enviado' | 'falhou' | 'nao_configurado' | 'sem_contato' = 'sem_contato';
       let error: string | null = null;
       if (to && channel === 'email') {
-        const mail = buildEmail({ company, subject: m.subject, body: m.body, format: m.format, layout: m.layout, vars: v, pixel, reply });
-        const res = await sendAlert(db, { tenantId: auth.tenantId, kind: 'contrato_esteira', to, subject: m.subject, text: reply ? `${mail.text}\n\nResponder: ${reply}` : mail.text, html: mail.html, contractId: c!.id, createdBy: auth.userId });
+        const mail = buildEmail({ company, subject: m.subject, body: m.body, format: m.format, layout: m.layout, vars: v, pixel, reply, images, frameHeight: p.raw?.frameHeight });
+        const res = await sendAlert(db, { tenantId: auth.tenantId, kind: 'contrato_esteira', to, subject: m.subject, text: reply ? `${mail.text}\n\nResponder: ${reply}` : mail.text, html: mail.html, attachments: mail.attachments, contractId: c!.id, createdBy: auth.userId });
         status = res && 'ok' in res && res.ok ? 'enviado' : res && 'notConfigured' in res && res.notConfigured ? 'nao_configurado' : 'falhou';
         error = res && !res.ok ? res.error ?? null : null;
       } else if (to && channel === 'whatsapp') {
