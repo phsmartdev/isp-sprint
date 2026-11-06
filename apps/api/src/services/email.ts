@@ -39,7 +39,8 @@ export function decryptSecret(blob: string): string | null {
 
 // ------------------------------------------------------------------ envio
 
-export type MailAttachment = { filename: string; content: Buffer; contentType: string };
+/** cid = imagem em linha no HTML (src="cid:…"), como o cabeçalho e o rodapé dos modelos de e-mail */
+export type MailAttachment = { filename: string; content: Buffer; contentType: string; cid?: string };
 export type SendInput = {
   tenantId: string;
   kind: string;

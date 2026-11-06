@@ -10,7 +10,7 @@ import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client;
-const sent: { to: string; subject: string; text: string; html?: string }[] = [];
+const sent: { to: string; subject: string; text: string; html?: string; attachments?: { cid?: string; contentType: string }[] }[] = [];
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 
@@ -64,6 +64,36 @@ describe('esteira de comunicação de contratos', () => {
     const bare = ok(await carlos.post('/comm/templates/preview', { subject: 'S', body: '<html><body><p>{{contrato}}</p></body></html>', whatsapp: '', format: 'html', layout: false })).json().html as string;
     expect(bare).not.toContain('#1F3A5F');
     expect(bare).toContain('<p>045/2026</p>');
+  });
+
+  it('modelo com imagens: cabeçalho e rodapé em imagem, assunto = nome com variáveis, corpo na área de altura definida, imagens em linha (cid)', async () => {
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAlgAAAAyCAIAAAAP9DKeAAAAtUlEQVR42u3VMQ0AAAgEsXeEHgyhmxUPNKmCWy7VAwBvRQIAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAAjBAArgUO6J/WfiOSTgAAAABJRU5ErkJggg==';
+    expect((await lucas.post('/comm/assets', { kind: 'cabecalho', filename: 'c.png', data: PNG })).statusCode).toBe(403);
+    expect(ok(await carlos.post('/comm/assets', { kind: 'cabecalho', filename: 'x.txt', data: Buffer.from('nao e imagem').toString('base64') }), 422).json().detail).toMatch(/PNG, JPG ou GIF/);
+    const h = ok(await carlos.post('/comm/assets', { kind: 'cabecalho', filename: 'cabecalho.png', data: PNG }), 201).json();
+    expect(h).toMatchObject({ mime: 'image/png', width: 600, height: 50, warning: null });
+    const f = ok(await carlos.post('/comm/assets', { kind: 'rodape', filename: 'rodape.png', data: PNG }), 201).json();
+    const img = ok(await carlos.get(`/comm/assets/${h.id}`));
+    expect(img.headers['content-type']).toBe('image/png');
+    const body = { name: 'Contrato {{contrato}} · {{cliente}}', channels: ['email'], subject: 'ignorado', body: 'Prezado(a) {{destinatario}},\n\nSegue o **aviso**.', format: 'modelo', headerAssetId: h.id, footerAssetId: f.id, frameHeight: 400 };
+    const pv = ok(await carlos.post('/comm/templates/preview', body)).json();
+    expect(pv.subject).toBe('Contrato 045/2026 · Cliente Exemplo Ltda');
+    expect(pv.html).toContain('data:image/png;base64,');
+    expect(pv.html).toContain('height:400px');
+    const id = ok(await carlos.post('/comm/templates', body), 201).json().id;
+    const saved = (await carlos.get('/comm/templates')).json().items.find((x: { id: string }) => x.id === id);
+    expect(saved).toMatchObject({ subject: 'Contrato {{contrato}} · {{cliente}}', format: 'modelo', headerAssetId: h.id, footerAssetId: f.id, frameHeight: 400 });
+    expect(ok(await carlos.post(`/comm/templates/${id}/publish`)).json().version).toBe(1);
+    const n = sent.length;
+    ok(await carlos.post(`/comm/templates/${id}/test`));
+    const m = sent[n]!;
+    expect(m.subject).toBe('[TESTE] Contrato 045/2026 · Cliente Exemplo Ltda');
+    expect(m.html).toContain('src="cid:header@modelo"');
+    expect(m.html).toContain('src="cid:footer@modelo"');
+    expect(m.attachments?.map((a) => a.cid)).toEqual(['header@modelo', 'footer@modelo']);
+    expect(m.text).toContain('Segue o **aviso**'.replace(/\*\*/g, '**'));
+    // imagem de outra empresa ou inexistente não entra
+    expect((await carlos.post('/comm/templates', { ...body, headerAssetId: '00000000-0000-4000-8000-000000000000' })).statusCode).toBe(422);
   });
 
   it('esteira: nasce em branco; o desenho é validado; publica e liga', async () => {

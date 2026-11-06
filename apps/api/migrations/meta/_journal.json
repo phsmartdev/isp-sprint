@@ -715,6 +715,13 @@
       "when": 1793917224716,
       "tag": "0101_fiscal_envelopes",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793922460280,
+      "tag": "0102_email_modelo_imagens",
+      "breakpoints": true
     }
   ]
 }

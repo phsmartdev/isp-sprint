@@ -6,16 +6,17 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  COMM_CHANNELS, COMM_CONDITIONS, COMM_NODE_TYPES, COMM_RECIPIENT_KINDS, COMM_TRIGGERS, CONTRACT_OWNERS, renderComm, templateIssues, validateCommGraph,
-  type CommGraph,
+  COMM_CHANNELS, COMM_CONDITIONS, COMM_NODE_TYPES, COMM_RECIPIENT_KINDS, COMM_TRIGGERS, CONTRACT_OWNERS, COMM_FORMATS, FRAME_HEIGHT, renderComm, templateIssues, validateCommGraph,
+  type CommGraph, type CommFormat,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
+import type { DbOrTx } from '../db/client';
 import { canManagePlaybook } from './playbook';
 import { loadContract } from '../services/contracts';
-import { buildEmail, canApprove, decideStep, runCommFlows } from '../services/commFlow';
+import { buildEmail, canApprove, commImages, decideStep, runCommFlows } from '../services/commFlow';
 import { sendAlert, tenantName } from '../services/email';
 
 const guard = (auth: AuthContext) => { if (!canManagePlaybook(auth)) throw forbidden('Só a administração ou quem tem nível Total em Contratos monta esteiras e templates.'); };
@@ -26,9 +27,42 @@ const Template = z.object({
   subject: z.string().max(250).default(''),
   body: z.string().max(20_000).default(''),
   whatsapp: z.string().max(4000).default(''),
-  format: z.enum(['texto', 'html']).default('texto'),
+  format: z.enum(COMM_FORMATS).default('texto'),
   layout: z.boolean().default(true),
+  headerAssetId: z.string().uuid().nullable().optional(),
+  footerAssetId: z.string().uuid().nullable().optional(),
+  frameHeight: z.number().int().min(FRAME_HEIGHT.min).max(FRAME_HEIGHT.max).default(FRAME_HEIGHT.default),
 });
+type TemplateBody = z.infer<typeof Template>;
+
+/** No modelo com imagens o assunto é o próprio nome do modelo (com as variáveis do contrato); as imagens são da empresa. */
+async function normalizeTemplate(db: DbOrTx, tenantId: string, b: TemplateBody) {
+  const out = { ...b, headerAssetId: b.headerAssetId ?? null, footerAssetId: b.footerAssetId ?? null };
+  if (b.format === 'modelo') out.subject = b.name;
+  const ids = [out.headerAssetId, out.footerAssetId].filter((x): x is string => !!x);
+  if (ids.length) {
+    const rows = await db.select({ id: s.commAssets.id }).from(s.commAssets).where(and(eq(s.commAssets.tenantId, tenantId), inArray(s.commAssets.id, ids)));
+    if (rows.length !== new Set(ids).size) throw unprocessable('Imagem de cabeçalho ou rodapé não encontrada.');
+  }
+  return out;
+}
+
+/** Tipo e tamanho da imagem pelos bytes (PNG, JPG ou GIF); null = não é imagem aceita. */
+function imageInfo(b: Buffer): { mime: string; width: number | null; height: number | null } | null {
+  if (b.length > 24 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mime: 'image/png', width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  if (b.length > 10 && b.subarray(0, 3).toString('latin1') === 'GIF') return { mime: 'image/gif', width: b.readUInt16LE(6), height: b.readUInt16LE(8) };
+  if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const m = b[i + 1]!;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { mime: 'image/jpeg', height: b.readUInt16BE(i + 5), width: b.readUInt16BE(i + 7) };
+      i += 2 + b.readUInt16BE(i + 2);
+    }
+    return { mime: 'image/jpeg', width: null, height: null };
+  }
+  return null;
+}
 
 const Node = z.object({
   id: z.string().min(1).max(60), type: z.enum(COMM_NODE_TYPES), x: z.number(), y: z.number(),
@@ -61,7 +95,7 @@ export const commRoutes = [
     method: 'POST', url: '/comm/templates', summary: 'Cria template (rascunho)', tag: 'Comunicação', module: 'contratos', body: Template,
     handler: async ({ app, auth, body, reply }) => {
       guard(auth);
-      const [t] = await app.db.insert(s.commTemplates).values({ tenantId: auth.tenantId, ...body, createdBy: auth.userId }).returning({ id: s.commTemplates.id });
+      const [t] = await app.db.insert(s.commTemplates).values({ tenantId: auth.tenantId, ...(await normalizeTemplate(app.db, auth.tenantId, body)), createdBy: auth.userId }).returning({ id: s.commTemplates.id });
       reply.code(201);
       return t!;
     },
@@ -74,7 +108,8 @@ export const commRoutes = [
       const [t] = await app.db.select().from(s.commTemplates).where(and(eq(s.commTemplates.id, params.id), eq(s.commTemplates.tenantId, auth.tenantId))).limit(1);
       if (!t) throw notFound('Template não encontrado.');
       if (t.rowVersion !== body.rowVersion) throw conflict(t.rowVersion);
-      const { rowVersion: _rv, ...rest } = body;
+      const { rowVersion: _rv, ...raw } = body;
+      const rest = await normalizeTemplate(app.db, auth.tenantId, raw);
       const [u] = await app.db.update(s.commTemplates).set({ ...rest, status: t.status === 'arquivado' ? 'arquivado' : t.version ? 'publicado' : 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.commTemplates.rowVersion} + 1` }).where(eq(s.commTemplates.id, t.id)).returning({ rowVersion: s.commTemplates.rowVersion });
       return { rowVersion: u!.rowVersion, dirty: true };
     },
@@ -85,21 +120,22 @@ export const commRoutes = [
       guard(auth);
       const [t] = await tx.select().from(s.commTemplates).where(and(eq(s.commTemplates.id, params.id), eq(s.commTemplates.tenantId, auth.tenantId))).limit(1);
       if (!t) throw notFound('Template não encontrado.');
-      const issues = templateIssues({ subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format as 'texto' | 'html' }, t.channels as ('email' | 'whatsapp')[]);
+      const issues = templateIssues({ subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format as CommFormat }, t.channels as ('email' | 'whatsapp')[]);
       if (issues.length) throw unprocessable(issues.join(' '));
       const version = t.version + 1;
-      await tx.insert(s.commTemplateVersions).values({ tenantId: auth.tenantId, templateId: t.id, version, channels: t.channels, subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format, layout: t.layout, publishedBy: auth.userId });
+      await tx.insert(s.commTemplateVersions).values({ tenantId: auth.tenantId, templateId: t.id, version, channels: t.channels, subject: t.subject, body: t.body, whatsapp: t.whatsapp, format: t.format, layout: t.layout, headerAssetId: t.headerAssetId, footerAssetId: t.footerAssetId, frameHeight: t.frameHeight, publishedBy: auth.userId });
       await tx.update(s.commTemplates).set({ version, status: 'publicado', updatedAt: new Date(), rowVersion: sql`${s.commTemplates.rowVersion} + 1` }).where(eq(s.commTemplates.id, t.id));
       return { version };
     }),
   }),
   defineRoute({
     method: 'POST', url: '/comm/templates/preview', summary: 'Pré-visualiza o template com dados de exemplo (HTML do e-mail e texto do WhatsApp)', tag: 'Comunicação', module: 'contratos',
-    body: Template.pick({ subject: true, body: true, whatsapp: true, format: true, layout: true }),
+    body: Template.pick({ subject: true, body: true, whatsapp: true, format: true, layout: true, headerAssetId: true, footerAssetId: true, frameHeight: true }).extend({ name: z.string().max(120).optional() }),
     handler: async ({ app, auth, body }) => {
       const vars = { ...SAMPLE, empresa: await tenantName(app.db, auth.tenantId) };
-      const subject = renderComm(body.subject, vars);
-      return { subject, html: buildEmail({ company: vars.empresa, subject, body: body.body, format: body.format, layout: body.layout, vars, reply: '#' }).html, whatsapp: renderComm(body.whatsapp, vars) };
+      const subject = renderComm(body.format === 'modelo' ? body.name ?? '' : body.subject, vars);
+      const images = body.format === 'modelo' ? await commImages(app.db, auth.tenantId, body) : {};
+      return { subject, html: buildEmail({ company: vars.empresa, subject, body: body.body, format: body.format, layout: body.layout, vars, reply: '#', images, frameHeight: body.frameHeight, inline: true }).html, whatsapp: renderComm(body.whatsapp, vars) };
     },
   }),
   defineRoute({
@@ -111,10 +147,36 @@ export const commRoutes = [
       const [me] = await app.db.select({ email: s.users.email }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
       const vars = { ...SAMPLE, empresa: await tenantName(app.db, auth.tenantId), destinatario: auth.name };
       const subject = `[TESTE] ${renderComm(t.subject, vars)}`;
-      const mail = buildEmail({ company: vars.empresa, subject, body: t.body, format: t.format, layout: t.layout, vars });
-      const r = await sendAlert(app.db, { tenantId: auth.tenantId, kind: 'contrato_esteira_teste', to: me!.email, subject, text: mail.text, html: mail.html, createdBy: auth.userId });
+      const images = t.format === 'modelo' ? await commImages(app.db, auth.tenantId, t) : {};
+      const mail = buildEmail({ company: vars.empresa, subject, body: t.body, format: t.format, layout: t.layout, vars, images, frameHeight: t.frameHeight });
+      const r = await sendAlert(app.db, { tenantId: auth.tenantId, kind: 'contrato_esteira_teste', to: me!.email, subject, text: mail.text, html: mail.html, attachments: mail.attachments, createdBy: auth.userId });
       if (!r || !r.ok) throw unprocessable(r && 'error' in r && r.error ? r.error : 'Não foi possível enviar o teste.');
       return { to: me!.email };
+    },
+  }),
+
+  // ---------------------------------------------------------------- imagens do modelo (cabeçalho e rodapé)
+  defineRoute({
+    method: 'POST', url: '/comm/assets', summary: 'Envia a imagem de cabeçalho ou rodapé do modelo de e-mail (PNG, JPG ou GIF até 1 MB; largura ideal 600 px)', tag: 'Comunicação', module: 'contratos',
+    bodyLimit: 1_600_000,
+    body: z.object({ kind: z.enum(['cabecalho', 'rodape']), filename: z.string().trim().min(1).max(160), data: z.string().min(10).max(1_500_000) }),
+    handler: async ({ app, auth, body, reply }) => {
+      guard(auth);
+      const data = Buffer.from(body.data.replace(/^data:[^;]+;base64,/, ''), 'base64');
+      if (data.length > 1_000_000) throw unprocessable('Imagem maior que 1 MB: e-mails pesados caem no spam. Exporte com qualidade menor.');
+      const info = imageInfo(data);
+      if (!info) throw unprocessable('Envie a imagem em PNG, JPG ou GIF.');
+      const [a] = await app.db.insert(s.commAssets).values({ tenantId: auth.tenantId, kind: body.kind, filename: body.filename, mime: info.mime, data, width: info.width, height: info.height, createdBy: auth.userId }).returning({ id: s.commAssets.id });
+      reply.code(201);
+      return { id: a!.id, mime: info.mime, width: info.width, height: info.height, warning: info.width != null && info.width < 600 ? `A imagem tem ${info.width} px de largura: no e-mail ela é esticada para 600 px e pode ficar borrada.` : null };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/comm/assets/:id', summary: 'Imagem do modelo de e-mail (para a tela do editor)', tag: 'Comunicação', module: 'contratos', params: IdParams,
+    handler: async ({ app, auth, params, reply }) => {
+      const [a] = await app.db.select({ mime: s.commAssets.mime, data: s.commAssets.data }).from(s.commAssets).where(and(eq(s.commAssets.id, params.id), eq(s.commAssets.tenantId, auth.tenantId))).limit(1);
+      if (!a) throw notFound('Imagem não encontrada.');
+      return reply.header('content-type', a.mime).header('cache-control', 'private, max-age=31536000, immutable').send(Buffer.from(a.data));
     },
   }),
 

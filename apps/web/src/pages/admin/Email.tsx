@@ -150,6 +150,10 @@ function EmailLog() {
 export function AdminEmail() {
   return (
     <div className="space-y-4">
+      <section className="card flex flex-wrap items-center justify-between gap-3 p-4" aria-label="Modelos de e-mail dos contratos">
+        <div><h3 className="font-bold text-ink">Modelos de e-mail dos contratos</h3><p className="text-sm text-muted">Cabeçalho e rodapé em imagem, assunto com as variáveis do contrato e só o corpo para digitar.</p></div>
+        <Link to="/settings/contratos-comunicacao?aba=templates" className="text-sm font-semibold text-primary hover:underline">Abrir modelos de e-mail</Link>
+      </section>
       <SmtpForm />
       <Notifications />
       <EmailLog />

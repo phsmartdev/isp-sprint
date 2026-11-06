@@ -1502,6 +1502,10 @@ export const commTemplates = pgTable('comm_templates', {
   format: text('format').notNull().default('texto'),
   /** no HTML: usar a moldura institucional (cabeçalho e rodapé) em volta */
   layout: boolean('layout').notNull().default(true),
+  /** formato 'modelo': imagens de cabeçalho e rodapé e a altura (px) da área do corpo */
+  headerAssetId: uuid('header_asset_id'),
+  footerAssetId: uuid('footer_asset_id'),
+  frameHeight: integer('frame_height').notNull().default(320),
   status: text('status').notNull().default('rascunho'),
   version: integer('version').notNull().default(0),
   createdBy: uuid('created_by').references(() => users.id),
@@ -1521,9 +1525,29 @@ export const commTemplateVersions = pgTable('comm_template_versions', {
   whatsapp: text('whatsapp').notNull(),
   format: text('format').notNull().default('texto'),
   layout: boolean('layout').notNull().default(true),
+  headerAssetId: uuid('header_asset_id'),
+  footerAssetId: uuid('footer_asset_id'),
+  frameHeight: integer('frame_height').notNull().default(320),
   publishedBy: uuid('published_by').references(() => users.id),
   publishedAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('comm_template_versions_uq').on(t.templateId, t.version) }));
+
+/**
+ * Imagens dos modelos de e-mail (cabeçalho e rodapé). Imutáveis: trocar a imagem grava outra linha, então a versão
+ * publicada de um modelo continua apontando para a imagem com que foi publicada. No envio vão anexadas em linha (cid).
+ */
+export const commAssets = pgTable('comm_assets', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  filename: text('filename').notNull(),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('comm_assets_idx').on(t.tenantId), kindCk: check('comm_assets_kind_ck', inList('kind', ['cabecalho', 'rodape'])) }));
 
 /** Esteira (fluxo) desenhada pela empresa. O rascunho é editável; a versão publicada é a que roda. */
 export const commFlows = pgTable('comm_flows', {
@@ -1571,7 +1595,7 @@ export const commRunSteps = pgTable('comm_run_steps', {
   status: text('status').notNull().default('agendado'),
   dueOn: date('due_on', { mode: 'string' }).notNull(),
   /** envio: o que vai sair (já com as variáveis), para quem e por qual canal */
-  preview: jsonb('preview').$type<{ raw?: { subject: string; body: string; whatsapp: string; format?: string; layout?: boolean }; vars?: Record<string, string | null>; subject: string; html: string; text: string; whatsapp: string; recipients: { name: string; email: string | null; phone: string | null; kind: string; userId: string | null; actorId: string | null }[]; channels: string[]; templateId: string; templateVersion: number } | null>(),
+  preview: jsonb('preview').$type<{ raw?: { subject: string; body: string; whatsapp: string; format?: string; layout?: boolean; headerAssetId?: string | null; footerAssetId?: string | null; frameHeight?: number }; vars?: Record<string, string | null>; subject: string; html: string; text: string; whatsapp: string; recipients: { name: string; email: string | null; phone: string | null; kind: string; userId: string | null; actorId: string | null }[]; channels: string[]; templateId: string; templateVersion: number } | null>(),
   approverRole: text('approver_role'),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
