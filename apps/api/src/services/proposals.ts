@@ -67,11 +67,12 @@ const A4_W = 595.28;
 
 export function safeText(font: PDFFont, t: string) {
   // Helvetica só tem WinAnsi: troca o que não dá para escrever
-  return [...t].map((ch) => { try { font.encodeText(ch); return ch; } catch { return ch === '•' ? '-' : '?'; } }).join('');
+  const MAP: Record<string, string> = { '•': '-', '→': '->', '←': '<-', '−': '-', '≥': '>=', '≤': '<=', '≈': '~', '×': 'x' };
+  return [...t].map((ch) => { try { font.encodeText(ch); return ch; } catch { return MAP[ch] ?? '?'; } }).join('');
 }
 export function wrap(font: PDFFont, text: string, size: number, maxW: number) {
   const out: string[] = [];
-  for (const para of text.split('\n')) {
+  for (const para of safeText(font, text).split('\n')) {
     const words = para.split(/\s+/).filter(Boolean);
     if (!words.length) { out.push(''); continue; }
     let line = '';

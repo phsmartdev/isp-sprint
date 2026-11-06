@@ -116,7 +116,7 @@ describe('Etapa 1: módulos de negócio', () => {
     const opp = ((await ctx.db.execute(sql`select id from opportunities where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string }).id;
     ok(await setModule('crm', { enabled: true, disabledFeatures: ['crm.viabilidade'] }));
     try {
-      for (const url of [`/opportunities/${opp}/economics`, '/admin/viability/econ', '/admin/viability/envelopes', '/finance-studio/catalog', '/economics/pending', '/cost-items', '/intelligence/economics']) {
+      for (const url of [`/opportunities/${opp}/economics`, '/admin/viability/econ', '/finance-studio/catalog', '/economics/pending', '/cost-items', '/intelligence/economics']) {
         const r = await carlos.get(url);
         expect(r.statusCode, url).toBe(403);
         expect(r.json().detail, url).toMatch(/Viabilidade econômica.*desligada/);

@@ -308,39 +308,34 @@ describe('viabilidade econômica', () => {
     ok(await carlos.get('/opportunities?from=29-10-2026'), 422);
   });
 
-  it('envelope fiscal por vigência: schema por chave, carga da nota e IR/CSLL do envelope, retenções fora do cálculo', async () => {
-    ok(await carlos.post('/admin/viability/econ', { ...ECON, overheadBp: 2000, lossPrivateBp: 300, badDebtBp: 100, incomeTaxBp: 3400, netMarginTargetBp: 4000 }), 201);
-    // schema da chave: 2026 com PIS/COFINS, 2027 sem (CBS/IBS no lugar)
-    const s26 = ok(await carlos.get('/admin/viability/envelopes/schema?year=2026')).json();
-    const s27 = ok(await carlos.get('/admin/viability/envelopes/schema?year=2027')).json();
-    expect(s26.taxes.map((x: { key: string }) => x.key)).toEqual(expect.arrayContaining(['pis', 'cofins', 'icms', 'iss', 'fecoep']));
-    expect(s27.regime).toBe('reforma');
-    expect(s27.taxes.map((x: { key: string }) => x.key)).not.toContain('pis');
-    expect(s27.taxes.map((x: { key: string }) => x.key)).toEqual(expect.arrayContaining(['cbs', 'ibs', 'das']));
-    ok(await lucas.get('/admin/viability/envelopes'), 403);
-
-    // filial com código IBGE (município fictício para teste)
-    const br = ok(await carlos.get('/admin/sales-branches')).json().items;
-    ok(await carlos.put('/admin/sales-branches', { items: br.map((b: Record<string, unknown>, i: number) => ({ id: b.id, name: b.name, active: b.active, fiscalKinds: b.fiscalKinds, cnpj: b.cnpj, taxRegime: b.taxRegime, city: b.city, state: b.state, ibgeCode: i === 0 ? '2800308' : b.ibgeCode ?? null })) }));
-    const branch = br[0].id;
-    const env = (year: number, values: object) => carlos.post('/admin/viability/envelopes', { branchId: branch, ibgeCode: '2800308', municipality: 'Município de teste', year, values });
-    ok(await env(2027, { taxes: { servico: { pis: 65 } }, profitTaxBp: 1500 }), 422); // PIS não existe em 2027
-    ok(await env(2026, { taxes: { servico: { pis: 65, cofins: 300, iss: 500 } }, profitTaxBp: 1100, retentions: { irrf: 150, csrf: 465, issRetido: 500 } }), 201);
-    ok(await env(2027, { taxes: { servico: { cbs: 880, ibs: 10, iss: 500 } }, profitTaxBp: 1500 }), 201);
-    const list = ok(await carlos.get('/admin/viability/envelopes')).json().items;
-    expect(list.filter((x: { current: boolean }) => x.current)).toHaveLength(2);
-
-    const docs = ok(await carlos.put(`/admin/fiscal-docs/${branch}`, { items: [{ id: null, fiscalKind: 'servico', code: 'NFSE-ENV', name: 'Nota de serviço', active: true, taxes: [{ name: 'ISS', percentBp: 500, fixedCents: 0, active: true }, { name: 'IRRF', percentBp: 150, fixedCents: 0, active: true }] }] })).json().items;
+  it('envelope fiscal por vigência nos documentos fiscais: tributos por ano, DRE e retenções por empresa; retenções fora do cálculo; faixa de margem líquida', async () => {
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, overheadBp: 2000, lossPrivateBp: 300, badDebtBp: 100, incomeTaxBp: 3400, netMarginTargetBp: 4000, netMarginMinBp: 1200, netMarginMaxBp: 2500 }), 201);
+    const branch = (ok(await carlos.get('/admin/sales-branches')).json().items)[0].id;
+    // documento com tributos de 2026 (cadastro atual) e de 2027 (Reforma: CBS/IBS no lugar de PIS/COFINS)
+    const put = (year: number, taxes: object[], id: string | null = null) => carlos.put(`/admin/fiscal-docs/${branch}`, { year, items: [{ id, fiscalKind: 'servico', code: 'NFSE-ENV', name: 'Nota de serviço', active: true, taxes }] });
+    let docs = ok(await put(2026, [{ name: 'ISS', percentBp: 500, fixedCents: 0, active: true }, { name: 'PIS', percentBp: 65, fixedCents: 0, active: true }, { name: 'COFINS', percentBp: 300, fixedCents: 0, active: true }, { name: 'IRRF', percentBp: 150, fixedCents: 0, active: true }])).json().items;
     const doc = docs.find((d: { code: string }) => d.code === 'NFSE-ENV');
-    expect(doc.rates.percentBp).toBe(500); // IRRF é retenção (camada 3): fora da carga da nota
+    expect(doc.rates.percentBp).toBe(865); // IRRF é retenção: fora da carga da nota
+    docs = ok(await put(2027, [{ name: 'ISS', percentBp: 500, fixedCents: 0, active: true }, { name: 'CBS', percentBp: 880, fixedCents: 0, active: true }, { name: 'IBS', percentBp: 10, fixedCents: 0, active: true }], doc.id)).json().items;
+    expect(docs.find((d: { id: string }) => d.id === doc.id)).toMatchObject({ taxesYear: 2027, rates: { percentBp: 1390 } });
+    const y26 = ok(await carlos.get('/admin/fiscal-docs?year=2026')).json().items.find((d: { id: string }) => d.id === doc.id);
+    expect(y26).toMatchObject({ taxesYear: 2026, rates: { percentBp: 865 } });
+    expect(ok(await carlos.get('/admin/fiscal-docs?year=2028')).json().items.find((d: { id: string }) => d.id === doc.id).taxesYear).toBe(2027);
+    // DRE e retenções da empresa por ano
+    ok(await carlos.post(`/admin/fiscal-docs/${branch}/envelope`, { year: 2026, profitTaxBp: 1100, retentions: { irrf: 150, csrf: 465, issRetido: 500 } }), 201);
+    ok(await carlos.post(`/admin/fiscal-docs/${branch}/envelope`, { year: 2027, profitTaxBp: 1500, retentions: {} }), 201);
+    ok(await carlos.post(`/admin/fiscal-docs/${branch}/envelope`, { year: 2027, profitTaxBp: 10_000 }), 422);
+    const e28 = ok(await carlos.get(`/admin/fiscal-docs/${branch}/envelope?year=2028`)).json();
+    expect(e28.current).toMatchObject({ year: 2027, inherited: true, values: { profitTaxBp: 1500 } });
+    ok(await lucas.get(`/admin/fiscal-docs/${branch}/envelope?year=2027`), 403);
+
     const lk = ok(await carlos.get('/meta/lookups')).json();
     const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
     const o = ok(await carlos.post('/opportunities', { newContact: { name: `Empresa Envelope ${Date.now()}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: branch, saleKind: 'venda_consultiva' }), 201).json();
     ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link', unit: 'un', qtyMilli: 1000, unitCents: 0, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: doc.id }] }));
     const input = { mode: 'recorrente', termMonths: 12, receiveMonth: 0, paybackMonths: 3, capex: [{ description: 'Implantação', impact: 'material', qtyMilli: 1000, unitCents: 1_000_000 }], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null };
-    ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, fiscalYear: 2027, municipalityIbge: '28' }), 422);
     const r26 = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, fiscalYear: 2026 })).json();
-    expect(r26.result.fiscal).toMatchObject({ year: 2026, regime: 'tradicional', ibgeCode: '2800308', profitTaxBp: 1100, profitTaxSource: 'envelope' });
+    expect(r26.result.fiscal).toMatchObject({ year: 2026, regime: 'tradicional', profitTaxBp: 1100, profitTaxSource: 'envelope', docs: [{ fromYear: 2026, percentBp: 865 }] });
     expect(r26.result.rates.a).toBeCloseTo(0.0865, 8);
     expect(r26.result.fiscal.retentions.map((x: { code: string }) => x.code)).toEqual(['irrf', 'csrf', 'issRetido']);
     const r27 = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, fiscalYear: 2027 })).json();
@@ -348,9 +343,12 @@ describe('viabilidade econômica', () => {
     expect(r27.result.rates.a).toBeCloseTo(0.139, 8);
     expect(r27.recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(40 / 0.85 + 24, 2);
     expect(r27.recomendacao_viabilidade.parametros_utilizados['irpj_csll_%']).toBe(15);
-    // a fotografia guarda o envelope usado
+    // faixa: na base da aprovação, sem preço dos produtos a decisão é no sugerido (margem líquida > 12% e < 25%)
+    expect(r27.result.recommendation.range.min.priceCents).toBeLessThan(r27.result.recommendation.range.max.priceCents);
+    expect(r27.result.decision.netMarginRange).toEqual({ minPct: 12, maxPct: 25 });
+    expect(r27.result.kpi.investmentPaybackMonths).toBeCloseTo(3, 2);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
-    expect(run.settings.fiscalEnvelope).toMatchObject({ year: 2027, ibgeCode: '2800308' });
+    expect(run.settings).toMatchObject({ fiscalYear: 2027, fiscalEnvelope: { year: 2027 } });
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
   });
 });
