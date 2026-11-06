@@ -53,3 +53,11 @@ export function hierarchyTree(ids: readonly string[], rels: readonly AccountRel[
   const roots = ids.filter((i) => !hasParent.has(i) && children.has(i));
   return { roots, children, inTree: new Set([...roots, ...hasParent]) };
 }
+
+// ---------------------------------------------------------------- estruturas (macro entidade que reúne contas e contratos)
+export const STRUCTURE_KINDS = ['programa', 'projeto', 'rede', 'consorcio', 'convenio', 'grupo_economico', 'outro'] as const;
+export type StructureKind = (typeof STRUCTURE_KINDS)[number];
+export const STRUCTURE_KIND_LABELS: Record<StructureKind, string> = { programa: 'Programa', projeto: 'Projeto', rede: 'Rede', consorcio: 'Consórcio', convenio: 'Convênio', grupo_economico: 'Grupo econômico', outro: 'Outra' };
+export const STRUCTURE_ROLES = ['gestor', 'participante', 'executor', 'financiador', 'parceiro', 'outro'] as const;
+export type StructureRole = (typeof STRUCTURE_ROLES)[number];
+export const STRUCTURE_ROLE_LABELS: Record<StructureRole, string> = { gestor: 'Órgão gestor / coordenação', participante: 'Participante', executor: 'Executor', financiador: 'Financiador', parceiro: 'Parceiro', outro: 'Outro papel' };

@@ -10,6 +10,7 @@ import { AdminEmail } from './Email';
 import { AdminInstructions } from './Instructions';
 import { AdminTaskScripts } from './TaskScripts';
 import { AdminLetterheads } from './Letterheads';
+import { StructuresAdmin } from '../../features/accounts/Structures';
 
 const TABS = [
   { key: 'contratos', label: 'Contratos' },
@@ -18,6 +19,7 @@ const TABS = [
   { key: 'emails', label: 'E-mails' },
   { key: 'instrucao', label: 'Instrução' },
   { key: 'tarefas', label: 'Tipos de tarefa' },
+  { key: 'estruturas', label: 'Estruturas' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
 
@@ -36,6 +38,7 @@ export function AdminModels() {
         {tab === 'emails' && <AdminEmail />}
         {tab === 'instrucao' && <AdminInstructions />}
         {tab === 'tarefas' && <AdminTaskScripts />}
+        {tab === 'estruturas' && <StructuresAdmin />}
       </div>
     </div>
   );
