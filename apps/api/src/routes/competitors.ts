@@ -2,9 +2,9 @@
  * Inteligência de licitação: concorrentes a partir dos participantes registrados nos pregões.
  * Concorrente = CNPJ (ou nome, quando o CNPJ não foi informado). Respeita o alcance do módulo Inteligência.
  */
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { competitorKey, competitorStats, normalizeLot, rankParticipants, type ParticipantStatus } from '@isp/domain';
+import { bidItemGap, competitorKey, competitorStats, normalizeLot, rankParticipants, type ParticipantStatus } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { notFound } from '../http/errors';
 import * as s from '../db/schema';
@@ -76,6 +76,39 @@ export const competitorRoutes = [
       const byKind: Record<string, number> = {};
       for (const a of actions) byKind[a.kind] = (byKind[a.kind] ?? 0) + 1;
       return { stats, pregoes, actions, actionsByKind: byKind };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/intelligence/bid-item-prices', summary: 'Histórico de preços por item nas licitações: nosso unitário (lance e final) e o da vencedora', tag: 'Inteligência', module: 'inteligencia',
+    query: z.object({ q: z.string().trim().max(100).optional(), onlyResults: z.enum(['true', 'false']).optional() }),
+    handler: async ({ app, auth, query }) => {
+      const at = sql<string>`coalesce(nullif(${s.opportunities.custom}->>'data_sessao', ''), to_char(${s.opportunities.createdAt} at time zone 'UTC', 'YYYY-MM-DD'))`;
+      const conds = [
+        eq(s.opportunityItems.tenantId, auth.tenantId),
+        sql`(${s.opportunities.saleKind} = 'licitacao' or (${s.opportunities.saleKind} is null and ${s.opportunities.pipelineId} in (select id from ${s.pipelines} where ${s.pipelines.tenantId} = ${auth.tenantId} and ${s.pipelines.key} = 'licitacao')))`,
+        ownerScope(auth, 'inteligencia', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt }),
+      ];
+      if (query.onlyResults === 'true') conds.push(or(isNotNull(s.opportunityItems.winnerUnitCents), eq(s.opportunityItems.winnerIsUs, true))!);
+      const rows = await app.db.select({
+        opportunityId: s.opportunities.id, code: s.opportunities.code, stage: s.opportunities.stage, contactName: s.contacts.name, at,
+        orgao: sql<string | null>`${s.opportunities.custom}->>'orgao_contratante'`, edital: sql<string | null>`${s.opportunities.custom}->>'numero_edital'`,
+        itemId: s.opportunityItems.id, description: s.opportunityItems.description, unit: s.opportunityItems.unit, qtyMilli: s.opportunityItems.qtyMilli,
+        bidUnitCents: s.opportunityItems.bidUnitCents, finalUnitCents: s.opportunityItems.finalUnitCents, winnerIsUs: s.opportunityItems.winnerIsUs,
+        winnerCompany: s.opportunityItems.winnerCompany, winnerUnitCents: s.opportunityItems.winnerUnitCents,
+      }).from(s.opportunityItems)
+        .innerJoin(s.opportunities, eq(s.opportunities.id, s.opportunityItems.opportunityId))
+        .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
+        .where(and(...conds))
+        .orderBy(desc(at), asc(s.opportunities.code), asc(s.opportunityItems.position));
+      const norm = (v: string | null | undefined) => (v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const t = norm(query.q);
+      const items = rows
+        .filter((r) => !t || [r.description, r.winnerCompany, r.orgao, r.contactName, r.edital, `op-${r.code}`].some((v) => norm(v).includes(t)))
+        .map((r) => {
+          const winnerUnit = r.winnerIsUs ? r.finalUnitCents ?? r.bidUnitCents : r.winnerUnitCents;
+          return { ...r, winnerUnitCents: winnerUnit, gap: r.winnerIsUs ? 0 : bidItemGap(r, winnerUnit) };
+        });
+      return { items };
     },
   }),
 ];

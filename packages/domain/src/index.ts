@@ -26,6 +26,7 @@ export * from './modules';
 export * from './glpi';
 export * from './items';
 export * from './bids';
+export * from './bidItemResults';
 export * from './eml';
 export * from './revenue';
 export * from './activation';
