@@ -8,7 +8,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   DEFAULT_INFLUENCE_POLICY, INFLUENCE_CONTEXTS, INFLUENCE_LEVELS, INTERESTS, PARTICIPATIONS, RELATIONSHIP_STRENGTHS, STAKEHOLDER_ACCESS, STAKEHOLDER_PRIORITIES, STAKEHOLDER_ROLES, STANCES,
-  atLeast, influenceChangeError, quadrantOf, validateInfluencePolicy,
+  atLeast, influenceChangeError, quadrantOf, validateInfluencePolicy, INNOVATION_OPENNESS, POWER_CLASSES, PROFILE_SOURCE_KINDS, reportsToError, suggestPowerClass,
   type InfluenceContext, type InfluenceLevel, type InfluencePolicy, type Interest,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -58,7 +58,19 @@ const StakeholderFields = z.object({
   interest: z.enum(INTERESTS).optional(), stance: z.enum(STANCES).optional(), relationshipStrength: z.enum(RELATIONSHIP_STRENGTHS).optional(), access: z.enum(STAKEHOLDER_ACCESS).optional(),
   participation: z.enum(PARTICIPATIONS).optional(), priority: z.enum(STAKEHOLDER_PRIORITIES).optional(), relationshipOwnerId: z.string().uuid().nullable().optional(),
   nextInteractionOn: isoDate.nullable().optional(), notes: z.string().trim().max(4000).nullable().optional(), active: z.boolean().optional(),
+  // análise de stakeholders
+  powerClass: z.enum(POWER_CLASSES).optional(), hiddenAgent: z.boolean().optional(), reportsToId: z.string().uuid().nullable().optional(),
+  innovationOpenness: z.enum(INNOVATION_OPENNESS).optional(), institutionalHistory: z.string().trim().max(4000).nullable().optional(), resistancePoints: z.string().trim().max(4000).nullable().optional(),
+  sources: z.array(z.object({ kind: z.enum(PROFILE_SOURCE_KINDS), url: z.string().trim().url().max(500).nullable(), note: z.string().trim().max(300).nullable(), at: isoDate.nullable().optional() })).max(20).optional(),
 }).strict();
+
+/** "Reporta a": stakeholder ativo da mesma conta, sem ciclo. */
+async function assertReportsTo(db: DbOrTx, contactId: string, id: string | null, reportsToId: string | null | undefined) {
+  if (!reportsToId) return;
+  const items = await db.select({ id: s.accountStakeholders.id, reportsToId: s.accountStakeholders.reportsToId }).from(s.accountStakeholders).where(eq(s.accountStakeholders.contactId, contactId));
+  const err = reportsToError(id ?? '00000000-0000-4000-8000-000000000000', reportsToId, items.filter((i) => i.id !== id).concat(id ? [{ id, reportsToId }] : []));
+  if (err) throw unprocessable(err, [{ path: 'reportsToId', message: err }]);
+}
 
 async function assertUnit(db: DbOrTx, contactId: string, unitId: string | null | undefined) {
   if (!unitId) return;
@@ -77,10 +89,16 @@ export async function stakeholderRows(db: DbOrTx, auth: AuthContext, contactIds:
   const inf = ids.length && canViewInfluence(auth, policy) ? await db.select().from(s.stakeholderInfluence).where(inArray(s.stakeholderInfluence.stakeholderId, ids)) : [];
   const pend = ids.length ? await db.select({ id: s.influenceChangeRequests.stakeholderId }).from(s.influenceChangeRequests).where(and(inArray(s.influenceChangeRequests.stakeholderId, ids), eq(s.influenceChangeRequests.status, 'pendente'))) : [];
   const show = canViewInfluence(auth, policy);
+  // de onde a pessoa veio: contato de negociação, contrato, lead… (vínculos ativos com registros do CRM)
+  const lk = ids.length ? await db.select({ id: s.stakeholderLinks.stakeholderId, type: s.stakeholderLinks.entityType, n: sql<number>`count(*)::int` }).from(s.stakeholderLinks)
+    .where(and(inArray(s.stakeholderLinks.stakeholderId, ids), sql`${s.stakeholderLinks.removedAt} is null`)).groupBy(s.stakeholderLinks.stakeholderId, s.stakeholderLinks.entityType) : [];
   return rows.map((r) => {
     const mine = inf.filter((i) => i.stakeholderId === r.st.id);
     const acc = mine.find((i) => i.contextType === 'conta');
+    const lev = show ? ((acc?.level ?? 'nao_avaliado') as InfluenceLevel) : null;
     return {
+      origins: lk.filter((l) => l.id === r.st.id).map((l) => ({ type: l.type, count: l.n })),
+      powerClassSuggestion: suggestPowerClass(r.st.roles as Parameters<typeof suggestPowerClass>[0], lev),
       ...r.st, name: r.person.name, email: r.person.email, phone: r.person.phone, personId: r.person.id, unitName: r.unitName, account: r.account, relationshipOwnerName: r.ownerName,
       influence: show ? ((acc?.level ?? 'nao_avaliado') as InfluenceLevel) : null,
       influenceContexts: show ? mine.filter((i) => i.contextType !== 'conta').map((i) => ({ contextType: i.contextType, contextKey: i.contextKey, contextLabel: i.contextLabel, level: i.level })) : [],
@@ -145,6 +163,7 @@ export const stakeholderRoutes = [
       const { personId: pid, person, ...fields } = body;
       if (!pid && !person) throw unprocessable('Escolha uma pessoa já cadastrada ou informe o nome.');
       await assertUnit(tx, params.id, fields.unitId);
+      await assertReportsTo(tx, params.id, null, fields.reportsToId);
       if (fields.relationshipOwnerId) await assertAssignableUser(tx, auth, 'clientes', fields.relationshipOwnerId);
       let personId = pid ?? null;
       if (personId) { const [p] = await tx.select({ id: s.people.id }).from(s.people).where(and(eq(s.people.id, personId), eq(s.people.tenantId, auth.tenantId))).limit(1); if (!p) throw unprocessable('Pessoa não encontrada.'); }
@@ -193,6 +212,7 @@ export const stakeholderRoutes = [
       const st = await loadStakeholder(tx, auth, params.id, true);
       if (st.rowVersion !== body.rowVersion) throw conflict(st.rowVersion);
       await assertUnit(tx, st.contactId, body.unitId);
+      if (body.reportsToId !== undefined && body.reportsToId !== st.reportsToId) await assertReportsTo(tx, st.contactId, st.id, body.reportsToId);
       if (body.relationshipOwnerId && body.relationshipOwnerId !== st.relationshipOwnerId) await assertAssignableUser(tx, auth, 'clientes', body.relationshipOwnerId);
       const { rowVersion: _rv, ...rest } = body;
       const changed = Object.entries(rest).filter(([k, v]) => v !== undefined && JSON.stringify(v) !== JSON.stringify((st as Record<string, unknown>)[k])).map(([k]) => k);
@@ -311,7 +331,7 @@ export const stakeholderRoutes = [
   // ------------------------------------------------------------ lista geral e mapa de influência
   defineRoute({
     method: 'GET', url: '/abm/stakeholders', summary: 'Stakeholders das contas do ABM visíveis, com filtros (papel, influência, prioridade, sem avaliação, conta)', tag: 'Marketing', module: 'clientes',
-    query: z.object({ role: z.enum(STAKEHOLDER_ROLES).optional(), influence: z.enum(INFLUENCE_LEVELS).optional(), priority: z.enum(STAKEHOLDER_PRIORITIES).optional(), contactId: z.string().uuid().optional(), q: z.string().max(100).optional() }),
+    query: z.object({ role: z.enum(STAKEHOLDER_ROLES).optional(), influence: z.enum(INFLUENCE_LEVELS).optional(), priority: z.enum(STAKEHOLDER_PRIORITIES).optional(), contactId: z.string().uuid().optional(), q: z.string().max(100).optional(), powerClass: z.enum(POWER_CLASSES).optional(), hidden: z.enum(['sim', 'nao']).optional() }),
     handler: async ({ app, auth, query: q }) => {
       const pol = await abmPolicy(app.db, auth.tenantId);
       const accounts = await app.db.select({ id: s.contacts.id, abmId: s.abmAccounts.id }).from(s.abmAccounts).innerJoin(s.contacts, eq(s.contacts.id, s.abmAccounts.contactId)).where(and(eq(s.abmAccounts.tenantId, auth.tenantId), contactVisible(auth), q.contactId ? eq(s.contacts.id, q.contactId) : sql`true`));
@@ -320,11 +340,13 @@ export const stakeholderRoutes = [
       if (q.role) items = items.filter((i) => i.roles.includes(q.role!));
       if (q.priority) items = items.filter((i) => i.priority === q.priority);
       if (q.influence) items = items.filter((i) => i.influence === q.influence);
+      if (q.powerClass) items = items.filter((i) => i.powerClass === q.powerClass);
+      if (q.hidden) items = items.filter((i) => i.hiddenAgent === (q.hidden === 'sim'));
       if (q.q) { const t = q.q.toLowerCase(); items = items.filter((i) => i.name.toLowerCase().includes(t) || (i.title ?? '').toLowerCase().includes(t) || i.account.toLowerCase().includes(t)); }
       const all = items.filter((i) => i.active);
       return {
         items, policy: { labels: pol.influence.labels, view: canViewInfluence(auth, pol.influence) },
-        counts: { total: all.length, decisores: all.filter((i) => i.roles.includes('decisor')).length, naoAvaliados: canViewInfluence(auth, pol.influence) ? all.filter((i) => i.influence === 'nao_avaliado').length : null, criticos: all.filter((i) => i.priority === 'critica').length },
+        counts: { total: all.length, decisores: all.filter((i) => i.roles.includes('decisor')).length, naoAvaliados: canViewInfluence(auth, pol.influence) ? all.filter((i) => i.influence === 'nao_avaliado').length : null, criticos: all.filter((i) => i.priority === 'critica').length, ia: all.filter((i) => i.powerClass === 'ia').length, ocultos: all.filter((i) => i.hiddenAgent).length, semClasse: all.filter((i) => i.powerClass === 'nao_avaliado').length },
       };
     },
   }),

@@ -722,6 +722,13 @@
       "when": 1793922460280,
       "tag": "0102_email_modelo_imagens",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793928696850,
+      "tag": "0103_stakeholders_analise",
+      "breakpoints": true
     }
   ]
 }

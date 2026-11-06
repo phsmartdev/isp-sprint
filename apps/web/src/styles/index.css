@@ -71,3 +71,18 @@
   /* nomes de etapa escurecidos para fundo claro: no escuro ficam no tom do texto */
   .stage-ink { color: rgb(var(--ink)) !important; }
 }
+
+/* Organograma dos stakeholders (árvore com conectores; rola na horizontal quando é largo) */
+.orgchart ul { display: flex; justify-content: center; position: relative; padding-top: 20px; margin: 0; list-style: none; }
+.orgchart > ul { padding-top: 0; }
+.orgchart li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 20px 6px 0; }
+.orgchart li::before, .orgchart li::after { content: ''; position: absolute; top: 0; right: 50%; width: 50%; height: 20px; border-top: 2px solid rgb(var(--line-strong, 148 163 184)); }
+.orgchart li::after { right: auto; left: 50%; border-left: 2px solid rgb(var(--line-strong, 148 163 184)); }
+.orgchart li:only-child::before, .orgchart li:only-child::after { display: none; }
+.orgchart li:only-child { padding-top: 0; }
+.orgchart li:first-child::before, .orgchart li:last-child::after { border: 0 none; }
+.orgchart li:last-child::before { border-right: 2px solid rgb(var(--line-strong, 148 163 184)); }
+.orgchart ul ul::before { content: ''; position: absolute; top: 0; left: 50%; height: 20px; border-left: 2px solid rgb(var(--line-strong, 148 163 184)); }
+.orgchart > ul > li { padding-top: 0; }
+.orgchart > ul > li::before, .orgchart > ul > li::after { display: none; }
+@media print { .orgchart { overflow: visible !important; } }
