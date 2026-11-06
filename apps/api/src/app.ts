@@ -79,6 +79,7 @@ import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
 import { accountRelationRoutes } from './routes/accountRelations';
+import { structureRoutes } from './routes/structures';
 import { interventionRoutes } from './routes/interventions';
 import { ritualRoutes } from './routes/rituals';
 import { campaignRoutes } from './routes/campaigns';
@@ -258,6 +259,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...abmFollowupRoutes,
     ...stakeholderRoutes,
     ...accountRelationRoutes,
+    ...structureRoutes,
     ...interventionRoutes,
     ...ritualRoutes,
     ...campaignRoutes,

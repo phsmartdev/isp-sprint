@@ -14,6 +14,7 @@ import { useDebounced } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { AccountStructuresPanel } from './Structures';
 
 export type NetNode = { contactId: string; name: string; visible: boolean; segment: string | null; city: string | null; abmId: string | null; inAbm?: boolean };
 export type NetEdge = { id: string; fromId: string; toId: string; kind: AccountRelationKind };
@@ -132,6 +133,8 @@ export function AccountRelationsPanel({ contactId, prefer = 'crm' }: { contactId
   const d = q.data!;
   const groups = [...new Set(d.items.map((i) => i.group))];
   return (
+    <div className="space-y-4">
+    <AccountStructuresPanel contactId={contactId} />
     <section className="card space-y-4 p-4" aria-label="Contas relacionadas">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div><h3 className="font-bold text-ink">Contas relacionadas</h3><p className="max-w-3xl text-sm text-muted">Grupo econômico, estrutura pública, consórcios, parcerias, fornecimento e concorrência. O sistema sugere quando acha relação; quem registra é você.</p></div>
@@ -174,6 +177,7 @@ export function AccountRelationsPanel({ contactId, prefer = 'crm' }: { contactId
         </Modal>
       )}
     </section>
+    </div>
   );
 }
 

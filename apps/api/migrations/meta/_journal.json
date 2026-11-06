@@ -736,6 +736,13 @@
       "when": 1793929663596,
       "tag": "0104_relacoes_entre_contas",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1793930822790,
+      "tag": "0105_estruturas",
+      "breakpoints": true
     }
   ]
 }

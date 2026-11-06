@@ -3869,6 +3869,62 @@ export const accountStakeholders = pgTable(
 );
 
 /**
+ * Estruturas: a macro entidade (programa, projeto, rede, consórcio, convênio, grupo) que reúne várias contas e
+ * contratos — ex.: uma rede estadual que liga vários órgãos. Contas e contratos são vinculados a ela; desvincular
+ * desativa (fica o histórico com o motivo).
+ */
+export const accountStructures = pgTable('account_structures', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('programa'),
+  description: text('description'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({
+  nameUq: uniqueIndex('account_structures_name_uq').on(t.tenantId, sql`lower(${t.name})`),
+  kindCk: check('account_structures_kind_ck', inList('kind', ['programa', 'projeto', 'rede', 'consorcio', 'convenio', 'grupo_economico', 'outro'])),
+}));
+export const structureMembers = pgTable('structure_members', {
+  id: id(),
+  tenantId: tenantId(),
+  structureId: uuid('structure_id').notNull().references(() => accountStructures.id),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  role: text('role').notNull().default('participante'),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  removedBy: uuid('removed_by').references(() => users.id),
+  removedAt: ts('removed_at'),
+  removedReason: text('removed_reason'),
+}, (t) => ({
+  uq: uniqueIndex('structure_members_uq').on(t.structureId, t.contactId).where(sql`active`),
+  idx: index('structure_members_contact_idx').on(t.tenantId, t.contactId),
+  roleCk: check('structure_members_role_ck', inList('role', ['gestor', 'participante', 'executor', 'financiador', 'parceiro', 'outro'])),
+}));
+export const structureContracts = pgTable('structure_contracts', {
+  id: id(),
+  tenantId: tenantId(),
+  structureId: uuid('structure_id').notNull().references(() => accountStructures.id),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  removedBy: uuid('removed_by').references(() => users.id),
+  removedAt: ts('removed_at'),
+  removedReason: text('removed_reason'),
+}, (t) => ({
+  uq: uniqueIndex('structure_contracts_uq').on(t.structureId, t.contractId).where(sql`active`),
+  idx: index('structure_contracts_contract_idx').on(t.tenantId, t.contractId),
+}));
+
+/**
  * Relações entre contas (organizações): matriz/filial, órgão superior/vinculado, membro de consórcio, parceria,
  * fornecimento, concorrência, influência. Registradas por pessoa; remover desativa (fica o histórico com o motivo).
  */
