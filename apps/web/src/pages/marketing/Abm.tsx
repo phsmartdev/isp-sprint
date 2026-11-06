@@ -21,6 +21,7 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { StakeholdersDirectory } from '../../features/abm/stakeholders';
+import { AbmRelationsMap } from '../../features/accounts/AccountRelations';
 import { PlaysLibrary } from '../../features/abm/plays';
 import { AbmIntelligence } from '../../features/abm/intel';
 import { SignalsCenter } from '../../features/abm/followup';
@@ -38,8 +39,8 @@ export function AbmPage() {
   return (
     <div>
       <PageHeader icon={<Crosshair />} title="ABM — Contas Estratégicas" subtitle="Prospecção e desenvolvimento de contas escolhidas, novas ou já cadastradas, sobre o mesmo cadastro do CRM." />
-      <Tabs label="ABM" value={(['stakeholders', 'plays', 'sinais', 'inteligencia'].includes(u.tab) ? u.tab : 'contas') as 'contas' | 'stakeholders' | 'plays' | 'sinais' | 'inteligencia'} onChange={(k) => setU({ tab: k })} tabs={[{ key: 'contas', label: 'Contas' }, { key: 'stakeholders', label: 'Stakeholders' }, { key: 'plays', label: 'Plays' }, { key: 'sinais', label: 'Sinais' }, { key: 'inteligencia', label: 'Inteligência' }]} className="mb-4" />
-      {u.tab === 'stakeholders' ? <StakeholdersDirectory /> : u.tab === 'plays' ? <PlaysLibrary /> : u.tab === 'inteligencia' ? <AbmIntelligence /> : u.tab === 'sinais' ? <SignalsCenter /> : <AccountsTab u={u} setU={setU} />}
+      <Tabs label="ABM" value={(['stakeholders', 'relacoes', 'plays', 'sinais', 'inteligencia'].includes(u.tab) ? u.tab : 'contas') as 'contas' | 'stakeholders' | 'relacoes' | 'plays' | 'sinais' | 'inteligencia'} onChange={(k) => setU({ tab: k })} tabs={[{ key: 'contas', label: 'Contas' }, { key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Relações entre contas' }, { key: 'plays', label: 'Plays' }, { key: 'sinais', label: 'Sinais' }, { key: 'inteligencia', label: 'Inteligência' }]} className="mb-4" />
+      {u.tab === 'stakeholders' ? <StakeholdersDirectory /> : u.tab === 'relacoes' ? <AbmRelationsMap /> : u.tab === 'plays' ? <PlaysLibrary /> : u.tab === 'inteligencia' ? <AbmIntelligence /> : u.tab === 'sinais' ? <SignalsCenter /> : <AccountsTab u={u} setU={setU} />}
       <AccountDrawer id={u.id || null} onClose={() => setU({ id: '' }, { resetPage: false })} />
     </div>
   );

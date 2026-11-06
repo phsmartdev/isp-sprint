@@ -39,6 +39,7 @@ export * from './finance';
 export * from './formula';
 export * from './financeModel';
 export * from './fiscalEnvelope';
+export * from './accountRelations';
 export * from './commitments';
 export * from './commitmentPlanning';
 export * from './playbook';

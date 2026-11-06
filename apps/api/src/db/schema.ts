@@ -3868,6 +3868,34 @@ export const accountStakeholders = pgTable(
   }),
 );
 
+/**
+ * Relações entre contas (organizações): matriz/filial, órgão superior/vinculado, membro de consórcio, parceria,
+ * fornecimento, concorrência, influência. Registradas por pessoa; remover desativa (fica o histórico com o motivo).
+ */
+export const accountRelations = pgTable(
+  'account_relations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    fromContactId: uuid('from_contact_id').notNull().references(() => contacts.id),
+    toContactId: uuid('to_contact_id').notNull().references(() => contacts.id),
+    kind: text('kind').notNull(),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    removedBy: uuid('removed_by').references(() => users.id),
+    removedAt: ts('removed_at'),
+    removedReason: text('removed_reason'),
+  },
+  (t) => ({
+    fromIdx: index('account_relations_from_idx').on(t.tenantId, t.fromContactId),
+    toIdx: index('account_relations_to_idx').on(t.tenantId, t.toContactId),
+    kindCk: check('account_relations_kind_ck', inList('kind', ['matriz', 'orgao_superior', 'membro', 'parceira', 'fornecedora', 'concorrente', 'influencia', 'outro'])),
+    selfCk: check('account_relations_self_ck', sql`from_contact_id <> to_contact_id`),
+  }),
+);
+
 /** Influência atual por contexto (conta, unidade, oportunidade, projeto, processo). Ausência = não avaliado. Só muda por ação manual. */
 export const stakeholderInfluence = pgTable(
   'stakeholder_influence',
