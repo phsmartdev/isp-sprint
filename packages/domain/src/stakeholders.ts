@@ -79,3 +79,72 @@ export function validateInfluencePolicy(p: InfluencePolicy) {
   for (const l of INFLUENCE_LEVELS) if (!(p.labels[l] ?? '').trim()) e.push(`Dê um nome ao nível "${DEFAULT_INFLUENCE_LABELS[l]}".`);
   return e;
 }
+
+// ---------------------------------------------------------------- análise de stakeholders (influência × autoridade)
+/**
+ * Classificação do papel na jornada de compra:
+ * IA = tem influência e autoridade · INA = influência sem autoridade · NIA = autoridade sem influência · NINA = nenhuma das duas.
+ * Escolhida pela pessoa que mapeia a conta (o sistema só sugere a partir dos papéis e da influência avaliada).
+ */
+export const POWER_CLASSES = ['ia', 'ina', 'nia', 'nina', 'nao_avaliado'] as const;
+export type PowerClass = (typeof POWER_CLASSES)[number];
+export const POWER_CLASS_LABELS: Record<PowerClass, string> = { ia: 'IA', ina: 'INA', nia: 'NIA', nina: 'NINA', nao_avaliado: 'Não classificado' };
+export const POWER_CLASS_DESC: Record<PowerClass, string> = {
+  ia: 'Influência e autoridade', ina: 'Influência, mas sem autoridade', nia: 'Autoridade, mas sem influência', nina: 'Sem influência e sem autoridade', nao_avaliado: 'Ainda não classificado',
+};
+/** Papéis que dão autoridade formal na decisão (decide, aprova, contrata ou patrocina). */
+export const AUTHORITY_ROLES: readonly StakeholderRole[] = ['decisor', 'aprovador_financeiro', 'responsavel_contratacao', 'patrocinador', 'gestor_politico'];
+/** Sugestão (nunca grava sozinha): autoridade pelos papéis; influência pela avaliação manual (médio ou mais). */
+export function suggestPowerClass(roles: readonly StakeholderRole[], influence: InfluenceLevel | null | undefined): PowerClass | null {
+  if (!influence || influence === 'nao_avaliado') return null;
+  const inf = influence === 'muito_alto' || influence === 'alto' || influence === 'medio';
+  const aut = roles.some((r) => AUTHORITY_ROLES.includes(r));
+  return inf ? (aut ? 'ia' : 'ina') : aut ? 'nia' : 'nina';
+}
+
+export const INNOVATION_OPENNESS = ['alta', 'media', 'baixa', 'nao_avaliado'] as const;
+export type InnovationOpenness = (typeof INNOVATION_OPENNESS)[number];
+export const INNOVATION_LABELS: Record<InnovationOpenness, string> = { alta: 'Alta', media: 'Média', baixa: 'Baixa', nao_avaliado: 'Não avaliada' };
+
+/** Fontes usadas para traçar o perfil. */
+export const PROFILE_SOURCE_KINDS = ['linkedin', 'imprensa', 'site_oficial', 'diario_oficial', 'outro'] as const;
+export type ProfileSourceKind = (typeof PROFILE_SOURCE_KINDS)[number];
+export const PROFILE_SOURCE_LABELS: Record<ProfileSourceKind, string> = { linkedin: 'LinkedIn', imprensa: 'Imprensa', site_oficial: 'Site oficial', diario_oficial: 'Diário oficial', outro: 'Outra fonte' };
+export type ProfileSource = { kind: ProfileSourceKind; url: string | null; note: string | null; at?: string | null };
+
+/**
+ * Organograma: árvore pelo "reporta a" de cada pessoa (só entre pessoas ativas da mesma conta). Quem não reporta a
+ * ninguém do mapa vira raiz; um ciclo é quebrado na primeira pessoa encontrada. Agentes ocultos ficam fora da árvore.
+ */
+export type OrgNode<T> = { item: T; children: OrgNode<T>[] };
+export function buildOrgChart<T extends { id: string; reportsToId: string | null; hiddenAgent?: boolean; active?: boolean; name: string }>(items: readonly T[]) {
+  const visible = items.filter((i) => i.active !== false && !i.hiddenAgent);
+  const byId = new Map(visible.map((i) => [i.id, i]));
+  const parentOf = (i: T) => (i.reportsToId && byId.has(i.reportsToId) && i.reportsToId !== i.id ? i.reportsToId : null);
+  // quebra ciclos: sobe a cadeia; se voltar para si mesmo, vira raiz
+  const cyclic = new Set<string>();
+  for (const i of visible) {
+    const seen = new Set<string>([i.id]);
+    let p = parentOf(i);
+    while (p) { if (seen.has(p)) { cyclic.add(i.id); break; } seen.add(p); p = parentOf(byId.get(p)!); }
+  }
+  const nodes = new Map(visible.map((i) => [i.id, { item: i, children: [] as OrgNode<T>[] }]));
+  const roots: OrgNode<T>[] = [];
+  for (const i of visible) {
+    const p = cyclic.has(i.id) ? null : parentOf(i);
+    if (p) nodes.get(p)!.children.push(nodes.get(i.id)!); else roots.push(nodes.get(i.id)!);
+  }
+  const sort = (ns: OrgNode<T>[]) => { ns.sort((a, b) => a.item.name.localeCompare(b.item.name, 'pt-BR')); ns.forEach((n) => sort(n.children)); };
+  sort(roots);
+  return { roots, hidden: items.filter((i) => i.active !== false && i.hiddenAgent), cyclic: [...cyclic] };
+}
+/** reportsTo válido: mesma conta, não a si mesmo e sem criar ciclo. Retorna o erro ou null. */
+export function reportsToError(id: string, reportsToId: string | null, items: readonly { id: string; reportsToId: string | null }[]): string | null {
+  if (!reportsToId) return null;
+  if (reportsToId === id) return 'A pessoa não pode reportar a si mesma.';
+  const byId = new Map(items.map((i) => [i.id, i]));
+  if (!byId.has(reportsToId)) return 'Quem recebe o reporte não é stakeholder desta conta.';
+  let p: string | null = reportsToId; const seen = new Set<string>();
+  while (p) { if (p === id) return 'Isso cria um ciclo no organograma (a pessoa acabaria reportando a si mesma).'; if (seen.has(p)) break; seen.add(p); p = byId.get(p)?.reportsToId ?? null; }
+  return null;
+}

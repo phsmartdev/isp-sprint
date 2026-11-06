@@ -88,4 +88,34 @@ describe('stakeholders', () => {
     const g = ok(await lucas.get('/abm/stakeholders?role=decisor')).json();
     expect(g.items.some((x: { id: string }) => x.id === sec)).toBe(true);
   });
+
+  it('análise: IA/INA/NIA/NINA, agente oculto, reporta a (sem ciclo), abertura, resistência, fontes; contatos da negociação entram na conta', async () => {
+    const one = async (id: string) => ok(await lucas.get(`/stakeholders/${id}`)).json();
+    let m = await one(sec);
+    expect(m.powerClassSuggestion).toBe('ia'); // decisor com influência muito alta avaliada
+    ok(await lucas.patch(`/stakeholders/${sec}`, { rowVersion: m.rowVersion, powerClass: 'ia', innovationOpenness: 'media', institutionalHistory: 'Segunda gestão na secretaria', resistancePoints: 'Contrato vigente com o fornecedor atual',
+      sources: [{ kind: 'linkedin', url: 'https://www.linkedin.com/in/perfil-ficticio', note: 'Formação em gestão pública' }, { kind: 'imprensa', url: null, note: 'Entrevista sobre saúde digital' }] }));
+    let j = await one(ti);
+    ok(await lucas.patch(`/stakeholders/${ti}`, { rowVersion: j.rowVersion, reportsToId: sec, powerClass: 'ina' }));
+    m = await one(sec);
+    expect((await lucas.patch(`/stakeholders/${sec}`, { rowVersion: m.rowVersion, reportsToId: ti })).json().detail).toMatch(/ciclo/);
+    expect((await lucas.patch(`/stakeholders/${sec}`, { rowVersion: m.rowVersion, reportsToId: sec })).statusCode).toBe(422);
+    expect((await lucas.patch(`/stakeholders/${sec}`, { rowVersion: m.rowVersion, sources: [{ kind: 'linkedin', url: 'nao-e-link', note: null }] })).statusCode).toBe(422);
+    const oc = ok(await lucas.post(`/accounts/${contactId}/stakeholders`, { person: { name: 'Assessor Fictício' }, title: 'Ex-secretário', hiddenAgent: true, powerClass: 'ina' }), 201).json();
+    ok(await lucas.post(`/accounts/${contactId}/relations`, { fromId: oc.id, toId: sec, kind: 'influencia' }), 201);
+    // contato cadastrado numa negociação da conta vira stakeholder da conta, com a origem
+    const plan = (await lucas.get('/meta/lookups')).json().plans[0];
+    const o = ok(await lucas.post('/opportunities', { contactId, planId: plan.id }), 201).json();
+    ok(await lucas.post(`/opportunities/${o.id}/contacts`, { person: { name: 'Fiscal Fictícia', email: `fiscal.${stamp}@exemplo.test` }, role: (await lucas.get(`/opportunities/${o.id}/contacts`)).json().roles[0].key }), 201);
+    const l = ok(await lucas.get(`/accounts/${contactId}/stakeholders`)).json().items;
+    const fiscal = l.find((x: { name: string }) => x.name === 'Fiscal Fictícia');
+    expect(fiscal.origins).toEqual([{ type: 'oportunidade', count: 1 }]);
+    expect(l.find((x: { id: string }) => x.id === ti)).toMatchObject({ reportsToId: sec, powerClass: 'ina' });
+    expect(l.find((x: { id: string }) => x.id === oc.id)).toMatchObject({ hiddenAgent: true });
+    expect(l.find((x: { id: string }) => x.id === sec)).toMatchObject({ powerClass: 'ia', innovationOpenness: 'media', resistancePoints: 'Contrato vigente com o fornecedor atual' });
+    const dir = ok(await lucas.get(`/abm/stakeholders?contactId=${contactId}&hidden=sim`)).json();
+    expect(dir.items.map((x: { id: string }) => x.id)).toEqual([oc.id]);
+    expect(ok(await lucas.get(`/abm/stakeholders?contactId=${contactId}&powerClass=ia`)).json().items.map((x: { id: string }) => x.id)).toEqual([sec]);
+    expect(ok(await lucas.get(`/abm/stakeholders?contactId=${contactId}`)).json().counts).toMatchObject({ ia: 1, ocultos: 1 });
+  });
 });

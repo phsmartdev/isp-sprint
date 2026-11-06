@@ -7,7 +7,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, doublePrecision, type AnyPgColumn,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, doublePrecision, foreignKey, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -3836,6 +3836,17 @@ export const accountStakeholders = pgTable(
     relationshipOwnerId: uuid('relationship_owner_id').references(() => users.id),
     nextInteractionOn: date('next_interaction_on', { mode: 'string' }),
     notes: text('notes'),
+    /** análise de stakeholders: IA, INA, NIA, NINA (influência × autoridade) */
+    powerClass: text('power_class').notNull().default('nao_avaliado'),
+    /** agente oculto: influencia a decisão sem papel formal ou sem aparecer no processo */
+    hiddenAgent: boolean('hidden_agent').notNull().default(false),
+    /** organograma: a quem a pessoa reporta (stakeholder da mesma conta) */
+    reportsToId: uuid('reports_to_id'),
+    innovationOpenness: text('innovation_openness').notNull().default('nao_avaliado'),
+    institutionalHistory: text('institutional_history'),
+    resistancePoints: text('resistance_points'),
+    /** fontes do perfil: LinkedIn, imprensa, site oficial… */
+    sources: jsonb('sources').$type<{ kind: string; url: string | null; note: string | null; at?: string | null }[]>().notNull().default(sql`'[]'::jsonb`),
     active: boolean('active').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     rowVersion: integer('row_version').notNull().default(1),
@@ -3843,6 +3854,9 @@ export const accountStakeholders = pgTable(
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => ({
+    powerCk: check('account_stakeholders_power_ck', inList('power_class', ['ia', 'ina', 'nia', 'nina', 'nao_avaliado'])),
+    innovCk: check('account_stakeholders_innov_ck', inList('innovation_openness', ['alta', 'media', 'baixa', 'nao_avaliado'])),
+    reportsFk: foreignKey({ columns: [t.reportsToId], foreignColumns: [t.id], name: 'account_stakeholders_reports_fk' }).onDelete('set null'),
     uq: uniqueIndex('account_stakeholders_uq').on(t.contactId, t.personId),
     idx: index('account_stakeholders_idx').on(t.tenantId, t.contactId),
     interestCk: check('account_stakeholders_interest_ck', inList('interest', ['alto', 'medio', 'baixo', 'desconhecido'])),
