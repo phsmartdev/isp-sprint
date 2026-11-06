@@ -163,7 +163,8 @@ function TargetSeek({ r, per }: { r: EconResult; per: string }) {
   const rc = r.recommendation;
   if (!rc) return null;
   const pts = rc.range ? [{ k: 'Margem líquida mínima', p: rc.range.min }, { k: 'Margem líquida máxima', p: rc.range.max }] : [{ k: 'Margem líquida alvo', p: { netPct: rc.netTargetPct, operatingPct: rc.operatingNeededPct, contributionPct: rc.contributionPct, priceCents: rc.priceCents, oneTimePriceCents: rc.oneTimePriceCents } }];
-  const ir = rc.params.incomeTaxPct;
+  const prm = rc.params ?? { incomeTaxPct: null, overheadPct: null, glosaPct: 0, badDebtPct: 0 };
+  const ir = prm.incomeTaxPct;
   return (
     <section className="mt-3 border-2 border-primary/50 bg-primary/5 p-3" aria-label="Preço pela margem líquida (target seeking)">
       <p className="text-sm font-bold text-ink">{rc.range ? 'Faixa de preço viável pela margem líquida' : 'Preço pela margem líquida alvo'}</p>
@@ -177,7 +178,7 @@ function TargetSeek({ r, per }: { r: EconResult; per: string }) {
           </div>
         ))}
       </div>
-      <p className="mt-2 font-mono text-2xs text-muted">MO = margem líquida ÷ (1 − IR/CSLL {pct(ir, 2)}) · MC = MO + despesas fixas {pct(rc.params.overheadPct, 2)} + glosa {pct(rc.params.glosaPct, 2)} + inadimplência {pct(rc.params.badDebtPct, 2)} · preço = custos ÷ (1 − tributos − desp. variáveis − MC)</p>
+      <p className="mt-2 font-mono text-2xs text-muted">MO = margem líquida ÷ (1 − IR/CSLL {pct(ir, 2)}) · MC = MO + despesas fixas {pct(prm.overheadPct, 2)} + glosa {pct(prm.glosaPct, 2)} + inadimplência {pct(prm.badDebtPct, 2)} · preço = custos ÷ (1 − tributos − desp. variáveis − MC)</p>
       {rc.range && <p className="mt-1 text-2xs text-muted">Viável entre os dois preços: abaixo do primeiro a margem líquida fica abaixo da mínima; acima do segundo, acima da máxima.</p>}
     </section>
   );
@@ -363,7 +364,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         <p className="mt-1 text-sm text-text">{econHeadline(r, fmtBRL)}</p>
         {r.fiscal && (
           <p className="mt-1 text-xs text-muted" aria-label="Envelope fiscal da simulação">
-            Tributos da nota {r.fiscal.docs.map((x) => `${x.name} ${pct(x.percentBp / 100, 2)}${x.fromYear != null && x.fromYear !== r.fiscal!.year ? ` (de ${x.fromYear})` : x.fromYear == null ? ' (cadastro atual)' : ''}`).join(' · ') || 'sem documento fiscal'} · IRPJ/CSLL {r.fiscal.profitTaxBp == null ? '—' : pct(r.fiscal.profitTaxBp / 100, 2)}{r.fiscal.profitTaxSource === 'envelope' ? ` (empresa, ${r.fiscal.envelope?.year})` : ' (parâmetros)'}{r.fiscal.retentions.length ? ` · retenções na fonte (${r.fiscal.retentions.map((x) => x.label.split(' ')[0]).join(', ')}) fora do cálculo` : ''}
+            Tributos da nota {(r.fiscal.docs ?? []).map((x) => `${x.name} ${pct(x.percentBp / 100, 2)}${x.fromYear != null && x.fromYear !== r.fiscal!.year ? ` (de ${x.fromYear})` : x.fromYear == null ? ' (cadastro atual)' : ''}`).join(' · ') || 'sem documento fiscal'} · IRPJ/CSLL {r.fiscal.profitTaxBp == null ? '—' : pct(r.fiscal.profitTaxBp / 100, 2)}{r.fiscal.profitTaxSource === 'envelope' ? ` (empresa, ${r.fiscal.envelope?.year})` : ' (parâmetros)'}{r.fiscal.retentions?.length ? ` · retenções na fonte (${r.fiscal.retentions.map((x) => x.label.split(' ')[0]).join(', ')}) fora do cálculo` : ''}
           </p>
         )}
       </div>

@@ -16,6 +16,7 @@ import { Avatar } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
+import { AppErrorBoundary } from '../AppErrorBoundary';
 
 type NavLeaf = {
   to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: 'approvals'; also?: string[];
@@ -332,7 +333,7 @@ export function AppShell() {
           </div>
         </header>
         <main id="conteudo" className="min-w-0 flex-1 px-4 py-6 sm:px-6 2xl:px-8">
-          <Outlet />
+          <AppErrorBoundary resetKey={loc.pathname}><Outlet /></AppErrorBoundary>
         </main>
       </div>
     </div>

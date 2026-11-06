@@ -1150,9 +1150,9 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(r.fiscal ? [
-        { label: `Vigência fiscal ${r.fiscal.year} (${r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'})`, formula: r.fiscal.docs.length ? r.fiscal.docs.map((x) => `${x.name}: ${pc(x.percentBp / 100)}${x.fromYear != null ? ` (tributos de ${x.fromYear})` : ' (cadastro atual)'}`).join(' · ') : 'sem documento fiscal nos produtos', value: 'na carga da nota' },
+        { label: `Vigência fiscal ${r.fiscal.year} (${r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'})`, formula: r.fiscal.docs?.length ? r.fiscal.docs.map((x) => `${x.name}: ${pc(x.percentBp / 100)}${x.fromYear != null ? ` (tributos de ${x.fromYear})` : ' (cadastro atual)'}`).join(' · ') : 'sem documento fiscal nos produtos', value: 'na carga da nota' },
         { label: 'Alíquota efetiva sobre o lucro (IRPJ/CSLL)', formula: r.fiscal.profitTaxSource === 'envelope' ? `envelope ${r.fiscal.envelope?.year}` : 'parâmetros de viabilidade', value: r.fiscal.profitTaxBp == null ? '—' : pc(r.fiscal.profitTaxBp / 100) },
-        ...(r.fiscal.retentions.length ? [{ label: 'Retenções na fonte (fora do cálculo)', formula: `${r.fiscal.retentions.map((x) => `${x.label} ${pc(x.bp / 100)}`).join(' + ')}: contas a receber e compensação, não entram no preço nem na DRE`, value: '—' }] : []),
+        ...(r.fiscal.retentions?.length ? [{ label: 'Retenções na fonte (fora do cálculo)', formula: `${r.fiscal.retentions.map((x) => `${x.label} ${pc(x.bp / 100)}`).join(' + ')}: contas a receber e compensação, não entram no preço nem na DRE`, value: '—' }] : []),
       ] : []),
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Despesas variáveis (dv)', formula: 'sobre o preço; sem comissão', value: pc(c * 100) },
