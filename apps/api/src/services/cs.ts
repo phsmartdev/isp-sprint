@@ -22,6 +22,23 @@ const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00
 const dayOf = (d: Date | string | null | undefined) => (d ? (typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10)) : null);
 
 // ------------------------------------------------------------------ configuração
+/**
+ * Quem é CSM: os membros do time "Sucesso do Cliente" (Gestão de Times; nome do time contendo "Sucesso do Cliente",
+ * sem diferença de acento ou maiúscula). Sem esse time com membros, vale o setor Sucesso do Cliente no cadastro do usuário.
+ */
+export async function csmUsers(db: DbOrTx, tenantId: string): Promise<{ id: string; name: string; source: 'time' | 'setor' }[]> {
+  const byTeam = await db.execute<{ id: string; name: string }>(sql`
+    select distinct u.id, u.name from users u
+      join team_memberships m on m.user_id = u.id
+      join teams t on t.id = m.team_id
+     where u.tenant_id = ${tenantId} and u.active and t.tenant_id = ${tenantId} and t.active
+       and translate(lower(t.name), 'áàâãéêíóôõúç', 'aaaaeeiooouc') like '%sucesso do cliente%'
+     order by u.name`);
+  if (byTeam.rows.length) return byTeam.rows.map((r) => ({ id: r.id, name: r.name, source: 'time' as const }));
+  const bySector = await db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), sql`'sucesso_cliente' = any(${s.users.sectors})`)).orderBy(asc(s.users.name));
+  return bySector.map((r) => ({ ...r, source: 'setor' as const }));
+}
+
 export async function csConfigOf(db: DbOrTx, tenantId: string): Promise<{ config: CsConfig; version: number }> {
   const [r] = await db.select().from(s.csSettings).where(eq(s.csSettings.tenantId, tenantId)).orderBy(desc(s.csSettings.version)).limit(1);
   if (!r) return { config: DEFAULT_CS_CONFIG, version: 0 };
@@ -331,7 +348,7 @@ export async function startJourney(db: DbOrTx, config: Config, tenantId: string,
   if (input.contractId) ctr = (await db.select({ c: s.contracts, v: s.contractVersions }).from(s.contracts).innerJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion))).where(eq(s.contracts.id, input.contractId)).limit(1))[0] ?? null;
   const [acc] = await db.select().from(s.csAccounts).where(and(eq(s.csAccounts.tenantId, tenantId), eq(s.csAccounts.contactId, input.contactId))).limit(1);
   const [opp] = input.opportunityId ? await db.select({ ownerId: s.opportunities.ownerId }).from(s.opportunities).where(eq(s.opportunities.id, input.opportunityId)).limit(1) : [];
-  const [sectorCsm] = await db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), sql`'sucesso_cliente' = any(${s.users.sectors})`)).limit(1);
+  const [sectorCsm] = await csmUsers(db, tenantId);
   const csmId = input.csmId ?? ctr?.c.csmId ?? acc?.csmId ?? sectorCsm?.id ?? opp?.ownerId ?? actorId;
   const isNew = !(await db.select({ n: sql<number>`count(*)::int` }).from(s.contracts).where(and(eq(s.contracts.tenantId, tenantId), eq(s.contracts.contactId, input.contactId), input.contractId ? sql`${s.contracts.id} <> ${input.contractId}` : sql`true`, sql`${s.contracts.validatedAt} is not null`)))[0]?.n;
   const acvCents = ctr ? contractAcv({ monthlyCents: ctr.v.monthlyCents, totalCents: ctr.v.totalCents, startAt: ctr.v.startAt, endAt: ctr.v.endAt }) : 0;
