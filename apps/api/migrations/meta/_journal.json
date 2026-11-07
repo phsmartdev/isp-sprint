@@ -778,6 +778,13 @@
       "when": 1794007189918,
       "tag": "0110_gamificacao_aprovacao",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1794011375635,
+      "tag": "0111_tarefa_componente_jornada",
+      "breakpoints": true
     }
   ]
 }

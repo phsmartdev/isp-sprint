@@ -797,6 +797,8 @@ export const activities = pgTable(
     arpId: uuid('arp_id'),
     /** ABM Fase 6: pessoas da conta (stakeholders) com quem foi a interação */
     stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Jornada de pontuação: componente desta tarefa (jornada:tarefa); concluída pontua quem concluiu, excluída ou reaberta deixa de pontuar. */
+    scoreComponent: text('score_component'),
     /** Playbook: transferência entre áreas exige aceite de quem recebe; sem aceite a demanda segue pendente com quem enviou. */
     acceptStatus: text('accept_status'),
     handoffFrom: uuid('handoff_from').references(() => users.id),

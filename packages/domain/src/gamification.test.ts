@@ -3,7 +3,7 @@ import { dispersion, gamificationSettingsErrors, goldMedalists, individualPoints
 
 // valores de teste; na empresa vêm das configurações
 const ST: GamificationSettings = {
-  teamIds: [], points: { negociacao_ganha: 30, proposta_enviada: 5 }, participationMultiplierBp: 15_000, hierarchyWeights: { colaborador: { ownBp: 5_000, teamBp: 5_000 }, lideranca: { ownBp: 2_000, teamBp: 8_000 } },
+  journeys: [], teamIds: [], points: { negociacao_ganha: 30, proposta_enviada: 5 }, participationMultiplierBp: 15_000, hierarchyWeights: { colaborador: { ownBp: 5_000, teamBp: 5_000 }, lideranca: { ownBp: 2_000, teamBp: 8_000 } },
   dispersionYellowBp: 3_000, dispersionRedBp: 5_000, levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 50 }, { name: 'Ouro', minPoints: 100 }],
 };
 
@@ -25,6 +25,9 @@ describe('gamificação colaborativa', () => {
     expect(m.get('a')).toMatchObject({ direct: 21, participation: 0, own: 21 });
     expect(m.get('b')).toMatchObject({ direct: 0, participation: 13.5, own: 13.5 }); // 30 × 0,3 × 1,5
     expect(m.has('c')).toBe(false);
+    // pontos das jornadas somam no próprio
+    const j = individualPoints([], ST, [{ userId: 'a', points: 8 }, { userId: 'a', points: 10.5 }]);
+    expect(j.get('a')).toMatchObject({ journey: 18.5, own: 18.5 });
   });
   it('dispersão: time nivelado é verde; desigual é vermelho', () => {
     expect(dispersion([100, 100, 100], ST)).toMatchObject({ cv: 0, tone: 'verde' });

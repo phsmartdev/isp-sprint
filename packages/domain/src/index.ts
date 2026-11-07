@@ -49,3 +49,4 @@ export * from './contractPortfolio';
 export * from './comms';
 export * from './vacations';
 export * from './gamification';
+export * from './scoreJourneys';

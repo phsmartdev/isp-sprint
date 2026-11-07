@@ -1,7 +1,12 @@
-/** Gestão de Times → Gamificação colaborativa: placar por time e pessoa, pódio, dispersão (liderança), níveis e Selo BK de Qualidade. */
+/**
+ * Gestão de Times → Gamificação colaborativa, sem ranking nem pódio (evita comparação pública e constrangimento):
+ * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
+ * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
+ */
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { atLeast, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, podium, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
+import { atLeast, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
+import { asExtra, journeyCreditsBetween } from '../services/scoreJourneys';
 import { defineRoute } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -10,32 +15,17 @@ import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { ensureFreshEvents } from '../services/businessEvents';
 import { vacationOrg, todayIn } from '../services/vacations';
-
-/** Proposta inicial (versão 1, status proposta): só vale depois de aprovada. Reconhece venda e ajuda ao colega; liderança pesa mais o time. */
-const START: GamificationSettings = {
-  teamIds: [],
-  points: { lead_qualificado: 5, oportunidade_criada: 2, proposta_enviada: 5, negociacao_ganha: 30, venda_validada: 20, contrato_assinado: 10, contrato_renovado: 15, acompanhamento_registrado: 3, abm_interacao: 2, abm_oportunidade_gerada: 10 },
-  participationMultiplierBp: 15_000, hierarchyWeights: { colaborador: { ownBp: 5_000, teamBp: 5_000 }, lideranca: { ownBp: 2_000, teamBp: 8_000 } }, dispersionYellowBp: 3_000, dispersionRedBp: 5_000,
-  levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 300 }, { name: 'Ouro', minPoints: 800 }, { name: 'Diamante', minPoints: 1500 }],
-};
+import { gamificationSettingsOf, GAMIFICATION_START as START } from '../services/gamification';
+export { gamificationSettingsOf };
+async function pipelinesWithStages(db: DbOrTx, tenantId: string) {
+  const rows = await db.select({ id: s.pipelines.id, name: s.pipelines.name, stageKey: s.pipelineStages.key, stageName: s.pipelineStages.name, position: s.pipelineStages.position })
+    .from(s.pipelines).innerJoin(s.pipelineStages, eq(s.pipelineStages.pipelineId, s.pipelines.id)).where(eq(s.pipelines.tenantId, tenantId)).orderBy(s.pipelines.name, s.pipelineStages.position);
+  const out = new Map<string, { id: string; name: string; stages: { key: string; name: string }[] }>();
+  for (const r of rows) { const p = out.get(r.id) ?? { id: r.id, name: r.name, stages: [] }; p.stages.push({ key: r.stageKey, name: r.stageName }); out.set(r.id, p); }
+  return [...out.values()];
+}
 const canConfigure = (auth: AuthContext) => atLeast(level(auth, 'configuracoes'), 'total') || level(auth, 'resultados') === 'total';
 
-const asSettings = (c: Record<string, unknown>) => ({ ...START, ...(c as Partial<GamificationSettings>) });
-/** Regra vigente = a aprovada mais recente (null enquanto nenhuma foi aprovada) e a proposta pendente, se houver. */
-export async function gamificationSettingsOf(db: DbOrTx, tenantId: string) {
-  let rows = await db.select().from(s.gamificationSettings).where(eq(s.gamificationSettings.tenantId, tenantId)).orderBy(desc(s.gamificationSettings.version));
-  if (!rows.length) {
-    await db.insert(s.gamificationSettings).values({ tenantId, version: 1, config: START as unknown as Record<string, unknown>, note: 'Proposta inicial', status: 'proposta' }).onConflictDoNothing();
-    rows = await db.select().from(s.gamificationSettings).where(eq(s.gamificationSettings.tenantId, tenantId)).orderBy(desc(s.gamificationSettings.version));
-  }
-  const approved = rows.find((r) => r.status === 'aprovada') ?? null;
-  const pending = rows.find((r) => r.status === 'proposta' && (!approved || r.version > approved.version)) ?? null;
-  return {
-    settings: approved ? asSettings(approved.config) : null, version: approved?.version ?? null,
-    proposal: pending ? { version: pending.version, settings: asSettings(pending.config), note: pending.note, createdBy: pending.createdBy, createdAt: pending.createdAt } : null,
-    lastVersion: rows[0]!.version,
-  };
-}
 
 async function participants(db: DbOrTx, tenantId: string, st: GamificationSettings) {
   const org = await vacationOrg(db, tenantId);
@@ -60,17 +50,23 @@ const monthBounds = (ym: string) => { const [y, m] = ym.split('-').map(Number); 
 async function board(db: DbOrTx, auth: AuthContext, st: GamificationSettings, from: string, to: string) {
   const { org, teams } = await participants(db, auth.tenantId, st);
   const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
-  const credits = await creditsBetween(db, auth.tenantId, from, to, auth.timezone, memberIds);
-  const r = teamBoards({ teams, credits, settings: st });
+  const [credits, journey] = await Promise.all([creditsBetween(db, auth.tenantId, from, to, auth.timezone, memberIds), journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st.journeys ?? [])]);
+  const r = teamBoards({ teams, credits, settings: st, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))) });
   const name = Object.fromEntries(org.people.map((p) => [p.id, p.name]));
-  const photos = new Set((await db.execute<{ user_id: string }>(sql`select user_id from user_avatars where user_id in ${memberIds.length ? memberIds : ['00000000-0000-0000-0000-000000000000']}`)).rows.map((r) => r.user_id));
+  const photos = new Set((await db.execute<{ user_id: string }>(sql`select user_id from user_avatars where user_id in ${memberIds.length ? memberIds : ['00000000-0000-0000-0000-000000000000']}`)).rows.map((x) => x.user_id));
   const who = (u: string) => ({ name: name[u] ?? '', hasPhoto: photos.has(u) });
-  // dispersão é indicador da liderança: quem lidera o time (ou tem nível Total) vê
-  const seesDispersion = (teamId: string) => level(auth, 'resultados') === 'total' || (org.leads[teamId] ?? []).includes(auth.userId);
+  // o time em detalhe (notas de cada pessoa e dispersão) é ferramenta da liderança: quem lidera o time ou tem nível Total
+  const leadsTeam = (teamId: string) => level(auth, 'resultados') === 'total' || (org.leads[teamId] ?? []).includes(auth.userId);
+  const myTeams = org.teams[auth.userId] ?? [];
+  const mine = r.people.find((p) => p.userId === auth.userId) ?? null;
+  const fromJourney = (u: string, src: 'tarefa' | 'ganho') => Math.round(journey.filter((c) => c.userId === u && c.source === src).reduce((t, c) => t + c.points, 0) * 10) / 10;
   return {
-    teams: r.boards.map((b) => ({ ...b, name: teams.find((t) => t.id === b.teamId)!.name, members: b.members.map((m) => ({ ...m, ...who(m.userId) })), dispersion: seesDispersion(b.teamId) ? b.dispersion : null, leads: (org.leads[b.teamId] ?? []).map((u) => name[u] ?? '') })),
-    people: r.people.map((p) => ({ ...p, ...who(p.userId) })),
-    podium: podium(r.people).map((p) => ({ ...p, ...who(p.userId) })),
+    teams: r.boards.filter((b) => leadsTeam(b.teamId) || myTeams.includes(b.teamId)).map((b) => {
+      const lead = leadsTeam(b.teamId);
+      return { teamId: b.teamId, name: teams.find((t) => t.id === b.teamId)!.name, average: b.average, points: b.points, canManage: lead, dispersion: lead ? b.dispersion : null, members: lead ? b.members.map((m) => ({ ...m, ...who(m.userId), tasks: fromJourney(m.userId, 'tarefa'), wins: fromJourney(m.userId, 'ganho') })) : null };
+    }),
+    me: mine ? { ...mine, tasks: fromJourney(auth.userId, 'tarefa'), wins: fromJourney(auth.userId, 'ganho') } : null,
+    people: r.people,
   };
 }
 
@@ -90,12 +86,14 @@ export const gamificationRoutes = [
       const mb = monthBounds(month);
       const [m, y] = await Promise.all([board(app.db, auth, settings, mb.from, mb.to), board(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`)]);
       const gold = goldMedalists(y.people);
-      const mine = y.people.find((p) => p.userId === auth.userId);
+      const goldNames = (await vacationOrg(app.db, auth.tenantId)).people.filter((p) => gold.includes(p.id)).map((p) => ({ userId: p.id, name: p.name }));
+      const strip = (b: typeof m) => ({ teams: b.teams, me: b.me });
       return {
         pending: false, proposal: pendingInfo, settings, settingsVersion: version, canConfigure: canConfigure(auth), month, year: Number(year),
-        monthBoard: m, yearBoard: { ...y, people: y.people.map((p) => ({ ...p, level: levelOf(p.score, settings)?.name ?? null })) },
-        gold: gold.map((u) => ({ userId: u, name: y.people.find((p) => p.userId === u)!.name, score: y.people.find((p) => p.userId === u)!.score })),
-        me: mine ? { score: mine.score, level: levelOf(mine.score, settings)?.name ?? null, rank: y.people.findIndex((p) => p.userId === auth.userId) + 1, gold: gold.includes(auth.userId) } : null,
+        monthBoard: strip(m), yearBoard: strip(y),
+        // só o primeiro lugar do ano é reconhecido (sem posições, sem pódio)
+        gold: goldNames,
+        me: y.me ? { score: y.me.score, level: levelOf(y.me.score, settings)?.name ?? null, gold: gold.includes(auth.userId) } : null,
         eventTypes: EVENT_TYPE_KEYS,
       };
     },
@@ -109,7 +107,8 @@ export const gamificationRoutes = [
       const { teams } = await participants(app.db, auth.tenantId, settings);
       if (!teams.some((t) => t.memberIds.includes(auth.userId))) return { gold: false, year: Number(year), score: null };
       const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
-      const r = teamBoards({ teams, credits: await creditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, memberIds), settings });
+      const journey = await journeyCreditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, settings.journeys ?? []);
+      const r = teamBoards({ teams, credits: await creditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, memberIds), settings, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))) });
       const me = r.people.find((p) => p.userId === auth.userId);
       return { gold: goldMedalists(r.people).includes(auth.userId), year: Number(year), score: me?.score ?? null };
     },
@@ -121,7 +120,7 @@ export const gamificationRoutes = [
       const history = await app.db.select({ version: s.gamificationSettings.version, note: s.gamificationSettings.note, status: s.gamificationSettings.status, decisionNote: s.gamificationSettings.decisionNote, decidedAt: s.gamificationSettings.decidedAt, createdAt: s.gamificationSettings.createdAt, by: s.users.name }).from(s.gamificationSettings).leftJoin(s.users, eq(s.users.id, s.gamificationSettings.createdBy))
         .where(eq(s.gamificationSettings.tenantId, auth.tenantId)).orderBy(desc(s.gamificationSettings.version));
       const teams = await app.db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true)));
-      return { ...cur, proposal: cur.proposal ? { ...cur.proposal, canDecide: canConfigure(auth) && cur.proposal.createdBy !== auth.userId } : null, start: START, history, teams, canConfigure: canConfigure(auth) };
+      return { ...cur, pipelines: await pipelinesWithStages(app.db, auth.tenantId), proposal: cur.proposal ? { ...cur.proposal, canDecide: canConfigure(auth) && cur.proposal.createdBy !== auth.userId } : null, start: START, history, teams, canConfigure: canConfigure(auth) };
     },
   }),
   defineRoute({
@@ -129,6 +128,10 @@ export const gamificationRoutes = [
     body: z.object({
       teamIds: z.array(z.string().uuid()).max(100), points: z.record(z.string(), z.number().int()), participationMultiplierBp: z.number().int(),
       hierarchyWeights: z.object({ colaborador: z.object({ ownBp: z.number().int(), teamBp: z.number().int() }), lideranca: z.object({ ownBp: z.number().int(), teamBp: z.number().int() }) }),
+      journeys: z.array(z.object({
+        key: z.string().trim().max(40), name: z.string().trim().max(80), pipelineId: z.string().uuid(), wonPoints: z.number().int(),
+        components: z.array(z.object({ key: z.string().trim().max(40), name: z.string().trim().max(120), stageKey: z.string().trim().max(60).nullable(), points: z.number().int(), dueDays: z.number().int() })).max(60),
+      })).max(30).default([]),
       dispersionYellowBp: z.number().int(), dispersionRedBp: z.number().int(), levels: z.array(z.object({ name: z.string().trim().min(1).max(40), minPoints: z.number().int().min(0) })).min(1).max(10), note: z.string().trim().min(3).max(300),
     }),
     handler: async ({ app, auth, body, reply }) => {
@@ -139,6 +142,14 @@ export const gamificationRoutes = [
       if (cfg.teamIds.length) {
         const found = await app.db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), inArray(s.teams.id, cfg.teamIds)));
         if (found.length !== cfg.teamIds.length) throw unprocessable('Time inválido.');
+      }
+      // jornada: funil da empresa e etapas que existem nele
+      const pipes = await pipelinesWithStages(app.db, auth.tenantId);
+      for (const j of cfg.journeys) {
+        const p = pipes.find((x) => x.id === j.pipelineId);
+        if (!p) throw unprocessable(`Jornada "${j.name}": funil inválido.`);
+        const bad = j.components.filter((c) => c.stageKey && !p.stages.some((st) => st.key === c.stageKey));
+        if (bad.length) throw unprocessable(`Jornada "${j.name}": etapa inexistente no funil ${p.name} (${bad.map((c) => c.name).join(', ')}).`);
       }
       const errs = gamificationSettingsErrors(cfg);
       if (errs.length) throw unprocessable(errs.join(' '));
@@ -163,6 +174,36 @@ export const gamificationRoutes = [
       await app.db.update(s.gamificationSettings).set({ status: body.approve ? 'aprovada' : 'recusada', decidedBy: auth.userId, decidedAt: new Date(), decisionNote: body.note?.trim() || null })
         .where(and(eq(s.gamificationSettings.id, row.id), eq(s.gamificationSettings.status, 'proposta')));
       return { version: row.version, status: body.approve ? 'aprovada' : 'recusada' };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/me/pontos', summary: 'Meus pontos (qualquer pessoa logada): nota do mês e do ano, de onde veio cada ponto e a média dos meus times. Nunca mostra colegas', tag: 'Gestão de Times', anyAuthenticated: true,
+    query: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }),
+    handler: async ({ app, auth, query }) => {
+      await ensureFreshEvents(app.db, auth.tenantId);
+      const { settings, version } = await gamificationSettingsOf(app.db, auth.tenantId);
+      const month = query.month ?? todayIn(auth.timezone).slice(0, 7);
+      const year = month.slice(0, 4);
+      if (!settings) return { pending: true, month, year: Number(year) };
+      const mb = monthBounds(month);
+      const [m, y] = await Promise.all([board(app.db, auth, settings, mb.from, mb.to), board(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`)]);
+      const participates = !!m.me || (await participants(app.db, auth.tenantId, settings)).teams.some((t) => t.memberIds.includes(auth.userId));
+      // de onde vieram os pontos do mês: tarefas da jornada e ganhos (com a oportunidade) e eventos por tipo
+      const journey = (await journeyCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, auth.timezone, settings.journeys ?? [])).filter((c) => c.userId === auth.userId);
+      const oppIds = [...new Set(journey.map((c) => c.opportunityId))];
+      const opps = oppIds.length ? (await app.db.execute<{ id: string; code: number; contact: string }>(sql`select o.id, o.code, c.name as contact from opportunities o join contacts c on c.id = o.contact_id where o.id in ${oppIds}`)).rows : [];
+      const jName = (k: string) => settings.journeys.find((j) => j.key === k)?.name ?? k;
+      const items = journey.map((c) => { const o = opps.find((x) => x.id === c.opportunityId); return { source: c.source, journey: jName(c.journeyKey), opportunityId: c.opportunityId, code: o?.code ?? null, contact: o?.contact ?? null, points: c.points }; });
+      const credits = (await creditsBetween(app.db, auth.tenantId, mb.from, mb.to, auth.timezone, [auth.userId])).filter((c) => (settings.points[c.type] ?? 0) > 0 && (c.kind === 'direto' || c.kind === 'participacao'));
+      const events = credits.map((c) => ({ type: c.type, kind: c.kind, points: Math.round(((settings.points[c.type] ?? 0) * c.shareBp * (c.kind === 'participacao' ? settings.participationMultiplierBp / 10_000 : 1)) / 1000) / 10 }));
+      const gold = goldMedalists(y.people);
+      return {
+        pending: false, participates, month, year: Number(year), settingsVersion: version,
+        weights: settings.hierarchyWeights, participationMultiplierBp: settings.participationMultiplierBp,
+        monthScore: m.me, yearScore: y.me, level: y.me ? levelOf(y.me.score, settings)?.name ?? null : null, gold: gold.includes(auth.userId),
+        myTeams: m.teams.map((t) => ({ name: t.name, average: t.average })),
+        items, events,
+      };
     },
   }),
 ];

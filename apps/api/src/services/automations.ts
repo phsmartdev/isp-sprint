@@ -4,6 +4,7 @@
  * Proteção contra laço: no máximo 3 níveis (ex.: perdida → duplica → criada → move …).
  */
 import { CS_KEY } from './customerSuccess';
+import { ensureJourneyTasks } from './scoreJourneys';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { renderTemplate, type Automation, type AutomationAction } from '@isp/shared';
 import type { Config } from '../config';
@@ -34,6 +35,10 @@ export async function runAutomations(db: DB, config: Config, tenantId: string, a
   if (depth >= MAX_DEPTH) return [];
   const o = await loadOpp(db, tenantId, opportunityId);
   if (!o) return [];
+  // jornada de pontuação: tarefas da etapa nascem com o peso (falha aqui não impede as automações)
+  if (event.type === 'criada' || event.type === 'entrou_na_etapa') {
+    await ensureJourneyTasks(db, tenantId, actorId, opportunityId, { stage: event.type === 'criada' ? o.opp.stage : event.stage ?? o.opp.stage, creation: event.type === 'criada' }).catch((e) => console.error('tarefas da jornada', e));
+  }
   const autos = await db
     .select()
     .from(s.pipelineAutomations)

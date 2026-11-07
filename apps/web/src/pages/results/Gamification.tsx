@@ -1,21 +1,25 @@
 /**
- * Gestão de Times → Gamificação colaborativa: regra de pontuação com aprovação, pódio do mês e do ano, ranking com foto
- * (mês e ano), placar por time (média; dispersão para a liderança), pesos por hierarquia, níveis e Selo BK de Qualidade.
+ * Gestão de Times → Gamificação colaborativa: regra de pontuação com aprovação (jornadas com pesos por tarefa),
+ * a minha nota (mês e ano, de onde vieram os pontos), o time para a liderança (média, dispersão e notas) e o Selo BK de Qualidade.
+ * Sem ranking nem pódio: comparação pública pode constranger quem não fica em primeiro.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Settings2, Trophy, Trash2, Plus } from 'lucide-react';
 import { BUSINESS_EVENT_TYPES, GAMIFICATION_ROLE_LABELS, GAMIFICATION_ROLES } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
-import { Avatar, Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Tabs } from '../../components/ui/primitives';
+import { Avatar, Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
-import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, Podium, useGamification, type Board, type GamData, type GamSettings } from '../../features/gamification/Gamification';
+import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore } from '../../features/gamification/Gamification';
+import { slugKey } from '@isp/domain';
 
 type SettingsResp = {
+  pipelines: { id: string; name: string; stages: { key: string; name: string }[] }[];
   settings: GamSettings | null; version: number | null; start: GamSettings; canConfigure: boolean; teams: { id: string; name: string }[];
   proposal: { version: number; settings: GamSettings; note: string; createdAt: string; canDecide: boolean } | null;
   history: { version: number; note: string; status: 'proposta' | 'aprovada' | 'recusada'; decisionNote: string | null; decidedAt: string | null; createdAt: string; by: string | null }[];
@@ -49,94 +53,91 @@ export function GamificationPage() {
   );
 }
 
+function Breakdown({ m, label }: { m: MemberScore | null; label: string }) {
+  if (!m) return <p className="text-sm text-muted">Sem pontos em {label}.</p>;
+  const rows: [string, number][] = [['Tarefas da jornada', m.tasks], ['Negócios ganhos (parte de quem trabalhou)', m.wins], ['Eventos próprios', m.direct], ['Ajudando colegas', m.participation]];
+  return (
+    <dl className="text-sm">
+      {rows.map(([l, v]) => <div key={l} className="flex justify-between border-b border-line py-1"><dt className="text-muted">{l}</dt><dd className="num font-semibold">{fmtPts(v)}</dd></div>)}
+      <div className="flex justify-between border-b border-line py-1"><dt className="text-muted">Média do time</dt><dd className="num font-semibold">{fmtPts(m.teamAverage)}</dd></div>
+      <div className="flex justify-between py-1.5"><dt className="font-semibold text-ink">Nota</dt><dd className="num text-lg font-extrabold text-ink">{fmtPts(m.score)}</dd></div>
+    </dl>
+  );
+}
+
 function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; settings: GamSettings } }) {
   const st = d.settings;
-  const [tab, setTab] = useState<'mes' | 'ano'>('mes');
   const monthName = new Date(`${d.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-  const ranking = tab === 'mes' ? d.monthBoard.people : d.yearBoard.people;
+  const myGold = d.me?.gold;
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-4">
-        {d.me && (
-          <section aria-label="Minha nota" className="card flex flex-wrap items-center gap-4 p-4">
-            {d.me.gold && <BkGoldMedal size={48} year={d.year} />}
+        <section aria-label="Minha nota" className="card p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            {myGold && <BkGoldMedal size={52} year={d.year} />}
             <div className="flex-1">
               <p className="text-sm text-muted">Minha nota em {d.year}</p>
-              <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me.score)}</span> pts{d.me.level && <span className="ml-2 text-base font-semibold text-primary">nível {d.me.level}</span>}</p>
+              <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me?.score ?? 0)}</span> pts{d.me?.level && <span className="ml-2 text-base font-semibold text-primary">nível {d.me.level}</span>}</p>
+              {myGold && <p className="text-sm font-semibold text-[#8A6610]">Selo BK de Qualidade: primeiro lugar do ano</p>}
             </div>
-            <p className="text-sm text-muted">{d.me.gold ? 'Medalha de ouro: Selo BK de Qualidade' : `${d.me.rank}º no ano`}</p>
-          </section>
-        )}
-        <section aria-label="Ranking" className="card p-4">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-lg font-bold text-ink">Ranking</h2>
-            <Tabs label="Período do ranking" value={tab} onChange={(x) => setTab(x as 'mes' | 'ano')} tabs={[{ key: 'mes', label: `Mês (${monthName})` }, { key: 'ano', label: `Ano ${d.year}` }]} />
+            <Link to="/meus-pontos" className="text-sm font-semibold text-primary hover:underline">De onde vieram meus pontos</Link>
           </div>
-          <ol className="divide-y divide-line text-sm">
-            {ranking.map((p, i) => {
-              const lvl = tab === 'ano' ? d.yearBoard.people.find((x) => x.userId === p.userId)?.level : null;
-              return (
-                <li key={p.userId} className="flex items-center gap-3 py-2">
-                  <span className="num w-7 text-right font-bold text-muted">{i + 1}º</span>
-                  <Avatar name={p.name} userId={p.userId} hasPhoto={p.hasPhoto} size={40} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold text-ink">{p.name}</span>
-                    <span className="block text-xs text-muted">{ROLE_SHORT[p.role]} · próprios {fmtPts(p.own)} · média do time {fmtPts(p.teamAverage)}</span>
-                  </span>
-                  {tab === 'ano' && d.gold.some((g) => g.userId === p.userId) && <BkGoldMedal size={22} year={d.year} />}
-                  {lvl && <span className="text-xs font-semibold text-primary">{lvl}</span>}
-                  <span className="num w-20 text-right text-base font-bold text-ink">{fmtPts(p.score)}</span>
-                </li>
-              );
-            })}
-          </ol>
+          <div className="mt-3 grid gap-4 md:grid-cols-2">
+            <div><h3 className="mb-1 text-sm font-bold text-ink">{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</h3><Breakdown m={d.monthBoard.me} label={monthName} /></div>
+            <div><h3 className="mb-1 text-sm font-bold text-ink">Ano {d.year}</h3><Breakdown m={d.yearBoard.me} label={String(d.year)} /></div>
+          </div>
         </section>
         {d.monthBoard.teams.map((t) => (
           <section key={t.teamId} aria-label={`Time ${t.name}`} className="card p-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-bold text-ink">{t.name}<span className="ml-2 text-sm font-normal text-muted">{monthName}</span></h2>
-              <p className="text-sm text-muted">Média do time <span className="num font-bold text-ink">{fmtPts(t.average)}</span> · total <span className="num">{fmtPts(t.points)}</span></p>
+              <p className="text-sm text-muted">Média do time <span className="num font-bold text-ink">{fmtPts(t.average)}</span></p>
             </div>
             {t.dispersion && (
               <div className={clsx('mb-3 border-l-4 px-3 py-2 text-sm', DISPERSION_STYLE[t.dispersion.tone])} role="status" aria-label={`Dispersão do time ${t.name}`}>
                 <p className="font-semibold">{DISPERSION_LABEL[t.dispersion.tone]}{t.dispersion.cv != null && ` · dispersão ${Math.round(t.dispersion.cv * 100)}%`}</p>
-                <p className="text-xs">Indicador da liderança: diferença entre os resultados individuais (de {fmtPts(t.dispersion.min)} a {fmtPts(t.dispersion.max)}). Atenção a partir de {st.dispersionYellowBp / 100}%, problema a partir de {st.dispersionRedBp / 100}%.{t.dispersion.tone === 'vermelho' || t.dispersion.tone === 'amarelo' ? ' Combine apoio entre as pessoas do time para nivelar o resultado.' : ''}</p>
+                <p className="text-xs">Indicador da liderança: diferença entre os resultados individuais. Atenção a partir de {st.dispersionYellowBp / 100}%, problema a partir de {st.dispersionRedBp / 100}%.{t.dispersion.tone === 'vermelho' || t.dispersion.tone === 'amarelo' ? ' Combine apoio entre as pessoas do time para nivelar o resultado.' : ''}</p>
               </div>
             )}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead className="text-xs text-muted"><tr>{['Pessoa', 'Próprios', 'Ajudando colegas', 'Média do time', 'Nota'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
-                <tbody>
-                  {t.members.map((m) => (
-                    <tr key={m.userId} className="border-t border-line">
-                      <td className="px-2 py-1.5"><span className="flex items-center gap-2"><Avatar name={m.name} userId={m.userId} hasPhoto={m.hasPhoto} size={28} /><span className="font-semibold text-ink">{m.name}</span>{m.role === 'lideranca' && <Chip tone="blue">Liderança</Chip>}</span></td>
-                      <td className="num px-2 py-1.5">{fmtPts(m.direct)}</td>
-                      <td className="num px-2 py-1.5">{fmtPts(m.participation)}</td>
-                      <td className="num px-2 py-1.5 text-muted">{fmtPts(m.teamAverage)}</td>
-                      <td className="num px-2 py-1.5 font-bold">{fmtPts(m.score)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {t.members ? (
+              <>
+                <p className="mb-1 text-xs text-muted">Visível só para a liderança, como apoio à gestão do time. As pessoas não veem a nota umas das outras.</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left text-sm">
+                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Tarefas da jornada', 'Ganhos', 'Eventos', 'Ajudando colegas', 'Nota'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {[...t.members].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map((m) => (
+                        <tr key={m.userId} className="border-t border-line">
+                          <td className="px-2 py-1.5"><span className="flex items-center gap-2"><Avatar name={m.name} userId={m.userId} hasPhoto={m.hasPhoto} size={28} /><span className="font-semibold text-ink">{m.name}</span>{m.role === 'lideranca' && <Chip tone="blue">Liderança</Chip>}</span></td>
+                          <td className="num px-2 py-1.5">{fmtPts(m.tasks)}</td>
+                          <td className="num px-2 py-1.5">{fmtPts(m.wins)}</td>
+                          <td className="num px-2 py-1.5">{fmtPts(m.direct)}</td>
+                          <td className="num px-2 py-1.5">{fmtPts(m.participation)}</td>
+                          <td className="num px-2 py-1.5 font-bold">{fmtPts(m.score)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : <p className="text-sm text-muted">A média do time entra na sua nota: quando o time sobe, todo mundo sobe.</p>}
           </section>
         ))}
       </div>
       <aside className="space-y-4">
-        <section className="card p-4" aria-label="Pódio do mês">
-          <h2 className="font-display text-lg font-bold text-ink">Pódio de {monthName}</h2>
-          <Podium key={d.month} people={d.monthBoard.podium} label={monthName} />
-        </section>
-        <section className="card p-4" aria-label="Pódio do ano">
-          <h2 className="font-display text-lg font-bold text-ink">Pódio de {d.year}</h2>
-          <Podium key={`y${d.year}`} people={d.yearBoard.podium} label={String(d.year)} />
-          {d.gold.length > 0 && <p className="mt-3 flex items-center gap-2 text-sm"><BkGoldMedal size={28} year={d.year} /><span><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span>: medalha de ouro, Selo BK de Qualidade</span></p>}
-        </section>
+        {d.gold.length > 0 && (
+          <section className="card flex items-center gap-3 p-4" aria-label="Selo do ano">
+            <BkGoldMedal size={48} year={d.year} />
+            <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Selo BK de Qualidade {d.year}: primeiro lugar do ano</span></p>
+          </section>
+        )}
         <section className="card p-4 text-sm text-muted" aria-label="Como funciona">
           <h2 className="mb-1 font-display text-lg font-bold text-ink">Como funciona</h2>
-          <p>Pontos vêm dos eventos de negócio válidos (Desempenho). Ajudar na venda do colega vale {fmtPts(st.participationMultiplierBp / 10_000)}× o crédito.</p>
+          <p>Cada tarefa da jornada vale pontos para quem conclui. Excluir ou reabrir tira os pontos.</p>
+          <p className="mt-1">Negócio ganho: o peso do ganho é dividido entre quem trabalhou nas tarefas daquela oportunidade.</p>
+          <p className="mt-1">Ajudar na venda do colega vale {fmtPts(st.participationMultiplierBp / 10_000)}× o crédito.</p>
           <ul className="mt-1 list-disc pl-4">{GAMIFICATION_ROLES.map((r) => <li key={r}>{ROLE_SHORT[r]}: {st.hierarchyWeights[r].ownBp / 100}% próprio + {st.hierarchyWeights[r].teamBp / 100}% média do time</li>)}</ul>
-          <p className="mt-1">Regra aprovada v{d.settingsVersion}.</p>
+          <p className="mt-1">Sem ranking: só o primeiro lugar do ano recebe o Selo BK de Qualidade. Regra aprovada v{d.settingsVersion}.</p>
         </section>
       </aside>
     </div>
@@ -164,6 +165,10 @@ function ProposalBanner() {
       <p className="text-sm text-muted">{p.note} · proposta em {fmtDate(p.createdAt)}</p>
       <div className="mt-3 grid gap-4 text-sm md:grid-cols-3">
         <div>
+          {s.journeys.length > 0 && <>
+            <p className="font-semibold text-ink">Jornadas</p>
+            <ul className="mb-2 mt-1 space-y-0.5">{s.journeys.map((j) => <li key={j.key}><span className="font-semibold">{j.name}</span>: {j.components.map((c) => `${c.name} ${c.points}`).join(' · ')} · ganho {j.wonPoints}</li>)}</ul>
+          </>}
           <p className="font-semibold text-ink">Pontos por evento</p>
           <ul className="mt-1 space-y-0.5">{Object.entries(s.points).filter(([, v]) => v > 0).map(([k, v]) => <li key={k} className="flex justify-between gap-2"><span>{eventLabel(k)}</span><span className="num font-semibold">{v}</span></li>)}</ul>
         </div>
@@ -218,6 +223,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
     <Modal open onClose={onClose} title="Regra de pontuação" size="xl" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>Fechar</Button><Button variant="primary" disabled={note.trim().length < 3} loading={save.isPending} onClick={() => save.mutate()}>Enviar para aprovação</Button></div>}>
       {err && <p role="alert" className="mb-2 bg-danger-soft px-3 py-2 text-sm text-danger">{err}</p>}
       <Notice tone="info">Cada mudança vira uma proposta e só vale depois de aprovada por quem administra a Gestão de Times (quem propõe não aprova). {meta.version ? `Hoje vale a v${meta.version}.` : 'Ainda não há regra aprovada.'}</Notice>
+      <JourneysEditor value={v.journeys ?? []} pipelines={meta.pipelines} onChange={(journeys) => setV({ ...v, journeys })} />
       <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Pesos da nota por hierarquia (próprio + time = 100%)</legend>
         <div className="mt-1 grid gap-3 sm:grid-cols-2">
           {GAMIFICATION_ROLES.map((r) => (
@@ -267,5 +273,51 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
         </details>
       )}
     </Modal>
+  );
+}
+
+/** Jornadas com pesos: cada tarefa (componente) de uma etapa do funil vale pontos para quem a conclui; o ganho tem peso próprio. */
+function JourneysEditor({ value, pipelines, onChange }: { value: JourneyDef[]; pipelines: SettingsResp['pipelines']; onChange: (v: JourneyDef[]) => void }) {
+  const set = (i: number, j: Partial<JourneyDef>) => onChange(value.map((x, k) => (k === i ? { ...x, ...j } : x)));
+  const free = pipelines.filter((p) => !value.some((j) => j.pipelineId === p.id));
+  const unique = (base: string, used: string[]) => { let k = base, n = 2; while (used.includes(k)) k = `${base}_${n++}`; return k; };
+  return (
+    <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Jornadas com pesos por tarefa</legend>
+      <p className="text-xs text-muted">A tarefa nasce quando a oportunidade entra na etapa. Concluir pontua quem concluiu; excluir ou reabrir tira os pontos. No negócio ganho, o peso do ganho é dividido entre quem trabalhou nas tarefas.</p>
+      <div className="mt-2 space-y-3">
+        {value.map((j, i) => {
+          const p = pipelines.find((x) => x.id === j.pipelineId);
+          return (
+            <div key={j.key} className="border border-line p-3" aria-label={`Jornada ${j.name}`} role="group">
+              <div className="flex flex-wrap items-end gap-2">
+                <FormField label="Nome da jornada" htmlFor={`j-name-${i}`}><Input id={`j-name-${i}`} className="h-9 w-[220px]" value={j.name} onChange={(e) => set(i, { name: e.target.value })} /></FormField>
+                <FormField label="Funil" htmlFor={`j-pipe-${i}`}><Select id={`j-pipe-${i}`} className="h-9 w-[220px]" value={j.pipelineId} onChange={(e) => { const np = pipelines.find((x) => x.id === e.target.value); const auto = !j.name.trim() || pipelines.some((x) => j.name === `Jornada ${x.name}`); set(i, { pipelineId: e.target.value, components: j.components.map((c) => ({ ...c, stageKey: null })), ...(auto && np ? { name: `Jornada ${np.name}` } : {}) }); }}>{pipelines.filter((x) => x.id === j.pipelineId || free.includes(x)).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>
+                <FormField label="Pontos do negócio ganho" htmlFor={`j-won-${i}`}><Input id={`j-won-${i}`} inputMode="numeric" className="num h-9 w-[110px]" value={String(j.wonPoints)} onChange={(e) => set(i, { wonPoints: Number(e.target.value.replace(/\D/g, '') || 0) })} /></FormField>
+                <button type="button" className="mb-2 p-1 text-muted hover:text-danger" aria-label={`Tirar jornada ${j.name}`} onClick={() => onChange(value.filter((_, k) => k !== i))}><Trash2 className="h-4 w-4" /></button>
+              </div>
+              <table className="mt-2 w-full text-sm">
+                <thead className="text-xs text-muted"><tr><th className="py-1 text-left font-medium">Tarefa</th><th className="py-1 text-left font-medium">Etapa</th><th className="py-1 text-left font-medium">Pontos</th><th className="py-1 text-left font-medium">Prazo (dias)</th><th /></tr></thead>
+                <tbody>
+                  {j.components.map((c, ci) => {
+                    const setC = (x: Partial<JourneyDef['components'][number]>) => set(i, { components: j.components.map((y, k) => (k === ci ? { ...y, ...x } : y)) });
+                    return (
+                      <tr key={c.key} className="border-t border-line">
+                        <td className="py-1 pr-2"><Input aria-label={`Tarefa ${ci + 1} da jornada ${j.name}`} className="h-8" value={c.name} onChange={(e) => setC({ name: e.target.value })} /></td>
+                        <td className="py-1 pr-2"><Select aria-label={`Etapa da tarefa ${ci + 1} da jornada ${j.name}`} className="h-8" value={c.stageKey ?? ''} onChange={(e) => setC({ stageKey: e.target.value || null })}><option value="">Na criação</option>{(p?.stages ?? []).filter((s) => s.key !== 'ganha' && s.key !== 'perdida').map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}</Select></td>
+                        <td className="py-1 pr-2"><Input aria-label={`Pontos da tarefa ${ci + 1} da jornada ${j.name}`} inputMode="numeric" className="num h-8 w-[80px]" value={String(c.points)} onChange={(e) => setC({ points: Number(e.target.value.replace(/\D/g, '') || 0) })} /></td>
+                        <td className="py-1 pr-2"><Input aria-label={`Prazo da tarefa ${ci + 1} da jornada ${j.name}`} inputMode="numeric" className="num h-8 w-[70px]" value={String(c.dueDays)} onChange={(e) => setC({ dueDays: Number(e.target.value.replace(/\D/g, '') || 0) })} /></td>
+                        <td><button type="button" className="p-1 text-muted hover:text-danger" aria-label={`Tirar tarefa ${ci + 1} da jornada ${j.name}`} onClick={() => set(i, { components: j.components.filter((_, k) => k !== ci) })}><Trash2 className="h-4 w-4" /></button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <Button className="mt-2" size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => set(i, { components: [...j.components, { key: unique(`tarefa_${j.components.length + 1}`, j.components.map((c) => c.key)), name: '', stageKey: null, points: 5, dueDays: 2 }] })}>Adicionar tarefa</Button>
+            </div>
+          );
+        })}
+        {free.length > 0 && <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => { const p = free[0]!; onChange([...value, { key: unique(slugKey(p.name), value.map((j) => j.key)), name: `Jornada ${p.name}`, pipelineId: p.id, wonPoints: 0, components: [] }]); }}>Adicionar jornada</Button>}
+      </div>
+    </fieldset>
   );
 }
