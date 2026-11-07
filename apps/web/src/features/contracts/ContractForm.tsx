@@ -1,7 +1,8 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useSectors } from '../../lib/hooks';
 import { useMemo, useState } from 'react';
-import { deliveryErrors, type DeliveryAddresses } from '@isp/domain';
+import { deliveryErrors, type DeliveryAddresses, EMPTY_ZENITH, zenithErrors, normalizeZenith, type ZenithContract } from '@isp/domain';
+import { ZenithFieldset } from './Zenith';
 import { DeliveryEditor, EMPTY_DELIVERY } from './DeliveryAddresses';
 import { AlertTriangle, ClipboardPaste, Download, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -23,6 +24,7 @@ export type FormState = {
   agency: string; processNumber: string; modality: string; commitmentNote: string; budgetLine: string; extensionMax: string;
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
   delivery: DeliveryAddresses;
+  zenith: ZenithContract;
 };
 
 export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
@@ -39,6 +41,7 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
     agency: p?.agency ?? '', processNumber: p?.processNumber ?? '', modality: p?.modality ?? '', commitmentNote: p?.commitmentNote ?? '', budgetLine: p?.budgetLine ?? '', extensionMax: p?.extensionMaxMonths ? String(p.extensionMaxMonths) : '',
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
     delivery: v.deliveryAddresses ?? EMPTY_DELIVERY,
+    zenith: v.zenith ?? EMPTY_ZENITH,
   };
 }
 
@@ -63,6 +66,8 @@ export function payloadOf(f: FormState) {
     : { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
   const dErr = deliveryErrors(f.delivery);
   if (dErr.length) throw new Error(`Endereços de entrega: ${dErr.slice(0, 3).join(' ')}`);
+  const zErr = zenithErrors(f.zenith);
+  if (zErr.length) throw new Error(`Cadastro Zenith: falta ${zErr.map((e) => e.message.toLowerCase()).join(', ')}.`);
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
@@ -72,6 +77,7 @@ export function payloadOf(f: FormState) {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
       items, guarantee, publicTerms, reportTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
+      zenith: normalizeZenith(f.zenith),
       deliveryAddresses: { columns: f.delivery.columns.map((c) => c.trim()), rows: f.delivery.rows.map((r) => ({ ...r, address: r.address.trim(), service: r.service?.trim() || null })) },
     },
   };
@@ -204,6 +210,8 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
         )}
         <FormField label="Objeto" htmlFor="cf-object" required className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-object" className="min-h-[64px]" value={f.object} onChange={(e) => onChange({ object: e.target.value })} /></FormField>
       </Fieldset>
+
+      <ZenithFieldset z={f.zenith} set={(zenith) => onChange({ zenith })} />
 
       <Fieldset title="Datas" hint="Assinatura, vigência, ativação técnica e início do faturamento são datas diferentes. O término sai do prazo; a renovação prevista é o dia seguinte ao término.">
         <FormField label="Assinatura" htmlFor="cf-signed" required><Input id="cf-signed" type="date" value={f.signedAt} onChange={(e) => onChange({ signedAt: e.target.value })} /></FormField>

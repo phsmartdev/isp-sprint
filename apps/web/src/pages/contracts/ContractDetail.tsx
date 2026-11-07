@@ -21,6 +21,7 @@ import { CommitmentControl } from '../../features/contracts/CommitmentControl';
 import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
 import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { ErpPanel } from '../../features/contracts/ErpPanel';
+import { ZenithPanel } from '../../features/contracts/Zenith';
 import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { ReportNotices, ReportTermsText } from '../../features/contracts/ReportNotices';
 import { ContractJourneySteps } from '../../features/contracts/ContractJourneySteps';
@@ -28,7 +29,7 @@ import { GenerateModal, SignModal } from '../../features/contracts/SignaturePane
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'zenith' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -167,6 +168,7 @@ export function ContractDetailPage() {
             ...(c.billingType === 'medicao' || c.kind === 'publico' ? [{ key: 'consumo' as Tab, label: c.billingType === 'medicao' ? (c.kind === 'publico' ? 'Consumo por valor' : 'Consumo') : 'Empenho por valor' }] : []),
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
+            { key: 'zenith', label: 'Zenith' },
             { key: 'processos', label: 'Processos', count: openProcs.length },
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
             { key: 'documentos', label: 'Documentos' },
@@ -221,6 +223,7 @@ export function ContractDetailPage() {
             </div>
           )}
           {tab === 'erp' && <ErpPanel c={c} />}
+          {tab === 'zenith' && <ZenithPanel contractId={c.id} />}
           {tab === 'empenhos' && <CommitmentControl contractId={c.id} />}
           {tab === 'consumo' && <ConsumptionPanel c={c} />}
           {tab === 'aditivos' && <AmendmentsPanel c={c} />}

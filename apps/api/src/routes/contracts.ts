@@ -9,6 +9,7 @@ import {
   SECTOR_KEY, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
 import { deliveryErrors, DELIVERY_MAX_COLUMNS, DELIVERY_MAX_ROWS } from '@isp/domain';
+import { ZenithBody, syncZenithSlas } from './zenith';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -55,6 +56,8 @@ const VersionFields = z.object({
     columns: z.array(z.string().trim().min(1).max(60)).max(DELIVERY_MAX_COLUMNS).default([]),
     rows: z.array(z.object({ seq: z.number().int().min(1).max(1_000_000), address: z.string().trim().min(1).max(500), service: z.string().trim().max(200).nullable().default(null), extra: z.record(z.string(), z.string().max(300)).default({}) })).max(DELIVERY_MAX_ROWS).default([]),
   }).superRefine((d, ctx) => { for (const m of deliveryErrors(d)) ctx.addIssue({ code: 'custom', message: m }); }).optional(),
+  /** Cadastro Zenith: quando enviado, precisa estar completo (a tela exige). */
+  zenith: ZenithBody.nullable().optional(),
 });
 const Header = z.object({
   kind: z.enum(CONTRACT_KINDS).default('privado'),
@@ -233,6 +236,7 @@ export const contractRoutes = [
         if (body.billingType === 'medicao' && body.initialBalanceCents > 0) {
           await tx.insert(s.contractLedger).values({ tenantId: auth.tenantId, contractId: c!.id, kind: 'credito', amountCents: body.initialBalanceCents, occurredOn: ver.signedAt ?? new Date().toISOString().slice(0, 10), description: 'Saldo inicial do contrato', createdBy: auth.userId });
         }
+        await syncZenithSlas(tx, auth.tenantId, c!.id, ver.zenith, auth.userId);
         await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Contrato ${ver.number} (${BILLING_TYPE_LABELS[body.billingType]}) cadastrado${oppTitle ? ` a partir da oportunidade “${oppTitle}”` : ''}`, { opportunityId: body.opportunityId });
         if (body.opportunityId) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: body.opportunityId, type: 'contrato_cadastrado', actorId: auth.userId, payload: { contractId: c!.id, number: ver.number } });
         return c!;
@@ -757,6 +761,7 @@ export const contractRoutes = [
           if (patch.reportTerms !== undefined) patch.reportTerms = normalizeVersion({ reportTerms: patch.reportTerms as ReportTerms | null }).reportTerms;
           if ((patch.reportTerms as ReportTerms | null)?.validatorId) await assertUsers(tx, auth, [(patch.reportTerms as ReportTerms).validatorId]);
           const r = await newVersion(tx, c, auth.userId, patch as VersionPatch, 'edicao', body.reason ?? 'Ajuste no cadastro antes da validação');
+          await syncZenithSlas(tx, auth.tenantId, c.id, body.version.zenith, auth.userId);
           version = r.version;
         }
         return { version, changedHeader };
