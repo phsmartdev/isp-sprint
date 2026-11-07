@@ -184,6 +184,7 @@ function ProposalBanner() {
             <li>Ajuda ao colega vale {fmtPts(s.participationMultiplierBp / 10_000)}×</li>
             {s.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts · ` : ''}{compositionText(l)}</li>)}
             <li>Bônus: no prazo +{s.bonuses.onTimeBp / 100}% · aprovada +{s.bonuses.adherenceBp / 100}% · acima da alçada +{s.bonuses.extraPerLevelBp / 100}%/nível (até +{s.bonuses.extraCapBp / 100} p.p.) · teto {s.bonuses.scoreCapBp / 100}%</li>
+            <li>Pedido de Apoio: {s.support ? `quem apoia ganha ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')}× os pontos da tarefa (ou ${s.support.basePoints} pts × ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')} sem tarefa) · quem pede ganha ${s.support.requesterPoints} pt(s) · teto ${s.support.monthlyCapPoints} pts/mês` : 'não pontua'}</li>
             <li>Participam: {teamNames}</li>
           </ul>
         </div>
@@ -233,6 +234,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
       <JourneysEditor value={v.journeys ?? []} pipelines={meta.pipelines} levels={v.competencyLevels} onChange={(journeys) => setV({ ...v, journeys })} />
       <LevelsEditor v={v} setV={setV} people={meta.people} />
       <PerformanceWeightsEditor v={v} setV={setV} />
+      <SupportRuleEditor v={v} setV={setV} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {pct('participationMultiplierBp', 'Valor da ajuda ao colega (%)', '100 = igual ao próprio; 150 = vale 1,5×')}
         {pct('dispersionYellowBp', 'Dispersão: atenção a partir de (%)')}
@@ -404,6 +406,30 @@ function PerformanceWeightsEditor({ v, setV }: { v: GamSettings; setV: (x: GamSe
         <FormField label="Atenção a partir de (%)" htmlFor="pb-yellow"><Input id="pb-yellow" inputMode="numeric" className="num" value={String((v.performanceBands?.yellowBp ?? 0) / 100)} onChange={(e) => setV({ ...v, performanceBands: { ...v.performanceBands, yellowBp: n(e.target.value) } })} /></FormField>
       </div>
       <p className="mt-1 text-xs text-muted">Componente sem meta no mês não pesa contra: o peso vai para os demais. Atividade = nota da gamificação; metas = atingimento médio das metas de Objetivos e metas.</p>
+    </fieldset>
+  );
+}
+
+/** Pedido de Apoio: quanto vale apoiar (multiplicador sobre os pontos da tarefa), a base sem tarefa, quem pede e o teto do mês. */
+const SUPPORT_SUGGESTED = { helperMultiplierBp: 15_000, basePoints: 3, requesterPoints: 1, monthlyCapPoints: 30 };
+function SupportRuleEditor({ v, setV }: { v: GamSettings; setV: (x: GamSettings) => void }) {
+  const on = !!v.support;
+  const sp = v.support ?? SUPPORT_SUGGESTED;
+  const n = (x: string) => Number(x.replace(',', '.').replace(/[^\d.]/g, '') || 0);
+  const set = (k: keyof typeof sp, val: number) => setV({ ...v, support: { ...sp, [k]: val } });
+  return (
+    <fieldset className="mt-4 border border-line p-3">
+      <legend className="px-1 text-sm font-semibold text-ink">Pedido de Apoio</legend>
+      <label className="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={on} onChange={(e) => setV({ ...v, support: e.target.checked ? sp : undefined })} />Apoio confirmado vale pontos</label>
+      {on && (
+        <div className="grid gap-3 sm:grid-cols-4">
+          <FormField label="Quem apoia ganha (×)" htmlFor="sp-m" hint="sobre os pontos da tarefa; 1,5 = 1,5×"><Input id="sp-m" inputMode="decimal" className="num" value={String(sp.helperMultiplierBp / 10_000).replace('.', ',')} onChange={(e) => set('helperMultiplierBp', Math.round(n(e.target.value) * 10_000))} /></FormField>
+          <FormField label="Pontos-base sem tarefa" htmlFor="sp-b" hint="quando o pedido não é de uma tarefa com pontos"><Input id="sp-b" inputMode="numeric" className="num" value={String(sp.basePoints)} onChange={(e) => set('basePoints', Math.round(n(e.target.value)))} /></FormField>
+          <FormField label="Quem pede ganha" htmlFor="sp-r" hint="pontos por apoio confirmado"><Input id="sp-r" inputMode="numeric" className="num" value={String(sp.requesterPoints)} onChange={(e) => set('requesterPoints', Math.round(n(e.target.value)))} /></FormField>
+          <FormField label="Teto por pessoa no mês" htmlFor="sp-c" hint="pontos de apoio (apoiar + pedir)"><Input id="sp-c" inputMode="numeric" className="num" value={String(sp.monthlyCapPoints)} onChange={(e) => set('monthlyCapPoints', Math.round(n(e.target.value)))} /></FormField>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-muted">Os pontos só entram depois que quem pediu confirma o apoio. Ninguém confirma o próprio apoio.</p>
     </fieldset>
   );
 }

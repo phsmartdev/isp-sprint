@@ -5556,3 +5556,45 @@ export const giftMovements = pgTable('gift_movements', {
   actorId: uuid('actor_id').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('gift_movements_idx').on(t.tenantId, t.itemId, t.createdAt), kindCk: check('gift_movements_kind_ck', inList('kind', ['entrada', 'saida', 'devolucao', 'ajuste'])) }));
+
+// ---------------------------------------------------------------- Pedido de Apoio
+/** Pedido de apoio ao time (grupo) ou a um colega, ligado (opcionalmente) ao item onde a pessoa estava. Histórico em support_request_events. */
+export const supportRequests = pgTable('support_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  requesterId: uuid('requester_id').notNull().references(() => users.id),
+  teamId: uuid('team_id').references(() => teams.id),
+  targetUserId: uuid('target_user_id').references(() => users.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  dueOn: date('due_on', { mode: 'string' }),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
+  entityLabel: text('entity_label'),
+  /** pontos da tarefa (jornada) ligada, congelados na abertura; sem tarefa com pontos: null (vale a base) */
+  taskPoints: integer('task_points'),
+  status: text('status').notNull().default('aberto'),
+  helperId: uuid('helper_id').references(() => users.id),
+  acceptedAt: ts('accepted_at'),
+  doneAt: ts('done_at'),
+  doneNote: text('done_note'),
+  confirmedAt: ts('confirmed_at'),
+  confirmedOn: date('confirmed_on', { mode: 'string' }),
+  cancelledAt: ts('cancelled_at'),
+  cancelReason: text('cancel_reason'),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('support_requests_idx').on(t.tenantId, t.status),
+  statusCk: check('support_requests_status_ck', inList('status', ['aberto', 'assumido', 'atendido', 'confirmado', 'cancelado'])),
+  targetCk: check('support_requests_target_ck', sql`(${t.teamId} is not null) <> (${t.targetUserId} is not null)`),
+}));
+
+export const supportRequestEvents = pgTable('support_request_events', {
+  id: id(),
+  tenantId: tenantId(),
+  requestId: uuid('request_id').notNull().references(() => supportRequests.id),
+  type: text('type').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('support_request_events_idx').on(t.requestId, t.createdAt) }));

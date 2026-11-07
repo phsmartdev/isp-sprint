@@ -47,6 +47,7 @@ import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
 import { TeamPanelPage } from './pages/results/TeamPanel';
 import { GoTo, TeamPeoplePage, TeamTrackingPage } from './pages/results/TeamHubs';
 import { GiftsPage } from './pages/Gifts';
+import { SupportPage } from './features/support/Support';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
@@ -135,6 +136,7 @@ export function App() {
         <Route path="times/intervencoes" element={<GoTo to="/times/acompanhamento" aba="intervencoes" />} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
         <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />
+        <Route path="apoio" element={<SupportPage />} />
         <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />

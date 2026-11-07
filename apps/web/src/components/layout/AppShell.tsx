@@ -1,4 +1,5 @@
 import { HeaderMoneyToggle } from '../../lib/privacy';
+import { HeaderSupport } from '../../features/support/Support';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -336,6 +337,7 @@ export function AppShell() {
               <Bell className="h-7 w-7" strokeWidth={1.6} />
               {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
             </Link>
+            <HeaderSupport />
             <HeaderMoneyToggle />
             <MentionsMenu />
             <HelpButton />

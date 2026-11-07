@@ -253,3 +253,28 @@ describe('Performance por nível hierárquico', () => {
     expect(lead.me.components.map((c: { key: string }) => c.key)).toEqual(['activity', 'individual', 'team', 'unit']);
   });
 });
+
+describe('Pedido de Apoio', () => {
+  it('pede ao time, colega assume e atende, quem pediu confirma: 1,5x para quem apoiou e pontos para quem pediu', async () => {
+    await ctx.app.db.execute(sql`delete from gamification_settings`);
+    const st = ok(await carlos.get('/times/gamificacao/settings')).json();
+    expect(st.proposal.settings.support).toMatchObject({ helperMultiplierBp: 15_000 });
+    ok(await carlos.post(`/times/gamificacao/settings/${st.proposal.version}/decide`, { approve: true }));
+    const resid = (await ctx.app.db.execute<{ id: string }>(sql`select id from teams where name = 'Residencial' limit 1`)).rows[0]!.id;
+    const r = ok(await lucas.post('/apoio', { title: 'Revisar proposta do cliente', teamId: resid }), 201).json();
+    expect((await lucas.post(`/apoio/${r.id}/assumir`, {})).statusCode).toBe(403);
+    const anaView = ok(await ana.get('/apoio')).json();
+    expect(anaView.toMe.some((x: { id: string }) => x.id === r.id)).toBe(true);
+    ok(await ana.post(`/apoio/${r.id}/assumir`, {}));
+    expect((await lucas.post(`/apoio/${r.id}/confirmar`, {})).statusCode).toBe(422); // ainda não atendido
+    ok(await ana.post(`/apoio/${r.id}/atendido`, { note: 'Revisado e ajustado' }));
+    expect((await ana.post(`/apoio/${r.id}/confirmar`, {})).statusCode).toBe(403); // só quem pediu
+    ok(await lucas.post(`/apoio/${r.id}/confirmar`, {}));
+    const pa = ok(await ana.get('/me/pontos')).json();
+    expect(pa.support).toContainEqual(expect.objectContaining({ requestId: r.id, role: 'apoiou', points: 4.5 }));
+    const pl = ok(await lucas.get('/me/pontos')).json();
+    expect(pl.support).toContainEqual(expect.objectContaining({ requestId: r.id, role: 'pediu', points: 1 }));
+    const hist = ok(await lucas.get(`/apoio/${r.id}/historico`)).json().items.map((x: { type: string }) => x.type);
+    expect(hist).toEqual(['pedido', 'assumido', 'atendido', 'confirmado']);
+  });
+});
