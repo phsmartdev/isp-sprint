@@ -3,6 +3,8 @@
  * com os pesos do nível de cada pessoa (regra aprovada). Visibilidade: a própria; a liderança, os times que lidera;
  * quem responde pela área, os times da área; nível Total, todos. Sem ranking (lista em ordem alfabética).
  */
+import { visibleTeams as teamsVisibleTo } from '../services/results';
+import { leadsOrManages } from '../services/vacations';
 import { and, eq, lte, gte, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { goalsAttainment, groupPerformance, levelFor, performanceScore, PERFORMANCE_COMPONENT_LABELS, type PerformanceComponent } from '@isp/domain';
@@ -24,17 +26,24 @@ export const hierarchyPerformanceRoutes = [
       const today = todayIn(auth.timezone);
       const month = query.month ?? today.slice(0, 7);
       const { settings, version } = await gamificationSettingsOf(app.db, auth.tenantId);
-      if (!settings) return { pending: true, month };
       const { from, to } = monthBounds(month);
       const org = await vacationOrg(app.db, auth.tenantId);
       const leads = new Set(Object.values(org.leads).flat());
-      const units = await app.db.select({ id: s.orgUnits.id, name: s.orgUnits.name, parentId: s.orgUnits.parentId, responsibleId: s.orgUnits.responsibleId }).from(s.orgUnits).where(eq(s.orgUnits.tenantId, auth.tenantId));
+      const units = await app.db.select({ id: s.orgUnits.id, name: s.orgUnits.name, kind: s.orgUnits.kind, parentId: s.orgUnits.parentId, responsibleId: s.orgUnits.responsibleId }).from(s.orgUnits).where(eq(s.orgUnits.tenantId, auth.tenantId));
       const teamRows = await app.db.select({ id: s.teams.id, orgUnitId: s.teams.orgUnitId }).from(s.teams).where(eq(s.teams.tenantId, auth.tenantId));
       const unitOfTeam = new Map(teamRows.map((t) => [t.id, t.orgUnitId]));
       // área de um time e as áreas acima (quem responde por uma área vê os times abaixo dela)
       const chain = (unitId: string | null) => { const out: string[] = []; let u = unitId; for (let i = 0; u && i < 20; i++) { out.push(u); u = units.find((x) => x.id === u)?.parentId ?? null; } return out; };
       const unitsOfUser = (u: string) => [...new Set((org.teams[u] ?? []).map((t) => unitOfTeam.get(t)).filter((x): x is string => !!x).concat(units.filter((x) => x.responsibleId === u).map((x) => x.id)))];
 
+      if (!settings) {
+        // regra ainda não aprovada: a estrutura aparece (para a análise), sem notas
+        const vis0 = await teamsVisibleTo(app.db, auth);
+        const ids = Object.keys(org.teamNames).filter((id) => vis0.all || vis0.teamIds.includes(id) || leadsOrManages(org, id, auth.userId));
+        const teams0 = ids.map((id) => { const unitId = unitOfTeam.get(id) ?? null; return { teamId: id, name: org.teamNames[id]!, unitId, unitName: units.find((x) => x.id === unitId)?.name ?? null, average: null, members: org.people.filter((p) => p.teamIds.includes(id)).map((p) => ({ userId: p.id, name: p.name, levelKey: '', levelName: '', lead: leads.has(p.id), score: null, tone: 'sem_dados' as const, components: [] })) }; }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+        const units0 = units.filter((un) => teams0.some((t) => chain(t.unitId).includes(un.id))).map((un) => ({ id: un.id, name: un.name, kind: un.kind, parentId: un.parentId, average: null }));
+        return { pending: true, month, teams: teams0, units: units0, overall: null };
+      }
       // metas do mês (ativas, com período que cruza o mês) e o atingimento de cada uma
       const goals = await app.db.select().from(s.goals).where(and(eq(s.goals.tenantId, auth.tenantId), eq(s.goals.status, 'ativa'), lte(s.goals.periodStart, to), gte(s.goals.periodEnd, from), sql`coalesce(${s.goals.approvalStatus}, 'aprovada') <> 'proposta'`));
       const att = new Map<string, number | null>();
@@ -61,9 +70,9 @@ export const hierarchyPerformanceRoutes = [
         return { userId: u, name: person?.name ?? '', levelKey: lv.key, levelName: lv.name, lead: leads.has(u), ...r, components: r.components.map((c) => ({ ...c, label: PERFORMANCE_COMPONENT_LABELS[c.key] })) };
       };
 
-      const total = level(auth, 'resultados') === 'total';
-      const myRespUnits = units.filter((x) => x.responsibleId === auth.userId).map((x) => x.id);
-      const seesTeam = (teamId: string) => total || (org.leads[teamId] ?? []).includes(auth.userId) || chain(unitOfTeam.get(teamId) ?? null).some((x) => myRespUnits.includes(x));
+      // mesma regra do sistema todo: supervisores e gerentes veem só os times que lideram ou gerem (e os das áreas que respondem)
+      const vis = await teamsVisibleTo(app.db, auth);
+      const seesTeam = (teamId: string) => vis.all || vis.teamIds.includes(teamId) || leadsOrManages(org, teamId, auth.userId);
       const visibleTeams = Object.keys(org.teamNames).filter(seesTeam);
       const photos = new Set((await app.db.execute<{ user_id: string }>(sql`select user_id from user_avatars ua join users u on u.id = ua.user_id where u.tenant_id = ${auth.tenantId}`)).rows.map((r) => r.user_id));
       const teams = visibleTeams.map((id) => {
@@ -72,12 +81,14 @@ export const hierarchyPerformanceRoutes = [
         return { teamId: id, name: org.teamNames[id]!, unitId, unitName: units.find((x) => x.id === unitId)?.name ?? null, average: groupPerformance(members.filter((m) => settings.competencyLevels.find((l) => l.key === m.levelKey)?.scoresTasks).map((m) => m.score)), members };
       }).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       // escalonado: área = média dos times da área (e das áreas abaixo)
-      const unitsOut = units.filter((un) => teams.some((t) => chain(t.unitId).includes(un.id))).map((un) => ({ id: un.id, name: un.name, average: groupPerformance(teams.filter((t) => chain(t.unitId).includes(un.id)).map((t) => t.average)) }));
+      const unitsOut = units.filter((un) => teams.some((t) => chain(t.unitId).includes(un.id))).map((un) => ({ id: un.id, name: un.name, kind: un.kind, parentId: un.parentId, average: groupPerformance(teams.filter((t) => chain(t.unitId).includes(un.id)).map((t) => t.average)) }));
       const me = org.people.some((p) => p.id === auth.userId) || activity.has(auth.userId) ? perf(auth.userId) : null;
       return {
         pending: false, month, settingsVersion: version, bands: settings.performanceBands,
         weights: settings.competencyLevels.map((l) => ({ key: l.key, name: l.name, weights: settings.performanceWeights[l.key] ?? null })),
         me, teams, units: unitsOut,
+        // geral: média de todos os times visíveis (mesma regra escalonada das áreas)
+        overall: teams.length ? groupPerformance(teams.map((t) => t.average)) : null,
       };
     },
   }),

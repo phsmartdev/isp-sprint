@@ -75,7 +75,7 @@ export function BkGoldMedal({ size = 64, year, title = 'Selo BK de Qualidade' }:
 export function HeaderSelo() {
   const q = useSelo();
   if (!q.data?.gold) return null;
-  return <Link to="/times/gamificacao" className="hidden items-center md:flex" title={`Selo BK de Qualidade ${q.data.year}: maior nota do ano`}><BkGoldMedal size={26} year={q.data.year} /></Link>;
+  return <Link to="/times/pessoas?aba=gamificacao" className="hidden items-center md:flex" title={`Selo BK de Qualidade ${q.data.year}: maior nota do ano`}><BkGoldMedal size={26} year={q.data.year} /></Link>;
 }
 
 /** Destaque na tela inicial da pessoa com a medalha de ouro. */
@@ -102,7 +102,7 @@ export function TeamPodiumAside() {
     <aside aria-label="Gamificação do time"><section className="card p-4">
       <h2 className="font-display text-lg font-bold text-ink">Gamificação</h2>
       <p className="mt-1 text-sm text-muted">A regra de pontuação está aguardando aprovação.</p>
-      <Link to="/times/gamificacao" className="mt-2 inline-block text-sm font-semibold text-primary hover:underline">{d.proposal?.canDecide ? 'Revisar e aprovar a regra' : 'Ver a proposta'}</Link>
+      <Link to="/times/pessoas?aba=gamificacao" className="mt-2 inline-block text-sm font-semibold text-primary hover:underline">{d.proposal?.canDecide ? 'Revisar e aprovar a regra' : 'Ver a proposta'}</Link>
     </section></aside>
   );
   const monthName = new Date(`${d.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', timeZone: 'UTC' });
@@ -115,7 +115,7 @@ export function TeamPodiumAside() {
         </section>
       )}
       <section className="card p-4" aria-label="Times no mês">
-        <div className="flex items-baseline justify-between"><h2 className="font-display text-lg font-bold text-ink">Times em {monthName}</h2><Link to="/times/gamificacao" className="text-sm font-semibold text-primary hover:underline">Minha nota</Link></div>
+        <div className="flex items-baseline justify-between"><h2 className="font-display text-lg font-bold text-ink">Times em {monthName}</h2><Link to="/times/pessoas?aba=gamificacao" className="text-sm font-semibold text-primary hover:underline">Minha nota</Link></div>
         <ul className="mt-2 space-y-2">
           {d.monthBoard.teams.map((t) => (
             <li key={t.teamId} className="border border-line p-2">

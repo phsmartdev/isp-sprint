@@ -93,3 +93,26 @@ describe('apuração oficial', () => {
     expect(h.competencias.map((c: { competencia: string }) => c.competencia)).toEqual([monthAgo().slice(0, 7)]);
   });
 });
+
+describe('times: vários líderes e gestores, visibilidade e centro de custo', () => {
+  it('gestor de vários times vê só esses times; cada time vira centro de custo', async () => {
+    const ctx2 = await makeApp();
+    try {
+      const carlos2 = await login(ctx2.app, 'carlos@yepnet.test');
+      const lucas2 = await login(ctx2.app, 'lucas@yepnet.test');
+      const org = (await carlos2.get('/results/org')).json();
+      const [t1, t2] = org.teams as { id: string; name: string }[];
+      expect((await carlos2.patch(`/results/org/teams/${t1!.id}`, { managerIds: [lucas2.me.user.id] })).statusCode).toBe(200);
+      expect((await carlos2.patch(`/results/org/teams/${t2!.id}`, { managerIds: [lucas2.me.user.id] })).statusCode).toBe(200);
+      const scope = (await lucas2.get('/results/scope')).json();
+      expect(scope.teams.map((t: { id: string }) => t.id).sort()).toEqual(expect.arrayContaining([t1!.id, t2!.id]));
+      const perf = (await lucas2.get('/times/performance')).json();
+      if (!perf.pending) expect((perf.teams as { teamId: string }[]).every((t) => scope.teams.some((x: { id: string }) => x.id === t.teamId))).toBe(true);
+      const ccs = (await carlos2.get('/budget/structure')).json().costCenters as { name: string; code: string }[];
+      expect(ccs.some((c) => c.name === t1!.name && c.code.startsWith('T-'))).toBe(true);
+      // volta
+      await carlos2.patch(`/results/org/teams/${t1!.id}`, { managerIds: [] });
+      await carlos2.patch(`/results/org/teams/${t2!.id}`, { managerIds: [] });
+    } finally { await ctx2.close(); }
+  });
+});

@@ -53,7 +53,7 @@ export function AbmIntelligence() {
       {can('desempenho') && (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
           <span>Os números do ABM também viram indicadores com meta e semáforo na Gestão de Times.</span>
-          <Link to="/desempenho/metas" className="font-semibold text-primary hover:underline">Ver metas</Link>
+          <Link to="/times/metas" className="font-semibold text-primary hover:underline">Ver metas</Link>
           {can('configuracoes', 'total') && <Link to="/settings/desempenho?t=indicadores" className="font-semibold text-primary hover:underline">Criar indicadores do ABM</Link>}
         </p>
       )}

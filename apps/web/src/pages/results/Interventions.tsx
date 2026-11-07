@@ -122,7 +122,7 @@ function InterventionDrawer({ id, onClose }: { id: string | null; onClose: () =>
         <div className="space-y-5">
           <div>
             <p className="text-sm text-muted">{INTERVENTION_KIND_LABELS[d.kind]} · {INTERVENTION_TRIGGER_LABELS[d.trigger]}</p>
-            <h3 className="text-lg font-bold text-ink">{d.goal ? <Link to={`/desempenho/metas?goal=${d.goal.id}`} className="hover:underline">{d.goal.title}</Link> : d.displayTitle}</h3>
+            <h3 className="text-lg font-bold text-ink">{d.goal ? <Link to={`/times/metas?goal=${d.goal.id}`} className="hover:underline">{d.goal.title}</Link> : d.displayTitle}</h3>
             {d.reason && <p className="mt-1 text-sm"><b>Motivo:</b> {d.reason}{d.createdByName && <span className="text-muted"> — aberta por {d.createdByName}</span>}</p>}
             <div className="mt-1 flex flex-wrap gap-2"><Chip tone={STATUS_TONE[d.status]}>{INTERVENTION_STATUS_LABELS[d.status]}</Chip><span className="text-sm">Responsável: <b>{d.ownerName}</b>{d.subjectName && <> · Avaliado: {d.subjectName}</>}</span></div>
           </div>

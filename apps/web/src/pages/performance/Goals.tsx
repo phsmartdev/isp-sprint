@@ -1,4 +1,5 @@
 /** Objetivos e metas: cascata Diretoria → Gestão → Liderança → pessoa, semáforo, ritmo, governança das alterações. */
+import { IndicatorsAdmin } from '../../features/performance/IndicatorBuilder';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -53,12 +54,14 @@ export function GoalBar({ g }: { g: Goal }) {
 
 export function GoalsPage() {
   const [u, setU] = useUrlState({ t: 'metas', goal: '' });
+  const canIndicators = useAuth().can('configuracoes', 'total');
   return (
     <div>
-      <PageHeader icon={<Target />} title="Objetivos e metas" subtitle="Desdobramento da estratégia em metas de equipe e individuais, calculadas pelos dados reais do sistema." />
-      <Tabs label="Objetivos e metas" value={u.t as 'metas' | 'objetivos' | 'aprovacoes'} onChange={(t) => setU({ t })} tabs={[{ key: 'metas', label: 'Metas' }, { key: 'objetivos', label: 'Objetivos' }, { key: 'aprovacoes', label: 'Aprovações e revisões' }]} className="mb-4" />
+      <PageHeader icon={<Target />} title="Metas e indicadores" subtitle="Defina o indicador, crie a meta do time ou da pessoa e acompanhe: o realizado vem dos dados do sistema ou é lançado na própria meta." />
+      <Tabs label="Metas e indicadores" value={u.t as 'metas' | 'objetivos' | 'aprovacoes' | 'indicadores'} onChange={(t) => setU({ t })} tabs={[{ key: 'metas', label: 'Metas' }, { key: 'objetivos', label: 'Objetivos' }, { key: 'aprovacoes', label: 'Aprovações e revisões' }, ...(canIndicators ? [{ key: 'indicadores' as const, label: 'Indicadores' }] : [])]} className="mb-4" />
       {u.t === 'objetivos' && <Objectives onGoal={(id) => setU({ goal: id }, { resetPage: false })} />}
       {u.t === 'metas' && <GoalsList onGoal={(id) => setU({ goal: id }, { resetPage: false })} />}
+      {u.t === 'indicadores' && canIndicators && <IndicatorsAdmin />}
       {u.t === 'aprovacoes' && <Approvals onGoal={(id) => setU({ goal: id }, { resetPage: false })} />}
       <GoalDrawer id={u.goal || null} onClose={() => setU({ goal: '' }, { resetPage: false })} onOpen={(id) => setU({ goal: id }, { resetPage: false })} />
     </div>

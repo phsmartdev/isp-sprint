@@ -72,7 +72,7 @@ export function MeetingPage() {
   const a = d.auto;
   return (
     <div>
-      <Breadcrumb items={[{ label: 'Rituais', to: '/times/rituais' }, { label: d.ritual.name }]} />
+      <Breadcrumb items={[{ label: 'Rituais', to: '/times/acompanhamento' }, { label: d.ritual.name }]} />
       <PageHeader icon={<CalendarClock />} title={d.ritual.name} subtitle={`${fmtDate(d.date)} às ${d.ritual.time} · ${durationLabel(d.ritual.durationMin)} · conduz ${d.ritual.facilitatorName}`}
         actions={<div className="flex items-center gap-3"><Chip tone={MEETING_STATUS_TONE[d.status]}>{MEETING_STATUS_LABEL[d.status]}</Chip>{!ro && <SaveStatus state={dirty && saveState !== 'saving' && saveState !== 'error' ? 'idle' : saveState} onRetry={() => { setSaveState('idle'); save.mutate(f); }} />}</div>} />
       {d.status === 'realizada' && <Notice tone="info">Ata encerrada por {d.finalizedByName} em {fmtDateTime(d.finalizedAt!)}. A pauta abaixo é a fotografia do momento do encerramento.</Notice>}
@@ -85,7 +85,7 @@ export function MeetingPage() {
             <h2 className="mb-2 font-bold text-ink">Resultados</h2>
             <ul className="mb-3 flex flex-wrap gap-2">{(['vermelho', 'amarelo', 'verde', 'sem_dado'] as const).map((c) => <li key={c} className="flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-sm"><span className={clsx('h-2.5 w-2.5 rounded-circle', DOT[c])} aria-hidden />{TRAFFIC_LABELS[c]} <b className="num">{a.goals.colors[c] ?? 0}</b></li>)}</ul>
             {!a.goals.offTrack.length ? <p className="text-sm text-muted">Nenhuma meta fora da faixa no período.</p> : (
-              <ul className="divide-y divide-line">{a.goals.offTrack.map((g) => <li key={g.id} className="flex items-center gap-2 py-2 text-sm"><span className={clsx('h-2.5 w-2.5 shrink-0 rounded-circle', DOT[g.color])} aria-hidden /><Link to={`/desempenho/metas?goal=${g.id}`} className="min-w-0 flex-1 truncate hover:underline">{g.title}</Link><span className="text-xs text-muted">{g.who}</span><span className="num text-xs">{fmtAtt(g.attainment)}{g.partial && ' (parcial)'}</span></li>)}</ul>
+              <ul className="divide-y divide-line">{a.goals.offTrack.map((g) => <li key={g.id} className="flex items-center gap-2 py-2 text-sm"><span className={clsx('h-2.5 w-2.5 shrink-0 rounded-circle', DOT[g.color])} aria-hidden /><Link to={`/times/metas?goal=${g.id}`} className="min-w-0 flex-1 truncate hover:underline">{g.title}</Link><span className="text-xs text-muted">{g.who}</span><span className="num text-xs">{fmtAtt(g.attainment)}{g.partial && ' (parcial)'}</span></li>)}</ul>
             )}
           </section>
 

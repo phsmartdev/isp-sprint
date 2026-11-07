@@ -2,7 +2,6 @@ import { EmailPage, MailboxesPage } from './pages/email/Email';
 import { AbmPage } from './pages/marketing/Abm';
 import { Abm360Page } from './pages/marketing/Abm360';
 import { ProductPage } from './pages/product/Product';
-import { ResultsPage } from './pages/results/Results';
 import { InterventionsPage } from './pages/results/Interventions';
 import { AnalysisPage } from './pages/results/Analysis';
 import { RitualsPage } from './pages/results/Rituals';
@@ -45,6 +44,8 @@ import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
 import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
+import { TeamPanelPage } from './pages/results/TeamPanel';
+import { GoTo, TeamPeoplePage, TeamTrackingPage } from './pages/results/TeamHubs';
 import { GiftsPage } from './pages/Gifts';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
@@ -126,18 +127,21 @@ export function App() {
         <Route path="activities" element={<Gate module="atividades" feature="crm.atividades"><ActivitiesPage /></Gate>} />
         <Route path="tarefas" element={<Gate module="atividades" feature="projetos.tarefas"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
-        <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
-        <Route path="times" element={<Gate module="resultados"><ResultsPage /></Gate>} />
-        <Route path="times/intervencoes" element={<Gate module="resultados"><InterventionsPage /></Gate>} />
+        <Route path="desempenho/metas" element={<GoTo to="/times/metas" />} />
+        <Route path="times/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
+        <Route path="times" element={<Gate module="resultados"><TeamPanelPage /></Gate>} />
+        <Route path="times/acompanhamento" element={<Gate module="resultados"><TeamTrackingPage /></Gate>} />
+        <Route path="times/pessoas" element={<TeamPeoplePage />} />
+        <Route path="times/intervencoes" element={<GoTo to="/times/acompanhamento" aba="intervencoes" />} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
-        <Route path="times/rituais" element={<Gate module="resultados"><RitualsPage /></Gate>} />
+        <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />
         <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
-        <Route path="times/ferias" element={<Gate module="resultados"><VacationsPage /></Gate>} />
-        <Route path="times/gamificacao" element={<Gate module="resultados"><GamificationPage /></Gate>} />
+        <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
+        <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
         <Route path="meus-pontos" element={<MyPointsPage />} />
-        <Route path="times/performance" element={<PerformancePage />} />
+        <Route path="times/performance" element={<GoTo to="/times/pessoas" aba="performance" />} />
         <Route path="times/rituais/reunioes/:id" element={<Gate module="resultados"><MeetingPage /></Gate>} />
-        <Route path="times/decisoes" element={<Gate module="resultados"><DecisionsPage /></Gate>} />
+        <Route path="times/decisoes" element={<GoTo to="/times/acompanhamento" aba="decisoes" />} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />
         <Route path="email" element={<Gate module="email"><EmailPage /></Gate>} />
         <Route path="email/caixas" element={<Gate module="email"><MailboxesPage /></Gate>} />

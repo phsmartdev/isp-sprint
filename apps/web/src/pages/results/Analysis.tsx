@@ -75,7 +75,7 @@ export function AnalysisPage() {
   const countFor = (k: Step) => gaps.filter((g) => g.step === k).length;
   return (
     <div>
-      <Breadcrumb items={[{ label: 'Intervenções', to: '/times/intervencoes' }, { label: iv.data?.displayTitle ?? '…', to: `/times/intervencoes?id=${id}` }, { label: 'Análise' }]} />
+      <Breadcrumb items={[{ label: 'Intervenções', to: '/times/acompanhamento?aba=intervencoes' }, { label: iv.data?.displayTitle ?? '…', to: `/times/intervencoes?id=${id}` }, { label: 'Análise' }]} />
       <PageHeader icon={<Search />} title="Análise da intervenção" subtitle={iv.data ? `${iv.data.displayTitle} · responsável ${iv.data.ownerName}` : ''}
         actions={!ro ? <SaveStatus state={dirty && saveState !== 'saving' && saveState !== 'error' ? 'idle' : saveState} onRetry={() => { setSaveState('idle'); save.mutate(c); }} /> : undefined} />
       {concluded && <Notice tone="info">Análise concluída por {d.analysis!.concludedByName} em {fmtDateTime(d.analysis!.concludedAt!)}. Para alterar, reabra com o motivo.</Notice>}

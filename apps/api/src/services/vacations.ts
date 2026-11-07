@@ -1,4 +1,5 @@
 /** Gestão de Times → Férias: regras da empresa, quem gerencia quem, contexto de validação e aviso N dias antes. */
+import { seesAllTeams } from './results';
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { isoAddDays, vacationEnd, vacationNeedsAlert, vacationSettingsErrors, type TeamMap, type Vacation, type VacationSettings } from '@isp/domain';
 import type { Config } from '../config';
@@ -20,7 +21,7 @@ export async function vacationSettingsOf(db: DbOrTx, tenantId: string): Promise<
 }
 export { vacationSettingsErrors };
 
-export type VacationOrg = { teams: TeamMap; leads: Record<string, string[]>; teamNames: Record<string, string>; people: { id: string; name: string; teamIds: string[] }[] };
+export type VacationOrg = { teams: TeamMap; leads: Record<string, string[]>; teamNames: Record<string, string>; people: { id: string; name: string; teamIds: string[] }[]; /** gestores do time e responsáveis (e substitutos) das unidades acima dele */ managers: Record<string, string[]> };
 
 /** Times ativos, membros, líderes (e substitutos) da empresa. */
 export async function vacationOrg(db: DbOrTx, tenantId: string): Promise<VacationOrg> {
@@ -39,15 +40,28 @@ export async function vacationOrg(db: DbOrTx, tenantId: string): Promise<Vacatio
     p.teamIds.push(r.teamId);
     people.set(r.userId, p);
   }
-  return { teams, leads, teamNames, people: [...people.values()] };
+  const [tms, units] = await Promise.all([
+    db.select({ id: s.teams.id, orgUnitId: s.teams.orgUnitId, managerIds: s.teams.managerIds }).from(s.teams).where(eq(s.teams.tenantId, tenantId)),
+    db.select({ id: s.orgUnits.id, parentId: s.orgUnits.parentId, responsibleId: s.orgUnits.responsibleId, substituteId: s.orgUnits.substituteId, active: s.orgUnits.active }).from(s.orgUnits).where(eq(s.orgUnits.tenantId, tenantId)),
+  ]);
+  const managers: Record<string, string[]> = {};
+  for (const t of tms) {
+    const out = new Set(t.managerIds);
+    let u = t.orgUnitId;
+    for (let i = 0; u && i < 20; i++) { const x = units.find((y) => y.id === u); if (!x) break; if (x.active) { if (x.responsibleId) out.add(x.responsibleId); if (x.substituteId) out.add(x.substituteId); } u = x.parentId; }
+    managers[t.id] = [...out];
+  }
+  return { teams, leads, teamNames, people: [...people.values()], managers };
 }
 
-/** Quem lidera a pessoa (líderes e substitutos dos times dela, menos ela mesma). */
-export const leadersOf = (org: VacationOrg, userId: string) => [...new Set((org.teams[userId] ?? []).flatMap((t) => org.leads[t] ?? []))].filter((u) => u !== userId);
+/** Quem lidera a pessoa: líderes e substitutos dos times dela, gestores desses times e responsáveis pelas áreas acima (menos ela mesma). */
+export const leadersOf = (org: VacationOrg, userId: string) => [...new Set((org.teams[userId] ?? []).flatMap((t) => [...(org.leads[t] ?? []), ...(org.managers[t] ?? [])]))].filter((u) => u !== userId);
+/** Lidera ou gere o time (inclui responsáveis pelas áreas acima). */
+export const leadsOrManages = (org: VacationOrg, teamId: string, userId: string) => (org.leads[teamId] ?? []).includes(userId) || (org.managers[teamId] ?? []).includes(userId);
 
-/** Gerencia as férias da pessoa: nível Total em Gestão de Times, ou lidera (ou substitui) um time dela. Ninguém aprova as próprias. */
+/** Gerencia as férias da pessoa: quem administra o sistema, ou lidera/gere um time dela. Ninguém aprova as próprias. */
 export function canManageVacation(auth: AuthContext, org: VacationOrg, userId: string) {
-  if (level(auth, 'resultados') === 'total') return true;
+  if (seesAllTeams(auth)) return true;
   return userId !== auth.userId && leadersOf(org, userId).includes(auth.userId);
 }
 /** Vê as férias da pessoa: ela, quem divide time com ela (para planejar sem choque) e quem a gerencia. */

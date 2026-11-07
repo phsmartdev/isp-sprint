@@ -68,7 +68,7 @@ export function RitualsPage() {
             {!recent.length ? <p className="text-sm text-muted">As atas encerradas aparecem aqui.</p> : (
               <ul className="divide-y divide-line">{recent.map((m) => <li key={m.id} className="flex items-center justify-between gap-2 py-2 text-sm"><Link to={`/times/rituais/reunioes/${m.id}`} className="hover:underline">{m.ritualName}</Link><Chip tone={STATUS_TONE[m.status]}>{fmtDate(m.date)}</Chip></li>)}</ul>
             )}
-            <Link to="/times/decisoes" className="mt-2 inline-block text-sm font-semibold text-primary hover:underline">Decisões e impedimentos</Link>
+            <Link to="/times/acompanhamento?aba=decisoes" className="mt-2 inline-block text-sm font-semibold text-primary hover:underline">Decisões e impedimentos</Link>
           </section>
         </aside>
       </div>

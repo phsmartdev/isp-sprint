@@ -1,4 +1,5 @@
 /** Oportunidade → Pontos da jornada: tarefas da jornada (peso, situação, quem concluiu) e o peso do ganho. */
+import { seesAllTeams } from '../services/results';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { componentRef, journeyCredits, parseComponentRef } from '@isp/domain';
@@ -33,7 +34,7 @@ export const scoreJourneyRoutes = [
       const won = opp.stage === 'ganha';
       const credits = journeyCredits([j], done, won ? [{ opportunityId: opp.id, pipelineId: opp.pipelineId, ownerId: opp.ownerId }] : [], ctx);
       // qualificar (opcional): a gerência e a liderança de quem concluiu; nunca quem concluiu
-      const canQualify = (doer: string) => doer !== auth.userId && (level(auth, 'resultados') === 'total' || leadersOf(org, doer).includes(auth.userId));
+      const canQualify = (doer: string) => doer !== auth.userId && (seesAllTeams(auth) || leadersOf(org, doer).includes(auth.userId));
       const winShare = credits.filter((c) => c.source === 'ganho').map((c) => ({ userId: c.userId, name: name(c.userId), points: c.points }));
       return {
         journey: { key: j.key, name: j.name, wonPoints: j.wonPoints },
@@ -80,7 +81,7 @@ export const scoreJourneyRoutes = [
       if (!t.completedAt) throw unprocessable('Só tarefa concluída pode ser qualificada.');
       const doer = t.completedBy ?? t.ownerId;
       const org = await vacationOrg(app.db, auth.tenantId);
-      if (doer === auth.userId || !(level(auth, 'resultados') === 'total' || leadersOf(org, doer).includes(auth.userId))) throw forbidden('Só a gerência ou a liderança de quem concluiu qualifica a tarefa.');
+      if (doer === auth.userId || !(seesAllTeams(auth) || leadersOf(org, doer).includes(auth.userId))) throw forbidden('Só a gerência ou a liderança de quem concluiu qualifica a tarefa.');
       await app.db.update(s.activities).set({ qualification: body.result, qualifiedBy: body.result ? auth.userId : null, qualifiedAt: body.result ? new Date() : null, updatedAt: new Date() }).where(eq(s.activities.id, t.id));
       await app.db.insert(s.activityEvents).values({ tenantId: auth.tenantId, activityId: t.id, type: 'qualified', actorId: auth.userId, payload: { result: body.result } });
       return { qualification: body.result };
