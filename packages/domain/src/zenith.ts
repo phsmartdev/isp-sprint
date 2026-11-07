@@ -3,6 +3,12 @@
  * ISP Sprint ainda não tinha ficam no contrato como "cadastro Zenith" (obrigatórios); o resto sai do CRM.
  * O envio depende da API do Zenith (ainda não recebida): aqui só se monta e confere o que seria enviado.
  */
+/** Serviço do contrato: só Telecom vai para o Zenith. */
+export const CONTRACT_SERVICE_TYPES = ['telecom', 'cloud', 'energia', 'cidades_inteligentes', 'outro'] as const;
+export type ContractServiceType = (typeof CONTRACT_SERVICE_TYPES)[number];
+export const CONTRACT_SERVICE_LABELS: Record<ContractServiceType, string> = { telecom: 'Serviços de telecom', cloud: 'Cloud', energia: 'Energia', cidades_inteligentes: 'Cidades inteligentes', outro: 'Outros serviços' };
+export const needsZenith = (t: string | null | undefined) => t === 'telecom';
+
 export const ZENITH_MODALITIES = ['convencional', 'pseudowire_p2p'] as const;
 export type ZenithModality = (typeof ZENITH_MODALITIES)[number];
 export const ZENITH_MODALITY_LABELS: Record<ZenithModality, string> = { convencional: 'Circuitos convencionais', pseudowire_p2p: 'Enlaces Pseudowire P2P' };

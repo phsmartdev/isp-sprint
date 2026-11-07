@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { SLA_DEFAULTS, SLA_METRIC_LABELS, DEFAULT_ZENITH_LISTS, ZENITH_MODALITIES, normalizeZenith, zenithErrors, zenithFields, type ZenithContract, type ZenithLists } from '@isp/domain';
+import { needsZenith, SLA_DEFAULTS, SLA_METRIC_LABELS, DEFAULT_ZENITH_LISTS, ZENITH_MODALITIES, normalizeZenith, zenithErrors, zenithFields, type ZenithContract, type ZenithLists } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { audit } from '../services/audit';
 import { currentVersion, loadContract } from '../services/contracts';
@@ -61,6 +61,7 @@ export const zenithRoutes = [
     handler: async ({ app, auth, params }) => {
       const c = await loadContract(app.db, auth, params.id);
       const v = await currentVersion(app.db, c);
+      if (!needsZenith(v.serviceType)) return { applicable: false as const, serviceType: v.serviceType, fields: [], missing: [], ready: false, zenith: null, sending: 'aguardando_api' as const };
       const [contact] = await app.db.select({ name: s.contacts.name, document: s.contacts.document }).from(s.contacts).where(eq(s.contacts.id, c.contactId)).limit(1);
       const [csa] = await app.db.select({ snap: s.csAccounts.snapshot }).from(s.csAccounts).where(and(eq(s.csAccounts.tenantId, auth.tenantId), eq(s.csAccounts.contactId, c.contactId))).limit(1);
       let ipc = ((csa?.snap as { ipc?: { total?: number | null } } | null)?.ipc?.total) ?? null;
@@ -76,7 +77,7 @@ export const zenithRoutes = [
       const slas = { availabilityPct: null as number | null, packetLossPct: null as number | null };
       for (const r of slaRows) { const k = SLA_FIELD[r.metric as keyof typeof SLA_FIELD]; if (slas[k] == null) slas[k] = r.target; }
       const out = zenithFields({ client: { name: contact?.name ?? '', document: contact?.document ?? null, ipc, subclients: subs }, contract: { number: v.number, zenith: (v.zenith as ZenithContract | null) ?? null }, slas });
-      return { ...out, ready: !out.missing.length, zenith: v.zenith ?? null, sending: 'aguardando_api' as const };
+      return { applicable: true as const, serviceType: v.serviceType, ...out, ready: !out.missing.length, zenith: v.zenith ?? null, sending: 'aguardando_api' as const };
     },
   }),
 ];
