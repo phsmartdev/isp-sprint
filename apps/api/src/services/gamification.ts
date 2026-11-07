@@ -4,13 +4,26 @@ import type { GamificationSettings } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 
-/** Proposta inicial (versão 1, status proposta): só vale depois de aprovada. Reconhece venda e ajuda ao colega; liderança pesa mais o time. */
+/**
+ * Proposta inicial (versão 1, status proposta): só vale depois de aprovada. Níveis de competência da estrutura comercial
+ * (apoio, execução, contas, liderança, gerência), bônus de pontualidade e aderência e crédito extra acima da alçada.
+ */
 export const GAMIFICATION_START: GamificationSettings = {
   journeys: [],
   teamIds: [],
   points: { lead_qualificado: 5, oportunidade_criada: 2, proposta_enviada: 5, negociacao_ganha: 30, venda_validada: 20, contrato_assinado: 10, contrato_renovado: 15, acompanhamento_registrado: 3, abm_interacao: 2, abm_oportunidade_gerada: 10 },
-  participationMultiplierBp: 15_000, hierarchyWeights: { colaborador: { ownBp: 5_000, teamBp: 5_000 }, lideranca: { ownBp: 2_000, teamBp: 8_000 } }, dispersionYellowBp: 3_000, dispersionRedBp: 5_000,
-  levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 300 }, { name: 'Ouro', minPoints: 800 }, { name: 'Diamante', minPoints: 1500 }],
+  participationMultiplierBp: 15_000,
+  competencyLevels: [
+    { key: 'n1', name: 'N1 · Apoio (assistente)', rank: 1, expectedMonthlyPoints: 60, scoresTasks: true, weights: { ownBp: 6_000, teamBp: 4_000, dispersionBp: 0, areaBp: 0 } },
+    { key: 'n2', name: 'N2 · Execução (analista)', rank: 2, expectedMonthlyPoints: 100, scoresTasks: true, weights: { ownBp: 6_000, teamBp: 4_000, dispersionBp: 0, areaBp: 0 } },
+    { key: 'n3', name: 'N3 · Contas (executivo de contas)', rank: 3, expectedMonthlyPoints: 120, scoresTasks: true, weights: { ownBp: 6_000, teamBp: 4_000, dispersionBp: 0, areaBp: 0 } },
+    { key: 'n4', name: 'N4 · Liderança (supervisão)', rank: 4, expectedMonthlyPoints: 100, scoresTasks: true, weights: { ownBp: 3_000, teamBp: 5_000, dispersionBp: 2_000, areaBp: 0 } },
+    { key: 'n5', name: 'N5 · Gerência', rank: 5, expectedMonthlyPoints: 0, scoresTasks: false, weights: { ownBp: 0, teamBp: 4_000, dispersionBp: 0, areaBp: 6_000 } },
+  ],
+  assignments: {}, defaultLevelKey: 'n2', defaultLeadLevelKey: 'n4',
+  bonuses: { onTimeBp: 2_000, adherenceBp: 3_000, extraPerLevelBp: 2_500, extraCapBp: 3_000, scoreCapBp: 13_000 },
+  dispersionYellowBp: 3_000, dispersionRedBp: 5_000,
+  levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 80 }, { name: 'Ouro', minPoints: 100 }, { name: 'Diamante', minPoints: 120 }],
 };
 
 const asSettings = (c: Record<string, unknown>) => ({ ...GAMIFICATION_START, ...(c as Partial<GamificationSettings>) });

@@ -42,4 +42,14 @@ describe('jornadas de pontuação', () => {
     const c = journeyCredits([LIC], [], [{ opportunityId: 'o2', pipelineId: 'p-lic', ownerId: 'dono' }, { opportunityId: 'o3', pipelineId: 'outro', ownerId: 'dono' }]);
     expect(c).toEqual([]);
   });
+  it('bônus de pontualidade e aderência; tarefa acima da alçada vira crédito extra', () => {
+    const J: ScoreJourney = { ...LIC, components: [{ ...LIC.components[0]!, level: 'n2' }, { ...LIC.components[1]!, level: 'n1' }] };
+    const ctx = { onTimeBp: 2_000, adherenceBp: 3_000, extraPerLevelBp: 2_500, rankOfUser: (u: string) => (u === 'assistente' ? 1 : 2), rankOfLevel: (k: string) => ({ n1: 1, n2: 2 } as Record<string, number>)[k] ?? null };
+    const c = journeyCredits([J], [
+      { opportunityId: 'o', ref: componentRef('licitacao', 'edital'), userId: 'assistente', inPeriod: true, onTime: true }, // 8 × 1,2 = 9,6; alçada N2, assistente N1 → +25% = 12 extra
+      { opportunityId: 'o', ref: componentRef('licitacao', 'documentos'), userId: 'analista', inPeriod: true, onTime: true, approved: true }, // 10 × 1,5 = 15, regular
+    ], [], ctx);
+    expect(c.map((x) => [x.userId, x.points, x.extra])).toEqual([['assistente', 12, true], ['analista', 15, false]]);
+    expect(c[1]!.bonus).toEqual({ onTime: true, adherence: true, levelsAbove: 0 });
+  });
 });

@@ -799,6 +799,10 @@ export const activities = pgTable(
     stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
     /** Jornada de pontuação: componente desta tarefa (jornada:tarefa); concluída pontua quem concluiu, excluída ou reaberta deixa de pontuar. */
     scoreComponent: text('score_component'),
+    /** Qualificação opcional da tarefa da jornada pela gerência (aprovada dá bônus de aderência; reprovada não tira pontos). */
+    qualification: text('qualification'),
+    qualifiedBy: uuid('qualified_by').references(() => users.id),
+    qualifiedAt: ts('qualified_at'),
     /** Playbook: transferência entre áreas exige aceite de quem recebe; sem aceite a demanda segue pendente com quem enviou. */
     acceptStatus: text('accept_status'),
     handoffFrom: uuid('handoff_from').references(() => users.id),
