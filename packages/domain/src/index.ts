@@ -52,3 +52,4 @@ export * from './gamification';
 export * from './scoreJourneys';
 export * from './hierarchyPerformance';
 export * from './deliveryAddresses';
+export * from './gifts';

@@ -58,6 +58,7 @@ const NAV: NavEntry[] = [
     { to: '/leads', label: 'Leads', module: 'leads' },
     { to: '/abm', label: 'ABM', module: 'clientes', feature: 'marketing.abm' },
     { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
+    { to: '/brindes', label: 'Brindes', module: 'campanhas' },
   ] },
   { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
