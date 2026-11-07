@@ -37,7 +37,11 @@ describe('estrutura: plano de contas e centros de custo', () => {
     ok(await carlos.patch(`/budget/cost-centers/${ccMkt}`, { leaderId: ana.me.user.id }));
     // líder só vê o próprio centro
     const mine = ok(await ana.get('/budget/structure')).json().costCenters;
-    expect(mine.map((c: { code: string }) => c.code)).toEqual(['MKT']);
+    // e os centros dos times que ela lidera (cada time é um centro de custo)
+    const codes = mine.map((c: { code: string }) => c.code);
+    expect(codes).toContain('MKT');
+    expect(codes.filter((c: string) => c !== 'MKT').every((c: string) => c.startsWith('T-'))).toBe(true);
+    expect(codes).not.toContain('COM');
     expect((await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${ccCom}`)).statusCode).toBe(403);
   });
 });

@@ -10,7 +10,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 
 type Unit = { id: string; name: string; kind: 'diretoria' | 'area' | 'unidade'; parentId: string | null; responsibleId: string | null; responsibleName: string | null; substituteId: string | null; substituteName: string | null; approvalLimitCents: number | null; active: boolean; rowVersion: number };
-type Team = { id: string; name: string; orgUnitId: string | null; substituteLeadId: string | null; substituteLeadName: string | null; leads: (string | null)[]; members: number };
+type Team = { id: string; name: string; orgUnitId: string | null; substituteLeadId: string | null; substituteLeadName: string | null; leads: (string | null)[]; leadIds: string[]; managerIds: string[]; members: number };
 type Org = { units: Unit[]; teams: Team[]; events: { id: string; type: string; createdAt: string; actorName: string | null }[] };
 const KIND: Record<Unit['kind'], string> = { diretoria: 'Diretoria', area: 'Área', unidade: 'Unidade' };
 
@@ -36,7 +36,7 @@ export function AdminResultsSettings() {
   const loose = o.teams.filter((t) => !t.orgUnitId || !o.units.some((u) => u.id === t.orgUnitId));
   return (
     <div className="space-y-4">
-      <div><h1 className="text-xl font-bold text-ink">Gestão de Times</h1><p className="text-sm text-muted">A estrutura define quem responde por quê: responsável por diretoria vê a perspectiva Diretoria; por área ou unidade, Gestão; líderes de time, Liderança. O cargo não dá acesso por si — o nível de acesso continua em Segurança.</p></div>
+      <div><h1 className="text-xl font-bold text-ink">Gestão de Times</h1><p className="text-sm text-muted">Cada pessoa vê só o que lidera ou gere: liderança vê os times que lidera; gestores, os times que gerem (podem ser vários); responsável por área ou diretoria, tudo abaixo dela. Cada time é um centro de custo no orçamento. Responsável por diretoria vê a perspectiva Diretoria; por área ou unidade, Gestão; líderes de time, Liderança. O cargo não dá acesso por si — o nível de acesso continua em Segurança.</p></div>
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between p-4"><h2 className="text-lg font-bold text-ink">Estrutura organizacional</h2><Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>Nova unidade</Button></div>
         {!o.units.length ? <div className="border-t border-line"><EmptyState title="Nenhuma unidade" description="Comece pela diretoria e crie as áreas abaixo dela; depois vincule os times." /></div> : o.units.filter((u) => !u.parentId).map((u) => node(u, 0))}
@@ -48,17 +48,42 @@ export function AdminResultsSettings() {
   );
 }
 
+/** Escolha de várias pessoas (liderança, gestores): lista com busca e caixas de marcar. */
+function PeoplePick({ label, value, onSave }: { label: string; value: string[]; onSave: (ids: string[]) => void }) {
+  const users = useLookups().data?.users ?? [];
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<string[]>(value);
+  const [q, setQ] = useState('');
+  const names = value.map((id) => users.find((u) => u.id === id)?.name ?? '').filter(Boolean);
+  const list = users.filter((u) => !q || u.name.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <button type="button" aria-label={label} onClick={() => { setSel(value); setQ(''); setOpen(true); }} className="flex min-h-9 min-w-[180px] max-w-[260px] items-center border border-line bg-surface px-3 py-1.5 text-left text-sm hover:border-primary">
+        <span className={names.length ? 'truncate text-ink' : 'text-muted'}>{names.join(', ') || 'Ninguém'}</span>
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title={label} footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancelar</Button><Button variant="primary" onClick={() => { onSave(sel); setOpen(false); }}>Salvar</Button></>}>
+        <Input aria-label="Buscar pessoa" placeholder="Buscar pessoa" value={q} onChange={(e) => setQ(e.target.value)} className="mb-2" />
+        <ul className="max-h-72 space-y-0.5 overflow-auto">{list.map((u) => (
+          <li key={u.id}><label className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-surface-2"><input type="checkbox" className="h-4 w-4 accent-primary" checked={sel.includes(u.id)} onChange={(e) => setSel(e.target.checked ? [...sel, u.id] : sel.filter((x) => x !== u.id))} />{u.name}</label></li>
+        ))}</ul>
+      </Modal>
+    </>
+  );
+}
+
 function TeamRow({ t, units, depth }: { t: Team; units: Unit[]; depth: number }) {
   const toast = useToast();
   const qc = useQueryClient();
   const users = useLookups().data?.users ?? [];
-  const m = useMutation({ mutationFn: (body: Record<string, unknown>) => api(`/results/org/teams/${t.id}`, { method: 'PATCH', body }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['results'] }); toast({ tone: 'success', message: 'Time atualizado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const m = useMutation({ mutationFn: (body: Record<string, unknown>) => api(`/results/org/teams/${t.id}`, { method: 'PATCH', body }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['results'] }); void qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Time atualizado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const cell = 'flex flex-col gap-1 text-xs text-muted';
   return (
-    <div className="flex flex-wrap items-center gap-3 border-t border-line bg-surface-2/40 px-4 py-2.5" style={{ paddingLeft: 16 + depth * 28 }}>
-      <Chip tone="neutral">Time</Chip>
-      <span className="min-w-[140px] flex-1 font-semibold text-ink">{t.name} <span className="text-xs font-normal text-muted">· {t.members} pessoa(s) · líder: {t.leads.filter(Boolean).join(', ') || '—'}</span></span>
-      <Select aria-label={`Unidade do time ${t.name}`} className="w-auto" value={t.orgUnitId ?? ''} onChange={(e) => m.mutate({ orgUnitId: e.target.value || null })}><option value="">Sem unidade</option>{units.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select>
-      <Select aria-label={`Líder substituto do time ${t.name}`} className="w-auto" value={t.substituteLeadId ?? ''} onChange={(e) => m.mutate({ substituteLeadId: e.target.value || null })}><option value="">Sem substituto</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select>
+    <div className="flex flex-wrap items-end gap-3 border-t border-line bg-surface-2/40 px-4 py-3" style={{ paddingLeft: 16 + depth * 28 }}>
+      <div className="min-w-[160px] flex-1"><Chip tone="neutral">Time</Chip><p className="mt-1 font-semibold text-ink">{t.name}</p><p className="text-xs text-muted">{t.members} pessoa(s) · centro de custo próprio no orçamento</p></div>
+      <label className={cell}>Unidade<Select aria-label={`Unidade do time ${t.name}`} className="w-auto" value={t.orgUnitId ?? ''} onChange={(e) => m.mutate({ orgUnitId: e.target.value || null })}><option value="">Sem unidade</option>{units.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></label>
+      <div className={cell}>Liderança<PeoplePick label={`Liderança do time ${t.name}`} value={t.leadIds} onSave={(ids) => m.mutate({ leadIds: ids })} /></div>
+      <div className={cell}>Gestores<PeoplePick label={`Gestores do time ${t.name}`} value={t.managerIds} onSave={(ids) => m.mutate({ managerIds: ids })} /></div>
+      <label className={cell}>Substituto<Select aria-label={`Líder substituto do time ${t.name}`} className="w-auto" value={t.substituteLeadId ?? ''} onChange={(e) => m.mutate({ substituteLeadId: e.target.value || null })}><option value="">Sem substituto</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></label>
     </div>
   );
 }

@@ -1,8 +1,13 @@
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import type { BrandSlot } from '@isp/shared';
+
+/** Dentro de uma tela com abas (ex.: Gestão de Times → Pessoas), a tela embutida não repete o cabeçalho: mostra só as ações. */
+export const EmbeddedPage = createContext(false);
 
 /** Cabeçalho das telas: ícone + título grande, subtítulo, mascote com balão fixo e ações. */
 export function PageHeader({ icon, title, subtitle, actions }: { icon: ReactNode; title: string; subtitle: string; mascot?: { slot: BrandSlot; lines: string[]; highlight: ReactNode }; actions?: ReactNode }) {
+  const embedded = useContext(EmbeddedPage);
+  if (embedded) return actions ? <div className="mb-4 flex flex-wrap items-center justify-end gap-3">{actions}</div> : null;
   return (
     <header className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3">
       <div className="flex min-w-[min(100%,20rem)] flex-1 items-start gap-3 sm:gap-4">

@@ -3,6 +3,8 @@
  * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
  * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
  */
+import { seesAllTeams } from '../services/results';
+import { leadsOrManages } from '../services/vacations';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { atLeast, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
@@ -67,8 +69,8 @@ async function board(db: DbOrTx, auth: AuthContext, st: GamificationSettings, fr
   const name = Object.fromEntries(org.people.map((p) => [p.id, p.name]));
   const photos = new Set((await db.execute<{ user_id: string }>(sql`select user_id from user_avatars where user_id in ${memberIds.length ? memberIds : ['00000000-0000-0000-0000-000000000000']}`)).rows.map((x) => x.user_id));
   const who = (u: string) => ({ name: name[u] ?? '', hasPhoto: photos.has(u) });
-  // o time em detalhe (notas de cada pessoa e dispersão) é ferramenta da liderança: quem lidera o time ou tem nível Total
-  const leadsTeam = (teamId: string) => level(auth, 'resultados') === 'total' || (org.leads[teamId] ?? []).includes(auth.userId);
+  // o time em detalhe (notas de cada pessoa e dispersão) é ferramenta da liderança: quem lidera ou gere o time (ou administra o sistema)
+  const leadsTeam = (teamId: string) => seesAllTeams(auth) || leadsOrManages(org, teamId, auth.userId);
   const myTeams = org.teams[auth.userId] ?? [];
   const mine = r.people.find((p) => p.userId === auth.userId) ?? null;
   const fromJourney = (u: string, src: 'tarefa' | 'ganho') => Math.round(journey.filter((c) => c.userId === u && c.source === src && !c.extra).reduce((t, c) => t + c.points, 0) * 10) / 10;

@@ -173,6 +173,8 @@ export const teams = pgTable(
     /** Gestão de Resultados: unidade organizacional a que o time pertence e líder substituto */
     orgUnitId: uuid('org_unit_id'),
     substituteLeadId: uuid('substitute_lead_id'),
+    /** Gestores do time (um gestor pode ter vários times; veem e acompanham só os times que gerem). */
+    managerIds: uuid('manager_ids').array().notNull().default(sql`'{}'::uuid[]`),
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('teams_tenant_name_uq').on(t.tenantId, t.name) }),
@@ -5013,10 +5015,12 @@ export const costCenters = pgTable('cost_centers', {
   name: text('name').notNull(),
   leaderId: uuid('leader_id').references(() => users.id),
   memberIds: uuid('member_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** Centro de custo do time (cada time é um centro; nome e responsáveis acompanham o time). */
+  teamId: uuid('team_id').references(() => teams.id),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => ({ uq: uniqueIndex('cost_centers_uq').on(t.tenantId, t.code) }));
+}, (t) => ({ uq: uniqueIndex('cost_centers_uq').on(t.tenantId, t.code), teamUq: uniqueIndex('cost_centers_team_uq').on(t.teamId) }));
 
 /** Planejamento trimestral de um centro de custo (validado pela Diretoria). */
 export const budgetPlans = pgTable('budget_plans', {

@@ -13,7 +13,38 @@ export const isBudgetAdmin = (auth: AuthContext) => level(auth, 'orcamento') ===
 /** Supervisão (perfil Supervisor sem nível Total): lança e dá baixa, mas não exclui nem muda valor. */
 export const isBudgetRestricted = (auth: AuthContext) => !isBudgetAdmin(auth) && auth.profiles.includes('supervisor') && !auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador');
 
+/**
+ * Cada time é um centro de custo: cria o centro do time que ainda não tem e mantém nome, responsáveis e situação
+ * acompanhando o time (líder = primeiro líder do time, ou o primeiro gestor; demais líderes e gestores também operam).
+ */
+export async function ensureTeamCostCenters(db: DbOrTx, tenantId: string) {
+  const [teams, members, ccs] = await Promise.all([
+    db.select({ id: s.teams.id, name: s.teams.name, active: s.teams.active, managerIds: s.teams.managerIds, sub: s.teams.substituteLeadId }).from(s.teams).where(eq(s.teams.tenantId, tenantId)),
+    db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(and(eq(s.teams.tenantId, tenantId), eq(s.teamMemberships.isLead, true))),
+    db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, tenantId)),
+  ]);
+  const codes = new Set(ccs.map((c) => c.code));
+  for (const t of teams) {
+    const leads = members.filter((m) => m.teamId === t.id).map((m) => m.userId).sort();
+    const people = [...new Set([...leads, ...(t.sub ? [t.sub] : []), ...t.managerIds])];
+    const leaderId = leads[0] ?? t.managerIds[0] ?? null;
+    const memberIds = people.filter((u) => u !== leaderId).sort();
+    const cc = ccs.find((c) => c.teamId === t.id);
+    if (!cc) {
+      if (!t.active) continue;
+      const base = `T-${t.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'TIME'}`;
+      let code = base, n = 2;
+      while (codes.has(code)) code = `${base}-${n++}`;
+      codes.add(code);
+      await db.insert(s.costCenters).values({ tenantId, code, name: t.name, leaderId, memberIds, teamId: t.id, active: true }).onConflictDoNothing();
+    } else if (cc.name !== t.name || cc.leaderId !== leaderId || cc.active !== t.active || [...cc.memberIds].sort().join() !== memberIds.join()) {
+      await db.update(s.costCenters).set({ name: t.name, leaderId, memberIds, active: t.active, updatedAt: new Date() }).where(eq(s.costCenters.id, cc.id));
+    }
+  }
+}
+
 export async function costCentersOf(db: DbOrTx, auth: AuthContext, includeInactive = false) {
+  await ensureTeamCostCenters(db, auth.tenantId);
   const all = await db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code);
   const list = includeInactive ? all : all.filter((c) => c.active);
   return isBudgetAdmin(auth) ? list : list.filter((c) => c.leaderId === auth.userId || c.memberIds.includes(auth.userId));

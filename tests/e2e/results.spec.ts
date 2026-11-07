@@ -35,14 +35,13 @@ test('Gestão de Times: estrutura organizacional e perspectivas por responsabili
   await shot(page, 'gr-estrutura');
 
   await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('button', { name: /^Gestão de Times/ }).click();
-  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: 'Visão geral', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: 'Painel', exact: true }).click();
   await expect(page).toHaveURL(/\/times/);
   await expect(page.getByRole('heading', { name: 'Gestão de Times', level: 1 })).toBeVisible();
-  await expect(page.getByRole('tab', { name: 'Diretoria' })).toBeVisible();
-  await expect(page.getByText('Estamos alcançando os objetivos do negócio?')).toBeVisible();
-  await page.getByRole('tab', { name: 'Gestão' }).click();
-  await expect(page.getByText('As equipes e os processos estão entregando o resultado esperado?')).toBeVisible();
-  await shot(page, 'gr-perspectivas');
+  await expect(page.getByRole('region', { name: 'Resumo' })).toContainText('Metas no alvo');
+  await expect(page.getByRole('region', { name: 'Performance por hierarquia' })).toBeVisible();
+  await expect(page.getByRole('row', { name: 'Geral' })).toBeVisible();
+  await shot(page, 'gr-painel');
 });
 
 test('Apuração oficial: fechamento, validação e pedido de revisão', async ({ page }) => {
@@ -170,9 +169,9 @@ test('Intervenções: vermelho na apuração exige plano de ação; o avaliado s
   await login(ana, 'ana@yepnet.test');
   await api(ana, 'post', `/results/closings/${goal}/rectify`, { reason: 'Valor conferido no relatório de visitas', value: 3, recompute: false });
 
-  await page.goto('/times');
-  await page.getByRole('link', { name: /Intervenções necessárias/ }).click();
-  await expect(page.getByRole('heading', { name: 'Intervenções', level: 1 })).toBeVisible();
+  await page.goto('/times/intervencoes');
+  await expect(page).toHaveURL(/\/times\/acompanhamento\?aba=intervencoes/);
+  await expect(page.getByRole('tab', { name: 'Intervenções', selected: true })).toBeVisible();
   await page.getByRole('button', { name: title }).click();
   const dr = page.getByRole('dialog', { name: 'Intervenção' });
   await expect(dr.getByText('Plano de ação obrigatório · Resultado vermelho')).toBeVisible();
@@ -287,8 +286,9 @@ test('Rituais: cria ritual, conduz a reunião com pauta automática, registra de
   await login(page, 'carlos@yepnet.test');
   const nav = page.getByRole('navigation', { name: 'Navegação principal' });
   await nav.getByRole('button', { name: /^Gestão de Times/ }).click();
-  await nav.getByRole('link', { name: 'Rituais', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Rituais', level: 1 })).toBeVisible();
+  await nav.getByRole('link', { name: 'Acompanhamento', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Acompanhamento', level: 1 })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Reuniões e rituais', selected: true })).toBeVisible();
   await page.getByRole('button', { name: /Novo ritual|Criar ritual/ }).first().click();
   const dlg = page.getByRole('dialog', { name: 'Novo ritual' });
   await dlg.getByLabel('Começar de um modelo').selectOption({ label: 'Gestão: Reunião semanal de gestão' });
@@ -326,7 +326,7 @@ test('Rituais: cria ritual, conduz a reunião com pauta automática, registra de
 
   await page.goto('/times/decisoes');
   await expect(page.getByText('Priorizar condomínios com rede pronta')).toBeVisible();
-  await page.getByRole('tab', { name: 'Impedimentos' }).click();
+  await page.getByRole('tab', { name: 'Impedimentos', exact: true }).click();
   await page.getByRole('button', { name: 'Mapa de cobertura desatualizado' }).click();
   const dr = page.getByRole('dialog', { name: 'Impedimento' });
   await dr.getByLabel('Situação').selectOption('removido');

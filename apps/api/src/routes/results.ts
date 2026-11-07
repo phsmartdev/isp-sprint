@@ -1,4 +1,5 @@
 /** GESTÃO DE RESULTADOS — Fase 2: estrutura organizacional, escopo e perspectivas (Diretoria, Gestão, Liderança). */
+import { ensureTeamCostCenters } from '../services/budget';
 import { and, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { atLeast, attainment, competenciaOf, trafficLight, trendOf, variation, type GoalStatus } from '@isp/domain';
@@ -55,7 +56,7 @@ export const resultsRoutes = [
       const events = await app.db.select({ id: s.orgEvents.id, type: s.orgEvents.type, payload: s.orgEvents.payload, createdAt: s.orgEvents.createdAt, actorName: s.users.name }).from(s.orgEvents).leftJoin(s.users, eq(s.users.id, s.orgEvents.actorId)).where(eq(s.orgEvents.tenantId, auth.tenantId)).orderBy(desc(s.orgEvents.createdAt)).limit(50);
       return {
         units: org.units.map((u) => ({ ...u, responsibleName: name(u.responsibleId), substituteName: name(u.substituteId) })),
-        teams: org.teams.map((t) => ({ id: t.id, name: t.name, orgUnitId: t.orgUnitId, substituteLeadId: t.substituteLeadId, substituteLeadName: name(t.substituteLeadId), leads: org.members.filter((m) => m.teamId === t.id && m.isLead).map((m) => name(m.userId)), members: org.members.filter((m) => m.teamId === t.id).length })),
+        teams: org.teams.filter((t) => t.active).map((t) => ({ id: t.id, name: t.name, orgUnitId: t.orgUnitId, substituteLeadId: t.substituteLeadId, substituteLeadName: name(t.substituteLeadId), leads: org.members.filter((m) => m.teamId === t.id && m.isLead).map((m) => name(m.userId)), leadIds: org.members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId), managerIds: t.managerIds, managerNames: t.managerIds.map(name), members: org.members.filter((m) => m.teamId === t.id).length })),
         events,
       };
     },
@@ -101,8 +102,8 @@ export const resultsRoutes = [
     },
   }),
   defineRoute({
-    method: 'PATCH', url: '/results/org/teams/:id', summary: 'Vincula o time a uma unidade e define o líder substituto', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
-    body: z.object({ orgUnitId: z.string().uuid().nullable().optional(), substituteLeadId: z.string().uuid().nullable().optional() }),
+    method: 'PATCH', url: '/results/org/teams/:id', summary: 'Vincula o time a uma unidade e define liderança (uma ou mais pessoas), gestores (um gestor pode ter vários times) e o líder substituto; o centro de custo do time acompanha', tag: 'Gestão de Resultados', module: 'resultados', params: IdParams,
+    body: z.object({ orgUnitId: z.string().uuid().nullable().optional(), substituteLeadId: z.string().uuid().nullable().optional(), leadIds: z.array(z.string().uuid()).max(20).optional(), managerIds: z.array(z.string().uuid()).max(20).optional() }),
     handler: async ({ app, auth, params, body }) => {
       if (!canConfigure(auth)) throw forbidden();
       return app.db.transaction(async (tx) => {
@@ -110,8 +111,16 @@ export const resultsRoutes = [
         if (!t) throw notFound('Time não encontrado.');
         if (body.orgUnitId) { const [u] = await tx.select({ id: s.orgUnits.id }).from(s.orgUnits).where(and(eq(s.orgUnits.id, body.orgUnitId), eq(s.orgUnits.tenantId, auth.tenantId))).limit(1); if (!u) throw unprocessable('Unidade não encontrada.'); }
         await assertUser(tx, auth, body.substituteLeadId, 'substituteLeadId');
-        await tx.update(s.teams).set({ orgUnitId: body.orgUnitId, substituteLeadId: body.substituteLeadId }).where(eq(s.teams.id, t.id));
-        await orgEvent(tx, auth, { teamId: t.id, type: 'time_alterado', payload: { before: { orgUnitId: t.orgUnitId, substituteLeadId: t.substituteLeadId }, after: body } });
+        for (const u of [...(body.leadIds ?? []), ...(body.managerIds ?? [])]) await assertUser(tx, auth, u, 'leadIds');
+        const before = await tx.select({ userId: s.teamMemberships.userId }).from(s.teamMemberships).where(and(eq(s.teamMemberships.teamId, t.id), eq(s.teamMemberships.isLead, true)));
+        await tx.update(s.teams).set({ orgUnitId: body.orgUnitId, substituteLeadId: body.substituteLeadId, ...(body.managerIds ? { managerIds: [...new Set(body.managerIds)] } : {}) }).where(eq(s.teams.id, t.id));
+        if (body.leadIds) {
+          // liderança: quem não era do time entra como membro líder; quem deixou de liderar continua no time como membro
+          await tx.update(s.teamMemberships).set({ isLead: false }).where(eq(s.teamMemberships.teamId, t.id));
+          for (const u of new Set(body.leadIds)) await tx.insert(s.teamMemberships).values({ teamId: t.id, userId: u, isLead: true }).onConflictDoUpdate({ target: [s.teamMemberships.teamId, s.teamMemberships.userId], set: { isLead: true } });
+        }
+        await orgEvent(tx, auth, { teamId: t.id, type: 'time_alterado', payload: { before: { orgUnitId: t.orgUnitId, substituteLeadId: t.substituteLeadId, managerIds: t.managerIds, leadIds: before.map((b) => b.userId) }, after: body } });
+        await ensureTeamCostCenters(tx, auth.tenantId);
         return { ok: true };
       });
     },

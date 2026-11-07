@@ -91,9 +91,9 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   // a liderança vê o time (notas e dispersão) como ferramenta de gestão
   await login(page, 'ana@yepnet.test');
   await page.goto('/times');
-  const aside = page.getByRole('complementary', { name: 'Gamificação do time' });
-  await expect(aside.getByRole('region', { name: 'Times no mês' })).toBeVisible();
-  await expect(aside.getByRole('list', { name: /Pódio/ })).toHaveCount(0);
+  const tree = page.getByRole('region', { name: 'Performance por hierarquia' });
+  await expect(tree).toBeVisible();
+  await expect(page.getByRole('list', { name: /Pódio/ })).toHaveCount(0);
   if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/visao-geral-times.png` });
   await page.goto('/times/gamificacao');
   const team = page.getByRole('region', { name: 'Time Residencial' });

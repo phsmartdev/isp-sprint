@@ -62,14 +62,10 @@ const NAV: NavEntry[] = [
   ] },
   { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
-    { to: '/times', label: 'Visão geral', module: 'resultados' },
-    { to: '/times/intervencoes', label: 'Intervenções', module: 'resultados' },
-    { to: '/times/rituais', label: 'Rituais', module: 'resultados' },
-    { to: '/times/decisoes', label: 'Decisões e impedimentos', module: 'resultados' },
-    { to: '/times/ferias', label: 'Férias', module: 'resultados' },
-    { to: '/times/performance', label: 'Performance', module: 'resultados' },
-    { to: '/times/gamificacao', label: 'Gamificação', module: 'resultados' },
-    { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
+    { to: '/times', label: 'Painel', module: 'resultados' },
+    { to: '/times/metas', label: 'Metas e indicadores', module: 'desempenho' },
+    { to: '/times/acompanhamento', label: 'Acompanhamento', module: 'resultados' },
+    { to: '/times/pessoas', label: 'Pessoas', module: 'resultados' },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
     { to: '/projetos', label: 'Projetos', module: 'projetos' },
