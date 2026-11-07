@@ -1,0 +1,1 @@
+ALTER TABLE "contract_versions" ADD COLUMN "service_type" text;

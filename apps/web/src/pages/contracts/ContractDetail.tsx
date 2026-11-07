@@ -22,6 +22,7 @@ import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
 import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { ErpPanel } from '../../features/contracts/ErpPanel';
 import { ZenithPanel } from '../../features/contracts/Zenith';
+import { CONTRACT_SERVICE_LABELS, needsZenith } from '@isp/domain';
 import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { ReportNotices, ReportTermsText } from '../../features/contracts/ReportNotices';
 import { ContractJourneySteps } from '../../features/contracts/ContractJourneySteps';
@@ -168,7 +169,7 @@ export function ContractDetailPage() {
             ...(c.billingType === 'medicao' || c.kind === 'publico' ? [{ key: 'consumo' as Tab, label: c.billingType === 'medicao' ? (c.kind === 'publico' ? 'Consumo por valor' : 'Consumo') : 'Empenho por valor' }] : []),
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
-            { key: 'zenith', label: 'Zenith' },
+            ...(needsZenith(v.serviceType) ? [{ key: 'zenith' as Tab, label: 'Zenith' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
             { key: 'documentos', label: 'Documentos' },
@@ -183,6 +184,7 @@ export function ContractDetailPage() {
           {tab === 'resumo' && (
             <div className="space-y-6">
               <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Info label="Serviço">{v.serviceType ? CONTRACT_SERVICE_LABELS[v.serviceType as keyof typeof CONTRACT_SERVICE_LABELS] ?? v.serviceType : <span className="text-[#C2610C]">Não informado</span>}</Info>
                 <Info label="Objeto"><span className="whitespace-pre-line">{v.object}</span></Info>
                 <Info label="Assinatura">{fmtDate(v.signedAt)}</Info>
                 <Info label="Ativação técnica">{v.activationAt ? fmtDate(v.activationAt) : <span className="text-[#C2610C]">Pendente</span>}</Info>

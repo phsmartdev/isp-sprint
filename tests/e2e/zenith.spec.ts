@@ -27,6 +27,13 @@ test('cadastro Zenith obrigatório no contrato e espelho dos campos', async ({ p
   await page.getByLabel('Número do contrato').fill(`ZEN-${st}`);
   await page.getByLabel('Início da vigência').fill('2026-11-01');
   await page.getByRole('button', { name: 'Cadastrar contrato' }).click();
+  await expect(page.getByText('Escolha o serviço do contrato.')).toBeVisible();
+  // outros serviços não têm cadastro Zenith
+  const svc = page.getByRole('radiogroup', { name: 'Serviço do contrato' });
+  await svc.getByLabel('Cloud').check();
+  await expect(page.getByRole('group', { name: 'Cadastro Zenith' })).toHaveCount(0);
+  await svc.getByLabel('Serviços de telecom').check();
+  await page.getByRole('button', { name: 'Cadastrar contrato' }).click();
   await expect(page.getByText(/Cadastro Zenith: falta alias/)).toBeVisible();
 
   const z = page.getByRole('group', { name: 'Cadastro Zenith' });

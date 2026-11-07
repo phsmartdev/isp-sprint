@@ -36,7 +36,7 @@ describe('Zenith', () => {
     expect((await carlos.post('/contracts', { opportunityId: won, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { ...version, zenith } })).statusCode).toBe(422);
     expect(bad.statusCode).toBe(422);
     expect(bad.body).toContain('Cadastro Zenith');
-    const id = ok(await carlos.post('/contracts', { opportunityId: won, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { ...version, zenith: { ...zenith, availabilityPct: 99.5, packetLossPct: 3 } } }), 201).json().id;
+    const id = ok(await carlos.post('/contracts', { opportunityId: won, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { ...version, serviceType: 'telecom', zenith: { ...zenith, availabilityPct: 99.5, packetLossPct: 3 } } }), 201).json().id;
     let m = ok(await carlos.get(`/contracts/${id}/zenith`)).json();
     expect(m.ready).toBe(false);
     expect(m.sending).toBe('aguardando_api');
@@ -58,5 +58,10 @@ describe('Zenith', () => {
     expect(m.zenith).toMatchObject({ modality: 'pseudowire_p2p', publicIp: null, cdiUnits: null });
     expect(m.fields.some((f: { label: string }) => f.label === 'Possuirá IP público')).toBe(false);
     expect(d.versions.length).toBe(3);
+    // telecom sem cadastro Zenith não salva; mudar para outro serviço tira o contrato do Zenith
+    expect((await carlos.put(`/contracts/${id}`, { version: { zenith: null } })).statusCode).toBe(422);
+    ok(await carlos.put(`/contracts/${id}`, { version: { serviceType: 'cloud' } }));
+    m = ok(await carlos.get(`/contracts/${id}/zenith`)).json();
+    expect(m).toMatchObject({ applicable: false, serviceType: 'cloud', zenith: null });
   });
 });

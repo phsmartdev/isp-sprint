@@ -69,6 +69,7 @@ test('oportunidade fechada: cadastrar contrato com os dados do CRM', async ({ pa
   await page.getByLabel('Número do contrato').fill('CT-E2E-900');
   await page.getByLabel('Início da vigência').fill('2026-11-01');
   await expect(page.getByLabel('Término da vigência')).toHaveValue('2027-10-31');
+  await page.getByRole('radiogroup', { name: 'Serviço do contrato' }).getByLabel('Serviços de telecom').check();
   const z = page.getByRole('group', { name: 'Cadastro Zenith' });
   await z.getByLabel('Empresa detentora do contrato').selectOption('UPNET');
   await z.getByLabel('Alias / apelido').fill('Contrato E2E');
