@@ -22,15 +22,21 @@ beforeAll(async () => {
   [carlos, lucas] = (await Promise.all(['carlos', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client];
   tenantId = carlos.me.tenant.id;
   lucasTeam = ((await ctx.db.execute(sql`select team_id from team_memberships where user_id = ${lucas.me.user.id} limit 1`)).rows[0] as { team_id: string }).team_id;
-  // perfil Analista restrito como o antigo perfil Implantação: sem CRM e sem financeiro, exportação ou exclusão
-  ok(await carlos.put('/admin/security', { profile: 'analista', module: 'oportunidades', level: 'nenhum' }));
-  for (const action of ['ver_financeiro', 'exportar', 'arquivar']) ok(await carlos.put('/admin/actions', { profile: 'analista', action, allowed: false }));
-  const u = ok(await carlos.post('/admin/users', { name: 'Implantação Fictícia', email: `impl-${stamp}@yepnet.test`, profile: 'analista', sectors: ['implantacao'] }), 201).json();
+  // um perfil sem ninguém nos outros testes (Diretoria), restrito como o antigo perfil Implantação: sem CRM e sem financeiro, exportação ou exclusão
+  ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'oportunidades', level: 'nenhum' }));
+  ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'clientes', level: 'proprio' }));
+  ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'campanhas', level: 'nenhum' }));
+  ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'leads', level: 'nenhum' }));
+  for (const action of ['ver_financeiro', 'exportar', 'arquivar']) ok(await carlos.put('/admin/actions', { profile: 'diretoria', action, allowed: false }));
+  const u = ok(await carlos.post('/admin/users', { name: 'Implantação Fictícia', email: `impl-${stamp}@yepnet.test`, profile: 'diretoria', sectors: ['implantacao'] }), 201).json();
   impl = await login(ctx.app, `impl-${stamp}@yepnet.test`, u.temporaryPassword);
   contractId = ((await ctx.db.execute(sql`select id from contracts where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string }).id;
 });
 afterAll(async () => {
-  await carlos.put('/admin/security', { profile: 'analista', module: 'oportunidades', level: 'proprio' });
+  await carlos.put('/admin/security', { profile: 'diretoria', module: 'oportunidades', level: 'total' });
+  await carlos.put('/admin/security', { profile: 'diretoria', module: 'clientes', level: 'total' });
+  await carlos.put('/admin/security', { profile: 'diretoria', module: 'campanhas', level: 'total' });
+  await carlos.put('/admin/security', { profile: 'diretoria', module: 'leads', level: 'total' });
   await ctx.db.execute(sql`delete from tenant_modules where tenant_id = ${tenantId}`);
   await ctx.db.execute(sql`delete from module_grants where tenant_id = ${tenantId}`);
   await ctx.db.execute(sql`delete from action_policies where role_id in (select id from roles where tenant_id = ${tenantId})`);
@@ -47,9 +53,9 @@ describe('Etapa 1: módulos de negócio', () => {
     expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(8);
   });
 
-  it('perfil Analista restrito: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {
+  it('perfil restrito: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {
     const me = ok(await impl.get('/me')).json();
-    expect(me.profiles).toEqual(['analista']);
+    expect(me.profiles).toEqual(['diretoria']);
     expect(me.actions).toMatchObject({ ver_financeiro: false, exportar: false, arquivar: false });
     const c = ok(await impl.get(`/contracts/${contractId}`));
     expect(c.headers['x-isp-financeiro']).toBe('oculto');
@@ -131,10 +137,10 @@ describe('Etapa 1: módulos de negócio', () => {
   });
 
   it('ações sensíveis por perfil: negar exportar ao vendedor bloqueia a planilha e fica na auditoria', async () => {
-    ok(await carlos.put('/admin/actions', { profile: 'vendedor', action: 'exportar', allowed: false }));
-    expect(ok(await carlos.get('/admin/actions')).json().matrix.vendedor.exportar).toBe(false);
+    ok(await carlos.put('/admin/actions', { profile: 'operacao', action: 'exportar', allowed: false }));
+    expect(ok(await carlos.get('/admin/actions')).json().matrix.operacao.exportar).toBe(false);
     expect((await lucas.get('/reports/export?kind=vendas&from=2026-10-01&to=2026-10-22')).statusCode).toBe(403);
-    ok(await carlos.put('/admin/actions', { profile: 'vendedor', action: 'exportar', allowed: true }));
+    ok(await carlos.put('/admin/actions', { profile: 'operacao', action: 'exportar', allowed: true }));
     const back = await lucas.get('/reports/export?kind=vendas&from=2026-10-01&to=2026-10-22');
     expect(back.statusCode, back.body).not.toBe(403);
     expect((await ctx.db.execute(sql`select count(*)::int n from audit_logs where tenant_id = ${tenantId} and action = 'security.action'`)).rows[0]).toMatchObject({ n: expect.any(Number) });

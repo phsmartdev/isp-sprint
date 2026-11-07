@@ -79,3 +79,10 @@ export function defaultPeriod() {
   const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(now) };
 }
+
+/** Setores da Gestão de Contratos da empresa (do sistema, renomeáveis, e os criados). */
+export function useSectors() {
+  const q = useQuery({ queryKey: ['contract-sectors'], queryFn: () => api<{ items: { key: string; label: string; system: boolean; processSteps: boolean }[] }>('/contract-sectors'), staleTime: 5 * 60_000 });
+  const items = q.data?.items ?? [];
+  return { ...q, items, label: (k: string) => items.find((x) => x.key === k)?.label ?? k };
+}

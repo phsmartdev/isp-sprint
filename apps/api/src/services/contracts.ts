@@ -81,7 +81,7 @@ export async function assertCanDoStep(db: DbOrTx, auth: AuthContext, c: Contract
   throw forbidden(`Esta etapa é do setor ${step.sectors.map((x) => SECTOR_LABELS[x]).join(' ou ')}.`);
 }
 
-export async function usersBySector(db: DbOrTx, tenantId: string, sectors: readonly Sector[]) {
+export async function usersBySector(db: DbOrTx, tenantId: string, sectors: readonly string[]) {
   if (!sectors.length) return [];
   return db
     .select({ id: s.users.id, name: s.users.name, email: s.users.email })
@@ -133,7 +133,7 @@ export async function createTask(db: DbOrTx, c: Pick<ContractRow, 'id' | 'tenant
 }
 
 /** Responsáveis por um setor; se ninguém tiver o setor, cai no responsável indicado. */
-export async function sectorOwners(db: DbOrTx, tenantId: string, sectors: readonly Sector[], fallbackIds: (string | null)[]) {
+export async function sectorOwners(db: DbOrTx, tenantId: string, sectors: readonly string[], fallbackIds: (string | null)[]) {
   const list = await usersBySector(db, tenantId, sectors);
   if (list.length) return list;
   const out = [];

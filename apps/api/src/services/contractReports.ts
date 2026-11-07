@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { and, desc, eq, like } from 'drizzle-orm';
 import {
-  REPORT_CHANNELS, REPORT_MESSAGE_KINDS, REPORT_MESSAGE_LABELS, SECTOR_LABELS, daysBetween, nextReportDue, renderComm,
+  REPORT_CHANNELS, REPORT_MESSAGE_KINDS, REPORT_MESSAGE_LABELS, SECTOR_LABELS, sectorLabel, daysBetween, nextReportDue, renderComm,
   type ReportChannel, type ReportMessage, type ReportMessageKind, type ReportMessages, type ReportTerms,
 } from '@isp/domain';
 import type { Config } from '../config';
@@ -66,7 +66,7 @@ export async function sendReportMessage(db: DbOrTx, config: Config, c: ContractR
     const [ct] = await db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, c.contactId)).limit(1);
     const due = t.dueDay ? nextReportDue(t.dueDay, today) : null;
     const base = {
-      cliente: ct?.name ?? null, contrato: v.number, codigo: `CT-${c.code}`, objeto: v.object, setor: SECTOR_LABELS[t.sector], validador: validator?.name ?? null,
+      cliente: ct?.name ?? null, contrato: v.number, codigo: `CT-${c.code}`, objeto: v.object, setor: sectorLabel(t.sector), validador: validator?.name ?? null,
       dia_envio: t.dueDay ? `dia ${t.dueDay}` : null, proximo_envio: fmtD(due), dias_para_envio: due ? String(daysBetween(today, due)) : null, empresa: await tenantName(db, c.tenantId),
     };
     const title = `Relatório mensal · ${REPORT_MESSAGE_LABELS[kind]}`;

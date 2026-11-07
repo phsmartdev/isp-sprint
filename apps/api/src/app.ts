@@ -85,6 +85,7 @@ import { ritualRoutes } from './routes/rituals';
 import { vacationRoutes } from './routes/vacations';
 import { giftRoutes } from './routes/gifts';
 import { supportRoutes } from './routes/support';
+import { contractSectorRoutes } from './routes/contractSectors';
 import { gamificationRoutes } from './routes/gamification';
 import { scoreJourneyRoutes } from './routes/scoreJourneys';
 import { hierarchyPerformanceRoutes } from './routes/hierarchyPerformance';
@@ -271,6 +272,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...vacationRoutes,
     ...giftRoutes,
     ...supportRoutes,
+    ...contractSectorRoutes,
     ...gamificationRoutes,
     ...scoreJourneyRoutes,
     ...hierarchyPerformanceRoutes,

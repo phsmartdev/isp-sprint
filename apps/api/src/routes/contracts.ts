@@ -6,7 +6,7 @@ import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
-  SECTORS, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
+  SECTOR_KEY, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
 import { deliveryErrors, DELIVERY_MAX_COLUMNS, DELIVERY_MAX_ROWS } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
@@ -48,7 +48,7 @@ const VersionFields = z.object({
   items: z.array(Item).max(50).default([]),
   guarantee: Guarantee.optional(),
   publicTerms: PublicTerms.optional(),
-  reportTerms: z.object({ required: z.boolean(), sector: z.enum(SECTORS).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
+  reportTerms: z.object({ required: z.boolean(), sector: z.string().regex(SECTOR_KEY).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
   adjustmentIndex: optText(60), adjustmentBaseDate: optDay, adjustmentRule: optText(1000),
   specialConditions: optText(4000),
   deliveryAddresses: z.object({

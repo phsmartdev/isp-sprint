@@ -128,7 +128,7 @@ describe('objetivos e metas em cascata', () => {
 describe('scorecards', () => {
   it('por perfil, pesos normalizados, sem meta não pontua, composição explícita', async () => {
     const conv = ok(await carlos.get('/performance/indicators')).json().items.find((i: { key: string }) => i.key === 'conversao').id;
-    const vend = ok(await carlos.post('/performance/scorecards', { name: 'Vendedor', appliesProfiles: ['vendedor'], def: { items: [{ indicatorId: indTarefas, weight: 30, target: 2 }, { indicatorId: conv, weight: 10 }], cap: 1.2 } }), 201).json().id;
+    const vend = ok(await carlos.post('/performance/scorecards', { name: 'Vendedor', appliesProfiles: ['operacao'], def: { items: [{ indicatorId: indTarefas, weight: 30, target: 2 }, { indicatorId: conv, weight: 10 }], cap: 1.2 } }), 201).json().id;
     expect((await carlos.post('/performance/scorecards', { name: 'Vazio', def: { items: [], cap: 1.2 } })).statusCode).toBe(422);
     const r = ok(await lucas.get(`/performance/scorecards/for/${uid('lucas')}`)).json();
     const card = r.cards.find((c: { scorecardId: string }) => c.scorecardId === vend);

@@ -1,4 +1,5 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
+import { useSectors } from '../../lib/hooks';
 import { useMemo, useState } from 'react';
 import { deliveryErrors, type DeliveryAddresses } from '@isp/domain';
 import { DeliveryEditor, EMPTY_DELIVERY } from './DeliveryAddresses';
@@ -166,6 +167,7 @@ function Fieldset({ title, children, hint }: { title: string; children: React.Re
 }
 
 export function ContractForm({ value, onChange, editing, validated, contactId }: { value: FormState; onChange: (patch: Partial<FormState>) => void; editing?: boolean; validated?: boolean; contactId?: string | null }) {
+  const sectorList = useSectors().items;
   const lookups = useLookups();
   const f = value;
   const users = lookups.data?.users ?? [];
@@ -305,7 +307,7 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <FormField label="Setor responsável pelo envio" htmlFor="cf-rsector" required>
-                <Select id="cf-rsector" value={f.rSector} onChange={(e) => onChange({ rSector: e.target.value })}><option value="">Escolha o setor</option>{SECTORS.map((x) => <option key={x} value={x}>{SECTOR_LABELS[x]}</option>)}</Select>
+                <Select id="cf-rsector" value={f.rSector} onChange={(e) => onChange({ rSector: e.target.value })}><option value="">Escolha o setor</option>{sectorList.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>
               </FormField>
               <FormField label="Responsável por validar" htmlFor="cf-rval" required>
                 <Select id="cf-rval" value={f.rValidator} onChange={(e) => onChange({ rValidator: e.target.value })}><option value="">Escolha a pessoa</option>{users.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>

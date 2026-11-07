@@ -171,11 +171,11 @@ describe('níveis de acesso por perfil (matriz padrão)', () => {
 describe('Configurações → Segurança (matriz editável pela gerência)', () => {
   it('mudança de nível vale na hora para quem tem o perfil e fica no log', async () => {
     const before = (await carlos.get('/admin/security')).json();
-    expect(before.matrix.vendedor.inteligencia).toBe('nenhum');
-    expect((await carlos.put('/admin/security', { profile: 'vendedor', module: 'inteligencia', level: 'proprio' })).statusCode).toBe(200);
+    expect(before.matrix.operacao.inteligencia).toBe('nenhum');
+    expect((await carlos.put('/admin/security', { profile: 'operacao', module: 'inteligencia', level: 'proprio' })).statusCode).toBe(200);
     expect((await lucas.get(`/intelligence/overview${P}`)).statusCode).toBe(200);
     expect((await lucas.get('/me')).json().access.inteligencia).toBe('proprio');
-    expect((await carlos.put('/admin/security', { profile: 'vendedor', module: 'inteligencia', level: 'nenhum' })).statusCode).toBe(200);
+    expect((await carlos.put('/admin/security', { profile: 'operacao', module: 'inteligencia', level: 'nenhum' })).statusCode).toBe(200);
     expect((await lucas.get(`/intelligence/overview${P}`)).statusCode).toBe(403);
     const logs = (await carlos.get('/admin/logs?pageSize=50')).json();
     expect(logs.items.some((l: { action: string }) => l.action === 'security.update')).toBe(true);
@@ -187,24 +187,24 @@ describe('Configurações → Segurança (matriz editável pela gerência)', () 
   });
 
   it('supervisão não altera a matriz nem usuários', async () => {
-    expect((await ana.put('/admin/security', { profile: 'vendedor', module: 'leads', level: 'total' })).statusCode).toBe(403);
+    expect((await ana.put('/admin/security', { profile: 'operacao', module: 'leads', level: 'total' })).statusCode).toBe(403);
     expect((await ana.get('/admin/users')).statusCode).toBe(403);
   });
 
   it('gerência não remove o próprio acesso', async () => {
-    const r = await carlos.patch(`/admin/users/${carlos.me.user.id}`, { profile: 'vendedor' });
+    const r = await carlos.patch(`/admin/users/${carlos.me.user.id}`, { profile: 'operacao' });
     expect(r.statusCode).toBe(422);
   });
 
   it('cadastro de usuário devolve senha temporária uma vez e ela funciona', async () => {
     const teams = (await carlos.get('/admin/users')).json().teams;
-    const r = await carlos.post('/admin/users', { name: 'Usuária Teste', email: 'teste.nova@yepnet.test', profile: 'vendedor', teamIds: [teams[0].id], leadTeamIds: [] });
+    const r = await carlos.post('/admin/users', { name: 'Usuária Teste', email: 'teste.nova@yepnet.test', profile: 'operacao', teamIds: [teams[0].id], leadTeamIds: [] });
     expect(r.statusCode).toBe(201);
     const pass = r.json().temporaryPassword;
     expect(pass.length).toBeGreaterThanOrEqual(10);
     const c = await login(ctx.app, 'teste.nova@yepnet.test', pass);
     expect(c.me.access.oportunidades).toBe('proprio');
-    expect((await carlos.post('/admin/users', { name: 'Dup', email: 'teste.nova@yepnet.test', profile: 'vendedor', teamIds: [] })).statusCode).toBe(422);
+    expect((await carlos.post('/admin/users', { name: 'Dup', email: 'teste.nova@yepnet.test', profile: 'operacao', teamIds: [] })).statusCode).toBe(422);
   });
 });
 

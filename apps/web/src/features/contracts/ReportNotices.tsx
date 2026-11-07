@@ -1,19 +1,21 @@
 /** Relatório mensal na ficha do contrato: o que foi combinado e o que já foi enviado (inclusão na rotina e lembretes). */
+import { useSectors } from '../../lib/hooks';
 import { useQuery } from '@tanstack/react-query';
-import { REPORT_CHANNEL_LABELS, REPORT_MESSAGE_LABELS, SECTOR_LABELS, nextReportDue, type ReportChannel, type ReportMessageKind, type ReportTerms } from '@isp/domain';
+import { REPORT_CHANNEL_LABELS, REPORT_MESSAGE_LABELS, sectorLabel, nextReportDue, type ReportChannel, type ReportMessageKind, type ReportTerms } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useLookups } from '../../lib/hooks';
 import { Chip, LoadingRows } from '../../components/ui/primitives';
 
 export function ReportTermsText({ t }: { t: ReportTerms | null | undefined }) {
+  const sectorList = useSectors().items;
   const lookups = useLookups();
   if (!t?.required) return <>Não exige</>;
   const who = lookups.data?.users.find((u) => u.id === t.validatorId)?.name;
   const today = new Date().toISOString().slice(0, 10);
   return (
     <>
-      Setor {t.sector ? SECTOR_LABELS[t.sector] : '—'} · até o dia {t.dueDay ?? '—'}
+      Setor {t.sector ? sectorLabel(t.sector, sectorList) : '—'} · até o dia {t.dueDay ?? '—'}
       <span className="block text-sm text-muted">Valida: {who ?? '—'} · {t.alertDaysBefore != null ? `alerta ${t.alertDaysBefore} dia(s) antes` : 'sem alerta antes'}{t.dueDay ? ` · próximo ${fmtDate(nextReportDue(t.dueDay, today))}` : ''}</span>
     </>
   );

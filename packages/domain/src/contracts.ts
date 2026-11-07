@@ -314,6 +314,14 @@ const ENCERRAMENTO: StepDef[] = [
   { key: 'arquivamento', label: 'Arquivar documentos (nota final, responsável e local)', sectors: ['administracao', 'inteligencia_comercial'], requires: 'nota' },
 ];
 
+/** Setores do sistema que têm etapas nos processos de contrato (podem ser renomeados, não excluídos). */
+export const PROCESS_SECTORS: Sector[] = [...new Set([IMPLANTACAO, RENOVACAO_PUBLICA, RENOVACAO_PRIVADA, REAJUSTE, ENCERRAMENTO].flat().flatMap((x) => x.sectors))];
+/** Chave de setor (do sistema ou criado pela empresa). */
+export const SECTOR_KEY = /^[a-z0-9_]{2,40}$/;
+export type SectorInfo = { key: string; label: string; system: boolean; processSteps: boolean };
+/** Nome do setor: o da empresa (quando informado) ou o padrão do sistema. */
+export const sectorLabel = (key: string, list?: { key: string; label: string }[] | null) => list?.find((x) => x.key === key)?.label ?? (SECTOR_LABELS as Record<string, string>)[key] ?? key;
+
 export function processSteps(kind: ProcessKind, contractKind: ContractKind): StepDef[] {
   if (kind === 'implantacao') return IMPLANTACAO;
   if (kind === 'renovacao') return contractKind === 'publico' ? RENOVACAO_PUBLICA : RENOVACAO_PRIVADA;
@@ -650,7 +658,7 @@ export function contractValuesFromItems(items: readonly { qty: number; unitCents
 
 // ------------------------------------------------------------------ relatório mensal do contrato
 /** Relatório mensal exigido pelo contrato: setor que envia, quem valida, dia do mês do envio e antecedência do alerta. */
-export type ReportTerms = { required: boolean; sector: Sector | null; validatorId: string | null; dueDay: number | null; alertDaysBefore: number | null };
+export type ReportTerms = { required: boolean; sector: string | null; validatorId: string | null; dueDay: number | null; alertDaysBefore: number | null };
 
 /** Prazo de envio deste mês (dia limitado ao fim do mês); se já passou, o do mês seguinte. */
 export function nextReportDue(dueDay: number, today: string): string {

@@ -23,10 +23,13 @@ const dayOf = (d: Date | string | null | undefined) => (d ? (typeof d === 'strin
 
 // ------------------------------------------------------------------ configuração
 /**
- * Quem é CSM: os membros do time "Sucesso do Cliente" (Gestão de Times; nome do time contendo "Sucesso do Cliente",
+ * Quem é CSM: quem está marcado como CSM no cadastro; sem ninguém marcado, os membros do time "Sucesso do Cliente" (Gestão de Times; nome do time contendo "Sucesso do Cliente",
  * sem diferença de acento ou maiúscula). Sem esse time com membros, vale o setor Sucesso do Cliente no cadastro do usuário.
  */
-export async function csmUsers(db: DbOrTx, tenantId: string): Promise<{ id: string; name: string; source: 'time' | 'setor' }[]> {
+export async function csmUsers(db: DbOrTx, tenantId: string): Promise<{ id: string; name: string; source: 'marcado' | 'time' | 'setor' }[]> {
+  // marcados como CSM no cadastro do usuário valem primeiro
+  const flagged = await db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), eq(s.users.isCsm, true))).orderBy(asc(s.users.name));
+  if (flagged.length) return flagged.map((r) => ({ ...r, source: 'marcado' as const }));
   const byTeam = await db.execute<{ id: string; name: string }>(sql`
     select distinct u.id, u.name from users u
       join team_memberships m on m.user_id = u.id

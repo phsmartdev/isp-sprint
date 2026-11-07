@@ -13,7 +13,7 @@ afterAll(async () => ctx.close());
 
 async function csm(name: string) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  return ok(await carlos.post('/admin/users', { name, email: `${stamp}@yepnet.test`, profile: 'analista', sectors: ['sucesso_cliente'] }), 201).json().id as string;
+  return ok(await carlos.post('/admin/users', { name, email: `${stamp}@yepnet.test`, profile: 'operacao', sectors: ['sucesso_cliente'] }), 201).json().id as string;
 }
 
 describe('distribuir carteira', () => {

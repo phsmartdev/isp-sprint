@@ -91,12 +91,12 @@ test('gerência muda nível na matriz e o vendedor sente na hora', async ({ brow
   const g = await (await browser.newContext()).newPage();
   await login(g, 'carlos@yepnet.test');
   await g.goto('/settings/security');
-  await g.getByLabel('Vendedor em Inteligência').selectOption('proprio');
+  await g.getByLabel('Operação em Inteligência').selectOption('proprio');
   await expect(g.getByText('Vendedor · Inteligência: Próprio')).toBeVisible();
   const v = await (await browser.newContext()).newPage();
   await login(v, 'lucas@yepnet.test');
   await expect(v.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Inteligência/ })).toBeVisible();
-  await g.getByLabel('Vendedor em Inteligência').selectOption('nenhum');
+  await g.getByLabel('Operação em Inteligência').selectOption('nenhum');
   await expect(g.getByText('Vendedor · Inteligência: Sem acesso')).toBeVisible();
 });
 
