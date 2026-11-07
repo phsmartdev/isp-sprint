@@ -45,6 +45,7 @@ import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
 import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
+import { GiftsPage } from './pages/Gifts';
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
@@ -130,6 +131,7 @@ export function App() {
         <Route path="times/intervencoes" element={<Gate module="resultados"><InterventionsPage /></Gate>} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
         <Route path="times/rituais" element={<Gate module="resultados"><RitualsPage /></Gate>} />
+        <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
         <Route path="times/ferias" element={<Gate module="resultados"><VacationsPage /></Gate>} />
         <Route path="times/gamificacao" element={<Gate module="resultados"><GamificationPage /></Gate>} />
         <Route path="meus-pontos" element={<MyPointsPage />} />

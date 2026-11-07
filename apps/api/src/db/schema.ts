@@ -5482,3 +5482,73 @@ export const gamificationSettings = pgTable('gamification_settings', {
   uq: uniqueIndex('gamification_settings_uq').on(t.tenantId, t.version),
   statusCk: check('gamification_settings_status_ck', sql`status in ('proposta','aprovada','recusada')`),
 }));
+
+// ---------------------------------------------------------------- Marketing → Brindes
+export const giftKitCategories = pgTable('gift_kit_categories', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('gift_kit_categories_uq').on(t.tenantId, t.name) }));
+
+/** Item de brinde: custo por unidade (médio ponderado pelas entradas) e estoque atual (os movimentos guardam o histórico). */
+export const giftItems = pgTable('gift_items', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  supplierId: uuid('supplier_id').references(() => suppliers.id),
+  unitCostCents: integer('unit_cost_cents').notNull().default(0),
+  stock: integer('stock').notNull().default(0),
+  minStock: integer('min_stock').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('gift_items_uq').on(t.tenantId, t.name), stockCk: check('gift_items_stock_ck', sql`${t.stock} >= 0`) }));
+
+export const giftKits = pgTable('gift_kits', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  categoryId: uuid('category_id').references(() => giftKitCategories.id),
+  items: jsonb('items').$type<{ itemId: string; qty: number }[]>().notNull().default(sql`'[]'::jsonb`),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('gift_kits_uq').on(t.tenantId, t.name) }));
+
+/** Envio para a conta (e stakeholders que receberam): itens e custos congelados no dia. Cancelar devolve ao estoque; nada é apagado. */
+export const giftDeliveries = pgTable('gift_deliveries', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  kitId: uuid('kit_id').references(() => giftKits.id),
+  kitName: text('kit_name'),
+  categoryName: text('category_name'),
+  kits: integer('kits').notNull().default(0),
+  items: jsonb('items').$type<{ itemId: string; name: string; qty: number; unitCostCents: number }[]>().notNull(),
+  totalCents: integer('total_cents').notNull(),
+  stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+  note: text('note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  cancelledAt: ts('cancelled_at'),
+  cancelledBy: uuid('cancelled_by').references(() => users.id),
+  cancelReason: text('cancel_reason'),
+}, (t) => ({ idx: index('gift_deliveries_idx').on(t.tenantId, t.contactId, t.occurredOn) }));
+
+/** Movimentos de estoque (append-only): entrada (compra, com fornecedor e custo), saída (envio), devolução (envio cancelado) e ajuste. */
+export const giftMovements = pgTable('gift_movements', {
+  id: id(),
+  tenantId: tenantId(),
+  itemId: uuid('item_id').notNull().references(() => giftItems.id),
+  kind: text('kind').notNull(),
+  qty: integer('qty').notNull(),
+  unitCostCents: integer('unit_cost_cents').notNull(),
+  supplierId: uuid('supplier_id').references(() => suppliers.id),
+  deliveryId: uuid('delivery_id').references(() => giftDeliveries.id),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('gift_movements_idx').on(t.tenantId, t.itemId, t.createdAt), kindCk: check('gift_movements_kind_ck', inList('kind', ['entrada', 'saida', 'devolucao', 'ajuste'])) }));

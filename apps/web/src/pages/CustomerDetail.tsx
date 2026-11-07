@@ -14,6 +14,7 @@ import { Account360 } from '../features/cs/Account360';
 import { AddToAbmButton } from '../features/abm/shared';
 import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, Input, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { StakeholdersPanel } from '../features/abm/stakeholders';
+import { AccountGifts } from '../features/gifts/AccountGifts';
 import { AccountRelationsPanel } from '../features/accounts/AccountRelations';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
@@ -204,6 +205,7 @@ export function CustomerDetailPage() {
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
             ...(c.segment !== 'residencial' ? [{ key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Contas relacionadas' }] : []),
+            { key: 'brindes', label: 'Brindes' },
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
@@ -255,6 +257,7 @@ export function CustomerDetailPage() {
           {tab === 'financeiro' && (action('ver_financeiro') ? <IxcFinance contactId={c.id} /> : <EmptyState title="Sem acesso aos valores financeiros" description="Seu perfil não vê valores financeiros. Fale com a administração." />)}
           {tab === 'atendimentos' && <IxcOrders contactId={c.id} />}
           {tab === 'stakeholders' && <StakeholdersPanel contactId={c.id} />}
+          {tab === 'brindes' && <AccountGifts contactId={c.id} name={c.name} />}
           {tab === 'relacoes' && <AccountRelationsPanel contactId={c.id} />}
           {FUTURE_TABS[tab] && <EmptyState title="Ainda sem dados" description={FUTURE_TABS[tab]} />}
         </div>

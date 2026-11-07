@@ -15,6 +15,7 @@ import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useDebounced, useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
+import { StakeholderGifts } from '../gifts/AccountGifts';
 import { errMsg } from '../contracts/shared';
 import { InviteDialog } from '../../pages/cs/Surveys';
 import { AnalysisSummary, BySector, OrgChart, OriginChips, PowerChip } from './stakeholderAnalysis';
@@ -181,6 +182,7 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
         <div className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-lg font-bold text-ink">{d.name}</h3><p className="text-sm text-muted">{[d.title, d.unitName, d.account].filter(Boolean).join(' · ')}</p>{(d.email || d.phone) && <p className="text-sm">{[d.email, d.phone].filter(Boolean).join(' · ')}</p>}</div><Button size="sm" variant="secondary" onClick={() => setSurvey(true)}>Enviar pesquisa</Button></div>
           {survey && <InviteDialog preset={{ contactId, account: d.account, stakeholderId: d.id }} onClose={() => setSurvey(false)} />}
+          <StakeholderGifts id={d.id} />
 
           <section className="space-y-3 rounded-lg border border-line p-3" aria-label="Poder de influência">
             <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-ink">Poder de influência</h4><InfluenceChip l={d.influence} labels={d.policy.labels} pending={d.influencePending} /></div>
