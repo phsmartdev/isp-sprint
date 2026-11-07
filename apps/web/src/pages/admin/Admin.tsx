@@ -1,3 +1,4 @@
+import { useSectors } from '../../lib/hooks';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { compressImage } from '../../lib/files';
 import { Link } from 'react-router-dom';
@@ -10,7 +11,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import {
-  BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, PROFILE_KEYS, PROFILE_LABELS, SECTORS, SECTOR_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
+  BUSINESS_MODULE_LABELS, LEVEL_LABELS, MODULE_LABELS, MODULE_OWNER, ADMIN_PROFILES, PROFILE_KEYS, PROFILE_LABELS, SEGMENTS, SEGMENT_LABELS, toCents, type AccessLevel, type Module, type ProfileKey, type Sector, type Segment,
   PLAYBOOK_INTERNAL_ROLES, PLAYBOOK_ROLE_LABELS, type PlaybookRole,
 } from '@isp/domain';
 import type { BrandSlot } from '@isp/shared';
@@ -168,7 +169,7 @@ export function AdminOverview() {
 // =================================================================== usuários
 type AdminUser = {
   id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; ipBypass?: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
-  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: Sector[]; playbookRoles?: PlaybookRole[];
+  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: string[]; isCsm?: boolean; playbookRoles?: PlaybookRole[];
 };
 
 async function fileToBase64(file: File) {
@@ -187,6 +188,12 @@ function TeamRow({ t, members }: { t: Team; members: number }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const del = useMutation({
+    mutationFn: () => api(`/admin/teams/${t.id}`, { method: 'DELETE' }),
+    onSuccess: () => { setDeleting(false); qc.invalidateQueries(); toast({ tone: 'success', message: 'Time excluído' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
   const m = useMutation({
     mutationFn: (body: { name?: string; active?: boolean }) => api(`/admin/teams/${t.id}`, { method: 'PATCH', body }),
     onSuccess: (_r, b) => { setName(null); qc.invalidateQueries({ queryKey: ['admin', 'users'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: b.active === undefined ? 'Time renomeado' : b.active ? 'Time ativado' : 'Time inativado' }); },
@@ -208,8 +215,13 @@ function TeamRow({ t, members }: { t: Team; members: number }) {
           {active ? <Chip tone="green">Ativo</Chip> : <Chip>Inativo</Chip>}
           <Button size="sm" variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setName(t.name)}>Editar</Button>
           <Button size="sm" variant="ghost" loading={m.isPending} onClick={() => m.mutate({ active: !active })}>{active ? 'Inativar' : 'Ativar'}</Button>
+          <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Excluir</Button>
         </>
       )}
+      <Modal open={deleting} onClose={() => setDeleting(false)} title={`Excluir o time ${t.name}?`}
+        footer={<><Button onClick={() => setDeleting(false)}>Cancelar</Button><Button variant="danger" loading={del.isPending} onClick={() => del.mutate()}>Excluir time</Button></>}>
+        <p className="text-sm text-ink">O time sai de todas as escolhas, telas e do orçamento (o centro de custo do time fica inativo). {members ? `${members} pessoa(s) deixam de fazer parte dele.` : ''} O que já foi registrado com este time continua no histórico.</p>
+      </Modal>
     </li>
   );
 }
@@ -220,9 +232,11 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();
+  const sectors = useSectors();
+  const [editingSectors, setEditingSectors] = useState(false);
   const [form, setForm] = useState({
-    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'vendedor') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
-    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: (user?.sectors ?? []) as Sector[], playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
+    name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'operacao') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
+    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: user?.sectors ?? [], isCsm: user?.isCsm ?? false, playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -231,8 +245,8 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, playbookRoles: form.playbookRoles } });
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, isCsm: form.isCsm, playbookRoles: form.playbookRoles } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -272,8 +286,8 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
         </fieldset>
       ) : (
         <fieldset>
-          <legend className="mb-1 text-sm font-semibold text-ink">{form.profile === 'gerencia' || form.profile === 'administrador' ? 'Times (opcional)' : 'Time de que faz parte'}</legend>
-          <p className="mb-2 text-xs text-muted">{form.profile === 'gerencia' || form.profile === 'administrador' ? 'Vê todos os times.' : 'O supervisor deste time vê o trabalho desta pessoa.'}</p>
+          <legend className="mb-1 text-sm font-semibold text-ink">{ADMIN_PROFILES.includes(form.profile) ? 'Times (opcional)' : 'Time de que faz parte'}</legend>
+          <p className="mb-2 text-xs text-muted">{ADMIN_PROFILES.includes(form.profile) ? 'Vê todos os times.' : 'O supervisor deste time vê o trabalho desta pessoa.'}</p>
           <ul className="space-y-1.5">
             {teams.map((t) => {
               const member = form.teamIds.includes(t.id);
@@ -287,12 +301,17 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
         </fieldset>
       )}
       <fieldset>
-        <legend className="mb-1 text-sm font-semibold text-ink">Setores (Gestão de Contratos)</legend>
+        <legend className="mb-1 flex w-full items-center justify-between gap-2 text-sm font-semibold text-ink">Setores (Gestão de Contratos)<Button size="sm" variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setEditingSectors(true)}>Editar setores</Button></legend>
         <p className="mb-2 text-xs text-muted">Definem quem recebe as tarefas e notificações dos contratos e quem conclui cada etapa. Setores de apoio enxergam todos os contratos.</p>
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-          {SECTORS.map((x) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sectors.includes(x)} onChange={() => set('sectors', form.sectors.includes(x) ? form.sectors.filter((y) => y !== x) : [...form.sectors, x])} />{SECTOR_LABELS[x]}</label>)}
+          {sectors.items.map(({ key: x, label }) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sectors.includes(x)} onChange={() => set('sectors', form.sectors.includes(x) ? form.sectors.filter((y) => y !== x) : [...form.sectors, x])} />{label}</label>)}
         </div>
+        <SectorsManager open={editingSectors} onClose={() => setEditingSectors(false)} />
       </fieldset>
+      <label className="flex items-start gap-2 border border-line px-3 py-2.5 text-sm">
+        <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={form.isCsm} onChange={(e) => set('isCsm', e.target.checked)} />
+        <span><span className="font-semibold text-ink">É CSM (Sucesso do Cliente)</span><span className="block text-xs text-muted">Recebe carteira de contas e aparece no filtro de CSM do Sucesso do Cliente.</span></span>
+      </label>
       <fieldset>
         <legend className="mb-1 text-sm font-semibold text-ink">Papéis no Playbook Comercial (contratos)</legend>
         <p className="mb-2 text-xs text-muted">Definem a responsabilidade da pessoa na matriz RACI: quem confere o Cadastro ERP e quem recebe os avisos de cada atividade de contrato (R, A, C, I e escalonamento). Financeiro, Operação/T.I., Jurídico e as lideranças são atores externos, cadastrados em Configurações → Responsabilidades de contratos.</p>
@@ -318,6 +337,7 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
 
 export function AdminUsers() {
   const qc = useQueryClient();
+  const sectorList = useSectors();
   const toast = useToast();
   const q = useQuery({ queryKey: ['admin', 'users'], queryFn: () => api<{ users: AdminUser[]; teams: Team[] }>('/admin/users') });
   const [editing, setEditing] = useState<AdminUser | 'new' | null>(() => (new URLSearchParams(location.search).get('novo') ? 'new' : null));
@@ -348,6 +368,7 @@ export function AdminUsers() {
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const { users, teams } = q.data!;
+
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? '';
   return (
     <div className="space-y-4">
@@ -368,9 +389,9 @@ export function AdminUsers() {
                       <span><span className="block font-semibold text-ink">{u.name}</span><span className="block text-xs text-muted">{u.email}{u.jobTitle ? ` · ${u.jobTitle}` : ''}</span></span>
                     </span>
                   </td>
-                  <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'administrador' ? 'red' : u.profile === 'gerencia' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
+                  <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'administrador' ? 'red' : u.profile === 'gerencia' || u.profile === 'diretoria' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
                   <td className="px-5 py-3 text-text">{u.teamIds.map((t) => `${teamName(t)}${u.leadTeamIds.includes(t) ? ' (lidera)' : ''}`).join(', ') || '—'}</td>
-                  <td className="px-5 py-3 text-text">{u.sectors?.map((x) => SECTOR_LABELS[x]).join(', ') || '—'}</td>
+                  <td className="px-5 py-3 text-text">{u.sectors?.map((x) => sectorList.label(x)).join(', ') || '—'}{u.isCsm && <Chip tone="green">CSM</Chip>}</td>
                   <td className="num px-5 py-3 text-text">{u.goalSales} / {u.goalProposals} / {u.goalLeads}</td>
                   <td className="num px-5 py-3 text-text">{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Nunca'}</td>
                   <td className="px-5 py-3"><Chip tone={u.active ? 'green' : 'neutral'}>{u.active ? 'Ativo' : 'Inativo'}</Chip></td>
@@ -426,7 +447,7 @@ export function AdminSources() {
     <section className="card p-5">
       <h2 className="text-lg font-bold text-ink">Canais de entrada</h2>
       <p className="mb-4 text-sm text-muted">Por onde o cliente chega (WhatsApp, Instagram, telefone…). Canais desativados somem dos formulários, mas os registros antigos continuam com a origem original.</p>
-      <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim().length >= 2) create.mutate(); }}>
+      <form className="mb-4 flex gap-2" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if (name.trim().length >= 2) create.mutate(); }}>
         <Input aria-label="Novo canal" className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Instagram" />
         <Button type="submit" variant="primary" icon={<Plus className="h-4 w-4" />} loading={create.isPending}>Cadastrar</Button>
       </form>
@@ -490,7 +511,7 @@ export function AdminSecurity() {
                   <th scope="row" className="px-5 py-3 font-semibold text-ink">{MODULE_LABELS[mod.key]}</th>
                   {d.profiles.map((p) => {
                     const lvl = d.matrix[p.key][mod.key];
-                    const locked = (p.key === 'gerencia' || p.key === 'administrador') && mod.key === 'configuracoes';
+                    const locked = ADMIN_PROFILES.includes(p.key) && mod.key === 'configuracoes';
                     return (
                       <td key={p.key} className="px-5 py-2.5">
                         <select
@@ -574,5 +595,50 @@ export function AdminLogs() {
         </>
       )}
     </section>
+  );
+}
+
+/** Setores da Gestão de Contratos: criar, renomear e excluir (os que têm etapas nos processos só renomeiam). */
+function SectorsManager({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const sectors = useSectors();
+  const [edit, setEdit] = useState<{ key: string; label: string } | null>(null);
+  const [name, setName] = useState('');
+  const [deleting, setDeleting] = useState<{ key: string; label: string } | null>(null);
+  const done = (msg: string) => { void qc.invalidateQueries({ queryKey: ['contract-sectors'] }); void qc.invalidateQueries({ queryKey: ['admin', 'users'] }); toast({ tone: 'success', message: msg }); };
+  const fail = (e: unknown) => toast({ tone: 'error', message: (e as Error).message });
+  const create = useMutation({ mutationFn: () => api('/contract-sectors', { method: 'POST', body: { label: name } }), onSuccess: () => { setName(''); done('Setor criado'); }, onError: fail });
+  const rename = useMutation({ mutationFn: (x: { key: string; label: string }) => api(`/contract-sectors/${x.key}`, { method: 'PATCH', body: { label: x.label } }), onSuccess: () => { setEdit(null); done('Setor renomeado'); }, onError: fail });
+  const del = useMutation({ mutationFn: (key: string) => api(`/contract-sectors/${key}`, { method: 'DELETE' }), onSuccess: () => { setDeleting(null); done('Setor excluído'); }, onError: fail });
+  return (
+    <Modal open={open} onClose={onClose} title="Setores da Gestão de Contratos" footer={<Button onClick={onClose}>Fechar</Button>}>
+      <ul className="divide-y divide-line border border-line">
+        {sectors.items.map((x) => (
+          <li key={x.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+            {edit?.key === x.key ? (
+              <form className="flex flex-1 items-center gap-2" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if (edit.label.trim().length >= 2) rename.mutate({ key: x.key, label: edit.label.trim() }); }}>
+                <Input aria-label={`Novo nome do setor ${x.label}`} autoFocus value={edit.label} onChange={(e) => setEdit({ key: x.key, label: e.target.value })} />
+                <Button size="sm" type="submit" variant="primary" loading={rename.isPending}>Salvar</Button>
+                <Button size="sm" type="button" onClick={() => setEdit(null)}>Cancelar</Button>
+              </form>
+            ) : (
+              <>
+                <span className="min-w-0 flex-1 font-semibold text-ink">{x.label}{x.processSteps && <span className="ml-2 text-xs font-normal text-muted">tem etapas nos processos</span>}</span>
+                <Button size="sm" variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setEdit({ key: x.key, label: x.label })}>Editar</Button>
+                <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} disabled={x.processSteps} title={x.processSteps ? 'Tem etapas nos processos de contrato: pode renomear, não excluir' : undefined} onClick={() => setDeleting(x)}>Excluir</Button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <form className="mt-3 flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); if (name.trim().length >= 2) create.mutate(); }}>
+        <FormField className="flex-1" label="Novo setor" htmlFor="sec-new"><Input id="sec-new" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Compras" /></FormField>
+        <Button type="submit" variant="primary" icon={<Plus className="h-4 w-4" />} disabled={name.trim().length < 2} loading={create.isPending}>Criar</Button>
+      </form>
+      <Modal open={!!deleting} onClose={() => setDeleting(null)} title={`Excluir o setor ${deleting?.label ?? ''}?`} footer={<><Button onClick={() => setDeleting(null)}>Cancelar</Button><Button variant="danger" loading={del.isPending} onClick={() => deleting && del.mutate(deleting.key)}>Excluir setor</Button></>}>
+        <p className="text-sm text-ink">O setor sai do cadastro das pessoas e das escolhas. O que já foi registrado continua no histórico.</p>
+      </Modal>
+    </Modal>
   );
 }

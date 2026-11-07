@@ -56,7 +56,7 @@ test('Indicadores, semáforo, scorecard e metas em cascata', async ({ page }) =>
   await page.getByRole('button', { name: 'Novo scorecard' }).click();
   const sc = page.getByRole('dialog', { name: 'Novo scorecard' });
   await sc.getByLabel('Nome da função').fill('Vendedor');
-  await sc.getByLabel('Vendedor', { exact: true }).check();
+  await sc.getByLabel('Operação', { exact: true }).check();
   await sc.getByRole('button', { name: 'Adicionar indicador' }).click();
   await sc.getByRole('button', { name: 'Adicionar indicador' }).click();
   await sc.getByLabel('Peso 1').fill('30');

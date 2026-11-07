@@ -57,7 +57,7 @@ export const dataAdminRoutes = [
     rateLimit: () => ({ max: 5, timeWindow: '10 minutes' }),
     body: z.object({ password: z.string().min(1).max(200), confirm: z.string(), scopes: z.array(z.enum(CLEAR_SCOPES)).min(1), keep: z.object({ opportunityIds: z.array(z.string().uuid()).max(50).default([]), contractIds: z.array(z.string().uuid()).max(50).default([]) }).default({}) }),
     handler: async ({ app, auth, body, req }) => {
-      if (!auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador')) throw forbidden('Só a administração ou a gerência pode limpar a base.');
+      if (!auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p))) throw forbidden('Só a administração ou a gerência pode limpar a base.');
       if (body.confirm.trim().toUpperCase() !== CONFIRM) throw unprocessable(`Digite exatamente "${CONFIRM}" para confirmar.`, [{ path: 'confirm', message: 'Frase de confirmação incorreta' }]);
       const [u] = await app.db.select({ hash: s.users.passwordHash }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
       if (!u || !(await verifyPassword(body.password, u.hash))) {

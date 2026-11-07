@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Download, FileText, FileUp, Lock, PenLine, Trash2 } from 'lucide-react';
 import { SignaturesList } from './SignaturePanels';
-import { DOC_TYPES, SECTORS, SECTOR_LABELS, documentName, type Sector } from '@isp/domain';
+import { DOC_TYPES, documentName, sectorLabel } from '@isp/domain';
+import { useSectors } from '../../lib/hooks';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { MAX_UPLOAD_BYTES, compressImage, fileToBase64, fmtBytes } from '../../lib/files';
@@ -12,7 +13,7 @@ import { Button, Chip, EmptyState, FormField, Input, LoadingRows, Select, Textar
 import { Modal, useToast } from '../../components/ui/overlay';
 import { CHANGE_LABEL, errMsg, todayIso, type Alert, type ContractDetail, type Version } from './shared';
 
-type Doc = { id: string; groupId: string; version: number; category: string; name: string; docDate: string; summary: string; mime: string; size: number; folder: string; restrictedTo: Sector[]; signed: boolean; processId: string | null; createdAt: string; uploadedBy: string | null; canOpen: boolean; latest: boolean };
+type Doc = { id: string; groupId: string; version: number; category: string; name: string; docDate: string; summary: string; mime: string; size: number; folder: string; restrictedTo: string[]; signed: boolean; processId: string | null; createdAt: string; uploadedBy: string | null; canOpen: boolean; latest: boolean };
 const MIMES: Record<string, string> = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
 
 export function UploadModal({ c, open, onClose, category: cat0, processId, newVersionOf }: { c: ContractDetail; open: boolean; onClose: () => void; category?: string; processId?: string; newVersionOf?: Doc | null }) {
@@ -23,7 +24,8 @@ export function UploadModal({ c, open, onClose, category: cat0, processId, newVe
   const [docDate, setDocDate] = useState(todayIso());
   const [summary, setSummary] = useState(newVersionOf?.summary ?? c.current.object.slice(0, 80));
   const [signed, setSigned] = useState(['CONTRATO', 'ADITIVO'].includes(cat0 ?? ''));
-  const [restricted, setRestricted] = useState<Sector[]>(newVersionOf?.restrictedTo ?? []);
+  const [restricted, setRestricted] = useState<string[]>(newVersionOf?.restrictedTo ?? []);
+  const sectors = useSectors();
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preview = documentName(docDate || todayIso(), category, c.contact.name, summary || '…');
@@ -58,7 +60,7 @@ export function UploadModal({ c, open, onClose, category: cat0, processId, newVe
         <fieldset>
           <legend className="mb-1 text-sm font-semibold text-ink">Quem pode abrir</legend>
           <p className="mb-2 text-xs text-muted">Sem marcar nada, todos com acesso ao contrato. Marcando, só os setores escolhidos (e a gerência).</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1">{SECTORS.map((x) => <label key={x} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={restricted.includes(x)} onChange={(e) => setRestricted(e.target.checked ? [...restricted, x] : restricted.filter((y) => y !== x))} />{SECTOR_LABELS[x]}</label>)}</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">{sectors.items.map(({ key: x, label }) => <label key={x} className="flex items-center gap-1.5 text-sm"><input type="checkbox" checked={restricted.includes(x)} onChange={(e) => setRestricted(e.target.checked ? [...restricted, x] : restricted.filter((y) => y !== x))} />{label}</label>)}</div>
         </fieldset>
       </div>
     </Modal>
@@ -66,6 +68,7 @@ export function UploadModal({ c, open, onClose, category: cat0, processId, newVe
 }
 
 export function DocumentsPanel({ c, onUpload, onGenerate, onSign }: { c: ContractDetail; onUpload: (opts: { newVersionOf?: Doc }) => void; onGenerate: () => void; onSign: (d: { id: string; name: string }) => void }) {
+  const sectorList = useSectors().items;
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['contract-docs', c.id], queryFn: () => api<{ items: Doc[] }>(`/contracts/${c.id}/documents`) });
@@ -101,7 +104,7 @@ export function DocumentsPanel({ c, onUpload, onGenerate, onSign }: { c: Contrac
                       <Chip tone="blue">{d.category}</Chip>
                       {d.signed && <Chip tone="green">Assinado</Chip>}
                       <Chip tone={d.folder === 'Encerrados' ? 'neutral' : 'purple'}>Pasta {d.folder}</Chip>
-                      {d.restrictedTo.length > 0 && <Chip tone="orange"><Lock className="h-3 w-3" aria-hidden />{d.restrictedTo.map((x) => SECTOR_LABELS[x]).join(', ')}</Chip>}
+                      {d.restrictedTo.length > 0 && <Chip tone="orange"><Lock className="h-3 w-3" aria-hidden />{d.restrictedTo.map((x) => sectorLabel(x, sectorList)).join(', ')}</Chip>}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">

@@ -112,7 +112,7 @@ function ClearCard() {
   const [error, setError] = useState<string | null>(null);
   const [keepOpps, setKeepOpps] = useState<Kept[]>([]);
   const [keepCtrs, setKeepCtrs] = useState<Kept[]>([]);
-  const isAdmin = me?.profiles.includes('gerencia') || me?.profiles.includes('administrador');
+  const isAdmin = me?.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p));
   const clear = useMutation({
     mutationFn: () => api<{ counts: Record<string, number> }>('/admin/clear-base', { method: 'POST', body: { password, confirm, scopes, keep: { opportunityIds: keepOpps.map((x) => x.id), contractIds: keepCtrs.map((x) => x.id) } } }),
     onSuccess: (r) => {

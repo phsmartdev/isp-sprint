@@ -55,6 +55,8 @@ export const users = pgTable(
     goalLeads: integer('goal_leads').notNull().default(0),
     /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
+    /** CSM (Sucesso do Cliente): recebe carteira e aparece nos filtros de CSM */
+    isCsm: boolean('is_csm').notNull().default(false),
     /** Papéis do Playbook Comercial que a pessoa ocupa (GC, SC, ANC, ASC...): parametrizado no cadastro do usuário. */
     playbookRoles: text('playbook_roles').array().notNull().default(sql`'{}'::text[]`),
     /** Conta Google vinculada no primeiro login com Google (identificador "sub"). */
@@ -175,6 +177,8 @@ export const teams = pgTable(
     substituteLeadId: uuid('substitute_lead_id'),
     /** Gestores do time (um gestor pode ter vários times; veem e acompanham só os times que gerem). */
     managerIds: uuid('manager_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Time excluído: some de todas as escolhas e listas; o histórico continua apontando para ele. */
+    deletedAt: ts('deleted_at'),
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('teams_tenant_name_uq').on(t.tenantId, t.name) }),
@@ -5598,3 +5602,17 @@ export const supportRequestEvents = pgTable('support_request_events', {
   actorId: uuid('actor_id').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('support_request_events_idx').on(t.requestId, t.createdAt) }));
+
+/**
+ * Setores da Gestão de Contratos por empresa: os do sistema (renomeáveis; os que têm etapas do processo não podem ser excluídos)
+ * e os criados pela empresa. Sem linha = setor do sistema com o nome padrão.
+ */
+export const contractSectors = pgTable('contract_sectors', {
+  id: id(),
+  tenantId: tenantId(),
+  key: text('key').notNull(),
+  label: text('label').notNull(),
+  system: boolean('system').notNull().default(false),
+  deletedAt: ts('deleted_at'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_sectors_uq').on(t.tenantId, t.key) }));

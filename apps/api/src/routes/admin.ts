@@ -1,6 +1,8 @@
+import { ensureTeamCostCenters } from '../services/budget';
+import { assertSectors } from './contractSectors';
 import { partnerCostsFromProducts, type PlanProduct } from '@isp/domain';
 import { randomBytes } from 'node:crypto';
-import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   BRAND_SLOTS, ImageUpload, PasswordChange, PlanUpsert, SecurityUpdate, SourceUpsert, UserCreate, UserUpdate,
@@ -51,7 +53,7 @@ const SUP_NEEDS_TEAM = 'O supervisor precisa supervisionar ao menos um time: ele
 async function setTeams(db: DbOrTx, auth: AuthContext, userId: string, teamIds: string[], leadTeamIds: string[]) {
   const all = [...new Set([...teamIds, ...leadTeamIds])];
   if (all.length) {
-    const valid = await db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), inArray(s.teams.id, all)));
+    const valid = await db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), inArray(s.teams.id, all), isNull(s.teams.deletedAt)));
     if (valid.length !== all.length) throw unprocessable('Time inválido.', [{ path: 'teamIds', message: 'Time não encontrado nesta empresa' }]);
   }
   await db.delete(s.teamMemberships).where(eq(s.teamMemberships.userId, userId));
@@ -174,7 +176,7 @@ export const adminRoutes = [
       const users = await app.db
         .select({
           id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, phone: s.users.phone, active: s.users.active, ipBypass: s.users.ipBypass, lastLoginAt: s.users.lastLoginAt,
-          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, playbookRoles: s.users.playbookRoles, createdAt: s.users.createdAt,
+          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, isCsm: s.users.isCsm, playbookRoles: s.users.playbookRoles, createdAt: s.users.createdAt,
           hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")`,
           profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'administrador' then 0 when 'gerencia' then 1 when 'supervisor' then 2 when 'analista' then 3 else 4 end limit 1)`,
         })
@@ -184,7 +186,7 @@ export const adminRoutes = [
       const memberships = users.length
         ? await app.db.select().from(s.teamMemberships).where(inArray(s.teamMemberships.userId, users.map((u) => u.id)))
         : [];
-      const teams = await app.db.select().from(s.teams).where(eq(s.teams.tenantId, auth.tenantId)).orderBy(asc(s.teams.name));
+      const teams = await app.db.select().from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name));
       return {
         users: users.map((u) => ({
           ...u,
@@ -209,8 +211,9 @@ export const adminRoutes = [
         const roles = await ensureRoles(tx, auth.tenantId);
         const [exists] = await tx.select({ id: s.users.id }).from(s.users).where(sql`lower(${s.users.email}) = ${body.email}`).limit(1);
         if (exists) throw unprocessable('E-mail já cadastrado.', [{ path: 'email', message: 'Já existe um usuário com este e-mail' }]);
+        await assertSectors(tx, auth.tenantId, body.sectors);
         if (body.profile === 'supervisor' && !body.leadTeamIds.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
-        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, phone: body.phone ?? null, sectors: body.sectors, playbookRoles: body.playbookRoles, passwordHash: await hashPassword(temp) }).returning();
+        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, phone: body.phone ?? null, isCsm: body.isCsm, sectors: body.sectors, playbookRoles: body.playbookRoles, passwordHash: await hashPassword(temp) }).returning();
         await tx.insert(s.userRoles).values({ userId: u!.id, roleId: roles[body.profile]! });
         await setTeams(tx, auth, u!.id, body.teamIds, body.leadTeamIds);
         await audit(tx, req, { action: 'user.create', entityType: 'user', entityId: u!.id, metadata: { name: body.name, profile: body.profile } });
@@ -242,9 +245,10 @@ export const adminRoutes = [
           // e-mail novo: desfaz o vínculo com a conta Google anterior
           await tx.update(s.users).set({ email: body.email, googleSub: null }).where(eq(s.users.id, u.id));
         }
+        await assertSectors(tx, auth.tenantId, body.sectors);
         await tx
           .update(s.users)
-          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, ipBypass: body.ipBypass, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, playbookRoles: body.playbookRoles, updatedAt: new Date() })
+          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, ipBypass: body.ipBypass, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, isCsm: body.isCsm, playbookRoles: body.playbookRoles, updatedAt: new Date() })
           .where(eq(s.users.id, u.id));
         if (body.active === false) await tx.update(s.sessions).set({ revokedAt: new Date() }).where(eq(s.sessions.userId, u.id));
         if (body.profile) {
@@ -322,7 +326,7 @@ export const adminRoutes = [
     body: z.object({ name: z.string().trim().min(2).max(60).optional(), active: z.boolean().optional() }),
     handler: async ({ app, auth, params, body }) => {
       if (body.name) {
-        const [dup] = await app.db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), sql`lower(${s.teams.name}) = lower(${body.name})`, sql`${s.teams.id} <> ${params.id}`)).limit(1);
+        const [dup] = await app.db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), sql`lower(${s.teams.name}) = lower(${body.name})`, sql`${s.teams.id} <> ${params.id}`, isNull(s.teams.deletedAt))).limit(1);
         if (dup) throw unprocessable('Já existe um time com esse nome.', [{ path: 'name', message: 'Nome em uso' }]);
       }
       const [t] = await app.db.update(s.teams).set({ ...(body.name ? { name: body.name } : {}), ...(body.active !== undefined ? { active: body.active } : {}) })
@@ -330,6 +334,26 @@ export const adminRoutes = [
       if (!t) throw notFound('Time não encontrado.');
       return t;
     },
+  }),
+
+  defineRoute({
+    method: 'DELETE',
+    url: '/admin/teams/:id',
+    summary: 'Exclui o time: sai de todas as escolhas, telas e do orçamento (centro de custo inativado); as pessoas ficam sem esse time; o histórico continua',
+    tag: 'Administração',
+    ...ADMIN,
+    params: IdParams,
+    handler: async ({ app, auth, params, req }) => app.db.transaction(async (tx) => {
+      const [t] = await tx.select().from(s.teams).where(and(eq(s.teams.id, params.id), eq(s.teams.tenantId, auth.tenantId), isNull(s.teams.deletedAt))).limit(1);
+      if (!t) throw notFound('Time não encontrado.');
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      // o nome fica livre para um time novo; o antigo guarda a marca da exclusão
+      await tx.update(s.teams).set({ active: false, deletedAt: new Date(), name: `${t.name} (excluído ${stamp})`.slice(0, 120), managerIds: [] }).where(eq(s.teams.id, t.id));
+      await tx.delete(s.teamMemberships).where(eq(s.teamMemberships.teamId, t.id));
+      await audit(tx, req, { action: 'team.delete', entityType: 'team', entityId: t.id, metadata: { name: t.name } });
+      await ensureTeamCostCenters(tx, auth.tenantId);
+      return { ok: true };
+    }),
   }),
 
   // ------------------------------------------------------------------ segurança
