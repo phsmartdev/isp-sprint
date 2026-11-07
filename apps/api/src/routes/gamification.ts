@@ -49,6 +49,16 @@ async function creditsBetween(db: DbOrTx, tenantId: string, from: string, to: st
 const monthsOfYear = (year: string, today: string) => (today.slice(0, 4) === year ? Number(today.slice(5, 7)) : today.slice(0, 4) > year ? 12 : 1);
 const monthBounds = (ym: string) => { const [y, m] = ym.split('-').map(Number); const last = new Date(Date.UTC(y!, m!, 0)).getUTCDate(); return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, '0')}` }; };
 
+/** Nota de atividade (gamificação) de todos os participantes no período, por pessoa. */
+export async function activityScores(db: DbOrTx, auth: AuthContext, st: GamificationSettings, from: string, to: string, months = 1) {
+  const { teams } = await participants(db, auth.tenantId, st);
+  const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
+  const [credits, journey] = await Promise.all([creditsBetween(db, auth.tenantId, from, to, auth.timezone, memberIds), journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st)]);
+  const r = teamBoards({ teams, credits, settings: st, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))), months });
+  return new Map(r.people.map((p) => [p.userId, p]));
+}
+export { monthBounds };
+
 async function board(db: DbOrTx, auth: AuthContext, st: GamificationSettings, from: string, to: string, months = 1) {
   const { org, teams } = await participants(db, auth.tenantId, st);
   const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
@@ -139,6 +149,8 @@ export const gamificationRoutes = [
         key: z.string().trim().max(40), name: z.string().trim().max(80), pipelineId: z.string().uuid(), wonPoints: z.number().int(),
         components: z.array(z.object({ key: z.string().trim().max(40), name: z.string().trim().max(120), stageKey: z.string().trim().max(60).nullable(), points: z.number().int(), dueDays: z.number().int(), level: z.string().max(30).nullable().optional() })).max(60),
       })).max(30).default([]),
+      performanceWeights: z.record(z.string().max(30), z.object({ activity: z.number().int(), individual: z.number().int(), team: z.number().int(), unit: z.number().int(), company: z.number().int() })),
+      performanceBands: z.object({ greenBp: z.number().int(), yellowBp: z.number().int() }),
       dispersionYellowBp: z.number().int(), dispersionRedBp: z.number().int(), levels: z.array(z.object({ name: z.string().trim().min(1).max(40), minPoints: z.number().int().min(0) })).min(1).max(10), note: z.string().trim().min(3).max(300),
     }),
     handler: async ({ app, auth, body, reply }) => {

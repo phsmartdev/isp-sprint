@@ -9,6 +9,7 @@
  */
 
 import { scoreJourneyErrors, type ScoreJourney } from './scoreJourneys';
+import { performanceWeightsErrors, type PerformanceBands, type PerformanceWeights } from './hierarchyPerformance';
 
 export type CompetencyLevel = {
   key: string; name: string;
@@ -54,6 +55,10 @@ export type GamificationSettings = {
   dispersionRedBp: number;
   /** faixas pela nota do ano (nota mínima em %, crescente) */
   levels: { name: string; minPoints: number }[];
+  /** performance por nível hierárquico: pesos de atividade e metas (individual, time, área, empresa) por nível de competência */
+  performanceWeights: Record<string, PerformanceWeights>;
+  /** faixas da performance (verde a partir de, amarelo a partir de), em bp de % */
+  performanceBands: PerformanceBands;
 };
 
 export const CREDIT_KINDS_COUNTED = ['direto', 'participacao'] as const;
@@ -88,6 +93,8 @@ export function gamificationSettingsErrors(s: GamificationSettings): string[] {
   for (let i = 1; i < s.levels.length; i++) if (s.levels[i]!.minPoints <= s.levels[i - 1]!.minPoints) e.push('As faixas devem ter mínimos crescentes.');
   if (s.levels.some((l) => !l.name.trim())) e.push('Toda faixa precisa de nome.');
   e.push(...scoreJourneyErrors(s.journeys ?? []));
+  e.push(...performanceWeightsErrors(s.performanceWeights ?? {}, Object.fromEntries(lv.map((l) => [l.key, l.name])), s.performanceBands ?? { greenBp: 0, yellowBp: 0 }));
+  for (const l of lv) if (!(s.performanceWeights ?? {})[l.key]) e.push(`Performance: defina os pesos de ${l.name}.`);
   for (const j of s.journeys ?? []) for (const c of j.components) if (c.level && !keys.has(c.level)) e.push(`Jornada "${j.name}": alçada inexistente em "${c.name}".`);
   return e;
 }

@@ -31,6 +31,8 @@ export type GamSettings = {
   journeys: JourneyDef[]; teamIds: string[]; points: Record<string, number>; participationMultiplierBp: number;
   competencyLevels: CompetencyLevel[]; assignments: Record<string, string>; defaultLevelKey: string; defaultLeadLevelKey: string; bonuses: Bonuses;
   dispersionYellowBp: number; dispersionRedBp: number; levels: { name: string; minPoints: number }[];
+  performanceWeights: Record<string, { activity: number; individual: number; team: number; unit: number; company: number }>;
+  performanceBands: { greenBp: number; yellowBp: number };
 };
 /** "60% próprio + 40% time + …" */
 export const compositionText = (l: CompetencyLevel) => [[l.weights.ownBp, 'próprio'], [l.weights.teamBp, 'média do time'], [l.weights.dispersionBp, 'dispersão do time'], [l.weights.areaBp, 'área']].filter(([w]) => (w as number) > 0).map(([w, n]) => `${(w as number) / 100}% ${n}`).join(' + ');
