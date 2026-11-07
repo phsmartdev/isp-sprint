@@ -18,6 +18,7 @@ type Data = {
   myTeams?: { name: string; average: number }[];
   items?: { source: 'tarefa' | 'ganho'; journey: string; opportunityId: string; code: number | null; contact: string | null; points: number; extra?: boolean; bonus?: { onTime: boolean; adherence: boolean; levelsAbove: number } | null }[];
   events?: { type: string; kind: 'direto' | 'participacao'; points: number }[];
+  support?: { requestId: string; title: string; role: 'apoiou' | 'pediu'; points: number; capped: boolean }[];
 };
 const eventLabel = (k: string) => BUSINESS_EVENT_TYPES.find((t) => t.key === k)?.label ?? k;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -47,6 +48,7 @@ export function MyPointsPage() {
   const header = <PageHeader icon={<Star />} title="Meus pontos" subtitle="A sua nota e de onde veio cada ponto. Só você vê esta tela: não há ranking nem comparação com colegas." actions={!d.pending ? <Input aria-label="Mês" type="month" className="h-10 w-[170px]" value={month || d.month} onChange={(e) => setMonth(e.target.value)} /> : undefined} />;
   if (d.pending) return <div>{header}<Notice tone="info">A regra de pontuação ainda está aguardando aprovação. Assim que for aprovada, seus pontos aparecem aqui.</Notice></div>;
   const items = d.items ?? [];
+  const support = d.support ?? [];
   const events = d.events ?? [];
   return (
     <div>
@@ -65,7 +67,7 @@ export function MyPointsPage() {
 
       <section aria-label="De onde vieram os pontos" className="card mt-4 p-4">
         <h2 className="mb-2 text-lg font-bold text-ink">De onde vieram os pontos em {monthName.toLowerCase()}</h2>
-        {!items.length && !events.length ? <EmptyState title="Nenhum ponto no mês" description="Conclua as tarefas da jornada nas oportunidades: cada uma vale pontos para quem conclui." /> : (
+        {!items.length && !events.length && !support.length ? <EmptyState title="Nenhum ponto no mês" description="Conclua as tarefas da jornada nas oportunidades: cada uma vale pontos para quem conclui." /> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead className="text-xs text-muted"><tr>{['Origem', 'Jornada ou evento', 'Oportunidade', 'Pontos'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
@@ -76,6 +78,14 @@ export function MyPointsPage() {
                     <td className="px-2 py-1.5">{i.journey}</td>
                     <td className="px-2 py-1.5"><Link className="font-semibold text-primary hover:underline" to={`/opportunities/${i.opportunityId}?aba=tarefas`}>{i.code != null ? `OP-${i.code}` : 'Oportunidade'}</Link>{i.contact && <span className="text-muted"> · {i.contact}</span>}</td>
                     <td className="num px-2 py-1.5 font-bold">+{fmtPts(i.points)}</td>
+                  </tr>
+                ))}
+                {support.map((x) => (
+                  <tr key={`s${x.requestId}${x.role}`} className="border-t border-line">
+                    <td className="px-2 py-1.5">{x.role === 'apoiou' ? 'Apoio a colega' : 'Pedido de apoio atendido'}{x.capped && <span className="block text-xs text-muted">limitado pelo teto do mês</span>}</td>
+                    <td className="px-2 py-1.5">{x.title}</td>
+                    <td className="px-2 py-1.5"><Link className="font-semibold text-primary hover:underline" to={`/apoio#apoio-${x.requestId}`}>Ver pedido</Link></td>
+                    <td className="num px-2 py-1.5 font-bold">+{fmtPts(x.points)}</td>
                   </tr>
                 ))}
                 {events.map((e, k) => (

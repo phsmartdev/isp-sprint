@@ -22,6 +22,8 @@ export const GAMIFICATION_START: GamificationSettings = {
   ],
   assignments: {}, defaultLevelKey: 'n2', defaultLeadLevelKey: 'n4',
   bonuses: { onTimeBp: 2_000, adherenceBp: 3_000, extraPerLevelBp: 2_500, extraCapBp: 3_000, scoreCapBp: 13_000 },
+  // Pedido de Apoio (proposta): quem apoia ganha 1,5x os pontos da tarefa (ou da base); quem pede também ganha
+  support: { helperMultiplierBp: 15_000, basePoints: 3, requesterPoints: 1, monthlyCapPoints: 30 },
   dispersionYellowBp: 3_000, dispersionRedBp: 5_000,
   levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 80 }, { name: 'Ouro', minPoints: 100 }, { name: 'Diamante', minPoints: 120 }],
   // performance por nível: quem sobe na hierarquia pesa mais o coletivo

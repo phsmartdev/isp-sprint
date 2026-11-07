@@ -3,6 +3,7 @@
  * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
  * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
  */
+import { supportCreditsBetween } from './support';
 import { seesAllTeams } from '../services/results';
 import { leadsOrManages } from '../services/vacations';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -36,6 +37,12 @@ async function participants(db: DbOrTx, tenantId: string, st: GamificationSettin
   return { org, teams };
 }
 
+/** Pontos de jornada + pontos de Pedido de Apoio confirmados (quem apoiou e quem pediu), só de quem participa. */
+async function withSupport(db: DbOrTx, tenantId: string, from: string, to: string, st: GamificationSettings, memberIds: string[], journey: Parameters<typeof asExtra>[0]) {
+  const support = await supportCreditsBetween(db, tenantId, from, to, st);
+  return [...asExtra(journey.filter((c) => memberIds.includes(c.userId))), ...support.filter((c) => memberIds.includes(c.userId) && c.points > 0).map((c) => ({ userId: c.userId, points: c.points }))];
+}
+
 async function creditsBetween(db: DbOrTx, tenantId: string, from: string, to: string, tz: string, userIds: string[]): Promise<CreditSum[]> {
   if (!userIds.length) return [];
   const rows = await db.execute<{ user_id: string; type: string; kind: string; share: number }>(sql`
@@ -56,7 +63,7 @@ export async function activityScores(db: DbOrTx, auth: AuthContext, st: Gamifica
   const { teams } = await participants(db, auth.tenantId, st);
   const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
   const [credits, journey] = await Promise.all([creditsBetween(db, auth.tenantId, from, to, auth.timezone, memberIds), journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st)]);
-  const r = teamBoards({ teams, credits, settings: st, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))), months });
+  const r = teamBoards({ teams, credits, settings: st, extra: await withSupport(db, auth.tenantId, from, to, st, memberIds, journey), months });
   return new Map(r.people.map((p) => [p.userId, p]));
 }
 export { monthBounds };
@@ -65,7 +72,7 @@ async function board(db: DbOrTx, auth: AuthContext, st: GamificationSettings, fr
   const { org, teams } = await participants(db, auth.tenantId, st);
   const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
   const [credits, journey] = await Promise.all([creditsBetween(db, auth.tenantId, from, to, auth.timezone, memberIds), journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st)]);
-  const r = teamBoards({ teams, credits, settings: st, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))), months });
+  const r = teamBoards({ teams, credits, settings: st, extra: await withSupport(db, auth.tenantId, from, to, st, memberIds, journey), months });
   const name = Object.fromEntries(org.people.map((p) => [p.id, p.name]));
   const photos = new Set((await db.execute<{ user_id: string }>(sql`select user_id from user_avatars where user_id in ${memberIds.length ? memberIds : ['00000000-0000-0000-0000-000000000000']}`)).rows.map((x) => x.user_id));
   const who = (u: string) => ({ name: name[u] ?? '', hasPhoto: photos.has(u) });
@@ -122,7 +129,7 @@ export const gamificationRoutes = [
       if (!teams.some((t) => t.memberIds.includes(auth.userId))) return { gold: false, year: Number(year), score: null };
       const memberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
       const journey = await journeyCreditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, settings);
-      const r = teamBoards({ teams, credits: await creditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, memberIds), settings, extra: asExtra(journey.filter((c) => memberIds.includes(c.userId))), months: monthsOfYear(year, todayIn(auth.timezone)) });
+      const r = teamBoards({ teams, credits: await creditsBetween(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, auth.timezone, memberIds), settings, extra: await withSupport(app.db, auth.tenantId, `${year}-01-01`, `${year}-12-31`, settings, memberIds, journey), months: monthsOfYear(year, todayIn(auth.timezone)) });
       const me = r.people.find((p) => p.userId === auth.userId);
       return { gold: goldMedalists(r.people).includes(auth.userId), year: Number(year), score: me?.score ?? null };
     },
@@ -147,6 +154,7 @@ export const gamificationRoutes = [
       assignments: z.record(z.string().uuid(), z.string().max(30)).default({}),
       defaultLevelKey: z.string().max(30), defaultLeadLevelKey: z.string().max(30),
       bonuses: z.object({ onTimeBp: z.number().int(), adherenceBp: z.number().int(), extraPerLevelBp: z.number().int(), extraCapBp: z.number().int(), scoreCapBp: z.number().int() }),
+      support: z.object({ helperMultiplierBp: z.number().int(), basePoints: z.number().int(), requesterPoints: z.number().int(), monthlyCapPoints: z.number().int() }).optional(),
       journeys: z.array(z.object({
         key: z.string().trim().max(40), name: z.string().trim().max(80), pipelineId: z.string().uuid(), wonPoints: z.number().int(),
         components: z.array(z.object({ key: z.string().trim().max(40), name: z.string().trim().max(120), stageKey: z.string().trim().max(60).nullable(), points: z.number().int(), dueDays: z.number().int(), level: z.string().max(30).nullable().optional() })).max(60),
@@ -231,6 +239,8 @@ export const gamificationRoutes = [
         monthScore: m.me, yearScore: y.me, level: y.me ? levelOf(y.me.score, settings)?.name ?? null : null, gold: gold.includes(auth.userId),
         myTeams: m.teams.map((t) => ({ name: t.name, average: t.average })),
         items, events,
+        support: (await supportCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, settings)).filter((c) => c.userId === auth.userId).map((c) => ({ requestId: c.requestId, title: c.title, role: c.role, points: c.points, capped: c.capped })),
+        supportRule: settings.support ?? null,
       };
     },
   }),
