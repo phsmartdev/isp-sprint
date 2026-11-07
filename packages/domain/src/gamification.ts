@@ -8,7 +8,11 @@
  * Todos os números (pontos, pesos, faixas, níveis) vêm das configurações; nada fixo no cálculo.
  */
 
+import { scoreJourneyErrors, type ScoreJourney } from './scoreJourneys';
+
 export type GamificationSettings = {
+  /** jornadas de pontuação: tarefas por etapa do funil, com peso, e o peso do negócio ganho */
+  journeys: ScoreJourney[];
   /** times que participam (vazio = todos os times ativos) */
   teamIds: string[];
   /** pontos por tipo de evento de negócio (chave do catálogo de eventos) */
@@ -34,7 +38,7 @@ export function gamificationSettingsErrors(s: GamificationSettings): string[] {
   const e: string[] = [];
   const bp = (v: number) => Number.isInteger(v) && v >= 0 && v <= 10_000;
   for (const [k, v] of Object.entries(s.points)) if (!Number.isInteger(v) || v < 0 || v > 10_000) e.push(`Pontos inválidos em ${k}.`);
-  if (!Object.values(s.points).some((v) => v > 0)) e.push('Defina pontos para pelo menos um tipo de evento.');
+  if (!Object.values(s.points).some((v) => v > 0) && !(s.journeys ?? []).length) e.push('Defina pontos para pelo menos um tipo de evento ou uma jornada.');
   if (!Number.isInteger(s.participationMultiplierBp) || s.participationMultiplierBp < 0 || s.participationMultiplierBp > 50_000) e.push('Multiplicador de participação inválido.');
   for (const r of GAMIFICATION_ROLES) {
     const w = s.hierarchyWeights?.[r];
@@ -44,26 +48,30 @@ export function gamificationSettingsErrors(s: GamificationSettings): string[] {
   if (!s.levels.length) e.push('Cadastre pelo menos um nível.');
   for (let i = 1; i < s.levels.length; i++) if (s.levels[i]!.minPoints <= s.levels[i - 1]!.minPoints) e.push('Os níveis devem ter mínimos crescentes.');
   if (s.levels.some((l) => !l.name.trim())) e.push('Todo nível precisa de nome.');
+  e.push(...scoreJourneyErrors(s.journeys ?? []));
   return e;
 }
 
 /** Crédito agregado: soma de participação (bp) por pessoa, tipo e tipo de crédito, no período. */
 export type CreditSum = { userId: string; type: string; kind: string; shareBp: number };
 
-export type PersonPoints = { userId: string; direct: number; participation: number; own: number };
+export type PersonPoints = { userId: string; direct: number; participation: number; journey: number; own: number };
+/** Pontos das jornadas (tarefas concluídas e ganhos) já calculados por pessoa. */
+export type ExtraPoints = { userId: string; points: number };
 
 /** Pontos individuais: tipo × participação (bp/10000); participação com o multiplicador. Arredonda no fim, por pessoa. */
-export function individualPoints(credits: CreditSum[], st: GamificationSettings): Map<string, PersonPoints> {
-  const out = new Map<string, { direct: number; participation: number }>();
+export function individualPoints(credits: CreditSum[], st: GamificationSettings, extra: ExtraPoints[] = []): Map<string, PersonPoints> {
+  const out = new Map<string, { direct: number; participation: number; journey: number }>();
+  for (const x of extra) { const cur = out.get(x.userId) ?? { direct: 0, participation: 0, journey: 0 }; cur.journey += x.points; out.set(x.userId, cur); }
   for (const c of credits) {
     const pts = st.points[c.type] ?? 0;
     if (!pts || !(CREDIT_KINDS_COUNTED as readonly string[]).includes(c.kind)) continue;
-    const cur = out.get(c.userId) ?? { direct: 0, participation: 0 };
+    const cur = out.get(c.userId) ?? { direct: 0, participation: 0, journey: 0 };
     if (c.kind === 'direto') cur.direct += (pts * c.shareBp) / 10_000;
     else cur.participation += (pts * c.shareBp * st.participationMultiplierBp) / 10_000 / 10_000;
     out.set(c.userId, cur);
   }
-  return new Map([...out].map(([u, v]) => [u, { userId: u, direct: round1(v.direct), participation: round1(v.participation), own: round1(v.direct + v.participation) }]));
+  return new Map([...out].map(([u, v]) => [u, { userId: u, direct: round1(v.direct), participation: round1(v.participation), journey: round1(v.journey), own: round1(v.direct + v.participation + v.journey) }]));
 }
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -90,10 +98,10 @@ export type TeamBoard = {
  * Placar por time e nota de cada pessoa. Quem está em mais de um time participante usa a média das médias dos times.
  * Sem eventos no período a pessoa entra com zero (conta na média e na dispersão do time).
  */
-export function teamBoards(args: { teams: { id: string; memberIds: string[]; leadIds?: string[] }[]; credits: CreditSum[]; settings: GamificationSettings }) {
+export function teamBoards(args: { teams: { id: string; memberIds: string[]; leadIds?: string[] }[]; credits: CreditSum[]; settings: GamificationSettings; extra?: ExtraPoints[] }) {
   const st = args.settings;
-  const ind = individualPoints(args.credits, st);
-  const pp = (u: string): PersonPoints => ind.get(u) ?? { userId: u, direct: 0, participation: 0, own: 0 };
+  const ind = individualPoints(args.credits, st, args.extra);
+  const pp = (u: string): PersonPoints => ind.get(u) ?? { userId: u, direct: 0, participation: 0, journey: 0, own: 0 };
   const avgOf = new Map<string, number>();
   for (const t of args.teams) avgOf.set(t.id, t.memberIds.length ? t.memberIds.reduce((s, u) => s + pp(u).own, 0) / t.memberIds.length : 0);
   const teamsOf = new Map<string, string[]>();

@@ -1,0 +1,1 @@
+ALTER TABLE "activities" ADD COLUMN "score_component" text;

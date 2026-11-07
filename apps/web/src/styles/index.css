@@ -87,15 +87,7 @@
 .orgchart > ul > li::before, .orgchart > ul > li::after { display: none; }
 @media print { .orgchart { overflow: visible !important; } }
 
-/* Gamificação: pódio sobe em sequência (3º, 2º, 1º) e o selo brilha uma vez. */
-@keyframes podium-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
-@keyframes podium-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.podium-bar { transform-origin: bottom; animation: podium-rise .7s cubic-bezier(.2,.8,.2,1) both; }
-.podium-name { animation: podium-fade .4s ease-out both; }
-.podium-bar.podium-d2, .podium-name.podium-d2 { animation-delay: .1s; }
-.podium-bar.podium-d0, .podium-name.podium-d0 { animation-delay: .45s; }
-.podium-bar.podium-d1, .podium-name.podium-d1 { animation-delay: .8s; }
-.podium-name.podium-d2 { animation-delay: .6s; } .podium-name.podium-d0 { animation-delay: .95s; } .podium-name.podium-d1 { animation-delay: 1.3s; }
+/* Gamificação: o selo do primeiro lugar brilha uma vez (sem pódio nem ranking). */
 @keyframes selo-shine { 0% { box-shadow: 0 0 0 0 rgba(212,166,42,.55); } 100% { box-shadow: 0 0 0 14px rgba(212,166,42,0); } }
 .selo-card { animation: selo-shine 1.6s ease-out 2; }
-@media (prefers-reduced-motion: reduce) { .podium-bar, .podium-name, .selo-card { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .selo-card { animation: none; } }

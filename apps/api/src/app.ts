@@ -84,6 +84,7 @@ import { interventionRoutes } from './routes/interventions';
 import { ritualRoutes } from './routes/rituals';
 import { vacationRoutes } from './routes/vacations';
 import { gamificationRoutes } from './routes/gamification';
+import { scoreJourneyRoutes } from './routes/scoreJourneys';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -266,6 +267,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...ritualRoutes,
     ...vacationRoutes,
     ...gamificationRoutes,
+    ...scoreJourneyRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

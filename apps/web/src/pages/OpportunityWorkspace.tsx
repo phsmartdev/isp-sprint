@@ -1,4 +1,5 @@
 import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { JourneyScore } from '../features/gamification/Gamification';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -785,6 +786,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
             <div className="space-y-5">
+              <JourneyScore oppId={opp.id} onOpen={setTaskOpen} editable={editable} />
               <LinkedTasks prefill={workPrefill} onOpen={setTaskOpen} />
               <section aria-label="Retornos e interações">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

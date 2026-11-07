@@ -1,24 +1,30 @@
 /**
- * Gamificação colaborativa: Selo BK de Qualidade (medalha de ouro da maior nota do ano), pódio animado e o resumo do time
- * (média e dispersão) — o pódio nunca aparece sozinho: o resultado do time vem junto.
+ * Gamificação colaborativa, sem ranking nem pódio (decisão: comparação pública pode constranger quem não fica em primeiro).
+ * Só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade. Cada pessoa vê a própria nota; a liderança vê o próprio time.
  */
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
+import { CheckCircle2, Circle, Plus } from 'lucide-react';
 import { api } from '../../lib/api';
-import { Avatar } from '../../components/ui/primitives';
+import { fmtDate } from '../../lib/format';
+import { Button, LoadingRows } from '../../components/ui/primitives';
+import { useToast } from '../../components/ui/overlay';
+import { errMsg } from '../contracts/shared';
 
 export type DispersionTone = 'verde' | 'amarelo' | 'vermelho' | 'sem_dados';
 export type Role = 'colaborador' | 'lideranca';
-export type Member = { userId: string; name: string; hasPhoto: boolean; role: Role; own: number; direct: number; participation: number; teamAverage: number; score: number; level?: string | null };
-export type TeamRow = { teamId: string; name: string; points: number; average: number; leads: string[]; dispersion: { cv: number | null; tone: DispersionTone; min: number; max: number } | null; members: Member[] };
-export type Board = { teams: TeamRow[]; people: Member[]; podium: (Member & { place: number })[] };
-export type GamSettings = { hierarchyWeights: Record<Role, { ownBp: number; teamBp: number }>; participationMultiplierBp: number; dispersionYellowBp: number; dispersionRedBp: number; points: Record<string, number>; levels: { name: string; minPoints: number }[]; teamIds: string[] };
+export type MemberScore = { userId: string; role: Role; own: number; direct: number; participation: number; journey: number; teamAverage: number; score: number; tasks: number; wins: number };
+export type Member = MemberScore & { name: string; hasPhoto: boolean };
+export type TeamRow = { teamId: string; name: string; points: number; average: number; canManage: boolean; dispersion: { cv: number | null; tone: DispersionTone; min: number; max: number } | null; members: Member[] | null };
+export type Board = { teams: TeamRow[]; me: MemberScore | null };
+export type JourneyDef = { key: string; name: string; pipelineId: string; wonPoints: number; components: { key: string; name: string; stageKey: string | null; points: number; dueDays: number }[] };
+export type GamSettings = { journeys: JourneyDef[]; hierarchyWeights: Record<Role, { ownBp: number; teamBp: number }>; participationMultiplierBp: number; dispersionYellowBp: number; dispersionRedBp: number; points: Record<string, number>; levels: { name: string; minPoints: number }[]; teamIds: string[] };
 export type GamData = {
   pending: boolean; proposal: { version: number; note: string; canDecide: boolean } | null;
   settings: GamSettings | null; settingsVersion: number | null; canConfigure: boolean; month: string; year: number; monthBoard: Board | null; yearBoard: Board | null;
-  gold: { userId: string; name: string; score: number }[]; me: { score: number; level: string | null; rank: number; gold: boolean } | null; eventTypes: string[];
+  gold: { userId: string; name: string }[]; me: { score: number; level: string | null; gold: boolean } | null; eventTypes: string[];
 };
 
 export const useGamification = (month?: string) => useQuery({ queryKey: ['gamificacao', month ?? ''], queryFn: () => api<GamData>(`/times/gamificacao${month ? `?month=${month}` : ''}`), staleTime: 60_000 });
@@ -38,10 +44,8 @@ export function BkGoldMedal({ size = 64, year, title = 'Selo BK de Qualidade' }:
         <linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#F8E08E" /><stop offset=".45" stopColor="#D4A62A" /><stop offset="1" stopColor="#9A7212" /></linearGradient>
         <linearGradient id={`r${id}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2F5986" /><stop offset="1" stopColor="#1F3D5E" /></linearGradient>
       </defs>
-      {/* fitas */}
       <path d="M30 0 L48 0 L56 46 L40 50 Z" fill={`url(#r${id})`} />
       <path d="M70 0 L52 0 L44 46 L60 50 Z" fill="#2D3339" />
-      {/* medalha */}
       <circle cx="50" cy="82" r="40" fill={`url(#g${id})`} stroke="#8A6610" strokeWidth="2" />
       <circle cx="50" cy="82" r="31" fill="none" stroke="#FFF3C4" strokeWidth="1.5" strokeDasharray="2 3" />
       <text x="50" y="90" textAnchor="middle" fontFamily="Saira, Arial, sans-serif" fontWeight="800" fontSize="26" fill="#2D3339">BK</text>
@@ -67,33 +71,13 @@ export function SeloHighlight() {
       <BkGoldMedal size={56} year={q.data.year} />
       <div>
         <p className="font-display text-lg font-bold text-ink">Medalha de ouro · Selo BK de Qualidade {q.data.year}</p>
-        <p className="text-sm text-muted">Maior nota do ano na gamificação ({fmtPts(q.data.score ?? 0)} pontos), que soma o seu resultado e o do seu time. Obrigado por puxar o time junto.</p>
+        <p className="text-sm text-muted">Maior nota do ano ({fmtPts(q.data.score ?? 0)} pontos), que soma o seu resultado e o do seu time. Obrigado por puxar o time junto.</p>
       </div>
     </section>
   );
 }
 
-/** Pódio animado: barras sobem em sequência (3º, 2º, 1º); respeita "reduzir movimento". */
-export function Podium({ people, label }: { people: (Member & { place: number })[]; label: string }) {
-  const order = [people.find((p, i) => i === 1), people[0], people.find((p, i) => i === 2)];
-  const H = { 1: 120, 2: 88, 3: 64 } as Record<number, number>;
-  const color = { 1: 'bg-[#D4A62A]', 2: 'bg-[#A7B0BA]', 3: 'bg-[#B87333]' } as Record<number, string>;
-  if (!people.length) return <p className="py-6 text-center text-sm text-muted">Ainda sem pontos em {label}.</p>;
-  return (
-    <div className="podium flex items-end justify-center gap-2 pt-4" role="list" aria-label={`Pódio de ${label}`}>
-      {order.map((p, i) => p ? (
-        <div key={p.userId} role="listitem" aria-label={`${p.place}º lugar: ${p.name}, ${fmtPts(p.score)} pontos`} className="flex w-[30%] flex-col items-center">
-          <span className={clsx('podium-name mb-1', `podium-d${i}`)}><Avatar name={p.name} userId={p.userId} hasPhoto={p.hasPhoto} size={p.place === 1 ? 52 : 42} className={p.place === 1 ? 'ring-2 ring-[#D4A62A]' : ''} /></span>
-          <span className={clsx('podium-name mb-1 line-clamp-2 text-center text-xs font-semibold text-ink', `podium-d${i}`)}>{p.name}</span>
-          <span className={clsx('podium-name num mb-1 text-xs text-muted', `podium-d${i}`)}>{fmtPts(p.score)} pts</span>
-          <div className={clsx('podium-bar flex w-full items-start justify-center pt-1 font-display text-xl font-extrabold text-white', color[p.place] ?? color[3], `podium-d${i}`)} style={{ height: H[p.place] ?? 64 }}>{p.place}º</div>
-        </div>
-      ) : <div key={`v${i}`} className="w-[30%]" />)}
-    </div>
-  );
-}
-
-/** Lateral direita da Visão geral: pódio do mês + resumo colaborativo de cada time (média e, para a liderança, dispersão). */
+/** Lateral direita da Visão geral: resultado de cada time (média; dispersão para a liderança) e o selo do ano. Sem pódio. */
 export function TeamPodiumAside() {
   const q = useGamification();
   if (q.isLoading || q.isError || !q.data) return null;
@@ -101,21 +85,22 @@ export function TeamPodiumAside() {
   if (d.pending || !d.monthBoard || !d.settings) return (
     <aside aria-label="Gamificação do time"><section className="card p-4">
       <h2 className="font-display text-lg font-bold text-ink">Gamificação</h2>
-      <p className="mt-1 text-sm text-muted">A regra de pontuação está aguardando aprovação. O pódio aparece assim que ela for aprovada.</p>
+      <p className="mt-1 text-sm text-muted">A regra de pontuação está aguardando aprovação.</p>
       <Link to="/times/gamificacao" className="mt-2 inline-block text-sm font-semibold text-primary hover:underline">{d.proposal?.canDecide ? 'Revisar e aprovar a regra' : 'Ver a proposta'}</Link>
     </section></aside>
   );
   const monthName = new Date(`${d.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', timeZone: 'UTC' });
   return (
     <aside aria-label="Gamificação do time" className="space-y-4">
-      <section className="card p-4">
-        <div className="flex items-baseline justify-between"><h2 className="font-display text-lg font-bold text-ink">Pódio de {monthName}</h2><Link to="/times/gamificacao" className="text-sm font-semibold text-primary hover:underline">Ver tudo</Link></div>
-        <Podium people={d.monthBoard.podium} label={monthName} />
-        <p className="mt-3 text-xs text-muted">A média do time entra na nota de todos ({d.settings.hierarchyWeights.colaborador.teamBp / 100}% para colaboradores, {d.settings.hierarchyWeights.lideranca.teamBp / 100}% para a liderança). Ajudar colega vale {fmtPts(d.settings.participationMultiplierBp / 10_000)}×.</p>
-      </section>
+      {d.gold.length > 0 && (
+        <section className="card flex items-center gap-3 p-4" aria-label="Selo BK de Qualidade do ano">
+          <BkGoldMedal size={44} year={d.year} />
+          <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Selo BK de Qualidade {d.year}: primeiro lugar do ano</span></p>
+        </section>
+      )}
       <section className="card p-4" aria-label="Times no mês">
-        <h2 className="mb-2 font-display text-lg font-bold text-ink">Times no mês</h2>
-        <ul className="space-y-2">
+        <div className="flex items-baseline justify-between"><h2 className="font-display text-lg font-bold text-ink">Times em {monthName}</h2><Link to="/times/gamificacao" className="text-sm font-semibold text-primary hover:underline">Minha nota</Link></div>
+        <ul className="mt-2 space-y-2">
           {d.monthBoard.teams.map((t) => (
             <li key={t.teamId} className="border border-line p-2">
               <p className="flex items-baseline justify-between text-sm"><span className="font-semibold text-ink">{t.name}</span><span className="num text-muted">média {fmtPts(t.average)}</span></p>
@@ -123,13 +108,52 @@ export function TeamPodiumAside() {
             </li>
           ))}
         </ul>
+        <p className="mt-3 text-xs text-muted">A média do time entra na nota de todos. Sem ranking: cada pessoa vê a própria nota.</p>
       </section>
-      {d.gold.length > 0 && (
-        <section className="card flex items-center gap-3 p-4" aria-label="Medalha de ouro do ano">
-          <BkGoldMedal size={40} year={d.year} />
-          <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Selo BK de Qualidade {d.year}</span></p>
-        </section>
-      )}
     </aside>
+  );
+}
+
+type ScoreData = {
+  journey: { key: string; name: string; wonPoints: number } | null;
+  components?: { key: string; name: string; stageKey: string | null; points: number; task: { id: string; title: string; done: boolean; completedAt: string | null; dueAt: string | null; by: string | null } | null }[];
+  earned?: number; won?: boolean; winShare?: { userId: string; name: string | null; points: number }[];
+};
+
+/** Oportunidade → Tarefas: pontos da jornada (cada tarefa com peso, situação e quem fez; peso do ganho e a divisão). */
+export function JourneyScore({ oppId, onOpen, editable }: { oppId: string; onOpen: (id: string) => void; editable: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['tasks', 'score', oppId], queryFn: () => api<ScoreData>(`/opportunities/${oppId}/score`) });
+  const add = useMutation({
+    mutationFn: (componentKey: string) => api(`/opportunities/${oppId}/score/tasks`, { method: 'POST', body: { componentKey } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['tasks', 'score', oppId] }); void qc.invalidateQueries({ queryKey: ['opp-tasks'] }); void qc.invalidateQueries({ queryKey: ['tasks'] }); toast({ tone: 'success', message: 'Tarefa da jornada criada' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (q.isLoading) return <LoadingRows rows={2} />;
+  if (!q.data?.journey) return null;
+  const d = q.data;
+  return (
+    <section aria-label="Pontos da jornada" className="border border-line p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-bold text-ink">Pontos da jornada · {d.journey!.name}</h3>
+        <span className="text-sm text-muted">feitos <span className="num font-bold text-ink">{fmtPts(d.earned ?? 0)}</span> pts · ganho vale <span className="num">{d.journey!.wonPoints}</span></span>
+      </div>
+      <ul className="divide-y divide-line text-sm">
+        {d.components!.map((c) => (
+          <li key={c.key} className="flex items-center gap-2 py-1.5">
+            {c.task?.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-[#15803D]" aria-label="concluída" /> : <Circle className="h-4 w-4 shrink-0 text-muted" aria-label="pendente" />}
+            <span className="min-w-0 flex-1">
+              {c.task ? <button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => onOpen(c.task!.id)}>{c.name}</button> : <span className="font-semibold text-ink">{c.name}</span>}
+              <span className="block text-xs text-muted">{c.task ? (c.task.done ? `Concluída por ${c.task.by ?? '—'}${c.task.completedAt ? ` em ${fmtDate(c.task.completedAt)}` : ''}` : `Com ${c.task.by ?? '—'}${c.task.dueAt ? `, prazo ${fmtDate(c.task.dueAt)}` : ''}`) : 'Ainda não criada (nasce quando a oportunidade entra na etapa)'}</span>
+            </span>
+            <span className="num shrink-0 font-bold text-ink" aria-label={`${c.points} pontos`}>+{c.points} pts</span>
+            {!c.task && editable && <Button size="sm" variant="outline" icon={<Plus className="h-3.5 w-3.5" />} loading={add.isPending} onClick={() => add.mutate(c.key)}>Criar</Button>}
+          </li>
+        ))}
+      </ul>
+      {d.won && d.winShare && d.winShare.length > 0 && <p className="mt-2 text-xs text-muted">Negócio ganho: {d.journey!.wonPoints} pts divididos entre {d.winShare.map((w) => `${w.name ?? '—'} (${fmtPts(w.points)})`).join(', ')}.</p>}
+      <p className="mt-1 text-xs text-muted">Concluir a tarefa pontua quem concluiu; excluir ou reabrir tira os pontos.</p>
+    </section>
   );
 }
