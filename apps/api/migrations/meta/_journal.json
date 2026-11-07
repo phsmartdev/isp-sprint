@@ -792,6 +792,13 @@
       "when": 1794015115870,
       "tag": "0112_qualificacao_tarefa",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1794021460706,
+      "tag": "0113_contrato_enderecos_entrega",
+      "breakpoints": true
     }
   ]
 }

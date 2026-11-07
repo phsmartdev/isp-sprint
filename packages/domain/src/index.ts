@@ -51,3 +51,4 @@ export * from './vacations';
 export * from './gamification';
 export * from './scoreJourneys';
 export * from './hierarchyPerformance';
+export * from './deliveryAddresses';
