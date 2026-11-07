@@ -124,7 +124,7 @@ export function spendCheck(availableCents: number, amountCents: number) {
 // ------------------------------------------------------------------ planejamento: estados
 export const PLAN_STATUS = ['rascunho', 'em_aprovacao', 'aprovado', 'devolvido'] as const;
 export type PlanStatus = (typeof PLAN_STATUS)[number];
-export const PLAN_STATUS_LABELS: Record<PlanStatus, string> = { rascunho: 'Em planejamento', em_aprovacao: 'Aguardando a Diretoria', aprovado: 'Aprovado', devolvido: 'Devolvido para ajuste' };
+export const PLAN_STATUS_LABELS: Record<PlanStatus, string> = { rascunho: 'Em planejamento', em_aprovacao: 'Em aprovação', aprovado: 'Aprovado', devolvido: 'Devolvido para ajuste' };
 export const LINE_STATUS = ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'] as const;
 export type LineStatus = (typeof LINE_STATUS)[number];
 export const LINE_STATUS_LABELS: Record<LineStatus, string> = { rascunho: 'Rascunho', em_aprovacao: 'Em aprovação', aprovado: 'Aprovado', recusado: 'Recusado' };

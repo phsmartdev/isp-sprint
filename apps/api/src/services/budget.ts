@@ -10,6 +10,19 @@ import { level } from './scope';
 /** Diretoria/gestão: nível Total no módulo (aprova, vê todos os centros, mantém a estrutura). */
 export const isBudgetAdmin = (auth: AuthContext) => level(auth, 'orcamento') === 'total';
 
+/**
+ * Alçadas do orçamento pelo perfil: a liderança planeja e executa o próprio centro; a Gerência aprova o que a liderança lança
+ * (e envia à Diretoria), remaneja saldo entre contas do centro e pede o Budget Guardião; a Diretoria dá a aprovação final e decide o Guardião.
+ */
+export type BudgetRole = 'diretoria' | 'gerencia' | 'lideranca';
+export const budgetRole = (auth: AuthContext): BudgetRole => (auth.profiles.some((p) => p === 'diretoria' || p === 'administrador') ? 'diretoria' : auth.profiles.includes('gerencia') ? 'gerencia' : 'lideranca');
+/** Etapas de aprovação que a pessoa decide. */
+export const decidesStages = (auth: AuthContext): ('gerencia' | 'diretoria')[] => ({ diretoria: ['gerencia', 'diretoria'] as ('gerencia' | 'diretoria')[], gerencia: ['gerencia'] as ('gerencia' | 'diretoria')[], lideranca: [] as ('gerencia' | 'diretoria')[] })[budgetRole(auth)];
+export const budgetCan = (auth: AuthContext) => {
+  const r = budgetRole(auth);
+  return { role: r, decideStages: decidesStages(auth), guardian: r === 'gerencia', decideGuardian: r === 'diretoria', transfer: r !== 'lideranca' };
+};
+
 /** Supervisão (perfil Supervisor sem nível Total): lança e dá baixa, mas não exclui nem muda valor. */
 export const isBudgetRestricted = (auth: AuthContext) => !isBudgetAdmin(auth) && auth.profiles.includes('supervisor') && !auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador');
 

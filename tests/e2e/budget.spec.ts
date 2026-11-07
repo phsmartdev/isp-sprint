@@ -8,10 +8,19 @@ async function login(page: Page, email: string) {
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
 
-test('Recursos e Orçamento: estrutura, líder planeja, Diretoria aprova o total, gasto com comprovante, Guardião e relatório', async ({ browser }) => {
+test('Recursos e Orçamento: estrutura, líder planeja, Gerência aprova e envia, Diretoria aprova, gasto com comprovante, Guardião e relatório', async ({ browser }) => {
   test.setTimeout(240_000);
   const dir = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await login(dir, 'carlos@yepnet.test');
+  // Diretoria: aprovação final e decisão do Guardião
+  const email = `diretoria-e2e-${Date.now().toString(36)}@yepnet.test`;
+  const nu = await (await dir.request.post('/api/v1/admin/users', { data: { name: 'Diretora Fictícia', email, profile: 'diretoria', teamIds: [] } })).json();
+  const board = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await board.goto('/login');
+  await board.getByLabel('E-mail').fill(email);
+  await board.getByLabel('Senha', { exact: true }).fill(nu.temporaryPassword);
+  await board.getByRole('button', { name: 'Entrar' }).click();
+  await expect(board.getByRole('button', { name: /^Conta de / })).toBeVisible();
   // menu do módulo
   await dir.getByRole('button', { name: /Recursos e Orçamento/ }).click();
   await dir.getByRole('link', { name: 'Planejamento orçamentário' }).click();
@@ -43,17 +52,24 @@ test('Recursos e Orçamento: estrutura, líder planeja, Diretoria aprova o total
   await dlg.getByLabel('Valor (R$)').fill('10000');
   await dlg.getByRole('button', { name: 'Salvar' }).click();
   await expect(ana.getByRole('region', { name: 'Itens planejados' })).toContainText('Campanha de mídia paga no LinkedIn');
-  await ana.getByRole('button', { name: /Enviar à Diretoria/ }).click();
+  await ana.getByRole('button', { name: /Enviar à Gerência/ }).click();
   await expect(ana.getByRole('region', { name: 'Itens planejados' })).toContainText('Em aprovação');
 
-  // Diretoria aprova o total do centro
+  // Gerência aprova o total do centro (segue para a Diretoria)
   await dir.goto('/orcamento?t=visao');
   const row = dir.getByRole('region', { name: /Centros de custo no/ }).getByRole('row').filter({ hasText: 'MKT · Marketing' });
-  await expect(row).toContainText('Aguardando a Diretoria');
+  await expect(row).toContainText('Em aprovação');
   await row.getByRole('button', { name: 'MKT · Marketing' }).click();
+  await expect(dir.getByRole('region', { name: 'Aprovação da Gerência' })).toContainText('O que você aprovar segue para a Diretoria');
   await dir.getByRole('button', { name: 'Aprovar o total do centro' }).click();
   await dir.getByRole('dialog').getByRole('button', { name: 'Aprovar' }).click();
-  await expect(dir.getByRole('region', { name: 'Itens planejados' })).toContainText('Aprovado');
+  await expect(dir.getByRole('region', { name: 'Itens planejados' })).toContainText('Com a Diretoria');
+  // Diretoria dá a aprovação final
+  await board.goto('/orcamento?t=centro');
+  await board.getByRole('combobox', { name: 'Centro de custo', exact: true }).selectOption({ label: 'MKT · Marketing' });
+  await board.getByRole('button', { name: 'Aprovar o total do centro' }).click();
+  await board.getByRole('dialog').getByRole('button', { name: 'Aprovar' }).click();
+  await expect(board.getByRole('region', { name: 'Itens planejados' })).toContainText('Aprovado');
 
   // líder lança gasto com comprovante (checagem com o Financeiro obrigatória)
   await ana.reload();
@@ -77,15 +93,23 @@ test('Recursos e Orçamento: estrutura, líder planeja, Diretoria aprova o total
   await dlg.getByRole('button', { name: 'Lançar gasto' }).click();
   await expect(ana.getByText(/Budget Guardião/).first()).toBeVisible();
   await dlg.getByRole('button', { name: 'Cancelar' }).click();
-  // Guardião: até 15% com justificativa
-  await ana.getByRole('button', { name: 'Budget Guardião' }).click();
-  dlg = ana.getByRole('dialog', { name: 'Budget Guardião' });
+  // a liderança não remaneja nem pede Guardião
+  await expect(ana.getByRole('button', { name: 'Budget Guardião' })).toHaveCount(0);
+  await expect(ana.getByRole('button', { name: 'Remanejar saldo' })).toHaveCount(0);
+  // Guardião: a Gerência pede, a Diretoria aprova
+  await dir.goto('/orcamento?t=centro');
+  await dir.getByRole('combobox', { name: 'Centro de custo', exact: true }).selectOption({ label: 'MKT · Marketing' });
+  await dir.getByRole('button', { name: 'Budget Guardião' }).click();
+  dlg = dir.getByRole('dialog', { name: 'Budget Guardião' });
   await dlg.getByLabel('Conta (subcategoria)').selectOption({ label: '3.1.01 · Comunicação › Mídia paga' });
   await dlg.getByLabel('Valor (R$)').fill('1000');
-  await expect(dlg).toContainText('dentro dos 15%');
+  await expect(dlg).toContainText('vale depois da aprovação da Diretoria');
   await dlg.getByLabel('Justificativa formal').fill('Campanha performou acima do esperado; ampliar alcance no mês');
-  await dlg.getByRole('button', { name: 'Registrar ajuste' }).click();
-  await expect(ana.getByRole('region', { name: 'Budget Guardião' })).toContainText('Registrado (até 15%)');
+  await dlg.getByRole('button', { name: 'Enviar à Diretoria' }).click();
+  await expect(dir.getByRole('region', { name: 'Budget Guardião' })).toContainText('Aguardando a Diretoria');
+  await board.reload();
+  await board.getByRole('region', { name: 'Budget Guardião' }).getByRole('button', { name: 'Aprovar' }).click();
+  await expect(board.getByRole('region', { name: 'Budget Guardião' })).toContainText('Aprovado');
 
   // licença em dólar sem senha, com referência do Vault
   await ana.goto('/orcamento/softwares');
