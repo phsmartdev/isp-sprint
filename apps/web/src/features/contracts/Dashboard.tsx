@@ -1,4 +1,3 @@
-import { MoneyToggle } from '../../lib/privacy';
 /**
  * Painel da Gestão de Contratos: carteira estratificada, vencimentos, faturamento por tipo no período e visão executiva.
  * A ordem e as seções visíveis vêm de Configurações → Módulos e liberação → Contratos (padrão: faturamento e visão executiva no fim).
@@ -550,7 +549,7 @@ export function ContractsDashboard() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-xl font-bold text-ink">Painel</h2><p className="text-xs text-muted">Atualizado em {new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</p></div>
-        <div className="flex flex-wrap items-center gap-3"><ArrangeButton a={arr} /><MoneyToggle compact /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
+        <div className="flex flex-wrap items-center gap-3"><ArrangeButton a={arr} /><DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} /></div>
       </div>
       {arr.order.filter((k) => typeof sections[k as DashboardSection] === 'function' && (arr.editing || !arr.isHidden(k))).map((k) => <div key={k} className={arr.cls(k)}>{arr.bar(k)}{sections[k as DashboardSection]()}</div>)}
       <ContractLifeDrawer id={life} onClose={() => setLife(null)} />

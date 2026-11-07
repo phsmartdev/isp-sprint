@@ -1,4 +1,5 @@
 /** Inteligência geral: indicadores por visão (Comercial, Negócio, Relacionamento) e cohort de retenção. */
+import { MASK, moneyHidden } from '../lib/privacy';
 import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, qs } from '../lib/api';
@@ -22,6 +23,7 @@ export type InsightView = 'geral' | 'comercial' | 'negocio' | 'relacionamento';
 /** Valor curto para os cartões: R$ 48,8 mil, R$ 1,2 mi. O valor exato aparece ao passar o mouse. */
 const brlCompact = (c: number | null | undefined) => {
   if (c == null) return 'N/D';
+  if (moneyHidden()) return MASK;
   const v = c / 100;
   if (Math.abs(v) >= 1_000_000) return `R$ ${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
   if (Math.abs(v) >= 10_000) return `R$ ${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;

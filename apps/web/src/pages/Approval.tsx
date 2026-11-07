@@ -9,7 +9,6 @@ import { api, qs } from '../lib/api';
 import { fmtBRL, fmtDateTime } from '../lib/format';
 import { Breadcrumb, Button, Chip, ErrorState, FormField, Input, LoadingRows, Select, Textarea, type Tone } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
-import { MoneyToggle } from '../lib/privacy';
 import { NegotiationChat } from '../features/NegotiationChat';
 import { dec, errMsg } from '../features/contracts/shared';
 import type { Analysis, RequestStatus } from '../features/approval/types';
@@ -47,7 +46,6 @@ export function ApprovalPage() {
         </div>
         <Chip tone={base ? 'blue' : 'purple'} title={a.kind.reasons.join(' ')}>{a.kind.label}</Chip>
         {latest && <Chip tone={STATUS[latest.status].tone}>v{latest.version}: {STATUS[latest.status].label}</Chip>}
-        <MoneyToggle compact />
         {canNew && <Button variant="primary" icon={<Send className="h-4 w-4" />} onClick={() => setRequestOpen(true)}>{a.pending ? 'Nova versão do pedido' : latest ? 'Pedir nova aprovação' : 'Solicitar aprovação'}</Button>}
       </header>
 

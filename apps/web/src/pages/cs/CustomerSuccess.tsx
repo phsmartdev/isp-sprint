@@ -14,7 +14,6 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { SurveysTab } from './Surveys';
-import { MoneyToggle } from '../../lib/privacy';
 import { FollowUpDialog, PlanDialog, VisitDialog } from '../../features/cs/Account360';
 import { HealthBadge, LevelChip, TierChip, covText, csmsOf, type Coverage } from '../../features/cs/shared';
 import { FitText } from '../../components/ui/FitText';
@@ -271,7 +270,7 @@ export function CustomerSuccessPage() {
   const tab = (tabs.some((t) => t.key === f.t) ? f.t : 'carteira') as Tab;
   return (
     <div className="w-full">
-      <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} actions={<MoneyToggle />} />
+      <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} />
       <div className="mb-4 flex flex-wrap items-end gap-3">
         {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{csmsOf(lookups.data?.users).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
         <FormField label="Tier" htmlFor="cs-f-tier"><Select id="cs-f-tier" value={f.tier} onChange={(e) => setF({ tier: e.target.value })}><option value="">Todos</option>{(['small', 'middle', 'large'] as Tier[]).map((t) => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}</Select></FormField>

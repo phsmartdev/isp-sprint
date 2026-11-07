@@ -1,4 +1,5 @@
 /** Tipos e formatação do Controle de Empenhos (a resposta de GET /contracts/:id/commitment-control). */
+import { MASK, moneyHidden } from '../../lib/privacy';
 import { useQueryClient } from '@tanstack/react-query';
 import type { CommitmentProjection, LineClass, MeasurementKind } from '@isp/domain';
 
@@ -31,9 +32,9 @@ export type Data = {
 };
 
 export const qty = (q4: number) => (q4 / 10_000).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
-export const money = (v4: number) => (v4 / 10_000).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+export const money = (v4: number) => moneyHidden() ? MASK : (v4 / 10_000).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 /** preço com as 4 casas internas (RN07) */
-export const price = (p4: number) => `R$ ${(p4 / 10_000).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+export const price = (p4: number) => moneyHidden() ? MASK : `R$ ${(p4 / 10_000).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
 export const pctOf = (a: number, b: number) => (b ? Math.max(0, Math.min(100, (a / b) * 100)) : 0);
 export const parseNum = (t: string) => { const s = t.trim(); if (!s) return null; const n = Number(/,/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s); return Number.isFinite(n) ? n : null; };
 export const monthLabel = (c: string) => new Date(`${c}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });

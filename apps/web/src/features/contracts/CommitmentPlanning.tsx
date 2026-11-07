@@ -2,6 +2,7 @@
  * Controle de Empenhos — fase 2: projeções (PF07), reajuste com demonstrativo e retroativo (PF08), virada de exercício
  * guiada (RN10), regras do contrato (fontes de receita e rateio, RN09; parâmetros dos alertas, PF06) e aditivo de item.
  */
+import { MASK, moneyHidden } from '../../lib/privacy';
 import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -15,6 +16,7 @@ import { errMsg } from './shared';
 import { downloadCsv, money, monthLabel, monthShort, parseNum, price, qty, useRefresh, type Data, type Line, type Pendencia } from './commitmentShared';
 
 const compact = (v4: number) => {
+  if (moneyHidden()) return MASK;
   const v = v4 / 10_000;
   if (Math.abs(v) >= 1_000_000) return `R$ ${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
   if (Math.abs(v) >= 1_000) return `R$ ${(v / 1_000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`;
