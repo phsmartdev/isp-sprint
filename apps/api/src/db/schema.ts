@@ -1408,6 +1408,8 @@ export const contractVersions = pgTable(
     specialConditions: text('special_conditions'),
     /** Endereços de entrega (um ou vários): sequência, endereço, banda/serviço e colunas extras definidas no cadastro. */
     deliveryAddresses: jsonb('delivery_addresses').$type<import('@isp/domain').DeliveryAddresses>().notNull().default(sql`'{"columns":[],"rows":[]}'::jsonb`),
+    /** Campos que o Zenith pede e o CRM não tinha (modalidade, empresa detentora, alias, saldos, SLA, contatos). */
+    zenith: jsonb('zenith').$type<import('@isp/domain').ZenithContract>(),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },
