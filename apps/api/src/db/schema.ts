@@ -5622,3 +5622,191 @@ export const contractSectors = pgTable('contract_sectors', {
   deletedAt: ts('deleted_at'),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('contract_sectors_uq').on(t.tenantId, t.key) }));
+
+// ---------------------------------------------------------------- Central de Playbooks
+/** Categorias da biblioteca (prefixo do código, ícone, alçada de aprovação). */
+export const playbookCategories = pgTable('playbook_categories', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  prefix: text('prefix').notNull(),
+  icon: text('icon').notNull().default('book'),
+  description: text('description'),
+  approval: jsonb('approval').$type<{ gerencia: boolean; diretoria: boolean }>().notNull().default(sql`'{"gerencia":true,"diretoria":true}'::jsonb`),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_categories_uq').on(t.tenantId, t.name) }));
+
+export const playbookSettings = pgTable('playbook_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  codePattern: text('code_pattern').notNull().default('{CAT}-PB-{NUM}'),
+  alertDays: integer('alert_days').array().notNull().default(sql`'{30,15,7,0}'::int[]`),
+  updatedAt: updatedAt(),
+});
+
+/** Playbook: identidade (código, categoria, dono) e o retrato da versão vigente (para busca e permissão). */
+export const playbooks = pgTable('playbooks', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  categoryId: uuid('category_id').notNull().references(() => playbookCategories.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  ownerTeamId: uuid('owner_team_id').references(() => teams.id),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+  maintainerId: uuid('maintainer_id').references(() => users.id),
+  visibility: text('visibility').notNull().default('corporativo'),
+  teamIds: uuid('team_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  costCenterIds: uuid('cost_center_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  profiles: text('profiles').array().notNull().default(sql`'{}'::text[]`),
+  userIds: uuid('user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  reviewPeriod: text('review_period').notNull().default('anual'),
+  reviewCustomDays: integer('review_custom_days'),
+  lastReviewOn: date('last_review_on', { mode: 'string' }),
+  nextReviewOn: date('next_review_on', { mode: 'string' }),
+  requiresAck: boolean('requires_ack').notNull().default(false),
+  status: text('status').notNull().default('ativo'),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: uuid('suspended_by').references(() => users.id),
+  suspendedAt: ts('suspended_at'),
+  currentVersionId: uuid('current_version_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('playbooks_code_uq').on(t.tenantId, t.code), statusCk: check('playbooks_status_ck', inList('status', ['ativo', 'suspenso'])) }));
+
+/** Versões: rascunho editável; a partir do envio o conteúdo trava; publicada é imutável. Metadados (título, público, revisão) viajam com a versão. */
+export const playbookVersions = pgTable('playbook_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  number: text('number').notNull(),
+  status: text('status').notNull().default('rascunho'),
+  meta: jsonb('meta').$type<Record<string, unknown>>().notNull(),
+  content: jsonb('content').$type<{ blocks: unknown[] }>().notNull(),
+  searchText: text('search_text').notNull().default(''),
+  changeSummary: text('change_summary'),
+  relevant: boolean('relevant').notNull().default(false),
+  stages: text('stages').array().notNull().default(sql`'{}'::text[]`),
+  basedOnVersionId: uuid('based_on_version_id'),
+  authorId: uuid('author_id').references(() => users.id),
+  submittedAt: ts('submitted_at'),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  managerApprovedBy: uuid('manager_approved_by').references(() => users.id),
+  managerApprovedAt: ts('manager_approved_at'),
+  directorApprovedBy: uuid('director_approved_by').references(() => users.id),
+  directorApprovedAt: ts('director_approved_at'),
+  effectiveFrom: date('effective_from', { mode: 'string' }),
+  publishedAt: ts('published_at'),
+  validTo: ts('valid_to'),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('playbook_versions_idx').on(t.playbookId, t.status),
+  statusCk: check('playbook_versions_status_ck', inList('status', ['rascunho', 'revisao_gerencia', 'homologacao_diretoria', 'aprovada', 'vigente', 'encerrada', 'rejeitada', 'descartada'])),
+  oneLive: uniqueIndex('playbook_versions_one_live').on(t.playbookId).where(sql`status = 'vigente'`),
+  oneOpen: uniqueIndex('playbook_versions_one_open').on(t.playbookId).where(sql`status in ('rascunho','revisao_gerencia','homologacao_diretoria','aprovada')`),
+}));
+
+/** Decisões e comentários do fluxo (append-only). */
+export const playbookDecisions = pgTable('playbook_decisions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull().references(() => playbookVersions.id),
+  stage: text('stage').notNull(),
+  decision: text('decision').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('playbook_decisions_idx').on(t.versionId) }));
+
+/** Histórico do playbook (criação, edição, envio, decisões, publicação, suspensão, revisões, alertas). */
+export const playbookEvents = pgTable('playbook_events', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id'),
+  type: text('type').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('playbook_events_idx').on(t.playbookId, t.createdAt) }));
+
+export const playbookFiles = pgTable('playbook_files', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  data: bytea('data').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const playbookFavorites = pgTable('playbook_favorites', {
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  createdAt: createdAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.playbookId] }) }));
+
+/** Leitura: visualizações e progresso (abrir não é ciência). */
+export const playbookReads = pgTable('playbook_reads', {
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull(),
+  views: integer('views').notNull().default(1),
+  progress: jsonb('progress').$type<{ section?: string | null; checks?: string[]; done?: string[] }>().notNull().default(sql`'{}'::jsonb`),
+  firstAt: createdAt(),
+  lastAt: ts('last_at').notNull().defaultNow(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.playbookId] }) }));
+
+/** Ciência por versão (append-only). */
+export const playbookAcks = pgTable('playbook_acks', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull().references(() => playbookVersions.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_acks_uq').on(t.userId, t.versionId) }));
+
+export const playbookSuggestions = pgTable('playbook_suggestions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').references(() => playbookVersions.id),
+  authorId: uuid('author_id').notNull().references(() => users.id),
+  kind: text('kind').notNull().default('melhoria'),
+  description: text('description').notNull(),
+  excerpt: text('excerpt'),
+  reason: text('reason'),
+  fileId: uuid('file_id').references(() => playbookFiles.id),
+  status: text('status').notNull().default('recebida'),
+  response: text('response'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ statusCk: check('playbook_suggestions_status_ck', inList('status', ['recebida', 'em_analise', 'aceita', 'rejeitada', 'incorporada'])) }));
+
+/** Alertas de revisão já enviados (um por playbook, data de revisão e antecedência). */
+export const playbookAlerts = pgTable('playbook_alerts', {
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  days: integer('days').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.playbookId, t.dueOn, t.days] }) }));
+
+export const playbookTemplates = pgTable('playbook_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  type: text('type').notNull(),
+  description: text('description'),
+  content: jsonb('content').$type<{ blocks: unknown[] }>().notNull(),
+  system: boolean('system').notNull().default(false),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_templates_uq').on(t.tenantId, t.name) }));
