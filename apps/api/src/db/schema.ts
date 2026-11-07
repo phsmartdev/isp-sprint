@@ -5059,6 +5059,8 @@ export const budgetLines = pgTable('budget_lines', {
   supplierId: uuid('supplier_id'),
   resourceId: uuid('resource_id'),
   status: text('status').notNull().default('rascunho'),
+  /** em aprovação: com quem está (a Gerência aprova o que a liderança lança e envia à Diretoria, que dá a aprovação final) */
+  approvalStage: text('approval_stage'),
   decisionNote: text('decision_note'),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
@@ -5081,6 +5083,10 @@ export const budgetAdjustments = pgTable('budget_adjustments', {
   justification: text('justification').notNull(),
   pct: doublePrecision('pct'),
   status: text('status').notNull(),
+  /** guardiao (muda o total do centro; Gerência pede, Diretoria aprova) ou remanejamento (move saldo entre contas do centro; só a Gerência) */
+  kind: text('kind').notNull().default('guardiao'),
+  /** remanejamento: liga a saída e a entrada */
+  transferId: uuid('transfer_id'),
   requestedBy: uuid('requested_by').references(() => users.id),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),

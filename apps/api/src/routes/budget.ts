@@ -15,7 +15,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
-import { accountsOf, availableFor, categoryOf, costCentersOf, isBudgetAdmin, isBudgetRestricted, loadCostCenter, logBudget, quarterNumbers, totals } from '../services/budget';
+import { accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, logBudget, quarterNumbers, totals } from '../services/budget';
 import { groupBy } from '../services/group';
 import { detectAttachment } from './sprint';
 
@@ -169,7 +169,7 @@ export const budgetRoutes = [
         const p = plans.find((x) => x.costCenterId === c.id);
         return { costCenter: { id: c.id, code: c.code, name: c.name, leaderId: c.leaderId }, planStatus: (p?.status ?? 'rascunho') as PlanStatus, ...t, pendingAdjustments: pendAdj.find((x) => x.cc === c.id)?.n ?? 0, byMonth: months.map((m) => ({ month: m, ...totals((byCc.get(c.id) ?? []).filter((r) => r.month === m)) })) };
       });
-      return { year: query.year, quarter: query.quarter, label: quarterLabel(query.year, query.quarter), months, items, total: totals(rows), admin: isBudgetAdmin(auth), bands: EXECUTION_BAND_INFO };
+      return { year: query.year, quarter: query.quarter, label: quarterLabel(query.year, query.quarter), months, items, total: totals(rows), admin: isBudgetAdmin(auth), can: budgetCan(auth), bands: EXECUTION_BAND_INFO };
     },
   }),
   defineRoute({
@@ -201,7 +201,7 @@ export const budgetRoutes = [
         label: quarterLabel(query.year, query.quarter), months, items,
         totals: { planned, executed, deviation: planned - executed, unlinkedCents: unlinked.reduce((a, e) => a + e.amountCents, 0), unlinkedCount: unlinked.length },
         drafts, costCenters: [...ccOf.values()],
-        can: { create: ccs.length > 0, delete: !restricted, editAmount: !restricted, cancelBaixa: !restricted, approve: isBudgetAdmin(auth) },
+        can: { create: ccs.length > 0, delete: !restricted, editAmount: !restricted, cancelBaixa: !restricted, approve: decidesStages(auth).length > 0, decideStages: decidesStages(auth), role: budgetRole(auth) },
       };
     },
   }),
@@ -227,7 +227,7 @@ export const budgetRoutes = [
         return { accountId: a.id, ...totals(rs), byMonth: months.map((m) => ({ month: m, ...totals(rs.filter((r) => r.month === m)) })) };
       }).filter((r) => r.approved || r.pending || r.draft || r.adjusted || r.adjustPending || r.realized);
       const canEdit = isBudgetAdmin(auth) || cc.leaderId === auth.userId || cc.memberIds.includes(auth.userId);
-      return { costCenter: cc, plan, months, lines, adjustments, expenses, accounts: accRows, total: totals(rows), canEdit, admin: isBudgetAdmin(auth), label: quarterLabel(query.year, query.quarter) };
+      return { costCenter: cc, plan, months, lines, adjustments, expenses, accounts: accRows, total: totals(rows), canEdit, admin: isBudgetAdmin(auth), can: budgetCan(auth), label: quarterLabel(query.year, query.quarter) };
     },
   }),
 
@@ -309,44 +309,49 @@ export const budgetRoutes = [
     },
   }),
   defineRoute({
-    method: 'POST', url: '/budget/plan/submit', summary: 'Envia o planejamento do trimestre para validação da Diretoria', tag: 'Orçamento', ...M,
+    method: 'POST', url: '/budget/plan/submit', summary: 'Envia o planejamento do trimestre: o da liderança vai à Gerência; o da Gerência, à Diretoria', tag: 'Orçamento', ...M,
     body: Q.extend({ costCenterId: uuid, note: z.string().trim().max(1000).nullable().optional() }),
     handler: async ({ app, auth, body, req }) => {
       const cc = await loadCostCenter(app.db, auth, body.costCenterId);
       const plan = await planOf(app.db, auth, cc.id, body.year, body.quarter);
       const r = await app.db.transaction(async (tx) => {
-        const upd = await tx.update(s.budgetLines).set({ status: 'em_aprovacao', updatedAt: new Date() }).where(and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), inArray(s.budgetLines.status, ['rascunho', 'recusado']))).returning({ amount: s.budgetLines.amountCents });
+        const stage = budgetRole(auth) === 'lideranca' ? 'gerencia' : 'diretoria';
+        const upd = await tx.update(s.budgetLines).set({ status: 'em_aprovacao', approvalStage: stage, updatedAt: new Date() }).where(and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), inArray(s.budgetLines.status, ['rascunho', 'recusado']))).returning({ amount: s.budgetLines.amountCents });
         if (!upd.length) throw unprocessable('Não há itens novos para enviar.');
         await tx.update(s.budgetPlans).set({ status: 'em_aprovacao', note: body.note ?? plan.note, submittedAt: new Date(), submittedBy: auth.userId, updatedAt: new Date(), rowVersion: sql`${s.budgetPlans.rowVersion} + 1` }).where(eq(s.budgetPlans.id, plan.id));
         const total = upd.reduce((t, x) => t + x.amount, 0);
-        await logBudget(tx, auth, cc.id, 'plano', plan.id, 'enviado', `${cc.code} ${quarterLabel(body.year, body.quarter)}: ${upd.length} item(ns) enviados à Diretoria (−${brl(total)}).`);
-        return { lines: upd.length, totalCents: total };
+        await logBudget(tx, auth, cc.id, 'plano', plan.id, 'enviado', `${cc.code} ${quarterLabel(body.year, body.quarter)}: ${upd.length} item(ns) enviados à ${stage === 'gerencia' ? 'Gerência' : 'Diretoria'} (−${brl(total)}).`);
+        return { lines: upd.length, totalCents: total, stage };
       });
       await audit(app.db, req, { action: 'budget.plan.submit', entityType: 'budget_plan', entityId: plan.id, metadata: r });
       return r;
     },
   }),
   defineRoute({
-    method: 'POST', url: '/budget/plan/decide', summary: 'Diretoria aprova/recusa itens (um a um) ou o total do centro de custo; devolver pede ajuste', tag: 'Orçamento', ...ADMIN,
+    method: 'POST', url: '/budget/plan/decide', summary: 'Gerência (itens da liderança: aprovar envia à Diretoria) e Diretoria (aprovação final) aprovam/recusam itens ou o total do centro; devolver pede ajuste', tag: 'Orçamento', ...M,
     body: z.object({ planId: uuid, lineIds: z.array(uuid).max(500).default([]), decision: z.enum(['aprovar', 'recusar', 'devolver']), note: z.string().trim().max(1000).nullable().optional() }),
     handler: async ({ app, auth, body, req }) => {
-      requireAdmin(auth);
+      const stages = decidesStages(auth);
+      if (!stages.length) throw forbidden('Quem aprova o orçamento é a Gerência (o que a liderança lança) e a Diretoria (aprovação final).');
       if (body.decision !== 'aprovar' && !body.note) throw unprocessable('Explique o motivo para o líder do centro de custo.', [{ path: 'note', message: 'Obrigatório' }]);
       const [plan] = await app.db.select().from(s.budgetPlans).where(and(eq(s.budgetPlans.id, body.planId), eq(s.budgetPlans.tenantId, auth.tenantId))).limit(1);
       if (!plan) throw notFound();
       const [cc] = await app.db.select().from(s.costCenters).where(eq(s.costCenters.id, plan.costCenterId)).limit(1);
       const whole = !body.lineIds.length;
       const r = await app.db.transaction(async (tx) => {
-        const target = and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), eq(s.budgetLines.status, 'em_aprovacao'), whole ? sql`true` : inArray(s.budgetLines.id, body.lineIds));
-        const status = body.decision === 'aprovar' ? 'aprovado' : body.decision === 'recusar' ? 'recusado' : 'rascunho';
-        const upd = await tx.update(s.budgetLines).set({ status, decisionNote: body.note ?? null, decidedBy: auth.userId, decidedAt: new Date(), updatedAt: new Date() }).where(target!).returning({ amount: s.budgetLines.amountCents, what: s.budgetLines.what });
+        const role = budgetRole(auth);
+        const target = and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), eq(s.budgetLines.status, 'em_aprovacao'), inArray(sql`coalesce(${s.budgetLines.approvalStage}, 'diretoria')`, stages), whole ? sql`true` : inArray(s.budgetLines.id, body.lineIds));
+        // a Gerência aprova o que a liderança lançou e envia à Diretoria; a Diretoria dá a aprovação final
+        const forward = body.decision === 'aprovar' && role === 'gerencia';
+        const status = forward ? 'em_aprovacao' : body.decision === 'aprovar' ? 'aprovado' : body.decision === 'recusar' ? 'recusado' : 'rascunho';
+        const upd = await tx.update(s.budgetLines).set({ status, approvalStage: forward ? 'diretoria' : null, decisionNote: body.note ?? null, decidedBy: auth.userId, decidedAt: new Date(), updatedAt: new Date() }).where(target!).returning({ amount: s.budgetLines.amountCents, what: s.budgetLines.what });
         if (!upd.length) throw unprocessable('Nenhum item aguardando decisão.');
         if (body.decision === 'devolver') await tx.update(s.budgetPlans).set({ status: 'devolvido', decidedAt: new Date(), decidedBy: auth.userId, updatedAt: new Date() }).where(eq(s.budgetPlans.id, plan.id));
         else await tx.update(s.budgetPlans).set({ decidedAt: new Date(), decidedBy: auth.userId }).where(eq(s.budgetPlans.id, plan.id));
         const st = body.decision === 'devolver' ? 'devolvido' : await syncPlanStatus(tx, plan.id);
         const total = upd.reduce((t, x) => t + x.amount, 0);
-        const verb = body.decision === 'aprovar' ? 'aprovou' : body.decision === 'recusar' ? 'recusou' : 'devolveu para ajuste';
-        await logBudget(tx, auth, plan.costCenterId, 'plano', plan.id, body.decision, `Diretoria ${verb} ${whole ? `o total do centro ${cc?.code}` : `${upd.length} item(ns) de ${cc?.code}`} em ${quarterLabel(plan.year, plan.quarter)} (−${brl(total)})${body.note ? `: ${body.note}` : ''}.`);
+        const verb = forward ? 'aprovou e enviou à Diretoria' : body.decision === 'aprovar' ? 'aprovou' : body.decision === 'recusar' ? 'recusou' : 'devolveu para ajuste';
+        await logBudget(tx, auth, plan.costCenterId, 'plano', plan.id, forward ? 'aprovado_gerencia' : body.decision, `${role === 'gerencia' ? 'Gerência' : 'Diretoria'} ${verb} ${whole ? `o total do centro ${cc?.code}` : `${upd.length} item(ns) de ${cc?.code}`} em ${quarterLabel(plan.year, plan.quarter)} (−${brl(total)})${body.note ? `: ${body.note}` : ''}.`);
         return { lines: upd.length, totalCents: total, planStatus: st };
       });
       await audit(app.db, req, { action: `budget.plan.${body.decision}`, entityType: 'budget_plan', entityId: plan.id, metadata: { ...r, whole } });
@@ -356,9 +361,10 @@ export const budgetRoutes = [
 
   // ------------------------------------------------------------------ Budget Guardião
   defineRoute({
-    method: 'POST', url: '/budget/adjustments', summary: 'Budget Guardião: ajuste no trimestre (até 15% do centro com justificativa; acima, vai à Diretoria). Sempre reportado.', tag: 'Orçamento', ...M,
+    method: 'POST', url: '/budget/adjustments', summary: 'Budget Guardião: a Gerência pede ajuste no total do centro no trimestre (com justificativa); vale depois da aprovação da Diretoria', tag: 'Orçamento', ...M,
     body: z.object({ costCenterId: uuid, accountId: uuid, month, deltaCents: z.number().int().refine((x) => x !== 0, 'Informe o valor do ajuste').refine((x) => Math.abs(x) <= 100_000_000_000), justification: z.string().trim().min(15, 'Justifique o ajuste (mínimo 15 caracteres)').max(2000) }),
     handler: async ({ app, auth, body, req, reply }) => {
+      if (budgetRole(auth) !== 'gerencia') throw forbidden('O Budget Guardião é pedido pela Gerência e aprovado pela Diretoria.');
       const cc = await loadCostCenter(app.db, auth, body.costCenterId);
       await leafAccount(app.db, auth.tenantId, body.accountId);
       const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
@@ -369,22 +375,23 @@ export const budgetRoutes = [
         const acc = totals(rows.filter((r) => r.account === body.accountId));
         if (acc.available + body.deltaCents < 0) throw unprocessable(`Não dá para reduzir mais do que o saldo disponível da conta (${brl(Math.max(0, acc.available))}).`);
       }
-      const prev = await app.db.select({ d: s.budgetAdjustments.deltaCents, st: s.budgetAdjustments.status }).from(s.budgetAdjustments).where(and(eq(s.budgetAdjustments.costCenterId, cc.id), eq(s.budgetAdjustments.year, year), eq(s.budgetAdjustments.quarter, quarter)));
+      const prev = await app.db.select({ d: s.budgetAdjustments.deltaCents, st: s.budgetAdjustments.status }).from(s.budgetAdjustments).where(and(eq(s.budgetAdjustments.costCenterId, cc.id), eq(s.budgetAdjustments.year, year), eq(s.budgetAdjustments.quarter, quarter), eq(s.budgetAdjustments.kind, 'guardiao')));
       const prevAbs = prev.filter((p) => p.st !== 'recusado').reduce((a, p) => a + Math.abs(p.d), 0);
       const route = guardianRoute(t.approved, prevAbs, body.deltaCents);
-      const status = route.needsDirector && !isBudgetAdmin(auth) ? 'pendente' : route.needsDirector ? 'aprovado' : 'registrado';
-      const [a] = await app.db.insert(s.budgetAdjustments).values({ tenantId: auth.tenantId, costCenterId: cc.id, year, quarter, accountId: body.accountId, month: body.month, deltaCents: body.deltaCents, justification: body.justification, pct: route.pct, status, requestedBy: auth.userId, ...(status === 'aprovado' ? { decidedBy: auth.userId, decidedAt: new Date(), decisionNote: 'Ajuste feito pela própria Diretoria' } : {}) }).returning();
-      await logBudget(app.db, auth, cc.id, 'guardiao', a!.id, status, `Budget Guardião ${cc.code}: ${body.deltaCents > 0 ? 'acréscimo' : 'redução'} de ${brl(Math.abs(body.deltaCents))} (${route.pct.toFixed(1).replace('.', ',')}% do trimestre acumulado) — ${status === 'pendente' ? 'aguardando a Diretoria (acima de 15%)' : status === 'registrado' ? 'registrado dentro do limite de 15% e reportado à Diretoria' : 'aprovado'}. Justificativa: ${body.justification}`);
+      // todo ajuste do Guardião passa pela Diretoria
+      const status = 'pendente';
+      const [a] = await app.db.insert(s.budgetAdjustments).values({ tenantId: auth.tenantId, costCenterId: cc.id, year, quarter, accountId: body.accountId, month: body.month, deltaCents: body.deltaCents, justification: body.justification, pct: route.pct, status, requestedBy: auth.userId }).returning();
+      await logBudget(app.db, auth, cc.id, 'guardiao', a!.id, status, `Budget Guardião ${cc.code}: Gerência pediu ${body.deltaCents > 0 ? 'acréscimo' : 'redução'} de ${brl(Math.abs(body.deltaCents))} (${route.pct.toFixed(1).replace('.', ',')}% do trimestre acumulado) — aguardando a Diretoria: ${body.justification}`);
       await audit(app.db, req, { action: 'budget.guardian', entityType: 'budget_adjustment', entityId: a!.id, metadata: { status, pct: route.pct } });
       reply.code(201);
-      return { ...a, needsDirector: route.needsDirector };
+      return { ...a, needsDirector: true };
     },
   }),
   defineRoute({
-    method: 'POST', url: '/budget/adjustments/:id/decide', summary: 'Diretoria decide ajuste acima de 15%', tag: 'Orçamento', ...ADMIN, params: IdParams,
+    method: 'POST', url: '/budget/adjustments/:id/decide', summary: 'Diretoria decide o Budget Guardião pedido pela Gerência', tag: 'Orçamento', ...M, params: IdParams,
     body: z.object({ approve: z.boolean(), note: z.string().trim().max(1000).nullable().optional() }),
     handler: async ({ app, auth, params, body, req }) => {
-      requireAdmin(auth);
+      if (budgetRole(auth) !== 'diretoria') throw forbidden('Só a Diretoria decide o Budget Guardião.');
       if (!body.approve && !body.note) throw unprocessable('Explique a recusa.', [{ path: 'note', message: 'Obrigatório' }]);
       const [a] = await app.db.update(s.budgetAdjustments).set({ status: body.approve ? 'aprovado' : 'recusado', decidedBy: auth.userId, decidedAt: new Date(), decisionNote: body.note ?? null })
         .where(and(eq(s.budgetAdjustments.id, params.id), eq(s.budgetAdjustments.tenantId, auth.tenantId), eq(s.budgetAdjustments.status, 'pendente'))).returning();
@@ -392,6 +399,32 @@ export const budgetRoutes = [
       await logBudget(app.db, auth, a.costCenterId, 'guardiao', a.id, body.approve ? 'aprovado' : 'recusado', `Diretoria ${body.approve ? 'aprovou' : 'recusou'} ajuste do Budget Guardião de ${brl(Math.abs(a.deltaCents))}${body.note ? `: ${body.note}` : ''}.`);
       await audit(app.db, req, { action: 'budget.guardian.decide', entityType: 'budget_adjustment', entityId: a.id, metadata: { approve: body.approve } });
       return a;
+    },
+  }),
+
+  defineRoute({
+    method: 'POST', url: '/budget/transfers', summary: 'Remaneja saldo entre contas do mesmo centro de custo no trimestre (só a Gerência; o total do centro não muda)', tag: 'Orçamento', ...M,
+    body: z.object({ costCenterId: uuid, fromAccountId: uuid, toAccountId: uuid, month, amountCents: cents, justification: z.string().trim().min(15, 'Justifique o remanejamento (mínimo 15 caracteres)').max(2000) }),
+    handler: async ({ app, auth, body, req, reply }) => {
+      if (budgetRole(auth) === 'lideranca') throw forbidden('Só a Gerência remaneja saldo entre contas do centro de custo.');
+      if (body.fromAccountId === body.toAccountId) throw unprocessable('Escolha contas diferentes.');
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      await leafAccount(app.db, auth.tenantId, body.fromAccountId);
+      await leafAccount(app.db, auth.tenantId, body.toAccountId);
+      const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
+      const { rows } = await quarterNumbers(app.db, auth.tenantId, year, quarter, [cc.id]);
+      const from = totals(rows.filter((r) => r.account === body.fromAccountId));
+      if (from.available < body.amountCents) throw unprocessable(`A conta de origem tem ${brl(Math.max(0, from.available))} de saldo no trimestre.`);
+      const transferId = crypto.randomUUID();
+      const rowsIns = await app.db.transaction(async (tx) => {
+        const base = { tenantId: auth.tenantId, costCenterId: cc.id, year, quarter, month: body.month, justification: body.justification, pct: 0, status: 'aprovado', kind: 'remanejamento', transferId, requestedBy: auth.userId, decidedBy: auth.userId, decidedAt: new Date() };
+        const r = await tx.insert(s.budgetAdjustments).values([{ ...base, accountId: body.fromAccountId, deltaCents: -body.amountCents }, { ...base, accountId: body.toAccountId, deltaCents: body.amountCents }]).returning();
+        await logBudget(tx, auth, cc.id, 'remanejamento', transferId, 'registrado', `Remanejamento ${cc.code}: ${brl(body.amountCents)} entre contas do centro em ${quarterLabel(year, quarter)} — ${body.justification}`);
+        return r;
+      });
+      await audit(app.db, req, { action: 'budget.transfer', entityType: 'budget_adjustment', entityId: transferId, metadata: { amountCents: body.amountCents } });
+      reply.code(201);
+      return { transferId, items: rowsIns };
     },
   }),
 

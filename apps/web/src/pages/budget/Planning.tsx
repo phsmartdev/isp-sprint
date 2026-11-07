@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Check, Download, FileUp, Plus, Send, ShieldAlert, Undo2, X } from 'lucide-react';
+import { Check, Download, FileUp, Plus, Send, ArrowLeftRight, ShieldAlert, Undo2, X } from 'lucide-react';
 import { ITEM_TYPES, ITEM_TYPE_LABELS, LINE_STATUS_LABELS, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, PLAN_STATUS_LABELS, monthsOfQuarter, parentCode, type LineStatus, type PlanStatus } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
@@ -13,11 +13,14 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { BudgetLaunches } from './Launches';
 import { AccountSelect, BandChip, BudgetShell, ExecBar, QuarterPicker, Stat, errMsg, neg, useStructure, type Account, type CostCenter, type Structure, type Totals } from '../../features/budget/shared';
 
-type Line = { id: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; status: LineStatus; decisionNote: string | null; supplierId: string | null; resourceId: string | null };
-type Adjustment = { id: string; accountId: string; month: string; deltaCents: number; justification: string; pct: number | null; status: 'registrado' | 'pendente' | 'aprovado' | 'recusado'; decisionNote: string | null; createdAt: string };
+type Line = { id: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; status: LineStatus; approvalStage?: 'gerencia' | 'diretoria' | null; decisionNote: string | null; supplierId: string | null; resourceId: string | null };
+type Adjustment = { id: string; accountId: string; month: string; deltaCents: number; justification: string; pct: number | null; status: 'registrado' | 'pendente' | 'aprovado' | 'recusado'; kind?: 'guardiao' | 'remanejamento'; transferId?: string | null; decisionNote: string | null; createdAt: string };
 type Expense = { id: string; accountId: string; lineId: string | null; occurredOn: string; description: string; amountCents: number; paymentMethod: string | null; docName: string | null; status: 'valido' | 'cancelado'; cancelReason: string | null };
 type AccRow = Totals & { accountId: string; byMonth: (Totals & { month: string })[] };
-type Plan = { costCenter: CostCenter; plan: { id: string; status: PlanStatus; note: string | null }; months: string[]; lines: Line[]; adjustments: Adjustment[]; expenses: Expense[]; accounts: AccRow[]; total: Totals; canEdit: boolean; admin: boolean; label: string };
+type Plan = { costCenter: CostCenter; plan: { id: string; status: PlanStatus; note: string | null }; months: string[]; lines: Line[]; adjustments: Adjustment[]; expenses: Expense[]; accounts: AccRow[]; total: Totals; canEdit: boolean; admin: boolean; can: BudgetCan; label: string };
+type BudgetCan = { role: 'diretoria' | 'gerencia' | 'lideranca'; decideStages: ('gerencia' | 'diretoria')[]; guardian: boolean; decideGuardian: boolean; transfer: boolean };
+const stageOf = (l: Line) => l.approvalStage ?? 'diretoria';
+const STAGE_LABEL = { gerencia: 'Gerência', diretoria: 'Diretoria' } as const;
 type QuarterData = { label: string; months: string[]; items: (Totals & { costCenter: { id: string; code: string; name: string }; planStatus: PlanStatus; pendingAdjustments: number })[]; total: Totals; admin: boolean };
 
 const now = new Date();
@@ -70,7 +73,7 @@ function Overview({ year, quarter, onOpen }: { year: number; quarter: number; on
         <Stat label="Realizado" value={neg(d.total.realized)} />
         <Stat label="Disponível" value={fmtBRL(d.total.available)} tone={d.total.available < 0 ? 'danger' : undefined} />
         <Stat label="Execução" value={d.total.over ? '>100%' : d.total.pct === null ? '—' : `${Math.round(d.total.pct)}%`} sub={<BandChip band={d.total.band} />} />
-        <Stat label="Aguardando a Diretoria" value={neg(d.total.pending)} sub={`${d.items.reduce((t, i) => t + i.pendingAdjustments, 0)} ajuste(s) do Guardião acima de 15%`} />
+        <Stat label="Aguardando a Diretoria" value={neg(d.total.pending)} sub={`${d.items.reduce((t, i) => t + i.pendingAdjustments, 0)} ajuste(s) do Guardião aguardando a Diretoria`} />
       </dl>
       <section className="card overflow-x-auto p-0" aria-label={`Centros de custo no ${d.label}`}>
         <table className="w-full min-w-[860px] text-sm">
@@ -107,6 +110,7 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
   const [line, setLine] = useState<Line | 'new' | null>(null);
   const [expense, setExpense] = useState<Line | 'new' | null>(null);
   const [guardian, setGuardian] = useState(false);
+  const [transfer, setTransfer] = useState(false);
   const [decide, setDecide] = useState<{ decision: 'aprovar' | 'recusar' | 'devolver'; ids: string[] } | null>(null);
   const [sel, setSel] = useState<string[]>([]);
   const act = useMutation({
@@ -120,6 +124,7 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
   const pendingLines = d.lines.filter((l) => l.status === 'em_aprovacao');
+  const myPending = pendingLines.filter((l) => d.can.decideStages.includes(stageOf(l)));
   const draft = d.lines.filter((l) => l.status === 'rascunho' || l.status === 'recusado');
   const locked = d.plan.status === 'em_aprovacao' || d.plan.status === 'aprovado';
   const rowsByCode = d.accounts.map((r) => ({ ...r, a: accName.get(r.accountId)! })).filter((r) => r.a).sort((a, b) => a.a.code.localeCompare(b.a.code, 'pt-BR', { numeric: true }));
@@ -132,8 +137,9 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
         <div className="ml-auto flex flex-wrap gap-2">
           {d.canEdit && !locked && <Button variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setLine('new')}>Planejar item</Button>}
           {d.canEdit && !locked && <Button variant="outline" onClick={() => act.mutate({ url: '/budget/plan/import-resources', body: { costCenterId: cc, year, quarter } }, { onSuccess: (r) => toast({ tone: 'success', message: `${(r as { created: number }).created} item(ns) recorrente(s) trazido(s)` }) })}>Trazer licenças e contratos</Button>}
-          {d.canEdit && draft.length > 0 && d.plan.status !== 'em_aprovacao' && <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={act.isPending} onClick={() => act.mutate({ url: '/budget/plan/submit', body: { costCenterId: cc, year, quarter } }, { onSuccess: () => toast({ tone: 'success', message: 'Planejamento enviado à Diretoria' }) })}>Enviar à Diretoria ({draft.length})</Button>}
-          {d.canEdit && d.total.approved > 0 && <Button variant="outline" icon={<ShieldAlert className="h-4 w-4" />} onClick={() => setGuardian(true)}>Budget Guardião</Button>}
+          {d.canEdit && draft.length > 0 && d.plan.status !== 'em_aprovacao' && <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={act.isPending} onClick={() => act.mutate({ url: '/budget/plan/submit', body: { costCenterId: cc, year, quarter } }, { onSuccess: () => toast({ tone: 'success', message: d.can.role === 'lideranca' ? 'Planejamento enviado à Gerência' : 'Planejamento enviado à Diretoria' }) })}>{d.can.role === 'lideranca' ? 'Enviar à Gerência' : 'Enviar à Diretoria'} ({draft.length})</Button>}
+          {d.can.transfer && d.total.approved > 0 && <Button variant="outline" icon={<ArrowLeftRight className="h-4 w-4" />} onClick={() => setTransfer(true)}>Remanejar saldo</Button>}
+          {d.can.guardian && d.total.approved > 0 && <Button variant="outline" icon={<ShieldAlert className="h-4 w-4" />} onClick={() => setGuardian(true)}>Budget Guardião</Button>}
           {d.canEdit && d.total.approved > 0 && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setExpense('new')}>Lançar gasto</Button>}
         </div>
       </div>
@@ -143,13 +149,13 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
         <Stat label="Realizado" value={neg(d.total.realized)} />
         <Stat label="Disponível" value={fmtBRL(d.total.available)} tone={d.total.available < 0 ? 'danger' : undefined} />
         <Stat label="Execução" value={d.total.over ? '>100%' : d.total.pct === null ? '—' : `${Math.round(d.total.pct)}%`} sub={<BandChip band={d.total.band} />} />
-        <Stat label="Em planejamento / aprovação" value={neg(d.total.draft + d.total.pending)} sub={`${draft.length} rascunho(s) · ${pendingLines.length} com a Diretoria`} />
+        <Stat label="Em planejamento / aprovação" value={neg(d.total.draft + d.total.pending)} sub={`${draft.length} rascunho(s) · ${pendingLines.filter((l) => stageOf(l) === 'gerencia').length} com a Gerência · ${pendingLines.filter((l) => stageOf(l) === 'diretoria').length} com a Diretoria`} />
       </dl>
 
-      {d.admin && pendingLines.length > 0 && (
-        <section className="border border-warning/40 bg-warning-soft/40 p-4" aria-label="Aprovação da Diretoria">
+      {myPending.length > 0 && (
+        <section className="border border-warning/40 bg-warning-soft/40 p-4" aria-label={`Aprovação da ${d.can.role === 'gerencia' ? 'Gerência' : 'Diretoria'}`}>
           <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm text-ink"><strong>{pendingLines.length} item(ns)</strong> aguardando a Diretoria · {neg(pendingLines.reduce((t, l) => t + l.amountCents, 0))}. Aprove o total do centro ou marque itens na lista.</p>
+            <p className="text-sm text-ink"><strong>{myPending.length} item(ns)</strong> aguardando {d.can.role === 'gerencia' ? 'a Gerência' : 'a sua decisão'} · {neg(myPending.reduce((t, l) => t + l.amountCents, 0))}. {d.can.role === 'gerencia' ? 'O que você aprovar segue para a Diretoria.' : 'Aprove o total do centro ou marque itens na lista.'}</p>
             <div className="ml-auto flex flex-wrap gap-2">
               <Button variant="primary" icon={<Check className="h-4 w-4" />} onClick={() => setDecide({ decision: 'aprovar', ids: sel })}>{sel.length ? `Aprovar ${sel.length} selecionado(s)` : 'Aprovar o total do centro'}</Button>
               <Button variant="outline" icon={<X className="h-4 w-4" />} onClick={() => setDecide({ decision: 'recusar', ids: sel })}>{sel.length ? 'Recusar selecionados' : 'Recusar todos'}</Button>
@@ -193,11 +199,12 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
               const spent = d.expenses.filter((e) => e.lineId === l.id && e.status === 'valido').reduce((t, e) => t + e.amountCents, 0);
               return (
                 <li key={l.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
-                  {d.admin && l.status === 'em_aprovacao' && <input type="checkbox" aria-label={`Selecionar ${l.what}`} className="mt-1 h-4 w-4 accent-[rgb(var(--primary))]" checked={sel.includes(l.id)} onChange={(e) => setSel((s) => (e.target.checked ? [...s, l.id] : s.filter((x) => x !== l.id)))} />}
+                  {l.status === 'em_aprovacao' && d.can.decideStages.includes(stageOf(l)) && <input type="checkbox" aria-label={`Selecionar ${l.what}`} className="mt-1 h-4 w-4 accent-[rgb(var(--primary))]" checked={sel.includes(l.id)} onChange={(e) => setSel((s) => (e.target.checked ? [...s, l.id] : s.filter((x) => x !== l.id)))} />}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-ink">{l.what} <span className="font-normal text-muted">· {ITEM_TYPE_LABELS[l.itemType as keyof typeof ITEM_TYPE_LABELS] ?? l.itemType}</span></p>
                     <p className="text-xs text-muted">{a ? `${a.code} ${a.path.split(' › ').slice(1).join(' › ')}` : ''} · {monthName(l.month)}/{l.month.slice(0, 4)}{l.how ? ` · ${l.how}` : ''}</p>
-                    {l.decisionNote && <p className="mt-0.5 text-xs text-[#C2610C]">Diretoria: {l.decisionNote}</p>}
+                    {l.status === 'em_aprovacao' && <p className="mt-0.5 text-xs text-muted">Com a {STAGE_LABEL[stageOf(l)]}</p>}
+                    {l.decisionNote && <p className="mt-0.5 text-xs text-[#C2610C]">Decisão: {l.decisionNote}</p>}
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-semibold tabular-nums text-ink">{neg(l.amountCents)}</p>
@@ -225,6 +232,7 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
       {line && <LineModal st={st} cc={cc} months={monthsOfQuarter(year, quarter)} line={line === 'new' ? null : line} onClose={() => setLine(null)} onDone={refresh} />}
       {expense && <ExpenseModal st={st} d={d} line={expense === 'new' ? null : expense} onClose={() => setExpense(null)} onDone={refresh} />}
       {guardian && <GuardianModal st={st} d={d} onClose={() => setGuardian(false)} onDone={refresh} />}
+      {transfer && <TransferModal st={st} d={d} onClose={() => setTransfer(false)} onDone={refresh} />}
       {decide && <DecideModal decide={decide} planId={d.plan.id} onClose={() => setDecide(null)} onDone={() => { refresh(); setSel([]); }} />}
     </div>
   );
@@ -265,26 +273,26 @@ function Expenses({ d, accName, onCancel }: { d: Plan; accName: Map<string, Acco
   );
 }
 
-const ADJ_LABEL = { registrado: 'Registrado (até 15%)', pendente: 'Aguardando a Diretoria', aprovado: 'Aprovado', recusado: 'Recusado' } as const;
+const ADJ_LABEL = { registrado: 'Registrado', pendente: 'Aguardando a Diretoria', aprovado: 'Aprovado', recusado: 'Recusado' } as const;
 const ADJ_TONE = { registrado: 'bg-primary-soft text-primary', pendente: 'bg-warning-soft text-[#C2610C]', aprovado: 'bg-success-soft text-[#15803D]', recusado: 'bg-danger-soft text-danger' } as const;
 function Guardian({ d, accName, onDecide }: { d: Plan; accName: Map<string, Account>; onDecide: (id: string, approve: boolean, note: string | null) => void }) {
   const [refuse, setRefuse] = useState<string | null>(null);
   return (
     <section className="card p-0" aria-label="Budget Guardião">
-      <header className="border-b border-line px-4 py-3"><h2 className="text-md font-bold text-ink">Budget Guardião</h2><p className="text-xs text-muted">Ajustes no trimestre: até 15% do centro com justificativa; acima, Diretoria. Tudo é reportado.</p></header>
+      <header className="border-b border-line px-4 py-3"><h2 className="text-md font-bold text-ink">Budget Guardião</h2><p className="text-xs text-muted">Ajustes no total do centro: a Gerência pede, a Diretoria aprova. Remanejamentos entre contas do centro (só a Gerência) aparecem aqui também.</p></header>
       {!d.adjustments.length ? <p className="px-4 py-6 text-sm text-muted">Nenhum ajuste no trimestre.</p> : (
         <ul className="divide-y divide-line">
           {d.adjustments.map((a) => (
             <li key={a.id} className="px-4 py-2.5">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-ink">{a.deltaCents > 0 ? 'Acréscimo' : 'Redução'} em {accName.get(a.accountId)?.code} {accName.get(a.accountId)?.name}</p>
+                  <p className="text-sm text-ink">{a.kind === 'remanejamento' ? (a.deltaCents > 0 ? 'Remanejado para' : 'Remanejado de') : a.deltaCents > 0 ? 'Acréscimo em' : 'Redução em'} {accName.get(a.accountId)?.code} {accName.get(a.accountId)?.name}</p>
                   <p className="text-xs text-muted">{a.justification}{a.pct !== null ? ` · ${a.pct.toFixed(1).replace('.', ',')}% acumulado no trimestre` : ''}{a.decisionNote ? ` · Diretoria: ${a.decisionNote}` : ''}</p>
                 </div>
                 <span className="text-sm font-semibold tabular-nums text-ink">{a.deltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.deltaCents))}</span>
                 <Tag className={ADJ_TONE[a.status]}>{ADJ_LABEL[a.status]}</Tag>
               </div>
-              {d.admin && a.status === 'pendente' && (
+              {d.can.decideGuardian && a.status === 'pendente' && (
                 <div className="mt-2 flex gap-2">
                   <Button size="sm" variant="primary" onClick={() => onDecide(a.id, true, null)}>Aprovar</Button>
                   <Button size="sm" variant="outline" onClick={() => setRefuse(a.id)}>Recusar</Button>
@@ -294,7 +302,7 @@ function Guardian({ d, accName, onDecide }: { d: Plan; accName: Map<string, Acco
           ))}
         </ul>
       )}
-      {refuse && <ReasonModal title="Recusar ajuste do Budget Guardião" label="Motivo para o líder" min={3} onClose={() => setRefuse(null)} onConfirm={(n) => onDecide(refuse, false, n)} />}
+      {refuse && <ReasonModal title="Recusar ajuste do Budget Guardião" label="Motivo para a Gerência" min={3} onClose={() => setRefuse(null)} onConfirm={(n) => onDecide(refuse, false, n)} />}
     </section>
   );
 }
@@ -401,17 +409,42 @@ function GuardianModal({ st, d, onClose, onDone }: { st: Structure; d: Plan; onC
   const pct = d.total.approved ? ((prevAbs + Math.abs(delta)) / d.total.approved) * 100 : null;
   const save = useMutation({
     mutationFn: () => api<{ status: string }>('/budget/adjustments', { method: 'POST', body: { costCenterId: d.costCenter.id, accountId: v.accountId, month: v.month, deltaCents: delta, justification: v.justification } }),
-    onSuccess: (r) => { onDone(); onClose(); toast({ tone: 'success', message: r.status === 'pendente' ? 'Ajuste enviado à Diretoria (acima de 15%)' : 'Ajuste registrado e reportado à Diretoria' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+    onSuccess: (r) => { onDone(); onClose(); toast({ tone: 'success', message: 'Ajuste enviado à Diretoria' }); void r; }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   return (
-    <Modal open onClose={onClose} title="Budget Guardião" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!v.accountId || !delta || v.justification.trim().length < 15} loading={save.isPending} onClick={() => save.mutate()}>{pct !== null && pct > 15 && !d.admin ? 'Enviar à Diretoria' : 'Registrar ajuste'}</Button></>}>
+    <Modal open onClose={onClose} title="Budget Guardião" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!v.accountId || !delta || v.justification.trim().length < 15} loading={save.isPending} onClick={() => save.mutate()}>{'Enviar à Diretoria'}</Button></>}>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField label="Conta (subcategoria)" htmlFor="gd-acc" required className="sm:col-span-2"><AccountSelect id="gd-acc" value={v.accountId} onChange={(x) => setV({ ...v, accountId: x })} accounts={st.accounts} /></FormField>
         <FormField label="Ajuste" htmlFor="gd-k"><Select id="gd-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value })}><option value="mais">Acrescentar</option><option value="menos">Reduzir</option></Select></FormField>
         <FormField label="Valor (R$)" htmlFor="gd-v" required><Input id="gd-v" inputMode="decimal" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} /></FormField>
         <FormField label="Mês" htmlFor="gd-m"><Select id="gd-m" value={v.month} onChange={(e) => setV({ ...v, month: e.target.value })}>{d.months.map((m) => <option key={m} value={m}>{monthName(m)}/{m.slice(0, 4)}</option>)}</Select></FormField>
-        <div className="self-end pb-2 text-sm">{pct !== null && delta !== 0 && <span className={pct > 15 ? 'font-semibold text-[#C2610C]' : 'text-muted'}>{pct.toFixed(1).replace('.', ',')}% do trimestre (acumulado) · {pct > 15 ? 'precisa da Diretoria' : 'dentro dos 15%'}</span>}</div>
+        <div className="self-end pb-2 text-sm">{pct !== null && delta !== 0 && <span className="text-muted">{pct.toFixed(1).replace('.', ',')}% do trimestre (acumulado) · vale depois da aprovação da Diretoria</span>}</div>
         <FormField label="Justificativa formal" htmlFor="gd-j" required className="sm:col-span-2"><Textarea id="gd-j" rows={3} value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} /></FormField>
+      </div>
+    </Modal>
+  );
+}
+
+/** Remanejar saldo entre contas do mesmo centro de custo (só a Gerência): o total do centro não muda. */
+function TransferModal({ st, d, onClose, onDone }: { st: Structure; d: Plan; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState({ from: '', to: '', month: d.months.includes(now.toISOString().slice(0, 7)) ? now.toISOString().slice(0, 7) : d.months[0]!, amount: '', justification: '' });
+  const cents = toCents(v.amount || '0');
+  const avail = d.accounts.find((a) => a.accountId === v.from)?.available ?? 0;
+  const save = useMutation({
+    mutationFn: () => api('/budget/transfers', { method: 'POST', body: { costCenterId: d.costCenter.id, fromAccountId: v.from, toAccountId: v.to, month: v.month, amountCents: cents, justification: v.justification } }),
+    onSuccess: () => { onDone(); onClose(); toast({ tone: 'success', message: 'Saldo remanejado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const ok = v.from && v.to && v.from !== v.to && cents > 0 && cents <= avail && v.justification.trim().length >= 15;
+  return (
+    <Modal open onClose={onClose} title="Remanejar saldo entre contas" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate()}>Remanejar</Button></>}>
+      <p className="mb-3 text-sm text-muted">Move saldo de uma conta para outra dentro de {d.costCenter.code}. O total do centro não muda. Só a Gerência remaneja.</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <FormField label="De (conta)" htmlFor="tr-f" required hint={v.from ? `Saldo no trimestre: ${fmtBRL(avail)}` : undefined}><AccountSelect id="tr-f" value={v.from} onChange={(x) => setV({ ...v, from: x })} accounts={st.accounts} /></FormField>
+        <FormField label="Para (conta)" htmlFor="tr-t" required><AccountSelect id="tr-t" value={v.to} onChange={(x) => setV({ ...v, to: x })} accounts={st.accounts} /></FormField>
+        <FormField label="Valor (R$)" htmlFor="tr-v" required><Input id="tr-v" inputMode="decimal" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} /></FormField>
+        <FormField label="Mês" htmlFor="tr-m"><Select id="tr-m" value={v.month} onChange={(e) => setV({ ...v, month: e.target.value })}>{d.months.map((m) => <option key={m} value={m}>{monthName(m)}/{m.slice(0, 4)}</option>)}</Select></FormField>
+        <FormField label="Justificativa" htmlFor="tr-j" required className="sm:col-span-2"><Textarea id="tr-j" rows={3} value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} /></FormField>
       </div>
     </Modal>
   );
