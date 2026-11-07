@@ -17,7 +17,8 @@ test('cadastro Zenith obrigatório no contrato e espelho dos campos', async ({ p
   expect((await page.request.put('/api/v1/admin/contract-settings/zenith', { data: { holders: ['Empresa Detentora Fictícia'], slaTypes: ['Nenhum SLA definido', 'SLA Fictício'] } })).ok()).toBe(true);
   const c = await (await page.request.post('/api/v1/contacts', { data: { name: `Cliente Zenith ${st}`, segment: 'empresarial', phone: '79999990004' } })).json();
   const plan = (await (await page.request.get('/api/v1/meta/lookups')).json()).plans[0];
-  const opp = await (await page.request.post('/api/v1/opportunities', { data: { contactId: c.id, planId: plan.id, cableMeters: 30, saleType: 'ativa', customerSuccess: false } })).json();
+  const branch = (await (await page.request.get('/api/v1/meta/lookups')).json()).branches.find((b: { name: string }) => b.name === 'BKT Soluções');
+  const opp = await (await page.request.post('/api/v1/opportunities', { data: { contactId: c.id, planId: plan.id, cableMeters: 30, saleType: 'ativa', customerSuccess: false, branchId: branch.id } })).json();
   const rv = (await (await page.request.get(`/api/v1/opportunities/${opp.id}`)).json()).rowVersion;
   expect((await page.request.post(`/api/v1/opportunities/${opp.id}/transition`, { data: { toStage: 'ganha', confirm: true, rowVersion: rv } })).ok()).toBe(true);
 
@@ -26,11 +27,12 @@ test('cadastro Zenith obrigatório no contrato e espelho dos campos', async ({ p
   await page.getByLabel('Número do contrato').fill(`ZEN-${st}`);
   await page.getByLabel('Início da vigência').fill('2026-11-01');
   await page.getByRole('button', { name: 'Cadastrar contrato' }).click();
-  await expect(page.getByText(/Cadastro Zenith: falta empresa detentora do contrato/)).toBeVisible();
+  await expect(page.getByText(/Cadastro Zenith: falta alias/)).toBeVisible();
 
   const z = page.getByRole('group', { name: 'Cadastro Zenith' });
   await expect(z.getByText('Cadastro Zenith').first()).toBeVisible();
-  await z.getByLabel('Empresa detentora do contrato').fill('Empresa Detentora Fictícia');
+  // já vem com a filial da oportunidade
+  await expect(z.getByLabel('Empresa detentora do contrato')).toHaveValue('BKT Soluções');
   await z.getByLabel('Alias / apelido').fill('Enlaces corporativos');
   await z.getByLabel('Tipo de SLA').selectOption('SLA Fictício');
   await z.getByLabel('Disponibilidade mensal mínima (%)').fill('99,8');
@@ -50,6 +52,8 @@ test('cadastro Zenith obrigatório no contrato e espelho dos campos', async ({ p
   const row = (label: string) => page.getByRole('row').filter({ has: page.getByRole('cell', { name: label, exact: true }) });
   await expect(row('Alias / apelido')).toContainText('cadastro Zenith');
   await expect(row('Número do contrato')).toContainText(`ZEN-${st}`);
+  await expect(row('Empresa detentora do contrato')).toContainText('BKT Soluções');
+  await expect(row('Empresa detentora do contrato')).toContainText('Oportunidade · filial');
   await expect(row('ICP (Ideal Customer Profile)')).toContainText('Score IPC');
   await expect(row('Disponibilidade mensal mínima (%)')).toContainText('99.8');
   await page.screenshot({ path: 'test-results/zenith-aba.png', fullPage: true });

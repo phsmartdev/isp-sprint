@@ -8,6 +8,7 @@ import clsx from 'clsx';
 import { CheckCircle2, CircleAlert } from 'lucide-react';
 import { ZENITH_MODALITIES, ZENITH_MODALITY_HINTS, ZENITH_MODALITY_LABELS, ZENITH_NO_SLA, slaDefined, type ZenithContact, type ZenithContract, type ZenithField, type ZenithLists } from '@isp/domain';
 import { api } from '../../lib/api';
+import { useLookups } from '../../lib/hooks';
 import { ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 
 /** Informação abaixo de cada campo que só existe por causa do Zenith. */
@@ -55,10 +56,11 @@ export function ZenithFieldset({ z, set }: { z: ZenithContract; set: (z: ZenithC
   const conv = z.modality === 'convencional';
   const units = (v: string) => (v === '' ? null : Number(v.replace(/\D/g, '').slice(0, 7)));
   const slaTypes = lists.data?.slaTypes ?? [ZENITH_NO_SLA];
+  const branches = (useLookups().data?.branches ?? []).map((b) => b.name);
   return (
     <fieldset className="rounded-md border border-primary/40 p-4" aria-describedby="zen-hint">
       <legend className="px-1 text-md font-bold text-ink">Cadastro Zenith</legend>
-      <p id="zen-hint" className="-mt-1 mb-3 text-sm text-muted">O que o Zenith pede e o CRM não tem. Cliente, CNPJ, ICP (Score IPC), número do contrato e metas de SLA saem do CRM.</p>
+      <p id="zen-hint" className="-mt-1 mb-3 text-sm text-muted">O que o Zenith pede e o CRM não tem. Cliente, CNPJ, ICP (Score IPC), filial e número do contrato saem do CRM.</p>
       <p className="text-sm font-semibold text-ink">Modalidade do contrato<span className="text-danger"> *</span></p>
       <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-2" role="radiogroup" aria-label="Modalidade do contrato no Zenith">
         {ZENITH_MODALITIES.map((m) => (
@@ -70,9 +72,8 @@ export function ZenithFieldset({ z, set }: { z: ZenithContract; set: (z: ZenithC
       </div>
       <div className="mb-4"><Tag /></div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <FormField label='Empresa detentora do contrato' htmlFor="zen-holder" required hint={hz(lists.data?.holders.length ? undefined : 'Escreva o nome; a lista fica em Configurações → Contratos.')}>
-          <Input id="zen-holder" list="zen-holders" value={z.holderCompany} onChange={(e) => p({ holderCompany: e.target.value })} />
-          <datalist id="zen-holders">{lists.data?.holders.map((h) => <option key={h} value={h} />)}</datalist>
+        <FormField label='Empresa detentora do contrato' htmlFor="zen-holder" required hint="Filial da oportunidade (Configurações → Filiais).">
+          <Select id="zen-holder" value={z.holderCompany} onChange={(e) => p({ holderCompany: e.target.value })}><option value="">Escolha a filial</option>{[...new Set([...branches, ...(z.holderCompany ? [z.holderCompany] : [])])].map((b) => <option key={b} value={b}>{b}</option>)}</Select>
         </FormField>
         <FormField label='Alias / apelido' htmlFor="zen-alias" required hint={ZEN}><Input id="zen-alias" value={z.alias} onChange={(e) => p({ alias: e.target.value })} placeholder="Ex.: Enlaces corporativos" /></FormField>
         <FormField label='Tipo de SLA' htmlFor="zen-sla" required hint={ZEN}>

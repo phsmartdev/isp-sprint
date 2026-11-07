@@ -10,6 +10,7 @@ import {
 } from '@isp/domain';
 import { deliveryErrors, DELIVERY_MAX_COLUMNS, DELIVERY_MAX_ROWS } from '@isp/domain';
 import { ZenithBody, syncZenithSlas } from './zenith';
+import { EMPTY_ZENITH } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -163,6 +164,8 @@ export const contractRoutes = [
         .where(and(eq(s.opportunities.id, query.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
       if (!o) throw notFound('Oportunidade não encontrada.');
       const [existing] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
+      // Zenith: a empresa detentora do contrato é a filial que vendeu a oportunidade
+      const [branch] = await app.db.select({ name: s.salesBranches.name }).from(s.opportunities).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.opportunities.branchId)).where(eq(s.opportunities.id, o.id)).limit(1);
       const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
       const items = await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
       const publico = o.segment === 'governamental';
@@ -173,7 +176,7 @@ export const contractRoutes = [
         won: o.stage === 'ganha',
         suggestion: {
           kind: publico ? 'publico' : 'privado', legalRegime: publico ? 'lei_14133' : 'privado', commercialOwnerId: o.ownerId,
-          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12 },
+          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12, zenith: { ...EMPTY_ZENITH, holderCompany: branch?.name ?? '' } },
         },
       };
     },

@@ -10,6 +10,7 @@ export const ZENITH_MODALITY_HINTS: Record<ZenithModality, string> = {
   convencional: 'MPLS, Internet (CDI), AntiDDoS e Satelital. Tem gestão de saldos, IP público e rede gerenciada.',
   pseudowire_p2p: 'Transporte ponto a ponto entre dois ou mais locais. Sem controle de saldo e sem IP público.',
 };
+/** Empresa detentora do contrato = filial que vendeu (Configurações → Filiais), já preenchida pela oportunidade. */
 /** Opção que o Zenith mostra por padrão no Tipo de SLA. As demais são cadastradas em Configurações → Contratos. */
 export const ZENITH_NO_SLA = 'Nenhum SLA definido';
 
@@ -122,7 +123,7 @@ export function zenithFields(i: ZenithInput): { fields: ZenithField[]; missing: 
   // Modelagem do contrato
   zen('contrato', 'Modalidade', z ? ZENITH_MODALITY_LABELS[z.modality] : null, 'modality');
   crm('contrato', 'Cliente vinculado', i.client.name || null, 'Contrato · cliente');
-  zen('contrato', 'Empresa detentora do contrato', z?.holderCompany || null, 'holderCompany');
+  crm('contrato', 'Empresa detentora do contrato', z?.holderCompany || null, 'Oportunidade · filial');
   crm('contrato', 'Número do contrato', i.contract.number, 'Contrato · número');
   zen('contrato', 'Alias / apelido', z?.alias || null, 'alias');
   if (conv) {
