@@ -19,7 +19,6 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { BarRows, CHART, ComboChart, Donut, Legend } from '../components/charts/charts';
 import { SergipeMap } from '../components/charts/SergipeMap';
 import { brlShort, monthLabel, monthYear } from './Reports';
-import { MoneyToggle } from '../lib/privacy';
 import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 import { useAuth } from '../auth/AuthProvider';
 import { FrontsPanel } from '../features/projects/fronts';
@@ -69,7 +68,6 @@ export function IntelligencePage() {
         actions={f.v === 'indicadores' || f.v === 'economia' || f.v === 'precos' ? undefined :
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
-            <MoneyToggle />
             <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
