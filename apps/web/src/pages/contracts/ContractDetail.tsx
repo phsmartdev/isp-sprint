@@ -1,5 +1,6 @@
 /** Ficha individual do contrato. */
 import { useAuth } from '../../auth/AuthProvider';
+import { DeliveryList } from '../../features/contracts/DeliveryAddresses';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { EntityPeoplePanel } from '../../features/abm/EntityPeoplePanel';
 import { useState } from 'react';
@@ -209,6 +210,7 @@ export function ContractDetailPage() {
                   </table></div>
                 )}
               </div>
+              <DeliveryList value={v.deliveryAddresses} />
               {v.specialConditions && <div><h2 className="mb-1 font-bold text-ink">Condições específicas</h2><p className="whitespace-pre-line text-sm text-text">{v.specialConditions}</p></div>}
               <div><h2 className="mb-1 font-bold text-ink">Cliente</h2><p className="text-sm text-text">{c.contact.name}{c.contact.email ? ` · ${c.contact.email}` : ''}{c.contact.phone ? ` · ${c.contact.phone}` : ''}{c.address ? ` · ${[c.address.street, c.address.number, c.address.district, c.address.city, c.address.state].filter(Boolean).join(', ')}` : ''}</p><p className="text-xs text-muted">Dados do cadastro do cliente no CRM (não são copiados para o contrato).</p></div>
             </div>

@@ -100,12 +100,14 @@ export async function addEvent(db: DbOrTx, tenantId: string, contractId: string,
   await db.insert(s.contractEvents).values({ tenantId, contractId, actorId, type, summary: summary.slice(0, 500), payload });
 }
 
+/** JSON com chaves em ordem (o jsonb do banco reordena as chaves; a comparação não pode depender disso). */
+const stableJson = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : x));
 export type VersionPatch = Partial<Omit<VersionRow, 'id' | 'tenantId' | 'contractId' | 'version' | 'createdAt' | 'createdBy' | 'changeKind' | 'reason'>>;
 /** Nova versão = cópia da atual + mudanças (INSERT). A anterior continua intacta. */
 export async function newVersion(db: DbOrTx, c: ContractRow, actorId: string | null, patch: VersionPatch, changeKind: VersionRow['changeKind'], reason: string) {
   const cur = await currentVersion(db, c);
   const { id: _i, createdAt: _c, version: _v, createdBy: _b, changeKind: _k, reason: _r, ...keep } = cur;
-  const changed = Object.entries(patch).filter(([k, v]) => v !== undefined && JSON.stringify(v) !== JSON.stringify((cur as Record<string, unknown>)[k])).map(([k]) => k);
+  const changed = Object.entries(patch).filter(([k, v]) => v !== undefined && stableJson(v) !== stableJson((cur as Record<string, unknown>)[k])).map(([k]) => k);
   if (!changed.length) return { version: cur.version, changed };
   const next = cur.version + 1;
   // a vigência é de cada versão: não passa para a seguinte

@@ -1,5 +1,7 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
 import { useMemo, useState } from 'react';
+import { deliveryErrors, type DeliveryAddresses } from '@isp/domain';
+import { DeliveryEditor, EMPTY_DELIVERY } from './DeliveryAddresses';
 import { AlertTriangle, ClipboardPaste, Download, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
@@ -19,6 +21,7 @@ export type FormState = {
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
   agency: string; processNumber: string; modality: string; commitmentNote: string; budgetLine: string; extensionMax: string;
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
+  delivery: DeliveryAddresses;
 };
 
 export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
@@ -34,6 +37,7 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
     hasGuarantee: !!g, gType: g?.type ?? '', gAmount: dec(g?.amountCents ?? null), gInsurer: g?.insurer ?? '', gPolicy: g?.policy ?? '', gExpires: g?.expiresAt ?? '', gRenewal: g?.renewalAt ?? '',
     agency: p?.agency ?? '', processNumber: p?.processNumber ?? '', modality: p?.modality ?? '', commitmentNote: p?.commitmentNote ?? '', budgetLine: p?.budgetLine ?? '', extensionMax: p?.extensionMaxMonths ? String(p.extensionMaxMonths) : '',
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
+    delivery: v.deliveryAddresses ?? EMPTY_DELIVERY,
   };
 }
 
@@ -56,6 +60,8 @@ export function payloadOf(f: FormState) {
   const reportTerms: ReportTerms = f.hasReport
     ? { required: true, sector: f.rSector as Sector, validatorId: f.rValidator, dueDay: Number(f.rDueDay), alertDaysBefore: f.rAlertDays.trim() === '' ? null : Number(f.rAlertDays) }
     : { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
+  const dErr = deliveryErrors(f.delivery);
+  if (dErr.length) throw new Error(`Endereços de entrega: ${dErr.slice(0, 3).join(' ')}`);
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
@@ -65,6 +71,7 @@ export function payloadOf(f: FormState) {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
       items, guarantee, publicTerms, reportTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
+      deliveryAddresses: { columns: f.delivery.columns.map((c) => c.trim()), rows: f.delivery.rows.map((r) => ({ ...r, address: r.address.trim(), service: r.service?.trim() || null })) },
     },
   };
 }
@@ -244,6 +251,12 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
           <p className="text-sm text-muted">Recorrente: <span className="num font-semibold text-ink">{fmtBRL(auto.monthlyCents)}</span>/mês{auto.oneTimeCents > 0 && <> · Venda: <span className="num font-semibold text-ink">{fmtBRL(auto.oneTimeCents)}</span></>}{auto.consumptionCents > 0 && <> · Consumo: <span className="num font-semibold text-ink">{fmtBRL(auto.consumptionCents)}</span></>}</p>
         </div>
       </fieldset>
+
+      <section aria-label="Endereços de entrega" className="mb-5">
+        <h3 className="mb-1 text-sm font-bold text-ink">Endereços de entrega</h3>
+        <p className="mb-2 text-xs text-muted">Um ou vários pontos: sequência, endereço e banda/serviço. Crie colunas se precisar (ex.: contato local, prazo de ativação).</p>
+        <DeliveryEditor value={f.delivery} onChange={(delivery) => onChange({ delivery })} />
+      </section>
 
       <Fieldset title="Valores e faturamento">
         {f.billingType === 'medicao' && !editing && <FormField label="Saldo contratado (R$)" htmlFor="cf-balance" required hint="Crédito inicial do contrato; as oportunidades consomem esse saldo."><Input id="cf-balance" inputMode="decimal" value={f.initialBalance} onChange={(e) => onChange({ initialBalance: e.target.value })} placeholder="100.000,00" /></FormField>}

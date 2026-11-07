@@ -1400,6 +1400,8 @@ export const contractVersions = pgTable(
     adjustmentBaseDate: date('adjustment_base_date', { mode: 'string' }),
     adjustmentRule: text('adjustment_rule'),
     specialConditions: text('special_conditions'),
+    /** Endereços de entrega (um ou vários): sequência, endereço, banda/serviço e colunas extras definidas no cadastro. */
+    deliveryAddresses: jsonb('delivery_addresses').$type<import('@isp/domain').DeliveryAddresses>().notNull().default(sql`'{"columns":[],"rows":[]}'::jsonb`),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },

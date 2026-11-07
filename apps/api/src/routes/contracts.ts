@@ -8,6 +8,7 @@ import {
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
   SECTORS, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
+import { deliveryErrors, DELIVERY_MAX_COLUMNS, DELIVERY_MAX_ROWS } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -50,6 +51,10 @@ const VersionFields = z.object({
   reportTerms: z.object({ required: z.boolean(), sector: z.enum(SECTORS).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
   adjustmentIndex: optText(60), adjustmentBaseDate: optDay, adjustmentRule: optText(1000),
   specialConditions: optText(4000),
+  deliveryAddresses: z.object({
+    columns: z.array(z.string().trim().min(1).max(60)).max(DELIVERY_MAX_COLUMNS).default([]),
+    rows: z.array(z.object({ seq: z.number().int().min(1).max(1_000_000), address: z.string().trim().min(1).max(500), service: z.string().trim().max(200).nullable().default(null), extra: z.record(z.string(), z.string().max(300)).default({}) })).max(DELIVERY_MAX_ROWS).default([]),
+  }).superRefine((d, ctx) => { for (const m of deliveryErrors(d)) ctx.addIssue({ code: 'custom', message: m }); }).optional(),
 });
 const Header = z.object({
   kind: z.enum(CONTRACT_KINDS).default('privado'),
