@@ -25,7 +25,10 @@ type NavLeaf = {
 };
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
 type NavEntry = NavLeaf | NavGroup;
-const ICON = 'h-[22px] w-[22px] shrink-0';
+const ICON = 'h-[18px] w-[18px] shrink-0';
+/** Item do menu lateral: texto 14px numa linha, ícone fino; ativo = fundo sutil e filete na lateral (sem bloco cheio). */
+const NAV_ITEM = 'relative flex h-10 w-full items-center gap-3 px-3.5 text-left text-sm font-medium tracking-[0.005em] transition-colors [&>svg]:stroke-[1.75]';
+const NAV_ON = 'bg-white/[0.07] before:absolute before:inset-y-2 before:left-0 before:w-[2px] before:bg-lime';
 const isGroup = (n: NavEntry): n is NavGroup => 'children' in n;
 /** Menu na ordem combinada com o Paulo (21/10/2026). Grupos abrem e fecham; abrem sozinhos quando a página atual está dentro. */
 const NAV: NavEntry[] = [
@@ -156,7 +159,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <span className="border-l border-white/25 pl-3 font-display text-sm font-semibold text-white/70">RevOps</span>
       </Link>
       <nav aria-label="Navegação principal" className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {NAV.map((n) => {
             if (isGroup(n)) {
               const kids = n.children.filter((c) => show(c));
@@ -165,17 +168,17 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               const open = openGroups[n.key] ?? active;
               return (
                 <li key={n.key}>
-                  <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx('relative flex h-12 w-full items-center gap-3.5 rounded-md px-4 text-left text-md transition-colors', active && !open ? 'bg-navy-active font-semibold text-lime' : 'text-white/95 hover:bg-white/5')}>
+                  <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx(NAV_ITEM, active ? 'text-white [&>svg:first-child]:text-lime' : 'text-white/70 hover:bg-white/[0.04] hover:text-white', active && !open && NAV_ON)}>
                     {n.icon}
-                    <span className="min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                    <ChevronDown className={clsx('h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                    <ChevronDown className={clsx('h-3.5 w-3.5 shrink-0 text-white/35 transition-transform duration-200', open && 'rotate-180')} aria-hidden />
                   </button>
                   {open && (
-                    <ul className="mb-1 mt-0.5 space-y-0.5 pl-9">
+                    <ul className="mb-2 ml-[25px] mt-0.5 space-y-px border-l border-white/10 pl-3">
                       {kids.map((c) => (
                         <li key={c.to}>
                           {(() => {
-                            const cls = (on: boolean) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', on ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5');
+                            const cls = (on: boolean) => clsx('relative flex items-center gap-2 px-2.5 py-[7px] text-[13px] leading-snug transition-colors', on ? 'bg-white/[0.06] font-medium text-white before:absolute before:-left-[13px] before:inset-y-1 before:w-[2px] before:bg-lime' : 'text-white/55 hover:bg-white/[0.04] hover:text-white');
                             const inner = <>
                               <span className="min-w-0 flex-1">{c.label}</span>
                               {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
@@ -193,20 +196,20 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             }
             if (!(show(n) || (n.module === 'configuracoes' && inSettings))) return null;
             return (
-              <li key={n.to}>
+              <li key={n.to} className={clsx(n.to === '/reports' && 'mt-3 border-t border-white/10 pt-3')}>
                 <NavLink
                   to={n.to}
                   end={n.to === '/'}
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     clsx(
-                      'relative flex h-12 items-center gap-3.5 rounded-md px-4 text-md transition-colors',
-                      isActive || (n.to === '/settings' && inSettings) ? 'bg-navy-active font-semibold text-lime before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-lime' : 'text-white/95 hover:bg-white/5',
+                      NAV_ITEM,
+                      isActive || (n.to === '/settings' && inSettings) ? clsx(NAV_ON, 'text-white [&>svg]:text-lime') : 'text-white/70 hover:bg-white/[0.04] hover:text-white',
                     )
                   }
                 >
                   {n.icon}
-                  <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{n.label}</span>
                 </NavLink>
                 {n.to === '/settings' && inSettings && <SettingsMenu onNavigate={onNavigate} />}
               </li>
