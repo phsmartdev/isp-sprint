@@ -4,6 +4,7 @@
  * Sem ranking nem pódio: comparação pública pode constranger quem não fica em primeiro.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Settings2, Trophy, Trash2, Plus } from 'lucide-react';
@@ -79,6 +80,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
               <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me?.score ?? 0)}</span> pts{d.me?.level && <span className="ml-2 text-base font-semibold text-primary">nível {d.me.level}</span>}</p>
               {myGold && <p className="text-sm font-semibold text-[#8A6610]">Selo BK de Qualidade: primeiro lugar do ano</p>}
             </div>
+            <Link to="/meus-pontos" className="text-sm font-semibold text-primary hover:underline">De onde vieram meus pontos</Link>
           </div>
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             <div><h3 className="mb-1 text-sm font-bold text-ink">{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</h3><Breakdown m={d.monthBoard.me} label={monthName} /></div>

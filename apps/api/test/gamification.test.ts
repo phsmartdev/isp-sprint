@@ -173,6 +173,13 @@ describe('Jornadas de pontuação', () => {
     const resid = ga.monthBoard.teams.find((t: { name: string }) => t.name === 'Residencial');
     expect(resid.members.find((m: { name: string }) => /Lucas/.test(m.name))).toMatchObject({ tasks: 8, wins: 16 });
 
+    // cada um vê os próprios pontos (qualquer pessoa logada), sem colegas
+    const mp = ok(await lucas.get('/me/pontos')).json();
+    expect(mp.monthScore).toMatchObject({ tasks: 8, wins: 16 });
+    expect(mp.items.filter((x: { opportunityId: string }) => x.opportunityId === o.id).map((x: { source: string; points: number }) => [x.source, x.points]).sort()).toEqual([['ganho', 16], ['tarefa', 8]]);
+    expect(mp).not.toHaveProperty('people');
+    const oth = ok(await ana.get('/me/pontos')).json();
+    expect(oth.items.some((x: { opportunityId: string; source: string }) => x.opportunityId === o.id && x.source === 'tarefa')).toBe(false);
     // reabrir tira os pontos da tarefa e a parte do ganho
     await complete(lucas, ts[0]!.id, false);
     g = ok(await lucas.get('/times/gamificacao')).json();

@@ -74,6 +74,14 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   await expect(page.getByRole('region', { name: 'Time Residencial' }).getByRole('table')).toHaveCount(0);
   if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/minha-nota.png` });
 
+  // Meus pontos: pelo menu da conta, com a origem de cada ponto
+  await page.getByRole('button', { name: /^Conta de / }).click();
+  await page.getByRole('menuitem', { name: 'Meus pontos' }).click();
+  const origin = page.getByRole('region', { name: 'De onde vieram os pontos' });
+  await expect(origin).toContainText('Tarefa da jornada');
+  await expect(origin).toContainText(`OP-${o.code}`);
+  if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/meus-pontos.png` });
+
   // a liderança vê o time (notas e dispersão) como ferramenta de gestão
   await login(page, 'ana@yepnet.test');
   await page.goto('/times');
