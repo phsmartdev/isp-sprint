@@ -24,6 +24,15 @@ export const GAMIFICATION_START: GamificationSettings = {
   bonuses: { onTimeBp: 2_000, adherenceBp: 3_000, extraPerLevelBp: 2_500, extraCapBp: 3_000, scoreCapBp: 13_000 },
   dispersionYellowBp: 3_000, dispersionRedBp: 5_000,
   levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 80 }, { name: 'Ouro', minPoints: 100 }, { name: 'Diamante', minPoints: 120 }],
+  // performance por nível: quem sobe na hierarquia pesa mais o coletivo
+  performanceWeights: {
+    n1: { activity: 5_000, individual: 3_000, team: 2_000, unit: 0, company: 0 },
+    n2: { activity: 4_000, individual: 3_500, team: 2_500, unit: 0, company: 0 },
+    n3: { activity: 3_000, individual: 4_500, team: 2_500, unit: 0, company: 0 },
+    n4: { activity: 1_500, individual: 1_500, team: 4_500, unit: 2_500, company: 0 },
+    n5: { activity: 0, individual: 0, team: 2_500, unit: 4_500, company: 3_000 },
+  },
+  performanceBands: { greenBp: 10_000, yellowBp: 8_000 },
 };
 
 const asSettings = (c: Record<string, unknown>) => ({ ...GAMIFICATION_START, ...(c as Partial<GamificationSettings>) });

@@ -62,6 +62,7 @@ const NAV: NavEntry[] = [
     { to: '/times/rituais', label: 'Rituais', module: 'resultados' },
     { to: '/times/decisoes', label: 'Decisões e impedimentos', module: 'resultados' },
     { to: '/times/ferias', label: 'Férias', module: 'resultados' },
+    { to: '/times/performance', label: 'Performance', module: 'resultados' },
     { to: '/times/gamificacao', label: 'Gamificação', module: 'resultados' },
     { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
   ] },

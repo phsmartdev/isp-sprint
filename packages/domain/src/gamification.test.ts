@@ -13,6 +13,11 @@ const ST: GamificationSettings = {
   assignments: { assist: 'n1', ger: 'n5' }, defaultLevelKey: 'n2', defaultLeadLevelKey: 'n4',
   bonuses: { onTimeBp: 2_000, adherenceBp: 3_000, extraPerLevelBp: 2_500, extraCapBp: 3_000, scoreCapBp: 13_000 },
   dispersionYellowBp: 3_000, dispersionRedBp: 5_000, levels: [{ name: 'Bronze', minPoints: 0 }, { name: 'Prata', minPoints: 80 }, { name: 'Ouro', minPoints: 100 }],
+  performanceBands: { greenBp: 10_000, yellowBp: 8_000 },
+  performanceWeights: {
+    n1: { activity: 5_000, individual: 3_000, team: 2_000, unit: 0, company: 0 }, n2: { activity: 4_000, individual: 3_500, team: 2_500, unit: 0, company: 0 },
+    n4: { activity: 1_500, individual: 1_500, team: 4_500, unit: 2_500, company: 0 }, n5: { activity: 0, individual: 0, team: 2_500, unit: 4_500, company: 3_000 },
+  },
 };
 
 describe('gamificação por nível de competência', () => {
@@ -21,6 +26,8 @@ describe('gamificação por nível de competência', () => {
     expect(gamificationSettingsErrors({ ...ST, dispersionRedBp: 2_000 }).join(' ')).toMatch(/vermelha/);
     expect(gamificationSettingsErrors({ ...ST, competencyLevels: [{ ...ST.competencyLevels[0]!, weights: { ownBp: 5_000, teamBp: 4_000, dispersionBp: 0, areaBp: 0 } }, ...ST.competencyLevels.slice(1)] }).join(' ')).toMatch(/somar 100%/);
     expect(gamificationSettingsErrors({ ...ST, assignments: { x: 'nenhum' } }).join(' ')).toMatch(/nível inexistente/);
+    expect(gamificationSettingsErrors({ ...ST, performanceWeights: { ...ST.performanceWeights, n1: { activity: 5_000, individual: 3_000, team: 1_000, unit: 0, company: 0 } } }).join(' ')).toMatch(/Performance de Apoio: os pesos devem somar 100%/);
+    expect(gamificationSettingsErrors({ ...ST, performanceWeights: { n1: ST.performanceWeights.n1! } }).join(' ')).toMatch(/defina os pesos de Execução/);
     expect(gamificationSettingsErrors({ ...ST, journeys: [{ key: 'lic', name: 'Lic', pipelineId: 'p', wonPoints: 0, components: [{ key: 'a', name: 'A', stageKey: null, points: 5, dueDays: 1, level: 'n9' }] }] }).join(' ')).toMatch(/alçada inexistente/);
   });
   it('pontos brutos: eventos, ajuda com multiplicador, jornada regular e extra', () => {

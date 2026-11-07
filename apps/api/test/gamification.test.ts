@@ -215,3 +215,41 @@ describe('Meus pontos', () => {
     expect(Array.isArray(r.items)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------- performance por nível hierárquico
+describe('Performance por nível hierárquico', () => {
+  it('compõe atividade e metas com os pesos do nível; cada um vê a própria, a liderança vê o time', async () => {
+    await ctx.app.db.execute(sql`delete from gamification_settings`);
+    const st = ok(await carlos.get('/times/gamificacao/settings')).json();
+    // proposta inicial (do sistema): a gestão aprova
+    ok(await carlos.post(`/times/gamificacao/settings/${st.proposal.version}/decide`, { approve: true }));
+    const lucasId = (await ctx.app.db.execute<{ id: string }>(sql`select id from users where email = 'lucas@yepnet.test'`)).rows[0]!.id;
+    const resid = (await ctx.app.db.execute<{ id: string }>(sql`select id from teams where name = 'Residencial' limit 1`)).rows[0]!.id;
+    const mk = async (body: Record<string, unknown>, value: number) => {
+      const g = ok(await ana.post('/performance/goals', { category: 'comercial', manualUnit: 'un', periodType: 'mes', target: 10, ...body }), 201).json();
+      ok(await ana.post(`/performance/goals/${g.id}/checkins`, { value, note: 'Apontamento de teste' }), 201);
+      return g;
+    };
+    await mk({ title: `Meta individual teste ${Date.now()}`, scope: 'individual', userId: lucasId }, 8);
+    await mk({ title: `Meta do time teste ${Date.now()}`, scope: 'equipe', teamId: resid }, 12);
+
+    const me = ok(await lucas.get('/times/performance')).json();
+    expect(me.pending).toBe(false);
+    expect(me.me).toMatchObject({ levelKey: 'n2' });
+    const comp = Object.fromEntries(me.me.components.map((c: { key: string; value: number | null; weightBp: number }) => [c.key, c]));
+    expect(comp.individual.value).toBeLessThanOrEqual(80); // pode haver outras metas individuais do seed no mês
+    expect(comp.individual).toMatchObject({ weightBp: 3_500 });
+    expect(comp.team).toMatchObject({ weightBp: 2_500 });
+    expect(comp.activity).toMatchObject({ weightBp: 4_000 });
+    expect(me.me.score).not.toBeNull();
+    // liderado não vê ninguém além de si
+    expect(me.teams).toEqual([]);
+    // a liderança vê o próprio time, sem posições (ordem alfabética)
+    const lead = ok(await ana.get('/times/performance')).json();
+    const r = lead.teams.find((t: { name: string }) => t.name === 'Residencial');
+    expect(r.members.map((m: { name: string }) => m.name)).toEqual([...r.members.map((m: { name: string }) => m.name)].sort((a: string, b: string) => a.localeCompare(b, 'pt-BR')));
+    expect(r.members.find((m: { userId: string }) => m.userId === lucasId).score).toBe(me.me.score);
+    expect(lead.me).toMatchObject({ levelKey: 'n4' });
+    expect(lead.me.components.map((c: { key: string }) => c.key)).toEqual(['activity', 'individual', 'team', 'unit']);
+  });
+});

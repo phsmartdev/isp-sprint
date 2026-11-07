@@ -50,3 +50,4 @@ export * from './comms';
 export * from './vacations';
 export * from './gamification';
 export * from './scoreJourneys';
+export * from './hierarchyPerformance';

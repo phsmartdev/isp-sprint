@@ -232,6 +232,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
       <Notice tone="info">Cada mudança vira uma proposta e só vale depois de aprovada por quem administra a Gestão de Times (quem propõe não aprova). {meta.version ? `Hoje vale a v${meta.version}.` : 'Ainda não há regra aprovada.'}</Notice>
       <JourneysEditor value={v.journeys ?? []} pipelines={meta.pipelines} levels={v.competencyLevels} onChange={(journeys) => setV({ ...v, journeys })} />
       <LevelsEditor v={v} setV={setV} people={meta.people} />
+      <PerformanceWeightsEditor v={v} setV={setV} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {pct('participationMultiplierBp', 'Valor da ajuda ao colega (%)', '100 = igual ao próprio; 150 = vale 1,5×')}
         {pct('dispersionYellowBp', 'Dispersão: atenção a partir de (%)')}
@@ -371,5 +372,38 @@ function LevelsEditor({ v, setV, people }: { v: GamSettings; setV: (x: GamSettin
         </div>
       </fieldset>
     </>
+  );
+}
+
+/** Performance por nível hierárquico: pesos de atividade e metas (soma 100% por nível) e faixas. */
+function PerformanceWeightsEditor({ v, setV }: { v: GamSettings; setV: (x: GamSettings) => void }) {
+  const n = (s: string) => Math.round(Number(s.replace(',', '.').replace(/[^\d.]/g, '') || 0) * 100);
+  const cols = [['activity', 'Atividade'], ['individual', 'Metas individuais'], ['team', 'Metas do time'], ['unit', 'Metas da área'], ['company', 'Metas da empresa']] as const;
+  const pw = v.performanceWeights ?? {};
+  return (
+    <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Performance por nível hierárquico (% de cada componente; soma 100%)</legend>
+      <div className="mt-1 overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead className="text-xs text-muted"><tr><th className="py-1 pr-2 text-left font-medium">Nível</th>{cols.map(([, l]) => <th key={l} className="py-1 pr-2 text-left font-medium">{l}</th>)}</tr></thead>
+          <tbody>
+            {v.competencyLevels.map((l) => {
+              const w = pw[l.key] ?? { activity: 0, individual: 0, team: 0, unit: 0, company: 0 };
+              const sum = cols.reduce((t, [k]) => t + (w[k] ?? 0), 0);
+              return (
+                <tr key={l.key} className="border-t border-line">
+                  <td className="py-1 pr-2">{l.name}</td>
+                  {cols.map(([k, label]) => <td key={k} className="py-1 pr-2"><Input aria-label={`${label}: performance de ${l.name}`} inputMode="numeric" className={`num h-8 w-[70px] ${sum !== 10_000 ? 'border-danger' : ''}`} value={String((w[k] ?? 0) / 100)} onChange={(e) => setV({ ...v, performanceWeights: { ...pw, [l.key]: { ...w, [k]: n(e.target.value) } } })} /></td>)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <FormField label="No alvo a partir de (%)" htmlFor="pb-green"><Input id="pb-green" inputMode="numeric" className="num" value={String((v.performanceBands?.greenBp ?? 0) / 100)} onChange={(e) => setV({ ...v, performanceBands: { ...v.performanceBands, greenBp: n(e.target.value) } })} /></FormField>
+        <FormField label="Atenção a partir de (%)" htmlFor="pb-yellow"><Input id="pb-yellow" inputMode="numeric" className="num" value={String((v.performanceBands?.yellowBp ?? 0) / 100)} onChange={(e) => setV({ ...v, performanceBands: { ...v.performanceBands, yellowBp: n(e.target.value) } })} /></FormField>
+      </div>
+      <p className="mt-1 text-xs text-muted">Componente sem meta no mês não pesa contra: o peso vai para os demais. Atividade = nota da gamificação; metas = atingimento médio das metas de Objetivos e metas.</p>
+    </fieldset>
   );
 }
