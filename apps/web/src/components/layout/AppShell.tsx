@@ -27,7 +27,7 @@ type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf
 type NavEntry = NavLeaf | NavGroup;
 const ICON = 'h-[18px] w-[18px] shrink-0';
 /** Item do menu lateral: texto 14px numa linha, ícone fino; ativo = fundo sutil e filete na lateral (sem bloco cheio). */
-const NAV_ITEM = 'relative flex h-10 w-full items-center gap-3 px-3.5 text-left text-sm font-medium tracking-[0.005em] transition-colors [&>svg]:stroke-[1.75]';
+const NAV_ITEM = 'relative flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium leading-tight tracking-[0.005em] transition-colors [&>svg]:stroke-[1.75]';
 const NAV_ON = 'bg-white/[0.07] before:absolute before:inset-y-2 before:left-0 before:w-[2px] before:bg-lime';
 const isGroup = (n: NavEntry): n is NavGroup => 'children' in n;
 /** Menu na ordem combinada com o Paulo (21/10/2026). Grupos abrem e fecham; abrem sozinhos quando a página atual está dentro. */
@@ -170,7 +170,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <li key={n.key}>
                   <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx(NAV_ITEM, active ? 'text-white [&>svg:first-child]:text-lime' : 'text-white/70 hover:bg-white/[0.04] hover:text-white', active && !open && NAV_ON)}>
                     {n.icon}
-                    <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                    <span className="min-w-0 flex-1 text-balance">{n.label}</span>
                     <ChevronDown className={clsx('h-3.5 w-3.5 shrink-0 text-white/35 transition-transform duration-200', open && 'rotate-180')} aria-hidden />
                   </button>
                   {open && (
@@ -178,7 +178,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                       {kids.map((c) => (
                         <li key={c.to}>
                           {(() => {
-                            const cls = (on: boolean) => clsx('relative flex items-center gap-2 px-2.5 py-[7px] text-[13px] leading-snug transition-colors', on ? 'bg-white/[0.06] font-medium text-white before:absolute before:-left-[13px] before:inset-y-1 before:w-[2px] before:bg-lime' : 'text-white/55 hover:bg-white/[0.04] hover:text-white');
+                            const cls = (on: boolean) => clsx('relative flex items-center gap-2 px-2.5 py-[7px] text-[13px] leading-snug transition-colors', on ? 'bg-white/[0.06] font-medium text-white before:absolute before:-left-[13px] before:inset-y-1 before:w-[2px] before:bg-lime' : 'text-white/60 hover:bg-white/[0.04] hover:text-white');
                             const inner = <>
                               <span className="min-w-0 flex-1">{c.label}</span>
                               {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
@@ -209,7 +209,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   }
                 >
                   {n.icon}
-                  <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                  <span className="min-w-0 flex-1 text-balance">{n.label}</span>
                 </NavLink>
                 {n.to === '/settings' && inSettings && <SettingsMenu onNavigate={onNavigate} />}
               </li>
@@ -217,7 +217,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </ul>
       </nav>
-      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[140px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[200px] min-h-[140px] shrink-0 [@media(max-height:720px)]:hidden')} aria-hidden>
+      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[110px] shrink-0 [@media(max-height:1000px)]:hidden' : 'h-[120px] shrink-0 [@media(max-height:900px)]:hidden')} aria-hidden>
         <Hexagons className="absolute inset-0 h-full w-full" />
         <img src="/brand/bkt-symbol-white.png" alt="" className="absolute bottom-4 left-5 h-10 w-auto opacity-90" draggable={false} />
       </div>
