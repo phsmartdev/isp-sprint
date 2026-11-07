@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { AlertTriangle, HeartHandshake } from 'lucide-react';
 import { CS_LEVELS, CS_LEVEL_LABELS, TIER_LABELS, type CsLevel, type Tier } from '@isp/domain';
 import { api, qs } from '../../lib/api';
-import { fmtBRL, fmtDate, fmtPct } from '../../lib/format';
+import { fmtBRL, fmtBRLCompact, fmtDate, fmtPct } from '../../lib/format';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { useAuth } from '../../auth/AuthProvider';
 import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs } from '../../components/ui/primitives';
@@ -15,7 +15,7 @@ import { errMsg } from '../../features/contracts/shared';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { SurveysTab } from './Surveys';
 import { FollowUpDialog, PlanDialog, VisitDialog } from '../../features/cs/Account360';
-import { HealthBadge, LevelChip, TierChip, covText, csmsOf, type Coverage } from '../../features/cs/shared';
+import { HealthBadge, LevelChip, TierChip, covText, useCsms, type Coverage } from '../../features/cs/shared';
 import { FitText } from '../../components/ui/FitText';
 
 type Acc = {
@@ -31,7 +31,7 @@ type Portfolio = {
   canManage: boolean;
 };
 const monthStart = () => `${new Date().toISOString().slice(0, 7)}-01`;
-const Kpi = ({ label, value, hint, tone }: { label: string; value: string | number; hint?: string; tone?: 'danger' }) => <li className="card p-4"><p className="text-sm text-muted">{label}</p><FitText className={clsx('num mt-1 text-xl font-bold', tone === 'danger' ? 'text-danger' : 'text-ink')}>{value}</FitText>{hint && <p className="text-xs text-muted">{hint}</p>}</li>;
+const Kpi = ({ label, value, hint, tone, title }: { label: string; value: string | number; hint?: string; tone?: 'danger'; title?: string }) => <li className="card p-4"><p className="text-sm text-muted">{label}</p><span title={title} className="block"><FitText className={clsx('num mt-1 text-xl font-bold', tone === 'danger' ? 'text-danger' : 'text-ink')}>{value}</FitText></span>{hint && <p className="text-xs text-muted">{hint}</p>}</li>;
 const Dist = ({ title, data, label }: { title: string; data: Record<string, number>; label?: (k: string) => string }) => (
   <div className="card p-4"><p className="mb-2 text-sm font-semibold text-ink">{title}</p><ul className="space-y-1 text-sm">{Object.entries(data).sort().map(([k, v]) => <li key={k} className="flex justify-between gap-3"><span>{label ? label(k) : k === 'sem' ? 'Não definido' : k}</span><span className="num font-semibold">{v}</span></li>)}</ul></div>
 );
@@ -42,7 +42,7 @@ function Carteira({ p, onAct }: { p: Portfolio; onAct: (a: { kind: 'followup' | 
     <div className="space-y-4">
       <ul className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         <Kpi label="Contas" value={t.accounts} />
-        <Kpi label="ACV administrado" value={fmtBRL(t.acvCents)} />
+        <Kpi label="ACV administrado" value={fmtBRLCompact(t.acvCents)} title={fmtBRL(t.acvCents)} />
         <Kpi label="Cobertura simples" value={covText(p.coverage)} hint={`${p.coverage.onTime}/${p.coverage.planned} no prazo${p.coverage.extra ? ` · +${p.coverage.extra} extras` : ''}`} />
         <Kpi label="Cobertura ponderada" value={covText(p.coverage, 'weighted')} hint="peso pela criticidade" />
         <Kpi label="Críticas sem acompanhamento" value={`${p.criticalLate.count}/${p.criticalLate.ofCritical}`} tone={p.criticalLate.count ? 'danger' : undefined} />
@@ -50,7 +50,7 @@ function Carteira({ p, onAct }: { p: Portfolio; onAct: (a: { kind: 'followup' | 
         <Kpi label="Em risco (saúde < 50)" value={t.atRisk} />
         <Kpi label="Alertas abertos" value={t.alerts} />
         <Kpi label="Renovações em 90 dias" value={t.renewals90} />
-        <Kpi label="Expansão em aberto" value={fmtBRL(t.openExpansion)} hint="por mês" />
+        <Kpi label="Expansão em aberto" value={fmtBRLCompact(t.openExpansion)} title={fmtBRL(t.openExpansion)} hint="por mês" />
       </ul>
       <section className="card p-5" aria-labelledby="pr-title">
         <h2 id="pr-title" className="mb-1 text-lg font-bold text-ink">Minhas prioridades de hoje</h2>
@@ -154,7 +154,7 @@ type DistPreview = { accounts: number; changes: number; outside: number; applied
 
 /** Divide a carteira entre os CSMs escolhidos, equilibrando o valor anual e a quantidade. Sempre mostra a prévia antes. */
 function DistributeDialog({ onClose }: { onClose: () => void }) {
-  const users = csmsOf(useLookups().data?.users);
+  const users = useCsms();
   const qc = useQueryClient();
   const toast = useToast();
   const [v, setV] = useState({ csmIds: [] as string[], scope: 'todas' as 'todas' | 'sem_csm', keep: true, justification: '' });
@@ -259,7 +259,7 @@ function Jornadas() {
 type Tab = 'carteira' | 'atencao' | 'cobertura' | 'gestao' | 'jornadas' | 'pesquisas';
 export function CustomerSuccessPage() {
   const { me } = useAuth();
-  const lookups = useLookups();
+  const csms = useCsms();
   const [f, setF] = useUrlState({ t: 'carteira', csm: '', tier: '', level: '', from: '', to: '' });
   const params = { csmId: f.csm || undefined, tier: f.tier || undefined, level: f.level || undefined, from: f.from || undefined, to: f.to || undefined };
   const q = useQuery({ queryKey: ['cs-portfolio', params], placeholderData: keepPreviousData, queryFn: () => api<Portfolio>(`/cs/portfolio${qs(params)}`) });
@@ -272,7 +272,7 @@ export function CustomerSuccessPage() {
     <div className="w-full">
       <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} />
       <div className="mb-4 flex flex-wrap items-end gap-3">
-        {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{csmsOf(lookups.data?.users).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
+        {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{csms.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
         <FormField label="Tier" htmlFor="cs-f-tier"><Select id="cs-f-tier" value={f.tier} onChange={(e) => setF({ tier: e.target.value })}><option value="">Todos</option>{(['small', 'middle', 'large'] as Tier[]).map((t) => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}</Select></FormField>
         <FormField label="Criticidade" htmlFor="cs-f-level"><Select id="cs-f-level" value={f.level} onChange={(e) => setF({ level: e.target.value })}><option value="">Todas</option>{CS_LEVELS.map((l) => <option key={l} value={l}>{CS_LEVEL_LABELS[l]}</option>)}</Select></FormField>
         {tab === 'carteira' && <><FormField label="Cobertura de" htmlFor="cs-f-from"><Input id="cs-f-from" type="date" value={f.from || monthStart()} onChange={(e) => setF({ from: e.target.value })} /></FormField><FormField label="até" htmlFor="cs-f-to"><Input id="cs-f-to" type="date" value={f.to || new Date().toISOString().slice(0, 10)} onChange={(e) => setF({ to: e.target.value })} /></FormField></>}

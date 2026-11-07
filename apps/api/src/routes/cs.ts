@@ -1,6 +1,7 @@
 /** Sucesso do Cliente: carteira, cobertura, conta 360°, IPC, prioridade, pesquisas, visitas, planos, jornadas, kickoff e configuração. */
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { csmUsers } from '../services/cs';
 import {
   CS_ACTIVITY_KINDS, CS_LEVELS, IPC_CRITERIA, coverage, distributeAccounts, levelRank, validateCsConfig, type CsConfig, type CsLevel,
 } from '@isp/domain';
@@ -73,6 +74,10 @@ async function slideTables(db: DbOrTx, j: { id: string; contractId: string | nul
 }
 
 export const csRoutes = [
+  defineRoute({
+    method: 'GET', url: '/cs/csms', summary: 'CSMs (membros do time Sucesso do Cliente; sem esse time, o setor no cadastro)', tag: 'Sucesso do Cliente', module: 'clientes',
+    handler: async ({ app, auth }) => ({ items: await csmUsers(app.db, auth.tenantId) }),
+  }),
   // ------------------------------------------------------------------ configuração
   defineRoute({
     method: 'GET', url: '/cs/config', summary: 'Configuração do Sucesso do Cliente (versão vigente e histórico)', tag: 'Sucesso do Cliente', module: 'clientes',
@@ -261,8 +266,9 @@ export const csRoutes = [
       const csmIds = [...new Set(body.csmIds)];
       const users = await app.db.select({ id: s.users.id, name: s.users.name, sectors: s.users.sectors }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), inArray(s.users.id, csmIds)));
       if (users.length !== csmIds.length) throw unprocessable('Escolha só usuários ativos da empresa.');
-      const notCsm = users.filter((u) => !u.sectors.includes('sucesso_cliente'));
-      if (notCsm.length) throw unprocessable(`${notCsm.map((u) => u.name).join(', ')} não tem o setor Sucesso do Cliente no cadastro: só CSMs recebem carteira.`);
+      const csms = await csmUsers(app.db, auth.tenantId);
+      const notCsm = users.filter((u) => !csms.some((c) => c.id === u.id));
+      if (notCsm.length) throw unprocessable(`${notCsm.map((u) => u.name).join(', ')} não ${notCsm.length > 1 ? 'são' : 'é'} do time Sucesso do Cliente: só CSMs recebem carteira.`);
       // contas do Sucesso do Cliente (com contrato, jornada ou acompanhamento); quem ainda não tem fotografia é calculado antes
       const ids = await accountIds(app.db, auth.tenantId);
       const load0 = () => (ids.length ? app.db.select({ contactId: s.csAccounts.contactId, csmId: s.csAccounts.csmId, snapshot: s.csAccounts.snapshot }).from(s.csAccounts).where(and(eq(s.csAccounts.tenantId, auth.tenantId), inArray(s.csAccounts.contactId, ids))) : Promise.resolve([]));

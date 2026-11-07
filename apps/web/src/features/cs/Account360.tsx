@@ -11,7 +11,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
-import { HealthBadge, IPC_LEVEL_OPTS, LevelChip, TierChip, covText, type Coverage, type Snapshot } from './shared';
+import { HealthBadge, IPC_LEVEL_OPTS, LevelChip, TierChip, covText, useCsms, type Coverage, type Snapshot } from './shared';
 
 type FollowUp = { id: string; title: string; kind: string | null; dueAt: string | null; plannedAt: string | null; completedAt: string | null; result: string | null; cadence: string | null; ownerName: string | null };
 type Data = {
@@ -194,6 +194,7 @@ function ClosePlan({ contactId, plan, onClose }: { contactId: string; plan: Data
 export function Account360({ contactId }: { contactId: string }) {
   const q = useQuery({ queryKey: ['cs-account', contactId], queryFn: () => api<Data>(`/cs/accounts/${contactId}`) });
   const lookups = useLookups();
+  const csms = useCsms();
   const qc = useQueryClient();
   const toast = useToast();
   const [dlg, setDlg] = useState<null | 'followup' | 'visit' | 'survey' | 'ipc' | 'priority' | 'plan' | 'occ'>(null);
@@ -302,7 +303,7 @@ export function Account360({ contactId }: { contactId: string }) {
         <Card title="Pesquisas e histórico">
           {!d.surveys.length ? <p className="mb-2 text-sm text-muted">Nenhuma pesquisa registrada.</p> : <ul className="mb-2 space-y-1 text-sm">{d.surveys.slice(0, 6).map((s) => <li key={s.id}><span className="num text-xs text-muted">{fmtDate(s.respondedAt)}</span> <span className="font-semibold uppercase">{s.kind}</span> {s.score}/{s.scale}{s.comment ? ` · ${s.comment}` : ''}</li>)}</ul>}
           {!!d.history.length && <details className="text-sm"><summary className="cursor-pointer text-muted">Mudanças de Tier, saúde, criticidade, prioridade e CSM ({d.history.length})</summary><ul className="mt-1 space-y-1">{d.history.map((h) => <li key={h.id}>{fmtDateTime(h.createdAt)} · {KIND_LABEL[h.kind] ?? h.kind}: {h.level ?? ''}{h.score !== null ? ` (${h.score})` : ''}{h.justification ? ` · ${h.justification}` : ''} · {h.actorName ?? 'cálculo automático'}</li>)}</ul></details>}
-          {d.canEdit && lookups.data && <div className="mt-3 flex items-center gap-2 text-sm"><label htmlFor="cs-csm" className="text-muted">CSM</label><Select id="cs-csm" className="h-9 w-auto" value={d.csm?.id ?? ''} onChange={(e) => e.target.value && patch.mutate({ csmId: e.target.value, justification: 'Troca de CSM pela ficha' })}><option value="">Escolha</option>{lookups.data.users.filter((u) => u.sectors?.includes('sucesso_cliente') || u.id === d.csm?.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></div>}
+          {d.canEdit && lookups.data && <div className="mt-3 flex items-center gap-2 text-sm"><label htmlFor="cs-csm" className="text-muted">CSM</label><Select id="cs-csm" className="h-9 w-auto" value={d.csm?.id ?? ''} onChange={(e) => e.target.value && patch.mutate({ csmId: e.target.value, justification: 'Troca de CSM pela ficha' })}><option value="">Escolha</option>{[...csms, ...(d.csm && !csms.some((c) => c.id === d.csm!.id) ? [d.csm] : [])].map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></div>}
         </Card>
       </div>
 
