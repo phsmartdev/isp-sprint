@@ -25,8 +25,11 @@ describe('Zenith', () => {
     const today = new Date().toISOString().slice(0, 10);
     const c = ok(await lucas.post('/contacts', { name: `Cliente Zenith ${stamp}`, segment: 'empresarial', phone: '79999990003' }), 201).json();
     const plan = (await carlos.get('/meta/lookups')).json().plans[0];
-    const won = ok(await lucas.post('/opportunities', { contactId: c.id, planId: plan.id, cableMeters: 30, saleType: 'ativa', customerSuccess: false }), 201).json().id;
+    const branch = (await carlos.get('/meta/lookups')).json().branches[0];
+    const won = ok(await lucas.post('/opportunities', { contactId: c.id, planId: plan.id, cableMeters: 30, saleType: 'ativa', customerSuccess: false, branchId: branch.id }), 201).json().id;
     ok(await carlos.post(`/opportunities/${won}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${won}`)).json().rowVersion }));
+    // a empresa detentora já vem da filial da oportunidade
+    expect((await carlos.get(`/contracts/prefill?opportunityId=${won}`)).json().suggestion.version.zenith.holderCompany).toBe(branch.name);
     const version = { number: `ZEN-${stamp}`, object: 'Conectividade fictícia', signedAt: today, startAt: today, termMonths: 12, monthlyCents: 100_000, items: [{ planId: null, description: 'Link', qty: 1, unitCents: 100_000 }] };
     const bad = await carlos.post('/contracts', { opportunityId: won, billingType: 'recorrente', commercialOwnerId: lucas.me.user.id, version: { ...version, zenith: { ...zenith, alias: '', cdiUnits: null } } });
     // SLA definido sem as metas também é recusado

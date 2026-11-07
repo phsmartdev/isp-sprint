@@ -142,7 +142,7 @@ function ContractViewSettings() {
   );
 }
 
-/** Listas do cadastro Zenith: empresas detentoras (sugestões no contrato) e tipos de SLA (iguais aos do Zenith). */
+/** Lista do cadastro Zenith: tipos de SLA (iguais aos do Zenith). A empresa detentora vem da filial. */
 function ZenithLists() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -155,9 +155,8 @@ function ZenithLists() {
   return (
     <section className="card p-5" aria-label="Cadastro Zenith">
       <h2 className="text-lg font-bold text-ink">Cadastro Zenith</h2>
-      <p className="mb-4 max-w-3xl text-sm text-muted">Use os mesmos nomes do Zenith. Um por linha.</p>
+      <p className="mb-4 max-w-3xl text-sm text-muted">Tipos de SLA com os mesmos nomes do Zenith, um por linha. A empresa detentora do contrato é a filial da oportunidade (Configurações → Filiais).</p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <FormField label="Empresas detentoras do contrato" htmlFor="zl-h" hint="Aparecem como sugestão no contrato."><Textarea id="zl-h" rows={5} value={v.holders} onChange={(e) => setV({ ...v, holders: e.target.value })} /></FormField>
         <FormField label="Tipos de SLA" htmlFor="zl-s" hint="Lista fechada no contrato. Mantenha “Nenhum SLA definido”."><Textarea id="zl-s" rows={5} value={v.slaTypes} onChange={(e) => setV({ ...v, slaTypes: e.target.value })} /></FormField>
       </div>
       <div className="mt-3 flex justify-end"><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar listas</Button></div>
