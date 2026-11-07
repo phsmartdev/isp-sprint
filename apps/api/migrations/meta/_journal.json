@@ -785,6 +785,13 @@
       "when": 1794011375635,
       "tag": "0111_tarefa_componente_jornada",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1794015115870,
+      "tag": "0112_qualificacao_tarefa",
+      "breakpoints": true
     }
   ]
 }

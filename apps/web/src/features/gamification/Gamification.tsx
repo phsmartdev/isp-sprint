@@ -14,13 +14,27 @@ import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 
 export type DispersionTone = 'verde' | 'amarelo' | 'vermelho' | 'sem_dados';
-export type Role = 'colaborador' | 'lideranca';
-export type MemberScore = { userId: string; role: Role; own: number; direct: number; participation: number; journey: number; teamAverage: number; score: number; tasks: number; wins: number };
+export type MemberScore = {
+  userId: string; levelKey: string; levelName: string; lead: boolean;
+  direct: number; participation: number; journey: number; extra: number; points: number; expected: number;
+  attainment: number; extraAttainment: number; own: number; teamAverage: number; dispersionScore: number; area: number; score: number;
+  tasks: number; wins: number;
+};
 export type Member = MemberScore & { name: string; hasPhoto: boolean };
 export type TeamRow = { teamId: string; name: string; points: number; average: number; canManage: boolean; dispersion: { cv: number | null; tone: DispersionTone; min: number; max: number } | null; members: Member[] | null };
 export type Board = { teams: TeamRow[]; me: MemberScore | null };
-export type JourneyDef = { key: string; name: string; pipelineId: string; wonPoints: number; components: { key: string; name: string; stageKey: string | null; points: number; dueDays: number }[] };
-export type GamSettings = { journeys: JourneyDef[]; hierarchyWeights: Record<Role, { ownBp: number; teamBp: number }>; participationMultiplierBp: number; dispersionYellowBp: number; dispersionRedBp: number; points: Record<string, number>; levels: { name: string; minPoints: number }[]; teamIds: string[] };
+export type JourneyComponentDef = { key: string; name: string; stageKey: string | null; points: number; dueDays: number; level?: string | null };
+export type JourneyDef = { key: string; name: string; pipelineId: string; wonPoints: number; components: JourneyComponentDef[] };
+export type CompetencyLevel = { key: string; name: string; rank: number; expectedMonthlyPoints: number; scoresTasks: boolean; weights: { ownBp: number; teamBp: number; dispersionBp: number; areaBp: number } };
+export type Bonuses = { onTimeBp: number; adherenceBp: number; extraPerLevelBp: number; extraCapBp: number; scoreCapBp: number };
+export type GamSettings = {
+  journeys: JourneyDef[]; teamIds: string[]; points: Record<string, number>; participationMultiplierBp: number;
+  competencyLevels: CompetencyLevel[]; assignments: Record<string, string>; defaultLevelKey: string; defaultLeadLevelKey: string; bonuses: Bonuses;
+  dispersionYellowBp: number; dispersionRedBp: number; levels: { name: string; minPoints: number }[];
+};
+/** "60% próprio + 40% time + …" */
+export const compositionText = (l: CompetencyLevel) => [[l.weights.ownBp, 'próprio'], [l.weights.teamBp, 'média do time'], [l.weights.dispersionBp, 'dispersão do time'], [l.weights.areaBp, 'área']].filter(([w]) => (w as number) > 0).map(([w, n]) => `${(w as number) / 100}% ${n}`).join(' + ');
+export const fmtPct = (n: number) => `${n.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 export type GamData = {
   pending: boolean; proposal: { version: number; note: string; canDecide: boolean } | null;
   settings: GamSettings | null; settingsVersion: number | null; canConfigure: boolean; month: string; year: number; monthBoard: Board | null; yearBoard: Board | null;
@@ -103,7 +117,7 @@ export function TeamPodiumAside() {
         <ul className="mt-2 space-y-2">
           {d.monthBoard.teams.map((t) => (
             <li key={t.teamId} className="border border-line p-2">
-              <p className="flex items-baseline justify-between text-sm"><span className="font-semibold text-ink">{t.name}</span><span className="num text-muted">média {fmtPts(t.average)}</span></p>
+              <p className="flex items-baseline justify-between text-sm"><span className="font-semibold text-ink">{t.name}</span><span className="num text-muted">média {fmtPct(t.average)}</span></p>
               {t.dispersion && <p className={clsx('mt-1 border-l-4 px-2 py-0.5 text-xs font-semibold', DISPERSION_STYLE[t.dispersion.tone])}>{DISPERSION_LABEL[t.dispersion.tone]}{t.dispersion.cv != null && ` · dispersão ${Math.round(t.dispersion.cv * 100)}%`}</p>}
             </li>
           ))}
@@ -116,7 +130,7 @@ export function TeamPodiumAside() {
 
 type ScoreData = {
   journey: { key: string; name: string; wonPoints: number } | null;
-  components?: { key: string; name: string; stageKey: string | null; points: number; task: { id: string; title: string; done: boolean; completedAt: string | null; dueAt: string | null; by: string | null } | null }[];
+  components?: { key: string; name: string; stageKey: string | null; points: number; level: string | null; task: { id: string; title: string; done: boolean; completedAt: string | null; dueAt: string | null; by: string | null; qualification: 'aprovada' | 'reprovada' | null; canQualify: boolean; earned: number; extra: boolean; bonus: { onTime: boolean; adherence: boolean; levelsAbove: number } | null } | null }[];
   earned?: number; won?: boolean; winShare?: { userId: string; name: string | null; points: number }[];
 };
 
@@ -128,6 +142,11 @@ export function JourneyScore({ oppId, onOpen, editable }: { oppId: string; onOpe
   const add = useMutation({
     mutationFn: (componentKey: string) => api(`/opportunities/${oppId}/score/tasks`, { method: 'POST', body: { componentKey } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['tasks', 'score', oppId] }); void qc.invalidateQueries({ queryKey: ['opp-tasks'] }); void qc.invalidateQueries({ queryKey: ['tasks'] }); toast({ tone: 'success', message: 'Tarefa da jornada criada' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const qualify = useMutation({
+    mutationFn: ({ taskId, result }: { taskId: string; result: 'aprovada' | 'reprovada' | null }) => api(`/opportunities/${oppId}/score/tasks/${taskId}/qualify`, { method: 'POST', body: { result } }),
+    onSuccess: (_d, v) => { void qc.invalidateQueries({ queryKey: ['tasks'] }); toast({ tone: 'success', message: v.result === 'aprovada' ? 'Tarefa aprovada: bônus de aderência' : v.result === 'reprovada' ? 'Tarefa reprovada (os pontos da tarefa ficam)' : 'Qualificação retirada' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (q.isLoading) return <LoadingRows rows={2} />;
@@ -145,15 +164,29 @@ export function JourneyScore({ oppId, onOpen, editable }: { oppId: string; onOpe
             {c.task?.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-[#15803D]" aria-label="concluída" /> : <Circle className="h-4 w-4 shrink-0 text-muted" aria-label="pendente" />}
             <span className="min-w-0 flex-1">
               {c.task ? <button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => onOpen(c.task!.id)}>{c.name}</button> : <span className="font-semibold text-ink">{c.name}</span>}
-              <span className="block text-xs text-muted">{c.task ? (c.task.done ? `Concluída por ${c.task.by ?? '—'}${c.task.completedAt ? ` em ${fmtDate(c.task.completedAt)}` : ''}` : `Com ${c.task.by ?? '—'}${c.task.dueAt ? `, prazo ${fmtDate(c.task.dueAt)}` : ''}`) : 'Ainda não criada (nasce quando a oportunidade entra na etapa)'}</span>
+              <span className="block text-xs text-muted">{c.task ? (c.task.done ? `Concluída por ${c.task.by ?? '—'}${c.task.completedAt ? ` em ${fmtDate(c.task.completedAt)}` : ''}` : `Com ${c.task.by ?? '—'}${c.task.dueAt ? `, prazo ${fmtDate(c.task.dueAt)}` : ''}`) : 'Ainda não criada (nasce quando a oportunidade entra na etapa)'}{c.level && ` · alçada ${c.level}`}</span>
+              {c.task?.done && (
+                <span className="mt-0.5 flex flex-wrap gap-1 text-2xs font-semibold">
+                  {c.task.bonus?.onTime && <span className="bg-[#ECFDF3] px-1.5 py-0.5 text-[#166534]">no prazo</span>}
+                  {c.task.qualification === 'aprovada' && <span className="bg-[#ECFDF3] px-1.5 py-0.5 text-[#166534]">aprovada: aderência</span>}
+                  {c.task.qualification === 'reprovada' && <span className="bg-surface-2 px-1.5 py-0.5 text-muted">reprovada</span>}
+                  {c.task.extra && <span className="bg-[#FFF7E6] px-1.5 py-0.5 text-[#92400E]">crédito extra: acima da alçada</span>}
+                </span>
+              )}
+              {c.task?.canQualify && (
+                <span className="mt-1 flex gap-2 text-xs">
+                  <button type="button" className="font-semibold text-primary hover:underline" onClick={() => qualify.mutate({ taskId: c.task!.id, result: c.task!.qualification === 'aprovada' ? null : 'aprovada' })}>{c.task.qualification === 'aprovada' ? 'Tirar aprovação' : 'Aprovar'}</button>
+                  {c.task.qualification !== 'reprovada' && <button type="button" className="font-semibold text-muted hover:underline" onClick={() => qualify.mutate({ taskId: c.task!.id, result: 'reprovada' })}>Reprovar</button>}
+                </span>
+              )}
             </span>
-            <span className="num shrink-0 font-bold text-ink" aria-label={`${c.points} pontos`}>+{c.points} pts</span>
+            <span className="num shrink-0 text-right font-bold text-ink" aria-label={`${c.points} pontos`}>{c.task?.done && c.task.earned !== c.points ? <>+{fmtPts(c.task.earned)} pts<span className="block text-2xs font-normal text-muted">base {c.points}</span></> : `+${c.points} pts`}</span>
             {!c.task && editable && <Button size="sm" variant="outline" icon={<Plus className="h-3.5 w-3.5" />} loading={add.isPending} onClick={() => add.mutate(c.key)}>Criar</Button>}
           </li>
         ))}
       </ul>
       {d.won && d.winShare && d.winShare.length > 0 && <p className="mt-2 text-xs text-muted">Negócio ganho: {d.journey!.wonPoints} pts divididos entre {d.winShare.map((w) => `${w.name ?? '—'} (${fmtPts(w.points)})`).join(', ')}.</p>}
-      <p className="mt-1 text-xs text-muted">Concluir a tarefa pontua quem concluiu; excluir ou reabrir tira os pontos.</p>
+      <p className="mt-1 text-xs text-muted">Concluir a tarefa pontua quem concluiu (mais bônus se for no prazo ou aprovada pela gerência); excluir ou reabrir tira os pontos.</p>
     </section>
   );
 }

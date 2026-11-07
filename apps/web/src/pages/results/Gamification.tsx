@@ -8,24 +8,24 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Settings2, Trophy, Trash2, Plus } from 'lucide-react';
-import { BUSINESS_EVENT_TYPES, GAMIFICATION_ROLE_LABELS, GAMIFICATION_ROLES } from '@isp/domain';
+import { BUSINESS_EVENT_TYPES } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDate } from '../../lib/format';
 import { Avatar, Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
-import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore } from '../../features/gamification/Gamification';
+import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore, type CompetencyLevel, compositionText, fmtPct } from '../../features/gamification/Gamification';
 import { slugKey } from '@isp/domain';
 
 type SettingsResp = {
+  people: { id: string; name: string; teamIds: string[]; lead: boolean }[];
   pipelines: { id: string; name: string; stages: { key: string; name: string }[] }[];
   settings: GamSettings | null; version: number | null; start: GamSettings; canConfigure: boolean; teams: { id: string; name: string }[];
   proposal: { version: number; settings: GamSettings; note: string; createdAt: string; canDecide: boolean } | null;
   history: { version: number; note: string; status: 'proposta' | 'aprovada' | 'recusada'; decisionNote: string | null; decidedAt: string | null; createdAt: string; by: string | null }[];
 };
 const eventLabel = (k: string) => BUSINESS_EVENT_TYPES.find((t) => t.key === k)?.label ?? k;
-const ROLE_SHORT = { colaborador: 'Colaborador', lideranca: 'Liderança' } as const;
 
 export function GamificationPage() {
   const [month, setMonth] = useState('');
@@ -55,11 +55,16 @@ export function GamificationPage() {
 
 function Breakdown({ m, label }: { m: MemberScore | null; label: string }) {
   if (!m) return <p className="text-sm text-muted">Sem pontos em {label}.</p>;
-  const rows: [string, number][] = [['Tarefas da jornada', m.tasks], ['Negócios ganhos (parte de quem trabalhou)', m.wins], ['Eventos próprios', m.direct], ['Ajudando colegas', m.participation]];
+  const rows: [string, string][] = [
+    ['Tarefas da jornada', fmtPts(m.tasks)], ['Negócios ganhos (minha parte)', fmtPts(m.wins)], ['Eventos próprios', fmtPts(m.direct)], ['Ajudando colegas', fmtPts(m.participation)],
+    ['Crédito extra (acima da alçada)', fmtPts(m.extra)],
+    [`Meta do nível (${m.levelName})`, `${fmtPts(m.expected)} pts`],
+    ['Atingimento', `${fmtPct(m.attainment)}${m.extraAttainment ? ` + ${fmtPct(m.extraAttainment)} extra` : ''}`],
+    ['Média do time', fmtPct(m.teamAverage)],
+  ];
   return (
     <dl className="text-sm">
-      {rows.map(([l, v]) => <div key={l} className="flex justify-between border-b border-line py-1"><dt className="text-muted">{l}</dt><dd className="num font-semibold">{fmtPts(v)}</dd></div>)}
-      <div className="flex justify-between border-b border-line py-1"><dt className="text-muted">Média do time</dt><dd className="num font-semibold">{fmtPts(m.teamAverage)}</dd></div>
+      {rows.map(([l, v]) => <div key={l} className="flex justify-between gap-2 border-b border-line py-1"><dt className="text-muted">{l}</dt><dd className="num text-right font-semibold">{v}</dd></div>)}
       <div className="flex justify-between py-1.5"><dt className="font-semibold text-ink">Nota</dt><dd className="num text-lg font-extrabold text-ink">{fmtPts(m.score)}</dd></div>
     </dl>
   );
@@ -77,7 +82,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
             {myGold && <BkGoldMedal size={52} year={d.year} />}
             <div className="flex-1">
               <p className="text-sm text-muted">Minha nota em {d.year}</p>
-              <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me?.score ?? 0)}</span> pts{d.me?.level && <span className="ml-2 text-base font-semibold text-primary">nível {d.me.level}</span>}</p>
+              <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me?.score ?? 0)}</span> pts{d.me?.level && <span className="ml-2 text-base font-semibold text-primary">faixa {d.me.level}</span>}</p>
               {myGold && <p className="text-sm font-semibold text-[#8A6610]">Selo BK de Qualidade: primeiro lugar do ano</p>}
             </div>
             <Link to="/meus-pontos" className="text-sm font-semibold text-primary hover:underline">De onde vieram meus pontos</Link>
@@ -91,7 +96,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
           <section key={t.teamId} aria-label={`Time ${t.name}`} className="card p-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-lg font-bold text-ink">{t.name}<span className="ml-2 text-sm font-normal text-muted">{monthName}</span></h2>
-              <p className="text-sm text-muted">Média do time <span className="num font-bold text-ink">{fmtPts(t.average)}</span></p>
+              <p className="text-sm text-muted">Média do time <span className="num font-bold text-ink">{fmtPct(t.average)}</span></p>
             </div>
             {t.dispersion && (
               <div className={clsx('mb-3 border-l-4 px-3 py-2 text-sm', DISPERSION_STYLE[t.dispersion.tone])} role="status" aria-label={`Dispersão do time ${t.name}`}>
@@ -104,15 +109,15 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
                 <p className="mb-1 text-xs text-muted">Visível só para a liderança, como apoio à gestão do time. As pessoas não veem a nota umas das outras.</p>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[680px] text-left text-sm">
-                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Tarefas da jornada', 'Ganhos', 'Eventos', 'Ajudando colegas', 'Nota'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Nível', 'Pontos', 'Atingimento', 'Extra', 'Nota'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
                     <tbody>
                       {[...t.members].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map((m) => (
                         <tr key={m.userId} className="border-t border-line">
-                          <td className="px-2 py-1.5"><span className="flex items-center gap-2"><Avatar name={m.name} userId={m.userId} hasPhoto={m.hasPhoto} size={28} /><span className="font-semibold text-ink">{m.name}</span>{m.role === 'lideranca' && <Chip tone="blue">Liderança</Chip>}</span></td>
-                          <td className="num px-2 py-1.5">{fmtPts(m.tasks)}</td>
-                          <td className="num px-2 py-1.5">{fmtPts(m.wins)}</td>
-                          <td className="num px-2 py-1.5">{fmtPts(m.direct)}</td>
-                          <td className="num px-2 py-1.5">{fmtPts(m.participation)}</td>
+                          <td className="px-2 py-1.5"><span className="flex items-center gap-2"><Avatar name={m.name} userId={m.userId} hasPhoto={m.hasPhoto} size={28} /><span className="font-semibold text-ink">{m.name}</span>{m.lead && <Chip tone="blue">Liderança</Chip>}</span></td>
+                          <td className="px-2 py-1.5 text-xs">{m.levelName}</td>
+                          <td className="num px-2 py-1.5">{fmtPts(m.points)} / {fmtPts(m.expected)}</td>
+                          <td className="num px-2 py-1.5">{fmtPct(m.attainment)}</td>
+                          <td className="num px-2 py-1.5">{m.extraAttainment ? `+${fmtPct(m.extraAttainment)}` : '—'}</td>
                           <td className="num px-2 py-1.5 font-bold">{fmtPts(m.score)}</td>
                         </tr>
                       ))}
@@ -136,7 +141,8 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
           <p>Cada tarefa da jornada vale pontos para quem conclui. Excluir ou reabrir tira os pontos.</p>
           <p className="mt-1">Negócio ganho: o peso do ganho é dividido entre quem trabalhou nas tarefas daquela oportunidade.</p>
           <p className="mt-1">Ajudar na venda do colega vale {fmtPts(st.participationMultiplierBp / 10_000)}× o crédito.</p>
-          <ul className="mt-1 list-disc pl-4">{GAMIFICATION_ROLES.map((r) => <li key={r}>{ROLE_SHORT[r]}: {st.hierarchyWeights[r].ownBp / 100}% próprio + {st.hierarchyWeights[r].teamBp / 100}% média do time</li>)}</ul>
+          <p className="mt-1">A nota é proporcional ao nível: pontos do mês ÷ meta do nível (teto {st.bonuses.scoreCapBp / 100}%). Bônus: no prazo +{st.bonuses.onTimeBp / 100}%, aprovada pela gerência +{st.bonuses.adherenceBp / 100}%. Acima da alçada vira crédito extra (+{st.bonuses.extraPerLevelBp / 100}% por nível, até +{st.bonuses.extraCapBp / 100} p.p.).</p>
+          <ul className="mt-1 list-disc pl-4">{st.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts/mês · ` : ''}{compositionText(l)}</li>)}</ul>
           <p className="mt-1">Sem ranking: só o primeiro lugar do ano recebe o Selo BK de Qualidade. Regra aprovada v{d.settingsVersion}.</p>
         </section>
       </aside>
@@ -167,7 +173,7 @@ function ProposalBanner() {
         <div>
           {s.journeys.length > 0 && <>
             <p className="font-semibold text-ink">Jornadas</p>
-            <ul className="mb-2 mt-1 space-y-0.5">{s.journeys.map((j) => <li key={j.key}><span className="font-semibold">{j.name}</span>: {j.components.map((c) => `${c.name} ${c.points}`).join(' · ')} · ganho {j.wonPoints}</li>)}</ul>
+            <ul className="mb-2 mt-1 space-y-0.5">{s.journeys.map((j) => <li key={j.key}><span className="font-semibold">{j.name}</span>: {j.components.map((c) => `${c.name} ${c.points}${c.level ? ` (${c.level.toUpperCase()})` : ''}`).join(' · ')} · ganho {j.wonPoints}</li>)}</ul>
           </>}
           <p className="font-semibold text-ink">Pontos por evento</p>
           <ul className="mt-1 space-y-0.5">{Object.entries(s.points).filter(([, v]) => v > 0).map(([k, v]) => <li key={k} className="flex justify-between gap-2"><span>{eventLabel(k)}</span><span className="num font-semibold">{v}</span></li>)}</ul>
@@ -176,15 +182,16 @@ function ProposalBanner() {
           <p className="font-semibold text-ink">Colaboração e hierarquia</p>
           <ul className="mt-1 space-y-0.5">
             <li>Ajuda ao colega vale {fmtPts(s.participationMultiplierBp / 10_000)}×</li>
-            {GAMIFICATION_ROLES.map((r) => <li key={r}>{ROLE_SHORT[r]}: {s.hierarchyWeights[r].ownBp / 100}% próprio + {s.hierarchyWeights[r].teamBp / 100}% do time</li>)}
+            {s.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts · ` : ''}{compositionText(l)}</li>)}
+            <li>Bônus: no prazo +{s.bonuses.onTimeBp / 100}% · aprovada +{s.bonuses.adherenceBp / 100}% · acima da alçada +{s.bonuses.extraPerLevelBp / 100}%/nível (até +{s.bonuses.extraCapBp / 100} p.p.) · teto {s.bonuses.scoreCapBp / 100}%</li>
             <li>Participam: {teamNames}</li>
           </ul>
         </div>
         <div>
-          <p className="font-semibold text-ink">Dispersão e níveis</p>
+          <p className="font-semibold text-ink">Dispersão e faixas</p>
           <ul className="mt-1 space-y-0.5">
             <li>Atenção a partir de {s.dispersionYellowBp / 100}%, problema a partir de {s.dispersionRedBp / 100}%</li>
-            {s.levels.map((l) => <li key={l.name}>{l.name}: {l.minPoints.toLocaleString('pt-BR')} pts no ano</li>)}
+            {s.levels.map((l) => <li key={l.name}>{l.name}: nota {l.minPoints}+ no ano</li>)}
           </ul>
         </div>
       </div>
@@ -223,20 +230,8 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
     <Modal open onClose={onClose} title="Regra de pontuação" size="xl" footer={<div className="flex justify-end gap-2"><Button onClick={onClose}>Fechar</Button><Button variant="primary" disabled={note.trim().length < 3} loading={save.isPending} onClick={() => save.mutate()}>Enviar para aprovação</Button></div>}>
       {err && <p role="alert" className="mb-2 bg-danger-soft px-3 py-2 text-sm text-danger">{err}</p>}
       <Notice tone="info">Cada mudança vira uma proposta e só vale depois de aprovada por quem administra a Gestão de Times (quem propõe não aprova). {meta.version ? `Hoje vale a v${meta.version}.` : 'Ainda não há regra aprovada.'}</Notice>
-      <JourneysEditor value={v.journeys ?? []} pipelines={meta.pipelines} onChange={(journeys) => setV({ ...v, journeys })} />
-      <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Pesos da nota por hierarquia (próprio + time = 100%)</legend>
-        <div className="mt-1 grid gap-3 sm:grid-cols-2">
-          {GAMIFICATION_ROLES.map((r) => (
-            <div key={r} className="border border-line p-2">
-              <p className="text-sm font-semibold text-ink">{GAMIFICATION_ROLE_LABELS[r]}</p>
-              <div className="mt-1 flex items-center gap-2 text-sm">
-                <label className="flex items-center gap-1">Próprio <Input aria-label={`Peso próprio: ${GAMIFICATION_ROLE_LABELS[r]}`} inputMode="numeric" className="num h-8 w-[70px]" value={String(v.hierarchyWeights[r].ownBp / 100)} onChange={(e) => { const own = Math.min(10_000, Math.round(num(e.target.value) * 100)); setV({ ...v, hierarchyWeights: { ...v.hierarchyWeights, [r]: { ownBp: own, teamBp: 10_000 - own } } }); }} />%</label>
-                <span>+ time {v.hierarchyWeights[r].teamBp / 100}%</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </fieldset>
+      <JourneysEditor value={v.journeys ?? []} pipelines={meta.pipelines} levels={v.competencyLevels} onChange={(journeys) => setV({ ...v, journeys })} />
+      <LevelsEditor v={v} setV={setV} people={meta.people} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {pct('participationMultiplierBp', 'Valor da ajuda ao colega (%)', '100 = igual ao próprio; 150 = vale 1,5×')}
         {pct('dispersionYellowBp', 'Dispersão: atenção a partir de (%)')}
@@ -254,16 +249,16 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
           ))}
         </div>
       </fieldset>
-      <fieldset className="mt-4"><legend className="text-sm font-semibold text-ink">Níveis pela nota do ano</legend>
+      <fieldset className="mt-4"><legend className="text-sm font-semibold text-ink">Faixas pela nota do ano (nota mínima)</legend>
         <div className="mt-1 space-y-1">
           {v.levels.map((l, i) => (
             <div key={i} className="flex items-center gap-2">
-              <Input aria-label={`Nome do nível ${i + 1}`} className="h-8 w-[180px]" value={l.name} onChange={(e) => setV({ ...v, levels: v.levels.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-              <Input aria-label={`Pontos mínimos do nível ${i + 1}`} inputMode="numeric" className="num h-8 w-[110px]" value={String(l.minPoints)} onChange={(e) => setV({ ...v, levels: v.levels.map((x, j) => (j === i ? { ...x, minPoints: Number(e.target.value.replace(/\D/g, '') || 0) } : x)) })} />
-              <button type="button" aria-label={`Tirar nível ${i + 1}`} className="p-1 text-muted hover:text-danger" onClick={() => setV({ ...v, levels: v.levels.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" /></button>
+              <Input aria-label={`Nome da faixa ${i + 1}`} className="h-8 w-[180px]" value={l.name} onChange={(e) => setV({ ...v, levels: v.levels.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+              <Input aria-label={`Nota mínima da faixa ${i + 1}`} inputMode="numeric" className="num h-8 w-[110px]" value={String(l.minPoints)} onChange={(e) => setV({ ...v, levels: v.levels.map((x, j) => (j === i ? { ...x, minPoints: Number(e.target.value.replace(/\D/g, '') || 0) } : x)) })} />
+              <button type="button" aria-label={`Tirar faixa ${i + 1}`} className="p-1 text-muted hover:text-danger" onClick={() => setV({ ...v, levels: v.levels.filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}
-          <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setV({ ...v, levels: [...v.levels, { name: '', minPoints: (v.levels.at(-1)?.minPoints ?? 0) + 100 }] })}>Adicionar nível</Button>
+          <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setV({ ...v, levels: [...v.levels, { name: '', minPoints: (v.levels.at(-1)?.minPoints ?? 0) + 100 }] })}>Adicionar faixa</Button>
         </div>
       </fieldset>
       <FormField className="mt-4" label="Motivo da mudança" htmlFor="g-note" required><Input id="g-note" value={note} onChange={(e) => setNote(e.target.value)} /></FormField>
@@ -277,7 +272,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
 }
 
 /** Jornadas com pesos: cada tarefa (componente) de uma etapa do funil vale pontos para quem a conclui; o ganho tem peso próprio. */
-function JourneysEditor({ value, pipelines, onChange }: { value: JourneyDef[]; pipelines: SettingsResp['pipelines']; onChange: (v: JourneyDef[]) => void }) {
+function JourneysEditor({ value, pipelines, levels, onChange }: { value: JourneyDef[]; pipelines: SettingsResp['pipelines']; levels: CompetencyLevel[]; onChange: (v: JourneyDef[]) => void }) {
   const set = (i: number, j: Partial<JourneyDef>) => onChange(value.map((x, k) => (k === i ? { ...x, ...j } : x)));
   const free = pipelines.filter((p) => !value.some((j) => j.pipelineId === p.id));
   const unique = (base: string, used: string[]) => { let k = base, n = 2; while (used.includes(k)) k = `${base}_${n++}`; return k; };
@@ -296,7 +291,7 @@ function JourneysEditor({ value, pipelines, onChange }: { value: JourneyDef[]; p
                 <button type="button" className="mb-2 p-1 text-muted hover:text-danger" aria-label={`Tirar jornada ${j.name}`} onClick={() => onChange(value.filter((_, k) => k !== i))}><Trash2 className="h-4 w-4" /></button>
               </div>
               <table className="mt-2 w-full text-sm">
-                <thead className="text-xs text-muted"><tr><th className="py-1 text-left font-medium">Tarefa</th><th className="py-1 text-left font-medium">Etapa</th><th className="py-1 text-left font-medium">Pontos</th><th className="py-1 text-left font-medium">Prazo (dias)</th><th /></tr></thead>
+                <thead className="text-xs text-muted"><tr><th className="py-1 text-left font-medium">Tarefa</th><th className="py-1 text-left font-medium">Etapa</th><th className="py-1 text-left font-medium">Alçada</th><th className="py-1 text-left font-medium">Pontos</th><th className="py-1 text-left font-medium">Prazo (dias)</th><th /></tr></thead>
                 <tbody>
                   {j.components.map((c, ci) => {
                     const setC = (x: Partial<JourneyDef['components'][number]>) => set(i, { components: j.components.map((y, k) => (k === ci ? { ...y, ...x } : y)) });
@@ -304,6 +299,7 @@ function JourneysEditor({ value, pipelines, onChange }: { value: JourneyDef[]; p
                       <tr key={c.key} className="border-t border-line">
                         <td className="py-1 pr-2"><Input aria-label={`Tarefa ${ci + 1} da jornada ${j.name}`} className="h-8" value={c.name} onChange={(e) => setC({ name: e.target.value })} /></td>
                         <td className="py-1 pr-2"><Select aria-label={`Etapa da tarefa ${ci + 1} da jornada ${j.name}`} className="h-8" value={c.stageKey ?? ''} onChange={(e) => setC({ stageKey: e.target.value || null })}><option value="">Na criação</option>{(p?.stages ?? []).filter((s) => s.key !== 'ganha' && s.key !== 'perdida').map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}</Select></td>
+                        <td className="py-1 pr-2"><Select aria-label={`Alçada da tarefa ${ci + 1} da jornada ${j.name}`} className="h-8" value={c.level ?? ''} onChange={(e) => setC({ level: e.target.value || null })}><option value="">Qualquer nível</option>{levels.filter((l) => l.scoresTasks).map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}</Select></td>
                         <td className="py-1 pr-2"><Input aria-label={`Pontos da tarefa ${ci + 1} da jornada ${j.name}`} inputMode="numeric" className="num h-8 w-[80px]" value={String(c.points)} onChange={(e) => setC({ points: Number(e.target.value.replace(/\D/g, '') || 0) })} /></td>
                         <td className="py-1 pr-2"><Input aria-label={`Prazo da tarefa ${ci + 1} da jornada ${j.name}`} inputMode="numeric" className="num h-8 w-[70px]" value={String(c.dueDays)} onChange={(e) => setC({ dueDays: Number(e.target.value.replace(/\D/g, '') || 0) })} /></td>
                         <td><button type="button" className="p-1 text-muted hover:text-danger" aria-label={`Tirar tarefa ${ci + 1} da jornada ${j.name}`} onClick={() => set(i, { components: j.components.filter((_, k) => k !== ci) })}><Trash2 className="h-4 w-4" /></button></td>
@@ -319,5 +315,61 @@ function JourneysEditor({ value, pipelines, onChange }: { value: JourneyDef[]; p
         {free.length > 0 && <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => { const p = free[0]!; onChange([...value, { key: unique(slugKey(p.name), value.map((j) => j.key)), name: `Jornada ${p.name}`, pipelineId: p.id, wonPoints: 0, components: [] }]); }}>Adicionar jornada</Button>}
       </div>
     </fieldset>
+  );
+}
+
+/** Níveis de competência (meta e composição da nota), quem está em cada nível e os bônus. */
+function LevelsEditor({ v, setV, people }: { v: GamSettings; setV: (x: GamSettings) => void; people: SettingsResp['people'] }) {
+  const n = (s: string) => Number(s.replace(',', '.').replace(/[^\d.]/g, '') || 0);
+  const setL = (i: number, x: Partial<CompetencyLevel>) => setV({ ...v, competencyLevels: v.competencyLevels.map((l, k) => (k === i ? { ...l, ...x } : l)) });
+  const setW = (i: number, key: keyof CompetencyLevel['weights'], val: string) => setL(i, { weights: { ...v.competencyLevels[i]!.weights, [key]: Math.round(n(val) * 100) } });
+  const bon = (key: keyof GamSettings['bonuses'], label: string, hint?: string) => (
+    <FormField label={label} htmlFor={`b-${key}`} hint={hint}><Input id={`b-${key}`} inputMode="numeric" className="num" value={String(v.bonuses[key] / 100)} onChange={(e) => setV({ ...v, bonuses: { ...v.bonuses, [key]: Math.round(n(e.target.value) * 100) } })} /></FormField>
+  );
+  return (
+    <>
+      <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Níveis de competência: meta de pontos e composição da nota (soma 100%)</legend>
+        <div className="mt-1 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="text-xs text-muted"><tr>{['Nível', 'Ordem', 'Pontua tarefas', 'Meta/mês', 'Próprio %', 'Time %', 'Dispersão %', 'Área %'].map((h) => <th key={h} className="py-1 pr-2 text-left font-medium">{h}</th>)}</tr></thead>
+            <tbody>
+              {v.competencyLevels.map((l, i) => {
+                const sum = l.weights.ownBp + l.weights.teamBp + l.weights.dispersionBp + l.weights.areaBp;
+                return (
+                  <tr key={l.key} className="border-t border-line">
+                    <td className="py-1 pr-2"><Input aria-label={`Nome do nível ${l.key}`} className="h-8 w-[220px]" value={l.name} onChange={(e) => setL(i, { name: e.target.value })} /></td>
+                    <td className="py-1 pr-2"><Input aria-label={`Ordem do nível ${l.key}`} inputMode="numeric" className="num h-8 w-[56px]" value={String(l.rank)} onChange={(e) => setL(i, { rank: n(e.target.value) })} /></td>
+                    <td className="py-1 pr-2"><input type="checkbox" aria-label={`Nível ${l.key} pontua tarefas`} checked={l.scoresTasks} onChange={(e) => setL(i, { scoresTasks: e.target.checked })} /></td>
+                    <td className="py-1 pr-2"><Input aria-label={`Meta do nível ${l.key}`} inputMode="numeric" className="num h-8 w-[70px]" value={String(l.expectedMonthlyPoints)} onChange={(e) => setL(i, { expectedMonthlyPoints: n(e.target.value) })} /></td>
+                    {(['ownBp', 'teamBp', 'dispersionBp', 'areaBp'] as const).map((k) => <td key={k} className="py-1 pr-2"><Input aria-label={`${k} do nível ${l.key}`} inputMode="numeric" className={`num h-8 w-[60px] ${sum !== 10_000 ? 'border-danger' : ''}`} value={String(l.weights[k] / 100)} onChange={(e) => setW(i, k, e.target.value)} /></td>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </fieldset>
+      <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Quem está em cada nível</legend>
+        <p className="text-xs text-muted">Sem escolha, vale o padrão: {v.competencyLevels.find((l) => l.key === v.defaultLevelKey)?.name} (quem lidera time: {v.competencyLevels.find((l) => l.key === v.defaultLeadLevelKey)?.name}).</p>
+        <div className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+          {people.map((p) => (
+            <label key={p.id} className="flex items-center justify-between gap-2 border-b border-line py-1 text-sm"><span>{p.name}{p.lead && <span className="text-xs text-muted"> · lidera time</span>}</span>
+              <Select aria-label={`Nível de ${p.name}`} className="h-8 w-[240px]" value={v.assignments[p.id] ?? ''} onChange={(e) => { const a = { ...v.assignments }; if (e.target.value) a[p.id] = e.target.value; else delete a[p.id]; setV({ ...v, assignments: a }); }}>
+                <option value="">Padrão</option>{v.competencyLevels.map((l) => <option key={l.key} value={l.key}>{l.name}</option>)}
+              </Select>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="mt-3"><legend className="text-sm font-semibold text-ink">Bônus e tetos (%)</legend>
+        <div className="mt-1 grid gap-3 sm:grid-cols-5">
+          {bon('onTimeBp', 'No prazo', 'sobre a tarefa')}
+          {bon('adherenceBp', 'Aprovada pela gerência', 'aderência, opcional')}
+          {bon('extraPerLevelBp', 'Acima da alçada', 'por nível acima')}
+          {bon('extraCapBp', 'Teto do extra', 'pontos percentuais')}
+          {bon('scoreCapBp', 'Teto do atingimento')}
+        </div>
+      </fieldset>
+    </>
   );
 }

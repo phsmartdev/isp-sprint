@@ -35,6 +35,9 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   await modal.getByRole('button', { name: 'Adicionar tarefa' }).first().click();
   await modal.getByLabel(/^Tarefa 1 da jornada/).fill('Conferir cadastro do cliente');
   await modal.getByLabel(/^Pontos da tarefa 1 da jornada/).fill('8');
+  // alçada da tarefa: N2; Lucas cadastrado como N1 → concluir é atividade acima da alçada (crédito extra)
+  await modal.getByLabel(/^Alçada da tarefa 1 da jornada/).selectOption('n2');
+  await modal.getByLabel('Nível de Lucas Lima').selectOption('n1');
   await modal.getByLabel('Motivo da mudança').fill('Jornada residencial com pesos');
   if (SHOTS) await modal.screenshot({ path: `${SHOTS}/regra-jornada.png` });
   await modal.getByRole('button', { name: 'Enviar para aprovação' }).click();
@@ -62,7 +65,10 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   expect((await page.request.patch(`/api/v1/activities/${taskId}`, { data: { completed: true, rowVersion: rv } })).status()).toBe(200);
   await page.reload();
   await expect(panel).toContainText('Concluída por Lucas');
-  await expect(panel).toContainText('feitos 8 pts');
+  // 8 × (1 + 20% no prazo) × (1 + 25% um nível acima) = 12
+  await expect(panel).toContainText('+12 pts');
+  await expect(panel).toContainText('no prazo');
+  await expect(panel).toContainText('crédito extra: acima da alçada');
   if (SHOTS) await panel.screenshot({ path: `${SHOTS}/pontos-jornada.png` });
 
   // a pessoa vê só a própria nota: sem ranking, sem pódio, sem colegas
@@ -78,7 +84,7 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   await page.getByRole('button', { name: /^Conta de / }).click();
   await page.getByRole('menuitem', { name: 'Meus pontos' }).click();
   const origin = page.getByRole('region', { name: 'De onde vieram os pontos' });
-  await expect(origin).toContainText('Tarefa da jornada');
+  await expect(origin).toContainText('Tarefa acima da alçada (extra)');
   await expect(origin).toContainText(`OP-${o.code}`);
   if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/meus-pontos.png` });
 
@@ -93,6 +99,14 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   const team = page.getByRole('region', { name: 'Time Residencial' });
   await expect(team.getByRole('status', { name: /Dispersão do time/ })).toBeVisible();
   await expect(team.getByRole('table')).toContainText('Lucas');
+  await expect(team.getByRole('table')).toContainText('N1 · Apoio');
+  // qualificação opcional pela liderança: aprovada soma aderência (8 × 1,5 × 1,25 = 15)
+  await page.goto(`/opportunities/${o.id}?aba=tarefas`);
+  const p2 = page.getByRole('region', { name: 'Pontos da jornada' });
+  await p2.getByRole('button', { name: 'Aprovar' }).click();
+  await expect(page.getByText('Tarefa aprovada: bônus de aderência')).toBeVisible();
+  await expect(p2).toContainText('+15 pts');
+  await expect(p2).toContainText('aprovada: aderência');
 
   // só o primeiro lugar do ano vê o selo na própria tela
   const g = await (await page.request.get('/api/v1/times/gamificacao')).json();

@@ -65,17 +65,18 @@ describe('Gamificação colaborativa', () => {
     expect(r.members).toBeNull();
     expect(r.dispersion).toBeNull();
     expect(g.monthBoard).not.toHaveProperty('podium');
-    expect(g.monthBoard.me).toMatchObject({ role: 'colaborador', own: 60 });
-    expect(g.monthBoard.me.score).toBeCloseTo(0.5 * 60 + 0.5 * g.monthBoard.me.teamAverage, 0);
+    // nível padrão N2 (meta 100 pts/mês): 60 pts = 60% de atingimento; nota = 60% próprio + 40% time
+    expect(g.monthBoard.me).toMatchObject({ levelKey: 'n2', points: 60, attainment: 60, own: 60 });
+    expect(g.monthBoard.me.score).toBeCloseTo(0.6 * 60 + 0.4 * g.monthBoard.me.teamAverage, 0);
     // a gestão vê o time em detalhe (ferramenta de gestão)
     const gm = ok(await carlos.get('/times/gamificacao?month=2024-02')).json();
     const rm = gm.monthBoard.teams.find((t: { name: string }) => t.name === 'Residencial');
     // Residencial: ana 22,5 (30 × 0,5 × 1,5) e lucas 60 → média 41,25
     expect(rm.members.map((m: { own: number }) => m.own).sort()).toEqual([22.5, 60]);
-    // liderança pesa mais o time: ana (líder) 20% próprio + 80% média dos times dela
+    // liderança (N4): 30% próprio + 50% time + 20% dispersão do time
     const anaRow = rm.members.find((p: { name: string }) => /Ana/.test(p.name));
-    expect(anaRow).toMatchObject({ role: 'lideranca', own: 22.5, hasPhoto: false });
-    expect(anaRow.score).toBeCloseTo(0.2 * 22.5 + 0.8 * anaRow.teamAverage, 0);
+    expect(anaRow).toMatchObject({ levelKey: 'n4', lead: true, own: 22.5, hasPhoto: false });
+    expect(anaRow.score).toBeCloseTo(0.3 * 22.5 + 0.5 * anaRow.teamAverage + 0.2 * anaRow.dispersionScore, 0);
     // ano 2024: lucas tem a maior nota → só o primeiro lugar recebe o selo
     expect(g.year).toBe(2024);
     expect(g.gold.map((x: { name: string }) => x.name)).toEqual([expect.stringMatching(/Lucas/)]);
@@ -100,7 +101,7 @@ describe('Gamificação colaborativa', () => {
   it('regras: só quem administra; validação; tipo desconhecido', async () => {
     const st = ok(await carlos.get('/times/gamificacao/settings')).json();
     expect((await lucas.post('/times/gamificacao/settings', { ...st.settings, note: 'Teste lucas' })).statusCode).toBe(403);
-    expect((await carlos.post('/times/gamificacao/settings', { ...st.settings, hierarchyWeights: { colaborador: { ownBp: 5_000, teamBp: 5_000 }, lideranca: { ownBp: 5_000, teamBp: 6_000 } }, note: 'teste' })).json().detail).toMatch(/somar 100%/);
+    expect((await carlos.post('/times/gamificacao/settings', { ...st.settings, competencyLevels: st.settings.competencyLevels.map((l: { weights: object }, i: number) => (i === 0 ? { ...l, weights: { ownBp: 5_000, teamBp: 6_000, dispersionBp: 0, areaBp: 0 } } : l)), note: 'teste' })).json().detail).toMatch(/somar 100%/);
     expect((await carlos.post('/times/gamificacao/settings', { ...st.settings, dispersionRedBp: 100, note: 'teste' })).statusCode).toBe(422);
     expect((await carlos.post('/times/gamificacao/settings', { ...st.settings, points: { inventado: 5 }, note: 'teste' })).json().detail).toMatch(/desconhecido/);
   });
@@ -153,7 +154,9 @@ describe('Jornadas de pontuação', () => {
     let sc = ok(await lucas.get(`/opportunities/${o.id}/score`)).json();
     expect(sc.journey).toMatchObject({ name: 'Jornada residencial', wonPoints: 36 });
     expect(sc.components.map((c: { points: number; task: { done: boolean } }) => [c.points, c.task.done])).toEqual([[8, true], [10, true]]);
-    expect(sc.earned).toBe(18);
+    // concluídas no prazo: +20% (8 → 9,6; 10 → 12)
+    expect(sc.earned).toBeCloseTo(21.6, 5);
+    expect(sc.components[0].task.bonus).toMatchObject({ onTime: true, adherence: false });
 
     // ganho: 36 dividido 8/18 e 10/18
     const r = ok(await carlos.get(`/opportunities/${o.id}`)).json();
@@ -162,7 +165,7 @@ describe('Jornadas de pontuação', () => {
     expect(sc.winShare.map((w: { points: number }) => w.points).sort((a: number, b: number) => a - b)).toEqual([16, 20]);
 
     let g = ok(await lucas.get('/times/gamificacao')).json();
-    expect(g.monthBoard.me).toMatchObject({ tasks: 8, wins: 16 });
+    expect(g.monthBoard.me).toMatchObject({ tasks: 9.6, wins: 16 });
     // sem ranking nem pódio para ninguém
     expect(g).not.toHaveProperty('monthBoard.podium');
     expect(g).not.toHaveProperty('monthBoard.people');
@@ -171,22 +174,28 @@ describe('Jornadas de pontuação', () => {
     expect(g.monthBoard.teams.every((t: { members: unknown }) => t.members === null)).toBe(true);
     const ga = ok(await ana.get('/times/gamificacao')).json();
     const resid = ga.monthBoard.teams.find((t: { name: string }) => t.name === 'Residencial');
-    expect(resid.members.find((m: { name: string }) => /Lucas/.test(m.name))).toMatchObject({ tasks: 8, wins: 16 });
+    expect(resid.members.find((m: { name: string }) => /Lucas/.test(m.name))).toMatchObject({ tasks: 9.6, wins: 16 });
 
     // cada um vê os próprios pontos (qualquer pessoa logada), sem colegas
     const mp = ok(await lucas.get('/me/pontos')).json();
-    expect(mp.monthScore).toMatchObject({ tasks: 8, wins: 16 });
-    expect(mp.items.filter((x: { opportunityId: string }) => x.opportunityId === o.id).map((x: { source: string; points: number }) => [x.source, x.points]).sort()).toEqual([['ganho', 16], ['tarefa', 8]]);
+    expect(mp.monthScore).toMatchObject({ tasks: 9.6, wins: 16 });
+    expect(mp.items.filter((x: { opportunityId: string }) => x.opportunityId === o.id).map((x: { source: string; points: number }) => [x.source, x.points]).sort()).toEqual([['ganho', 16], ['tarefa', 9.6]]);
     expect(mp).not.toHaveProperty('people');
     const oth = ok(await ana.get('/me/pontos')).json();
     expect(oth.items.some((x: { opportunityId: string; source: string }) => x.opportunityId === o.id && x.source === 'tarefa')).toBe(false);
+    // qualificação opcional: quem concluiu não qualifica; a liderança aprova → bônus de aderência (+30%)
+    expect((await lucas.post(`/opportunities/${o.id}/score/tasks/${ts[0]!.id}/qualify`, { result: 'aprovada' })).statusCode).toBe(403);
+    ok(await ana.post(`/opportunities/${o.id}/score/tasks/${ts[0]!.id}/qualify`, { result: 'aprovada' }));
+    expect(ok(await lucas.get('/times/gamificacao')).json().monthBoard.me.tasks).toBeCloseTo(12, 5); // 8 × (1 + 0,2 + 0,3)
+    ok(await ana.post(`/opportunities/${o.id}/score/tasks/${ts[0]!.id}/qualify`, { result: 'reprovada' }));
+    expect(ok(await lucas.get('/times/gamificacao')).json().monthBoard.me.tasks).toBeCloseTo(9.6, 5); // reprovada não tira pontos
     // reabrir tira os pontos da tarefa e a parte do ganho
     await complete(lucas, ts[0]!.id, false);
     g = ok(await lucas.get('/times/gamificacao')).json();
     expect(g.monthBoard.me).toMatchObject({ tasks: 0, wins: 0 });
     // concluir de novo e excluir: também sai
     await complete(lucas, ts[0]!.id, true);
-    expect(ok(await lucas.get('/times/gamificacao')).json().monthBoard.me.tasks).toBe(8);
+    expect(ok(await lucas.get('/times/gamificacao')).json().monthBoard.me.tasks).toBe(9.6);
     ok(await carlos.del(`/tasks/${ts[0]!.id}`));
     expect(ok(await lucas.get('/times/gamificacao')).json().monthBoard.me).toMatchObject({ tasks: 0, wins: 0 });
     // recriar à mão a tarefa excluída
