@@ -99,6 +99,9 @@ export const dataAdminRoutes = [
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(sc(s.contracts));
           // e-mails ficam (são correspondência real); só perdem o vínculo com contas e oportunidades apagadas
           await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(sc(s.mailThreads));
+          // brindes enviados às contas: o estoque baixado continua no histórico de movimentos (só perde o vínculo com o envio)
+          await tx.update(s.giftMovements).set({ deliveryId: null }).where(sc(s.giftMovements));
+          await tx.delete(s.giftDeliveries).where(sc(s.giftDeliveries));
           // ABM (depende de contatos)
           for (const tbl of [s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.accountRelations, s.structureMembers, s.structureContracts, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(sc(tbl));
           // Sucesso do Cliente (depende de contatos, contratos, oportunidades e atividades)

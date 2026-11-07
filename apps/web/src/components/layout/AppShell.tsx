@@ -5,7 +5,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star } from 'lucide-react';
+  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -338,6 +338,7 @@ export function AppShell() {
               {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
             </Link>
             <HeaderSupport />
+            <HeaderPlaybooks />
             <HeaderMoneyToggle />
             <MentionsMenu />
             <HelpButton />
@@ -349,5 +350,17 @@ export function AppShell() {
         </main>
       </div>
     </div>
+  );
+}
+
+/** Atalho global para a Central de Playbooks (fica ativo dentro de /playbooks). */
+function HeaderPlaybooks() {
+  const { pathname } = useLocation();
+  const on = pathname === '/playbooks' || pathname.startsWith('/playbooks/');
+  return (
+    <Link to="/playbooks" aria-label="Playbooks" title="Playbooks" aria-current={on ? 'page' : undefined}
+      className={clsx('flex h-11 w-11 items-center justify-center rounded-circle hover:bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary', on ? 'bg-navy text-lime hover:bg-navy' : 'text-ink')}>
+      <BookOpen className="h-6 w-6" strokeWidth={1.6} aria-hidden />
+    </Link>
   );
 }

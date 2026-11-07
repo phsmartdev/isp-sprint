@@ -48,6 +48,12 @@ import { TeamPanelPage } from './pages/results/TeamPanel';
 import { GoTo, TeamPeoplePage, TeamTrackingPage } from './pages/results/TeamHubs';
 import { GiftsPage } from './pages/Gifts';
 import { SupportPage } from './features/support/Support';
+const PlaybooksPage = lazy(() => import('./pages/playbooks/Library').then((m) => ({ default: m.PlaybooksPage })));
+const PlaybookReaderPage = lazy(() => import('./pages/playbooks/Reader').then((m) => ({ default: m.PlaybookReaderPage })));
+const PlaybookNewPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookNewPage })));
+const PlaybookEditorPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookEditorPage })));
+const PlaybookApprovePage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookApprovePage })));
+const PlaybookVersionsPage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookVersionsPage })));
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
@@ -137,6 +143,12 @@ export function App() {
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
         <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />
         <Route path="apoio" element={<SupportPage />} />
+        <Route path="playbooks" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybooksPage /></Suspense>} />
+        <Route path="playbooks/novo" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookNewPage /></Suspense>} />
+        <Route path="playbooks/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookReaderPage /></Suspense>} />
+        <Route path="playbooks/:id/editar" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookEditorPage /></Suspense>} />
+        <Route path="playbooks/:id/versoes" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookVersionsPage /></Suspense>} />
+        <Route path="playbooks/:id/aprovar/:versionId" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookApprovePage /></Suspense>} />
         <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
