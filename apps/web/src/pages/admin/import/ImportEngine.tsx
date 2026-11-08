@@ -17,6 +17,7 @@ import { errMsg } from '../../../features/contracts/shared';
 import { MappingEditor } from '../../../features/dataImport/MappingEditor';
 import { NewImport } from '../../../features/dataImport/NewImport';
 import { RunPanel } from '../../../features/dataImport/RunPanel';
+import { UploadFiles } from '../../../features/dataImport/UploadFiles';
 import { Counters, ModeChip, RunStatusChip, scopeText, useConnectors, type Caps, type RunSummary } from '../../../features/dataImport/shared';
 
 type Overview = { can: Caps; totals: { importacoes: number; andamento: number; concluidas: number; comErros: number; simulacoes: number; modelos: number }; records: { processados: number; criados: number; atualizados: number; ignorados: number; revisar: number; erros: number }; latest: RunSummary[] };
@@ -103,16 +104,12 @@ function Connectors() {
   const qc = useQueryClient();
   const toast = useToast();
   const [form, setForm] = useState<{ kind: 'rdstation_crm' | 'csv'; name: string; token: string } | null>(null);
-  const [upload, setUpload] = useState<{ id: string; entity: string; idColumn: string; file: File | null } | null>(null);
+  const [upload, setUpload] = useState<string | null>(null);
   const [tokenFor, setTokenFor] = useState<{ id: string; token: string } | null>(null);
   const inv = () => qc.invalidateQueries({ queryKey: ['import'] });
   const create = useMutation({ mutationFn: () => api('/admin/import/connectors', { method: 'POST', body: { kind: form!.kind, name: form!.name, token: form!.kind === 'rdstation_crm' ? form!.token : undefined } }), onSuccess: () => { setForm(null); void inv(); toast({ tone: 'success', message: 'Conector criado. Teste a conexão.' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const test = useMutation({ mutationFn: (id: string) => api<{ ok: boolean; detail: string }>(`/admin/import/connectors/${id}/test`, { method: 'POST' }), onSuccess: (r) => { void inv(); toast({ tone: r.ok ? 'success' : 'error', message: r.detail }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const patch = useMutation({ mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) => api(`/admin/import/connectors/${id}`, { method: 'PATCH', body }), onSuccess: () => { setTokenFor(null); void inv(); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  const send = useMutation({
-    mutationFn: async () => api<{ rows: number }>(`/admin/import/connectors/${upload!.id}/files`, { method: 'POST', body: { entity: upload!.entity, name: upload!.file!.name, idColumn: upload!.idColumn || null, content: await upload!.file!.text() } }),
-    onSuccess: (r) => { setUpload(null); void inv(); toast({ tone: 'success', message: `${r.rows} linha(s) recebidas` }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
-  });
   if (q.isLoading) return <LoadingRows rows={4} />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const can = q.data!.can.conectores;
@@ -130,7 +127,7 @@ function Connectors() {
             {can && <div className="flex flex-wrap gap-2">
               <Button size="sm" loading={test.isPending && test.variables === c.id} onClick={() => test.mutate(c.id)}>Testar conexão</Button>
               {c.kind === 'rdstation_crm' && <Button size="sm" variant="ghost" onClick={() => setTokenFor({ id: c.id, token: '' })}>Trocar token</Button>}
-              {c.kind === 'csv' && <Button size="sm" variant="ghost" icon={<FileUp className="h-4 w-4" />} onClick={() => setUpload({ id: c.id, entity: '', idColumn: '', file: null })}>Enviar arquivo</Button>}
+              {c.kind === 'csv' && <Button size="sm" variant="ghost" icon={<FileUp className="h-4 w-4" />} onClick={() => setUpload(c.id)}>Enviar arquivo (CSV ou Excel)</Button>}
               <Button size="sm" variant="ghost" onClick={() => patch.mutate({ id: c.id, body: { archived: !c.archived } })}>{c.archived ? 'Reativar' : 'Arquivar'}</Button>
             </div>}
           </li>
@@ -138,7 +135,7 @@ function Connectors() {
       )}
       <Modal open={!!form} onClose={() => setForm(null)} title="Novo conector" footer={<><Button onClick={() => setForm(null)}>Cancelar</Button><Button variant="primary" loading={create.isPending} disabled={!form || form.name.trim().length < 2 || (form.kind === 'rdstation_crm' && form.token.trim().length < 10)} onClick={() => create.mutate()}>Criar</Button></>}>
         {form && <div className="space-y-3">
-          <FormField label="Origem" htmlFor="cn-k"><Select id="cn-k" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as 'csv', name: e.target.value === 'csv' ? 'Arquivos CSV' : 'RD Station CRM' })}><option value="rdstation_crm">RD Station CRM (API)</option><option value="csv">Arquivos CSV</option></Select></FormField>
+          <FormField label="Origem" htmlFor="cn-k"><Select id="cn-k" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as 'csv', name: e.target.value === 'csv' ? 'Planilhas' : 'RD Station CRM' })}><option value="rdstation_crm">RD Station CRM (API)</option><option value="csv">Arquivos (CSV ou Excel)</option></Select></FormField>
           <FormField label="Nome" htmlFor="cn-n"><Input id="cn-n" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></FormField>
           {form.kind === 'rdstation_crm' && <FormField label="Token da API do RD Station CRM" htmlFor="cn-t" hint="No RD Station CRM: Perfil → Integrações → Token. Fica cifrado e não aparece de novo."><Input id="cn-t" type="password" autoComplete="off" value={form.token} onChange={(e) => setForm({ ...form, token: e.target.value })} /></FormField>}
         </div>}
@@ -146,13 +143,7 @@ function Connectors() {
       <Modal open={!!tokenFor} onClose={() => setTokenFor(null)} title="Trocar token" footer={<><Button onClick={() => setTokenFor(null)}>Cancelar</Button><Button variant="primary" disabled={(tokenFor?.token.trim().length ?? 0) < 10} loading={patch.isPending} onClick={() => patch.mutate({ id: tokenFor!.id, body: { token: tokenFor!.token } })}>Salvar</Button></>}>
         {tokenFor && <FormField label="Novo token" htmlFor="tk"><Input id="tk" type="password" autoComplete="off" value={tokenFor.token} onChange={(e) => setTokenFor({ ...tokenFor, token: e.target.value })} /></FormField>}
       </Modal>
-      <Modal open={!!upload} onClose={() => setUpload(null)} title="Enviar arquivo CSV" footer={<><Button onClick={() => setUpload(null)}>Cancelar</Button><Button variant="primary" loading={send.isPending} disabled={!upload?.file || (upload?.entity.length ?? 0) < 2} onClick={() => send.mutate()}>Enviar</Button></>}>
-        {upload && <div className="space-y-3">
-          <FormField label="Entidade (nome do conjunto)" htmlFor="up-e" hint="Ex.: empresas, contatos, negocios. Enviar de novo com o mesmo nome substitui o arquivo."><Input id="up-e" value={upload.entity} onChange={(e) => setUpload({ ...upload, entity: e.target.value.replace(/[^\w-]/g, '') })} /></FormField>
-          <FormField label="Coluna de ID" htmlFor="up-i" hint="Identificador estável de cada linha (evita duplicar em reimportações)."><Input id="up-i" value={upload.idColumn} onChange={(e) => setUpload({ ...upload, idColumn: e.target.value })} /></FormField>
-          <input type="file" accept=".csv,text/csv" aria-label="Arquivo CSV" onChange={(e) => setUpload({ ...upload, file: e.target.files?.[0] ?? null })} />
-        </div>}
-      </Modal>
+      {upload && <UploadFiles connectorId={upload} onClose={() => setUpload(null)} onDone={() => { setUpload(null); void inv(); }} />}
     </div>
   );
 }

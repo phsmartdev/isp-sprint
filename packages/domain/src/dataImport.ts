@@ -77,10 +77,11 @@ export type Transform =
   | { op: 'percent'; decimal: ',' | '.' }
   | { op: 'phone' } | { op: 'document' } | { op: 'email' }
   | { op: 'boolean'; trueValues: string[] }
-  | { op: 'equivalence'; table: string };
+  | { op: 'equivalence'; table: string }
+  | { op: 'split_first'; sep: string };
 export const TRANSFORM_LABELS: Record<Transform['op'], string> = {
   trim: 'Tirar espaços', upper: 'Maiúsculas', lower: 'Minúsculas', digits: 'Só dígitos', truncate: 'Cortar no tamanho', default: 'Valor padrão se vazio', null_if: 'Tratar como vazio',
-  date: 'Data', datetime: 'Data e hora (fuso)', cents: 'Dinheiro → centavos', number: 'Número', percent: 'Percentual', phone: 'Telefone', document: 'CPF/CNPJ', email: 'E-mail', boolean: 'Sim/não', equivalence: 'Tabela de equivalência',
+  date: 'Data', datetime: 'Data e hora (fuso)', cents: 'Dinheiro → centavos', number: 'Número', percent: 'Percentual', phone: 'Telefone', document: 'CPF/CNPJ', email: 'E-mail', boolean: 'Sim/não', equivalence: 'Tabela de equivalência', split_first: 'Primeiro de uma lista',
 };
 
 export type ConditionOp = 'eq' | 'neq' | 'contains' | 'empty' | 'not_empty' | 'in' | 'true' | 'false';
@@ -114,7 +115,19 @@ export type ImportPolicy = {
   matchByKey: 'revisar' | 'vincular' | 'desligado';
 };
 export const DEFAULT_POLICY: ImportPolicy = { onNew: 'criar', onExisting: 'atualizar', emptyValues: 'manter', matchByKey: 'revisar' };
-export type EntityMapping = { source: string; target: TargetEntity; enabled: boolean; fields: FieldMapping[]; legacy: 'preservar' | 'descartar'; policy: ImportPolicy; filter: Condition[] };
+export type EntityMapping = {
+  source: string; target: TargetEntity; enabled: boolean; fields: FieldMapping[]; legacy: 'preservar' | 'descartar'; policy: ImportPolicy; filter: Condition[];
+  /**
+   * Identidade do registro de destino montada por colunas (ex.: a empresa de uma linha de negociação). Linhas com a
+   * mesma chave viram um registro só. Sem isto, cada registro da origem é um registro de destino.
+   */
+  keyFrom?: string[];
+  /** Chave alternativa para outras entidades acharem este registro (ex.: tarefas ligadas por "nome da negociação + empresa"). */
+  altKeyFrom?: string[];
+};
+/** Normalização das chaves montadas por colunas: sem acento, minúsculas, espaços simples, partes separadas por "|". */
+export const keyNorm = (parts: unknown[]) => parts.map((p) => String(p ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()).join('|');
+export const keyOf = (record: unknown, paths: string[]): string | null => { const parts = paths.map((p) => getPath(record, p)); return parts.every((x) => x == null || String(x).trim() === '') ? null : keyNorm(parts); };
 export type EquivalenceRow = { from: string; to: string | null; label?: string };
 export type EquivalenceTable = { key: string; label: string; refKind: RefKind | 'valor'; rows: EquivalenceRow[]; fallback: { kind: 'revisar' | 'padrao' | 'vazio'; value?: string } };
 export type ImportConfig = {
@@ -268,6 +281,7 @@ export function applyTransforms(input: unknown, transforms: Transform[], ctx: { 
       case 'document': { if (empty) { v = null; break; } const issue = documentIssue(s); if (issue) return { value: input, error: `${issue}: "${s}"` }; v = onlyDigits(s); break; }
       case 'email': { if (empty) { v = null; break; } const e = s.trim().toLowerCase(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { value: input, review: `E-mail fora do padrão: "${s}"` }; v = e; break; }
       case 'boolean': { if (empty) { v = null; break; } v = t.trueValues.map((x) => x.toLowerCase()).includes(s.trim().toLowerCase()) || v === true; break; }
+      case 'split_first': v = empty ? null : (s.split(t.sep || ',')[0] ?? '').trim() || null; break;
       case 'equivalence': {
         if (empty) { v = null; break; }
         const tb = ctx.tables.find((x) => x.key === t.table);
@@ -441,7 +455,7 @@ export function diffConfigs(a: ImportConfig, b: ImportConfig): ConfigChange[] {
   for (const k of keys) {
     const ea = a.entities.find((e) => `${e.source}→${e.target}` === k), eb = b.entities.find((e) => `${e.source}→${e.target}` === k);
     if (!ea || !eb) { cmp(`entidade ${k}`, ea ? 'ativa' : undefined, eb ? 'ativa' : undefined); continue; }
-    cmp(`${k} · ativa`, ea.enabled, eb.enabled); cmp(`${k} · política`, ea.policy, eb.policy); cmp(`${k} · legado`, ea.legacy, eb.legacy); cmp(`${k} · filtro`, ea.filter, eb.filter);
+    cmp(`${k} · ativa`, ea.enabled, eb.enabled); cmp(`${k} · política`, ea.policy, eb.policy); cmp(`${k} · legado`, ea.legacy, eb.legacy); cmp(`${k} · filtro`, ea.filter, eb.filter); cmp(`${k} · chave`, ea.keyFrom ?? null, eb.keyFrom ?? null); cmp(`${k} · chave alternativa`, ea.altKeyFrom ?? null, eb.altKeyFrom ?? null);
     const targets = new Set([...ea.fields, ...eb.fields].map((f) => f.target));
     for (const t of targets) {
       const fa = ea.fields.find((f) => f.target === t), fb = eb.fields.find((f) => f.target === t);
@@ -458,8 +472,9 @@ export function diffConfigs(a: ImportConfig, b: ImportConfig): ConfigChange[] {
 export const RECORD_ACTIONS = ['criar', 'atualizar', 'ignorar', 'revisar', 'erro'] as const;
 export type RecordAction = (typeof RECORD_ACTIONS)[number];
 export const RECORD_ACTION_LABELS: Record<RecordAction, string> = { criar: 'Criar', atualizar: 'Atualizar', ignorar: 'Ignorar', revisar: 'Revisar', erro: 'Erro' };
-export type RunCounters = { identificados: number; processados: number; criados: number; atualizados: number; ignorados: number; revisar: number; erros: number; pendentes: number };
-export const EMPTY_COUNTERS: RunCounters = { identificados: 0, processados: 0, criados: 0, atualizados: 0, ignorados: 0, revisar: 0, erros: 0, pendentes: 0 };
+/** mesclados: linhas que repetem um registro já tratado na execução (ex.: a mesma empresa em várias negociações); filtrados: fora do filtro da entidade. */
+export type RunCounters = { identificados: number; processados: number; criados: number; atualizados: number; ignorados: number; revisar: number; erros: number; pendentes: number; mesclados: number; filtrados: number };
+export const EMPTY_COUNTERS: RunCounters = { identificados: 0, processados: 0, criados: 0, atualizados: 0, ignorados: 0, revisar: 0, erros: 0, pendentes: 0, mesclados: 0, filtrados: 0 };
 
 export type QualityInput = { entity: TargetEntity; action: RecordAction; mappedFields: number; totalTargetFields: number; converted: number; mapped: number; issues: Issue[]; legacyKeys: number; refErrors: number; duplicate: boolean };
 export type Quality = { campos: number; registros: number; transformacoes: number; relacionamentos: number; duplicidades: number; legado: number; impeditivos: number; revisao: number; porEntidade: Record<string, { total: number; erros: number; revisao: number }>; porCampo: { field: string; count: number }[] };

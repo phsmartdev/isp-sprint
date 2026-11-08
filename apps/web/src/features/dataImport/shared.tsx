@@ -41,7 +41,7 @@ export const useConnectors = () => useQuery({ queryKey: ['import', 'connectors']
 
 /** Contadores reais da execução (nada estimado). */
 export function Counters({ c, compact }: { c: RunCounters; compact?: boolean }) {
-  const items: [string, number, string][] = [['Identificados', c.identificados, 'text-ink'], ['Processados', c.processados, 'text-ink'], ['Criados', c.criados, 'text-[#15803D]'], ['Atualizados', c.atualizados, 'text-primary'], ['Ignorados', c.ignorados, 'text-muted'], ['Para revisar', c.revisar, 'text-[#9A6B00]'], ['Com erro', c.erros, 'text-danger'], ['Pendentes', c.pendentes, 'text-muted']];
+  const items: [string, number, string][] = [['Identificados', c.identificados, 'text-ink'], ['Processados', c.processados, 'text-ink'], ['Criados', c.criados, 'text-[#15803D]'], ['Atualizados', c.atualizados, 'text-primary'], ['Ignorados', c.ignorados, 'text-muted'], ['Para revisar', c.revisar, 'text-[#9A6B00]'], ['Com erro', c.erros, 'text-danger'], ['Pendentes', c.pendentes, 'text-muted'], ...(c.mesclados ? [['Mesclados', c.mesclados, 'text-muted'] as [string, number, string]] : []), ...(c.filtrados ? [['Fora do filtro', c.filtrados, 'text-muted'] as [string, number, string]] : [])];
   return (
     <dl className={compact ? 'flex flex-wrap gap-x-4 gap-y-1 text-xs' : 'grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8'}>
       {items.map(([l, v, tone]) => compact
