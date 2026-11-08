@@ -45,18 +45,18 @@ function Picker({ connectorId, kind, accountId, label, onPick, picked }: { conne
   );
 }
 
-export function NewImport({ initialTemplateId }: { initialTemplateId?: string }) {
+export function NewImport({ initialTemplateId, initialConnectorId }: { initialTemplateId?: string; initialConnectorId?: string }) {
   const toast = useToast();
   const qc = useQueryClient();
   const schema = useImportSchema();
   const conns = useConnectors();
   const tpls = useQuery({ queryKey: ['import', 'templates'], queryFn: () => api<{ items: TemplateItem[] }>('/admin/import/templates') });
-  const [step, setStep] = useState(0);
-  const [useSaved, setUseSaved] = useState(true);
+  const [step, setStep] = useState(initialConnectorId ? 2 : 0);
+  const [useSaved, setUseSaved] = useState(!initialConnectorId);
   const [templateId, setTemplateId] = useState(initialTemplateId ?? '');
   const [versionId, setVersionId] = useState('');
   const full = useQuery({ queryKey: ['import', 'template', templateId], enabled: !!templateId && useSaved, queryFn: () => api<TemplateFull>(`/admin/import/templates/${templateId}`) });
-  const [connectorId, setConnectorId] = useState('');
+  const [connectorId, setConnectorId] = useState(initialConnectorId ?? '');
   const [scope, setScope] = useState<ImportScope>({ mode: 'uma_oportunidade', accountId: '', opportunityId: '' });
   const [config, setConfig] = useState<ImportConfig | null>(null);
   const [issues, setIssues] = useState<Issue[] | null>(null);
@@ -69,6 +69,9 @@ export function NewImport({ initialTemplateId }: { initialTemplateId?: string })
   const version = full.data?.versions.find((v) => v.id === versionId);
   useEffect(() => { if (full.data && !versionId) { const v = full.data.versions.find((x) => x.id === full.data!.template.currentVersionId) ?? full.data.versions[0]; if (v) { setVersionId(v.id); setConfig(structuredClone(v.config)); } if (full.data.template.connectorId && !connectorId) setConnectorId(full.data.template.connectorId); } }, [full.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const conn = conns.data?.items.find((c) => c.id === connectorId);
+  // começou pelo envio de uma planilha: o modelo sugerido (ex.: exportação do RD) já vem montado
+  const auto = useQuery({ queryKey: ['import', 'auto-suggest', initialConnectorId], enabled: !!initialConnectorId, queryFn: () => api<ImportConfig>('/admin/import/templates/suggest', { method: 'POST', body: { connectorId: initialConnectorId } }), staleTime: Infinity, retry: false });
+  useEffect(() => { if (auto.data && !config) { setConfig(auto.data); setScope({ mode: 'base_completa' }); } }, [auto.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = !!config && (!version || !same(config, version.config));
   const sim = useQuery({ queryKey: ['import', 'run', simId], enabled: !!simId, queryFn: () => api<RunDetail>(`/admin/import/runs/${simId}`), refetchInterval: (q) => (q.state.data && ['na_fila', 'em_andamento'].includes(q.state.data.run.status) ? 2000 : false) });
   const simDone = !!sim.data && ['concluida', 'concluida_com_pendencias'].includes(sim.data.run.status);
@@ -83,7 +86,7 @@ export function NewImport({ initialTemplateId }: { initialTemplateId?: string })
   const saveNew = useMutation({ mutationFn: () => api<{ id: string; versionId: string }>('/admin/import/templates', { method: 'POST', body: { name: saveName, connectorId, config, justification: justif || 'Mapeamento inicial' } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['import'] }); toast({ tone: 'success', message: 'Modelo salvo (versão 1.0 em rascunho, aguardando aprovação)' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const saveVersion = useMutation({ mutationFn: () => api<{ id: string; number: string }>(`/admin/import/templates/${templateId}/versions`, { method: 'POST', body: { config, justification: justif, basedOnVersionId: versionId || null } }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['import'] }); toast({ tone: 'success', message: `Versão ${r.number} criada; vale para importações depois de aprovada` }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
 
-  if (schema.isLoading || conns.isLoading || tpls.isLoading) return <LoadingRows rows={6} />;
+  if (schema.isLoading || conns.isLoading || tpls.isLoading || (initialConnectorId && auto.isLoading)) return <LoadingRows rows={6} />;
   const can = schema.data!.can;
   const errors = issues?.filter((i) => i.level === 'erro') ?? [];
   const scopeOk = scope.mode === 'base_completa' || (scope.mode === 'uma_conta' && !!scope.accountId) || (scope.mode === 'uma_oportunidade' && !!scope.accountId && !!scope.opportunityId) || scope.mode === 'personalizado';

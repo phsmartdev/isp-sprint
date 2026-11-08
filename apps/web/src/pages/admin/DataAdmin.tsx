@@ -1,5 +1,6 @@
 /** Configurações → Base de dados: planilha modelo, importação de clientes e limpeza da base. */
 import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Download, Upload } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
@@ -43,6 +44,7 @@ function ImportCard() {
   };
   return (
     <section className="card p-5">
+      <div className="mb-4"><Notice tone="info">Vai trazer o histórico do RD Station (planilha exportada de negociações e tarefas)? Use o <Link className="link font-semibold" to="/settings/importacao">Data Import Engine</Link> → "Importar planilha (Excel ou CSV)".</Notice></div>
       <h2 className="text-lg font-bold text-ink">Importar clientes por planilha</h2>
       <p className="mb-4 max-w-3xl text-sm text-muted">Baixe o modelo com os campos do CRM, preencha no Excel (uma linha por cliente) e salve como CSV. O sistema confere tudo antes de gravar. Se o código do cliente já existir, a linha atualiza o cadastro.</p>
       <div className="mb-4 flex flex-wrap gap-2">
