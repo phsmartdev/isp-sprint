@@ -64,6 +64,8 @@ function describe(i: TimelineItem): string {
   }
   switch (i.type) {
     case 'created': return 'Oportunidade criada';
+    case 'importado': return i.payload?.atualizado ? 'Atualizada pela importação de dados' : `Importada do ${i.payload?.source === 'rdstation_crm' ? 'RD Station' : 'arquivo'}${i.payload?.sourceId ? ` (ID ${String(i.payload.sourceId)})` : ''}`;
+    case 'nota_importada': return `Anotação importada: ${String(i.payload?.text ?? '').slice(0, 280)}`;
     case 'stage_changed': {
       const loss = i.payload?.lossReason as LossReason | undefined;
       return `Etapa: ${st(i.fromValue)} → ${st(i.toValue)}${loss ? ` (motivo: ${LOSS_REASON_LABELS[loss]})` : ''}`;

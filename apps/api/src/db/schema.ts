@@ -5814,3 +5814,189 @@ export const playbookTemplates = pgTable('playbook_templates', {
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('playbook_templates_uq').on(t.tenantId, t.name) }));
+
+// ------------------------------------------------------------------ Data Import Engine (infraestrutura administrativa, separada do CRM)
+/** Fontes de dados. Credenciais cifradas (AES-256-GCM) ficam aqui, nunca nos modelos. */
+export const importConnectors = pgTable('import_connectors', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+  secrets: jsonb('secrets').$type<Record<string, string>>().notNull().default({}),
+  status: text('status').notNull().default('nao_testado'),
+  lastTestAt: ts('last_test_at'),
+  lastTestResult: text('last_test_result'),
+  archivedAt: ts('archived_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  kindCk: check('import_connectors_kind_ck', inList('kind', ['rdstation_crm', 'csv'])),
+  statusCk: check('import_connectors_status_ck', inList('status', ['nao_testado', 'ok', 'falhou'])),
+  nameUq: uniqueIndex('import_connectors_name_uq').on(t.tenantId, t.name),
+}));
+/** Arquivos enviados a um conector CSV (cada arquivo = uma entidade de origem). */
+export const importSourceFiles = pgTable('import_source_files', {
+  id: id(),
+  tenantId: tenantId(),
+  connectorId: uuid('connector_id').notNull().references(() => importConnectors.id),
+  entity: text('entity').notNull(),
+  name: text('name').notNull(),
+  idColumn: text('id_column'),
+  content: text('content').notNull(),
+  rows: integer('rows').notNull(),
+  uploadedBy: uuid('uploaded_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('import_source_files_uq').on(t.connectorId, t.entity) }));
+
+/** Biblioteca permanente de modelos. A lógica fica nas versões (imutáveis depois de usadas). */
+export const importTemplates = pgTable('import_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  source: text('source').notNull(),
+  connectorId: uuid('connector_id').references(() => importConnectors.id),
+  currentVersionId: uuid('current_version_id'),
+  archivedAt: ts('archived_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ nameUq: uniqueIndex('import_templates_name_uq').on(t.tenantId, t.name) }));
+export const importTemplateVersions = pgTable('import_template_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  templateId: uuid('template_id').notNull().references(() => importTemplates.id),
+  number: text('number').notNull(),
+  config: jsonb('config').$type<import('@isp/domain').ImportConfig>().notNull(),
+  justification: text('justification').notNull(),
+  /** rascunho (editável) → aprovada (usável em execução) → substituida; usada em execução = travada */
+  status: text('status').notNull().default('rascunho'),
+  basedOnVersionId: uuid('based_on_version_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  lockedAt: ts('locked_at'),
+  rowVersion: integer('row_version').notNull().default(1),
+}, (t) => ({
+  uq: uniqueIndex('import_template_versions_uq').on(t.templateId, t.number),
+  statusCk: check('import_template_versions_status_ck', inList('status', ['rascunho', 'aprovada', 'substituida'])),
+}));
+
+/** Execução (simulação ou importação) com retrato imutável da configuração usada. */
+export const importRuns = pgTable('import_runs', {
+  id: id(),
+  tenantId: tenantId(),
+  code: serial('code').notNull(),
+  mode: text('mode').notNull(),
+  templateId: uuid('template_id').references(() => importTemplates.id),
+  templateVersionId: uuid('template_version_id').references(() => importTemplateVersions.id),
+  /** alterações temporárias desta execução não mudam o modelo */
+  temporaryChanges: boolean('temporary_changes').notNull().default(false),
+  configSnapshot: jsonb('config_snapshot').$type<import('@isp/domain').ImportConfig>().notNull(),
+  configHash: text('config_hash').notNull(),
+  connectorId: uuid('connector_id').notNull().references(() => importConnectors.id),
+  source: text('source').notNull(),
+  scope: jsonb('scope').$type<import('@isp/domain').ImportScope>().notNull(),
+  scopeHash: text('scope_hash').notNull(),
+  /** importação: a simulação válida em que se baseia */
+  simulationRunId: uuid('simulation_run_id'),
+  status: text('status').notNull().default('na_fila'),
+  phase: text('phase').notNull().default('extracao'),
+  counters: jsonb('counters').$type<import('@isp/domain').RunCounters>().notNull(),
+  checkpoint: jsonb('checkpoint').$type<Record<string, unknown>>().notNull().default({}),
+  warnings: jsonb('warnings').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  error: text('error'),
+  startedBy: uuid('started_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  largeVolumeBy: uuid('large_volume_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  finishedAt: ts('finished_at'),
+  lockedUntil: ts('locked_until'),
+}, (t) => ({
+  modeCk: check('import_runs_mode_ck', inList('mode', ['simulacao', 'importacao'])),
+  statusCk: check('import_runs_status_ck', inList('status', ['na_fila', 'em_andamento', 'pausada', 'cancelada', 'concluida', 'concluida_com_pendencias', 'falhou'])),
+  phaseCk: check('import_runs_phase_ck', inList('phase', ['extracao', 'processamento', 'fim'])),
+  tenantIdx: index('import_runs_tenant_idx').on(t.tenantId, t.createdAt),
+}));
+/** Fila de buscas na origem (paginação, dependências, retentativas). */
+export const importFetchJobs = pgTable('import_fetch_jobs', {
+  id: id(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  seq: serial('seq').notNull(),
+  job: jsonb('job').$type<Record<string, unknown>>().notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  status: text('status').notNull().default('pendente'),
+  attempts: integer('attempts').notNull().default(0),
+  notBefore: ts('not_before'),
+  lastError: text('last_error'),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_fetch_jobs_uq').on(t.runId, t.dedupeKey),
+  pendIdx: index('import_fetch_jobs_pend_idx').on(t.runId, t.status, t.seq),
+  statusCk: check('import_fetch_jobs_status_ck', inList('status', ['pendente', 'feito', 'falhou'])),
+}));
+/** Dado bruto da origem, como veio (separado dos dados operacionais). */
+export const importRawRecords = pgTable('import_raw_records', {
+  id: id(),
+  tenantId: tenantId(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  seq: serial('seq').notNull(),
+  entity: text('entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  /** por que entrou: selecionado ou dependência (de qual registro) */
+  reason: text('reason').notNull().default('selecionado'),
+  fetchedAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('import_raw_records_uq').on(t.runId, t.entity, t.sourceId), seqIdx: index('import_raw_records_seq_idx').on(t.runId, t.seq) }));
+/** Resultado por registro: original → transformado → destino, com pendências e legado. */
+export const importRecordResults = pgTable('import_record_results', {
+  id: id(),
+  tenantId: tenantId(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  rawId: uuid('raw_id').notNull().references(() => importRawRecords.id, { onDelete: 'cascade' }),
+  sourceEntity: text('source_entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  targetEntity: text('target_entity').notNull(),
+  action: text('action').notNull(),
+  targetId: uuid('target_id'),
+  values: jsonb('values').$type<Record<string, unknown>>().notNull(),
+  originals: jsonb('originals').$type<Record<string, unknown>>().notNull(),
+  converted: text('converted').array().notNull().default(sql`'{}'::text[]`),
+  issues: jsonb('issues').$type<import('@isp/domain').Issue[]>().notNull(),
+  legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
+  reason: text('reason'),
+  duplicate: boolean('duplicate').notNull().default(false),
+  /** decisão administrativa de um registro em revisão */
+  decision: text('decision'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_record_results_uq').on(t.runId, t.targetEntity, t.sourceEntity, t.sourceId),
+  actionCk: check('import_record_results_action_ck', inList('action', ['criar', 'atualizar', 'ignorar', 'revisar', 'erro'])),
+  runIdx: index('import_record_results_run_idx').on(t.runId, t.action),
+}));
+/** Correspondência permanente origem → ISP Sprint (impede duplicar em importações sucessivas). */
+export const importLinks = pgTable('import_links', {
+  id: id(),
+  tenantId: tenantId(),
+  source: text('source').notNull(),
+  sourceEntity: text('source_entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  targetEntity: text('target_entity').notNull(),
+  targetId: uuid('target_id').notNull(),
+  firstRunId: uuid('first_run_id').notNull().references(() => importRuns.id),
+  lastRunId: uuid('last_run_id').notNull().references(() => importRuns.id),
+  /** quando o motor gravou por último: se o registro mudou depois, foi alteração manual → revisão */
+  lastWrittenAt: ts('last_written_at').notNull(),
+  legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_links_uq').on(t.tenantId, t.source, t.targetEntity, t.sourceEntity, t.sourceId),
+  targetIdx: index('import_links_target_idx').on(t.tenantId, t.targetEntity, t.targetId),
+}));

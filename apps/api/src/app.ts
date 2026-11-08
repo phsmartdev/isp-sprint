@@ -88,6 +88,7 @@ import { supportRoutes } from './routes/support';
 import { contractSectorRoutes } from './routes/contractSectors';
 import { playbookCentralRoutes } from './routes/playbooks';
 import { zenithRoutes } from './routes/zenith';
+import { dataImportRoutes } from './routes/dataImport';
 import { gamificationRoutes } from './routes/gamification';
 import { scoreJourneyRoutes } from './routes/scoreJourneys';
 import { hierarchyPerformanceRoutes } from './routes/hierarchyPerformance';
@@ -277,6 +278,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractSectorRoutes,
     ...playbookCentralRoutes,
     ...zenithRoutes,
+    ...dataImportRoutes,
     ...gamificationRoutes,
     ...scoreJourneyRoutes,
     ...hierarchyPerformanceRoutes,
