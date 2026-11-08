@@ -20,7 +20,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const TRANSFORM_DEFAULTS: Record<Transform['op'], Transform> = {
   trim: { op: 'trim' }, upper: { op: 'upper' }, lower: { op: 'lower' }, digits: { op: 'digits' }, truncate: { op: 'truncate', max: 200 }, default: { op: 'default', value: '' }, null_if: { op: 'null_if', values: ['-', 'n/a'] },
   date: { op: 'date', format: 'dd/mm/yyyy' }, datetime: { op: 'datetime', timezone: 'America/Sao_Paulo' }, cents: { op: 'cents', decimal: ',', unit: 'reais' }, number: { op: 'number', decimal: ',' }, percent: { op: 'percent', decimal: ',' },
-  phone: { op: 'phone' }, document: { op: 'document' }, email: { op: 'email' }, boolean: { op: 'boolean', trueValues: ['sim', 'true', '1'] }, equivalence: { op: 'equivalence', table: '' },
+  phone: { op: 'phone' }, document: { op: 'document' }, email: { op: 'email' }, boolean: { op: 'boolean', trueValues: ['sim', 'true', '1'] }, equivalence: { op: 'equivalence', table: '' }, split_first: { op: 'split_first', sep: ',' },
 };
 const OPS: [Condition['op'], string][] = [['eq', 'igual a'], ['neq', 'diferente de'], ['contains', 'contém'], ['in', 'está em (a,b)'], ['empty', 'vazio'], ['not_empty', 'preenchido'], ['true', 'verdadeiro'], ['false', 'falso']];
 
@@ -36,6 +36,7 @@ function TransformEditor({ t, set, tables, onRemove }: { t: Transform; set: (t: 
       {(t.op === 'cents' || t.op === 'number' || t.op === 'percent') && <select aria-label="Separador decimal" className="border border-line" value={t.decimal} onChange={(e) => set({ ...t, decimal: e.target.value as ',' | '.' })}><option value=",">vírgula</option><option value=".">ponto</option></select>}
       {t.op === 'cents' && <select aria-label="Unidade" className="border border-line" value={t.unit} onChange={(e) => set({ ...t, unit: e.target.value as 'reais' | 'centavos' })}><option value="reais">em reais</option><option value="centavos">já em centavos</option></select>}
       {t.op === 'boolean' && <input aria-label="Valores verdadeiros" className="w-24 border border-line px-1" value={t.trueValues.join(',')} onChange={(e) => set({ ...t, trueValues: e.target.value.split(',').map((x) => x.trim()) })} />}
+      {t.op === 'split_first' && <input aria-label="Separador" className="w-8 border border-line px-1" value={t.sep} onChange={(e) => set({ ...t, sep: e.target.value || ',' })} />}
       {t.op === 'equivalence' && <select aria-label="Tabela" className="border border-line" value={t.table} onChange={(e) => set({ ...t, table: e.target.value })}><option value="">tabela…</option>{tables.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</select>}
       <button type="button" aria-label={`Tirar ${TRANSFORM_LABELS[t.op]}`} className="text-muted hover:text-danger" onClick={onRemove}>×</button>
     </span>
@@ -115,8 +116,15 @@ function FieldRow({ tf, m, set, remove, add, fields, tables, readOnly }: { tf: T
   );
 }
 
-function TablesEditor({ tables, set, readOnly, refs, connectorId }: { tables: EquivalenceTable[]; set: (t: EquivalenceTable[]) => void; readOnly: boolean; refs: Record<string, RefOpt[]>; connectorId: string | null }) {
+function TablesEditor({ tables, set, readOnly, refs, connectorId, config }: { tables: EquivalenceTable[]; set: (t: EquivalenceTable[]) => void; readOnly: boolean; refs: Record<string, RefOpt[]>; connectorId: string | null; config: ImportConfig }) {
   const toast = useToast();
+  // de onde vêm os valores de cada tabela: o mapeamento que a usa (aba e colunas)
+  const usage = (key: string) => { for (const e of config.entities) for (const f of e.fields) if (f.table === key || f.transforms.some((t) => t.op === 'equivalence' && t.table === key)) return { entity: e.source, paths: f.sources, template: f.kind === 'composicao' ? f.template : undefined, split: f.transforms.find((t): t is Extract<Transform, { op: 'split_first' }> => t.op === 'split_first')?.sep }; return null; };
+  const fromColumn = useMutation({
+    mutationFn: async (i: number) => { const u = usage(tables[i]!.key)!; const r = await api<{ items: { value: string; count: number }[] }>(`/admin/import/connectors/${connectorId}/values?entity=${encodeURIComponent(u.entity)}&paths=${encodeURIComponent(u.paths.join(','))}${u.template ? `&template=${encodeURIComponent(u.template)}` : ''}`); return { i, items: r.items.map((x) => ({ ...x, value: u.split ? (x.value.split(u.split)[0] ?? '').trim() : x.value })) }; },
+    onSuccess: ({ i, items }) => { const t = tables[i]!; const add = [...new Map(items.filter((it) => it.value && !t.rows.some((r) => r.from === it.value)).map((it) => [it.value, it])).values()]; set(tables.map((x, k) => (k === i ? { ...x, rows: [...t.rows, ...add.map((it) => ({ from: it.value, to: null, label: `${it.count} registro(s)` }))] } : x))); toast({ tone: 'success', message: `${add.length} valor(es) novo(s)` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const load = useMutation({
     mutationFn: async (i: number) => { const t = tables[i]!; const kind = t.refKind === 'etapa' ? 'etapa' : t.refKind === 'usuario' ? 'usuario' : t.refKind === 'origem' ? 'origem' : 'motivo'; return { i, items: (await api<{ items: RefOpt[] }>(`/admin/import/connectors/${connectorId}/references?kind=${kind}`)).items }; },
     onSuccess: ({ i, items }) => { const t = tables[i]!; set(tables.map((x, k) => (k === i ? { ...x, rows: [...t.rows, ...items.filter((it) => !t.rows.some((r) => r.from === it.id)).map((it) => ({ from: it.id, to: null, label: [it.label, it.sub].filter(Boolean).join(' · ') }))] } : x))); },
@@ -138,7 +146,8 @@ function TablesEditor({ tables, set, readOnly, refs, connectorId }: { tables: Eq
               <FormField label="Traduz para" htmlFor={`tb-r-${i}`}><Select id={`tb-r-${i}`} className="h-8" value={t.refKind} onChange={(e) => upd({ refKind: e.target.value as EquivalenceTable['refKind'] })}><option value="valor">Valor (texto/categoria)</option><option value="etapa">Jornada e etapa</option><option value="usuario">Usuário</option><option value="origem">Origem</option><option value="filial">Filial</option></Select></FormField>
               <FormField label="Sem equivalência" htmlFor={`tb-f-${i}`}><Select id={`tb-f-${i}`} className="h-8" value={t.fallback.kind} onChange={(e) => upd({ fallback: { ...t.fallback, kind: e.target.value as 'revisar' } })}><option value="revisar">Mandar para revisão</option><option value="vazio">Deixar vazio</option><option value="padrao">Usar valor padrão</option></Select></FormField>
               {t.fallback.kind === 'padrao' && <FormField label="Padrão" htmlFor={`tb-p-${i}`}><Input id={`tb-p-${i}`} className="h-8" value={t.fallback.value ?? ''} onChange={(e) => upd({ fallback: { ...t.fallback, value: e.target.value } })} /></FormField>}
-              {connectorId && t.refKind !== 'valor' && t.refKind !== 'filial' && <Button size="sm" variant="ghost" loading={load.isPending && load.variables === i} onClick={() => load.mutate(i)}>Carregar valores da origem</Button>}
+              {connectorId && config.source === 'rdstation_crm' && t.refKind !== 'valor' && t.refKind !== 'filial' && <Button size="sm" variant="ghost" loading={load.isPending && load.variables === i} onClick={() => load.mutate(i)}>Carregar valores da origem</Button>}
+              {connectorId && usage(t.key) && <Button size="sm" variant="ghost" loading={fromColumn.isPending && fromColumn.variables === i} onClick={() => fromColumn.mutate(i)}>Carregar valores da coluna</Button>}
               <button type="button" aria-label={`Tirar tabela ${t.label}`} className="ml-auto pb-2 text-muted hover:text-danger" onClick={() => set(tables.filter((_, k) => k !== i))}><Trash2 className="h-4 w-4" /></button>
             </div>
             {!!missing && <p className="mb-1 text-xs text-[#9A6B00]">{missing} valor(es) sem equivalência.</p>}
@@ -181,6 +190,7 @@ export function MappingEditor({ config, onChange, connectorId, readOnly = false 
         {!readOnly && connectorId && <Button size="sm" icon={<Sparkles className="h-4 w-4" />} loading={suggest.isPending} onClick={() => suggest.mutate()}>{config.entities.length ? 'Refazer sugestões a partir da origem' : 'Sugerir a partir da origem'}</Button>}
         {disc.isError && <span className="text-xs text-danger">Não consegui ler a origem: {errMsg(disc.error)}</span>}
         {!!pending && <Chip tone="yellow">{pending} correspondência(s) para aprovar</Chip>}
+        {!!pending && !readOnly && <Button size="sm" variant="ghost" icon={<Check className="h-4 w-4" />} onClick={() => onChange({ ...config, entities: config.entities.map((e) => ({ ...e, fields: e.fields.map((f) => ({ ...f, approved: f.approved || ((f.confidence ?? 0) >= 0.8 && !f.reason?.includes('empate') && !f.reason?.includes('também sugerido')) })) })) })}>Aprovar todas sem ambiguidade (≥ 80%)</Button>}
         <span className="ml-auto text-xs text-muted">Fuso da origem</span>
         <Select aria-label="Fuso da origem" disabled={readOnly} className="h-8 w-40 text-xs" value={config.timezone} onChange={(e) => onChange({ ...config, timezone: e.target.value })}><option value="America/Sao_Paulo">Brasília</option><option value="America/Bahia">Bahia</option><option value="UTC">UTC</option></Select>
       </div>
@@ -206,6 +216,9 @@ export function MappingEditor({ config, onChange, connectorId, readOnly = false 
             <FormField label="Valor vazio na origem" htmlFor="pol-empty"><Select id="pol-empty" className="h-8" value={em.policy.emptyValues} onChange={(e) => setEm({ ...em, policy: { ...em.policy, emptyValues: e.target.value as 'manter' } })}><option value="manter">Não apagar o que existe</option><option value="limpar">Limpar no ISP Sprint</option></Select></FormField>
             <FormField label="Já existe no ISP Sprint (CPF/CNPJ ou e-mail)" htmlFor="pol-key"><Select id="pol-key" className="h-8" value={em.policy.matchByKey} onChange={(e) => setEm({ ...em, policy: { ...em.policy, matchByKey: e.target.value as 'revisar' } })}><option value="revisar">Revisar</option><option value="vincular">Vincular e atualizar</option><option value="desligado">Não procurar</option></Select></FormField>
             <FormField label="Campos sem correspondência" htmlFor="pol-leg"><Select id="pol-leg" className="h-8" value={em.legacy} onChange={(e) => setEm({ ...em, legacy: e.target.value as 'preservar' })}><option value="preservar">Preservar como legado</option><option value="descartar">Não guardar</option></Select></FormField>
+            <FormField label="Identidade por colunas" htmlFor="pol-kf" hint="Linhas com os mesmos valores viram um registro só (ex.: Empresa)"><Input id="pol-kf" className="h-8 w-56" placeholder="vazio = ID da origem" value={(em.keyFrom ?? []).join(', ')} onChange={(e) => setEm({ ...em, keyFrom: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></FormField>
+            {em.target === 'oportunidade' && <FormField label="Chave para tarefas/anotações" htmlFor="pol-ak" hint="Ex.: Nome, Empresa"><Input id="pol-ak" className="h-8 w-48" value={(em.altKeyFrom ?? []).join(', ')} onChange={(e) => setEm({ ...em, altKeyFrom: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></FormField>}
+            {!!em.filter.length && <p className="pb-2 text-xs text-muted">Só linhas com {em.filter.map((f) => `${f.path} ${f.op === 'not_empty' ? 'preenchido' : f.op}`).join(' e ')}</p>}
             {!readOnly && <button type="button" className="ml-auto pb-2 text-xs text-muted hover:text-danger" onClick={() => { onChange({ ...config, entities: config.entities.filter((_, i) => i !== tab) }); setTab(0); }}>Tirar entidade</button>}
           </fieldset>
           <div className="overflow-x-auto rounded-md border border-line bg-surface">
@@ -223,10 +236,10 @@ export function MappingEditor({ config, onChange, connectorId, readOnly = false 
             </table>
           </div>
           {sch[em.target].some((tf) => tf.key.startsWith('custom.') && !em.fields.some((f) => f.target === tf.key)) && <button type="button" className="text-sm text-primary" onClick={() => setAll(!all)}>{all ? 'Esconder campos personalizados sem correspondência' : `Mostrar os ${sch[em.target].filter((tf) => tf.key.startsWith('custom.') && !em.fields.some((f) => f.target === tf.key)).length} campos personalizados sem correspondência`}</button>}
-          {!readOnly && !!em.fields.filter((f) => !f.approved).length && <Button size="sm" variant="ghost" icon={<Check className="h-4 w-4" />} onClick={() => setEm({ ...em, fields: em.fields.map((f) => ({ ...f, approved: f.approved || ((f.confidence ?? 0) >= 0.8 && !f.reason?.includes('empate') && !f.reason?.includes('também sugerido')) })) })}>Aprovar só as sugestões sem ambiguidade (≥ 80%)</Button>}
+          {!readOnly && !!em.fields.filter((f) => !f.approved).length && <Button size="sm" variant="ghost" icon={<Check className="h-4 w-4" />} onClick={() => setEm({ ...em, fields: em.fields.map((f) => ({ ...f, approved: f.approved || ((f.confidence ?? 0) >= 0.8 && !f.reason?.includes('empate') && !f.reason?.includes('também sugerido')) })) })}>Aprovar as sugestões sem ambiguidade (≥ 80%) desta entidade</Button>}
         </div>
       )}
-      <TablesEditor tables={config.tables} set={(tables) => onChange({ ...config, tables })} readOnly={readOnly} refs={schema.data!.refs} connectorId={connectorId} />
+      <TablesEditor tables={config.tables} config={config} set={(tables) => onChange({ ...config, tables })} readOnly={readOnly} refs={schema.data!.refs} connectorId={connectorId} />
       <fieldset disabled={readOnly} className="flex flex-wrap gap-3 text-sm">
         <FormField label="Registros por lote" htmlFor="ex-b"><Input id="ex-b" className="h-8 w-24" inputMode="numeric" value={config.execution.batchSize} onChange={(e) => onChange({ ...config, execution: { ...config.execution, batchSize: Math.min(200, Math.max(5, Number(e.target.value.replace(/\D/g, '')) || 5)) } })} /></FormField>
         <FormField label="Grande volume a partir de" htmlFor="ex-l" hint="Acima disso, a importação pede autorização da Diretoria/Administração"><Input id="ex-l" className="h-8 w-28" inputMode="numeric" value={config.execution.largeVolume} onChange={(e) => onChange({ ...config, execution: { ...config.execution, largeVolume: Math.max(10, Number(e.target.value.replace(/\D/g, '')) || 10) } })} /></FormField>

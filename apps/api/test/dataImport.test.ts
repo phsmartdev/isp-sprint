@@ -280,3 +280,64 @@ describe('Data Import Engine', () => {
     expect(ok(await dir.post(`/admin/import/connectors/${connectorId}/test`)).json()).toMatchObject({ ok: false, detail: expect.stringMatching(/recusado/) });
   });
 });
+
+describe('Exportação de negociações do RD (planilha, sem IDs)', () => {
+  const H = ['Nome', 'Empresa', 'Funil de vendas', 'Etapa', 'Estado', 'Motivo de Perda', 'Valor Único', 'Valor Recorrente', 'Data de criação', 'Hora de criação', 'Data de fechamento', 'Hora de fechamento', 'Fonte', 'Responsável', 'Filial', 'Modalidade da Contratação:', 'Contatos', 'Cargo', 'Email', 'Telefone'];
+  const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const csv = (rows: string[][]) => [H, ...rows].map((r) => r.map(q).join(';')).join('\n') + '\n';
+  const E1 = `Secretaria Fictícia ${st}`, E2 = `Autarquia Fictícia ${st}`;
+  const deals = csv([
+    [`Link ${st}`, E1, 'Vendas Consultiva', 'Proposta', 'Vendida', 'Nada', '1500.5', '200', '2026-01-10', '09:25', '2026-02-01', '10:00', 'Cliente Ativo', 'Carlos', 'BKT Soluções', 'Pregão Eletrônico', 'Ana Fictícia', 'Diretora', `ana-${st}@exemplo.test`, '79 9 9999-0000'],
+    [`Link ${st}`, E1, 'Vendas Consultiva', 'Proposta', 'Vendida', 'Nada', '1500.5', '200', '2026-01-10', '09:25', '2026-02-01', '10:00', 'Cliente Ativo', 'Carlos', 'BKT Soluções', 'Pregão Eletrônico', 'Bruno Fictício', 'Gerente', `bruno-${st}@exemplo.test`, '79 9 8888-0000'], // mesma negociação, outro contato
+    [`Link ${st}`, E1, 'Vendas Consultiva', 'Proposta', 'Vendida', 'Nada', '1500.5', '200', '2026-01-10', '09:25', '2026-02-01', '10:00', 'Cliente Ativo', 'Carlos', 'BKT Soluções', 'Pregão Eletrônico', 'Bruno Fictício', 'Gerente', `bruno-${st}@exemplo.test`, '79 9 8888-0000'], // linha repetida da exportação
+    [`Câmeras ${st}`, E1, 'Vendas Consultiva', 'Follow up', 'Perdida', 'Vendas - Preço', '900', '0', '2026-03-02', '14:00', '2026-03-20', '08:00', '', 'Carlos', '', '', '', '', '', ''],
+    [`Câmeras ${st}`, E2, 'Vendas Consultiva', 'Lead', 'Em Andamento', 'Nada', '0', '0', '2026-04-05', '11:11', '', '', '', 'Carlos', '', '', '', '', '', ''],
+    [`Sem empresa ${st}`, '', 'Vendas Consultiva', 'Lead', 'Em Andamento', 'Nada', '0', '0', '2026-04-06', '11:11', '', '', '', 'Carlos', '', '', '', '', '', ''],
+  ]);
+  const cs = csv([[`Acompanhamento ${st}`, E1, 'Sucesso do Cliente', 'Adoção e Engajamento', 'Em Andamento', 'Nada', '0', '0', '2026-03-10', '08:00', '', '', '', 'Carlos', '', '', '', '', '', '']]);
+  const TH = ['Negociação vinculada', 'Tipo', 'Assunto', 'Data de criação', 'Hora de criação', 'Usuário que criou', 'Data agendada', 'Hora agendada', 'Responsáveis', 'Status', 'Empresa vinculada', 'Descrição', 'Data da conclusão', 'Hora da conclusão'];
+  const tasks = [TH, [`Link ${st}`, 'Reunião', 'Kickoff', '2026-01-11', '10:00', 'Carlos', '2026-01-12', '15:00', 'Carlos, Lucas', 'Concluída', E1, 'Alinhamento', '2026-01-12', '16:00'], [`Câmeras ${st}`, 'Tarefa', 'Ligar', '2026-03-03', '10:00', 'Carlos', '2026-03-04', '09:00', 'Carlos', 'Atrasada', E1, '', '', ''], [`Inexistente ${st}`, 'Tarefa', 'Avulsa', '2026-03-03', '10:00', 'Carlos', '2026-03-04', '09:00', 'Carlos', 'Atrasada', E2, '', '', '']].map((r) => r.map(q).join(';')).join('\n') + '\n';
+  let conn = '';
+
+  it('reconhece a exportação, monta o modelo e simula: empresa uma vez, contato por linha, negociação sem duplicar', async () => {
+    conn = ok(await dir.post('/admin/import/connectors', { kind: 'csv', name: `Planilha RD ${st}` }), 201).json().id;
+    const ids = ok(await carlos.post('/admin/import/id-columns', { headers: H })).json();
+    expect(ids).toEqual({ kind: 'negociacoes_rd', columns: ['Nome', 'Empresa', 'Data de criação', 'Hora de criação', 'Contatos'] });
+    for (const [entity, content, cols] of [['negociacoes', deals, ids.columns], ['negociacoes_cs', cs, ids.columns], ['tarefas', tasks, ['Negociação vinculada', 'Assunto', 'Data de criação', 'Hora de criação']]] as const) ok(await dir.post(`/admin/import/connectors/${conn}/files`, { entity, name: `${entity}.csv`, idColumn: cols.join(' + '), content }));
+    // conta que já existe no ISP Sprint com o mesmo nome (sem CNPJ): revisão, nunca vínculo automático
+    ok(await lucas.post('/contacts', { name: E2, segment: 'empresarial', phone: '79999990077' }), 201);
+    const cfg = ok(await carlos.post('/admin/import/templates/suggest', { connectorId: conn })).json();
+    expect(cfg.entities.map((e: { source: string; target: string }) => `${e.source}→${e.target}`)).toEqual(['negociacoes→conta', 'negociacoes→pessoa', 'negociacoes→oportunidade', 'negociacoes_cs→conta', 'negociacoes_cs→pessoa', 'negociacoes_cs→oportunidade', 'tarefas→tarefa']);
+    const users = cfg.tables.find((t: { key: string }) => t.key === 'usuarios');
+    expect(users.rows.map((r: { from: string }) => r.from)).toEqual(['Carlos']);
+    const schema = ok(await carlos.get('/admin/import/schema')).json();
+    for (const t of cfg.tables) for (const r of t.rows) if (!r.to) r.to = t.refKind === 'usuario' ? schema.refs.usuario.find((u: { sub: string }) => u.sub === 'carlos@yepnet.test').id : t.refKind === 'etapa' ? schema.refs.etapa[2].id : t.refKind === 'filial' ? schema.refs.filial[0]?.id ?? null : null;
+    for (const e of cfg.entities) for (const f of e.fields) f.approved = true;
+    const sim = ok(await carlos.post('/admin/import/runs', { mode: 'simulacao', connectorId: conn, scope: { mode: 'base_completa' }, config: cfg }), 201).json().id;
+    const s = await runToEnd(carlos, sim);
+    expect(s.warnings.join(' ')).toMatch(/1 linha\(s\) com o mesmo ID/);
+    const det = ok(await carlos.get(`/admin/import/runs/${sim}`)).json();
+    expect(det.byEntity).toEqual({ conta: { criar: 1, revisar: 1 }, pessoa: { criar: 2 }, oportunidade: { criar: 3, revisar: 1, erro: 1 }, tarefa: { criar: 2, revisar: 1 } });
+    const g = ok(await carlos.get(`/admin/import/runs/${sim}/review-groups`)).json();
+    expect(g.review).toEqual(expect.arrayContaining([expect.objectContaining({ entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no ISP Sprint', n: 1 })]));
+    expect(g.reviewIssues.map((x: { message: string }) => x.message).join(' ')).toMatch(/Depende da decisão sobre conta.*não está nesta importação|não está nesta importação.*Depende da decisão/);
+    expect(g.errors).toEqual([{ entity: 'oportunidade', message: 'Conta é obrigatório', n: 1 }]);
+    // decisões em lote: vincula a conta existente; tarefas sem negociação entram ligadas só à empresa
+    expect(ok(await carlos.post(`/admin/import/runs/${sim}/decisions`, { entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no ISP Sprint', decision: 'vincular' })).json().count).toBe(1);
+    ok(await carlos.post(`/admin/import/runs/${sim}/decisions`, { entity: 'tarefa', reason: 'Campos para revisar', decision: 'importar' }));
+    // a negociação que dependia da conta em revisão segue a decisão da conta (vinculada) — sem decisão própria
+    const imp = ok(await dir.post('/admin/import/runs', { mode: 'importacao', connectorId: conn, scope: { mode: 'base_completa' }, config: cfg, simulationRunId: sim, confirm: true, acceptErrors: true }), 201).json().id;
+    const r = await runToEnd(dir, imp);
+    expect(r.counters).toMatchObject({ criados: 10, atualizados: 1, erros: 1, revisar: 0 });
+    const n = async (q2: string) => Number(((await ctx.db.execute(sql.raw(q2))) as unknown as { rows: { n: number }[] }).rows[0]!.n);
+    expect(await n(`select count(*)::int n from contacts where name = '${E1}'`)).toBe(1);
+    expect(await n(`select count(*)::int n from contacts where name = '${E2}'`)).toBe(1); // vinculada, não duplicada
+    expect(await n(`select count(*)::int n from opportunities where title like '%${st}' and title not like 'Negociação%'`)).toBe(4);
+    expect(await n(`select count(*)::int n from account_stakeholders s join people p on p.id = s.person_id where p.email like '%-${st}@exemplo.test'`)).toBe(2);
+    const t = ((await ctx.db.execute(sql.raw(`select title, opportunity_id is not null o, contact_id is not null c from activities where title in ('Kickoff','Ligar','Avulsa') and created_at > now() - interval '5 minutes' order by title`))) as unknown as { rows: { title: string; o: boolean; c: boolean }[] }).rows;
+    expect(t).toEqual([{ title: 'Avulsa', o: false, c: true }, { title: 'Kickoff', o: true, c: true }, { title: 'Ligar', o: true, c: true }]);
+    // reenviar a mesma planilha não duplica
+    const again = ok(await carlos.post('/admin/import/runs', { mode: 'simulacao', connectorId: conn, scope: { mode: 'base_completa' }, config: cfg }), 201).json().id;
+    expect((await runToEnd(carlos, again)).counters.criados).toBe(0);
+  });
+});

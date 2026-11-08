@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import {
-  EMPTY_COUNTERS, TARGET_ORDER, conditionHolds, evaluateRecord, targetSchema,
+  EMPTY_COUNTERS, TARGET_ORDER, conditionHolds, evaluateRecord, keyNorm, keyOf, targetSchema,
   type EntityMapping, type ImportConfig, type ImportScope, type Issue, type RecordAction, type RunCounters, type TargetEntity, type TargetField,
 } from '@isp/domain';
 import type { DB, DbOrTx } from '../db/client';
@@ -18,6 +18,8 @@ import { ConnectorError, RetryableError, connectorFor, type FetchJob } from './i
 
 export const hashOf = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 32);
 const STEP_BUDGET_MS = 18_000;
+/** "Entidade de origem" dos registros montados por chave (compartilhada entre abas). */
+const KEYED = 'chave';
 const LOCK_MS = 45_000;
 
 export async function importSchema(db: DbOrTx, tenantId: string) {
@@ -146,13 +148,28 @@ async function resolveRef(c: Ctx, f: TargetField, v: unknown): Promise<{ id: str
     default: {
       const ent = f.ref as TargetEntity;
       const em = c.config.entities.find((e) => e.target === ent && e.enabled) ?? c.config.entities.find((e) => e.target === ent);
-      const srcEntity = em?.source ?? '';
-      const [link] = await c.db.select({ id: s.importLinks.targetId }).from(s.importLinks).where(and(eq(s.importLinks.tenantId, c.run.tenantId), eq(s.importLinks.source, c.run.source), eq(s.importLinks.targetEntity, ent), eq(s.importLinks.sourceEntity, srcEntity), eq(s.importLinks.sourceId, val))).limit(1);
+      const srcEntity = em?.keyFrom?.length ? KEYED : em?.source ?? '';
+      // registros montados por chave (ex.: a empresa de uma linha de negociação) são achados pela mesma chave normalizada
+      const sid = em?.keyFrom?.length ? `k:${keyNorm(val.split('|'))}` : val;
+      const [link] = await c.db.select({ id: s.importLinks.targetId }).from(s.importLinks).where(and(eq(s.importLinks.tenantId, c.run.tenantId), eq(s.importLinks.source, c.run.source), eq(s.importLinks.targetEntity, ent), eq(s.importLinks.sourceEntity, srcEntity), eq(s.importLinks.sourceId, sid))).limit(1);
       if (link) return { id: link.id };
-      const [here] = await c.db.select({ action: s.importRecordResults.action, targetId: s.importRecordResults.targetId }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, c.run.id), eq(s.importRecordResults.targetEntity, ent), eq(s.importRecordResults.sourceEntity, srcEntity), eq(s.importRecordResults.sourceId, val))).limit(1);
-      if (here && (here.action === 'criar' || here.action === 'atualizar')) return { id: here.targetId ?? `nesta-execucao:${val}` };
-      if (here) return { id: null, issue: { field: f.key, level: 'erro', message: `Relacionamento incompleto: ${ent} ${val} desta execução ficou como "${here.action}"` } };
-      return { id: null, issue: { field: f.key, level: 'erro', message: `Relacionamento incompleto: ${ent} ${val} não está nesta importação nem foi importado antes` } };
+      const [here] = await c.db.select({ action: s.importRecordResults.action, targetId: s.importRecordResults.targetId }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, c.run.id), eq(s.importRecordResults.targetEntity, ent), eq(s.importRecordResults.sourceEntity, srcEntity), eq(s.importRecordResults.sourceId, sid))).limit(1);
+      if (here && (here.action === 'criar' || here.action === 'atualizar')) return { id: here.targetId ?? `nesta-execucao:${sid}` };
+      if (here?.action === 'revisar') return { id: null, issue: { field: f.key, level: 'revisao', message: `Depende da decisão sobre ${ent} "${val}", que está em revisão` } };
+      if (here) return { id: null, issue: { field: f.key, level: f.required ? 'erro' : 'revisao', message: `Relacionamento incompleto: ${ent} "${val}" desta execução ficou como "${here.action}"` } };
+      // chave alternativa (ex.: tarefa ligada por "negociação + empresa"): só vale quando aponta para um registro só
+      if (em?.altKeyFrom?.length) {
+        const ak = keyNorm(val.split('|'));
+        const [ls, hs] = await Promise.all([
+          c.db.select({ sid: s.importLinks.sourceId, id: s.importLinks.targetId }).from(s.importLinks).where(and(eq(s.importLinks.tenantId, c.run.tenantId), eq(s.importLinks.source, c.run.source), eq(s.importLinks.targetEntity, ent), eq(s.importLinks.altKey, ak))).limit(5),
+          c.db.select({ sid: s.importRecordResults.sourceId, id: s.importRecordResults.targetId }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, c.run.id), eq(s.importRecordResults.targetEntity, ent), eq(s.importRecordResults.altKey, ak), inArray(s.importRecordResults.action, ['criar', 'atualizar']))).limit(5),
+        ]);
+        const found = new Map<string, string>();
+        for (const x of [...ls, ...hs]) if (!found.has(x.sid)) found.set(x.sid, x.id ?? `nesta-execucao:${x.sid}`);
+        if (found.size === 1) return { id: [...found.values()][0]! };
+        if (found.size > 1) return { id: null, issue: { field: f.key, level: f.required ? 'erro' : 'revisao', message: `${found.size} registros de ${ent} combinam com "${val}": não dá para saber qual` } };
+      }
+      return { id: null, issue: { field: f.key, level: f.required ? 'erro' : 'revisao', message: `Relacionamento incompleto: ${ent} "${val}" não está nesta importação nem foi importado antes` } };
     }
   }
 }
@@ -168,15 +185,22 @@ async function targetRow(c: Ctx, ent: TargetEntity, id: string): Promise<Existin
   return r ? { id: r.id, updatedAt: r.updatedAt, deleted: !!r.deleted } : null;
 }
 
-/** Registro já existente sem vínculo de importação, achado por chave forte (documento da conta, e-mail da pessoa). Nunca por nome. */
-async function matchByKey(c: Ctx, ent: TargetEntity, values: Record<string, unknown>): Promise<string | null> {
+/**
+ * Registro já existente sem vínculo de importação. Chave forte (CPF/CNPJ da conta, e-mail da pessoa) ou, para contas
+ * sem documento, o mesmo nome exato — que nunca vincula sozinho: sempre vai para revisão.
+ */
+async function matchByKey(c: Ctx, ent: TargetEntity, values: Record<string, unknown>): Promise<{ id: string; weak: boolean } | null> {
   if (ent === 'conta' && values.document) {
     const [r] = await c.db.select({ id: s.contacts.id }).from(s.contacts).where(and(eq(s.contacts.tenantId, c.run.tenantId), isNull(s.contacts.deletedAt), sql`regexp_replace(coalesce(${s.contacts.document}, ''), '\\D', '', 'g') = ${String(values.document)}`)).limit(1);
-    return r?.id ?? null;
+    if (r) return { id: r.id, weak: false };
+  }
+  if (ent === 'conta' && values.name) {
+    const [r] = await c.db.select({ id: s.contacts.id }).from(s.contacts).where(and(eq(s.contacts.tenantId, c.run.tenantId), isNull(s.contacts.deletedAt), sql`lower(regexp_replace(trim(${s.contacts.name}), '\\s+', ' ', 'g')) = ${String(values.name).trim().replace(/\s+/g, ' ').toLowerCase()}`)).limit(1);
+    if (r) return { id: r.id, weak: true };
   }
   if (ent === 'pessoa' && values.email) {
     const [r] = await c.db.select({ id: s.people.id }).from(s.people).where(and(eq(s.people.tenantId, c.run.tenantId), sql`lower(${s.people.email}) = ${String(values.email).toLowerCase()}`)).limit(1);
-    return r?.id ?? null;
+    if (r) return { id: r.id, weak: false };
   }
   return null;
 }
@@ -254,9 +278,24 @@ async function writeTarget(c: Ctx, tx: DbOrTx, ent: TargetEntity, action: 'criar
   }
 }
 
-async function processOne(c: Ctx, raw: typeof s.importRawRecords.$inferSelect, em: EntityMapping): Promise<RecordAction> {
+type Outcome = RecordAction | 'mesclado' | 'filtrado';
+async function processOne(c: Ctx, raw: typeof s.importRawRecords.$inferSelect, em: EntityMapping): Promise<Outcome> {
   const ent = em.target;
   const fields = c.schema[ent];
+  // fora do filtro da entidade: não gera resultado (ex.: linha de negociação sem contato, para a entidade Pessoas)
+  if (em.filter.length && !em.filter.every((cond) => conditionHolds(raw.payload, cond))) return 'filtrado';
+  // identidade: a da origem, ou montada por colunas (a mesma empresa em várias linhas vira uma conta só)
+  let sid = raw.sourceId;
+  // registros montados por chave são compartilhados entre abas (a mesma empresa em duas abas de negociações = uma conta)
+  const skey = em.keyFrom?.length ? KEYED : raw.entity;
+  if (em.keyFrom?.length) {
+    const k = keyOf(raw.payload, em.keyFrom);
+    if (!k) return 'filtrado';
+    sid = `k:${k}`;
+    const [seen] = await c.db.select({ id: s.importRecordResults.id }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, c.run.id), eq(s.importRecordResults.targetEntity, ent), eq(s.importRecordResults.sourceEntity, skey), eq(s.importRecordResults.sourceId, sid))).limit(1);
+    if (seen) return 'mesclado';
+  }
+  const altKey = em.altKeyFrom?.length ? keyOf(raw.payload, em.altKeyFrom) : null;
   const ev = evaluateRecord(raw.payload, em, fields, { timezone: c.config.timezone, tables: c.config.tables });
   const issues = [...ev.issues];
   let action: RecordAction;
@@ -264,44 +303,42 @@ async function processOne(c: Ctx, raw: typeof s.importRawRecords.$inferSelect, e
   let targetId: string | null = null;
   let duplicate = false;
   const refs: Record<string, string> = {};
-  if (em.filter.length && !em.filter.every((cond) => conditionHolds(raw.payload, cond))) { action = 'ignorar'; reason = 'Fora do filtro do modelo'; }
-  else {
-    for (const f of fields.filter((x) => x.type === 'ref')) {
-      const v = ev.values[f.key];
-      if (v == null || v === '') continue;
-      const r = await resolveRef(c, f, v);
-      if (r.issue) issues.push(r.issue); else refs[f.key] = r.id!;
-    }
-    const [link] = await c.db.select().from(s.importLinks).where(and(eq(s.importLinks.tenantId, c.run.tenantId), eq(s.importLinks.source, c.run.source), eq(s.importLinks.targetEntity, ent), eq(s.importLinks.sourceEntity, raw.entity), eq(s.importLinks.sourceId, raw.sourceId))).limit(1);
-    let existing: Existing = null;
-    if (link) {
-      existing = await targetRow(c, ent, link.targetId);
-      targetId = link.targetId;
-    } else if (em.policy.matchByKey !== 'desligado') {
-      const m = await matchByKey(c, ent, ev.values);
-      if (m) { duplicate = true; targetId = m; existing = await targetRow(c, ent, m); }
-    }
-    const decision = c.decisions.get(`${ent}|${raw.entity}|${raw.sourceId}`);
-    if (issues.some((i) => i.level === 'erro')) { action = 'erro'; reason = 'Erro impeditivo'; }
-    else if (link && (!existing || existing.deleted)) { action = 'revisar'; reason = 'O registro importado antes foi excluído no ISP Sprint'; }
-    else if (existing && link && existing.updatedAt && existing.updatedAt.getTime() > link.lastWrittenAt.getTime() + 2000 && em.policy.onExisting === 'atualizar' && decision !== 'atualizar') { action = 'revisar'; reason = 'Alterado manualmente no ISP Sprint depois da última importação'; }
-    else if (existing && duplicate && !link && em.policy.matchByKey === 'revisar' && decision !== 'vincular') { action = 'revisar'; reason = ent === 'conta' ? 'Já existe uma conta com este CPF/CNPJ' : 'Já existe uma pessoa com este e-mail'; }
-    else if (existing) { action = em.policy.onExisting === 'atualizar' ? (ent === 'anotacao' ? 'ignorar' : 'atualizar') : em.policy.onExisting; reason = duplicate ? 'Vinculado a registro existente (chave forte)' : 'Já importado antes'; }
-    else { action = em.policy.onNew; reason = 'Novo'; targetId = null; }
-    if (issues.some((i) => i.level === 'revisao') && (action === 'criar' || action === 'atualizar') && decision !== 'importar') { action = 'revisar'; reason = 'Campos para revisar'; }
-    if (decision === 'ignorar') { action = 'ignorar'; reason = 'Decisão administrativa: ignorar'; }
+  for (const f of fields.filter((x) => x.type === 'ref')) {
+    const v = ev.values[f.key];
+    if (v == null || v === '') continue;
+    const r = await resolveRef(c, f, v);
+    if (r.issue) issues.push(r.issue); else refs[f.key] = r.id!;
   }
+  const [link] = await c.db.select().from(s.importLinks).where(and(eq(s.importLinks.tenantId, c.run.tenantId), eq(s.importLinks.source, c.run.source), eq(s.importLinks.targetEntity, ent), eq(s.importLinks.sourceEntity, skey), eq(s.importLinks.sourceId, sid))).limit(1);
+  let existing: Existing = null;
+  let weak = false;
+  if (link) {
+    existing = await targetRow(c, ent, link.targetId);
+    targetId = link.targetId;
+  } else if (em.policy.matchByKey !== 'desligado') {
+    const m = await matchByKey(c, ent, ev.values);
+    if (m) { duplicate = true; weak = m.weak; targetId = m.id; existing = await targetRow(c, ent, m.id); }
+  }
+  const decision = c.decisions.get(`${ent}|${skey}|${sid}`);
+  if (issues.some((i) => i.level === 'erro')) { action = 'erro'; reason = 'Erro impeditivo'; }
+  else if (link && (!existing || existing.deleted)) { action = 'revisar'; reason = 'O registro importado antes foi excluído no ISP Sprint'; }
+  else if (existing && link && existing.updatedAt && existing.updatedAt.getTime() > link.lastWrittenAt.getTime() + 2000 && em.policy.onExisting === 'atualizar' && decision !== 'atualizar') { action = 'revisar'; reason = 'Alterado manualmente no ISP Sprint depois da última importação'; }
+  else if (existing && duplicate && !link && (weak || em.policy.matchByKey === 'revisar') && decision !== 'vincular') { action = 'revisar'; reason = weak ? 'Já existe uma conta com o mesmo nome no ISP Sprint' : ent === 'conta' ? 'Já existe uma conta com este CPF/CNPJ' : 'Já existe uma pessoa com este e-mail'; }
+  else if (existing) { action = em.policy.onExisting === 'atualizar' ? (ent === 'anotacao' ? 'ignorar' : 'atualizar') : em.policy.onExisting; reason = duplicate ? 'Vinculado a registro existente' : 'Já importado antes'; }
+  else { action = em.policy.onNew; reason = 'Novo'; targetId = null; }
+  if (issues.some((i) => i.level === 'revisao') && (action === 'criar' || action === 'atualizar') && decision !== 'importar') { action = 'revisar'; reason = 'Campos para revisar'; }
+  if (decision === 'ignorar') { action = 'ignorar'; reason = 'Decisão administrativa: ignorar'; }
   // gravação (só na importação)
   if (c.write && (action === 'criar' || action === 'atualizar')) {
     targetId = await c.db.transaction(async (tx) => {
-      const id = await writeTarget(c, tx, ent, action as 'criar' | 'atualizar', targetId, ev.values, refs, em, raw.sourceId);
-      await tx.insert(s.importLinks).values({ tenantId: c.run.tenantId, source: c.run.source, sourceEntity: raw.entity, sourceId: raw.sourceId, targetEntity: ent, targetId: id, firstRunId: c.run.id, lastRunId: c.run.id, lastWrittenAt: new Date(), legacy: ev.legacy })
-        .onConflictDoUpdate({ target: [s.importLinks.tenantId, s.importLinks.source, s.importLinks.targetEntity, s.importLinks.sourceEntity, s.importLinks.sourceId], set: { targetId: id, lastRunId: c.run.id, lastWrittenAt: new Date(), legacy: ev.legacy } });
+      const id = await writeTarget(c, tx, ent, action as 'criar' | 'atualizar', targetId, ev.values, refs, em, sid);
+      await tx.insert(s.importLinks).values({ tenantId: c.run.tenantId, source: c.run.source, sourceEntity: skey, sourceId: sid, targetEntity: ent, targetId: id, firstRunId: c.run.id, lastRunId: c.run.id, lastWrittenAt: new Date(), legacy: ev.legacy, altKey })
+        .onConflictDoUpdate({ target: [s.importLinks.tenantId, s.importLinks.source, s.importLinks.targetEntity, s.importLinks.sourceEntity, s.importLinks.sourceId], set: { targetId: id, lastRunId: c.run.id, lastWrittenAt: new Date(), legacy: ev.legacy, altKey } });
       return id;
     });
   }
-  await c.db.insert(s.importRecordResults).values({ tenantId: c.run.tenantId, runId: c.run.id, rawId: raw.id, sourceEntity: raw.entity, sourceId: raw.sourceId, targetEntity: ent, action, targetId, values: ev.values, originals: ev.originals, converted: ev.converted, issues, legacy: ev.legacy, reason, duplicate })
-    .onConflictDoUpdate({ target: [s.importRecordResults.runId, s.importRecordResults.targetEntity, s.importRecordResults.sourceEntity, s.importRecordResults.sourceId], set: { action, targetId, values: ev.values, originals: ev.originals, converted: ev.converted, issues, legacy: ev.legacy, reason, duplicate } });
+  await c.db.insert(s.importRecordResults).values({ tenantId: c.run.tenantId, runId: c.run.id, rawId: raw.id, sourceEntity: skey, sourceId: sid, targetEntity: ent, action, targetId, values: ev.values, originals: ev.originals, converted: ev.converted, issues, legacy: ev.legacy, reason, duplicate, altKey })
+    .onConflictDoUpdate({ target: [s.importRecordResults.runId, s.importRecordResults.targetEntity, s.importRecordResults.sourceEntity, s.importRecordResults.sourceId], set: { action, targetId, values: ev.values, originals: ev.originals, converted: ev.converted, issues, legacy: ev.legacy, reason, duplicate, altKey } });
   return action;
 }
 
@@ -319,7 +356,7 @@ async function processBatch(db: DB, run: RunRow, actorId: string, deadline: numb
       if (Date.now() >= deadline) break;
       try {
         const a = await processOne(c, raw, em);
-        counters[key[a]] += 1;
+        if (a === 'mesclado') counters.mesclados += 1; else if (a === 'filtrado') counters.filtrados += 1; else counters[key[a]] += 1;
       } catch (e) {
         counters.erros += 1;
         await db.insert(s.importRecordResults).values({ tenantId: run.tenantId, runId: run.id, rawId: raw.id, sourceEntity: raw.entity, sourceId: raw.sourceId, targetEntity: em.target, action: 'erro', values: {}, originals: {}, issues: [{ field: '*', level: 'erro', message: `Falha ao gravar: ${(e as Error).message.slice(0, 300)}` }], reason: 'Falha na gravação (desfeita)' })
@@ -345,8 +382,10 @@ export async function stepRun(db: DB, tenantId: string, runId: string, actorId: 
     let waiting = false;
     if (run.phase === 'extracao') {
       const r = await extract(db, { ...run, status: 'em_andamento' }, deadline);
-      const [cnt] = await db.select({ n: sql<number>`count(*)::int` }).from(s.importRawRecords).where(and(eq(s.importRawRecords.runId, run.id), inArray(s.importRawRecords.entity, run.configSnapshot.entities.filter((e) => e.enabled).map((e) => e.source))));
-      await setCounters(db, run.id, { identificados: cnt?.n ?? 0, pendentes: Math.max(0, (cnt?.n ?? 0) - run.counters.processados) });
+      // cada entidade ativa trata cada registro da sua aba de origem (uma aba pode alimentar várias entidades)
+      const per = await db.select({ e: s.importRawRecords.entity, n: sql<number>`count(*)::int` }).from(s.importRawRecords).where(eq(s.importRawRecords.runId, run.id)).groupBy(s.importRawRecords.entity);
+      const ident = run.configSnapshot.entities.filter((e) => e.enabled).reduce((a, e) => a + (per.find((x) => x.e === e.source)?.n ?? 0), 0);
+      await setCounters(db, run.id, { identificados: ident, pendentes: Math.max(0, ident - run.counters.processados) });
       if (r === 'feito') await db.update(s.importRuns).set({ phase: 'processamento', checkpoint: { entityIdx: 0, lastSeq: 0 } }).where(eq(s.importRuns.id, run.id));
       waiting = r === 'aguardando';
     }

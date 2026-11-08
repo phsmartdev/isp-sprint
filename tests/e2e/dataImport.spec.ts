@@ -33,12 +33,13 @@ test('importação por modelo salvo: simular, aprovar, executar e conferir', asy
   await expect(card).toBeVisible();
   const conn = (await (await page.request.get('/api/v1/admin/import/connectors')).json()).items.find((c: { name: string }) => c.name === `CSV ${st}`);
   for (const [entity, content] of [['empresas', `id;nome\nE${st};Empresa CSV ${st}\n`], ['negocios', `id;titulo;empresa_id;responsavel;valor;situacao\nN1${st};Negócio CSV ${st};E${st};carlos@yepnet.test;1.234,56;ganho\nN2${st};Negócio aberto ${st};E${st};carlos@yepnet.test;99,90;aberto\n`]] as const) {
-    await card.getByRole('button', { name: 'Enviar arquivo' }).click();
-    const up = page.getByRole('dialog', { name: 'Enviar arquivo CSV' });
-    await up.getByLabel('Entidade (nome do conjunto)').fill(entity);
-    await up.getByLabel('Coluna de ID').fill('id');
-    await up.getByLabel('Arquivo CSV').setInputFiles({ name: `${entity}.csv`, mimeType: 'text/csv', buffer: Buffer.from(content) });
-    await up.getByRole('button', { name: 'Enviar' }).click();
+    await card.getByRole('button', { name: 'Enviar arquivo (CSV ou Excel)' }).click();
+    const up = page.getByRole('dialog', { name: 'Enviar arquivo' });
+    await up.getByLabel('Arquivo CSV ou Excel').setInputFiles({ name: `${entity}.csv`, mimeType: 'text/csv', buffer: Buffer.from(content) });
+    const sheet = up.getByRole('listitem', { name: `Aba ${entity}` });
+    await expect(sheet.getByLabel('Entidade')).toHaveValue(entity);
+    await expect(sheet.getByText('ID = id')).toBeVisible(); // coluna de ID sugerida
+    await up.getByRole('button', { name: 'Enviar', exact: true }).click();
     await expect(page.getByText(/linha\(s\) recebidas/)).toBeVisible();
   }
   await card.getByRole('button', { name: 'Testar conexão' }).click();

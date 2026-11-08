@@ -5972,6 +5972,8 @@ export const importRecordResults = pgTable('import_record_results', {
   legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
   reason: text('reason'),
   duplicate: boolean('duplicate').notNull().default(false),
+  /** chave alternativa (ex.: nome da negociação + empresa) para outras entidades acharem este registro */
+  altKey: text('alt_key'),
   /** decisão administrativa de um registro em revisão */
   decision: text('decision'),
   decidedBy: uuid('decided_by').references(() => users.id),
@@ -5994,9 +5996,11 @@ export const importLinks = pgTable('import_links', {
   lastRunId: uuid('last_run_id').notNull().references(() => importRuns.id),
   /** quando o motor gravou por último: se o registro mudou depois, foi alteração manual → revisão */
   lastWrittenAt: ts('last_written_at').notNull(),
+  altKey: text('alt_key'),
   legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: createdAt(),
 }, (t) => ({
   uq: uniqueIndex('import_links_uq').on(t.tenantId, t.source, t.targetEntity, t.sourceEntity, t.sourceId),
   targetIdx: index('import_links_target_idx').on(t.tenantId, t.targetEntity, t.targetId),
+  altIdx: index('import_links_alt_idx').on(t.tenantId, t.source, t.targetEntity, t.altKey),
 }));

@@ -5,14 +5,15 @@
 import { and, asc, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  DEFAULT_EXECUTION, DEFAULT_POLICY, EMPTY_COUNTERS, IMPORT_SOURCES, RECORD_ACTIONS, TARGET_ENTITIES, configIssues, diffConfigs, discoverFields, importCan, nextImportVersion, qualityOf, suggestMappings,
+  DEFAULT_EXECUTION, DEFAULT_POLICY, EMPTY_COUNTERS, getPath, IMPORT_SOURCES, RECORD_ACTIONS, TARGET_ENTITIES, configIssues, diffConfigs, discoverFields, importCan, nextImportVersion, qualityOf, suggestMappings,
   type EntityMapping, type FieldMapping, type ImportCap, type ImportConfig, type ImportScope, type QualityInput, type TargetEntity,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import { audit } from '../services/audit';
 import { encryptSecret } from '../services/email';
-import { ConnectorError, connectorFor } from '../services/importConnectors';
+import { ConnectorError, CsvConnector, connectorFor } from '../services/importConnectors';
+import { RD_DEAL_ID_COLS, RD_TASK_ID_COLS, isRdDealsExport, isRdTasksExport, rdExportPreset } from '../services/importPresets';
 import { enqueue, hashOf, importSchema, stepRun } from '../services/importEngine';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -32,6 +33,7 @@ const TransformZ = z.discriminatedUnion('op', [
   z.object({ op: z.literal('number'), decimal: z.enum([',', '.']) }), z.object({ op: z.literal('percent'), decimal: z.enum([',', '.']) }),
   z.object({ op: z.literal('phone') }), z.object({ op: z.literal('document') }), z.object({ op: z.literal('email') }),
   z.object({ op: z.literal('boolean'), trueValues: z.array(z.string().max(50)).max(10) }), z.object({ op: z.literal('equivalence'), table: z.string().max(60) }),
+  z.object({ op: z.literal('split_first'), sep: z.string().max(5) }),
 ]);
 const FieldZ = z.object({
   id: z.string().max(60), target: z.string().max(120), kind: z.enum(['direta', 'composicao', 'condicional', 'equivalencia', 'constante']), sources: z.array(z.string().max(300)).max(10),
@@ -45,6 +47,7 @@ export const ConfigZ = z.object({
     source: z.string().max(80), target: z.enum(TARGET_ENTITIES), enabled: z.boolean(), fields: z.array(FieldZ).max(80), legacy: z.enum(['preservar', 'descartar']),
     policy: z.object({ onNew: z.enum(['criar', 'ignorar', 'revisar']), onExisting: z.enum(['atualizar', 'ignorar', 'revisar']), emptyValues: z.enum(['manter', 'limpar']), matchByKey: z.enum(['revisar', 'vincular', 'desligado']) }),
     filter: z.array(Cond).max(10),
+    keyFrom: z.array(z.string().max(300)).max(6).optional(), altKeyFrom: z.array(z.string().max(300)).max(6).optional(),
   })).max(12),
   tables: z.array(z.object({ key: z.string().min(1).max(60), label: z.string().max(120), refKind: z.enum(['conta', 'pessoa', 'oportunidade', 'tarefa', 'anotacao', 'usuario', 'etapa', 'origem', 'filial', 'valor']), rows: z.array(z.object({ from: z.string().max(300), to: z.string().max(300).nullable(), label: z.string().max(300).optional() })).max(2000), fallback: z.object({ kind: z.enum(['revisar', 'padrao', 'vazio']), value: z.string().max(300).optional() }) })).max(30),
   execution: z.object({ batchSize: z.number().int().min(5).max(200), largeVolume: z.number().int().min(10).max(1_000_000) }),
@@ -78,6 +81,12 @@ async function suggestConfig(db: DbOrTx, tenantId: string, connectorId: string):
   const { row, connector } = await connectorFor(db as never, tenantId, connectorId);
   const schema = await importSchema(db, tenantId);
   const ents = await connector.entities();
+  // exportação de negociações do RD Station enviada como planilha: modelo pronto para ela
+  if (row.kind === 'csv' && connector instanceof CsvConnector) {
+    const files = await Promise.all(ents.map(async (e) => { const rows = await connector.allRows(e.key); return { entity: e.key, headers: Object.keys(rows[0] ?? {}), rows }; }));
+    const preset = await rdExportPreset(db, tenantId, files);
+    if (preset) return preset;
+  }
   const entities: EntityMapping[] = [];
   const rd = row.kind === 'rdstation_crm';
   for (const e of ents) {
@@ -188,7 +197,7 @@ export const dataImportRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/admin/import/connectors/:id/files', summary: 'Envia um CSV ao conector (uma entidade por arquivo)', ...M, params: IdParams, bodyLimit: 15_000_000,
-    body: z.object({ entity: z.string().trim().min(2).max(60).regex(/^[\w-]+$/, 'Use letras, números, _ ou -'), name: z.string().max(200), idColumn: z.string().max(120).nullable(), content: z.string().min(1).max(14_000_000) }),
+    body: z.object({ entity: z.string().trim().min(2).max(60).regex(/^[\w-]+$/, 'Use letras, números, _ ou -'), name: z.string().max(200), idColumn: z.string().max(600).nullable(), content: z.string().min(1).max(14_000_000) }),
     handler: async ({ app, auth, params, body, req }) => {
       need(auth, 'conectores');
       const [c] = await app.db.select().from(s.importConnectors).where(and(eq(s.importConnectors.id, params.id), eq(s.importConnectors.tenantId, auth.tenantId)));
@@ -196,7 +205,9 @@ export const dataImportRoutes = [
       const { parseCsv } = await import('../services/customerImport');
       const rows = parseCsv(body.content);
       if (rows.length < 2) throw unprocessable('O arquivo precisa de cabeçalho e ao menos uma linha.');
-      if (body.idColumn && !rows[0]!.map((h) => h.trim()).includes(body.idColumn)) throw unprocessable(`A coluna de ID "${body.idColumn}" não está no cabeçalho.`);
+      const head = rows[0]!.map((h) => h.trim());
+      const missing = (body.idColumn ?? '').split(' + ').map((x) => x.trim()).filter((x) => x && !head.includes(x));
+      if (missing.length) throw unprocessable(`Coluna(s) de ID fora do cabeçalho: ${missing.join(', ')}.`);
       await app.db.insert(s.importSourceFiles).values({ tenantId: auth.tenantId, connectorId: c.id, entity: body.entity, name: body.name, idColumn: body.idColumn, content: body.content, rows: rows.length - 1, uploadedBy: auth.userId })
         .onConflictDoUpdate({ target: [s.importSourceFiles.connectorId, s.importSourceFiles.entity], set: { name: body.name, idColumn: body.idColumn, content: body.content, rows: rows.length - 1, uploadedBy: auth.userId, createdAt: new Date() } });
       await audit(app.db, req, { action: 'import.connector.file', entityType: 'import_connector', entityId: c.id, metadata: { entity: body.entity, name: body.name, rows: rows.length - 1 } });
@@ -214,6 +225,35 @@ export const dataImportRoutes = [
       const out: Record<string, ReturnType<typeof discoverFields>> = {};
       for (const e of pick) out[e.key] = discoverFields(await connector.sample(e.key, 30).catch(connErr));
       return { entities, fields: out };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/import/id-columns', summary: 'Sugere as colunas que identificam cada linha (exportações do RD não trazem ID)', ...M,
+    body: z.object({ headers: z.array(z.string().max(200)).max(300) }),
+    handler: async ({ auth, body }) => {
+      need(auth, 'painel');
+      const h = body.headers.map((x) => x.trim());
+      if (isRdDealsExport(h)) return { columns: RD_DEAL_ID_COLS.filter((c) => h.includes(c)), kind: 'negociacoes_rd' };
+      if (isRdTasksExport(h)) return { columns: RD_TASK_ID_COLS.filter((c) => h.includes(c)), kind: 'tarefas_rd' };
+      const id = h.find((x) => /^(id|_id|codigo|código)$/i.test(x));
+      return { columns: id ? [id] : [], kind: null };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/admin/import/connectors/:id/values', summary: 'Valores distintos de um campo (ou composição) da origem, com contagem — para as equivalências', ...M, params: IdParams,
+    query: z.object({ entity: z.string().max(80), paths: z.string().max(600), template: z.string().max(200).optional() }),
+    handler: async ({ app, auth, params, query }) => {
+      need(auth, 'modelos');
+      const { connector } = await connectorFor(app.db, auth.tenantId, params.id).catch(connErr);
+      const rows = connector instanceof CsvConnector ? await connector.allRows(query.entity) : await connector.sample(query.entity, 200).catch(connErr);
+      const paths = query.paths.split(',').map((x) => x.trim()).filter(Boolean);
+      const counts = new Map<string, number>();
+      for (const r of rows) {
+        const parts = paths.map((p) => String(getPath(r, p) ?? '').trim());
+        const v = (query.template ?? paths.map((_, i) => `{${i}}`).join(' ')).replace(/\{(\d+)\}/g, (_, i) => parts[Number(i)] ?? '').replace(/\s+/g, ' ').trim();
+        if (v && !/^[·|\s-]*$/.test(v)) counts.set(v, (counts.get(v) ?? 0) + 1);
+      }
+      return { complete: connector instanceof CsvConnector, items: [...counts.entries()].map(([value, count]) => ({ value, count })).sort((a, b) => b.count - a.count).slice(0, 2000) };
     },
   }),
   defineRoute({
@@ -553,6 +593,33 @@ export const dataImportRoutes = [
       await app.db.update(s.importRecordResults).set({ decision: body.decision, decidedBy: body.decision ? auth.userId : null }).where(eq(s.importRecordResults.id, x.id));
       await audit(app.db, req, { action: 'import.record.decision', entityType: 'import_run', entityId: run.id, metadata: { record: x.id, decision: body.decision } });
       return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/import/runs/:id/decisions', summary: 'Decisão em lote para os registros em revisão de uma simulação', ...M, params: IdParams,
+    body: z.object({ entity: z.enum(TARGET_ENTITIES), reason: z.string().max(200), decision: z.enum(['importar', 'ignorar', 'vincular', 'atualizar']).nullable() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      need(auth, 'simular');
+      const run = await loadRun(app.db, auth.tenantId, params.id);
+      if (run.mode !== 'simulacao') throw unprocessable('Decisões são tomadas na simulação, antes de importar.');
+      const r = await app.db.update(s.importRecordResults).set({ decision: body.decision, decidedBy: body.decision ? auth.userId : null }).where(and(eq(s.importRecordResults.runId, run.id), eq(s.importRecordResults.targetEntity, body.entity), eq(s.importRecordResults.action, 'revisar'), eq(s.importRecordResults.reason, body.reason))).returning({ id: s.importRecordResults.id });
+      await audit(app.db, req, { action: 'import.record.decision.bulk', entityType: 'import_run', entityId: run.id, metadata: { ...body, count: r.length } });
+      return { count: r.length };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/admin/import/runs/:id/review-groups', summary: 'Registros em revisão agrupados por motivo (para decidir em lote)', ...M, params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      need(auth, 'auditoria');
+      const run = await loadRun(app.db, auth.tenantId, params.id);
+      const rows = await app.db.select({ entity: s.importRecordResults.targetEntity, reason: s.importRecordResults.reason, n: count(), decided: sql<number>`count(${s.importRecordResults.decision})::int` }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, run.id), eq(s.importRecordResults.action, 'revisar'))).groupBy(s.importRecordResults.targetEntity, s.importRecordResults.reason);
+      const bad = await app.db.select({ entity: s.importRecordResults.targetEntity, action: s.importRecordResults.action, issues: s.importRecordResults.issues }).from(s.importRecordResults).where(and(eq(s.importRecordResults.runId, run.id), inArray(s.importRecordResults.action, ['erro', 'revisar'])));
+      const group = (level: 'erro' | 'revisao') => {
+        const m = new Map<string, number>();
+        for (const e of bad) for (const i of e.issues.filter((x) => x.level === level)) { const k = `${e.entity}\u0001${i.message.replace(/"[^"]*"/g, '"…"').slice(0, 160)}`; m.set(k, (m.get(k) ?? 0) + 1); }
+        return [...m.entries()].map(([k, n]) => { const [entity, message] = k.split('\u0001'); return { entity, message, n }; }).sort((a, b) => b.n - a.n).slice(0, 30);
+      };
+      return { review: rows, reviewIssues: group('revisao'), errors: group('erro') };
     },
   }),
   defineRoute({

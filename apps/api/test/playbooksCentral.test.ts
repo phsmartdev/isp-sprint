@@ -96,7 +96,7 @@ describe('Central de Playbooks', () => {
     // Diretoria programa a vigência: a 1.0 continua até a data
     expect(ok(await dir.post(`/playbook-versions/${d.versionId}/decide`, { decision: 'aprovar', effectiveFrom: tomorrow })).json()).toMatchObject({ status: 'aprovada' });
     expect(ok(await lucas.get(`/playbooks/${c.id}`)).json().version.number).toBe('1.0');
-    await ctx.db.execute(sql`update playbook_versions set effective_from = current_date where id = ${d.versionId}`);
+    await ctx.db.execute(sql`update playbook_versions set effective_from = (now() at time zone 'America/Sao_Paulo')::date where id = ${d.versionId}`);
     const now2 = ok(await lucas.get(`/playbooks/${c.id}`)).json();
     expect(now2.version.number).toBe('2.0');
     expect(now2.me.acked).toBe(false); // ciência é por versão
@@ -125,7 +125,7 @@ describe('Central de Playbooks', () => {
     expect((await dir.post(`/playbook-versions/${c.versionId}/decide`, { decision: 'aprovar' })).statusCode).toBe(403);
     await ctx.db.execute(sql`update playbook_versions set status = 'homologacao_diretoria' where id = ${c.versionId}`);
     ok(await dir.post(`/playbook-versions/${c.versionId}/decide`, { decision: 'aprovar' }));
-    await ctx.db.execute(sql`update playbooks set next_review_on = current_date - 1 where id = ${c.id}`);
+    await ctx.db.execute(sql`update playbooks set next_review_on = (now() at time zone 'America/Sao_Paulo')::date - 1 where id = ${c.id}`);
     ok(await carlos.get('/playbooks/manage'));
     ok(await carlos.get('/playbooks/manage'));
     const alerts = (await ctx.db.execute<{ n: number }>(sql`select count(*)::int as n from playbook_alerts where playbook_id = ${c.id}`)).rows[0]!.n;

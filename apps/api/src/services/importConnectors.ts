@@ -251,18 +251,35 @@ export class CsvConnector implements Connector {
     if (!f) throw new ConnectorError(`Arquivo ${job.entity} não está mais no conector.`);
     const only = job.ctx?.only ? new Set(job.ctx.only.split('\u0001')) : null;
     const records: FetchedRecord[] = [];
+    const idCols = CsvConnector.idCols(f.idColumn);
+    const seen = new Map<string, number>();
+    let dups = 0;
     CsvConnector.rowsOf(f.content).forEach((r, i) => {
-      const id = f.idColumn && r[f.idColumn]?.trim() ? r[f.idColumn]!.trim() : `linha-${i + 2}`;
+      const id = CsvConnector.idOfRow(r, idCols, i);
+      if (seen.has(id)) { dups += 1; return; }
+      seen.set(id, i);
       if (only && !only.has(id) && !Object.values(r).some((v) => only.has(v.trim()))) return;
       records.push({ entity: f.entity, sourceId: id, payload: r, reason: only ? 'selecionado (ou ligado a um ID escolhido)' : 'selecionado' });
     });
-    return { records, next: [], warnings: f.idColumn ? [] : [`${f.name}: sem coluna de ID; a linha do arquivo vira o ID (reimportar outro arquivo pode duplicar).`] };
+    const warnings: string[] = [];
+    if (!idCols.length) warnings.push(`${f.name}: sem coluna de ID; a linha do arquivo vira o ID (reimportar outro arquivo pode duplicar).`);
+    if (dups) warnings.push(`${f.name} (${f.entity}): ${dups} linha(s) com o mesmo ID de outra linha (${idCols.join(' + ')}); só a primeira entrou.`);
+    return { records, next: [], warnings };
+  }
+  /** ID da linha: uma coluna, ou várias juntas ("Nome + Empresa + Data de criação"). */
+  static idCols(idColumn: string | null) { return idColumn ? idColumn.split(' + ').map((x) => x.trim()).filter(Boolean) : []; }
+  static idOfRow(r: Record<string, string>, cols: string[], i: number) {
+    if (!cols.length) return `linha-${i + 2}`;
+    const parts = cols.map((c) => (r[c] ?? '').trim());
+    return parts.every((p) => !p) ? `linha-${i + 2}` : parts.join(' | ');
   }
   async sample(entity: string, n: number) { const f = (await this.files()).find((x) => x.entity === entity); return f ? CsvConnector.rowsOf(f.content).slice(0, n) : []; }
+  /** Todas as linhas de uma aba (para listar os valores distintos de uma coluna nas equivalências). */
+  async allRows(entity: string) { const f = (await this.files()).find((x) => x.entity === entity); return f ? CsvConnector.rowsOf(f.content) : []; }
   async search(_k: 'conta' | 'oportunidade', q: string) {
     const out: RefOption[] = [];
     for (const f of await this.files()) for (const [i, r] of CsvConnector.rowsOf(f.content).entries()) {
-      const id = f.idColumn ? r[f.idColumn] ?? '' : `linha-${i + 2}`;
+      const id = CsvConnector.idOfRow(r, CsvConnector.idCols(f.idColumn), i);
       const label = Object.values(r).slice(0, 3).join(' · ');
       if (!q || label.toLowerCase().includes(q.toLowerCase())) out.push({ id, label, sub: f.entity });
       if (out.length >= 30) return out;

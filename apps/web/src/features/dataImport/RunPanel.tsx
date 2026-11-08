@@ -46,6 +46,48 @@ function QualityCards({ q }: { q: Quality }) {
   );
 }
 
+type Groups = { review: { entity: string; reason: string | null; n: number; decided: number }[]; reviewIssues: { entity: string; message: string; n: number }[]; errors: { entity: string; message: string; n: number }[] };
+/** O que travou, agrupado por motivo, com decisão em lote para os registros em revisão. */
+function ReviewGroups({ runId, canDecide }: { runId: string; canDecide: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['import', 'run', runId, 'groups'], queryFn: () => api<Groups>(`/admin/import/runs/${runId}/review-groups`) });
+  const bulk = useMutation({ mutationFn: (b: { entity: string; reason: string; decision: string | null }) => api<{ count: number }>(`/admin/import/runs/${runId}/decisions`, { method: 'POST', body: b }), onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['import', 'run', runId] }); toast({ tone: 'success', message: `Decisão aplicada a ${r.count} registro(s)` }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  if (!q.data || (!q.data.review.length && !q.data.errors.length)) return null;
+  const d = q.data;
+  const ent = (e: string) => TARGET_ENTITY_LABELS[e as TargetEntity] ?? e;
+  return (
+    <section aria-label="Pendências agrupadas" className="grid gap-4 lg:grid-cols-2">
+      {!!d.review.length && (
+        <div className="rounded-md border border-warning/40 bg-surface p-3 text-sm">
+          <p className="mb-2 font-semibold text-ink">Em revisão</p>
+          <ul className="space-y-2">{d.review.map((g) => (
+            <li key={`${g.entity}${g.reason}`} className="border-b border-line pb-2">
+              <p><b>{g.n}</b> × {ent(g.entity)} — {g.reason}{g.decided ? <span className="text-xs text-muted"> ({g.decided} já decididos)</span> : null}</p>
+              {canDecide && <div className="mt-1 flex flex-wrap gap-1.5">
+                {g.reason?.startsWith('Já existe') && <Button size="sm" onClick={() => bulk.mutate({ entity: g.entity, reason: g.reason!, decision: 'vincular' })}>Vincular todos aos existentes</Button>}
+                {g.reason?.startsWith('Alterado manualmente') && <Button size="sm" onClick={() => bulk.mutate({ entity: g.entity, reason: g.reason!, decision: 'atualizar' })}>Sobrescrever todos</Button>}
+                {g.reason === 'Campos para revisar' && <Button size="sm" onClick={() => bulk.mutate({ entity: g.entity, reason: g.reason!, decision: 'importar' })}>Importar todos assim mesmo</Button>}
+                <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ entity: g.entity, reason: g.reason!, decision: 'ignorar' })}>Não importar</Button>
+                {!!g.decided && <Button size="sm" variant="ghost" onClick={() => bulk.mutate({ entity: g.entity, reason: g.reason!, decision: null })}>Desfazer</Button>}
+              </div>}
+            </li>
+          ))}</ul>
+          {!!d.reviewIssues.length && <><p className="mt-2 text-xs font-semibold text-muted">Motivos</p><ul className="text-xs">{d.reviewIssues.map((x, i) => <li key={i}>{x.n} × {ent(x.entity)}: {x.message}</li>)}</ul></>}
+          <p className="mt-2 text-[11px] text-muted">"Importar assim mesmo" grava sem o que ficou pendente (ex.: tarefa sem a negociação, ligada só à empresa). As decisões valem para a importação desta simulação.</p>
+        </div>
+      )}
+      {!!d.errors.length && (
+        <div className="rounded-md border border-danger/30 bg-surface p-3 text-sm">
+          <p className="mb-2 font-semibold text-ink">Erros (nunca são gravados)</p>
+          <ul className="space-y-1">{d.errors.map((x, i) => <li key={i} className="border-b border-line pb-1"><b>{x.n}</b> × {ent(x.entity)}: {x.message}</li>)}</ul>
+          <p className="mt-2 text-[11px] text-muted">Corrija o mapeamento ou a planilha e simule de novo, ou siga sem eles.</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Value({ v, changed }: { v: unknown; changed?: boolean }) {
   return <span className={clsx('break-all', changed && 'bg-[#E0F2FE] px-0.5')}>{pretty(v)}</span>;
 }
@@ -180,6 +222,7 @@ export function RunPanel({ runId, autoDrive = true }: { runId: string; autoDrive
           {!!d.failedJobs.length && <><p className="mt-2 text-xs font-semibold text-danger">Buscas que falharam</p><ul className="text-xs">{d.failedJobs.map((j, i) => <li key={i}>{String(j.job.path ?? j.job.entity)} — {j.error} ({j.attempts}×)</li>)}</ul></>}
         </div>
       </section>
+      {done && r.mode === 'simulacao' && <ReviewGroups runId={runId} canDecide={d.can.simular} />}
       {(done || r.phase !== 'extracao') && <RecordBrowser runId={runId} mode={r.mode} canDecide={d.can.simular} />}
     </div>
   );
