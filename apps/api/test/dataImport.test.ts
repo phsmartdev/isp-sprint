@@ -11,10 +11,18 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, dir: Client;
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const st = Date.now().toString(36);
+/** CNPJ fictício válido e único por execução do teste (não colide com outros testes). */
+function cnpjOf(seed: number) {
+  const b = (String(seed % 1e8).padStart(8, '0') + '0001').split('').map(Number);
+  const dv = (arr: number[], w: number[]) => { const r = arr.reduce((a, x, i) => a + x * w[i]!, 0) % 11; return r < 2 ? 0 : 11 - r; };
+  const d1 = dv(b, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]); const d2 = dv([...b, d1], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+  return [...b, d1, d2].join('');
+}
+const CNPJ = cnpjOf(Date.now());
 
 // ------------------------------------------------------------------ dublê do RD Station
 const orgs = [
-  { _id: `o1${st}`, id: `o1${st}`, name: `Prefeitura Fictícia ${st}`, organization_custom_fields: [{ custom_field: { label: 'CNPJ' }, value: '11.222.333/0001-81' }] },
+  { _id: `o1${st}`, id: `o1${st}`, name: `Prefeitura Fictícia ${st}`, organization_custom_fields: [{ custom_field: { label: 'CNPJ' }, value: CNPJ }] },
   { _id: `o2${st}`, id: `o2${st}`, name: `Hospital Fictício ${st}`, organization_custom_fields: [] },
 ];
 const deal = (id: string, org: (typeof orgs)[number], extra: Record<string, unknown>) => ({

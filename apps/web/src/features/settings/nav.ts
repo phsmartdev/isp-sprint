@@ -45,6 +45,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     { to: '/settings/integrations', label: 'Integrações', desc: 'IXC, GLPI, WhatsApp e outros sistemas.', admin: true, keywords: 'ixc glpi api' },
     { to: '/settings/gmail', label: 'E-mail corporativo (Gmail)', desc: 'Conta Google para enviar e receber pelo sistema.', admin: true, keywords: 'google' },
     { to: '/settings/data', label: 'Base de dados', desc: 'Importação, exportação e limpeza de dados.', admin: true, keywords: 'importar exportar' },
+    { to: '/settings/importacao', label: 'Data Import Engine', desc: 'Migração de outros sistemas (RD Station, CSV) com modelos versionados, simulação e auditoria.', admin: true, keywords: 'rd station migração importar modelo mapeamento crm' },
   ] },
 ];
 

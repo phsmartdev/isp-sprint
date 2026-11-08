@@ -65,6 +65,9 @@ const AdminModules = lazy(() => import('./pages/admin/Modules').then((m) => ({ d
 const AdminSalesBranches = lazy(() => import('./pages/admin/SalesBranches').then((m) => ({ default: m.AdminSalesBranches })));
 const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then((m) => ({ default: m.AdminGmailSettings })));
 const AdminResultsSettings = lazy(() => import('./pages/admin/ResultsSettings').then((m) => ({ default: m.AdminResultsSettings })));
+const ImportEnginePage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportEnginePage })));
+const ImportTemplatePage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportTemplatePage })));
+const ImportRunPage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportRunPage })));
 const AdminAbmSettings = lazy(() => import('./pages/admin/AbmSettings').then((m) => ({ default: m.AdminAbmSettings })));
 const AdminPerformanceSettings = lazy(() => import('./pages/admin/PerformanceSettings').then((m) => ({ default: m.AdminPerformanceSettings })));
 const AdminContractComms = lazy(() => import('./pages/admin/ContractComms').then((m) => ({ default: m.AdminContractComms })));
@@ -191,6 +194,9 @@ export function App() {
           <Route path="instructions" element={<Navigate to="/settings/modelos?aba=instrucao" replace />} />
           <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="data" element={<AdminData />} />
+          <Route path="importacao" element={<ImportEnginePage />} />
+          <Route path="importacao/modelos/:id" element={<ImportTemplatePage />} />
+          <Route path="importacao/execucoes/:id" element={<ImportRunPage />} />
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<Navigate to="/settings/modulos?cfg=contratos" replace />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
