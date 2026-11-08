@@ -185,16 +185,40 @@ function TraceBox() {
   );
 }
 
+/** Atalho principal: enviar uma planilha (Excel ou CSV). Usa (ou cria) o conector "Planilhas" e abre o assistente já com o modelo sugerido. */
+function SheetImportButton({ onDone }: { onDone: (connectorId: string) => void }) {
+  const conns = useConnectors();
+  const toast = useToast();
+  const [target, setTarget] = useState<string | null>(null);
+  const prep = useMutation({
+    mutationFn: async () => {
+      const existing = conns.data?.items.find((c) => c.kind === 'csv' && !c.archived);
+      if (existing) return existing.id;
+      return (await api<{ id: string }>('/admin/import/connectors', { method: 'POST', body: { kind: 'csv', name: 'Planilhas' } })).id;
+    },
+    onSuccess: (id) => setTarget(id), onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (!conns.data) return null;
+  if (!conns.data.can.conectores) return <p className="text-sm text-muted">Enviar planilhas é feito pela Diretoria ou pela Administração.</p>;
+  return (<>
+    <Button variant="primary" icon={<FileUp className="h-4 w-4" />} loading={prep.isPending} onClick={() => prep.mutate()}>Importar planilha (Excel ou CSV)</Button>
+    {target && <UploadFiles connectorId={target} onClose={() => setTarget(null)} onDone={() => { const id = target; setTarget(null); onDone(id); }} />}
+  </>);
+}
+
 export function ImportEnginePage() {
-  const [s, set] = useUrlState({ aba: 'painel', modelo: '' });
+  const [s, set] = useUrlState({ aba: 'painel', modelo: '', conector: '' });
   const tabs = [{ key: 'painel', label: 'Painel geral' }, { key: 'modelos', label: 'Modelos de importação' }, { key: 'nova', label: 'Nova importação' }, { key: 'conectores', label: 'Conectores' }, { key: 'historico', label: 'Histórico e auditoria' }] as const;
   return (
     <div className="space-y-5">
-      <p className="max-w-3xl text-sm text-muted">Importa dados de outros sistemas com modelos salvos e versionados. Nada é gravado sem simulação, e cada registro importado aponta para o original.</p>
-      <Tabs label="Data Import Engine" tabs={[...tabs]} value={s.aba as (typeof tabs)[number]['key']} onChange={(k) => set({ aba: k, modelo: '' })} />
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="max-w-3xl flex-1 text-sm text-muted">Importa dados de outros sistemas (planilhas exportadas do RD Station, CSV ou a API do RD) com modelos salvos e versionados. Nada é gravado sem simulação, e cada registro importado aponta para o original.</p>
+        <SheetImportButton onDone={(id) => set({ aba: 'nova', modelo: '', conector: id })} />
+      </div>
+      <Tabs label="Data Import Engine" tabs={[...tabs]} value={s.aba as (typeof tabs)[number]['key']} onChange={(k) => set({ aba: k, modelo: '', conector: '' })} />
       {s.aba === 'painel' && <Panel />}
       {s.aba === 'modelos' && <Templates onUse={(id) => set({ aba: 'nova', modelo: id })} />}
-      {s.aba === 'nova' && <NewImport key={s.modelo} initialTemplateId={s.modelo || undefined} />}
+      {s.aba === 'nova' && <NewImport key={`${s.modelo}|${s.conector}`} initialTemplateId={s.modelo || undefined} initialConnectorId={s.conector || undefined} />}
       {s.aba === 'conectores' && <Connectors />}
       {s.aba === 'historico' && <History />}
     </div>

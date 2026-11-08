@@ -40,7 +40,7 @@ test('importação por modelo salvo: simular, aprovar, executar e conferir', asy
     await expect(sheet.getByLabel('Entidade')).toHaveValue(entity);
     await expect(sheet.getByText('ID = id')).toBeVisible(); // coluna de ID sugerida
     await up.getByRole('button', { name: 'Enviar', exact: true }).click();
-    await expect(page.getByText(/linha\(s\) recebidas/)).toBeVisible();
+    await expect(page.getByText(/linha\(s\) recebidas/).last()).toBeVisible();
   }
   await card.getByRole('button', { name: 'Testar conexão' }).click();
   await expect(card.getByText('Conexão ok')).toBeVisible();
@@ -108,4 +108,28 @@ test('importação por modelo salvo: simular, aprovar, executar e conferir', asy
   await page.screenshot({ path: 'test-results/import-conferencia.png', fullPage: true });
   expect(psql(`select count(*) from opportunities where title like 'Negócio % ${st}'`)).toBe('2');
   expect(psql(`select stage || ':' || value_cents from opportunities where title = 'Negócio CSV ${st}'`)).toBe('ganha:123456');
+});
+
+test('atalho: importar planilha exportada do RD abre o assistente com o modelo pronto', async ({ page }) => {
+  test.setTimeout(120_000);
+  const st = Date.now().toString(36);
+  await login(page, 'carlos@yepnet.test');
+  const dirEmail = `dir-plan-${st}@yepnet.test`;
+  expect((await page.request.post('/api/v1/admin/users', { data: { name: 'Diretor Planilha', email: dirEmail, profile: 'diretoria', teamIds: [] } })).status()).toBe(201);
+  psql(`update users set password_hash = (select password_hash from users where email = 'carlos@yepnet.test') where email = '${dirEmail}'`);
+  await login(page, dirEmail);
+  await page.goto('/settings/importacao');
+  await page.getByRole('button', { name: 'Importar planilha (Excel ou CSV)' }).click();
+  const up = page.getByRole('dialog', { name: 'Enviar arquivo' });
+  const H = ['Nome', 'Empresa', 'Funil de vendas', 'Etapa', 'Estado', 'Valor Único', 'Data de criação', 'Hora de criação', 'Responsável', 'Contatos'];
+  const csv = [H, [`Link ${st}`, `Empresa Fictícia ${st}`, 'Vendas Consultiva', 'Proposta', 'Vendida', '1000', '2026-01-10', '09:25', 'Carlos', 'Contato Fictício']].map((r) => r.map((v) => `"${v}"`).join(';')).join('\n');
+  await up.getByLabel('Arquivo CSV ou Excel').setInputFiles({ name: 'negociacoes_rd.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+  await expect(up.getByText('Exportação de negociações do RD')).toBeVisible();
+  await up.getByRole('button', { name: 'Enviar', exact: true }).click();
+  await expect(page.getByRole('button', { name: /3\s*Escopo/ })).toHaveAttribute('aria-current', 'step');
+  await expect(page.getByRole('radio', { name: /Todas as contas e oportunidades/ })).toBeChecked();
+  await page.getByRole('button', { name: /5\s*Mapeamento/ }).click();
+  await expect(page.getByRole('tab', { name: /negociacoes_rd → Contas/ })).toBeVisible();
+  await expect(page.getByRole('tab', { name: /negociacoes_rd → Oportunidades/ })).toBeVisible();
+  await page.screenshot({ path: 'test-results/import-planilha-atalho.png', fullPage: true });
 });
