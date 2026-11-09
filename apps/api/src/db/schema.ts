@@ -6004,3 +6004,38 @@ export const importLinks = pgTable('import_links', {
   targetIdx: index('import_links_target_idx').on(t.tenantId, t.targetEntity, t.targetId),
   altIdx: index('import_links_alt_idx').on(t.tenantId, t.source, t.targetEntity, t.altKey),
 }));
+
+/** Relatório de Medição: contas com obrigação de envio (dia previsto, destinatários e textos do e-mail). */
+export const measurementReportSettings = pgTable('measurement_report_settings', {
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  enabled: boolean('enabled').notNull().default(false),
+  dueDay: integer('due_day').notNull().default(5),
+  toAddress: text('to_address'),
+  ccAddress: text('cc_address'),
+  texts: jsonb('texts').$type<{ greeting: string; intro: string; closing: string }>(),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('measurement_report_settings_pk').on(t.tenantId, t.contactId), dayCk: check('measurement_report_settings_day_ck', sql`due_day between 1 and 31`) }));
+
+/** Relatório de Medição do mês (rascunho gerado automaticamente; enviado fica congelado). */
+export const measurementReports = pgTable('measurement_reports', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  referenceMonth: text('reference_month').notNull(),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  status: text('status').notNull().default('rascunho'),
+  /** Snapshot: propostas (com inclusão), itens consolidados e textos. */
+  data: jsonb('data').$type<Record<string, unknown>>().notNull(),
+  subject: text('subject').notNull(),
+  generatedBy: uuid('generated_by').references(() => users.id),
+  generatedAt: ts('generated_at').notNull().defaultNow(),
+  sentAt: ts('sent_at'),
+  sentBy: uuid('sent_by').references(() => users.id),
+  sentTo: text('sent_to'),
+  sentCc: text('sent_cc'),
+  emailMessageId: uuid('email_message_id'),
+  error: text('error'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('measurement_reports_uq').on(t.tenantId, t.contactId, t.referenceMonth), statusCk: check('measurement_reports_status_ck', inList('status', ['rascunho', 'enviado'])) }));
