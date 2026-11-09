@@ -58,7 +58,7 @@ export async function generateProposal(tx: DbOrTx, who: Who, opp: { id: string; 
 }
 
 /** Modelo padrão da filial da oportunidade (ativo, de proposta, com páginas). */
-export async function branchDefaultTemplate(db: DbOrTx, tenantId: string, branchId: string | null) {
+async function branchDefaultOnly(db: DbOrTx, tenantId: string, branchId: string | null) {
   if (!branchId) return null;
   const [b] = await db.select({ t: s.salesBranches.defaultProposalTemplateId }).from(s.salesBranches).where(and(eq(s.salesBranches.id, branchId), eq(s.salesBranches.tenantId, tenantId)));
   if (!b?.t) return null;
@@ -73,3 +73,14 @@ export async function hasProposal(db: DbOrTx, tenantId: string, oppId: string) {
 
 /** Etapa de proposta: chave "proposta" ou nome "Proposta". */
 export const isProposalStage = (st: { key: string; name: string }) => st.key === 'proposta' || st.name.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase() === 'proposta';
+
+/**
+ * Modelo usado na geração automática ao entrar em Proposta: o padrão da filial da oportunidade;
+ * sem filial ou sem padrão na filial, o único modelo de proposta ativo da empresa (com mais de um, não adivinha).
+ */
+export async function branchDefaultTemplate(db: DbOrTx, tenantId: string, branchId: string | null) {
+  const own = await branchDefaultOnly(db, tenantId, branchId);
+  if (own) return own;
+  const all = await db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, tenantId), eq(s.proposalTemplates.active, true), eq(s.proposalTemplates.purpose, 'proposta'))).limit(2);
+  return all.length === 1 ? all[0]! : null;
+}

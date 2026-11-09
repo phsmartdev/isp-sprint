@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
+import { Trash2, Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
@@ -28,7 +28,7 @@ import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { OpportunityArpPanel } from '../features/arp/OpportunityArp';
 import { Avatar, Breadcrumb, Button, ChipGroup, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, SaveStatus, Select, Tabs, Textarea } from '../components/ui/primitives';
-import { Drawer, Modal, useToast } from '../components/ui/overlay';
+import { ConfirmDialog, Drawer, Modal, useToast } from '../components/ui/overlay';
 import { ContractChip, CoverageChip, LifecycleChip, ProposalChip, StageChip, productLabel } from '../components/badges';
 import { MyOpportunityPoints } from '../features/MyOpportunityPoints';
 import { Timeline } from '../features/Timeline';
@@ -590,6 +590,7 @@ export function OpportunityWorkspacePage() {
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
   const [oppAction, setOppAction] = useState<OppAction | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
@@ -863,7 +864,9 @@ export function OpportunityWorkspacePage() {
         {editable && opp.paused && <span className="rounded-sm bg-[#FFF6D6] px-2 py-0.5 text-xs font-bold text-[#9A6B00]" title={opp.pauseReason ?? undefined}>{opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada'}</span>}
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? '' : '. Reabrir é com a supervisão.'}</span>}
         {isClosed(opp.stage) && canReopen && <Button variant="primary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOppAction('reabrir')}>Reabrir negociação</Button>}
+        {opp.stage !== 'ganha' && <Button variant="ghost" className="text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Excluir negociação</Button>}
       </div>
+      {deleting && <DeleteOpportunity id={opp.id} rowVersion={opp.rowVersion} title={opp.contactName} onClose={() => setDeleting(false)} />}
 
       <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
 
@@ -891,5 +894,24 @@ export function OpportunityWorkspacePage() {
       {oppAction && <OppActionDialog act={{ opp, kind: oppAction }} stages={stages} onClose={() => setOppAction(null)} />}
       <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
     </div>
+  );
+}
+
+/** Excluir a negociação: some do funil, das listas e dos indicadores; o motivo fica na auditoria. Venda fechada não se exclui. */
+function DeleteOpportunity({ id, rowVersion, title, onClose }: { id: string; rowVersion: number; title: string; onClose: () => void }) {
+  const [reason, setReason] = useState('');
+  const qc = useQueryClient();
+  const toast = useToast();
+  const nav = useNavigate();
+  const del = useMutation({
+    mutationFn: () => api(`/opportunities/${id}`, { method: 'DELETE', body: { rowVersion, reason: reason.trim() } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['opportunities'] }); void qc.invalidateQueries({ queryKey: ['opportunity', id] }); toast({ tone: 'success', message: 'Negociação excluída' }); onClose(); nav('/opportunities'); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  return (
+    <ConfirmDialog open title="Excluir negociação" tone="danger" confirmLabel="Excluir" loading={del.isPending} confirmDisabled={reason.trim().length < 3} onCancel={onClose} onConfirm={() => del.mutate()}>
+      <p><strong>{title}</strong> sai do funil, das listas e dos indicadores. Tarefas e pontos ligados a ela deixam de contar. O registro e o motivo ficam na auditoria.</p>
+      <FormField label="Motivo da exclusão" htmlFor="del-opp-reason" required><Textarea id="del-opp-reason" value={reason} onChange={(e) => setReason(e.target.value)} className="min-h-[64px]" data-autofocus /></FormField>
+    </ConfirmDialog>
   );
 }
