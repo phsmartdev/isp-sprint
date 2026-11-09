@@ -115,7 +115,7 @@ export const trainingExamRoutes = [
           const [u] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId));
           const [t] = await tx.select({ name: s.tenants.name }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId));
           const course = cfg.courseTitle?.trim() || p.title;
-          const pdf = await trainingCertificatePdf({ company: t?.name ?? '', person: u?.name ?? '', course, playbook: p.code, hours: cfg.hours, scorePct: g.scorePct, issuedOn: today, code });
+          const pdf = await trainingCertificatePdf({ company: t?.name ?? '', person: u?.name ?? '', course, playbook: p.code, hours: cfg.hours, scorePct: g.scorePct, issuedOn: today, code, gamification: cfg.countsForGamification });
           let gamId: string | null = null;
           if (cfg.countsForGamification) {
             // conta como curso complementar já validado (a prova é a validação); a área é a primeira da pessoa
@@ -140,7 +140,16 @@ export const trainingExamRoutes = [
       const [c] = await app.db.select().from(s.trainingCertificates).where(and(eq(s.trainingCertificates.id, params.id), eq(s.trainingCertificates.tenantId, auth.tenantId)));
       if (!c) throw notFound('Certificado não encontrado.');
       if (c.userId !== auth.userId && !isDirector(auth) && !isManager(auth) && !(await canEditPb(app.db, auth, await loadPb(app.db, auth, c.playbookId)))) throw notFound('Certificado não encontrado.');
-      return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${c.code}.pdf"`).header('cache-control', 'private, no-store').send(c.data);
+      // redesenha com o layout atual a partir dos dados gravados na emissão (nome do curso, horas, nota, data e código não mudam)
+      const [u] = await app.db.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, c.userId));
+      const [t] = await app.db.select({ name: s.tenants.name }).from(s.tenants).where(eq(s.tenants.id, c.tenantId));
+      const [pb] = await app.db.select({ code: s.playbooks.code }).from(s.playbooks).where(eq(s.playbooks.id, c.playbookId));
+      const pdf = await trainingCertificatePdf({ company: t?.name ?? '', person: u?.name ?? '', course: c.title, playbook: pb?.code ?? '', hours: c.hours, scorePct: c.scoreBp / 100, issuedOn: c.issuedOn, code: c.code, gamification: !!c.gamificationCertificateId });
+      if (!pdf.equals(c.data)) {
+        await app.db.update(s.trainingCertificates).set({ data: pdf }).where(eq(s.trainingCertificates.id, c.id));
+        if (c.gamificationCertificateId) await app.db.update(s.gamificationCertificates).set({ data: pdf }).where(eq(s.gamificationCertificates.id, c.gamificationCertificateId));
+      }
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${c.code}.pdf"`).header('cache-control', 'private, no-store').send(pdf);
     },
   }),
   defineRoute({
