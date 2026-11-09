@@ -1,5 +1,5 @@
 /**
- * Certificado de treinamento em PDF, com a cara do sistema (marca BKT: cantos retos, grafite, azul e lima)
+ * Certificado de treinamento em PDF, com a cara do sistema (marca BKT: cantos retos, grafite e azul)
  * e a Badge Crescimento, que é onde o curso conta na gamificação.
  * Gerado uma vez na aprovação e guardado: o arquivo não muda se a prova mudar depois.
  */
@@ -9,7 +9,7 @@ import { safeText } from './proposals';
 const BLUE = rgb(0x2f / 255, 0x59 / 255, 0x86 / 255);
 const NAVY = rgb(0x2d / 255, 0x33 / 255, 0x39 / 255);
 const NAVY_DARK = rgb(0x26 / 255, 0x2b / 255, 0x30 / 255);
-const LIME = rgb(0xb5 / 255, 0xd3 / 255, 0x34 / 255);
+const SKY = rgb(0x8f / 255, 0xa9 / 255, 0xc4 / 255);
 const INK = rgb(0x2d / 255, 0x33 / 255, 0x39 / 255);
 const MUTED = rgb(0x5b / 255, 0x65 / 255, 0x70 / 255);
 const LINE = rgb(0xdc / 255, 0xe1 / 255, 0xe6 / 255);
@@ -25,7 +25,7 @@ function drawGrowthBadge(page: PDFPage, x: number, top: number, size: number) {
   const s = size / 100;
   page.drawSvgPath(HEX, { x, y: top, scale: s, color: BLUE, borderColor: WHITE, borderWidth: 3 * s });
   page.drawSvgPath(ARROW, { x, y: top, scale: s, color: WHITE });
-  for (let i = 0; i < 3; i++) page.drawRectangle({ x: x + (35 + i * 11) * s, y: top + 6, width: 7 * s, height: 5 * s, color: LIME });
+  for (let i = 0; i < 3; i++) page.drawRectangle({ x: x + (35 + i * 11) * s, y: top + 6, width: 7 * s, height: 5 * s, color: SKY });
 }
 
 function fit(font: PDFFont, text: string, size: number, max: number, min = 9) {
@@ -59,9 +59,9 @@ export async function trainingCertificatePdf(c: { company: string; person: strin
   // coluna da marca (grafite) com a Badge Crescimento
   const SIDE = 270;
   page.drawRectangle({ x: 0, y: 0, width: SIDE, height: H, color: NAVY });
-  page.drawRectangle({ x: SIDE, y: 0, width: 6, height: H, color: LIME });
+  page.drawRectangle({ x: SIDE, y: 0, width: 6, height: H, color: BLUE });
   page.drawText('RevOps', { x: 36, y: H - 62, size: 24, font: bold, color: WHITE });
-  page.drawText('Centro de Aprimoramento', { x: 36, y: H - 82, size: 11, font: reg, color: SOFT });
+  page.drawText('Central de Playbooks', { x: 36, y: H - 82, size: 11, font: reg, color: SOFT });
   const bs = 150;
   drawGrowthBadge(page, (SIDE - bs) / 2, H - 150, bs);
   const bl = 'Badge Crescimento';
@@ -75,12 +75,12 @@ export async function trainingCertificatePdf(c: { company: string; person: strin
   // código de verificação no pé da coluna
   page.drawRectangle({ x: 0, y: 0, width: SIDE, height: 76, color: NAVY_DARK });
   page.drawText('Código de verificação', { x: 36, y: 46, size: 9, font: reg, color: SOFT });
-  page.drawText(c.code, { x: 36, y: 26, size: 15, font: bold, color: LIME });
+  page.drawText(c.code, { x: 36, y: 26, size: 15, font: bold, color: WHITE });
 
   // conteúdo
   const L = SIDE + 6 + 56, R = W - 56, MAXW = R - L;
   page.drawText('CERTIFICADO DE CONCLUSÃO', { x: L, y: H - 70, size: 11, font: bold, color: BLUE });
-  page.drawRectangle({ x: L, y: H - 82, width: 48, height: 3, color: LIME });
+  page.drawRectangle({ x: L, y: H - 82, width: 48, height: 3, color: BLUE });
   page.drawText('Certificamos que', { x: L, y: H - 130, size: 13, font: reg, color: MUTED });
   const name = fit(bold, c.person, 34, MAXW, 18);
   page.drawText(name.t, { x: L, y: H - 172, size: name.sz, font: bold, color: INK });
@@ -97,7 +97,7 @@ export async function trainingCertificatePdf(c: { company: string; person: strin
   boxes.forEach(([k, v], i) => {
     const x = L + i * (bw + gap);
     page.drawRectangle({ x, y: by, width: bw, height: bh, borderColor: LINE, borderWidth: 1, color: WHITE });
-    page.drawRectangle({ x, y: by + bh - 3, width: bw, height: 3, color: i === 1 ? LIME : BLUE });
+    page.drawRectangle({ x, y: by + bh - 3, width: bw, height: 3, color: BLUE });
     page.drawText(k, { x: x + 14, y: by + bh - 22, size: 9, font: reg, color: MUTED });
     page.drawText(v, { x: x + 14, y: by + 14, size: 20, font: bold, color: INK });
   });
