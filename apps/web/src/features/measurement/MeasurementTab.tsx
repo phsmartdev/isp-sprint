@@ -5,8 +5,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Download, FileText, Mail, RefreshCw, Send } from 'lucide-react';
-import { monthLabel, type MeasurementProposal, type MeasurementTexts } from '@isp/domain';
+import { Download, FileText, Mail, Plus, RefreshCw, RotateCcw, Send, X } from 'lucide-react';
+import { measurementEmailHtml, monthLabel, type GridAlign, type MeasurementGrid, type MeasurementProposal, type MeasurementTables, type MeasurementTexts } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Textarea } from '../../components/ui/primitives';
@@ -19,7 +19,7 @@ type ReportItem = { id: string; referenceMonth: string; dueOn: string; status: '
 type Home = { settings: Settings; official: { referenceMonth: string; dueOn: string; today: string } | null; defaultTo: string; reports: ReportItem[] };
 type Data = { referenceMonth: string; texts: MeasurementTexts; proposals: MeasurementProposal[]; partial: boolean };
 type Preview = { subject: string; data: Data; html: string; totals: Totals };
-type Full = ReportItem & { data: Data; html: string; to: string; cc: string };
+type Full = ReportItem & { data: Data; html: string; to: string; cc: string; tables: MeasurementTables; edited: boolean };
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 const curMonth = () => today().slice(0, 7);
@@ -157,18 +157,23 @@ function ReportModal({ id, contactId, onClose }: { id: string; contactId: string
   const [texts, setTexts] = useState<MeasurementTexts | null>(null);
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
+  const [tables, setTables] = useState<MeasurementTables | null>(null);
+  const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  useEffect(() => { if (q.data) { setSubject(q.data.subject); setTexts(q.data.data.texts); setTo(q.data.to ?? ''); setCc(q.data.cc ?? ''); } }, [q.data]);
+  useEffect(() => { if (q.data) { setSubject(q.data.subject); setTexts(q.data.data.texts); setTo(q.data.to ?? ''); setCc(q.data.cc ?? ''); setTables(q.data.tables); setDirty(false); } }, [q.data]);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['measurement-report', id] }); void qc.invalidateQueries({ queryKey: ['measurement', contactId] }); };
-  const save = useMutation({ mutationFn: (excluded: string[]) => api(`/measurement-reports/${id}`, { method: 'PUT', body: { subject, texts, excluded } }), onSuccess: refresh, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  const send = useMutation({ mutationFn: async () => { await api(`/measurement-reports/${id}`, { method: 'PUT', body: { subject, texts, excluded: excludedNow } }); return api(`/measurement-reports/${id}/send`, { method: 'POST', body: { to, cc } }); }, onSuccess: () => { refresh(); setConfirm(false); toast({ tone: 'success', message: 'Relatório enviado' }); }, onError: (e) => { setConfirm(false); toast({ tone: 'error', message: errMsg(e) }); } });
+  const save = useMutation({ mutationFn: ({ excluded, reset }: { excluded: string[]; reset?: boolean }) => api(`/measurement-reports/${id}`, { method: 'PUT', body: { subject, texts, excluded, resetTables: !!reset, ...(dirty && !reset ? { tables } : {}) } }), onSuccess: refresh, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const send = useMutation({ mutationFn: async () => { await api(`/measurement-reports/${id}`, { method: 'PUT', body: { subject, texts, excluded: excludedNow, ...(dirty ? { tables } : {}) } }); return api(`/measurement-reports/${id}/send`, { method: 'POST', body: { to, cc } }); }, onSuccess: () => { refresh(); setConfirm(false); toast({ tone: 'success', message: 'Relatório enviado' }); }, onError: (e) => { setConfirm(false); toast({ tone: 'error', message: errMsg(e) }); } });
   const r = q.data;
   const draft = r?.status === 'rascunho';
   const excludedNow = (r?.data.proposals ?? []).filter((p) => !p.included).map((p) => p.opportunityId);
-  const toggle = (p: MeasurementProposal) => save.mutate(p.included ? [...excludedNow, p.opportunityId] : excludedNow.filter((x) => x !== p.opportunityId));
+  const toggle = (p: MeasurementProposal) => save.mutate({ excluded: p.included ? [...excludedNow, p.opportunityId] : excludedNow.filter((x) => x !== p.opportunityId), reset: true });
+  const setGrid = (k: keyof MeasurementTables) => (g: MeasurementGrid) => { setTables((cur) => (cur ? { ...cur, [k]: g } : cur)); setDirty(true); };
+  // prévia local enquanto edita (mesma função que gera o e-mail)
+  const html = r && texts && tables && draft ? measurementEmailHtml({ referenceMonth: r.referenceMonth, texts, proposals: r.data.proposals, items: [], tables }) : r?.html ?? '';
   return (
     <Modal open onClose={onClose} size="xl" title={r ? `Relatório de Medição · ${monthLabel(r.referenceMonth)}` : 'Relatório de Medição'}
-      footer={r && (draft ? <><Button onClick={onClose}>Fechar</Button><Button loading={save.isPending} icon={<RefreshCw className="h-4 w-4" />} onClick={() => save.mutate(excludedNow)}>Salvar e atualizar com o CRM</Button><Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!r.totals.proposals} onClick={() => setConfirm(true)}>Enviar</Button></> : <Button onClick={onClose}>Fechar</Button>)}>
+      footer={r && (draft ? <><Button onClick={onClose}>Fechar</Button><Button loading={save.isPending} icon={<RefreshCw className="h-4 w-4" />} onClick={() => save.mutate({ excluded: excludedNow })}>Salvar</Button><Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!r.totals.proposals} onClick={() => setConfirm(true)}>Enviar</Button></> : <Button onClick={onClose}>Fechar</Button>)}>
       {!r || !texts ? <LoadingRows rows={4} /> : (
         <div className="space-y-4">
           {r.status === 'enviado' && <p className="border-l-4 border-[#15803D] bg-[#ECFDF3] px-3 py-2 text-sm">Enviado em {fmtDateTime(r.sentAt)} para {r.sentTo}{r.sentCc ? ` (cópia: ${r.sentCc})` : ''}. Conteúdo congelado.</p>}
@@ -187,10 +192,20 @@ function ReportModal({ id, contactId, onClose }: { id: string; contactId: string
                 ))}</ul>
               </fieldset>
               <details className="border border-line p-3"><summary className="cursor-pointer text-sm font-semibold text-ink">Textos do e-mail</summary><div className="mt-3"><TextsFields t={texts} set={setTexts} /></div></details>
+              {tables && (
+                <div className="space-y-4 border border-line p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div><p className="text-sm font-semibold text-ink">Tabelas do e-mail</p><p className="text-xs text-muted">Edite o texto de qualquer célula, inclua linhas e colunas. Incluir ou tirar uma proposta refaz as tabelas a partir do CRM.</p></div>
+                    {(r.edited || dirty) && <Button size="sm" icon={<RotateCcw className="h-4 w-4" />} loading={save.isPending} onClick={() => save.mutate({ excluded: excludedNow, reset: true })}>Refazer a partir do CRM</Button>}
+                  </div>
+                  <GridEditor title="Histórico de propostas" g={tables.proposals} set={setGrid('proposals')} />
+                  <GridEditor title="Itens consumidos" g={tables.items} set={setGrid('items')} />
+                </div>
+              )}
             </>
           )}
           <Attachments ps={r.data.proposals} />
-          <EmailFrame html={r.html} subject={draft ? subject : r.subject} />
+          <EmailFrame html={html} subject={draft ? subject : r.subject} />
         </div>
       )}
       <ConfirmDialog open={confirm} title="Enviar o Relatório de Medição?" confirmLabel="Enviar" loading={send.isPending} onConfirm={() => send.mutate()} onCancel={() => setConfirm(false)}>
@@ -198,5 +213,44 @@ function ReportModal({ id, contactId, onClose }: { id: string; contactId: string
         <p className="text-sm text-muted">O que foi alterado nos textos e no assunto é salvo antes do envio.</p>
       </ConfirmDialog>
     </Modal>
+  );
+}
+
+const ALIGNS: [GridAlign, string][] = [['left', 'Esq.'], ['center', 'Centro'], ['right', 'Dir.']];
+/** Editor de tabela: cabeçalho, linhas e linha de total; tudo texto livre. */
+function GridEditor({ title, g, set }: { title: string; g: MeasurementGrid; set: (g: MeasurementGrid) => void }) {
+  const cols = g.columns.length;
+  const setCell = (ri: number, ci: number, v: string) => set({ ...g, rows: g.rows.map((r, i) => (i === ri ? r.map((c, j) => (j === ci ? v : c)) : r)) });
+  const setTotal = (ci: number, v: string) => set({ ...g, total: (g.total ?? Array(cols).fill('')).map((c, j) => (j === ci ? v : c)) });
+  const addCol = () => cols < 12 && set({ columns: [...g.columns, { label: 'Nova coluna', align: 'left' }], rows: g.rows.map((r) => [...r, '']), total: g.total ? [...g.total, ''] : null });
+  const delCol = (ci: number) => cols > 1 && set({ columns: g.columns.filter((_, j) => j !== ci), rows: g.rows.map((r) => r.filter((_, j) => j !== ci)), total: g.total ? g.total.filter((_, j) => j !== ci) : null });
+  const inp = 'h-8 w-full min-w-[90px] border border-line bg-surface px-2 text-sm focus:border-primary focus:outline-none';
+  return (
+    <div role="group" aria-label={`Tabela ${title}`} className="space-y-2">
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <thead><tr>{g.columns.map((c, ci) => (
+            <th key={ci} className="border border-line bg-surface-2 p-1 align-top">
+              <div className="flex gap-1"><input aria-label={`${title}: título da coluna ${ci + 1}`} className={`${inp} font-semibold`} value={c.label} onChange={(e) => set({ ...g, columns: g.columns.map((x, j) => (j === ci ? { ...x, label: e.target.value } : x)) })} />
+                <button type="button" aria-label={`${title}: remover coluna ${ci + 1}`} title="Remover coluna" disabled={cols <= 1} onClick={() => delCol(ci)} className="px-1 text-muted hover:text-danger disabled:opacity-30"><X className="h-4 w-4" /></button></div>
+              <select aria-label={`${title}: alinhamento da coluna ${ci + 1}`} className="mt-1 h-7 w-full border border-line bg-surface text-xs" value={c.align} onChange={(e) => set({ ...g, columns: g.columns.map((x, j) => (j === ci ? { ...x, align: e.target.value as GridAlign } : x)) })}>{ALIGNS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            </th>
+          ))}<th className="w-8 border border-line bg-surface-2" /></tr></thead>
+          <tbody>
+            {g.rows.map((r, ri) => (
+              <tr key={ri}>{r.map((v, ci) => <td key={ci} className="border border-line p-1"><input aria-label={`${title}: linha ${ri + 1}, ${g.columns[ci]?.label || `coluna ${ci + 1}`}`} className={inp} value={v} onChange={(e) => setCell(ri, ci, e.target.value)} /></td>)}
+                <td className="border border-line text-center"><button type="button" aria-label={`${title}: remover linha ${ri + 1}`} title="Remover linha" onClick={() => set({ ...g, rows: g.rows.filter((_, i) => i !== ri) })} className="px-1 text-muted hover:text-danger"><X className="h-4 w-4" /></button></td></tr>
+            ))}
+            {g.total && <tr className="bg-surface-2">{g.total.map((v, ci) => <td key={ci} className="border border-line p-1"><input aria-label={`${title}: total, ${g.columns[ci]?.label || `coluna ${ci + 1}`}`} className={`${inp} font-semibold`} value={v} onChange={(e) => setTotal(ci, e.target.value)} /></td>)}<td className="border border-line" /></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => set({ ...g, rows: g.rows.length < 300 ? [...g.rows, Array(cols).fill('')] : g.rows })}>Linha</Button>
+        <Button size="sm" icon={<Plus className="h-4 w-4" />} disabled={cols >= 12} onClick={addCol}>Coluna</Button>
+        {!g.total && <Button size="sm" onClick={() => set({ ...g, total: Array(cols).fill('') })}>Linha de total</Button>}
+      </div>
+    </div>
   );
 }

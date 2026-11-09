@@ -1,4 +1,7 @@
 /** Modelos de proposta (arte + campos variáveis) e geração do PDF da proposta na oportunidade. */
+import { ensureProposalNumber } from '../services/proposalNumber';
+import { todayIn } from '../services/vacations';
+import { proposalTitle } from '@isp/domain';
 import { createHash } from 'node:crypto';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -170,10 +173,11 @@ export const proposalRoutes = [
       const o = await loadOpportunity(app.db, auth, params.id);
       const t = await templateOr404(app.db, auth.tenantId, body.templateId);
       const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
+      const number = await app.db.transaction((tx) => ensureProposalNumber(tx, auth.tenantId, o.id, todayIn(auth.timezone)));
       const vars = { ...(await systemValues(app.db, auth.tenantId, o.id, auth.timezone)), ...custom };
       const out = await buildProposalPdf(app.db, auth.tenantId, t.id, vars);
       if (!out) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
-      const filename = `Proposta ${o.contactName} - ${t.name}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
+      const filename = `${proposalTitle(number, o.contactName)}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
       const row = await app.db.transaction(async (tx) => {
         const [r] = await tx.insert(s.opportunityAttachments).values({ tenantId: auth.tenantId, opportunityId: o.id, kind: 'proposta', filename, mime: 'application/pdf', sizeBytes: out.pdf.length, sha256: createHash('sha256').update(out.pdf).digest('hex'), data: out.pdf, uploadedBy: auth.userId }).returning({ id: s.opportunityAttachments.id, filename: s.opportunityAttachments.filename, sizeBytes: s.opportunityAttachments.sizeBytes });
         if (o.proposalStatus === 'nao_criada') await tx.update(s.opportunities).set({ proposalStatus: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));

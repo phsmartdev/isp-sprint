@@ -20,6 +20,8 @@ export const SYSTEM_VARIABLES = [
   ['plano.valor_numero', 'Mensalidade sem "R$" (ex.: 729,90)'],
   ['plano.produtos', 'Produtos do plano (um por linha)'],
   ['oportunidade.taxa_ativacao', 'Taxa de ativação (R$)'],
+  ['proposta.numero', 'Número da proposta (PC AAMMDD)'],
+  ['proposta.titulo', 'Número da proposta + nome da conta'],
   ['oportunidade.titulo', 'Nome do deal'],
   ['vendedor.nome', 'Vendedor responsável'],
   ['vendedor.email', 'E-mail do vendedor'],
@@ -33,7 +35,7 @@ const num = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLoca
 export async function systemValues(db: DbOrTx, tenantId: string, oppId: string, timezone: string) {
   const [o] = await db
     .select({
-      title: s.opportunities.title, valueCents: s.opportunities.valueCents, fee: s.opportunities.activationFeeCents,
+      title: s.opportunities.title, proposalNumber: s.opportunities.proposalNumber, valueCents: s.opportunities.valueCents, fee: s.opportunities.activationFeeCents,
       street: s.opportunities.installStreet, number: s.opportunities.installNumber, district: s.opportunities.installDistrict, city: s.opportunities.installCity, block: s.opportunities.installBlock, unit: s.opportunities.installUnit,
       contactName: s.contacts.name, document: s.contacts.document, phone: s.contacts.phone, email: s.contacts.email,
       ownerName: s.users.name, ownerEmail: s.users.email, planName: s.plans.name, invoice: s.plans.invoiceServiceName, speed: s.plans.speedMbps, products: s.plans.products, tenantName: s.tenants.name,
@@ -54,7 +56,7 @@ export async function systemValues(db: DbOrTx, tenantId: string, oppId: string, 
     'plano.nome': o.planName ?? '', 'plano.servico_fatura': o.invoice ?? o.planName ?? '', 'plano.velocidade': o.speed ? `${o.speed} Mbps` : '',
     'plano.valor': brl(o.valueCents), 'plano.valor_numero': num(o.valueCents),
     'plano.produtos': (o.products ?? []).map((p) => `• ${p.qty > 1 ? `${p.qty}× ` : ''}${p.name}`).join('\n'),
-    'oportunidade.taxa_ativacao': o.fee == null ? 'R$ 0,00' : brl(o.fee), 'oportunidade.titulo': o.title,
+    'oportunidade.taxa_ativacao': o.fee == null ? 'R$ 0,00' : brl(o.fee), 'oportunidade.titulo': o.title, 'proposta.numero': o.proposalNumber ?? '', 'proposta.titulo': o.proposalNumber ? `${o.proposalNumber} - ${o.contactName}` : '',
     'vendedor.nome': o.ownerName, 'vendedor.email': o.ownerEmail, 'empresa.nome': o.tenantName,
     'data.hoje': new Intl.DateTimeFormat('pt-BR', { timeZone: timezone }).format(new Date()),
   } as Record<string, string>;

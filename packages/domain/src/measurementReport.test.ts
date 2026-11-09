@@ -28,3 +28,29 @@ describe('relatório de medição', () => {
   });
   it('lista de e-mails', () => { expect(emailListOk('a@b.com; c@d.com.br')).toBe(true); expect(emailListOk('a@b')).toBe(false); });
 });
+
+import { nextProposalNumber } from './measurementReport';
+describe('número da proposta', () => {
+  it('PC AAMMDD e sufixo no mesmo dia', () => {
+    expect(nextProposalNumber('2026-11-09', [])).toBe('PC 261109');
+    expect(nextProposalNumber('2026-11-09', ['PC 261109'])).toBe('PC 261109-2');
+    expect(nextProposalNumber('2026-11-09', ['PC 261109', 'PC 261109-2'])).toBe('PC 261109-3');
+  });
+});
+
+import { defaultTables, normalizeGrid } from './measurementReport';
+describe('tabelas editáveis', () => {
+  it('parte do CRM, aceita coluna e linha novas e texto livre', () => {
+    const p: MeasurementProposal = { opportunityId: 'a', code: 9, number: 'PC 261005', title: 'Serviço fictício', sentOn: '2026-10-05', valueCents: 100_00, attachment: null, contractNumber: null, included: true };
+    const t = defaultTables([p], []);
+    expect(t.proposals.rows[0]).toEqual(['05/10/2026', 'SERVIÇO FICTÍCIO', 'PC 261005', 'R$ 100,00']);
+    t.proposals.columns.push({ label: 'Observação', align: 'left' });
+    t.proposals.rows.push(['—', 'Ajuste combinado <com o fiscal>', '', 'R$ 0,00']);
+    const g = normalizeGrid(t.proposals);
+    expect(g.rows.every((r) => r.length === 5)).toBe(true);
+    const html = measurementEmailHtml({ referenceMonth: '2026-10', texts: DEFAULT_MEASUREMENT_TEXTS, proposals: [p], items: [], tables: { proposals: g, items: t.items } });
+    expect(html).toContain('Observação');
+    expect(html).toContain('&lt;com o fiscal&gt;');
+    expect(html).toContain('colspan="3"');
+  });
+});

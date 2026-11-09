@@ -1,4 +1,6 @@
 /** Sprint: roteiro (respostas), anexos de proposta e e-mail ao cliente a partir da oportunidade. */
+import { ensureProposalNumber } from '../services/proposalNumber';
+import { todayIn } from '../services/vacations';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -266,6 +268,7 @@ export const sprintRoutes = [
       });
       if (!result.ok) throw unprocessable(`O e-mail não foi enviado: ${result.error}`, [{ path: 'smtp', message: result.error }]);
       await app.db.transaction(async (tx) => {
+        if (body.kind === 'proposta') await ensureProposalNumber(tx, auth.tenantId, params.id, todayIn(auth.timezone));
         if (body.kind === 'proposta' && ['nao_criada', 'rascunho'].includes(opp.proposalStatus)) {
           await tx.update(s.opportunities).set({ proposalStatus: 'enviada', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, params.id));
         }
@@ -337,6 +340,7 @@ export const sprintRoutes = [
       }
       await app.db.transaction(async (tx) => {
         await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'whatsapp_sent', actorId: auth.userId, payload: { filename: a.filename, to, mode: body.mode }, rowVersion: o.rowVersion });
+        if (a.kind === 'proposta') await ensureProposalNumber(tx, auth.tenantId, o.id, todayIn(auth.timezone));
         if (a.kind === 'proposta' && ['nao_criada', 'rascunho'].includes(o.proposalStatus)) await tx.update(s.opportunities).set({ proposalStatus: 'enviada', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));
       });
       await audit(app.db, req, { action: 'attachment.whatsapp', entityType: 'opportunity', entityId: o.id, metadata: { filename: a.filename, mode: body.mode } });

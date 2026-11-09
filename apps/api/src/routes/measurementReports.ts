@@ -1,7 +1,7 @@
 /** Relatório de Medição da conta: configuração, prévia ao vivo (qualquer mês), rascunho do mês fechado e envio por e-mail. */
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { emailListOk, officialPeriod } from '@isp/domain';
+import { defaultTables, emailListOk, normalizeGrid, officialPeriod } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -14,6 +14,7 @@ import { buildReport, renderReport, sendReport, settingsOf, subjectOf, upsertDra
 
 const Month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 const Emails = z.string().max(1000).refine((v) => !v.trim() || emailListOk(v), 'E-mail inválido (separe vários por vírgula ou ponto e vírgula)');
+const Grid = z.object({ columns: z.array(z.object({ label: z.string().max(120), align: z.enum(['left', 'center', 'right']) })).min(1).max(12), rows: z.array(z.array(z.string().max(1000)).max(12)).max(300), total: z.array(z.string().max(1000)).max(12).nullable() });
 const Texts = z.object({ greeting: z.string().max(500), intro: z.string().max(2000), closing: z.string().max(3000) });
 
 async function contactOr404(db: DbOrTx, auth: AuthContext, id: string) {
@@ -86,16 +87,20 @@ export const measurementReportRoutes = [
       const r = await reportOr404(app.db, auth, params.id);
       const d = r.data as unknown as ReportData;
       const st = await settingsOf(app.db, auth.tenantId, r.contactId);
-      return { ...view(r), data: d, html: renderReport(d).html, to: r.sentTo ?? st.toAddress, cc: r.sentCc ?? st.ccAddress };
+      return { ...view(r), data: d, tables: d.tables ?? defaultTables(d.proposals, d.items), edited: !!d.tables, html: renderReport(d).html, to: r.sentTo ?? st.toAddress, cc: r.sentCc ?? st.ccAddress };
     },
   }),
   defineRoute({
     method: 'PUT', url: '/measurement-reports/:id', summary: 'Ajusta o rascunho: assunto, textos e propostas incluídas (refaz o consolidado)', tag: 'Contratos', module: 'contratos', params: IdParams,
-    body: z.object({ subject: z.string().min(3).max(250), texts: Texts, excluded: z.array(z.string().uuid()).max(500), refresh: z.boolean().default(false) }),
+    body: z.object({ subject: z.string().min(3).max(250), texts: Texts, excluded: z.array(z.string().uuid()).max(500), tables: z.object({ proposals: Grid, items: Grid }).nullable().optional(), resetTables: z.boolean().default(false) }),
     handler: async ({ app, auth, params, body }) => {
       const r = await reportOr404(app.db, auth, params.id);
       if (r.status !== 'rascunho') throw unprocessable('Relatório já enviado: o conteúdo fica congelado.');
-      const d = await buildReport(app.db, auth.tenantId, r.contactId, r.referenceMonth, body.texts, todayIn(auth.timezone), body.excluded);
+      const prev = r.data as unknown as ReportData;
+      const built = await buildReport(app.db, auth.tenantId, r.contactId, r.referenceMonth, body.texts, todayIn(auth.timezone), body.excluded);
+      // tabelas: as editadas ficam; "refazer" volta ao que vem do CRM
+      const tables = body.resetTables ? null : body.tables ? { proposals: normalizeGrid(body.tables.proposals), items: normalizeGrid(body.tables.items) } : prev.tables ?? null;
+      const d: ReportData = { ...built, tables };
       const [u] = await app.db.update(s.measurementReports).set({ subject: body.subject, data: d as unknown as Record<string, unknown>, generatedAt: new Date(), generatedBy: auth.userId }).where(eq(s.measurementReports.id, r.id)).returning();
       return view(u!);
     },

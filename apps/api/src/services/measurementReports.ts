@@ -7,13 +7,13 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import {
   consolidateItems, DEFAULT_MEASUREMENT_TEXTS, measurementEmailHtml, measurementEmailText, monthLabel, monthRange, officialPeriod,
-  type ConsolidatedItem, type MeasurementProposal, type MeasurementTexts,
+  type ConsolidatedItem, type MeasurementProposal, type MeasurementTables, type MeasurementTexts,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { sendEmail } from './email';
 
-export type ReportData = { referenceMonth: string; texts: MeasurementTexts; proposals: MeasurementProposal[]; items: ConsolidatedItem[]; partial: boolean };
+export type ReportData = { referenceMonth: string; texts: MeasurementTexts; proposals: MeasurementProposal[]; items: ConsolidatedItem[]; partial: boolean; tables?: MeasurementTables | null };
 
 export async function settingsOf(db: DbOrTx, tenantId: string, contactId: string) {
   const [r] = await db.select().from(s.measurementReportSettings).where(and(eq(s.measurementReportSettings.tenantId, tenantId), eq(s.measurementReportSettings.contactId, contactId)));
@@ -23,8 +23,8 @@ export async function settingsOf(db: DbOrTx, tenantId: string, contactId: string
 /** Propostas e itens do mês (ao vivo). `excluded` = oportunidades desmarcadas no rascunho. */
 export async function buildReport(db: DbOrTx, tenantId: string, contactId: string, referenceMonth: string, texts: MeasurementTexts, today: string, excluded: string[] = []): Promise<ReportData> {
   const { from, to } = monthRange(referenceMonth);
-  const rows = (await db.execute<{ id: string; code: number; title: string; value_cents: string | null; contract_id: string; contract_code: number; sent_on: string | null }>(sql`
-    select o.id, o.code, o.title, coalesce(o.measurement_cents, o.value_cents) value_cents, o.measurement_contract_id contract_id, c.code contract_code,
+  const rows = (await db.execute<{ id: string; code: number; proposal_number: string | null; title: string; value_cents: string | null; contract_id: string; contract_code: number; sent_on: string | null }>(sql`
+    select o.id, o.code, o.proposal_number, o.title, coalesce(o.measurement_cents, o.value_cents) value_cents, o.measurement_contract_id contract_id, c.code contract_code,
       coalesce(
         (select min((e.occurred_at at time zone t.timezone)::date) from opportunity_events e where e.opportunity_id = o.id and ((e.type = 'email_sent' and e.payload->>'kind' = 'proposta') or e.type = 'whatsapp_sent')),
         case when o.proposal_status in ('enviada', 'aceita') then (select max((a.created_at at time zone t.timezone)::date) from opportunity_attachments a where a.opportunity_id = o.id and a.kind = 'proposta' and a.deleted_at is null) end
@@ -41,7 +41,7 @@ export async function buildReport(db: DbOrTx, tenantId: string, contactId: strin
   for (const a of atts) { const cur = lastAtt.get(a.opportunityId); if (!cur || a.createdAt > cur.createdAt) lastAtt.set(a.opportunityId, a); }
   const proposals: MeasurementProposal[] = rows.map((r) => {
     const a = lastAtt.get(r.id);
-    return { opportunityId: r.id, code: Number(r.code), title: r.title, sentOn: r.sent_on!, valueCents: Number(r.value_cents ?? 0), attachment: a ? { id: a.id, filename: a.filename, sizeBytes: a.sizeBytes } : null, contractNumber: `CT-${r.contract_code}`, included: !excluded.includes(r.id) };
+    return { opportunityId: r.id, code: Number(r.code), number: r.proposal_number, title: r.title, sentOn: r.sent_on!, valueCents: Number(r.value_cents ?? 0), attachment: a ? { id: a.id, filename: a.filename, sizeBytes: a.sizeBytes } : null, contractNumber: `CT-${r.contract_code}`, included: !excluded.includes(r.id) };
   }).sort((x, y) => x.sentOn.localeCompare(y.sentOn) || x.code - y.code);
   const inc = proposals.filter((p) => p.included).map((p) => p.opportunityId);
   const lines = inc.length ? await db.select().from(s.opportunityItems).where(inArray(s.opportunityItems.opportunityId, inc)) : [];
@@ -67,7 +67,7 @@ export async function upsertDraft(db: DbOrTx, tenantId: string, contactId: strin
   if (cur?.status === 'enviado') return cur;
   const prev = (cur?.data ?? {}) as Partial<ReportData>;
   const excluded = (prev.proposals ?? []).filter((p) => !p.included).map((p) => p.opportunityId);
-  const data = await buildReport(db, tenantId, contactId, referenceMonth, (prev.texts as MeasurementTexts) ?? cfg.texts, today, excluded);
+  const data: ReportData = { ...(await buildReport(db, tenantId, contactId, referenceMonth, (prev.texts as MeasurementTexts) ?? cfg.texts, today, excluded)), tables: prev.tables ?? null };
   const [c] = await db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, contactId));
   const values = { data: data as unknown as Record<string, unknown>, subject: cur?.subject ?? subjectOf(c?.name ?? '', referenceMonth), generatedAt: new Date(), generatedBy: actorId, dueOn };
   if (cur) { const [r] = await db.update(s.measurementReports).set(values).where(eq(s.measurementReports.id, cur.id)).returning(); return r!; }

@@ -593,6 +593,8 @@ export const opportunities = pgTable(
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
     proposalStatus: text('proposal_status').notNull().default('nao_criada'),
+    /** Número da proposta gerada no CRM: PC AAMMDD (sufixo -2… no mesmo dia), único na empresa. */
+    proposalNumber: text('proposal_number'),
     contractRequestStatus: text('contract_request_status').notNull().default('nao_solicitada'),
     coverageStatus: text('coverage_status').notNull().default('nao_consultada'),
     reasons: text('reasons').array().notNull().default(sql`'{}'::text[]`),

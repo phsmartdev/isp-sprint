@@ -32,6 +32,9 @@ it('modelo Yepempresa: arte, variáveis criadas pela empresa e PDF anexado', asy
   const att = (await lucas.get(`/opportunities/${o.id}/attachments`)).json().items;
   expect(att[0].kind).toBe('proposta');
   expect(att[0].mime).toBe('application/pdf');
+  expect(gen.json().filename).toMatch(/^PC \d{6}(-\d+)? - .+\.pdf$/); // PC AAMMDD - Nome da conta
+  const again = await lucas.post(`/opportunities/${o.id}/proposal`, { templateId: id, values: {} });
+  expect(again.json().filename.split(' - ')[0]).toBe(gen.json().filename.split(' - ')[0]); // número fica na oportunidade
   const file = await lucas.get(`/opportunities/${o.id}/attachments/${att[0].id}/download`);
   expect(file.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
   const wa = await lucas.post(`/opportunities/${o.id}/attachments/${att[0].id}/whatsapp`, { phone: '(79) 99999-0000', message: 'Olá! Segue a proposta.', mode: 'link' });

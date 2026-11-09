@@ -62,3 +62,34 @@ describe('Relatório de Medição', () => {
     else { expect(s.statusCode).toBe(422); expect(ok(await carlos.get(`/measurement-reports/${g.id}`)).json().status).toBe('rascunho'); }
   });
 });
+
+describe('Exemplo e número da proposta', () => {
+  it('carrega 1 contrato com 6 medições pelas oportunidades, sem duplicar, com PC AAMMDD', async () => {
+    const r = ok(await carlos.post('/admin/demo/measurement-example', {})).json();
+    expect(r.created).toBe(true);
+    expect(ok(await carlos.post('/admin/demo/measurement-example', {})).json()).toEqual({ contactId: r.contactId, created: false });
+    const home = ok(await carlos.get(`/contacts/${r.contactId}/measurement`)).json();
+    const rep = home.reports.find((x: { referenceMonth: string }) => x.referenceMonth === home.official.referenceMonth);
+    expect(rep.totals.proposals).toBe(6);
+    expect(rep.totals.withoutAttachment).toBe(0);
+    expect(rep.totals.itemsCents).toBe(rep.totals.proposalsCents);
+    const full = ok(await carlos.get(`/measurement-reports/${rep.id}`)).json();
+    expect(full.data.proposals.every((p: { number: string }) => /^PC \d{6}(-\d+)?$/.test(p.number))).toBe(true);
+    expect(full.data.items.map((i: { item: string }) => i.item)).toEqual(['15', '22', '23', '27', '28', '29', '41', '48', '49']);
+    const led = (await ctx.db.execute(sql`select count(*)::int n from contract_ledger l join contracts c on c.id = l.contract_id where c.contact_id = ${r.contactId} and l.kind = 'consumo'`)).rows[0] as { n: number };
+    expect(led.n).toBe(6);
+    // tabela editada: nova coluna e nova linha de texto ficam no e-mail
+    const t = full.tables;
+    t.proposals.columns.push({ label: 'Observação', align: 'left' });
+    t.proposals.rows = t.proposals.rows.map((x: string[]) => [...x, '']);
+    t.proposals.total = [...t.proposals.total, ''];
+    t.proposals.rows.push(['—', 'Texto livre de exemplo', '', '', 'Combinado com o fiscal']);
+    ok(await carlos.put(`/measurement-reports/${rep.id}`, { subject: full.subject, texts: full.data.texts, excluded: [], tables: t }));
+    const after = ok(await carlos.get(`/measurement-reports/${rep.id}`)).json();
+    expect(after.edited).toBe(true);
+    expect(after.html).toContain('Combinado com o fiscal');
+    expect(after.html).toContain('Observação');
+    ok(await carlos.put(`/measurement-reports/${rep.id}`, { subject: full.subject, texts: full.data.texts, excluded: [], resetTables: true }));
+    expect(ok(await carlos.get(`/measurement-reports/${rep.id}`)).json().edited).toBe(false);
+  });
+});

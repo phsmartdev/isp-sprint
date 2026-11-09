@@ -1,4 +1,6 @@
 /** Base de clientes: modelo de planilha, importação com prévia e limpeza da base (gerência + senha). */
+import { loadMeasurementExample } from '../services/measurementExample';
+import { todayIn } from '../services/vacations';
 import { customerFieldList } from '../services/customFields';
 import { or, and, eq, inArray, isNull, notExists, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -46,6 +48,15 @@ export const dataAdminRoutes = [
       const r = await app.db.transaction((tx) => applyImport(tx, auth.tenantId, auth.userId, v.rows));
       await audit(app.db, req, { action: 'customers.import', entityType: 'customers', entityId: auth.tenantId, metadata: { ...r, skipped: v.errors.length } });
       return { ...preview, imported: r };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/admin/demo/measurement-example', summary: 'Carrega o exemplo fictício do Relatório de Medição: 1 contrato por medição com 6 medições pelas oportunidades (sai com Limpar base)', tag: 'Base de dados', ...ADMIN,
+    handler: async ({ app, auth, req }) => {
+      if (!auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p))) throw forbidden('Só a administração ou a gerência carrega exemplos.');
+      const r = await loadMeasurementExample(app.db, auth.tenantId, auth.userId, todayIn(auth.timezone));
+      await audit(app.db, req, { action: 'base.measurement_example', entityType: 'contact', entityId: r.contactId, metadata: { created: r.created } });
+      return r;
     },
   }),
   defineRoute({
@@ -199,6 +210,8 @@ export const dataAdminRoutes = [
         // contatos que não estão mais em lead, oportunidade, cliente ou atividade
         const used = (tbl: typeof s.leads | typeof s.opportunities | typeof s.customers | typeof s.activities) => tx.select({ x: sql`1` }).from(tbl).where(eq((tbl as typeof s.leads).contactId, s.contacts.id));
         await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), isNull(s.addresses.customerId), notExists(tx.select({ x: sql`1` }).from(s.leads).where(eq(s.leads.contactId, s.addresses.contactId)))));
+        // Relatório de Medição das contas que vão sair (configuração e relatórios)
+        for (const tb of ['measurement_reports', 'measurement_report_settings']) await tx.execute(sql`delete from ${sql.identifier(tb)} m where m.tenant_id = ${t} and not exists (select 1 from opportunities o where o.contact_id = m.contact_id) and not exists (select 1 from leads l where l.contact_id = m.contact_id) and not exists (select 1 from customers c where c.contact_id = m.contact_id) and not exists (select 1 from activities a where a.contact_id = m.contact_id)`);
         await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.contactClassifications).where(eq(s.contactClassifications.contactId, s.contacts.id))), notExists(tx.select({ x: sql`1` }).from(s.contactIdentityLinks).where(or(eq(s.contactIdentityLinks.contactId, s.contacts.id), eq(s.contactIdentityLinks.otherContactId, s.contacts.id)))), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));
       });
       await audit(app.db, req, { action: 'base.clear', entityType: 'tenant', entityId: t, metadata: { scopes: body.scopes, counts, keep: body.keep } });

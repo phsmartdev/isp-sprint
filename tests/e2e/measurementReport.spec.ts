@@ -53,3 +53,29 @@ test('conta com Relatório de Medição: consumo ao vivo igual ao e-mail e rascu
   await expect(dlg.frameLocator('iframe[title="Prévia do e-mail"]').getByText('Valor Total', { exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/medicao-rascunho.png', fullPage: true });
 });
+
+test('exemplo: 1 contrato com 6 medições; tabela do e-mail com coluna e linha novas', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/data');
+  await page.getByRole('button', { name: 'Carregar exemplo' }).click();
+  await expect(page).toHaveURL(/\/customers\/.+\?t=medicao/);
+  const list = page.getByRole('region', { name: 'Relatórios enviados e a enviar' });
+  const row = list.getByRole('listitem').first();
+  await expect(row).toContainText('6 proposta(s)');
+  await row.getByRole('button', { name: 'Revisar e enviar' }).click();
+  const dlg = page.getByRole('dialog', { name: /Relatório de Medição · / });
+  const props = dlg.getByRole('group', { name: 'Tabela Histórico de propostas' });
+  await expect(props.getByLabel(/linha 1, Nº da proposta/)).toHaveValue(/^PC \d{6}/);
+  await props.getByRole('button', { name: 'Coluna', exact: true }).click();
+  await props.getByLabel('Histórico de propostas: título da coluna 5').fill('Observação');
+  await props.getByLabel('Histórico de propostas: linha 1, Observação').fill('Atestado pelo fiscal');
+  await props.getByRole('button', { name: 'Linha', exact: true }).click();
+  await props.getByLabel('Histórico de propostas: linha 7, Serviço').fill('Texto livre: visita técnica sem custo');
+  const mail = dlg.frameLocator('iframe[title="Prévia do e-mail"]');
+  await expect(mail.getByText('Atestado pelo fiscal')).toBeVisible();
+  await expect(mail.getByRole('row', { name: /27 Fusão óptica Und 102/ })).toBeVisible();
+  await dlg.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(dlg.getByRole('button', { name: 'Refazer a partir do CRM' })).toBeVisible();
+  await dlg.screenshot({ path: 'test-results/medicao-exemplo-edicao.png' });
+});
