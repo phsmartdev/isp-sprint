@@ -45,7 +45,7 @@ export function BadgeIcon({ badgeKey, tierIndex, size = 56, label }: { badgeKey:
 }
 
 /** Minhas badges do ano: faixa alcançada, quanto falta para a próxima e de onde vieram os pontos. */
-export function MyBadges({ badges, year, compact }: { badges: BadgeProgress[]; year: number; compact?: boolean }) {
+export function MyBadges({ badges, year, compact, preview }: { badges: BadgeProgress[]; year: number; compact?: boolean; preview?: boolean }) {
   if (!badges.length) return null;
   return (
     <section aria-label="Minhas badges" className="card p-4">
@@ -53,6 +53,7 @@ export function MyBadges({ badges, year, compact }: { badges: BadgeProgress[]; y
         <h2 className="text-lg font-bold text-ink">Minhas badges em {year}</h2>
         <p className="text-xs text-muted">Pontos do ano em cada dimensão. Todos podem chegar a todas as faixas.</p>
       </div>
+      {preview && <p className="mb-3 border-l-4 border-[#B45309] bg-[#FFF7E6] px-3 py-2 text-xs text-[#92400E]">Prévia com as faixas sugeridas: seus pontos são os reais, mas as badges passam a valer oficialmente quando a regra de pontuação com badges for aprovada.</p>}
       <ul className={clsx('grid gap-3', compact ? 'sm:grid-cols-2 lg:grid-cols-5' : 'sm:grid-cols-2 xl:grid-cols-5')}>
         {badges.map((b) => {
           const top = b.tiers[b.tiers.length - 1]!.minPoints;

@@ -23,7 +23,7 @@ type Data = {
   events?: { type: string; kind: 'direto' | 'participacao'; points: number }[];
   support?: { requestId: string; title: string; role: 'apoiou' | 'pediu'; points: number; capped: boolean }[];
   certificates?: { certificateId: string; title: string; points: number; capped: boolean }[];
-  badges?: BadgeProgress[];
+  badges?: BadgeProgress[]; badgesPreview?: boolean;
 };
 const eventLabel = (k: string) => BUSINESS_EVENT_TYPES.find((t) => t.key === k)?.label ?? k;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -67,7 +67,7 @@ export function MyPointsPage() {
           <p className="font-display text-lg font-bold text-ink">Badge Ouro {d.year}<span className="block font-sans text-sm font-normal text-muted">Maior nota do ano.</span></p>
         </section>
       )}
-      {!!d.badges?.length && <div className="mb-4"><MyBadges badges={d.badges} year={d.year} /></div>}
+      {!!d.badges?.length && <div className="mb-4"><MyBadges badges={d.badges} year={d.year} preview={d.badgesPreview} /></div>}
       <div className="grid gap-4 md:grid-cols-2">
         <Score title={monthName} m={d.monthScore} />
         <Score title={`Ano ${d.year}${d.level ? ` · faixa ${d.level}` : ''}`} m={d.yearScore} />
