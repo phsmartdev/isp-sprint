@@ -1,4 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
+
+/** Badges como a regra os grava (subconjunto válido das origens). */
+const tiers = (a: number, b: number, c: number) => [{ name: 'Faixa mínima', minPoints: a }, { name: 'Faixa média', minPoints: b }, { name: 'Faixa alta', minPoints: c }];
+const BADGES = [
+  { key: 'humanizacao', name: 'Humanização', description: 'Cuidar de pessoas.', sources: ['apoio_dado', 'apoio_pedido', 'participacao'], tiers: tiers(30, 80, 160) },
+  { key: 'excelencia', name: 'Excelência', description: 'Qualidade reconhecida.', sources: ['aderencia'], tiers: tiers(50, 150, 300) },
+  { key: 'dinamismo', name: 'Dinamismo', description: 'Ritmo e iniciativa.', sources: ['tarefas'], tiers: tiers(300, 700, 1200) },
+  { key: 'crescimento', name: 'Crescimento', description: 'Cursos e negócio crescendo.', sources: ['certificados', 'acima_alcada', 'ganhos'], tiers: tiers(10, 120, 250) },
+  { key: 'compromisso', name: 'Compromisso', description: 'Cumprir o combinado.', sources: ['pontualidade'], tiers: tiers(40, 120, 240) },
+];
 import { execFileSync } from 'node:child_process';
 
 /** Certificado de curso: a pessoa envia pela tela, a liderança valida, os pontos aparecem. */
@@ -18,7 +28,7 @@ test('certificado de curso complementar: envio, validação e pontos', async ({ 
   const st = Date.now().toString(36);
   const tenant = psql(`select tenant_id from users where email = 'lucas@yepnet.test'`);
   const base = psql(`select config from gamification_settings where tenant_id = '${tenant}' and status = 'aprovada' order by version desc limit 1`) || '{}';
-  const cfg = JSON.stringify({ ...JSON.parse(base), journeys: JSON.parse(base).journeys ?? [], certificates: { pointsPerCertificate: 10, pointsPerHourTenths: 5, maxHoursCounted: 40, monthlyCapPoints: 40 } }).replace(/'/g, "''");
+  const cfg = JSON.stringify({ ...JSON.parse(base), journeys: JSON.parse(base).journeys ?? [], badges: BADGES, certificates: { pointsPerCertificate: 10, pointsPerHourTenths: 5, maxHoursCounted: 40, monthlyCapPoints: 40 } }).replace(/'/g, "''");
   psql(`insert into gamification_settings (tenant_id, version, config, note, status, created_by) values ('${tenant}', (select coalesce(max(version),0)+1 from gamification_settings where tenant_id = '${tenant}'), '${cfg}'::jsonb, 'E2E', 'aprovada', (select id from users where email = 'carlos@yepnet.test'))`);
   psql(`update users set sectors = array['comercial'] where email = 'lucas@yepnet.test'`);
 
@@ -48,4 +58,10 @@ test('certificado de curso complementar: envio, validação e pontos', async ({ 
   await login(page, 'lucas@yepnet.test');
   await page.goto('/meus-pontos');
   await expect(page.getByRole('list', { name: 'Meus certificados' })).toContainText('+14 pts');
+  // badge Crescimento: o certificado validado leva à faixa mínima (10 pts)
+  const badges = page.getByRole('region', { name: 'Minhas badges' });
+  await expect(badges.getByRole('listitem', { name: 'Badge Crescimento' })).toContainText('Faixa mínima');
+  await expect(badges.getByRole('listitem', { name: 'Badge Crescimento' })).toContainText('Faltam');
+  await expect(badges.getByRole('listitem', { name: 'Badge Dinamismo' })).toContainText('Ainda sem faixa');
+  await badges.screenshot({ path: 'test-results/badges.png' });
 });

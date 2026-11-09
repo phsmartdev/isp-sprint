@@ -49,6 +49,8 @@ export type JourneyCredit = {
   /** crédito extra: tarefa acima da alçada de quem concluiu */
   extra: boolean; taskId?: string;
   bonus?: { onTime: boolean; adherence: boolean; levelsAbove: number };
+  /** pontos da tarefa por parte (base, bônus de prazo, bônus de aderência, adicional acima da alçada) — usado pelos badges */
+  split?: { base: number; onTime: number; adherence: number; above: number };
 };
 /** Contexto de níveis e bônus (regra aprovada); sem ele, só os pesos das tarefas. */
 export type JourneyContext = { onTimeBp: number; adherenceBp: number; extraPerLevelBp: number; rankOfUser: (userId: string) => number; rankOfLevel: (key: string) => number | null };
@@ -74,7 +76,9 @@ export function journeyCredits(journeys: ScoreJourney[], tasks: JourneyTaskDone[
     const levelsAbove = ctx && need != null ? Math.max(0, need - ctx.rankOfUser(t.userId)) : 0;
     const base = p.points * (1 + (onTime ? ctx!.onTimeBp / 10_000 : 0) + (adherence ? ctx!.adherenceBp / 10_000 : 0));
     const pts = levelsAbove > 0 ? base * (1 + (ctx!.extraPerLevelBp * levelsAbove) / 10_000) : base;
-    out.push({ userId: t.userId, points: Math.round(pts * 10) / 10, source: 'tarefa', journeyKey: p.journey.key, opportunityId: t.opportunityId, extra: levelsAbove > 0, taskId: t.taskId, bonus: { onTime, adherence, levelsAbove } });
+    const r = (n: number) => Math.round(n * 100) / 100;
+    const split = { base: r(p.points), onTime: r(onTime ? (p.points * ctx!.onTimeBp) / 10_000 : 0), adherence: r(adherence ? (p.points * ctx!.adherenceBp) / 10_000 : 0), above: r(pts - base) };
+    out.push({ userId: t.userId, points: Math.round(pts * 10) / 10, source: 'tarefa', journeyKey: p.journey.key, opportunityId: t.opportunityId, extra: levelsAbove > 0, taskId: t.taskId, bonus: { onTime, adherence, levelsAbove }, split });
   }
   for (const w of wins) {
     const j = journeys.find((x) => x.pipelineId === w.pipelineId);

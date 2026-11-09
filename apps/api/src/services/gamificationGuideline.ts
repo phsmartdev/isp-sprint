@@ -10,6 +10,8 @@ import * as s from '../db/schema';
 import { todayIn } from './vacations';
 
 export const GUIDELINE_CONTEXT = 'sistema:diretriz_gamificacao';
+const OLD_RECOGNITION = JSON.stringify('O único reconhecimento individual é o **Badge Ouro**, para a maior nota do ano (empate: todos os empatados). Não há segundo nem terceiro lugar. O restante do time é reconhecido pelas faixas do ano, que todos podem alcançar.').slice(1, -1);
+const NEW_RECOGNITION = JSON.stringify('O reconhecimento é por **badges**, sem ranking: Humanização, Excelência, Dinamismo, Crescimento e Compromisso. Cada badge soma, no ano, os pontos de origens específicas (cada origem conta numa badge só) e tem faixas por pontos mínimos — mínima, média e alta — que todos podem alcançar. O que cada badge reconhece, o que soma e as faixas estão na aba **Badges** da regra vigente, acima; cada pessoa acompanha as suas em Meus pontos. A maior nota do ano recebe ainda o **Badge Ouro** (empate: todos os empatados).').slice(1, -1);
 
 let n = 0;
 const id = () => `g${(n++).toString(36)}`;
@@ -40,7 +42,7 @@ export function guidelineContent(): PlaybookContent {
       { id: 'e', kind: 'fim', label: 'Pontos para os dois', guidance: 'Quem ajudou e quem pediu pontuam, até o teto mensal.', x: 0, y: 400 },
     ], edges: [{ id: 'e1', from: 'a', to: 'b' }, { id: 'e2', from: 'b', to: 'c' }, { id: 'e3', from: 'c', to: 'd' }, { id: 'e4', from: 'd', to: 'e', label: 'Sim' }, { id: 'e5', from: 'd', to: 'c', label: 'Ainda não' }] },
     H('Reconhecimento'),
-    T('O único reconhecimento individual é o **Badge Ouro**, para a maior nota do ano (empate: todos os empatados). Não há segundo nem terceiro lugar. O restante do time é reconhecido pelas faixas do ano, que todos podem alcançar.'),
+    T('O reconhecimento é por **badges**, sem ranking: Humanização, Excelência, Dinamismo, Crescimento e Compromisso. Cada badge soma, no ano, os pontos de origens específicas (cada origem conta numa badge só) e tem faixas por pontos mínimos — mínima, média e alta — que todos podem alcançar. O que cada badge reconhece, o que soma e as faixas estão na aba **Badges** da regra vigente, acima; cada pessoa acompanha as suas em Meus pontos. A maior nota do ano recebe ainda o **Badge Ouro** (empate: todos os empatados).'),
     C('atencao', 'Não monte rankings por fora', 'Planilhas, apresentações ou mensagens comparando pessoas desfazem o princípio da ferramenta e não são permitidas.'),
     H('Responsabilidades da gestão'),
     { id: id(), type: 'checklist', mode: 'operacional', title: 'Rotina da liderança', items: [
@@ -82,12 +84,12 @@ export function guidelineContent(): PlaybookContent {
 export async function ensureGamificationGuideline(db: DbOrTx, tenantId: string, tz = 'America/Sao_Paulo') {
   const done = await db.execute(sql`select 1 from playbook_versions where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} limit 1`);
   if (done.rows.length) {
-    // o reconhecimento do vencedor passou a se chamar Badge Ouro: ajusta o texto do playbook criado pelo sistema (só a nomenclatura)
+    // ajustes de texto do playbook criado pelo sistema: Selo BK → Badge Ouro; reconhecimento passou a ser por badges
     const fixed = await db.execute<{ id: string; playbook_id: string }>(sql`update playbook_versions set
-        content = replace(replace(content::text, 'Selo BK de Qualidade', 'Badge Ouro'), 'Só o primeiro lugar do ano é reconhecido**', 'Só o vencedor do ano é reconhecido**')::jsonb,
+        content = replace(replace(replace(content::text, 'Selo BK de Qualidade', 'Badge Ouro'), 'Só o primeiro lugar do ano é reconhecido**', 'Só o vencedor do ano é reconhecido**'), ${OLD_RECOGNITION}, ${NEW_RECOGNITION})::jsonb,
         search_text = replace(replace(search_text, 'Selo BK de Qualidade', 'Badge Ouro'), 'Só o primeiro lugar do ano é reconhecido', 'Só o vencedor do ano é reconhecido')
-      where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} and content::text like '%Selo BK de Qualidade%' returning id, playbook_id`);
-    for (const r of fixed.rows) await db.insert(s.playbookEvents).values({ tenantId, playbookId: r.playbook_id, versionId: r.id, type: 'ajuste', note: 'Ajuste de nomenclatura pelo sistema: o reconhecimento do vencedor do ano passou a se chamar Badge Ouro.', actorId: null });
+      where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} and (content::text like '%Selo BK de Qualidade%' or content::text like '%O único reconhecimento individual%') returning id, playbook_id`);
+    for (const r of fixed.rows) await db.insert(s.playbookEvents).values({ tenantId, playbookId: r.playbook_id, versionId: r.id, type: 'ajuste', note: 'Ajuste de texto pelo sistema: reconhecimento por badges (Humanização, Excelência, Dinamismo, Crescimento e Compromisso) e Badge Ouro para a maior nota do ano.', actorId: null });
     return null;
   }
   return db.transaction(async (tx) => {

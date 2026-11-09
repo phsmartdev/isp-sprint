@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { readFileSync } from 'node:fs';
+import { DEFAULT_BADGES } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -12,7 +13,7 @@ afterAll(async () => ctx.close());
 it('envio, validação e pontos', async () => {
   const tenant = ((await ctx.db.execute(sql`select tenant_id from users where id = ${lucas.me.user.id}`)).rows[0] as { tenant_id: string }).tenant_id;
   // regra aprovada com certificados (10 + 0,5/h até 40 h, teto 40)
-  await ctx.db.execute(sql`insert into gamification_settings (tenant_id, version, config, note, status, created_by) values (${tenant}, (select coalesce(max(version),0)+1 from gamification_settings where tenant_id = ${tenant}), ${JSON.stringify({ journeys: [], certificates: { pointsPerCertificate: 10, pointsPerHourTenths: 5, maxHoursCounted: 40, monthlyCapPoints: 40 } })}::jsonb, 'teste', 'aprovada', ${carlos.me.user.id})`);
+  await ctx.db.execute(sql`insert into gamification_settings (tenant_id, version, config, note, status, created_by) values (${tenant}, (select coalesce(max(version),0)+1 from gamification_settings where tenant_id = ${tenant}), ${JSON.stringify({ journeys: [], badges: DEFAULT_BADGES, certificates: { pointsPerCertificate: 10, pointsPerHourTenths: 5, maxHoursCounted: 40, monthlyCapPoints: 40 } })}::jsonb, 'teste', 'aprovada', ${carlos.me.user.id})`);
   await ctx.db.execute(sql`update users set sectors = array['comercial'] where id = ${lucas.me.user.id}`);
   const home = (await lucas.get('/times/certificados')).json();
   expect(home.rule.pointsPerCertificate).toBe(10);
@@ -33,4 +34,8 @@ it('envio, validação e pontos', async () => {
   // aparece em "Meus pontos" do mês da validação
   const meR = await lucas.get('/me/pontos'); expect(meR.statusCode, meR.body).toBe(200); const me = meR.json();
   expect(me.certificates.find((x: { certificateId: string }) => x.certificateId === id).points).toBe(14);
+  // badge Crescimento soma os certificados; os outros badges começam sem faixa
+  const growth = me.badges.find((b: { key: string }) => b.key === 'crescimento');
+  expect(growth.parts.find((x: { source: string }) => x.source === 'certificados').points).toBeGreaterThanOrEqual(14);
+  expect(me.badges).toHaveLength(5);
 });

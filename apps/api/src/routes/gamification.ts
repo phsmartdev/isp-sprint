@@ -11,7 +11,7 @@ import { seesAllTeams } from '../services/results';
 import { leadsOrManages } from '../services/vacations';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { atLeast, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
+import { atLeast, BADGE_KEYS, badgeProgress, pointsBySource, type BadgeProgress, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
 import { asExtra, journeyCreditsBetween } from '../services/scoreJourneys';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
@@ -57,6 +57,20 @@ async function creditsBetween(db: DbOrTx, tenantId: string, from: string, to: st
        and (e.occurred_at at time zone ${tz})::date between ${from}::date and ${to}::date
      group by c.user_id, e.type, c.kind`);
   return rows.rows.map((r) => ({ userId: r.user_id, type: r.type, kind: r.kind, shareBp: r.share }));
+}
+
+/** Badges de cada pessoa no período (normalmente o ano): pontos por origem, das mesmas fontes da nota. */
+export async function badgesBetween(db: DbOrTx, auth: AuthContext, st: GamificationSettings, from: string, to: string, userIds: string[]): Promise<Map<string, BadgeProgress[]>> {
+  if (!st.badges?.length || !userIds.length) return new Map();
+  const [journey, credits, support, certs] = await Promise.all([
+    journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st), creditsBetween(db, auth.tenantId, from, to, auth.timezone, userIds),
+    supportCreditsBetween(db, auth.tenantId, from, to, st), certificateCreditsBetween(db, auth.tenantId, from, to, st),
+  ]);
+  const ids = new Set(userIds);
+  const events = credits.filter((c) => (st.points[c.type] ?? 0) > 0 && (c.kind === 'direto' || c.kind === 'participacao'))
+    .map((c) => ({ userId: c.userId, type: c.type, kind: c.kind, points: ((st.points[c.type] ?? 0) * c.shareBp * (c.kind === 'participacao' ? st.participationMultiplierBp / 10_000 : 1)) / 10_000 }));
+  const by = pointsBySource({ journey: journey.filter((j) => ids.has(j.userId)), events, support: support.filter((x) => ids.has(x.userId)), certificates: certs.filter((x) => ids.has(x.userId)) });
+  return new Map(userIds.map((u) => [u, badgeProgress(by.get(u) ?? {}, st.badges!)]));
 }
 
 /** Meses do ano que a meta cobre: o ano corrente até o mês atual; anos passados, 12. */
@@ -118,10 +132,14 @@ export const gamificationRoutes = [
       const year = month.slice(0, 4);
       const pendingInfo = proposal ? { version: proposal.version, note: proposal.note, canDecide: canConfigure(auth) && proposal.createdBy !== auth.userId } : null;
       // sem regra aprovada ninguém pontua: o placar espera a aprovação
-      if (!settings) return { pending: true, proposal: pendingInfo, canConfigure: canConfigure(auth), month, year: Number(year), settings: null, settingsVersion: null, monthBoard: null, yearBoard: null, gold: [], me: null, eventTypes: EVENT_TYPE_KEYS };
+      if (!settings) return { pending: true, proposal: pendingInfo, canConfigure: canConfigure(auth), month, year: Number(year), settings: null, settingsVersion: null, monthBoard: null, yearBoard: null, gold: [], me: null, myBadges: [], eventTypes: EVENT_TYPE_KEYS };
       const mb = monthBounds(month);
       const [m, y] = await Promise.all([board(app.db, auth, settings, mb.from, mb.to), board(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`, monthsOfYear(year, todayIn(auth.timezone)))]);
       const gold = goldMedalists(y.people);
+      const yearIds = [...new Set([auth.userId, ...y.teams.flatMap((t) => (t.members ?? []).map((m) => m.userId))])];
+      const badges = await badgesBetween(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`, yearIds);
+      const tiersOf = (u: string) => (badges.get(u) ?? []).map((b) => ({ key: b.key, name: b.name, tier: b.tier, tierIndex: b.tierIndex }));
+      y.teams.forEach((t) => t.members?.forEach((m) => Object.assign(m, { badges: tiersOf(m.userId) })));
       const goldNames = (await vacationOrg(app.db, auth.tenantId)).people.filter((p) => gold.includes(p.id)).map((p) => ({ userId: p.id, name: p.name }));
       const strip = (b: typeof m) => ({ teams: b.teams, me: b.me });
       return {
@@ -130,6 +148,7 @@ export const gamificationRoutes = [
         // só o primeiro lugar do ano é reconhecido (sem posições, sem pódio)
         gold: goldNames,
         me: y.me ? { score: y.me.score, level: levelOf(y.me.score, settings)?.name ?? null, gold: gold.includes(auth.userId) } : null,
+        myBadges: badges.get(auth.userId) ?? [],
         eventTypes: EVENT_TYPE_KEYS,
       };
     },
@@ -171,6 +190,7 @@ export const gamificationRoutes = [
       bonuses: z.object({ onTimeBp: z.number().int(), adherenceBp: z.number().int(), extraPerLevelBp: z.number().int(), extraCapBp: z.number().int(), scoreCapBp: z.number().int() }),
       support: z.object({ helperMultiplierBp: z.number().int(), basePoints: z.number().int(), requesterPoints: z.number().int(), monthlyCapPoints: z.number().int() }).optional(),
       certificates: z.object({ pointsPerCertificate: z.number().int(), pointsPerHourTenths: z.number().int(), maxHoursCounted: z.number().int(), monthlyCapPoints: z.number().int() }).optional(),
+      badges: z.array(z.object({ key: z.enum(BADGE_KEYS), name: z.string().trim().max(40), description: z.string().trim().max(400), sources: z.array(z.string().max(60)).max(60), tiers: z.array(z.object({ name: z.string().trim().max(30), minPoints: z.number().int() })).max(5) })).max(5).optional(),
       journeys: z.array(z.object({
         key: z.string().trim().max(40), name: z.string().trim().max(80), pipelineId: z.string().uuid(), wonPoints: z.number().int(),
         components: z.array(z.object({ key: z.string().trim().max(40), name: z.string().trim().max(120), stageKey: z.string().trim().max(60).nullable(), points: z.number().int(), dueDays: z.number().int(), level: z.string().max(30).nullable().optional() })).max(60),
@@ -259,6 +279,8 @@ export const gamificationRoutes = [
         supportRule: settings.support ?? null,
         certificates: (await certificateCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, settings)).filter((c) => c.userId === auth.userId).map((c) => ({ certificateId: c.certificateId, title: c.title, points: c.points, capped: c.capped })),
         certificateRule: settings.certificates ?? null,
+        // badges do ano (faixas por pontos de cada dimensão)
+        badges: (await badgesBetween(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`, [auth.userId])).get(auth.userId) ?? [],
       };
     },
   }),

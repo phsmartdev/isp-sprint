@@ -339,6 +339,7 @@ export const playbookCentralRoutes = [
         participationMultiplierBp: st.participationMultiplierBp,
         support: st.support ?? null,
         certificates: st.certificates ?? null,
+        badges: st.badges ?? null,
         yearBands: st.levels,
       };
     },
