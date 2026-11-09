@@ -412,7 +412,7 @@ export const playbookCentralRoutes = [
     body: z.object({
       categoryId: uuid, meta: Meta, templateId: uuid.nullable().optional(), duplicateOf: uuid.nullable().optional(),
       /** importado de PDF: conteúdo estruturado (revisável) + o PDF original anexado ao fim */
-      imported: z.object({ content: z.object({ blocks: z.array(z.record(z.string(), z.unknown())).max(600) }), source: z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(8).max(4_200_000) }).nullable() }).nullable().optional(),
+      imported: z.object({ content: z.object({ blocks: z.array(z.record(z.string(), z.unknown())).max(1000) }), source: z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(8).max(4_200_000) }).nullable() }).nullable().optional(),
     }),
     bodyLimit: 4_400_000,
     handler: async ({ app, auth, body, req, reply }) => {
