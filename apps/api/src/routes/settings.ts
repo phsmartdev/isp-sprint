@@ -2,6 +2,7 @@
 import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
 import { runMeasurementDrafts } from '../services/measurementReports';
+import { drainAutomationQueue, pollIxcReturns } from '../services/automationQueue';
 import { timingSafeEqual } from 'node:crypto';
 import { runAbmDaily } from '../services/abmFollowup';
 import { and, desc, eq, max, ne, sql } from 'drizzle-orm';
@@ -314,7 +315,13 @@ export const settingsRoutes = [
       }
       const glpi: Record<string, unknown> = {};
       for (const t of tenants) glpi[t.id] = await syncOpenTickets(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
-      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement };
+      // Automações por retorno de chamado/leitura de e-mail: IXC (comparação das OS) e fila
+      const automations: Record<string, unknown> = {};
+      for (const t of tenants) {
+        try { automations[t.id] = { ixc: await pollIxcReturns(app.db, t.id), fila: await drainAutomationQueue(app.db, app.config, t.id, 200) }; }
+        catch (e) { automations[t.id] = { error: (e as Error).message }; }
+      }
+      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement, automations };
     },
   }),
 ];

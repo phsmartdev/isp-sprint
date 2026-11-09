@@ -5,6 +5,7 @@
  * Visibilidade: caixa pessoal só para a dona. Caixa compartilhada: quem tem acesso total ao E-mail, quem está numa fila
  * da caixa ou da conversa, e quem vê a pessoa atribuída (Equipe = times que lidera).
  */
+import { drainAutomationQueue } from '../services/automationQueue';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
@@ -280,7 +281,9 @@ export const mailRoutes = [
       if (!b) throw notFound('Caixa não encontrada.');
       if (b.provider !== 'gmail_senha') gmailOn(app.config);
       if (b.status !== 'conectada' && b.status !== 'erro') throw unprocessable('Conecte a caixa antes de sincronizar.');
-      return syncMailbox(app.db, app.config.gmail, b.id, auth.userId, 'manual');
+      const r = await syncMailbox(app.db, app.config.gmail, b.id, auth.userId, 'manual');
+      await drainAutomationQueue(app.db, app.config, auth.tenantId).catch(() => undefined);
+      return r;
     },
   }),
   defineRoute({
@@ -516,6 +519,7 @@ export const mailRoutes = [
         // caixas pela Gmail API e pela senha de app (IMAP) se atualizam ao abrir a lista
         const boxes = (await visibleBoxes(app.db, auth)).map((b) => b.id);
         await syncTenantMail(app.db, app.config.gmail ?? null, auth.tenantId, 2 * 60_000, boxes).catch(() => undefined);
+        await drainAutomationQueue(app.db, app.config, auth.tenantId).catch(() => undefined);
       }
       const conds: SQL[] = [eq(s.mailThreads.tenantId, auth.tenantId), await threadScope(app.db, auth)];
       if (f.mailboxId) conds.push(eq(s.mailThreads.mailboxId, f.mailboxId));

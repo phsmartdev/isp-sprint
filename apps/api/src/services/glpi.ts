@@ -19,6 +19,7 @@
  *
  * Validação real pendente: exige uma instância GLPI 11 alcançável pela internet, um cliente OAuth e um usuário de integração.
  */
+import { enqueueAutomation } from './automationQueue';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
@@ -218,6 +219,11 @@ export async function syncTicket(db: DbOrTx, c: GlpiCfg, row: TicketRow): Promis
       status, statusName, solvedAt: glpiDate(t.date_solve, tz), closedAt: glpiDate(t.date_close, tz), glpiUpdatedAt: t.date_mod ?? null,
       lastSyncAt: new Date(), syncError: null, unseen: sql`${s.glpiTickets.unseen} + ${fresh}`, updatedAt: new Date(),
     }).where(eq(s.glpiTickets.id, row.id));
+    // retorno do chamado (acompanhamento, solução ou mudança de situação vindos do GLPI) → automações da jornada
+    if (fresh > 0 && row.opportunityId) {
+      const first = added.find((a) => a.direction === 'entrada')!;
+      await enqueueAutomation(db, row.tenantId, row.opportunityId, { type: 'chamado_retorno', origem: 'glpi', detail: `Chamado GLPI #${row.glpiId}: ${statusName ?? 'novo retorno'}` }, `glpi:${first.id}`);
+    }
     const solvedNow = status && (status === 5 || status === 6) && (row.status ?? 0) < 5;
     if (solvedNow) await taskForOwner(db, row, status!);
     return { added: fresh, status };

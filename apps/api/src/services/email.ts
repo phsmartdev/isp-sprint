@@ -45,6 +45,8 @@ export type SendInput = {
   tenantId: string;
   kind: string;
   to: string;
+  /** token do pixel de leitura (e-mails da oportunidade) */
+  openToken?: string | null;
   subject: string;
   text: string;
   attachments?: MailAttachment[];
@@ -103,7 +105,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
   const log = async (status: 'enviado' | 'falhou' | 'ignorado', error: string | null, messageId: string | null) => {
     const [row] = await db
       .insert(s.emailMessages)
-      .values({ tenantId: input.tenantId, kind: input.kind, toAddress: input.to, subject, status, error, messageId, opportunityId: input.opportunityId ?? null, attachmentId: input.attachmentId ?? null, contractId: input.contractId ?? null, ccAddress: input.cc ?? null, createdBy: input.createdBy ?? null })
+      .values({ tenantId: input.tenantId, kind: input.kind, toAddress: input.to, subject, status, error, messageId, openToken: input.openToken ?? null, opportunityId: input.opportunityId ?? null, attachmentId: input.attachmentId ?? null, contractId: input.contractId ?? null, ccAddress: input.cc ?? null, createdBy: input.createdBy ?? null })
       .returning({ id: s.emailMessages.id });
     return row!.id;
   };
