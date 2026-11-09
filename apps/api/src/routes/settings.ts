@@ -1,6 +1,7 @@
 /** Configurações: modelo de instrução, jornadas, SMTP, notificações, registro de e-mails e agendamento. */
 import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
+import { runMeasurementDrafts } from '../services/measurementReports';
 import { timingSafeEqual } from 'node:crypto';
 import { runAbmDaily } from '../services/abmFollowup';
 import { and, desc, eq, max, ne, sql } from 'drizzle-orm';
@@ -292,6 +293,14 @@ export const settingsRoutes = [
       for (const t of tenants) cs[t.id] = await runCsDaily(app.db, app.config, t.id).catch((e) => ({ error: (e as Error).message }));
       const events: Record<string, unknown> = {};
       for (const t of tenants) events[t.id] = await syncBusinessEvents(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
+      // Relatório de Medição: rascunho do mês fechado nas contas com envio obrigatório
+      const measurement: Record<string, unknown> = {};
+      for (const t of tenants) {
+        try {
+          const [tz] = await app.db.select({ tz: s.tenants.timezone }).from(s.tenants).where(eq(s.tenants.id, t.id)).limit(1);
+          measurement[t.id] = await runMeasurementDrafts(app.db, t.id, new Intl.DateTimeFormat('en-CA', { timeZone: tz?.tz ?? 'America/Sao_Paulo' }).format(new Date()));
+        } catch (e) { measurement[t.id] = { error: (e as Error).message }; }
+      }
       // Gestão de Resultados: apuração oficial das metas vencidas e metas mensais recorrentes do mês
       const results: Record<string, unknown> = {};
       for (const t of tenants) {
@@ -305,7 +314,7 @@ export const settingsRoutes = [
       }
       const glpi: Record<string, unknown> = {};
       for (const t of tenants) glpi[t.id] = await syncOpenTickets(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
-      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi };
+      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement };
     },
   }),
 ];

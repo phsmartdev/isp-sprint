@@ -1,4 +1,5 @@
 import { WorkLinks } from '../features/tasks/WorkLinks';
+import { MeasurementTab } from '../features/measurement/MeasurementTab';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -200,7 +201,7 @@ export function CustomerDetailPage() {
             ...(can('oportunidades') ? [{ key: 'oportunidades', label: 'Oportunidades', count: c.opportunities.length }] : []),
             { key: 'atividades', label: 'Interações', count: acts.data?.total },
             ...(feature('crm.sucesso_cliente') ? [{ key: 'sucesso', label: 'Sucesso do Cliente' }] : []),
-            ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }] : []),
+            ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }, { key: 'medicao', label: 'Medição' }] : []),
             ...(can('projetos') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
@@ -238,6 +239,7 @@ export function CustomerDetailPage() {
           )}
           {tab === 'sucesso' && <Account360 contactId={c.id} />}
           {tab === 'contratos' && <AccountContracts contactId={c.id} />}
+          {tab === 'medicao' && <MeasurementTab contactId={c.id} />}
           {tab === 'projetos' && <WorkLinks prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
