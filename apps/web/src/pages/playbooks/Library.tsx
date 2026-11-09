@@ -6,13 +6,13 @@ import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { BookOpen, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
+import { BookOpen, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { PLAYBOOK_TYPES, PLAYBOOK_TYPE_LABELS, SUGGESTION_STATUS_LABELS, VERSION_STATUS_LABELS, type SuggestionStatus, type VersionStatus } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useDebounced, useUrlState } from '../../lib/hooks';
 import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs, Textarea } from '../../components/ui/primitives';
-import { Modal, useToast } from '../../components/ui/overlay';
+import { ConfirmDialog, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { CatIcon, ICON_CHOICES, PlaybookCard, ReviewTag, type Card, type Category } from '../../features/playbooks/shared';
 
@@ -118,17 +118,7 @@ export function PlaybooksPage() {
               <Shelf title="Atualizações" items={d!.forYou.updates} />
               <Shelf title="Continue de onde parou" items={d!.forYou.recent} />
               <Shelf title="Favoritos" items={d!.forYou.favorites} />
-              <section aria-label="Categorias" className="space-y-3">
-                <h2 className="font-display text-lg font-bold text-ink">Categorias</h2>
-                <div className="grid gap-px border border-line bg-line sm:grid-cols-2 xl:grid-cols-3">
-                  {d!.categories.map((c) => (
-                    <button key={c.id} type="button" onClick={() => setU({ categoria: c.id })} className="group flex items-start gap-4 bg-surface p-5 text-left hover:bg-surface-2">
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center border border-line text-primary group-hover:border-primary group-hover:bg-primary group-hover:text-white"><CatIcon name={c.icon} className="h-5 w-5" /></span>
-                      <span className="min-w-0 flex-1"><span className="flex items-baseline justify-between gap-2"><span className="font-bold text-ink">{c.name}</span><span className="num text-sm text-muted">{c.count}</span></span>{c.description && <span className="mt-0.5 block text-sm text-muted">{c.description}</span>}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
+              <LibraryCategories categories={d!.categories} manage={d!.can.manage} onPick={(id) => setU({ categoria: id })} />
               {!d!.items.length && !d!.forYou.team.length && <EmptyState title="A biblioteca ainda está vazia" description={d!.can.create ? 'Crie o primeiro playbook a partir de um modelo. Ele passa pela Gerência e pela Diretoria antes de ser publicado.' : 'Os playbooks publicados para você aparecem aqui.'} />}
             </div>
           )}
@@ -287,6 +277,7 @@ function SuggestionResponse({ r, onClose }: { r: { id: string; status: Suggestio
 function Settings() {
   const s = usePbSetup();
   const [edit, setEdit] = useState<Partial<Category> | null>(null);
+  const [del, setDel] = useState<Category | null>(null);
   const [cfg, setCfg] = useState<{ codePattern: string; alertDays: string } | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
@@ -305,6 +296,7 @@ function Settings() {
             <span className="min-w-0 flex-1"><span className="font-semibold text-ink">{x.name}</span> <span className="num text-xs text-muted">{x.prefix}</span>{x.description && <span className="block text-sm text-muted">{x.description}</span>}</span>
             <span className="text-xs text-muted">Aprovação: {[x.approval.gerencia && 'Gerência', x.approval.diretoria && 'Diretoria'].filter(Boolean).join(' → ') || 'Diretoria'}</span>
             <Button size="sm" variant="ghost" onClick={() => setEdit(x)}>Editar</Button>
+            <Button size="sm" variant="ghost" onClick={() => setDel(x)}>Excluir</Button>
           </li>
         ))}</ul>
         <p className="text-xs text-muted">Criticidade alta sempre passa pela Gerência e pela Diretoria. Delegação de aprovação não está habilitada.</p>
@@ -316,7 +308,53 @@ function Settings() {
         <Button variant="primary" disabled={!cfg} loading={saveCfg.isPending} onClick={() => saveCfg.mutate()}>Salvar</Button>
       </section>
       {edit && <CategoryModal c={edit} onClose={() => setEdit(null)} />}
+      {del && <DeleteCategory c={del} onClose={() => setDel(null)} />}
     </div>
+  );
+}
+
+/** Categorias na biblioteca; quem administra (Gerência e Diretoria) cria, edita e exclui ali mesmo. */
+function LibraryCategories({ categories, manage, onPick }: { categories: Category[]; manage: boolean; onPick: (id: string) => void }) {
+  const [edit, setEdit] = useState<Partial<Category> | null>(null);
+  const [del, setDel] = useState<Category | null>(null);
+  return (
+    <section aria-label="Categorias" className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-display text-lg font-bold text-ink">Categorias</h2>
+        {manage && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ icon: 'book', approval: { gerencia: true, diretoria: true } })}>Nova categoria</Button>}
+      </div>
+      {!categories.length ? <EmptyState title="Nenhuma categoria" description={manage ? 'Crie as categorias que a sua operação usa. Cada uma define o prefixo do código e quem aprova os playbooks.' : 'A gestão ainda não criou categorias.'} /> : (
+        <ul className="grid gap-px border border-line bg-line sm:grid-cols-2 xl:grid-cols-3">
+          {categories.map((c) => (
+            <li key={c.id} aria-label={c.name} className="group relative flex bg-surface hover:bg-surface-2">
+              <button type="button" onClick={() => onPick(c.id)} className="flex flex-1 items-start gap-4 p-5 text-left">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center border border-line text-primary group-hover:border-primary group-hover:bg-primary group-hover:text-white"><CatIcon name={c.icon} className="h-5 w-5" /></span>
+                <span className="min-w-0 flex-1"><span className="flex items-baseline justify-between gap-2"><span className="font-bold text-ink">{c.name}</span><span className="num text-sm text-muted">{c.count}</span></span>{c.description && <span className="mt-0.5 block text-sm text-muted">{c.description}</span>}</span>
+              </button>
+              {manage && (
+                <span className="flex flex-col border-l border-line">
+                  <button type="button" aria-label={`Editar ${c.name}`} title="Editar" onClick={() => setEdit({ ...c, active: true })} className="flex flex-1 items-center justify-center px-3 text-muted hover:bg-primary hover:text-white"><Pencil className="h-4 w-4" /></button>
+                  <button type="button" aria-label={`Excluir ${c.name}`} title="Excluir" onClick={() => setDel(c)} className="flex flex-1 items-center justify-center border-t border-line px-3 text-muted hover:bg-danger hover:text-white"><Trash2 className="h-4 w-4" /></button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {edit && <CategoryModal c={edit} onClose={() => setEdit(null)} />}
+      {del && <DeleteCategory c={del} onClose={() => setDel(null)} />}
+    </section>
+  );
+}
+
+function DeleteCategory({ c, onClose }: { c: Category; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const m = useMutation({ mutationFn: () => api(`/playbooks/categories/${c.id}`, { method: 'DELETE' }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['playbooks'] }); toast({ tone: 'success', message: 'Categoria excluída' }); onClose(); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  return (
+    <ConfirmDialog open title={`Excluir “${c.name}”?`} confirmLabel="Excluir" tone="danger" loading={m.isPending} onConfirm={() => m.mutate()} onCancel={onClose}>
+      <p>A categoria sai da biblioteca e do editor. Só é possível excluir categorias sem playbooks. Se houver algum, desative a categoria em Editar: os playbooks continuam disponíveis.</p>
+    </ConfirmDialog>
   );
 }
 function CategoryModal({ c, onClose }: { c: Partial<Category>; onClose: () => void }) {

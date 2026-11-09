@@ -346,6 +346,19 @@ export const playbookCentralRoutes = [
     },
   }),
   defineRoute({
+    method: 'DELETE', url: '/playbooks/categories/:id', summary: 'Exclui categoria sem playbooks (Gerência e Diretoria); com playbooks, só desativar', ...A,
+    params: z.object({ id: uuid }),
+    handler: async ({ app, auth, params }) => {
+      if (!isDirector(auth) && !isManager(auth)) throw forbidden('Categorias são administradas pela Gerência e pela Diretoria.');
+      const [c] = await app.db.select().from(s.playbookCategories).where(and(eq(s.playbookCategories.id, params.id), eq(s.playbookCategories.tenantId, auth.tenantId)));
+      if (!c) throw notFound();
+      const n = (await app.db.select({ n: sql<number>`count(*)::int` }).from(s.playbooks).where(and(eq(s.playbooks.tenantId, auth.tenantId), eq(s.playbooks.categoryId, c.id))))[0]!.n;
+      if (n > 0) throw unprocessable(`A categoria “${c.name}” tem ${n} playbook(s), inclusive arquivados ou em rascunho. Para tirá-la de uso, desative a categoria em Editar: os playbooks continuam disponíveis e ela deixa de aparecer para novos playbooks.`);
+      await app.db.delete(s.playbookCategories).where(and(eq(s.playbookCategories.id, c.id), eq(s.playbookCategories.tenantId, auth.tenantId)));
+      return { ok: true, id: c.id };
+    },
+  }),
+  defineRoute({
     method: 'PUT', url: '/playbooks/settings', summary: 'Convenção do código e dias dos alertas de revisão (Gerência e Diretoria)', ...A,
     body: z.object({ codePattern: z.string().trim().max(40).refine((x) => x.includes('{NUM}'), 'Inclua {NUM} no padrão'), alertDays: z.array(z.number().int().min(0).max(365)).min(1).max(6) }),
     handler: async ({ app, auth, body }) => {

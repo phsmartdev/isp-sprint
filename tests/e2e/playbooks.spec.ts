@@ -104,3 +104,34 @@ test('playbook: criar do modelo, editar, aprovar em duas etapas, ler e dar ciên
   await expect(row).toContainText('Carlos Silva');
   await expect(row).toContainText('Diretora Fictícia');
 });
+
+test('categorias: a Diretoria cria, edita e exclui direto na biblioteca', async ({ page }) => {
+  test.setTimeout(120_000);
+  const st = Date.now().toString(36);
+  await login(page, 'carlos@yepnet.test');
+  const dirEmail = `dir-cat-${st}@yepnet.test`;
+  expect((await page.request.post('/api/v1/admin/users', { data: { name: 'Diretor Categorias', email: dirEmail, profile: 'diretoria', teamIds: [] } })).status()).toBe(201);
+  psql(`update users set password_hash = (select password_hash from users where email = 'carlos@yepnet.test') where email = '${dirEmail}'`);
+  await login(page, dirEmail);
+  await page.goto('/playbooks');
+  const cats = page.getByRole('region', { name: 'Categorias' });
+  await cats.getByRole('button', { name: 'Nova categoria' }).click();
+  let dlg = page.getByRole('dialog', { name: 'Nova categoria' });
+  await dlg.getByLabel('Nome').fill(`Treinamento ${st}`);
+  await dlg.getByLabel('Prefixo do código').fill('TRN');
+  await dlg.getByLabel('Descrição').fill('Trilhas de capacitação.');
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  const item = cats.getByRole('listitem', { name: `Treinamento ${st}` });
+  await expect(item).toBeVisible();
+  await item.getByRole('button', { name: `Editar Treinamento ${st}` }).click();
+  dlg = page.getByRole('dialog', { name: 'Editar categoria' });
+  await dlg.getByLabel('Nome').fill(`Capacitação ${st}`);
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  const renamed = cats.getByRole('listitem', { name: `Capacitação ${st}` });
+  await expect(renamed).toBeVisible();
+  await page.screenshot({ path: 'test-results/playbook-categorias.png', fullPage: true });
+  await renamed.getByRole('button', { name: `Excluir Capacitação ${st}` }).click();
+  await page.getByRole('dialog', { name: `Excluir “Capacitação ${st}”?` }).getByRole('button', { name: 'Excluir' }).click();
+  await expect(renamed).toHaveCount(0);
+  expect(psql(`select count(*) from playbook_categories where name like '%${st}'`)).toBe('0');
+});
