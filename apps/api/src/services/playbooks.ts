@@ -55,9 +55,13 @@ export function readerAllows(p: PbRow, v: Viewer) {
 
 /** Categorias e modelos iniciais (uma vez por empresa). */
 export async function ensurePlaybookSetup(db: DbOrTx, tenantId: string) {
-  const [any] = await db.select({ id: s.playbookCategories.id }).from(s.playbookCategories).where(eq(s.playbookCategories.tenantId, tenantId)).limit(1);
-  if (!any) await db.insert(s.playbookCategories).values(DEFAULT_PLAYBOOK_CATEGORIES.map((c) => ({ tenantId, name: c.name, prefix: c.prefix, icon: c.icon, description: c.description }))).onConflictDoNothing();
-  await db.insert(s.playbookSettings).values({ tenantId }).onConflictDoNothing();
+  // categorias iniciais só na primeira vez (a linha de configuração marca que a Central já foi preparada):
+  // depois disso a gestão cria, edita e exclui à vontade, e excluir todas não as recria
+  const created = await db.insert(s.playbookSettings).values({ tenantId }).onConflictDoNothing().returning({ t: s.playbookSettings.tenantId });
+  if (created.length) {
+    const [any] = await db.select({ id: s.playbookCategories.id }).from(s.playbookCategories).where(eq(s.playbookCategories.tenantId, tenantId)).limit(1);
+    if (!any) await db.insert(s.playbookCategories).values(DEFAULT_PLAYBOOK_CATEGORIES.map((c) => ({ tenantId, name: c.name, prefix: c.prefix, icon: c.icon, description: c.description }))).onConflictDoNothing();
+  }
   const [tpl] = await db.select({ id: s.playbookTemplates.id }).from(s.playbookTemplates).where(and(eq(s.playbookTemplates.tenantId, tenantId), eq(s.playbookTemplates.system, true))).limit(1);
   if (!tpl) await db.insert(s.playbookTemplates).values(SYSTEM_TEMPLATES.map((t) => ({ tenantId, name: t.name, type: t.type, description: t.description, content: t.content, system: true }))).onConflictDoNothing();
 }

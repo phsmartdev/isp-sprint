@@ -138,4 +138,21 @@ describe('Central de Playbooks', () => {
     ok(await dir.post(`/playbooks/${c.id}/suspend`, { suspend: false }));
     ok(await mariana.get(`/playbooks/${c.id}`));
   });
+  it('gestão cria, edita e exclui categorias; categoria com playbook não é excluída', async () => {
+    const pre = (st.slice(-3).replace(/[^a-z]/g, 'x') + 'zz').slice(0, 3).toUpperCase();
+    const c = ok(await dir.post('/playbooks/categories', { name: `Categoria Fictícia ${st}`, prefix: `Q${pre}`, icon: 'book', description: 'Teste', approval: { gerencia: true, diretoria: true } })).json();
+    expect((await lucas.del(`/playbooks/categories/${c.id}`)).statusCode).toBe(403);
+    ok(await dir.post('/playbooks/categories', { id: c.id, name: `Categoria Renomeada ${st}`, prefix: `Q${pre}`, icon: 'shield', description: null, approval: { gerencia: false, diretoria: true } }));
+    let home = ok(await dir.get('/playbooks')).json();
+    expect(home.categories.find((x: { id: string }) => x.id === c.id).name).toBe(`Categoria Renomeada ${st}`);
+    ok(await dir.del(`/playbooks/categories/${c.id}`));
+    home = ok(await dir.get('/playbooks')).json();
+    expect(home.categories.some((x: { id: string }) => x.id === c.id)).toBe(false);
+    expect((await dir.del(`/playbooks/categories/${c.id}`)).statusCode).toBe(404);
+    // a que tem playbook (COM) não sai
+    const com = home.categories.find((x: { prefix: string }) => x.prefix === 'COM');
+    const r = await dir.del(`/playbooks/categories/${com.id}`);
+    expect(r.statusCode).toBe(422);
+    expect(r.body).toMatch(/desative a categoria/);
+  });
 });
