@@ -29,7 +29,7 @@ export async function certificateCreditsBetween(db: DbOrTx, tenantId: string, fr
 }
 
 /** Áreas da pessoa: setores do cadastro e times de que participa. */
-async function areasOf(db: DbOrTx, tenantId: string, userId: string) {
+export async function areasOf(db: DbOrTx, tenantId: string, userId: string) {
   const [u] = await db.select({ sectors: s.users.sectors }).from(s.users).where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId)));
   const org = await vacationOrg(db, tenantId);
   return [...new Set([...(u?.sectors ?? []).map((k) => sectorLabel(k)), ...(org.teams[userId] ?? []).map((t) => org.teamNames[t] ?? '').filter(Boolean)])];

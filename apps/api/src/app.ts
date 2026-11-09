@@ -37,6 +37,7 @@ import { playbookRoutes } from './routes/playbook';
 import { contractReportRoutes } from './routes/contractReports';
 import { measurementReportRoutes } from './routes/measurementReports';
 import { certificateRoutes } from './routes/certificates';
+import { trainingExamRoutes } from './routes/trainingExams';
 import { contractErpRoutes } from './routes/contractErp';
 import { publicNoticeRoutes } from './routes/publicNotices';
 import { commRoutes } from './routes/comm';
@@ -228,6 +229,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractReportRoutes,
     ...measurementReportRoutes,
     ...certificateRoutes,
+    ...trainingExamRoutes,
     ...contractErpRoutes,
     ...publicNoticeRoutes,
     ...commRoutes,

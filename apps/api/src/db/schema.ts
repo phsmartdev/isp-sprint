@@ -6113,3 +6113,45 @@ export const gamificationCertificates = pgTable('gamification_certificates', {
   decisionNote: text('decision_note'),
   createdAt: createdAt(),
 }, (t) => ({ user: index('gamification_certificates_user_idx').on(t.tenantId, t.userId), statusCk: check('gamification_certificates_status_ck', inList('status', ['pendente', 'aprovado', 'recusado'])) }));
+
+// ---------------------------------------------------------------- provas e certificados dos treinamentos (Central de Playbooks)
+export const trainingExams = pgTable('training_exams', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  version: integer('version').notNull().default(1),
+  active: boolean('active').notNull().default(true),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  createdAt: createdAt(),
+}, (t) => ({ pb: uniqueIndex('training_exams_playbook_uq').on(t.playbookId) }));
+
+export const trainingAttempts = pgTable('training_attempts', {
+  id: id(),
+  tenantId: tenantId(),
+  examId: uuid('exam_id').notNull().references(() => trainingExams.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  examVersion: integer('exam_version').notNull(),
+  answers: jsonb('answers').$type<Record<string, string[]>>().notNull(),
+  scoreBp: integer('score_bp').notNull(),
+  passed: boolean('passed').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ user: index('training_attempts_user_idx').on(t.examId, t.userId) }));
+
+export const trainingCertificates = pgTable('training_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  examId: uuid('exam_id').notNull().references(() => trainingExams.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  attemptId: uuid('attempt_id').notNull().references(() => trainingAttempts.id),
+  code: text('code').notNull(),
+  title: text('title').notNull(),
+  hours: integer('hours').notNull(),
+  scoreBp: integer('score_bp').notNull(),
+  issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+  data: bytea('data').notNull(),
+  gamificationCertificateId: uuid('gamification_certificate_id').references(() => gamificationCertificates.id),
+  createdAt: createdAt(),
+}, (t) => ({ one: uniqueIndex('training_certificates_user_uq').on(t.examId, t.userId), code: uniqueIndex('training_certificates_code_uq').on(t.tenantId, t.code) }));
