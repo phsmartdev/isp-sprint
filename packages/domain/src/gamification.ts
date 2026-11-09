@@ -9,6 +9,7 @@
  */
 import { supportSettingsErrors, type SupportSettings } from './supportRequests';
 import { certificateSettingsErrors, type CertificateSettings } from './certificates';
+import { badgeSettingsErrors, type BadgeDef } from './badges';
 
 import { scoreJourneyErrors, type ScoreJourney } from './scoreJourneys';
 import { performanceWeightsErrors, type PerformanceBands, type PerformanceWeights } from './hierarchyPerformance';
@@ -42,6 +43,8 @@ export type GamificationSettings = {
   support?: SupportSettings;
   /** certificados de cursos complementares na área (pontos extras depois de validados) */
   certificates?: CertificateSettings;
+  /** badges (Humanização, Excelência, Dinamismo, Crescimento, Compromisso): origens de pontos e faixas por pontos no ano */
+  badges?: BadgeDef[];
   /** jornadas de pontuação: tarefas por etapa do funil, com peso e alçada, e o peso do negócio ganho */
   journeys: ScoreJourney[];
   /** times que participam (vazio = todos os times ativos) */
@@ -71,7 +74,7 @@ export const CREDIT_KINDS_COUNTED = ['direto', 'participacao'] as const;
 const KEY = /^[a-z0-9_]{1,30}$/;
 
 export function gamificationSettingsErrors(s: GamificationSettings): string[] {
-  const e: string[] = [...supportSettingsErrors(s.support), ...certificateSettingsErrors(s.certificates)];
+  const e: string[] = [...supportSettingsErrors(s.support), ...certificateSettingsErrors(s.certificates), ...badgeSettingsErrors(s.badges)];
   const bp = (v: number, max = 10_000) => Number.isInteger(v) && v >= 0 && v <= max;
   for (const [k, v] of Object.entries(s.points)) if (!Number.isInteger(v) || v < 0 || v > 10_000) e.push(`Pontos inválidos em ${k}.`);
   if (!Object.values(s.points).some((v) => v > 0) && !(s.journeys ?? []).length) e.push('Defina pontos para pelo menos um tipo de evento ou uma jornada.');

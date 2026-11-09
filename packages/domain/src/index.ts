@@ -8,6 +8,7 @@ export * from './proposalSections';
 export * from './automationRules';
 export * from './playbookImport';
 export * from './certificates';
+export * from './badges';
 export * from './approvals';
 export * from './arp';
 export * from './cs';

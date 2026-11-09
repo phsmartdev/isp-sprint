@@ -3,6 +3,8 @@
  * Lê a regra aprovada no momento da leitura (nada fixo no playbook): quantas tarefas faltam para chegar a uma meta
  * e um plano com várias tarefas. Mesma conta do cálculo oficial (domínio: taskPointsWith).
  */
+import type { BadgeDef } from '@isp/domain';
+import { BadgeRules } from '../gamification/Badges';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -24,6 +26,7 @@ type Rule =
     participationMultiplierBp: number;
     support: { helperMultiplierBp: number; basePoints: number; requesterPoints: number; monthlyCapPoints: number } | null;
     certificates?: { pointsPerCertificate: number; pointsPerHourTenths: number; maxHoursCounted: number; monthlyCapPoints: number } | null;
+    badges?: BadgeDef[] | null;
     yearBands: { name: string; minPoints: number }[];
   };
 
@@ -163,7 +166,7 @@ function Calc({ rule }: { rule: Approved }) {
 }
 
 const WEIGHT_PARTS = [['ownBp', 'Próprio', 'bg-primary'], ['teamBp', 'Time', 'bg-[#5B8DB8]'], ['dispersionBp', 'Nivelamento', 'bg-lime'], ['areaBp', 'Área', 'bg-navy']] as const;
-const TABS = [['niveis', 'Níveis e nota'], ['pontos', 'Como pontuar'], ['simulador', 'Simular minha nota'], ['lideranca', 'Liderança e faixas']] as const;
+const TABS = [['niveis', 'Níveis e nota'], ['pontos', 'Como pontuar'], ['simulador', 'Simular minha nota'], ['badges', 'Badges'], ['lideranca', 'Liderança e faixas']] as const;
 
 function RuleView({ rule }: { rule: Approved }) {
   const [tab, setTab] = useState<(typeof TABS)[number][0]>('niveis');
@@ -176,6 +179,7 @@ function RuleView({ rule }: { rule: Approved }) {
         {tab === 'niveis' && <Levels rule={rule} />}
         {tab === 'pontos' && <Points rule={rule} />}
         {tab === 'simulador' && <Simulator rule={rule} />}
+        {tab === 'badges' && (rule.badges?.length ? <><p className="text-sm text-muted">Sem ranking: cada badge soma, no ano, os pontos das origens abaixo (cada origem conta numa badge só) e tem faixas por pontos mínimos. Todos podem chegar a todas as faixas; as badges não mudam a nota. Acompanhe as suas em Meus pontos.</p><BadgeRules badges={rule.badges} /></> : <p className="text-sm text-muted">A regra aprovada ainda não usa as badges.</p>)}
         {tab === 'lideranca' && <Leadership rule={rule} />}
       </div>
     </div>

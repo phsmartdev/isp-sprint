@@ -16,7 +16,8 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore, type CompetencyLevel, compositionText, fmtPct } from '../../features/gamification/Gamification';
-import { slugKey, DEFAULT_CERTIFICATE_SETTINGS } from '@isp/domain';
+import { slugKey, DEFAULT_CERTIFICATE_SETTINGS, type BadgeKey } from '@isp/domain';
+import { BadgeIcon, BadgeRuleEditor, BadgeRules, MyBadges } from '../../features/gamification/Badges';
 
 type SettingsResp = {
   people: { id: string; name: string; teamIds: string[]; lead: boolean }[];
@@ -74,6 +75,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
   const st = d.settings;
   const monthName = new Date(`${d.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const myGold = d.me?.gold;
+  const yearBadges = new Map(d.yearBoard.teams.flatMap((t) => (t.members ?? []).map((m) => [m.userId, (m as { badges?: { key: BadgeKey; name: string; tier: string | null; tierIndex: number | null }[] }).badges ?? []] as const)));
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-4">
@@ -92,6 +94,13 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
             <div><h3 className="mb-1 text-sm font-bold text-ink">Ano {d.year}</h3><Breakdown m={d.yearBoard.me} label={String(d.year)} /></div>
           </div>
         </section>
+        {!!d.myBadges?.length && <MyBadges badges={d.myBadges} year={d.year} compact />}
+        {!!st.badges?.length && (
+          <details className="card p-4" aria-label="Regras das badges">
+            <summary className="cursor-pointer font-display text-lg font-bold text-ink">Regras das badges</summary>
+            <div className="mt-3"><BadgeRules badges={st.badges} /></div>
+          </details>
+        )}
         {d.monthBoard.teams.map((t) => (
           <section key={t.teamId} aria-label={`Time ${t.name}`} className="card p-4">
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
@@ -109,7 +118,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
                 <p className="mb-1 text-xs text-muted">Visível só para a liderança, como apoio à gestão do time. As pessoas não veem a nota umas das outras.</p>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[680px] text-left text-sm">
-                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Nível', 'Pontos', 'Atingimento', 'Extra', 'Nota'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Nível', 'Pontos', 'Atingimento', 'Extra', 'Nota', ...(st.badges?.length ? ['Badges no ano'] : [])].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
                     <tbody>
                       {[...t.members].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map((m) => (
                         <tr key={m.userId} className="border-t border-line">
@@ -119,6 +128,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
                           <td className="num px-2 py-1.5">{fmtPct(m.attainment)}</td>
                           <td className="num px-2 py-1.5">{m.extraAttainment ? `+${fmtPct(m.extraAttainment)}` : '—'}</td>
                           <td className="num px-2 py-1.5 font-bold">{fmtPts(m.score)}</td>
+                          {!!st.badges?.length && <td className="px-2 py-1.5"><span className="flex gap-0.5">{(yearBadges.get(m.userId) ?? []).map((b) => <BadgeIcon key={b.key} badgeKey={b.key} tierIndex={b.tierIndex} size={22} label={`${b.name}: ${b.tier ?? 'sem faixa'}`} />)}</span></td>}
                         </tr>
                       ))}
                     </tbody>
@@ -143,6 +153,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
           <p className="mt-1">Ajudar na venda do colega vale {fmtPts(st.participationMultiplierBp / 10_000)}× o crédito.</p>
           <p className="mt-1">A nota é proporcional ao nível: pontos do mês ÷ meta do nível (teto {st.bonuses.scoreCapBp / 100}%). Bônus: no prazo +{st.bonuses.onTimeBp / 100}%, aprovada pela gerência +{st.bonuses.adherenceBp / 100}%. Acima da alçada vira crédito extra (+{st.bonuses.extraPerLevelBp / 100}% por nível, até +{st.bonuses.extraCapBp / 100} p.p.).</p>
           <ul className="mt-1 list-disc pl-4">{st.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts/mês · ` : ''}{compositionText(l)}</li>)}</ul>
+          {!!st.badges?.length && <p className="mt-1">Badges do ano — {st.badges.map((b) => `${b.name} (${b.tiers.map((t) => t.minPoints).join(' / ')} pts)`).join(' · ')}. Todos podem chegar a todas as faixas.</p>}
           <p className="mt-1">Sem ranking: só o vencedor do ano recebe o Badge Ouro. Regra aprovada v{d.settingsVersion}.</p>
         </section>
       </aside>
@@ -186,6 +197,7 @@ function ProposalBanner() {
             <li>Bônus: no prazo +{s.bonuses.onTimeBp / 100}% · aprovada +{s.bonuses.adherenceBp / 100}% · acima da alçada +{s.bonuses.extraPerLevelBp / 100}%/nível (até +{s.bonuses.extraCapBp / 100} p.p.) · teto {s.bonuses.scoreCapBp / 100}%</li>
             <li>Pedido de Apoio: {s.support ? `quem apoia ganha ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')}× os pontos da tarefa (ou ${s.support.basePoints} pts × ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')} sem tarefa) · quem pede ganha ${s.support.requesterPoints} pt(s) · teto ${s.support.monthlyCapPoints} pts/mês` : 'não pontua'}</li>
             <li>Certificados de cursos: {s.certificates ? `${s.certificates.pointsPerCertificate} pts + ${(s.certificates.pointsPerHourTenths / 10).toLocaleString('pt-BR')} pt/h (até ${s.certificates.maxHoursCounted} h), teto de ${s.certificates.monthlyCapPoints} pts/mês, depois de validados pela liderança` : 'não pontuam'}</li>
+            <li>Badges: {s.badges?.length ? s.badges.map((b) => `${b.name} ${b.tiers.map((x) => x.minPoints).join('/')} pts`).join(' · ') : 'não usados'}</li>
             <li>Participam: {teamNames}</li>
           </ul>
         </div>
@@ -237,6 +249,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
       <PerformanceWeightsEditor v={v} setV={setV} />
       <SupportRuleEditor v={v} setV={setV} />
       <CertificateRuleEditor v={v} setV={setV} />
+      <BadgeRuleEditor v={v} setV={setV} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {pct('participationMultiplierBp', 'Valor da ajuda ao colega (%)', '100 = igual ao próprio; 150 = vale 1,5×')}
         {pct('dispersionYellowBp', 'Dispersão: atenção a partir de (%)')}

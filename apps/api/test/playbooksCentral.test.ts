@@ -171,6 +171,15 @@ describe('Diretriz de Gamificação', () => {
     const rule = ok(await lucas.get('/playbooks/gamification-rule')).json();
     if (rule.approved) { expect(rule.myLevel.key).toBeTruthy(); expect(rule.levels[0].weights).toBeTruthy(); expect(JSON.stringify(rule)).not.toMatch(/assignments/); }
     else expect(rule).toEqual({ approved: false });
+    // playbook antigo (Selo BK, reconhecimento só do primeiro lugar) é ajustado ao abrir a biblioteca
+    await ctx.db.execute(sql`update playbook_versions set content = replace(replace(content::text, 'O reconhecimento é por **badges**', 'XX'), 'Badge Ouro', 'Selo BK de Qualidade')::jsonb where id = (select current_version_id from playbooks where id = ${rows[0]!.id})`);
+    await ctx.db.execute(sql`update playbook_versions set content = regexp_replace(content::text, 'XX[^"]*', 'O único reconhecimento individual é o **Selo BK de Qualidade**, para a maior nota do ano (empate: todos os empatados). Não há segundo nem terceiro lugar. O restante do time é reconhecido pelas faixas do ano, que todos podem alcançar.')::jsonb where id = (select current_version_id from playbooks where id = ${rows[0]!.id})`);
+    expect(JSON.stringify(ok(await lucas.get(`/playbooks/${rows[0]!.id}`)).json().content)).toMatch(/O único reconhecimento individual/);
+    ok(await lucas.get('/playbooks'));
+    const fixed = JSON.stringify(ok(await lucas.get(`/playbooks/${rows[0]!.id}`)).json().content);
+    expect(fixed).not.toMatch(/Selo BK|O único reconhecimento/);
+    expect(fixed).toMatch(/O reconhecimento é por \*\*badges\*\*/);
+    expect(fixed).toMatch(/Badge Ouro/);
   });
 });
 

@@ -2,6 +2,7 @@
  * Gamificação colaborativa, sem ranking nem pódio (decisão: comparação pública pode constranger quem não fica em primeiro).
  * Só o primeiro lugar do ano é reconhecido, com o Badge Ouro. Cada pessoa vê a própria nota; a liderança vê o próprio time.
  */
+import type { BadgeDef, BadgeProgress } from '@isp/domain';
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -36,6 +37,7 @@ export type GamSettings = {
   /** Pedido de Apoio */
   support?: { helperMultiplierBp: number; basePoints: number; requesterPoints: number; monthlyCapPoints: number };
   certificates?: { pointsPerCertificate: number; pointsPerHourTenths: number; maxHoursCounted: number; monthlyCapPoints: number };
+  badges?: BadgeDef[];
 };
 /** "60% próprio + 40% time + …" */
 export const compositionText = (l: CompetencyLevel) => [[l.weights.ownBp, 'próprio'], [l.weights.teamBp, 'média do time'], [l.weights.dispersionBp, 'dispersão do time'], [l.weights.areaBp, 'área']].filter(([w]) => (w as number) > 0).map(([w, n]) => `${(w as number) / 100}% ${n}`).join(' + ');
@@ -43,7 +45,7 @@ export const fmtPct = (n: number) => `${n.toLocaleString('pt-BR', { maximumFract
 export type GamData = {
   pending: boolean; proposal: { version: number; note: string; canDecide: boolean } | null;
   settings: GamSettings | null; settingsVersion: number | null; canConfigure: boolean; month: string; year: number; monthBoard: Board | null; yearBoard: Board | null;
-  gold: { userId: string; name: string }[]; me: { score: number; level: string | null; gold: boolean } | null; eventTypes: string[];
+  gold: { userId: string; name: string }[]; me: { score: number; level: string | null; gold: boolean } | null; myBadges?: BadgeProgress[]; eventTypes: string[];
 };
 
 export const useGamification = (month?: string) => useQuery({ queryKey: ['gamificacao', month ?? ''], queryFn: () => api<GamData>(`/times/gamificacao${month ? `?month=${month}` : ''}`), staleTime: 60_000 });
