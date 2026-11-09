@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, CircleAlert, Paperclip } from 'lucide-react';
 import { LOSS_REASONS, LOSS_REASON_LABELS, type LossReason } from '@isp/domain';
 import { api } from '../lib/api';
@@ -46,10 +46,18 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
   const [uploaded, setUploaded] = useState(0);
   const [uploading, setUploading] = useState(false);
   useEffect(() => { setReason(''); setLoss(''); setUploaded(0); }, [request]);
+  // entrando em Proposta sem proposta: o servidor gera no modelo padrão da filial (ou no único modelo ativo) ao mover
+  const isProposal = !!request && request.toKind === 'open' && (request.to === 'proposta' || request.toName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() === 'proposta');
+  const auto = useQuery({
+    queryKey: ['auto-proposal', request?.opp.id ?? ''],
+    queryFn: () => api<{ template: { id: string; name: string } | null; hasProposal: boolean }>(`/opportunities/${request!.opp.id}/auto-proposal`),
+    enabled: isProposal && !!request?.requirements.proposta && !request?.opp.proposalCount,
+  });
   if (!request) return null;
+  const autoTemplate = isProposal ? auto.data?.template ?? null : null;
   const { from, to, opp } = request;
   const reopening = isClosed(from);
-  const unmet = unmetRequirements({ ...opp, proposalCount: opp.proposalCount + uploaded }, request.requirements, request.toKind);
+  const unmet = unmetRequirements({ ...opp, proposalCount: opp.proposalCount + uploaded + (autoTemplate ? 1 : 0) }, request.requirements, request.toKind);
   const title = reopening ? 'Reabrir oportunidade' : to === 'ganha' ? 'Marcar venda fechada' : to === 'perdida' ? 'Marcar como perdida' : `Mover para ${request.toName}`;
 
   const upload = async (f: File) => {
@@ -75,7 +83,7 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
       tone={to === 'perdida' ? 'danger' : 'primary'}
       confirmLabel={reopening ? 'Reabrir' : to === 'ganha' ? 'Marcar venda fechada' : to === 'perdida' ? 'Marcar como perdida' : 'Mover'}
       loading={loading}
-      confirmDisabled={(to === 'perdida' && !loss) || (reopening && !reason.trim()) || unmet.length > 0}
+      confirmDisabled={(isProposal && auto.isLoading && !!request.requirements.proposta && !opp.proposalCount) || (to === 'perdida' && !loss) || (reopening && !reason.trim()) || unmet.length > 0}
       onCancel={onCancel}
       onConfirm={() => onConfirm({ toStage: to, confirm: true, reason: reason.trim() || null, lossReason: to === 'perdida' ? (loss as LossReason) : null })}
     >
@@ -90,7 +98,7 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
             {request.requirements.respostasObrigatorias && <Req ok>Perguntas obrigatórias respondidas <span className="text-xs text-muted">(conferido ao salvar)</span></Req>}
             {request.requirements.proposta && (
               <Req ok={!unmet.some((u) => u.key === 'proposta')}>
-                Proposta anexada
+                {autoTemplate && !opp.proposalCount && !uploaded ? <>Proposta gerada ao mover, no modelo “{autoTemplate.name}”</> : 'Proposta anexada'}
                 {unmet.some((u) => u.key === 'proposta') && (
                   <>
                     <Button size="sm" className="ml-2" icon={<Paperclip className="h-4 w-4" />} loading={uploading} onClick={() => file.current?.click()}>Anexar agora</Button>

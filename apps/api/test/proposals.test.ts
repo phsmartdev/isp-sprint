@@ -102,3 +102,17 @@ it('entrar na etapa Proposta gera a proposta no modelo padrão da filial; editar
   expect((await lucas.get(`/opportunities/${o.id}/proposal-draft`)).json().draft.values).toEqual({ obs: 'Editada' });
   await carlos.put(`/admin/proposal-templates/${t.id}/branches`, { branchIds: [] });
 });
+
+it('diz em que modelo a proposta sai ao mover e permite excluir a negociação (não a venda fechada)', async () => {
+  const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+  const o = (await lucas.post('/opportunities', { newContact: { name: 'Conta Exclusão Fictícia', segment: 'empresarial' }, planId: plan.id })).json();
+  const ap = await lucas.get(`/opportunities/${o.id}/auto-proposal`);
+  expect(ap.statusCode, ap.body).toBe(200);
+  expect(ap.json()).toHaveProperty('template');
+  expect(ap.json().hasProposal).toBe(false);
+  const cur = (await lucas.get(`/opportunities/${o.id}`)).json();
+  expect((await lucas.del(`/opportunities/${o.id}`, { rowVersion: cur.rowVersion, reason: '' })).statusCode).toBe(422); // sem motivo
+  const del = await lucas.del(`/opportunities/${o.id}`, { rowVersion: cur.rowVersion, reason: 'Duplicada por engano' });
+  expect(del.statusCode, del.body).toBe(200);
+  expect((await lucas.get(`/opportunities/${o.id}`)).statusCode).toBe(404);
+});
