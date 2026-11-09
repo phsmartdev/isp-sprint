@@ -6092,3 +6092,24 @@ export const proposalDrafts = pgTable('proposal_drafts', {
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ pk: uniqueIndex('proposal_drafts_pk').on(t.opportunityId) }));
+
+/** Certificados de cursos complementares (pontos extras da gamificação depois de validados pela liderança). */
+export const gamificationCertificates = pgTable('gamification_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  title: text('title').notNull(),
+  institution: text('institution').notNull(),
+  area: text('area').notNull(),
+  hours: integer('hours').notNull(),
+  completedOn: date('completed_on', { mode: 'string' }).notNull(),
+  fileName: text('file_name').notNull(),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  status: text('status').notNull().default('pendente'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  approvedOn: date('approved_on', { mode: 'string' }),
+  decisionNote: text('decision_note'),
+  createdAt: createdAt(),
+}, (t) => ({ user: index('gamification_certificates_user_idx').on(t.tenantId, t.userId), statusCk: check('gamification_certificates_status_ck', inList('status', ['pendente', 'aprovado', 'recusado'])) }));

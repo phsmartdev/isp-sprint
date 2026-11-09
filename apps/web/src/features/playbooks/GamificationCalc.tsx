@@ -23,6 +23,7 @@ type Rule =
     events: { key: string; label: string; points: number }[];
     participationMultiplierBp: number;
     support: { helperMultiplierBp: number; basePoints: number; requesterPoints: number; monthlyCapPoints: number } | null;
+    certificates?: { pointsPerCertificate: number; pointsPerHourTenths: number; maxHoursCounted: number; monthlyCapPoints: number } | null;
     yearBands: { name: string; minPoints: number }[];
   };
 
@@ -229,7 +230,7 @@ function Points({ rule }: { rule: Approved }) {
       )}
       <h4 className="font-bold text-ink">Eventos de negócio</h4>
       <div className="overflow-x-auto border border-line"><table className="w-full text-left text-sm"><tbody>{rule.events.map((e) => <tr key={e.key} className="border-t border-line first:border-t-0"><td className="px-3 py-1.5">{e.label}</td><td className="num px-3 py-1.5 text-right font-semibold">{n1(e.points)} pts</td></tr>)}</tbody></table></div>
-      <p className="text-sm text-muted">Ajudou na venda de um colega? A sua parte vale {n1(rule.participationMultiplierBp / 10_000)}x.{rule.support ? ` Pedido de Apoio: quem ajuda ganha ${n1(rule.support.helperMultiplierBp / 10_000)}x os pontos da tarefa (ou ${n1(rule.support.basePoints)} pts × ${n1(rule.support.helperMultiplierBp / 10_000)} sem tarefa); quem pede ganha ${n1(rule.support.requesterPoints)} pt por apoio confirmado; teto de ${n1(rule.support.monthlyCapPoints)} pts de apoio por mês.` : ''}</p>
+      <p className="text-sm text-muted">Ajudou na venda de um colega? A sua parte vale {n1(rule.participationMultiplierBp / 10_000)}x.{rule.support ? ` Pedido de Apoio: quem ajuda ganha ${n1(rule.support.helperMultiplierBp / 10_000)}x os pontos da tarefa (ou ${n1(rule.support.basePoints)} pts × ${n1(rule.support.helperMultiplierBp / 10_000)} sem tarefa); quem pede ganha ${n1(rule.support.requesterPoints)} pt por apoio confirmado; teto de ${n1(rule.support.monthlyCapPoints)} pts de apoio por mês.` : ''}{rule.certificates ? ` Certificado de curso complementar da sua área, validado pela liderança: ${n1(rule.certificates.pointsPerCertificate)} pts + ${n1(rule.certificates.pointsPerHourTenths / 10)} pt por hora (até ${rule.certificates.maxHoursCounted} h), teto de ${n1(rule.certificates.monthlyCapPoints)} pts por mês; envie em Meus pontos.` : ''}</p>
     </>
   );
 }

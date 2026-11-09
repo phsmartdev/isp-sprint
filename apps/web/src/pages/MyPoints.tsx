@@ -1,6 +1,7 @@
 /**
  * Meus pontos: qualquer pessoa vê a própria nota (mês e ano) e de onde veio cada ponto. Nunca mostra colegas, posição ou ranking.
  */
+import { CertificatesPanel } from '../features/gamification/Certificates';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -19,6 +20,7 @@ type Data = {
   items?: { source: 'tarefa' | 'ganho'; journey: string; opportunityId: string; code: number | null; contact: string | null; points: number; extra?: boolean; bonus?: { onTime: boolean; adherence: boolean; levelsAbove: number } | null }[];
   events?: { type: string; kind: 'direto' | 'participacao'; points: number }[];
   support?: { requestId: string; title: string; role: 'apoiou' | 'pediu'; points: number; capped: boolean }[];
+  certificates?: { certificateId: string; title: string; points: number; capped: boolean }[];
 };
 const eventLabel = (k: string) => BUSINESS_EVENT_TYPES.find((t) => t.key === k)?.label ?? k;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -49,11 +51,13 @@ export function MyPointsPage() {
   if (d.pending) return <div>{header}<Notice tone="info">A regra de pontuação ainda está aguardando aprovação. Assim que for aprovada, seus pontos aparecem aqui.</Notice></div>;
   const items = d.items ?? [];
   const support = d.support ?? [];
+  const certs = d.certificates ?? [];
   const events = d.events ?? [];
   return (
     <div>
       {header}
       {!d.participates && <div className="mb-4"><Notice tone="info">Você não está num time que participa da gamificação. Os pontos aparecem quando a regra incluir o seu time.</Notice></div>}
+      <div className="mb-4"><CertificatesPanel /></div>
       {d.gold && (
         <section aria-label="Selo BK de Qualidade" className="selo-card mb-4 flex items-center gap-4 border border-[#D4A62A] bg-gradient-to-r from-[#FFF8E1] to-surface p-4">
           <BkGoldMedal size={52} year={d.year} />
@@ -67,7 +71,7 @@ export function MyPointsPage() {
 
       <section aria-label="De onde vieram os pontos" className="card mt-4 p-4">
         <h2 className="mb-2 text-lg font-bold text-ink">De onde vieram os pontos em {monthName.toLowerCase()}</h2>
-        {!items.length && !events.length && !support.length ? <EmptyState title="Nenhum ponto no mês" description="Conclua as tarefas da jornada nas oportunidades: cada uma vale pontos para quem conclui." /> : (
+        {!items.length && !events.length && !support.length && !certs.length ? <EmptyState title="Nenhum ponto no mês" description="Conclua as tarefas da jornada nas oportunidades: cada uma vale pontos para quem conclui." /> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[560px] text-left text-sm">
               <thead className="text-xs text-muted"><tr>{['Origem', 'Jornada ou evento', 'Oportunidade', 'Pontos'].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
@@ -78,6 +82,14 @@ export function MyPointsPage() {
                     <td className="px-2 py-1.5">{i.journey}</td>
                     <td className="px-2 py-1.5"><Link className="font-semibold text-primary hover:underline" to={`/opportunities/${i.opportunityId}?aba=tarefas`}>{i.code != null ? `OP-${i.code}` : 'Oportunidade'}</Link>{i.contact && <span className="text-muted"> · {i.contact}</span>}</td>
                     <td className="num px-2 py-1.5 font-bold">+{fmtPts(i.points)}</td>
+                  </tr>
+                ))}
+                {certs.map((x) => (
+                  <tr key={`c${x.certificateId}`} className="border-t border-line">
+                    <td className="px-2 py-1.5">Certificado de curso{x.capped && <span className="block text-xs text-muted">limitado pelo teto do mês</span>}</td>
+                    <td className="px-2 py-1.5">{x.title}</td>
+                    <td className="px-2 py-1.5">—</td>
+                    <td className="num px-2 py-1.5 font-bold">+{fmtPts(x.points)}</td>
                   </tr>
                 ))}
                 {support.map((x) => (

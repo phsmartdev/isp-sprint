@@ -16,7 +16,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore, type CompetencyLevel, compositionText, fmtPct } from '../../features/gamification/Gamification';
-import { slugKey } from '@isp/domain';
+import { slugKey, DEFAULT_CERTIFICATE_SETTINGS } from '@isp/domain';
 
 type SettingsResp = {
   people: { id: string; name: string; teamIds: string[]; lead: boolean }[];
@@ -185,6 +185,7 @@ function ProposalBanner() {
             {s.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts · ` : ''}{compositionText(l)}</li>)}
             <li>Bônus: no prazo +{s.bonuses.onTimeBp / 100}% · aprovada +{s.bonuses.adherenceBp / 100}% · acima da alçada +{s.bonuses.extraPerLevelBp / 100}%/nível (até +{s.bonuses.extraCapBp / 100} p.p.) · teto {s.bonuses.scoreCapBp / 100}%</li>
             <li>Pedido de Apoio: {s.support ? `quem apoia ganha ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')}× os pontos da tarefa (ou ${s.support.basePoints} pts × ${(s.support.helperMultiplierBp / 10_000).toLocaleString('pt-BR')} sem tarefa) · quem pede ganha ${s.support.requesterPoints} pt(s) · teto ${s.support.monthlyCapPoints} pts/mês` : 'não pontua'}</li>
+            <li>Certificados de cursos: {s.certificates ? `${s.certificates.pointsPerCertificate} pts + ${(s.certificates.pointsPerHourTenths / 10).toLocaleString('pt-BR')} pt/h (até ${s.certificates.maxHoursCounted} h), teto de ${s.certificates.monthlyCapPoints} pts/mês, depois de validados pela liderança` : 'não pontuam'}</li>
             <li>Participam: {teamNames}</li>
           </ul>
         </div>
@@ -235,6 +236,7 @@ function RulesForm({ meta, onClose, onSaved }: { meta: SettingsResp; onClose: ()
       <LevelsEditor v={v} setV={setV} people={meta.people} />
       <PerformanceWeightsEditor v={v} setV={setV} />
       <SupportRuleEditor v={v} setV={setV} />
+      <CertificateRuleEditor v={v} setV={setV} />
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {pct('participationMultiplierBp', 'Valor da ajuda ao colega (%)', '100 = igual ao próprio; 150 = vale 1,5×')}
         {pct('dispersionYellowBp', 'Dispersão: atenção a partir de (%)')}
@@ -430,6 +432,29 @@ function SupportRuleEditor({ v, setV }: { v: GamSettings; setV: (x: GamSettings)
         </div>
       )}
       <p className="mt-2 text-xs text-muted">Os pontos só entram depois que quem pediu confirma o apoio. Ninguém confirma o próprio apoio.</p>
+    </fieldset>
+  );
+}
+
+/** Certificados de cursos complementares da área: pontos extras depois de validados pela liderança. */
+function CertificateRuleEditor({ v, setV }: { v: GamSettings; setV: (x: GamSettings) => void }) {
+  const on = !!v.certificates;
+  const c = v.certificates ?? DEFAULT_CERTIFICATE_SETTINGS;
+  const n = (x: string) => Number(x.replace(',', '.').replace(/[^\d.]/g, '') || 0);
+  const set = (k: keyof typeof c, val: number) => setV({ ...v, certificates: { ...c, [k]: val } });
+  return (
+    <fieldset className="mt-4 border border-line p-3">
+      <legend className="px-1 text-sm font-semibold text-ink">Certificados de cursos complementares</legend>
+      <label className="mb-2 flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={on} onChange={(e) => setV({ ...v, certificates: e.target.checked ? c : undefined })} />Certificado de curso da área vale pontos extras</label>
+      {on && (
+        <div className="grid gap-3 sm:grid-cols-4">
+          <FormField label="Pontos por certificado" htmlFor="ct-p"><Input id="ct-p" inputMode="numeric" className="num" value={String(c.pointsPerCertificate)} onChange={(e) => set('pointsPerCertificate', Math.round(n(e.target.value)))} /></FormField>
+          <FormField label="Pontos por hora" htmlFor="ct-h" hint="0,5 = meio ponto por hora"><Input id="ct-h" inputMode="decimal" className="num" value={String(c.pointsPerHourTenths / 10).replace('.', ',')} onChange={(e) => set('pointsPerHourTenths', Math.round(n(e.target.value) * 10))} /></FormField>
+          <FormField label="Horas contadas até" htmlFor="ct-m"><Input id="ct-m" inputMode="numeric" className="num" value={String(c.maxHoursCounted)} onChange={(e) => set('maxHoursCounted', Math.round(n(e.target.value)))} /></FormField>
+          <FormField label="Teto por pessoa no mês" htmlFor="ct-c"><Input id="ct-c" inputMode="numeric" className="num" value={String(c.monthlyCapPoints)} onChange={(e) => set('monthlyCapPoints', Math.round(n(e.target.value)))} /></FormField>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-muted">A pessoa envia o certificado de um curso da sua área (setor ou time); a liderança do time valida. Conta no mês da validação. Ninguém valida o próprio.</p>
     </fieldset>
   );
 }
