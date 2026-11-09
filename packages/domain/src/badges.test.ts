@@ -13,7 +13,7 @@ describe('badges', () => {
     bad[1]!.sources.push('apoio_dado', 'evento:inexistente');
     bad[2]!.tiers[1]!.minPoints = 10;
     const e = badgeSettingsErrors(bad).join(' ');
-    expect(e).toMatch(/dois badges/);
+    expect(e).toMatch(/duas badges/);
     expect(e).toMatch(/origem desconhecida/);
     expect(e).toMatch(/crescentes/);
   });

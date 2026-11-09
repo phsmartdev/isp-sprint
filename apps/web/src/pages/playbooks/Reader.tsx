@@ -15,6 +15,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { BlockView } from '../../features/playbooks/blocks';
 import { CatIcon, FavButton, ReviewTag } from '../../features/playbooks/shared';
+import { TrainingExamSection } from '../../features/playbooks/TrainingExam';
 
 export type ReaderData = {
   playbook: { id: string; code: string; title: string; description: string | null; status: string; suspendedReason: string | null; requiresAck: boolean; category: { id: string; name: string; icon: string } | null; team: string | null; costCenter: string | null; maintainer: string | null; lastReviewOn: string | null; nextReviewOn: string | null; publishedAt: string | null; review: ReviewState; visibility: Visibility };
@@ -129,6 +130,7 @@ export function PlaybookReaderPage() {
               <Button variant="primary" disabled={journey === d.sections.length - 1} onClick={() => { if (live) markDone(d.sections[journey]!.id); setJourney(journey + 1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Próxima <ArrowRight className="ml-1 h-4 w-4" /></Button>
             </div>
           )}
+          {(live || d.can.edit) && (journey === null || journey === d.sections.length - 1) && <TrainingExamSection playbookId={p.id} title={p.title} />}
         </article>
       </div>
       {suggest && <SuggestModal id={p.id} kind={suggest} onClose={() => setSuggest(null)} />}
