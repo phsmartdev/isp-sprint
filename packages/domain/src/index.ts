@@ -21,6 +21,7 @@ export * from './abmLinks';
 export * from './surveys';
 export * from './abmIntel';
 export * from './abmSignals';
+export * from './accountOccurrences';
 export * from './mail';
 export * from './modules';
 export * from './glpi';

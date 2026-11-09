@@ -5257,3 +5257,41 @@ export const financialFormulaEvents = pgTable('financial_formula_events', {
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('financial_formula_events_idx').on(t.tenantId, t.code, t.createdAt) }));
+
+// ---------------------------------------------------------------- Ocorrências da conta (evolução do relacionamento)
+/** Fatos registrados pela equipe que ajudam a analisar a conta: notificação, elogio, mudança na negociação… Nada é inferido. */
+export const accountOccurrences = pgTable(
+  'account_occurrences',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    contactId: uuid('contact_id').notNull().references(() => contacts.id),
+    kind: text('kind').notNull(),
+    occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    impact: text('impact').notNull().default('neutro'),
+    channel: text('channel'),
+    /** só para mudança na negociação: o que mudou */
+    aspects: text('aspects').array().notNull().default(sql`'{}'::text[]`),
+    stakeholderId: uuid('stakeholder_id').references(() => accountStakeholders.id),
+    opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+    contractId: uuid('contract_id').references(() => contracts.id),
+    responseDueOn: date('response_due_on', { mode: 'string' }),
+    respondedOn: date('responded_on', { mode: 'string' }),
+    responseNote: text('response_note'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    removedAt: ts('removed_at'),
+    removedBy: uuid('removed_by').references(() => users.id),
+    removedReason: text('removed_reason'),
+    rowVersion: integer('row_version').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    idx: index('account_occurrences_idx').on(t.tenantId, t.contactId, t.occurredOn),
+    kindCk: check('account_occurrences_kind_ck', inList('kind', ['notificacao', 'reclamacao', 'feedback_positivo', 'mudanca_negociacao', 'mudanca_gestao', 'reuniao_decisao', 'marco', 'outro'])),
+    impactCk: check('account_occurrences_impact_ck', inList('impact', ['positivo', 'neutro', 'negativo'])),
+  }),
+);

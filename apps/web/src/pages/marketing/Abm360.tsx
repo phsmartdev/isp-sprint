@@ -18,6 +18,7 @@ import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { CommercialChip, PriorityChip, StatusChip } from '../../features/abm/shared';
 import { AccountDrawer } from './Abm';
 import { InfluenceMapPanel, StakeholdersPanel } from '../../features/abm/stakeholders';
+import { AccountEvolution } from '../../features/account/AccountEvolution';
 import { AccountPlaysPanel } from '../../features/abm/plays';
 import { CoverageCard } from '../../features/abm/intel';
 import { AccountFollowup } from '../../features/abm/followup';
@@ -42,7 +43,7 @@ const NATURE = { publica: 'Pública', privada: 'Privada' } as const;
 const TABS = [
   { key: 'resumo', label: 'Resumo estratégico' }, { key: 'dados', label: 'Dados da organização' }, { key: 'estrutura', label: 'Estrutura organizacional' },
   { key: 'stakeholders', label: 'Stakeholders' }, { key: 'mapa', label: 'Mapa de influência' }, { key: 'plays', label: 'Plays' }, { key: 'acompanhamento', label: 'Acompanhamento' },
-  { key: 'comercial', label: 'Leads e oportunidades' }, { key: 'contratos', label: 'Contratos' }, { key: 'trabalho', label: 'Projetos e tarefas' }, { key: 'historico', label: 'Histórico' },
+  { key: 'comercial', label: 'Leads e oportunidades' }, { key: 'contratos', label: 'Contratos' }, { key: 'trabalho', label: 'Projetos e tarefas' }, { key: 'evolucao', label: 'Evolução' }, { key: 'historico', label: 'Histórico' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
 
@@ -98,6 +99,7 @@ export function Abm360Page() {
         <section className="card p-4">{!d.contracts.length ? <p className="text-sm text-muted">Nenhum contrato com esta conta.</p> : <ul className="divide-y divide-line">{d.contracts.map((c) => <li key={c.id} className="flex flex-wrap items-center gap-2 py-2 text-sm"><Link to={`/contracts/${c.id}`} className="min-w-0 flex-1 font-semibold text-primary hover:underline">{c.number ?? `Contrato ${c.code}`}</Link><StageChip stage={c.stage} />{c.monthlyCents !== null && <span className="num text-xs">{fmtBRL(c.monthlyCents)}/mês</span>}{c.endAt && <span className="num text-xs text-muted">até {fmtDate(c.endAt)}</span>}</li>)}</ul>}</section>
       )}
       {tab === 'trabalho' && <section className="card p-4"><WorkLinks prefill={{ contactId: d.abm.contactId, label: d.organization.name }} /></section>}
+      {tab === 'evolucao' && <AccountEvolution contactId={d.abm.contactId} />}
       {tab === 'historico' && <History d={d} />}
       <AccountDrawer id={editing ? d.abm.id : null} onClose={() => { setEditing(false); void q.refetch(); }} />
     </div>
