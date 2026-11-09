@@ -409,7 +409,12 @@ export const playbookCentralRoutes = [
   // ------------------------------------------------------------------ criação e rascunhos
   defineRoute({
     method: 'POST', url: '/playbooks/new', summary: 'Cria playbook (código automático) com o primeiro rascunho, a partir de um modelo ou de outro playbook (duplicar)', ...A,
-    body: z.object({ categoryId: uuid, meta: Meta, templateId: uuid.nullable().optional(), duplicateOf: uuid.nullable().optional() }),
+    body: z.object({
+      categoryId: uuid, meta: Meta, templateId: uuid.nullable().optional(), duplicateOf: uuid.nullable().optional(),
+      /** importado de PDF: conteúdo estruturado (revisável) + o PDF original anexado ao fim */
+      imported: z.object({ content: z.object({ blocks: z.array(z.record(z.string(), z.unknown())).max(600) }), source: z.object({ name: z.string().trim().min(1).max(200), data: z.string().min(8).max(4_200_000) }).nullable() }).nullable().optional(),
+    }),
+    bodyLimit: 4_400_000,
     handler: async ({ app, auth, body, req, reply }) => {
       if (!(await canCreate(app.db, auth))) throw forbidden('Quem cria playbooks é a liderança, a Gerência e a Diretoria.');
       await ensurePlaybookSetup(app.db, auth.tenantId);
@@ -424,6 +429,16 @@ export const playbookCentralRoutes = [
         const [v] = src.currentVersionId ? await app.db.select().from(s.playbookVersions).where(eq(s.playbookVersions.id, src.currentVersionId)) : [];
         if (v) content = v.content as unknown as PlaybookContent;
       }
+      let pdf: Buffer | null = null;
+      if (body.imported) {
+        content = body.imported.content as unknown as PlaybookContent;
+        const errs = contentErrors(content);
+        if (errs.length) throw unprocessable(`O conteúdo importado tem problemas: ${errs.slice(0, 3).join('; ')}`);
+        if (body.imported.source) {
+          pdf = Buffer.from(body.imported.source.data, 'base64');
+          if (detectAttachment(body.imported.source.name, pdf) !== 'application/pdf') throw unprocessable('O arquivo original precisa ser PDF.');
+        }
+      }
       const r = await app.db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`playbook-code:${auth.tenantId}`}))`);
         const [st] = await tx.select().from(s.playbookSettings).where(eq(s.playbookSettings.tenantId, auth.tenantId));
@@ -433,8 +448,12 @@ export const playbookCentralRoutes = [
         while ((await tx.select({ id: s.playbooks.id }).from(s.playbooks).where(and(eq(s.playbooks.tenantId, auth.tenantId), eq(s.playbooks.code, code)))).length) code = playbookCode(pattern, cat.prefix, ++k);
         const m = body.meta;
         const [p] = await tx.insert(s.playbooks).values({ tenantId: auth.tenantId, code, categoryId: cat.id, title: m.title, description: m.description, ownerTeamId: m.ownerTeamId, costCenterId: m.costCenterId, maintainerId: m.maintainerId ?? auth.userId, visibility: m.visibility, teamIds: m.teamIds, costCenterIds: m.costCenterIds, profiles: m.profiles, userIds: m.userIds, reviewPeriod: m.reviewPeriod, reviewCustomDays: m.reviewCustomDays, nextReviewOn: m.nextReviewOn, requiresAck: m.requiresAck, createdBy: auth.userId }).returning();
+        if (pdf && body.imported?.source) {
+          const [f] = await tx.insert(s.playbookFiles).values({ tenantId: auth.tenantId, playbookId: p!.id, name: body.imported.source.name.replace(/[\\/:*?"<>|\r\n]+/g, '_'), mime: 'application/pdf', size: pdf.length, data: pdf, createdBy: auth.userId }).returning({ id: s.playbookFiles.id, name: s.playbookFiles.name });
+          content = { blocks: [...content.blocks, { id: 'imp-original-h', type: 'heading', level: 2, text: 'Documento original' }, { id: 'imp-original', type: 'pdf', fileId: f!.id, name: f!.name, caption: 'PDF importado na criação deste playbook' }] };
+        }
         const [v] = await tx.insert(s.playbookVersions).values({ tenantId: auth.tenantId, playbookId: p!.id, number: '1.0', meta: { ...m, maintainerId: m.maintainerId ?? auth.userId }, content, searchText: contentText(content), authorId: auth.userId }).returning();
-        await ev(tx, auth, p!.id, v!.id, 'criado', `${code} criado${body.duplicateOf ? ' (duplicado de outro playbook)' : body.templateId ? ' a partir de modelo' : ''}.`);
+        await ev(tx, auth, p!.id, v!.id, 'criado', `${code} criado${body.imported ? ' a partir de PDF importado' : body.duplicateOf ? ' (duplicado de outro playbook)' : body.templateId ? ' a partir de modelo' : ''}.`);
         return { id: p!.id, code, versionId: v!.id };
       });
       await audit(app.db, req, { action: 'playbook.create', entityType: 'playbook', entityId: r.id, metadata: { code: r.code } });

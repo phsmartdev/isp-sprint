@@ -171,3 +171,15 @@ test('Diretriz de Gamificação: regra vigente em abas, simulador e calculadora 
   await flow.screenshot({ path: 'test-results/diretriz-fluxo.png' });
   await page.screenshot({ path: 'test-results/diretriz-gamificacao.png', fullPage: true });
 });
+
+test('importar playbook de PDF: estrutura padrão como primeiro rascunho, com o PDF original anexado', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/playbooks/novo');
+  await page.getByLabel('Arquivo PDF do playbook').setInputFiles('tests/e2e/fixtures/playbook-ficticio.pdf');
+  const res = page.getByLabel('Resultado da importação');
+  await expect(res).toContainText('3 página(s)');
+  await expect(res.getByRole('listitem')).toHaveText(['Objetivo', 'Pontos de atencao', 'Passo a passo', 'Encerramento']);
+  await expect(page.getByLabel('Título')).toHaveValue('Playbook de Atendimento Ficticio');
+  await page.screenshot({ path: 'test-results/playbook-importar-pdf.png', fullPage: true });
+});

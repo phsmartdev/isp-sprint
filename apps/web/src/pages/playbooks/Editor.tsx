@@ -3,6 +3,8 @@
  * revisão, blocos (arrastar para reordenar), arquivos, fluxograma, checklist e árvore de decisão; salvamento automático
  * com controle de concorrência; prévia; envio para aprovação.
  */
+import { structurePdf, type PlaybookContent } from '@isp/domain';
+import { readPdfLines } from '../../features/playbooks/pdfImport';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -79,7 +81,22 @@ export function PlaybookNewPage() {
   const [cat, setCat] = useState('');
   const [tpl, setTpl] = useState('');
   const [m, setM] = useState<Meta>(BLANK);
-  const save = useMutation({ mutationFn: () => api<{ id: string }>('/playbooks/new', { method: 'POST', body: { categoryId: cat, meta: m, templateId: tpl || null } }), onSuccess: (r) => nav(`/playbooks/${r.id}/editar`), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const [imp, setImp] = useState<{ name: string; content: PlaybookContent; stats: Record<string, number>; pages: number; source: { name: string; data: string } | null } | null>(null);
+  const [reading, setReading] = useState(false);
+  const save = useMutation({ mutationFn: () => api<{ id: string }>('/playbooks/new', { method: 'POST', body: { categoryId: cat, meta: m, templateId: imp ? null : tpl || null, imported: imp ? { content: imp.content, source: imp.source } : null } }), onSuccess: (r) => nav(`/playbooks/${r.id}/editar`), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const importPdf = async (f: File) => {
+    if (f.type && f.type !== 'application/pdf') { toast({ tone: 'error', message: 'Envie um arquivo PDF.' }); return; }
+    setReading(true);
+    try {
+      const { lines, pages } = await readPdfLines(f);
+      const r = structurePdf(lines);
+      if (!r.content.blocks.length) { toast({ tone: 'error', message: 'Não encontramos texto neste PDF. PDF escaneado (imagem) precisa passar por OCR antes.' }); return; }
+      const data = f.size <= 3 * 1024 * 1024 ? await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1] ?? ''); fr.onerror = rej; fr.readAsDataURL(f); }) : null;
+      setImp({ name: f.name, content: r.content, stats: r.stats, pages, source: data ? { name: f.name, data } : null });
+      setTpl('');
+      if (!m.title.trim() && r.title) setM({ ...m, title: r.title.slice(0, 160) });
+    } catch (e) { console.error('pdf-import', e); toast({ tone: 'error', message: 'Não foi possível ler este PDF.' }); } finally { setReading(false); }
+  };
   if (setup.isLoading) return <LoadingRows rows={6} />;
   if (setup.isError) return <ErrorState error={setup.error} onRetry={() => setup.refetch()} />;
   const s = setup.data!;
@@ -92,6 +109,19 @@ export function PlaybookNewPage() {
       <section className="grid gap-4 md:grid-cols-2">
         <FormField label="Categoria" htmlFor="pn-c" required hint="Define o prefixo do código e quem aprova"><Select id="pn-c" value={cat} onChange={(e) => setCat(e.target.value)}><option value="">Escolha</option>{s.categories.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.prefix})</option>)}</Select></FormField>
         <FormField label="Começar de um modelo" htmlFor="pn-t"><Select id="pn-t" value={tpl} onChange={(e) => { setTpl(e.target.value); const t = s.templates.find((x) => x.id === e.target.value); if (t) setM({ ...m, type: t.type as Meta['type'] }); }}><option value="">Em branco</option>{s.templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.system ? '' : ' (da empresa)'}</option>)}</Select></FormField>
+      </section>
+      <section aria-label="Importar de PDF" className="space-y-3 border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="font-bold text-ink">Importar de PDF</p><p className="text-sm text-muted">Transforma um playbook que já existe em PDF na estrutura padrão (títulos, textos, listas e passos) como primeiro rascunho. Você revisa no editor antes de enviar para aprovação.</p></div>
+          <label className="inline-flex cursor-pointer items-center gap-2 border border-line px-3 py-2 text-sm font-semibold hover:border-primary"><Upload className="h-4 w-4" />{reading ? 'Lendo o PDF…' : imp ? 'Trocar PDF' : 'Escolher PDF'}<input type="file" accept="application/pdf,.pdf" className="sr-only" aria-label="Arquivo PDF do playbook" disabled={reading} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importPdf(f); e.target.value = ''; }} /></label>
+        </div>
+        {imp && (
+          <div className="space-y-2 border-t border-line pt-3" aria-label="Resultado da importação">
+            <p className="text-sm text-ink"><strong>{imp.name}</strong> · {imp.pages} página(s): {[['heading', 'título(s)'], ['text', 'texto(s) e lista(s)'], ['steps', 'passo a passo']].filter(([k]) => imp.stats[k!]).map(([k, l]) => `${imp.stats[k!]} ${l}`).join(', ')}{imp.source ? '; o PDF original fica anexado ao fim' : '; o PDF original passa de 3 MB e não será anexado'}.</p>
+            <ol className="max-h-56 list-inside list-decimal space-y-0.5 overflow-y-auto text-sm text-muted">{imp.content.blocks.filter((b) => b.type === 'heading').map((b) => <li key={b.id} className={(b as { level: number }).level === 2 ? 'ml-4' : 'text-ink'}>{(b as { text: string }).text}</li>)}</ol>
+            <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setImp(null)}>Descartar importação</button>
+          </div>
+        )}
       </section>
       <MetaForm m={m} set={setM} setup={s} />
       <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
