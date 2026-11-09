@@ -45,7 +45,7 @@ export const fmtPct = (n: number) => `${n.toLocaleString('pt-BR', { maximumFract
 export type GamData = {
   pending: boolean; proposal: { version: number; note: string; canDecide: boolean } | null;
   settings: GamSettings | null; settingsVersion: number | null; canConfigure: boolean; month: string; year: number; monthBoard: Board | null; yearBoard: Board | null;
-  gold: { userId: string; name: string }[]; me: { score: number; level: string | null; gold: boolean } | null; myBadges?: BadgeProgress[]; eventTypes: string[];
+  gold: { userId: string; name: string }[]; me: { score: number; level: string | null; gold: boolean } | null; myBadges?: BadgeProgress[]; badgesPreview?: boolean; eventTypes: string[];
 };
 
 export const useGamification = (month?: string) => useQuery({ queryKey: ['gamificacao', month ?? ''], queryFn: () => api<GamData>(`/times/gamificacao${month ? `?month=${month}` : ''}`), staleTime: 60_000 });

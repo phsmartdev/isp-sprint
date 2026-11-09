@@ -38,4 +38,5 @@ it('envio, validação e pontos', async () => {
   const growth = me.badges.find((b: { key: string }) => b.key === 'crescimento');
   expect(growth.parts.find((x: { source: string }) => x.source === 'certificados').points).toBeGreaterThanOrEqual(14);
   expect(me.badges).toHaveLength(5);
+  expect(me.badgesPreview).toBe(false);
 });

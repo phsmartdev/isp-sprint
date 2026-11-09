@@ -11,7 +11,7 @@ import { seesAllTeams } from '../services/results';
 import { leadsOrManages } from '../services/vacations';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { atLeast, BADGE_KEYS, badgeProgress, pointsBySource, type BadgeProgress, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
+import { atLeast, BADGE_KEYS, DEFAULT_BADGES, badgeProgress, pointsBySource, type BadgeProgress, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
 import { asExtra, journeyCreditsBetween } from '../services/scoreJourneys';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
@@ -61,7 +61,9 @@ async function creditsBetween(db: DbOrTx, tenantId: string, from: string, to: st
 
 /** Badges de cada pessoa no período (normalmente o ano): pontos por origem, das mesmas fontes da nota. */
 export async function badgesBetween(db: DbOrTx, auth: AuthContext, st: GamificationSettings, from: string, to: string, userIds: string[]): Promise<Map<string, BadgeProgress[]>> {
-  if (!st.badges?.length || !userIds.length) return new Map();
+  if (!userIds.length) return new Map();
+  // sem badges na regra aprovada: prévia com as faixas sugeridas (a tela avisa que ainda não é a regra oficial)
+  const defs = st.badges?.length ? st.badges : DEFAULT_BADGES;
   const [journey, credits, support, certs] = await Promise.all([
     journeyCreditsBetween(db, auth.tenantId, from, to, auth.timezone, st), creditsBetween(db, auth.tenantId, from, to, auth.timezone, userIds),
     supportCreditsBetween(db, auth.tenantId, from, to, st), certificateCreditsBetween(db, auth.tenantId, from, to, st),
@@ -70,7 +72,7 @@ export async function badgesBetween(db: DbOrTx, auth: AuthContext, st: Gamificat
   const events = credits.filter((c) => (st.points[c.type] ?? 0) > 0 && (c.kind === 'direto' || c.kind === 'participacao'))
     .map((c) => ({ userId: c.userId, type: c.type, kind: c.kind, points: ((st.points[c.type] ?? 0) * c.shareBp * (c.kind === 'participacao' ? st.participationMultiplierBp / 10_000 : 1)) / 10_000 }));
   const by = pointsBySource({ journey: journey.filter((j) => ids.has(j.userId)), events, support: support.filter((x) => ids.has(x.userId)), certificates: certs.filter((x) => ids.has(x.userId)) });
-  return new Map(userIds.map((u) => [u, badgeProgress(by.get(u) ?? {}, st.badges!)]));
+  return new Map(userIds.map((u) => [u, badgeProgress(by.get(u) ?? {}, defs)]));
 }
 
 /** Meses do ano que a meta cobre: o ano corrente até o mês atual; anos passados, 12. */
@@ -148,7 +150,7 @@ export const gamificationRoutes = [
         // só o primeiro lugar do ano é reconhecido (sem posições, sem pódio)
         gold: goldNames,
         me: y.me ? { score: y.me.score, level: levelOf(y.me.score, settings)?.name ?? null, gold: gold.includes(auth.userId) } : null,
-        myBadges: badges.get(auth.userId) ?? [],
+        myBadges: badges.get(auth.userId) ?? [], badgesPreview: !settings.badges?.length,
         eventTypes: EVENT_TYPE_KEYS,
       };
     },
@@ -280,6 +282,7 @@ export const gamificationRoutes = [
         certificates: (await certificateCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, settings)).filter((c) => c.userId === auth.userId).map((c) => ({ certificateId: c.certificateId, title: c.title, points: c.points, capped: c.capped })),
         certificateRule: settings.certificates ?? null,
         // badges do ano (faixas por pontos de cada dimensão)
+        badgesPreview: !settings.badges?.length,
         badges: (await badgesBetween(app.db, auth, settings, `${year}-01-01`, `${year}-12-31`, [auth.userId])).get(auth.userId) ?? [],
       };
     },

@@ -116,4 +116,11 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   await expect(page.getByRole('img', { name: /Badge Ouro/ }).first()).toBeVisible();
   await page.goto('/');
   await expect(page.getByRole('region', { name: 'Badge Ouro' })).toContainText('Badge Ouro');
+  // as cinco badges aparecem com faixa e pontos (prévia enquanto a regra não tiver badges aprovadas)
+  await page.goto('/meus-pontos');
+  const myBadges = page.getByRole('region', { name: 'Minhas badges' });
+  await expect(myBadges).toContainText('Prévia com as faixas sugeridas');
+  await expect(myBadges.getByRole('listitem')).toHaveCount(5);
+  await expect(myBadges.getByRole('listitem', { name: 'Badge Dinamismo' })).toContainText('pts no ano');
+  await myBadges.screenshot({ path: 'test-results/minhas-badges.png' });
 });

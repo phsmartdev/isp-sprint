@@ -16,7 +16,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { BkGoldMedal, DISPERSION_LABEL, DISPERSION_STYLE, fmtPts, useGamification, type Board, type GamData, type GamSettings, type JourneyDef, type MemberScore, type CompetencyLevel, compositionText, fmtPct } from '../../features/gamification/Gamification';
-import { slugKey, DEFAULT_CERTIFICATE_SETTINGS, type BadgeKey } from '@isp/domain';
+import { slugKey, DEFAULT_BADGES, DEFAULT_CERTIFICATE_SETTINGS, type BadgeKey } from '@isp/domain';
 import { BadgeIcon, BadgeRuleEditor, BadgeRules, MyBadges } from '../../features/gamification/Badges';
 
 type SettingsResp = {
@@ -75,6 +75,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
   const st = d.settings;
   const monthName = new Date(`${d.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   const myGold = d.me?.gold;
+  const badgeDefs = st.badges?.length ? st.badges : DEFAULT_BADGES;
   const yearBadges = new Map(d.yearBoard.teams.flatMap((t) => (t.members ?? []).map((m) => [m.userId, (m as { badges?: { key: BadgeKey; name: string; tier: string | null; tierIndex: number | null }[] }).badges ?? []] as const)));
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -94,11 +95,11 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
             <div><h3 className="mb-1 text-sm font-bold text-ink">Ano {d.year}</h3><Breakdown m={d.yearBoard.me} label={String(d.year)} /></div>
           </div>
         </section>
-        {!!d.myBadges?.length && <MyBadges badges={d.myBadges} year={d.year} compact />}
-        {!!st.badges?.length && (
+        {!!d.myBadges?.length && <MyBadges badges={d.myBadges} year={d.year} compact preview={d.badgesPreview} />}
+        {!!badgeDefs.length && (
           <details className="card p-4" aria-label="Regras das badges">
             <summary className="cursor-pointer font-display text-lg font-bold text-ink">Regras das badges</summary>
-            <div className="mt-3"><BadgeRules badges={st.badges} /></div>
+            <div className="mt-3"><BadgeRules badges={badgeDefs} /></div>
           </details>
         )}
         {d.monthBoard.teams.map((t) => (
@@ -118,7 +119,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
                 <p className="mb-1 text-xs text-muted">Visível só para a liderança, como apoio à gestão do time. As pessoas não veem a nota umas das outras.</p>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[680px] text-left text-sm">
-                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Nível', 'Pontos', 'Atingimento', 'Extra', 'Nota', ...(st.badges?.length ? ['Badges no ano'] : [])].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
+                    <thead className="text-xs text-muted"><tr>{['Pessoa', 'Nível', 'Pontos', 'Atingimento', 'Extra', 'Nota', ...(badgeDefs.length ? ['Badges no ano'] : [])].map((h) => <th key={h} className="px-2 py-1.5 font-medium">{h}</th>)}</tr></thead>
                     <tbody>
                       {[...t.members].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')).map((m) => (
                         <tr key={m.userId} className="border-t border-line">
@@ -128,7 +129,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
                           <td className="num px-2 py-1.5">{fmtPct(m.attainment)}</td>
                           <td className="num px-2 py-1.5">{m.extraAttainment ? `+${fmtPct(m.extraAttainment)}` : '—'}</td>
                           <td className="num px-2 py-1.5 font-bold">{fmtPts(m.score)}</td>
-                          {!!st.badges?.length && <td className="px-2 py-1.5"><span className="flex gap-0.5">{(yearBadges.get(m.userId) ?? []).map((b) => <BadgeIcon key={b.key} badgeKey={b.key} tierIndex={b.tierIndex} size={22} label={`${b.name}: ${b.tier ?? 'sem faixa'}`} />)}</span></td>}
+                          {!!badgeDefs.length && <td className="px-2 py-1.5"><span className="flex gap-0.5">{(yearBadges.get(m.userId) ?? []).map((b) => <BadgeIcon key={b.key} badgeKey={b.key} tierIndex={b.tierIndex} size={22} label={`${b.name}: ${b.tier ?? 'sem faixa'}`} />)}</span></td>}
                         </tr>
                       ))}
                     </tbody>
