@@ -12,8 +12,8 @@ import { ProposalCanvas, type PField, type PPage } from '../../features/Proposal
 
 type Variable = { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string };
 type Purpose = 'proposta' | 'contrato';
-type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[]; purpose: Purpose; billingType: BillingType | null; sections?: Partial<ProposalSectionsConfig> | null };
-type Data = { items: Template[]; systemVariables: { key: string; label: string }[] };
+type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[]; purpose: Purpose; billingType: BillingType | null; sections?: Partial<ProposalSectionsConfig> | null; defaultBranchIds?: string[] };
+type Data = { items: Template[]; systemVariables: { key: string; label: string }[]; branches?: { id: string; name: string }[] };
 
 const SAMPLE: Record<string, string> = {
   'cliente.nome': 'EMPRESA EXEMPLO LTDA', 'cliente.documento': '00.000.000/0001-00', 'cliente.telefone': '(79) 99999-0000', 'cliente.email': 'contato@exemplo.com', 'cliente.endereco': 'Rua Exemplo, 100 · Centro · Aracaju',
@@ -27,7 +27,7 @@ const SAMPLE: Record<string, string> = {
 const newId = () => Math.random().toString(36).slice(2, 10);
 const errMsg = (e: unknown) => (e instanceof ApiError ? [e.problem.detail ?? e.message, ...(e.problem.errors ?? []).map((x) => x.message)].join(' ') : (e as Error).message);
 
-function Editor({ template, systemVariables, onClose }: { template: Template; systemVariables: Data['systemVariables']; onClose: () => void }) {
+function Editor({ template, systemVariables, branches, onClose }: { template: Template; systemVariables: Data['systemVariables']; branches: { id: string; name: string }[]; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -124,6 +124,7 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
             </fieldset>
           ) : <p className="rounded-md bg-surface-2 p-3 text-sm text-muted">Selecione um campo na arte para editar, ou use “Adicionar campo”.</p>}
 
+          {t.purpose === 'proposta' && <BranchDefaults templateId={t.id} branches={branches} current={t.defaultBranchIds ?? []} />}
           {t.purpose === 'proposta' && <SectionsPanel s={normalizeSections(t.sections)} pages={t.pages.length} set={(sections) => update({ sections })} />}
 
           <fieldset className="space-y-2">
@@ -218,7 +219,7 @@ function TemplatesAdmin({ purpose }: { purpose: Purpose }) {
           ))}
         </ul>
       )}
-      {current && <Editor key={current.id} template={current} systemVariables={q.data!.systemVariables} onClose={() => setEditing(null)} />}
+      {current && <Editor key={current.id} template={current} systemVariables={q.data!.systemVariables} branches={q.data!.branches ?? []} onClose={() => setEditing(null)} />}
     </section>
   );
 }
@@ -253,6 +254,22 @@ function SectionsPanel({ s, pages, set }: { s: ProposalSectionsConfig; pages: nu
           <FormField label="Texto da condição" hint="{{proposta.validade_dias}} e {{proposta.validade_data}} viram o prazo" htmlFor="ps-cond"><Textarea id="ps-cond" rows={3} value={s.conditionText} onChange={(e) => set({ ...s, conditionText: e.target.value })} /></FormField>
         </div>
       )}
+    </fieldset>
+  );
+}
+
+/** Filiais em que este é o modelo padrão: a proposta é gerada nele ao entrar na etapa Proposta. */
+function BranchDefaults({ templateId, branches, current }: { templateId: string; branches: { id: string; name: string }[]; current: string[] }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [sel, setSel] = useState(current);
+  const m = useMutation({ mutationFn: (ids: string[]) => api(`/admin/proposal-templates/${templateId}/branches`, { method: 'PUT', body: { branchIds: ids } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }); toast({ tone: 'success', message: 'Filiais atualizadas' }); }, onError: (e) => toast({ tone: 'error', message: (e as Error).message }) });
+  if (!branches.length) return null;
+  return (
+    <fieldset className="space-y-2 border border-line p-3">
+      <legend className="px-1 text-sm font-semibold text-ink">Padrão nas filiais</legend>
+      <p className="text-xs text-muted">Ao entrar na etapa Proposta sem proposta anexada, a oportunidade dessas filiais ganha a proposta neste modelo (PC AAMMDD - Nome da Conta.pdf), editável na aba Anexos. Cada filial tem um só modelo padrão.</p>
+      {branches.map((b) => <label key={b.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={sel.includes(b.id)} onChange={(e) => { const next = e.target.checked ? [...sel, b.id] : sel.filter((x) => x !== b.id); setSel(next); m.mutate(next); }} />{b.name}</label>)}
     </fieldset>
   );
 }

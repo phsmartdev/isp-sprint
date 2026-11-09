@@ -904,6 +904,13 @@
       "when": 1794245425121,
       "tag": "0128_automation_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1794247833805,
+      "tag": "0129_proposal_drafts",
+      "breakpoints": true
     }
   ]
 }

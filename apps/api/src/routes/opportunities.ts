@@ -1,4 +1,5 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
+import { GenBody, branchDefaultTemplate, generateProposal, hasProposal, isProposalStage } from '../services/proposalGen';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
 import { freshSnapshot } from '../services/cs';
 import { snapshotEconomicsOnWon } from '../services/economics';
@@ -364,6 +365,7 @@ export const opportunityRoutes = [
     body: OpportunityTransition,
     handler: async ({ app, auth, params, body, req }) => {
       let wasWon = false;
+      let autoProposal: { filename: string; number: string; template: string } | null = null;
       await app.db.transaction(async (tx) => {
         const cur = await loadOpportunity(tx, auth, params.id);
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
@@ -376,6 +378,16 @@ export const opportunityRoutes = [
         if (!pipe || !target) throw unprocessable('Etapa não existe nesta jornada.', [{ path: 'toStage', message: 'Etapa inválida para a jornada da oportunidade' }]);
         const v = validateTransition({ from, to: body.toStage as OpportunityStage, reason: body.reason, lossReason: body.lossReason, confirm: body.confirm, canReopen: atLeast(level(auth, 'oportunidades'), 'equipe') });
         if (!v.ok) throw unprocessable(v.message, [{ path: v.code, message: v.message }]);
+        // entrou na etapa Proposta sem proposta anexada: gera no modelo padrão da filial (com as últimas escolhas, se houver)
+        if (target.kind === 'open' && isProposalStage(target) && !(await hasProposal(tx, auth.tenantId, cur.id))) {
+          const tpl = await branchDefaultTemplate(tx, auth.tenantId, cur.branchId ?? null);
+          if (tpl) {
+            const [d] = await tx.select().from(s.proposalDrafts).where(and(eq(s.proposalDrafts.opportunityId, cur.id), eq(s.proposalDrafts.tenantId, auth.tenantId)));
+            const input = GenBody.parse({ templateId: tpl.id, values: d?.templateId === tpl.id ? d.values : {}, services: { text: d?.servicesText ?? '', photos: d?.photos ?? [] }, ...(d?.validityDays ? { validityDays: d.validityDays } : {}) });
+            const g = await generateProposal(tx, auth, { id: cur.id, contactName: cur.contactName, proposalStatus: cur.proposalStatus, rowVersion: cur.rowVersion }, tpl, input, { bump: false, automatic: true });
+            if (g) autoProposal = { filename: g.filename, number: g.number, template: g.template };
+          }
+        }
         if (target.kind !== 'lost') {
           const { content } = await getActiveInstruction(tx, auth.tenantId);
           const issues = await checkStageRequirements(tx, auth.tenantId, cur, target, content, pipe.key);
@@ -444,7 +456,7 @@ export const opportunityRoutes = [
       // ganhar (ou reabrir uma ganha) muda o valor anual consolidado da conta: Tier e IPC recalculam na hora
       if (body.toStage === 'ganha' || wasWon) await freshSnapshot(app.db, auth.tenantId, dto.contactId).catch((e) => req.log.error(e, 'tier da conta'));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
-      return dto;
+      return autoProposal ? { ...dto, autoProposal } : dto;
     },
   }),
 

@@ -28,11 +28,28 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
   const itemsQ = useQuery({ queryKey: ['opportunity-items', oppId], enabled: open, queryFn: () => api<{ items: unknown[]; totals: { total: number } }>(`/opportunities/${oppId}/items`) });
   const [sent, setSent] = useState<{ id: string; filename: string } | null>(null);
   const oppQ = useQuery({ queryKey: ['opportunity', oppId], enabled: open, queryFn: () => api<Opportunity>(`/opportunities/${oppId}`) });
+  // última proposta da oportunidade (editar e gerar de novo) e o modelo padrão da filial
+  const draftQ = useQuery({ queryKey: ['proposal-draft', oppId], enabled: open, queryFn: () => api<{ draft: { templateId: string; values: Record<string, string>; servicesText: string; photos: { data: string; mime: string }[]; validityDays: number | null } | null; branchDefaultTemplateId: string | null }>(`/opportunities/${oppId}/proposal-draft`) });
+  const draft = draftQ.data?.draft ?? null;
+  useEffect(() => {
+    if (!open || !draftQ.data || !q.data) return;
+    const want = draft?.templateId ?? draftQ.data.branchDefaultTemplateId;
+    if (want && q.data.items.some((t) => t.id === want)) setTplId(want);
+    if (draft) {
+      setSvcText(draft.servicesText);
+      setPhotos(draft.photos.map((p) => { const bin = atob(p.data); const u8 = Uint8Array.from(bin, (c) => c.charCodeAt(0)); return { ...p, url: URL.createObjectURL(new Blob([u8], { type: p.mime })) }; }));
+    }
+  }, [open, draftQ.data, q.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const tpl = q.data?.items.find((t) => t.id === tplId) ?? q.data?.items[0];
-  useEffect(() => { if (tpl) { setValues(Object.fromEntries(tpl.variables.map((v) => [v.key, v.default]))); setDays(tpl.sections?.validityDays ?? 15); } }, [tpl?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!tpl) return;
+    const fromDraft = draft && draft.templateId === tpl.id;
+    setValues(Object.fromEntries(tpl.variables.map((v) => [v.key, fromDraft ? draft.values[v.key] ?? v.default : v.default])));
+    setDays(fromDraft && draft.validityDays ? draft.validityDays : tpl.sections?.validityDays ?? 15);
+  }, [tpl?.id, draft]); // eslint-disable-line react-hooks/exhaustive-deps
   const gen = useMutation({
     mutationFn: () => api<{ id: string; filename: string }>(`/opportunities/${oppId}/proposal`, { method: 'POST', body: payload() }),
-    onSuccess: (r) => { for (const k of ['attachments', 'opportunity', 'timeline']) qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Proposta gerada e anexada: ${r.filename}` }); setSent(r); },
+    onSuccess: (r) => { for (const k of ['attachments', 'opportunity', 'timeline', 'proposal-draft']) qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Proposta gerada e anexada: ${r.filename}` }); setSent(r); },
     onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
   });
   const all = { ...(q.data?.system ?? {}), ...values };
@@ -60,7 +77,7 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
   };
   if (sent && oppQ.data) return <WhatsAppSend opp={oppQ.data} attachment={sent} open={open} onClose={() => { setSent(null); onClose(); }} />;
   return (
-    <Modal open={open} onClose={onClose} title="Gerar proposta" size="xl" footer={<><Button onClick={onClose}>Cancelar</Button>{tpl && <Button icon={<Eye className="h-4 w-4" />} loading={previewing} onClick={() => void preview()}>Prévia do PDF</Button>}<Button variant="primary" loading={gen.isPending} disabled={!tpl} onClick={() => gen.mutate()}>Gerar PDF e anexar</Button></>}>
+    <Modal open={open} onClose={onClose} title={draft ? 'Editar proposta' : 'Gerar proposta'} size="xl" footer={<><Button onClick={onClose}>Cancelar</Button>{tpl && <Button icon={<Eye className="h-4 w-4" />} loading={previewing} onClick={() => void preview()}>Prévia do PDF</Button>}<Button variant="primary" loading={gen.isPending} disabled={!tpl} onClick={() => gen.mutate()}>{draft ? 'Gerar nova versão e anexar' : 'Gerar PDF e anexar'}</Button></>}>
       {q.isLoading ? <LoadingRows rows={5} /> : !tpl ? (
         <EmptyState title="Nenhum modelo de proposta pronto" description="A gerência cadastra o modelo (com a arte do Canva) em Configurações → Modelos de proposta." />
       ) : (
