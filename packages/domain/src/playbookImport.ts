@@ -11,27 +11,32 @@ const BULLET = /^\s*([•●▪◦‣∙·*✓✔□■–—-])\s+/;
 const NUMBERED = /^\s*(\d{1,2})[.)]\s+(.+)$/;
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-/** Linhas repetidas em muitas páginas (cabeçalho/rodapé) e números de página. */
-function noise(lines: PdfLine[]) {
+/** Linhas repetidas em muitas páginas (cabeçalho/rodapé) e números de página. Com números trocados só conta em letra menor que o corpo. */
+function noise(lines: PdfLine[], body: number) {
   const pages = new Set(lines.map((l) => l.page)).size;
-  const count = new Map<string, Set<number>>();
-  for (const l of lines) { const k = norm(l.text).replace(/\d+/g, '#').toLowerCase(); if (!count.has(k)) count.set(k, new Set()); count.get(k)!.add(l.page); }
+  const exact = new Map<string, Set<number>>(), loose = new Map<string, Set<number>>();
+  const add = (m: Map<string, Set<number>>, k: string, p: number) => { if (!m.has(k)) m.set(k, new Set()); m.get(k)!.add(p); };
+  for (const l of lines) { const t = norm(l.text).toLowerCase(); add(exact, t, l.page); add(loose, t.replace(/\d+/g, '#'), l.page); }
+  const min = Math.max(3, pages * 0.6);
   return (l: PdfLine) => {
     const t = norm(l.text);
     if (!t) return true;
     if (/^(p[aá]gina\s*)?\d{1,3}(\s*(de|\/)\s*\d{1,3})?$/i.test(t)) return true;
-    return pages >= 3 && (count.get(t.replace(/\d+/g, '#').toLowerCase())?.size ?? 0) >= Math.max(3, pages * 0.6);
+    if (pages < 3) return false;
+    if ((exact.get(t.toLowerCase())?.size ?? 0) >= min) return true;
+    return l.size < body - 0.5 && (loose.get(t.toLowerCase().replace(/\d+/g, '#'))?.size ?? 0) >= min;
   };
 }
 
 export function structurePdf(raw: PdfLine[], idPrefix = 'imp'): { title: string | null; content: PlaybookContent; stats: Record<string, number> } {
-  const isNoise = noise(raw);
-  const lines = raw.filter((l) => !isNoise(l)).map((l) => ({ ...l, text: norm(l.text) }));
-  if (!lines.length) return { title: null, content: { blocks: [] }, stats: {} };
+  if (!raw.length) return { title: null, content: { blocks: [] }, stats: {} };
   // tamanho do corpo: o mais usado (pesado pela quantidade de letras)
   const weight = new Map<number, number>();
-  for (const l of lines) { const k = Math.round(l.size * 2) / 2; weight.set(k, (weight.get(k) ?? 0) + l.text.length); }
+  for (const l of raw) { const k = Math.round(l.size * 2) / 2; weight.set(k, (weight.get(k) ?? 0) + l.text.length); }
   const body = [...weight.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+  const isNoise = noise(raw, body);
+  const lines = raw.filter((l) => !isNoise(l)).map((l) => ({ ...l, text: norm(l.text) }));
+  if (!lines.length) return { title: null, content: { blocks: [] }, stats: {} };
   const bigSizes = [...new Set(lines.filter((l) => l.size >= body * 1.25).map((l) => Math.round(l.size * 2) / 2))].sort((a, b) => b - a);
   // o maior tamanho da primeira página é o título do documento; o maior tamanho seguinte é o título de seção (nível 1)
   const firstPage = lines[0]!.page;
@@ -86,8 +91,25 @@ export function structurePdf(raw: PdfLine[], idPrefix = 'imp'): { title: string 
     prev = l;
   }
   flushAll();
-  // títulos sem nada embaixo no fim saem; textos muito longos ficam (o editor permite quebrar)
+  // títulos sem nada embaixo no fim saem
   while (blocks.length && blocks[blocks.length - 1]!.type === 'heading') blocks.pop();
+  // documentos longos: textos seguidos da mesma seção viram um bloco só (parágrafos separados por linha em branco)
+  for (let i = blocks.length - 1; i > 0; i--) {
+    const a = blocks[i - 1]!, b = blocks[i]!;
+    if (a.type === 'text' && b.type === 'text' && a.text.length + b.text.length < 15_000) { a.text = `${a.text}\n\n${b.text}`; blocks.splice(i, 1); }
+  }
+  // texto único gigante (sem títulos no PDF) é quebrado em partes que o editor aceita
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!;
+    if (b.type === 'text' && b.text.length > 18_000) {
+      const parts: string[] = []; let cur = '';
+      for (const p of b.text.split('\n\n')) { if (cur && cur.length + p.length > 15_000) { parts.push(cur); cur = ''; } cur = cur ? `${cur}\n\n${p}` : p.slice(0, 18_000); }
+      if (cur) parts.push(cur);
+      blocks.splice(i, 1, ...parts.map((text, k) => ({ id: `${b.id}-${k}`, type: 'text' as const, text })));
+      i += parts.length - 1;
+    }
+  }
+  if (blocks.length > 1000) blocks.length = 1000;
   const stats = blocks.reduce<Record<string, number>>((a, b) => ({ ...a, [b.type]: (a[b.type] ?? 0) + 1 }), {});
   return { title, content: { blocks }, stats };
 }

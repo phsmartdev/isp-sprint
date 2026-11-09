@@ -57,7 +57,7 @@ const httpUrl = (s: string) => { try { const u = new URL(s); return u.protocol =
 export function contentErrors(c: PlaybookContent): string[] {
   const e: string[] = [];
   if (!Array.isArray(c?.blocks)) return ['Conteúdo inválido.'];
-  if (c.blocks.length > 400) e.push('No máximo 400 blocos.');
+  if (c.blocks.length > 1000) e.push('No máximo 1000 blocos.');
   const ids = new Set<string>();
   c.blocks.forEach((b, i) => {
     const at = `Bloco ${i + 1}`;

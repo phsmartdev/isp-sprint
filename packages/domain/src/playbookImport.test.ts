@@ -35,3 +35,19 @@ describe('importação de playbook em PDF', () => {
     expect(contentErrors(r.content)).toEqual([]);
   });
 });
+
+describe('PDF grande', () => {
+  it('85 páginas com muitos parágrafos cabem: textos da mesma seção juntos, dentro dos limites', () => {
+    const lines: PdfLine[] = [];
+    for (let p = 1; p <= 85; p++) {
+      lines.push(L(p, 780, `Seção ${p}`, 16, true));
+      for (let k = 0; k < 12; k++) lines.push(L(p, 740 - k * 40, `Parágrafo ${k + 1} da página ${p} com conteúdo fictício suficiente para uma linha.`, 11));
+    }
+    const r = structurePdf(lines);
+    expect(r.content.blocks.length).toBeLessThanOrEqual(1000);
+    expect(r.content.blocks.filter((b) => b.type === 'heading').length).toBe(84); // a primeira vira o título do documento
+    expect(contentErrors(r.content)).toEqual([]);
+    const single = structurePdf(Array.from({ length: 3000 }, (_, i) => L(1 + Math.floor(i / 40), 800 - (i % 40) * 30, `Linha solta ${i} de um PDF sem títulos, com texto corrido.`, 11)));
+    expect(contentErrors(single.content)).toEqual([]);
+  });
+});
