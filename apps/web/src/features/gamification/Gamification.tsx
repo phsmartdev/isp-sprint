@@ -55,23 +55,22 @@ export const fmtPts = (n: number) => n.toLocaleString('pt-BR', { maximumFraction
 export const DISPERSION_LABEL: Record<DispersionTone, string> = { verde: 'Time nivelado', amarelo: 'Atenção: time desigual', vermelho: 'Problema: time muito desigual', sem_dados: 'Sem dados suficientes' };
 export const DISPERSION_STYLE: Record<DispersionTone, string> = { verde: 'border-[#15803D] bg-[#ECFDF3] text-[#166534]', amarelo: 'border-[#B45309] bg-[#FFF7E6] text-[#92400E]', vermelho: 'border-danger bg-danger-soft text-danger', sem_dados: 'border-line bg-surface-2 text-muted' };
 
-/** Medalha de ouro com o Badge Ouro (SVG próprio; cores da marca + ouro). */
+/** Badge Ouro: badge hexagonal em ouro, no mesmo formato das demais badges (sem medalha nem fita). */
 export function BkGoldMedal({ size = 64, year, title = 'Badge Ouro' }: { size?: number; year?: number; title?: string }) {
   const id = useId().replace(/:/g, '');
+  const hex = '50,4 90,27 90,73 50,96 10,73 10,27';
   return (
-    <svg width={size} height={size * 1.3} viewBox="0 0 100 130" role="img" aria-label={`${title}${year ? ` ${year}` : ''}`}>
+    <svg width={size} height={size} viewBox="0 0 100 100" role="img" aria-label={`${title}${year ? ` ${year}` : ''}`}>
       <title>{`${title}${year ? ` ${year}` : ''}`}</title>
       <defs>
         <linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#F8E08E" /><stop offset=".45" stopColor="#D4A62A" /><stop offset="1" stopColor="#9A7212" /></linearGradient>
-        <linearGradient id={`r${id}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2F5986" /><stop offset="1" stopColor="#1F3D5E" /></linearGradient>
       </defs>
-      <path d="M30 0 L48 0 L56 46 L40 50 Z" fill={`url(#r${id})`} />
-      <path d="M70 0 L52 0 L44 46 L60 50 Z" fill="#2D3339" />
-      <circle cx="50" cy="82" r="40" fill={`url(#g${id})`} stroke="#8A6610" strokeWidth="2" />
-      <circle cx="50" cy="82" r="31" fill="none" stroke="#FFF3C4" strokeWidth="1.5" strokeDasharray="2 3" />
-      <text x="50" y="90" textAnchor="middle" fontFamily="Saira, Arial, sans-serif" fontWeight="800" fontSize="26" fill="#2D3339">BK</text>
-      <text x="50" y="104" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="7" letterSpacing="1.2" fill="#2D3339">OURO</text>
-      {year && <text x="50" y="70" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="8" fill="#2D3339">{year}</text>}
+      <polygon points={hex} fill={`url(#g${id})`} stroke="#8A6610" strokeWidth="3" />
+      <polygon points="50,14 81,32 81,68 50,86 19,68 19,32" fill="none" stroke="#FFF3C4" strokeWidth="1.5" strokeDasharray="2 3" />
+      <path d="M36 31 L42 37 L50 27 L58 37 L64 31 L62 42 L38 42 Z" fill="#2D3339" />
+      <text x="50" y="64" textAnchor="middle" fontFamily="Saira, Arial, sans-serif" fontWeight="800" fontSize="22" fill="#2D3339">BK</text>
+      {year ? <text x="50" y="77" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="8" letterSpacing=".6" fill="#2D3339">OURO {year}</text>
+        : <text x="50" y="77" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="8" letterSpacing="1.2" fill="#2D3339">OURO</text>}
     </svg>
   );
 }
@@ -83,7 +82,7 @@ export function HeaderSelo() {
   return <Link to="/times/pessoas?aba=gamificacao" className="hidden items-center md:flex" title={`Badge Ouro ${q.data.year}: vencedor do ano`}><BkGoldMedal size={26} year={q.data.year} /></Link>;
 }
 
-/** Destaque na tela inicial da pessoa com a medalha de ouro. */
+/** Destaque na tela inicial da pessoa com o Badge Ouro. */
 export function SeloHighlight() {
   const q = useSelo();
   if (!q.data?.gold) return null;
