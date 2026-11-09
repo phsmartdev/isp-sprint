@@ -1,7 +1,7 @@
 /**
  * Gestão de Times → Gamificação colaborativa, sem ranking nem pódio (evita comparação pública e constrangimento):
  * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
- * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
+ * só o primeiro lugar do ano é reconhecido, com o Badge Ouro.
  */
 import { certificateCreditsBetween } from './certificates';
 import { opportunityPointsFor } from '../services/scoreJourneys';
@@ -135,7 +135,7 @@ export const gamificationRoutes = [
     },
   }),
   defineRoute({
-    method: 'GET', url: '/me/selo', summary: 'Selo BK de Qualidade: se a pessoa tem a maior nota do ano na gamificação (medalha de ouro)', tag: 'Gestão de Times', anyAuthenticated: true,
+    method: 'GET', url: '/me/selo', summary: 'Badge Ouro: se a pessoa tem a maior nota do ano na gamificação (medalha de ouro)', tag: 'Gestão de Times', anyAuthenticated: true,
     handler: async ({ app, auth }) => {
       const year = todayIn(auth.timezone).slice(0, 4);
       const { settings } = await gamificationSettingsOf(app.db, auth.tenantId);

@@ -275,7 +275,7 @@ function Leadership({ rule }: { rule: Approved }) {
       </div>
       <h4 className="font-bold text-ink">Faixas do ano</h4>
       <div className="flex flex-wrap gap-px border border-line bg-line">{rule.yearBands.map((b) => <div key={b.name} className="min-w-[120px] flex-1 bg-surface p-3"><p className="font-bold text-ink">{b.name}</p><p className="num text-sm text-muted">a partir de {n1(b.minPoints)}</p></div>)}</div>
-      <p className="text-sm text-muted">Todos podem chegar à mesma faixa: ela não depende de ninguém ficar abaixo. Não existe ranking nem pódio; só a maior nota do ano recebe o <strong className="text-ink">Selo BK de Qualidade</strong> (empate: todos os empatados).</p>
+      <p className="text-sm text-muted">Todos podem chegar à mesma faixa: ela não depende de ninguém ficar abaixo. Não existe ranking nem pódio; só a maior nota do ano recebe o <strong className="text-ink">Badge Ouro</strong> (empate: todos os empatados).</p>
     </>
   );
 }

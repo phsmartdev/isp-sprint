@@ -22,7 +22,7 @@ export function guidelineContent(): PlaybookContent {
   return { blocks: [
     C('importante', 'Para que serve', 'A gamificação reforça o jeito certo de trabalhar: seguir a jornada de cada venda, cumprir prazos, ajudar colegas e fechar negócios juntos. Ela **não** serve para expor ninguém nem para criar disputa entre colegas.'),
     H('Princípios'),
-    T('- **Colaborativa, não competitiva.** Não existe ranking, placar público nem pódio.\n- **Proporcional à responsabilidade.** Cada nível de competência tem a sua meta; ninguém é comparado com quem tem outro papel.\n- **O coletivo pesa.** Parte da nota de todos vem da média do time; quanto mais alto o nível, mais pesa o time e a área.\n- **Time nivelado é sinal de boa liderança.** A dispersão do time entra na nota de quem lidera.\n- **Pedir e dar ajuda vale ponto.** Pedir apoio cedo é comportamento desejado.\n- **Uma regra só, aprovada e conhecida.** Nada é decidido caso a caso.\n- **Só o primeiro lugar do ano é reconhecido**, com o Selo BK de Qualidade.'),
+    T('- **Colaborativa, não competitiva.** Não existe ranking, placar público nem pódio.\n- **Proporcional à responsabilidade.** Cada nível de competência tem a sua meta; ninguém é comparado com quem tem outro papel.\n- **O coletivo pesa.** Parte da nota de todos vem da média do time; quanto mais alto o nível, mais pesa o time e a área.\n- **Time nivelado é sinal de boa liderança.** A dispersão do time entra na nota de quem lidera.\n- **Pedir e dar ajuda vale ponto.** Pedir apoio cedo é comportamento desejado.\n- **Uma regra só, aprovada e conhecida.** Nada é decidido caso a caso.\n- **Só o vencedor do ano é reconhecido**, com o Badge Ouro.'),
     H('A regra vigente'),
     T('Os números abaixo são lidos da regra aprovada **agora**. Se a regra mudar, este bloco muda junto. Navegue pelas abas: níveis, como pontuar, simulador de nota e indicadores da liderança.'),
     { id: id(), type: 'gamification_rule', title: 'Regra vigente da gamificação' },
@@ -40,7 +40,7 @@ export function guidelineContent(): PlaybookContent {
       { id: 'e', kind: 'fim', label: 'Pontos para os dois', guidance: 'Quem ajudou e quem pediu pontuam, até o teto mensal.', x: 0, y: 400 },
     ], edges: [{ id: 'e1', from: 'a', to: 'b' }, { id: 'e2', from: 'b', to: 'c' }, { id: 'e3', from: 'c', to: 'd' }, { id: 'e4', from: 'd', to: 'e', label: 'Sim' }, { id: 'e5', from: 'd', to: 'c', label: 'Ainda não' }] },
     H('Reconhecimento'),
-    T('O único reconhecimento individual é o **Selo BK de Qualidade**, para a maior nota do ano (empate: todos os empatados). Não há segundo nem terceiro lugar. O restante do time é reconhecido pelas faixas do ano, que todos podem alcançar.'),
+    T('O único reconhecimento individual é o **Badge Ouro**, para a maior nota do ano (empate: todos os empatados). Não há segundo nem terceiro lugar. O restante do time é reconhecido pelas faixas do ano, que todos podem alcançar.'),
     C('atencao', 'Não monte rankings por fora', 'Planilhas, apresentações ou mensagens comparando pessoas desfazem o princípio da ferramenta e não são permitidas.'),
     H('Responsabilidades da gestão'),
     { id: id(), type: 'checklist', mode: 'operacional', title: 'Rotina da liderança', items: [
@@ -81,7 +81,15 @@ export function guidelineContent(): PlaybookContent {
 /** Cria o playbook uma vez (na categoria de Governança e Compliance, se existir e estiver ativa). */
 export async function ensureGamificationGuideline(db: DbOrTx, tenantId: string, tz = 'America/Sao_Paulo') {
   const done = await db.execute(sql`select 1 from playbook_versions where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} limit 1`);
-  if (done.rows.length) return null;
+  if (done.rows.length) {
+    // o reconhecimento do vencedor passou a se chamar Badge Ouro: ajusta o texto do playbook criado pelo sistema (só a nomenclatura)
+    const fixed = await db.execute<{ id: string; playbook_id: string }>(sql`update playbook_versions set
+        content = replace(replace(content::text, 'Selo BK de Qualidade', 'Badge Ouro'), 'Só o primeiro lugar do ano é reconhecido**', 'Só o vencedor do ano é reconhecido**')::jsonb,
+        search_text = replace(replace(search_text, 'Selo BK de Qualidade', 'Badge Ouro'), 'Só o primeiro lugar do ano é reconhecido', 'Só o vencedor do ano é reconhecido')
+      where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} and content::text like '%Selo BK de Qualidade%' returning id, playbook_id`);
+    for (const r of fixed.rows) await db.insert(s.playbookEvents).values({ tenantId, playbookId: r.playbook_id, versionId: r.id, type: 'ajuste', note: 'Ajuste de nomenclatura pelo sistema: o reconhecimento do vencedor do ano passou a se chamar Badge Ouro.', actorId: null });
+    return null;
+  }
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`pb-guideline:${tenantId}`}))`);
     const again = await tx.execute(sql`select 1 from playbook_versions where tenant_id = ${tenantId} and meta->'contexts' ? ${GUIDELINE_CONTEXT} limit 1`);
@@ -94,7 +102,7 @@ export async function ensureGamificationGuideline(db: DbOrTx, tenantId: string, 
     while ((await tx.select({ id: s.playbooks.id }).from(s.playbooks).where(and(eq(s.playbooks.tenantId, tenantId), eq(s.playbooks.code, code)))).length) code = playbookCode(st?.codePattern ?? '{CAT}-PB-{NUM}', cat.prefix, ++seq);
     const today = todayIn(tz);
     const content = guidelineContent();
-    const meta = { title: 'Diretriz de Gamificação', description: 'Como a gamificação do time funciona: princípios, regra vigente, calculadora de meta, Pedido de Apoio, reconhecimento e governança.', keywords: ['gamificação', 'pontos', 'meta', 'nota', 'selo', 'apoio'], type: 'politica', criticality: 'media', ownerTeamId: null, costCenterId: null, maintainerId: null, visibility: 'corporativo', teamIds: [], costCenterIds: [], profiles: [], userIds: [], reviewPeriod: 'anual', reviewCustomDays: null, nextReviewOn: null, requiresAck: true, contexts: [GUIDELINE_CONTEXT] };
+    const meta = { title: 'Diretriz de Gamificação', description: 'Como a gamificação do time funciona: princípios, regra vigente, calculadora de meta, Pedido de Apoio, reconhecimento e governança.', keywords: ['gamificação', 'pontos', 'meta', 'nota', 'badge ouro', 'apoio'], type: 'politica', criticality: 'media', ownerTeamId: null, costCenterId: null, maintainerId: null, visibility: 'corporativo', teamIds: [], costCenterIds: [], profiles: [], userIds: [], reviewPeriod: 'anual', reviewCustomDays: null, nextReviewOn: null, requiresAck: true, contexts: [GUIDELINE_CONTEXT] };
     const next = nextReview(today, 'anual', null);
     const [p] = await tx.insert(s.playbooks).values({ tenantId, code, categoryId: cat.id, title: meta.title, description: meta.description, visibility: 'corporativo', reviewPeriod: 'anual', lastReviewOn: today, nextReviewOn: next, requiresAck: true }).returning();
     const [v] = await tx.insert(s.playbookVersions).values({ tenantId, playbookId: p!.id, number: '1.0', status: 'vigente', meta, content: content as unknown as { blocks: unknown[] }, searchText: contentText(content), changeSummary: 'Versão inicial criada pelo sistema a partir da regra de gamificação.', relevant: true, publishedAt: new Date(), effectiveFrom: today }).returning();
