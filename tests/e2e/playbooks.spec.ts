@@ -135,3 +135,39 @@ test('categorias: a Diretoria cria, edita e exclui direto na biblioteca', async 
   await expect(renamed).toHaveCount(0);
   expect(psql(`select count(*) from playbook_categories where name like '%${st}'`)).toBe('0');
 });
+
+test('Diretriz de Gamificação: regra vigente em abas, simulador e calculadora de meta', async ({ page }) => {
+  test.setTimeout(120_000);
+  const tenant = psql(`select tenant_id from users where email = 'lucas@yepnet.test'`);
+  const pipe = psql(`select id from pipelines where tenant_id = '${tenant}' limit 1`);
+  const cfg = JSON.stringify({ journeys: [{ key: 'e2e_jornada', name: 'Jornada E2E', pipelineId: pipe, wonPoints: 40, components: [{ key: 'diag', name: 'Diagnóstico fictício', stageKey: null, points: 10, dueDays: 3, level: null }] }] });
+  psql(`insert into gamification_settings (tenant_id, version, config, note, status, created_by) values ('${tenant}', (select coalesce(max(version),0)+1 from gamification_settings where tenant_id = '${tenant}'), '${cfg}'::jsonb, 'E2E', 'aprovada', (select id from users where email = 'carlos@yepnet.test'))`);
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/playbooks');
+  await expect(page.getByRole('heading', { name: 'Playbooks', level: 1 })).toBeVisible();
+  const q = `select p.id from playbooks p join playbook_versions v on v.id = p.current_version_id where p.tenant_id = '${tenant}' and v.meta->'contexts' ? 'sistema:diretriz_gamificacao'`;
+  await expect.poll(() => psql(q)).not.toBe(''); // criada na primeira abertura da Central
+  const pid = psql(q);
+  await page.goto(`/playbooks/${pid}`);
+  await expect(page.getByRole('heading', { name: 'Diretriz de Gamificação' }).first()).toBeVisible();
+  const rule = page.getByRole('region', { name: 'Regra vigente da gamificação' });
+  await expect(rule.getByRole('tab', { name: 'Níveis e nota' })).toHaveAttribute('aria-selected', 'true');
+  await expect(rule.getByText('você', { exact: true })).toBeVisible();
+  await rule.getByRole('tab', { name: 'Como pontuar' }).click();
+  await expect(rule.getByText('Diagnóstico fictício')).toBeVisible();
+  await rule.getByRole('tab', { name: 'Simular minha nota' }).click();
+  await expect(rule.getByTestId('sim-score')).toBeVisible();
+  const calc = page.getByRole('region', { name: 'Quantas tarefas faltam para a minha meta?' });
+  await calc.getByLabel('Quero chegar a (pontos)').fill('1000');
+  await calc.getByLabel('Tarefa ou evento').selectOption({ label: 'Diagnóstico fictício · 10 pts' });
+  await expect(calc.getByTestId('calc-need')).toHaveText('84'); // 10 pts + 20% no prazo = 12 → 1000/12
+  await calc.getByLabel('Qualificada pela gerência (+30%)').check();
+  await expect(calc.getByTestId('calc-need')).toHaveText('67'); // 15 pts
+  await calc.getByLabel('Quantidade de Diagnóstico fictício').fill('40');
+  await expect(calc.getByLabel('Resultado do plano')).toContainText('600');
+  const flow = page.getByLabel('Fluxograma Do pedido aos pontos');
+  await flow.scrollIntoViewIfNeeded();
+  await expect(flow.getByText('Colega assume')).toBeVisible();
+  await flow.screenshot({ path: 'test-results/diretriz-fluxo.png' });
+  await page.screenshot({ path: 'test-results/diretriz-gamificacao.png', fullPage: true });
+});

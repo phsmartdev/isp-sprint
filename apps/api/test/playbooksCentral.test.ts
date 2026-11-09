@@ -156,3 +156,20 @@ describe('Central de Playbooks', () => {
     expect(r.body).toMatch(/desative a categoria/);
   });
 });
+
+describe('Diretriz de Gamificação', () => {
+  it('é criada uma vez em Governança e Compliance, com conteúdo válido e blocos interativos', async () => {
+    const { contentErrors } = await import('@isp/domain');
+    const { guidelineContent } = await import('../src/services/gamificationGuideline');
+    expect(contentErrors(guidelineContent())).toEqual([]);
+    ok(await lucas.get('/playbooks')); ok(await ana.get('/playbooks'));
+    const rows = (await ctx.db.execute<{ id: string; code: string; prefix: string }>(sql`select p.id, p.code, c.prefix from playbooks p join playbook_categories c on c.id = p.category_id join playbook_versions v on v.id = p.current_version_id where v.meta->'contexts' ? 'sistema:diretriz_gamificacao'`)).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.prefix).toBe('GOV');
+    const r = ok(await lucas.get(`/playbooks/${rows[0]!.id}`)).json();
+    expect(r.content.blocks.map((b: { type: string }) => b.type)).toEqual(expect.arrayContaining(['gamification_rule', 'gamification_calc', 'flow', 'decision']));
+    const rule = ok(await lucas.get('/playbooks/gamification-rule')).json();
+    if (rule.approved) { expect(rule.myLevel.key).toBeTruthy(); expect(rule.levels[0].weights).toBeTruthy(); expect(JSON.stringify(rule)).not.toMatch(/assignments/); }
+    else expect(rule).toEqual({ approved: false });
+  });
+});
