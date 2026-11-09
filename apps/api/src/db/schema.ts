@@ -983,9 +983,12 @@ export const emailMessages = pgTable(
     ccAddress: text('cc_address'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
+    /** rastreio de leitura (pixel) dos e-mails enviados pela oportunidade; as aberturas ficam em email_opens */
+    openToken: text('open_token'),
   },
   (t) => ({
     tenantIdx: index('email_messages_tenant_idx').on(t.tenantId, t.createdAt),
+    openTokenUq: uniqueIndex('email_messages_open_token_uq').on(t.openToken),
     statusCk: check('email_messages_status_ck', inList('status', ['enviado', 'falhou', 'ignorado'])),
   }),
 );
@@ -6043,3 +6046,34 @@ export const measurementReports = pgTable('measurement_reports', {
   error: text('error'),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('measurement_reports_uq').on(t.tenantId, t.contactId, t.referenceMonth), statusCk: check('measurement_reports_status_ck', inList('status', ['rascunho', 'enviado'])) }));
+
+/** Fila de gatilhos que chegam de fora (retorno de chamado GLPI/IXC/e-mail, leitura de e-mail); idempotente pela chave. */
+export const automationQueue = pgTable('automation_queue', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  event: jsonb('event').$type<Record<string, unknown>>().notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  createdAt: createdAt(),
+  processedAt: ts('processed_at'),
+  error: text('error'),
+}, (t) => ({ uq: uniqueIndex('automation_queue_uq').on(t.tenantId, t.dedupeKey), pending: index('automation_queue_pending_idx').on(t.tenantId, t.processedAt) }));
+
+/** Última situação vista das ordens de serviço do IXC por conta (para perceber retorno). */
+export const ixcOsWatch = pgTable('ixc_os_watch', {
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  osId: text('os_id').notNull(),
+  status: text('status').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  seenAt: ts('seen_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('ixc_os_watch_pk').on(t.tenantId, t.contactId, t.osId) }));
+
+/** Aberturas (pixel) dos e-mails enviados pela oportunidade: uma linha por abertura (histórico só cresce). */
+export const emailOpens = pgTable('email_opens', {
+  id: id(),
+  tenantId: tenantId(),
+  emailMessageId: uuid('email_message_id').notNull().references(() => emailMessages.id),
+  userAgent: text('user_agent'),
+  openedAt: ts('opened_at').notNull().defaultNow(),
+}, (t) => ({ msg: index('email_opens_msg_idx').on(t.emailMessageId, t.openedAt) }));

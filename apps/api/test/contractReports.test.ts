@@ -25,8 +25,9 @@ beforeAll(async () => {
   const me = (Array.isArray(uj) ? uj : uj.items ?? uj.users).find((u: { id: string }) => u.id === ana.me.user.id);
   anaSectors.push(...(me?.sectors ?? []));
   ok(await carlos.patch(`/admin/users/${ana.me.user.id}`, { sectors: ['financeiro'] }));
-  const list = ok(await carlos.get('/contracts?stage=vigente')).json().items as { id: string }[];
-  contractId = list[0]!.id;
+  // contrato vigente que não seja de telecom (telecom exige o cadastro Zenith para salvar nova versão)
+  const [row] = (await ctx.db.execute(sql`select c.id from contracts c join contract_versions v on v.contract_id = c.id and v.version = c.current_version where c.stage = 'vigente' and coalesce(v.service_type, '') <> 'telecom' order by c.created_at limit 1`)).rows as { id: string }[];
+  contractId = row!.id;
 });
 afterAll(async () => {
   await carlos.patch(`/admin/users/${ana.me.user.id}`, { sectors: anaSectors });

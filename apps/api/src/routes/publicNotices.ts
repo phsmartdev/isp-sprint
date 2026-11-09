@@ -3,6 +3,9 @@
  * Público pelo token do aviso (aleatório, um por pessoa e canal): mostra o essencial e registra a confirmação,
  * a data, o IP e, para o ator externo, a resposta. Nada além do aviso é exposto.
  */
+import type { DB } from '../db/client';
+import type { Config } from '../config';
+import { drainAutomationQueue, enqueueAutomation } from '../services/automationQueue';
 import { eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { RACI_LETTER_LABELS, type RaciLetter } from '@isp/domain';
@@ -27,7 +30,27 @@ async function markOpen(db: Parameters<typeof addEvent>[0], token: string, ua: s
   }
 }
 
+/** Leitura de e-mail enviado pela oportunidade: primeira abertura vira gatilho "Cliente leu o e-mail". */
+async function markMailOpen(app: { db: DB; config: Config }, token: string, ua: string | undefined) {
+  const [m] = await app.db.select({ id: s.emailMessages.id, tenantId: s.emailMessages.tenantId, opportunityId: s.emailMessages.opportunityId, subject: s.emailMessages.subject, to: s.emailMessages.toAddress }).from(s.emailMessages).where(eq(s.emailMessages.openToken, token)).limit(1);
+  if (!m) return;
+  await app.db.insert(s.emailOpens).values({ tenantId: m.tenantId, emailMessageId: m.id, userAgent: (ua ?? '').slice(0, 300) || null });
+  const n = Number(((await app.db.execute(sql`select count(*)::int n from email_opens where email_message_id = ${m.id}`)).rows[0] as { n: number }).n);
+  if (n !== 1 || !m.opportunityId) return;
+  await app.db.insert(s.opportunityEvents).values({ tenantId: m.tenantId, opportunityId: m.opportunityId, type: 'email_opened', actorId: null, payload: { subject: m.subject, to: m.to } });
+  await enqueueAutomation(app.db, m.tenantId, m.opportunityId, { type: 'email_lido', detail: `E-mail lido: ${m.subject.slice(0, 120)}` }, `open:${m.id}`);
+  await drainAutomationQueue(app.db, app.config, m.tenantId, 10);
+}
+
 export const publicNoticeRoutes = [
+  defineRoute({
+    method: 'GET', url: '/public/mail-open/:token', summary: 'Pixel de leitura dos e-mails enviados pela oportunidade (imagem 1×1)', tag: 'Público', public: true, params: Token,
+    rateLimit: () => ({ max: 120, timeWindow: '1 minute' }),
+    handler: async ({ app, params, req, reply }) => {
+      await markMailOpen(app, params.token, req.headers['user-agent']).catch(() => undefined);
+      return reply.header('content-type', 'image/gif').header('cache-control', 'no-store, max-age=0').send(GIF);
+    },
+  }),
   defineRoute({
     method: 'GET',
     url: '/public/open/:token',

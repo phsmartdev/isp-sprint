@@ -146,6 +146,7 @@ export const dataAdminRoutes = [
           await tx.delete(s.contractProcesses).where(sc(s.contractProcesses));
           await tx.delete(s.contractEvents).where(sc(s.contractEvents));
           await tx.delete(s.contractVersions).where(sc(s.contractVersions));
+          await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)));
           await tx.update(s.activities).set({ contractId: null }).where(sc(s.activities));
           await del('contratos', tx.delete(s.contracts).where(sc(s.contracts)).returning({ id: s.contracts.id }));
@@ -174,6 +175,8 @@ export const dataAdminRoutes = [
           for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(sc(tbl));
           counts.projetos = (await tx.delete(s.projects).where(sc(s.projects)).returning({ id: s.projects.id })).length;
           await tx.delete(s.automationRuns).where(sc(s.automationRuns));
+          await tx.delete(s.automationQueue).where(and(eq(s.automationQueue.tenantId, t), inArray(s.automationQueue.opportunityId, opps)));
+          await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(sc(s.negotiationReads));
           await tx.delete(s.negotiationMessages).where(sc(s.negotiationMessages));
@@ -210,6 +213,7 @@ export const dataAdminRoutes = [
         // contatos que não estão mais em lead, oportunidade, cliente ou atividade
         const used = (tbl: typeof s.leads | typeof s.opportunities | typeof s.customers | typeof s.activities) => tx.select({ x: sql`1` }).from(tbl).where(eq((tbl as typeof s.leads).contactId, s.contacts.id));
         await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), isNull(s.addresses.customerId), notExists(tx.select({ x: sql`1` }).from(s.leads).where(eq(s.leads.contactId, s.addresses.contactId)))));
+        await tx.delete(s.ixcOsWatch).where(eq(s.ixcOsWatch.tenantId, t)); // só memória da última leitura do IXC
         // Relatório de Medição das contas que vão sair (configuração e relatórios)
         for (const tb of ['measurement_reports', 'measurement_report_settings']) await tx.execute(sql`delete from ${sql.identifier(tb)} m where m.tenant_id = ${t} and not exists (select 1 from opportunities o where o.contact_id = m.contact_id) and not exists (select 1 from leads l where l.contact_id = m.contact_id) and not exists (select 1 from customers c where c.contact_id = m.contact_id) and not exists (select 1 from activities a where a.contact_id = m.contact_id)`);
         await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.contactClassifications).where(eq(s.contactClassifications.contactId, s.contacts.id))), notExists(tx.select({ x: sql`1` }).from(s.contactIdentityLinks).where(or(eq(s.contactIdentityLinks.contactId, s.contacts.id), eq(s.contactIdentityLinks.otherContactId, s.contacts.id)))), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));

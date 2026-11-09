@@ -1,4 +1,5 @@
 /** Chamados no GLPI a partir da negociação: abrir, acompanhar, responder e receber o retorno (webhook + releitura). */
+import { drainAutomationQueue } from '../services/automationQueue';
 import { timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -189,7 +190,9 @@ export const glpiRoutes = [
     handler: async ({ app, auth, params }) => {
       const { t } = await ticketFor(app, auth, params.id);
       const c = await glpiConfig(app.db, auth.tenantId);
-      return viaGlpi(() => syncTicket(app.db, c, t));
+      const r = await viaGlpi(() => syncTicket(app.db, c, t));
+      await drainAutomationQueue(app.db, app.config, auth.tenantId).catch(() => undefined);
+      return r;
     },
   }),
   defineRoute({
@@ -241,6 +244,7 @@ export const glpiRoutes = [
       try {
         const c = await glpiConfig(app.db, r.tenantId);
         const res = await syncTicket(app.db, c, t);
+        await drainAutomationQueue(app.db, app.config, r.tenantId).catch(() => undefined);
         await logEvent(app.db, r.tenantId, 'glpi', 'recebido', `Chamado #${glpiId}: ${res.added} retorno(s) novo(s).`);
         return { ok: true, ...res };
       } catch (e) {

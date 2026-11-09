@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, Plus, Trash2, Workflow, Zap } from 'lucide-react';
 import { SEGMENTS, SEGMENT_LABELS, type Segment } from '@isp/domain';
 import {
   ACTION_LABELS, ACTION_TYPES, AUTOMATION_EMAIL_VARIABLES, FIELD_TYPES, FIELD_TYPE_LABELS, TRIGGER_LABELS, TRIGGER_TYPES,
+  EXCEPTION_FIELDS, EXCEPTION_FIELD_LABELS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, TICKET_ORIGINS, TICKET_ORIGIN_LABELS, type AutomationException,
   type Automation, type AutomationAction,
 } from '@isp/shared';
 import { api, ApiError } from '../../lib/api';
@@ -28,7 +29,7 @@ export type Journey = {
   automations: JAutomation[];
   open: number;
 };
-type Run = { id: string; status: string; detail: { actions?: { action: string; error?: string }[] } | null; createdAt: string; automation: string; opportunityId: string; opportunityTitle: string };
+type Run = { id: string; status: string; detail: { actions?: { action: string; error?: string }[]; reason?: string; about?: string } | null; createdAt: string; automation: string; opportunityId: string; opportunityTitle: string };
 
 export const useJourneys = () => useQuery({ queryKey: ['admin', 'journeys'], queryFn: () => api<{ items: Journey[] }>('/admin/journeys') });
 const REQ_LABELS: Record<keyof Req, string> = { plano: 'Plano escolhido', proposta: 'Proposta anexada', proximaAcao: 'Próxima ação definida', respostasObrigatorias: 'Perguntas obrigatórias respondidas' };
@@ -108,7 +109,7 @@ export function AdminJourneys() {
                     <td className="num whitespace-nowrap px-4 py-2 text-text">{fmtDateTime(r.createdAt)}</td>
                     <td className="px-4 py-2 font-medium text-ink">{r.automation}</td>
                     <td className="px-4 py-2"><a className="link" href={`/opportunities/${r.opportunityId}`}>{r.opportunityTitle}</a></td>
-                    <td className="px-4 py-2"><Chip tone={r.status === 'ok' ? 'green' : r.status === 'erro' ? 'red' : 'neutral'}>{r.status === 'ok' ? 'Executada' : r.status === 'erro' ? 'Falhou' : r.status}</Chip>{r.detail?.actions?.length ? <span className="ml-2 text-xs text-muted">{r.detail.actions.map((x) => `${ACTION_LABELS[x.action as AutomationAction['tipo']] ?? x.action}${x.error ? `: ${x.error}` : ''}`).join(' · ')}</span> : null}</td>
+                    <td className="px-4 py-2"><Chip tone={r.status === 'ok' ? 'green' : r.status === 'erro' ? 'red' : 'neutral'}>{r.status === 'ok' ? 'Executada' : r.status === 'erro' ? 'Falhou' : r.status === 'ignorado' ? 'Não rodou' : r.status}</Chip>{r.status === 'ignorado' && r.detail?.reason ? <span className="ml-2 text-xs text-muted">{String(r.detail.reason)}</span> : null}{r.detail?.about ? <span className="ml-2 text-xs text-muted">{String(r.detail.about)}</span> : null}{r.detail?.actions?.length ? <span className="ml-2 text-xs text-muted">{r.detail.actions.map((x) => `${ACTION_LABELS[x.action as AutomationAction['tipo']] ?? x.action}${x.error ? `: ${x.error}` : ''}`).join(' · ')}</span> : null}</td>
                   </tr>
                 ))}
               </tbody>
@@ -308,8 +309,10 @@ export function FieldsTab({ journey, all }: { journey: Journey; all?: Journey[] 
 function describeTrigger(a: Automation, j: Journey) {
   const st = (k?: string | null) => j.stages.find((s) => s.key === k)?.name ?? k;
   if (a.gatilho.tipo === 'entrou_na_etapa') return `Quando entrar em “${st(a.gatilho.etapa)}”`;
-  if (a.gatilho.tipo === 'parada') return `Quando ficar ${a.gatilho.dias} dia(s) parada${a.gatilho.etapa ? ` em “${st(a.gatilho.etapa)}”` : ''}`;
-  return `Quando: ${TRIGGER_LABELS[a.gatilho.tipo].toLowerCase()}`;
+  const exc = a.gatilho.excecoes?.length ? ` · ${a.gatilho.excecoes.length} exceção(ões)` : '';
+  if (a.gatilho.tipo === 'parada') return `Quando ficar ${a.gatilho.dias} dia(s) parada${a.gatilho.etapa ? ` em “${st(a.gatilho.etapa)}”` : ''}${exc}`;
+  if (a.gatilho.tipo === 'chamado_retorno') return `Quando houver retorno: ${TICKET_ORIGIN_LABELS[a.gatilho.origem ?? 'qualquer'].toLowerCase()}${exc}`;
+  return `Quando: ${TRIGGER_LABELS[a.gatilho.tipo].toLowerCase()}${exc}`;
 }
 
 function AutomationsTab({ journey, all }: { journey: Journey; all: Journey[] }) {
@@ -377,7 +380,7 @@ function AutomationEditor({ journey, all, automation, onClose }: { journey: Jour
   const updAction = (i: number, v: Partial<AutomationAction>) => setA((x) => ({ ...x, acoes: x.acoes.map((ac, j) => (j === i ? ({ ...ac, ...v } as AutomationAction) : ac)) }));
   const save = useMutation({
     mutationFn: () => {
-      const body = { ...a, gatilho: { tipo: a.gatilho.tipo, etapa: ['entrou_na_etapa', 'parada'].includes(a.gatilho.tipo) ? a.gatilho.etapa || null : null, dias: a.gatilho.tipo === 'parada' ? a.gatilho.dias : null } };
+      const body = { ...a, gatilho: { tipo: a.gatilho.tipo, etapa: ['entrou_na_etapa', 'parada'].includes(a.gatilho.tipo) ? a.gatilho.etapa || null : null, dias: a.gatilho.tipo === 'parada' ? a.gatilho.dias : null, origem: a.gatilho.tipo === 'chamado_retorno' ? a.gatilho.origem ?? 'qualquer' : null, excecoes: a.gatilho.excecoes ?? [] } };
       return automation ? api(`/admin/automations/${automation.id}`, { method: 'PUT', body }) : api(`/admin/journeys/${journey.id}/automations`, { method: 'POST', body });
     },
     onSuccess: () => { invalidate(); toast({ tone: 'success', message: 'Automação salva' }); onClose(); },
@@ -406,7 +409,15 @@ function AutomationEditor({ journey, all, automation, onClose }: { journey: Jour
             {a.gatilho.tipo === 'parada' && <FormField label="Dias sem mudança" htmlFor="au-days"><Input id="au-days" type="number" min={1} max={365} value={a.gatilho.dias ?? ''} onChange={(e) => setA({ ...a, gatilho: { ...a.gatilho, dias: e.target.value ? Number(e.target.value) : null } })} /></FormField>}
           </div>
           {a.gatilho.tipo === 'parada' && <p className="mt-2 text-xs text-muted">Verificado uma vez por dia pelo agendamento. Cada oportunidade dispara uma vez por etapa.</p>}
+          {a.gatilho.tipo === 'chamado_retorno' && (
+            <div className="mt-3 space-y-1">
+              <FormField label="Origem do retorno" htmlFor="au-orig"><Select id="au-orig" value={a.gatilho.origem ?? 'qualquer'} onChange={(e) => setA({ ...a, gatilho: { ...a.gatilho, origem: e.target.value as (typeof TICKET_ORIGINS)[number] } })}>{TICKET_ORIGINS.map((o) => <option key={o} value={o}>{TICKET_ORIGIN_LABELS[o]}</option>)}</Select></FormField>
+              <p className="text-xs text-muted">GLPI: novo acompanhamento, solução ou mudança de situação de um chamado aberto pela oportunidade. IXC: mudança numa ordem de serviço da conta (conferido uma vez por dia). E-mail: resposta do cliente numa conversa vinculada à oportunidade.</p>
+            </div>
+          )}
+          {a.gatilho.tipo === 'email_lido' && <p className="mt-2 text-xs text-muted">Na primeira vez que o cliente abre um e-mail enviado pela oportunidade (leitura detectada por imagem invisível; alguns programas de e-mail bloqueiam imagens e a leitura não aparece).</p>}
         </fieldset>
+        <ExceptionsEditor value={a.gatilho.excecoes ?? []} onChange={(excecoes) => setA({ ...a, gatilho: { ...a.gatilho, excecoes } })} />
         <fieldset className="space-y-2 rounded-md border border-line p-3">
           <legend className="px-1 text-sm font-semibold text-ink">Então</legend>
           {a.acoes.map((ac, i) => (
@@ -472,5 +483,36 @@ function AutomationEditor({ journey, all, automation, onClose }: { journey: Jour
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={a.ativo} onChange={(e) => setA({ ...a, ativo: e.target.checked })} />Ativa</label>
       </div>
     </Modal>
+  );
+}
+
+/** Exceções: a automação não roda quando a oportunidade bate com qualquer uma. */
+function ExceptionsEditor({ value, onChange }: { value: AutomationException[]; onChange: (v: AutomationException[]) => void }) {
+  const lookups = useLookups();
+  const opts = (campo: AutomationException['campo']): [string, string][] => {
+    if (campo === 'tipo_venda') return SALE_TYPE_KEYS.map((k) => [k, SALE_TYPE_LABELS[k]]);
+    if (campo === 'segmento') return SEGMENTS.map((k) => [k, SEGMENT_LABELS[k]]);
+    if (campo === 'natureza') return [['publica', 'Pública'], ['privada', 'Privada']];
+    if (campo === 'filial') return (lookups.data?.branches ?? []).map((b) => [b.id, b.name]);
+    return [];
+  };
+  const set = (i: number, v: Partial<AutomationException>) => onChange(value.map((x, j) => (j === i ? { ...x, ...v } : x)));
+  return (
+    <fieldset className="space-y-2 rounded-md border border-line p-3" aria-label="Exceções">
+      <legend className="px-1 text-sm font-semibold text-ink">Exceto quando</legend>
+      <p className="text-xs text-muted">A automação não roda se a oportunidade bater com qualquer exceção. Fica registrado no histórico da automação por que ela não rodou. Ex.: consumo de contrato não vai para o Sucesso do Cliente, fica só no histórico da conta.</p>
+      {value.map((ex, i) => (
+        <div key={i} className="flex flex-wrap items-start gap-2 rounded-md bg-surface-2 p-2">
+          <Select aria-label={`Exceção ${i + 1}: campo`} className="w-48" value={ex.campo} onChange={(e) => set(i, { campo: e.target.value as AutomationException['campo'], valores: [], valor: null })}>{EXCEPTION_FIELDS.map((f) => <option key={f} value={f}>{EXCEPTION_FIELD_LABELS[f]}</option>)}</Select>
+          {ex.campo.startsWith('valor_')
+            ? <Input aria-label={`Exceção ${i + 1}: valor em reais`} type="number" min={0} className="w-40" value={ex.valor ?? ''} onChange={(e) => set(i, { valor: e.target.value === '' ? null : Number(e.target.value) })} />
+            : <div className="flex flex-1 flex-wrap gap-x-4 gap-y-1">{opts(ex.campo).map(([k, l]) => (
+                <label key={k} className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`Exceção ${i + 1}: ${l}`} checked={ex.valores.includes(k)} onChange={(e) => set(i, { valores: e.target.checked ? [...ex.valores, k] : ex.valores.filter((x) => x !== k) })} />{l}</label>
+              ))}</div>}
+          <button type="button" aria-label={`Remover exceção ${i + 1}`} onClick={() => onChange(value.filter((_, j) => j !== i))} className="ml-auto p-1 text-muted hover:text-danger"><Trash2 className="h-4 w-4" /></button>
+        </div>
+      ))}
+      <Button size="sm" icon={<Plus className="h-4 w-4" />} disabled={value.length >= 10} onClick={() => onChange([...value, { campo: 'tipo_venda', valores: [], valor: null }])}>Adicionar exceção</Button>
+    </fieldset>
   );
 }

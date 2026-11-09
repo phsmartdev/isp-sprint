@@ -1,4 +1,6 @@
 /** Sprint: roteiro (respostas), anexos de proposta e e-mail ao cliente a partir da oportunidade. */
+import { randomBytes } from 'node:crypto';
+import { textToHtml } from '../services/email';
 import { ensureProposalNumber } from '../services/proposalNumber';
 import { todayIn } from '../services/vacations';
 import { createHash } from 'node:crypto';
@@ -254,12 +256,16 @@ export const sprintRoutes = [
         if (!a) throw unprocessable('Anexo não encontrado nesta oportunidade.', [{ path: 'attachmentId', message: 'Anexo inválido' }]);
         attachment = a;
       }
+      // leitura do e-mail: pixel 1×1 com token próprio (gatilho "Cliente leu o e-mail" das jornadas)
+      const openToken = randomBytes(24).toString('base64url');
       const result = await sendEmail(app.db, {
         tenantId: auth.tenantId,
         kind: body.kind,
         to: body.to,
         subject: body.subject,
         text: body.body,
+        openToken,
+        html: `${textToHtml(body.body)}<img src="${publicLink(app.config, `/api/v1/public/mail-open/${openToken}`)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px">`,
         attachments: attachment ? [{ filename: attachment.filename, content: attachment.data, contentType: attachment.mime }] : undefined,
         opportunityId: params.id,
         attachmentId: attachment?.id ?? null,

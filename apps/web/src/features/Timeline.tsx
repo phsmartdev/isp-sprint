@@ -90,6 +90,7 @@ function describe(i: TimelineItem): string {
     case 'whatsapp_sent': return `Enviado por WhatsApp${i.payload?.filename ? `: ${String(i.payload.filename)}` : ''}${i.payload?.to ? ` para ${String(i.payload.to)}` : ''}`;
     case 'email_sent': return `E-mail enviado${i.payload?.subject ? `: ${String(i.payload.subject)}` : ''}`;
     case 'automation_ran': return `Automação executada${i.payload?.automation ? `: ${String(i.payload.automation)}` : ''}`;
+    case 'email_opened': return `Cliente leu o e-mail${i.payload?.subject ? `: ${String(i.payload.subject)}` : ''}`;
     case 'duplicated_from': return 'Criada a partir de outra oportunidade (histórico copiado)';
     case 'duplicated_to': return 'Copiada para outro funil';
     case 'port_released': return 'Porta da CTO liberada';
