@@ -47,3 +47,29 @@ it('modelo Yepempresa: arte, variáveis criadas pela empresa e PDF anexado', asy
   expect((await ctx.app.inject({ method: 'GET', url: `/api/v1/public/files/${token.slice(0, -2)}xx` })).statusCode).toBe(404);
   expect((await lucas.get(`/opportunities/${o.id}`)).json().proposalStatus).toBe('enviada');
 });
+
+it('seções automáticas: serviços com fotos, composição do investimento (aba Produto) e condição; prévia exata', async () => {
+  const { PDFDocument } = await import('pdf-lib');
+  const { sql } = await import('drizzle-orm');
+  const t = (await carlos.post('/admin/proposal-templates', { name: `Com seções ${Date.now()}`, segments: [], variables: [], fields: [{ id: 'h', page: 1, x: 8, y: 4, w: 80, size: 12, color: '#000000', align: 'left', bold: true, text: '{{proposta.titulo}}' }] })).json();
+  for (let i = 0; i < 3; i++) expect((await carlos.post(`/admin/proposal-templates/${t.id}/pages`, { data: PNG })).statusCode).toBe(201);
+  const full = (await carlos.get('/admin/proposal-templates')).json().items.find((x: { id: string }) => x.id === t.id);
+  const sections = { enabled: true, backgroundPage: 1, insertAfter: 0, margins: { top: 14, bottom: 10, left: 8, right: 8 }, color: '#2F5986', titles: { services: 'SERVIÇOS PROPOSTOS', investment: 'COMPOSIÇÃO DO INVESTIMENTO', condition: 'CONDIÇÃO DA PROPOSTA' }, validityDays: 10, conditionText: 'Válida por {{proposta.validade_dias}} dias, até {{proposta.validade_data}}.' };
+  expect((await carlos.put(`/admin/proposal-templates/${t.id}`, { name: full.name, segments: [], variables: [], fields: full.fields, sections })).statusCode).toBe(200);
+  const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+  const o = (await lucas.post('/opportunities', { newContact: { name: 'Empresa Seções Fictícia LTDA', segment: 'empresarial' }, planId: plan.id })).json();
+  for (let i = 0; i < 40; i++) await ctx.db.execute(sql`insert into opportunity_items (tenant_id, opportunity_id, position, description, unit, qty_milli, unit_cents) select tenant_id, id, ${i}, ${`Item fictício ${i + 1} com descrição longa para quebrar a linha na tabela de investimento`}, 'un', 2000, 12345 from opportunities where id = ${o.id}`);
+  const photo = PNG.split(',')[1]!;
+  const body = { templateId: t.id, values: {}, services: { text: 'Recuperação da rede óptica com troca de cabos.\n\n- Fusões\n- Testes', photos: [1, 2, 3, 4, 5].map(() => ({ data: photo, mime: 'image/png' })) }, validityDays: 20 };
+  const prev = await lucas.post(`/opportunities/${o.id}/proposal/preview`, body);
+  expect(prev.statusCode, prev.body).toBe(200);
+  const doc = await PDFDocument.load(prev.rawPayload);
+  // 3 páginas da arte: capa + (fundo vira páginas geradas) + 1 final; 40 itens + 5 fotos quebram em mais de uma página
+  expect(doc.getPageCount()).toBeGreaterThanOrEqual(4);
+  expect((await lucas.get(`/opportunities/${o.id}`)).json().proposalNumber ?? null).toBeNull(); // prévia não numera
+  const gen = await lucas.post(`/opportunities/${o.id}/proposal`, body);
+  expect(gen.statusCode, gen.body).toBe(201);
+  expect(gen.json().filename).toMatch(/^PC \d{6}(-\d+)? - Empresa Seções Fictícia LTDA\.pdf$/);
+  const bad = await lucas.post(`/opportunities/${o.id}/proposal/preview`, { ...body, services: { text: '', photos: [{ data: Buffer.from('not an image').toString('base64'), mime: 'image/jpeg' }] } });
+  expect(bad.statusCode).toBe(422);
+});

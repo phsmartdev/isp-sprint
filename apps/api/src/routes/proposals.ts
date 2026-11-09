@@ -1,7 +1,9 @@
 /** Modelos de proposta (arte + campos variáveis) e geração do PDF da proposta na oportunidade. */
 import { ensureProposalNumber } from '../services/proposalNumber';
 import { todayIn } from '../services/vacations';
-import { proposalTitle } from '@isp/domain';
+import { normalizeSections, proposalTitle, validityDate } from '@isp/domain';
+import type { DbOrTx } from '../db/client';
+import type { AuthContext } from '../http/context';
 import { createHash } from 'node:crypto';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -27,6 +29,18 @@ const TemplateBody = z.object({
   active: z.boolean().default(true),
   purpose: z.enum(['proposta', 'contrato']).default('proposta'),
   billingType: z.enum(['recorrente', 'frequente', 'medicao']).nullable().default(null),
+  sections: z.object({
+    enabled: z.boolean(), backgroundPage: z.number().int().min(0).max(40).nullable(), insertAfter: z.number().int().min(-1).max(40),
+    margins: z.object({ top: z.number().min(0).max(40), bottom: z.number().min(0).max(40), left: z.number().min(0).max(40), right: z.number().min(0).max(40) }),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/), titles: z.object({ services: z.string().max(80), investment: z.string().max(80), condition: z.string().max(80) }),
+    validityDays: z.number().int().min(1).max(365), conditionText: z.string().max(2000),
+  }).nullable().optional(),
+});
+const Photo = z.object({ data: z.string().max(1_400_000), mime: z.enum(['image/jpeg', 'image/png']) });
+const GenBody = z.object({
+  templateId: z.string().uuid(), values: z.record(z.string(), z.string().max(2000)).default({}),
+  services: z.object({ text: z.string().max(6000).default(''), photos: z.array(Photo).max(8).default([]) }).default({ text: '', photos: [] }),
+  validityDays: z.number().int().min(1).max(365).optional(),
 });
 const PageParams = z.object({ id: z.string().uuid(), pageId: z.string().uuid() });
 
@@ -42,6 +56,23 @@ const checkVars = (b: z.infer<typeof TemplateBody>) => {
   const keys = new Set<string>();
   for (const v of b.variables) { if (keys.has(v.key)) throw unprocessable(`Variável repetida: ${v.key}`); if (v.key.includes('.')) throw unprocessable('Variável própria não pode ter ponto.'); keys.add(v.key); }
 };
+
+
+/** Variáveis + seções automáticas (serviços, itens da aba Produto, validade) e o PDF. */
+async function renderFor(db: DbOrTx, auth: AuthContext, oppId: string, t: typeof s.proposalTemplates.$inferSelect, body: z.infer<typeof GenBody>) {
+  const cfg = normalizeSections(t.sections);
+  const days = body.validityDays ?? cfg.validityDays;
+  const today = todayIn(auth.timezone);
+  const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
+  const vars = { ...(await systemValues(db, auth.tenantId, oppId, auth.timezone)), 'proposta.validade_dias': String(days), 'proposta.validade_data': validityDate(today, days).split('-').reverse().join('/'), ...custom };
+  const items = await db.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, oppId)).orderBy(asc(s.opportunityItems.position));
+  const photos = body.services.photos.map((p) => ({ data: Buffer.from(p.data, 'base64'), mime: p.mime }));
+  for (const ph of photos) {
+    const ok = ph.mime === 'image/png' ? ph.data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) : ph.data[0] === 0xff && ph.data[1] === 0xd8;
+    if (!ok) throw unprocessable('Foto inválida: envie JPG ou PNG.');
+  }
+  return buildProposalPdf(db, auth.tenantId, t.id, vars, { servicesText: body.services.text, photos, items: items.map((i) => ({ description: i.description, unit: i.unit, qtyMilli: Number(i.qtyMilli), unitCents: Number(i.unitCents), discountCents: Number(i.discountCents), surchargeCents: Number(i.surchargeCents) })) });
+}
 
 export const proposalRoutes = [
   defineRoute({
@@ -156,9 +187,20 @@ export const proposalRoutes = [
       for (const t of rows) {
         const pages = await pagesOf(app.db, auth.tenantId, t.id);
         if (!pages.length) continue;
-        items.push({ id: t.id, name: t.name, segments: t.segments, matches: !t.segments.length || t.segments.includes(o.contactSegment), variables: t.variables, fields: t.fields, pages });
+        items.push({ id: t.id, name: t.name, segments: t.segments, matches: !t.segments.length || t.segments.includes(o.contactSegment), variables: t.variables, fields: t.fields, pages, sections: normalizeSections(t.sections) });
       }
       return { items: items.sort((a, b) => Number(b.matches) - Number(a.matches)), system: await systemValues(app.db, auth.tenantId, o.id, auth.timezone) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/opportunities/:id/proposal/preview', summary: 'Prévia exata do PDF da proposta (não anexa nem numera)', tag: 'Propostas', module: 'oportunidades', params: IdParams,
+    body: GenBody, bodyLimit: 4_400_000,
+    handler: async ({ app, auth, params, body, reply }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const t = await templateOr404(app.db, auth.tenantId, body.templateId);
+      const out = await renderFor(app.db, auth, o.id, t, body);
+      if (!out) throw unprocessable('O modelo ainda não tem páginas.');
+      return reply.header('content-type', 'application/pdf').header('cache-control', 'no-store').send(out.pdf);
     },
   }),
   defineRoute({
@@ -168,14 +210,13 @@ export const proposalRoutes = [
     tag: 'Propostas',
     module: 'oportunidades',
     params: IdParams,
-    body: z.object({ templateId: z.string().uuid(), values: z.record(z.string(), z.string().max(2000)).default({}) }),
+    body: GenBody,
+    bodyLimit: 4_400_000,
     handler: async ({ app, auth, params, body, req, reply }) => {
       const o = await loadOpportunity(app.db, auth, params.id);
       const t = await templateOr404(app.db, auth.tenantId, body.templateId);
-      const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
       const number = await app.db.transaction((tx) => ensureProposalNumber(tx, auth.tenantId, o.id, todayIn(auth.timezone)));
-      const vars = { ...(await systemValues(app.db, auth.tenantId, o.id, auth.timezone)), ...custom };
-      const out = await buildProposalPdf(app.db, auth.tenantId, t.id, vars);
+      const out = await renderFor(app.db, auth, o.id, t, body);
       if (!out) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
       const filename = `${proposalTitle(number, o.contactName)}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
       const row = await app.db.transaction(async (tx) => {

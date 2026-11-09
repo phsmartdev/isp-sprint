@@ -1271,6 +1271,8 @@ export const proposalTemplates = pgTable('proposal_templates', {
   segments: text('segments').array().notNull().default(sql`'{}'::text[]`),
   fields: jsonb('fields').$type<ProposalField[]>().notNull().default([]),
   variables: jsonb('variables').$type<ProposalVariable[]>().notNull().default([]),
+  /** Seções automáticas (serviços propostos, composição do investimento, condição) geradas sobre a arte de fundo. */
+  sections: jsonb('sections').$type<Record<string, unknown>>(),
   /** proposta (oportunidade) ou contrato (Gestão de Contratos): mesmo editor de arte + campos. */
   purpose: text('purpose').notNull().default('proposta'),
   /** Para modelos de contrato: tipo de contrato que usa o modelo (vazio = todos). */

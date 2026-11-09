@@ -1,0 +1,1 @@
+ALTER TABLE "proposal_templates" ADD COLUMN "sections" jsonb;
