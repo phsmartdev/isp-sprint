@@ -60,8 +60,8 @@ describe('Zenith', () => {
     expect(d.versions.length).toBe(3);
     // telecom sem cadastro Zenith não salva; mudar para outro serviço tira o contrato do Zenith
     expect((await carlos.put(`/contracts/${id}`, { version: { zenith: null } })).statusCode).toBe(422);
-    ok(await carlos.put(`/contracts/${id}`, { version: { serviceType: 'cloud' } }));
+    ok(await carlos.put(`/contracts/${id}`, { version: { serviceType: 'outro' } }));
     m = ok(await carlos.get(`/contracts/${id}/zenith`)).json();
-    expect(m).toMatchObject({ applicable: false, serviceType: 'cloud', zenith: null });
+    expect(m).toMatchObject({ applicable: false, serviceType: 'outro', zenith: null });
   });
 });

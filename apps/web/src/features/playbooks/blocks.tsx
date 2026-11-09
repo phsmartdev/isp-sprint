@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { AlertTriangle, ArrowRight, Check, ChevronDown, Download, ExternalLink, FileText, Info, Lightbulb, RotateCcw, Sparkles } from 'lucide-react';
 import { ReactFlow, Background, MarkerType, type Edge, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { GamificationCalcBlock, GamificationRuleBlock } from './GamificationCalc';
 import { CALLOUT_LABELS, videoEmbed, type Block, type CalloutKind, type FlowNode } from '@isp/domain';
 
 export const fileUrl = (id: string) => `/api/v1/playbook-files/${id}`;
@@ -60,7 +61,7 @@ function FlowBlock({ b }: { b: Extract<Block, { type: 'flow' }> }) {
   const nodes: Node[] = useMemo(() => b.nodes.map((n) => ({
     id: n.id, position: { x: n.x, y: n.y }, draggable: false, connectable: false,
     data: { label: n.label },
-    style: { borderRadius: n.kind === 'decisao' ? 0 : n.kind === 'inicio' || n.kind === 'fim' ? 999 : 0, border: `2px solid ${n.kind === 'decisao' ? '#B45309' : n.kind === 'fim' ? '#2D3339' : '#2F5986'}`, background: walk?.at(-1) === n.id ? '#E8F0F8' : '#fff', fontSize: 13, fontWeight: 600, width: 180, transform: n.kind === 'decisao' ? undefined : undefined },
+    style: { borderRadius: n.kind === 'decisao' ? 0 : n.kind === 'inicio' || n.kind === 'fim' ? 999 : 0, border: `2px solid ${n.kind === 'decisao' ? '#B45309' : n.kind === 'fim' ? '#2D3339' : '#2F5986'}`, background: walk?.at(-1) === n.id ? '#E8F0F8' : '#fff', fontSize: 13, fontWeight: 600, width: 180 },
   })), [b.nodes, walk]);
   const edges: Edge[] = useMemo(() => b.edges.map((e) => ({ id: e.id, source: e.from, target: e.to, label: e.label, markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: '#64748B' }, labelStyle: { fontWeight: 600 } })), [b.edges]);
   const cur = walk ? b.nodes.find((n) => n.id === walk.at(-1)) : null;
@@ -187,5 +188,7 @@ export function BlockView({ b, checks = [], onCheck }: { b: Block; checks?: stri
     case 'flow': return <FlowBlock b={b} />;
     case 'decision': return <DecisionBlock b={b} />;
     case 'divider': return <hr className="border-line" />;
+    case 'gamification_calc': return <GamificationCalcBlock title={b.title} />;
+    case 'gamification_rule': return <GamificationRuleBlock title={b.title} />;
   }
 }

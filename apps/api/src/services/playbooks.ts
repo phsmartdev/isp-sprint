@@ -11,6 +11,7 @@ import type { DB, DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { seesAllTeams } from './results';
 import { leadsOrManages, todayIn, vacationOrg } from './vacations';
+import { ensureGamificationGuideline } from './gamificationGuideline';
 
 export type PlaybookMeta = {
   title: string; description: string; keywords: string[]; type: PlaybookType; criticality: 'baixa' | 'media' | 'alta';
@@ -63,6 +64,7 @@ export async function ensurePlaybookSetup(db: DbOrTx, tenantId: string) {
     if (!any) await db.insert(s.playbookCategories).values(DEFAULT_PLAYBOOK_CATEGORIES.map((c) => ({ tenantId, name: c.name, prefix: c.prefix, icon: c.icon, description: c.description }))).onConflictDoNothing();
   }
   const [tpl] = await db.select({ id: s.playbookTemplates.id }).from(s.playbookTemplates).where(and(eq(s.playbookTemplates.tenantId, tenantId), eq(s.playbookTemplates.system, true))).limit(1);
+  await ensureGamificationGuideline(db, tenantId);
   if (!tpl) await db.insert(s.playbookTemplates).values(SYSTEM_TEMPLATES.map((t) => ({ tenantId, name: t.name, type: t.type, description: t.description, content: t.content, system: true }))).onConflictDoNothing();
 }
 

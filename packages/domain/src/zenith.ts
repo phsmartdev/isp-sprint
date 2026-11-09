@@ -4,9 +4,10 @@
  * O envio depende da API do Zenith (ainda não recebida): aqui só se monta e confere o que seria enviado.
  */
 /** Serviço do contrato: só Telecom vai para o Zenith. */
-export const CONTRACT_SERVICE_TYPES = ['telecom', 'cloud', 'energia', 'cidades_inteligentes', 'outro'] as const;
+export const CONTRACT_SERVICE_TYPES = ['telecom', 'outro'] as const;
 export type ContractServiceType = (typeof CONTRACT_SERVICE_TYPES)[number];
-export const CONTRACT_SERVICE_LABELS: Record<ContractServiceType, string> = { telecom: 'Serviços de telecom', cloud: 'Cloud', energia: 'Energia', cidades_inteligentes: 'Cidades inteligentes', outro: 'Outros serviços' };
+/** Rótulos (inclui valores antigos, que valem como outros serviços: versões de contrato não são reescritas). */
+export const CONTRACT_SERVICE_LABELS: Record<ContractServiceType, string> & Record<string, string> = { telecom: 'Serviços de telecom', outro: 'Outros serviços', cloud: 'Outros serviços (cloud)', energia: 'Outros serviços (energia)', cidades_inteligentes: 'Outros serviços (cidades inteligentes)' };
 export const needsZenith = (t: string | null | undefined) => t === 'telecom';
 
 export const ZENITH_MODALITIES = ['convencional', 'pseudowire_p2p'] as const;

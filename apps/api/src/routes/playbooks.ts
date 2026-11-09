@@ -8,7 +8,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   PLAYBOOK_TYPES, REVIEW_PERIODS, SUGGESTION_STATUSES, VISIBILITIES, approvalStagesFor, audienceErrors, contentErrors, contentText,
-  diffContent, nextVersion, playbookCode, reviewState, sectionsOf, type PlaybookContent, type VersionStatus,
+  BUSINESS_EVENT_TYPES, levelFor, diffContent, nextVersion, playbookCode, reviewState, sectionsOf, type PlaybookContent, type VersionStatus,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -19,6 +19,7 @@ import { audit } from '../services/audit';
 import { canCreate, canEditPb, ensurePlaybookJobs, ensurePlaybookSetup, isDirector, isManager, publishVersion, readerAllows, viewerOf, type PlaybookMeta } from '../services/playbooks';
 import { leadsOrManages, todayIn, vacationOrg } from '../services/vacations';
 import { detectAttachment } from './sprint';
+import { gamificationSettingsOf } from '../services/gamification';
 
 const uuid = z.string().uuid();
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -317,6 +318,30 @@ export const playbookCentralRoutes = [
   }),
 
   // ------------------------------------------------------------------ categorias, modelos e configuração
+  defineRoute({
+    method: 'GET', url: '/playbooks/gamification-rule', summary: 'Regra aprovada da gamificação para a calculadora de meta dos playbooks (regra é pública para o time: metas, pontos, bônus; sem notas de ninguém)', ...A,
+    handler: async ({ app, auth }) => {
+      const { settings: st, version } = await gamificationSettingsOf(app.db, auth.tenantId);
+      if (!st) return { approved: false as const };
+      const org = await vacationOrg(app.db, auth.tenantId);
+      const isLead = Object.values(org.leads).some((l) => l.includes(auth.userId));
+      const mine = levelFor(st, auth.userId, isLead);
+      const lv = new Map(st.competencyLevels.map((l) => [l.key, l]));
+      const label = new Map(BUSINESS_EVENT_TYPES.map((e) => [e.key, e.label]));
+      return {
+        approved: true as const, version,
+        myLevel: { key: mine.key, name: mine.name, rank: mine.rank, expectedMonthlyPoints: mine.expectedMonthlyPoints, scoresTasks: mine.scoresTasks },
+        levels: st.competencyLevels.map((l) => ({ key: l.key, name: l.name, rank: l.rank, expectedMonthlyPoints: l.expectedMonthlyPoints, scoresTasks: l.scoresTasks, weights: l.weights })),
+        dispersionYellowBp: st.dispersionYellowBp, dispersionRedBp: st.dispersionRedBp,
+        bonuses: st.bonuses,
+        journeys: (st.journeys ?? []).map((j) => ({ key: j.key, name: j.name, wonPoints: j.wonPoints, tasks: j.components.map((c) => ({ key: c.key, name: c.name, points: c.points, dueDays: c.dueDays, level: c.level ?? null, levelName: c.level ? lv.get(c.level)?.name ?? null : null, levelRank: c.level ? lv.get(c.level)?.rank ?? null : null })) })),
+        events: Object.entries(st.points).filter(([, v]) => v > 0).map(([k, v]) => ({ key: k, label: label.get(k as never) ?? k, points: v })),
+        participationMultiplierBp: st.participationMultiplierBp,
+        support: st.support ?? null,
+        yearBands: st.levels,
+      };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/playbooks/setup', summary: 'Categorias, modelos, configuração e cadastros para o editor (times, centros, pessoas, perfis)', ...A,
     handler: async ({ app, auth }) => {

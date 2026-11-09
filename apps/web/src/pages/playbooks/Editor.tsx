@@ -120,6 +120,8 @@ function newBlock(t: BlockType): Block {
     case 'flow': return { id, type: 'flow', title: '', nodes: [{ id: 'n1', kind: 'inicio', label: 'Início', x: 0, y: 0 }, { id: 'n2', kind: 'fim', label: 'Fim', x: 0, y: 160 }], edges: [{ id: 'e1', from: 'n1', to: 'n2' }] };
     case 'decision': return { id, type: 'decision', title: '', start: 'q1', nodes: [{ id: 'q1', question: '', options: [{ label: 'Sim', next: null, result: '' }, { label: 'Não', next: null, result: '' }] }] };
     case 'divider': return { id, type: 'divider' };
+    case 'gamification_calc': return { id, type: 'gamification_calc', title: 'Calculadora de meta' };
+    case 'gamification_rule': return { id, type: 'gamification_rule', title: 'Regra vigente' };
   }
 }
 
@@ -232,6 +234,7 @@ function BlockForm({ b, set, playbookId }: { b: Block; set: (b: Block) => void; 
     case 'flow': return <ReactFlowProvider><FlowEditor b={b} set={set} /></ReactFlowProvider>;
     case 'decision': return <DecisionEditor b={b} set={set} />;
     case 'divider': return <hr className="border-line" />;
+    case 'gamification_calc': case 'gamification_rule': return <div className="space-y-1"><Input aria-label="Título do bloco" placeholder="Título" value={b.title ?? ''} onChange={(e) => set({ ...b, title: e.target.value })} /><p className="text-xs text-muted">Interativo na leitura: mostra e calcula com a regra de gamificação aprovada no momento em que a pessoa lê (muda sozinho quando a regra muda).</p></div>;
   }
 }
 

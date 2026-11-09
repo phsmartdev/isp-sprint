@@ -43,7 +43,8 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
     delivery: v.deliveryAddresses ?? EMPTY_DELIVERY,
     zenith: v.zenith ?? EMPTY_ZENITH,
-    serviceType: (v.serviceType as ContractServiceType | null | undefined) ?? '',
+    // valores antigos (cloud, energia, cidades inteligentes) passam a ser outros serviços
+    serviceType: !v.serviceType ? '' : (CONTRACT_SERVICE_TYPES as readonly string[]).includes(v.serviceType) ? (v.serviceType as ContractServiceType) : 'outro',
   };
 }
 
