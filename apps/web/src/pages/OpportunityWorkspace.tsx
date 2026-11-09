@@ -30,7 +30,7 @@ import { OpportunityArpPanel } from '../features/arp/OpportunityArp';
 import { Avatar, Breadcrumb, Button, ChipGroup, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, SaveStatus, Select, Tabs, Textarea } from '../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../components/ui/overlay';
 import { ContractChip, CoverageChip, LifecycleChip, ProposalChip, StageChip, productLabel } from '../components/badges';
-import { SprintTimer } from '../features/SprintTimer';
+import { MyOpportunityPoints } from '../features/MyOpportunityPoints';
 import { Timeline } from '../features/Timeline';
 import { NegotiationChat, useUnread } from '../features/NegotiationChat';
 import { ActivityComposer } from '../features/ActivityComposer';
@@ -840,7 +840,7 @@ export function OpportunityWorkspacePage() {
           {opp.stage === 'ganha' && can('contratos') && (opp.contractId
             ? <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
             : <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
-          <SprintTimer startedAt={opp.sprintStartedAt} baseSeconds={opp.sprintElapsedSeconds} running={running} />
+          <MyOpportunityPoints oppId={opp.id} />
         </div>
       </div>
 
