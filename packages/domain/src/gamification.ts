@@ -214,7 +214,7 @@ export function teamBoards(args: { teams: { id: string; memberIds: string[]; lea
 /** Faixa pela nota do ano. */
 export const levelOf = (score: number, st: GamificationSettings) => [...st.levels].reverse().find((l) => score >= l.minPoints) ?? null;
 
-/** Selo BK de Qualidade (medalha de ouro): a maior nota do ano; empate = todos os empatados. Sem ranking além disso. */
+/** Badge Ouro (medalha de ouro): a maior nota do ano; empate = todos os empatados. Sem ranking além disso. */
 export const goldMedalists = <T extends { userId: string; score: number }>(people: T[]) => {
   const best = Math.max(0, ...people.map((p) => p.score));
   return best > 0 ? people.filter((p) => p.score === best).map((p) => p.userId) : [];

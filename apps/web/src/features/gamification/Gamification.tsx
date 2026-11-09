@@ -1,6 +1,6 @@
 /**
  * Gamificação colaborativa, sem ranking nem pódio (decisão: comparação pública pode constranger quem não fica em primeiro).
- * Só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade. Cada pessoa vê a própria nota; a liderança vê o próprio time.
+ * Só o primeiro lugar do ano é reconhecido, com o Badge Ouro. Cada pessoa vê a própria nota; a liderança vê o próprio time.
  */
 import { useId } from 'react';
 import { Link } from 'react-router-dom';
@@ -53,8 +53,8 @@ export const fmtPts = (n: number) => n.toLocaleString('pt-BR', { maximumFraction
 export const DISPERSION_LABEL: Record<DispersionTone, string> = { verde: 'Time nivelado', amarelo: 'Atenção: time desigual', vermelho: 'Problema: time muito desigual', sem_dados: 'Sem dados suficientes' };
 export const DISPERSION_STYLE: Record<DispersionTone, string> = { verde: 'border-[#15803D] bg-[#ECFDF3] text-[#166534]', amarelo: 'border-[#B45309] bg-[#FFF7E6] text-[#92400E]', vermelho: 'border-danger bg-danger-soft text-danger', sem_dados: 'border-line bg-surface-2 text-muted' };
 
-/** Medalha de ouro com o Selo BK de Qualidade (SVG próprio; cores da marca + ouro). */
-export function BkGoldMedal({ size = 64, year, title = 'Selo BK de Qualidade' }: { size?: number; year?: number; title?: string }) {
+/** Medalha de ouro com o Badge Ouro (SVG próprio; cores da marca + ouro). */
+export function BkGoldMedal({ size = 64, year, title = 'Badge Ouro' }: { size?: number; year?: number; title?: string }) {
   const id = useId().replace(/:/g, '');
   return (
     <svg width={size} height={size * 1.3} viewBox="0 0 100 130" role="img" aria-label={`${title}${year ? ` ${year}` : ''}`}>
@@ -68,7 +68,7 @@ export function BkGoldMedal({ size = 64, year, title = 'Selo BK de Qualidade' }:
       <circle cx="50" cy="82" r="40" fill={`url(#g${id})`} stroke="#8A6610" strokeWidth="2" />
       <circle cx="50" cy="82" r="31" fill="none" stroke="#FFF3C4" strokeWidth="1.5" strokeDasharray="2 3" />
       <text x="50" y="90" textAnchor="middle" fontFamily="Saira, Arial, sans-serif" fontWeight="800" fontSize="26" fill="#2D3339">BK</text>
-      <text x="50" y="104" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="7" letterSpacing=".6" fill="#2D3339">QUALIDADE</text>
+      <text x="50" y="104" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="7" letterSpacing="1.2" fill="#2D3339">OURO</text>
       {year && <text x="50" y="70" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="8" fill="#2D3339">{year}</text>}
     </svg>
   );
@@ -78,7 +78,7 @@ export function BkGoldMedal({ size = 64, year, title = 'Selo BK de Qualidade' }:
 export function HeaderSelo() {
   const q = useSelo();
   if (!q.data?.gold) return null;
-  return <Link to="/times/pessoas?aba=gamificacao" className="hidden items-center md:flex" title={`Selo BK de Qualidade ${q.data.year}: maior nota do ano`}><BkGoldMedal size={26} year={q.data.year} /></Link>;
+  return <Link to="/times/pessoas?aba=gamificacao" className="hidden items-center md:flex" title={`Badge Ouro ${q.data.year}: vencedor do ano`}><BkGoldMedal size={26} year={q.data.year} /></Link>;
 }
 
 /** Destaque na tela inicial da pessoa com a medalha de ouro. */
@@ -86,10 +86,10 @@ export function SeloHighlight() {
   const q = useSelo();
   if (!q.data?.gold) return null;
   return (
-    <section aria-label="Selo BK de Qualidade" className="selo-card mb-4 flex items-center gap-4 border border-[#D4A62A] bg-gradient-to-r from-[#FFF8E1] to-surface p-4">
+    <section aria-label="Badge Ouro" className="selo-card mb-4 flex items-center gap-4 border border-[#D4A62A] bg-gradient-to-r from-[#FFF8E1] to-surface p-4">
       <BkGoldMedal size={56} year={q.data.year} />
       <div>
-        <p className="font-display text-lg font-bold text-ink">Medalha de ouro · Selo BK de Qualidade {q.data.year}</p>
+        <p className="font-display text-lg font-bold text-ink">Badge Ouro {q.data.year}</p>
         <p className="text-sm text-muted">Maior nota do ano ({fmtPts(q.data.score ?? 0)} pontos), que soma o seu resultado e o do seu time. Obrigado por puxar o time junto.</p>
       </div>
     </section>
@@ -112,9 +112,9 @@ export function TeamPodiumAside() {
   return (
     <aside aria-label="Gamificação do time" className="space-y-4">
       {d.gold.length > 0 && (
-        <section className="card flex items-center gap-3 p-4" aria-label="Selo BK de Qualidade do ano">
+        <section className="card flex items-center gap-3 p-4" aria-label="Badge Ouro do ano">
           <BkGoldMedal size={44} year={d.year} />
-          <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Selo BK de Qualidade {d.year}: primeiro lugar do ano</span></p>
+          <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Badge Ouro {d.year}: vencedor do ano</span></p>
         </section>
       )}
       <section className="card p-4" aria-label="Times no mês">

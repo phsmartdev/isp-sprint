@@ -59,9 +59,9 @@ export function MyPointsPage() {
       {!d.participates && <div className="mb-4"><Notice tone="info">Você não está num time que participa da gamificação. Os pontos aparecem quando a regra incluir o seu time.</Notice></div>}
       <div className="mb-4"><CertificatesPanel /></div>
       {d.gold && (
-        <section aria-label="Selo BK de Qualidade" className="selo-card mb-4 flex items-center gap-4 border border-[#D4A62A] bg-gradient-to-r from-[#FFF8E1] to-surface p-4">
+        <section aria-label="Badge Ouro" className="selo-card mb-4 flex items-center gap-4 border border-[#D4A62A] bg-gradient-to-r from-[#FFF8E1] to-surface p-4">
           <BkGoldMedal size={52} year={d.year} />
-          <p className="font-display text-lg font-bold text-ink">Medalha de ouro · Selo BK de Qualidade {d.year}<span className="block font-sans text-sm font-normal text-muted">Maior nota do ano.</span></p>
+          <p className="font-display text-lg font-bold text-ink">Badge Ouro {d.year}<span className="block font-sans text-sm font-normal text-muted">Maior nota do ano.</span></p>
         </section>
       )}
       <div className="grid gap-4 md:grid-cols-2">

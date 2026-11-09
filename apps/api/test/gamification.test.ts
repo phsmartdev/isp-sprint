@@ -1,4 +1,4 @@
-/** Gamificação colaborativa: pontos dos eventos válidos, peso do time, dispersão só para a liderança, pódio, níveis e Selo BK. */
+/** Gamificação colaborativa: pontos dos eventos válidos, peso do time, dispersão só para a liderança, pódio, níveis e Badge Ouro. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
@@ -91,7 +91,7 @@ describe('Gamificação colaborativa', () => {
     const e = ok(await carlos.get('/times/gamificacao?month=2024-02')).json().monthBoard.teams.find((t: { name: string }) => t.name === 'Empresarial');
     expect(e.dispersion).not.toBeNull();
   });
-  it('Selo BK de Qualidade: o mesmo resultado do placar do ano corrente', async () => {
+  it('Badge Ouro: o mesmo resultado do placar do ano corrente', async () => {
     const g = ok(await lucas.get('/times/gamificacao')).json();
     const selo = ok(await lucas.get('/me/selo')).json();
     expect(selo.gold).toBe(Boolean(g.me?.gold));

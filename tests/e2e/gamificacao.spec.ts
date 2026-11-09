@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 
 /**
  * Gamificação colaborativa sem ranking nem pódio: jornada com pesos criada na regra, aprovação, tarefa nasce na oportunidade,
- * concluir pontua quem concluiu, a pessoa vê só a própria nota, a liderança vê o time e só o primeiro lugar recebe o Selo BK.
+ * concluir pontua quem concluiu, a pessoa vê só a própria nota, a liderança vê o time e só o primeiro lugar recebe o Badge Ouro.
  */
 const DB = process.env.TEST_DATABASE_URL ?? 'postgres://isp:isp@localhost:5432/isp_sprint_test';
 const SHOTS = process.env.E2E_SHOTS;
@@ -113,7 +113,7 @@ test('jornada com pesos, minha nota sem ranking e selo do primeiro lugar', async
   expect(g.gold.length).toBeGreaterThan(0);
   const email = psql(`select email from users where id = '${g.gold[0].userId}'`);
   await login(page, email);
-  await expect(page.getByRole('img', { name: /Selo BK de Qualidade/ }).first()).toBeVisible();
+  await expect(page.getByRole('img', { name: /Badge Ouro/ }).first()).toBeVisible();
   await page.goto('/');
-  await expect(page.getByRole('region', { name: 'Selo BK de Qualidade' })).toContainText('Medalha de ouro');
+  await expect(page.getByRole('region', { name: 'Badge Ouro' })).toContainText('Badge Ouro');
 });

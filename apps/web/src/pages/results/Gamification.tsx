@@ -1,6 +1,6 @@
 /**
  * Gestão de Times → Gamificação colaborativa: regra de pontuação com aprovação (jornadas com pesos por tarefa),
- * a minha nota (mês e ano, de onde vieram os pontos), o time para a liderança (média, dispersão e notas) e o Selo BK de Qualidade.
+ * a minha nota (mês e ano, de onde vieram os pontos), o time para a liderança (média, dispersão e notas) e o Badge Ouro.
  * Sem ranking nem pódio: comparação pública pode constranger quem não fica em primeiro.
  */
 import { useState } from 'react';
@@ -83,7 +83,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
             <div className="flex-1">
               <p className="text-sm text-muted">Minha nota em {d.year}</p>
               <p className="font-display text-2xl font-extrabold text-ink"><span className="num">{fmtPts(d.me?.score ?? 0)}</span> pts{d.me?.level && <span className="ml-2 text-base font-semibold text-primary">faixa {d.me.level}</span>}</p>
-              {myGold && <p className="text-sm font-semibold text-[#8A6610]">Selo BK de Qualidade: primeiro lugar do ano</p>}
+              {myGold && <p className="text-sm font-semibold text-[#8A6610]">Badge Ouro: vencedor do ano</p>}
             </div>
             <Link to="/meus-pontos" className="text-sm font-semibold text-primary hover:underline">De onde vieram meus pontos</Link>
           </div>
@@ -133,7 +133,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
         {d.gold.length > 0 && (
           <section className="card flex items-center gap-3 p-4" aria-label="Selo do ano">
             <BkGoldMedal size={48} year={d.year} />
-            <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Selo BK de Qualidade {d.year}: primeiro lugar do ano</span></p>
+            <p className="text-sm"><span className="font-semibold text-ink">{d.gold.map((g) => g.name).join(', ')}</span><br /><span className="text-muted">Badge Ouro {d.year}: vencedor do ano</span></p>
           </section>
         )}
         <section className="card p-4 text-sm text-muted" aria-label="Como funciona">
@@ -143,7 +143,7 @@ function Boards({ d }: { d: GamData & { monthBoard: Board; yearBoard: Board; set
           <p className="mt-1">Ajudar na venda do colega vale {fmtPts(st.participationMultiplierBp / 10_000)}× o crédito.</p>
           <p className="mt-1">A nota é proporcional ao nível: pontos do mês ÷ meta do nível (teto {st.bonuses.scoreCapBp / 100}%). Bônus: no prazo +{st.bonuses.onTimeBp / 100}%, aprovada pela gerência +{st.bonuses.adherenceBp / 100}%. Acima da alçada vira crédito extra (+{st.bonuses.extraPerLevelBp / 100}% por nível, até +{st.bonuses.extraCapBp / 100} p.p.).</p>
           <ul className="mt-1 list-disc pl-4">{st.competencyLevels.map((l) => <li key={l.key}>{l.name}: {l.scoresTasks ? `meta ${l.expectedMonthlyPoints} pts/mês · ` : ''}{compositionText(l)}</li>)}</ul>
-          <p className="mt-1">Sem ranking: só o primeiro lugar do ano recebe o Selo BK de Qualidade. Regra aprovada v{d.settingsVersion}.</p>
+          <p className="mt-1">Sem ranking: só o vencedor do ano recebe o Badge Ouro. Regra aprovada v{d.settingsVersion}.</p>
         </section>
       </aside>
     </div>
