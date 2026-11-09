@@ -38,8 +38,10 @@ export function useTransitionMutation() {
       toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'Outra pessoa alterou esta oportunidade. O quadro foi atualizado.' : (e as Error).message });
     },
     onSuccess: (o) => {
+      const auto = (o as Opportunity & { autoProposal?: { filename: string; template: string } }).autoProposal;
       qc.setQueryData(['opportunity', o.id], o);
-      toast({ tone: 'success', message: `Movida para ${o.stageName ?? o.stage}` });
+      toast({ tone: 'success', message: auto ? `Movida para ${o.stageName ?? o.stage}. Proposta gerada no modelo da filial: ${auto.filename}. Edite em Anexos.` : `Movida para ${o.stageName ?? o.stage}` });
+      if (auto) for (const k of ['attachments', 'proposal-draft']) qc.invalidateQueries({ queryKey: [k] });
     },
     onSettled: (_d, _e, v) => {
       for (const k of ['pipeline', 'opportunities', 'home', 'reports', 'intelligence']) qc.invalidateQueries({ queryKey: [k] });

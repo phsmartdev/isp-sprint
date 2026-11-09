@@ -800,7 +800,7 @@ export function OpportunityWorkspacePage() {
               <TaskDrawer id={taskOpen} onClose={() => setTaskOpen(null)} onOpen={setTaskOpen} />
             </div>
           )}
-          {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
+          {centerTab === 'anexos' && <Attachments oppId={opp.id} onEditProposal={() => setGenProposal(true)} />}
           {centerTab === 'chamados' && <GlpiTickets oppId={opp.id} contactName={opp.contactName} hasCustomer={!!opp.customerId} />}
         </div>
       </section>

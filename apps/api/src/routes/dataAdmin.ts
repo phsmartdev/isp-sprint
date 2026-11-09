@@ -176,6 +176,7 @@ export const dataAdminRoutes = [
           counts.projetos = (await tx.delete(s.projects).where(sc(s.projects)).returning({ id: s.projects.id })).length;
           await tx.delete(s.automationRuns).where(sc(s.automationRuns));
           await tx.delete(s.automationQueue).where(and(eq(s.automationQueue.tenantId, t), inArray(s.automationQueue.opportunityId, opps)));
+          await tx.delete(s.proposalDrafts).where(and(eq(s.proposalDrafts.tenantId, t), inArray(s.proposalDrafts.opportunityId, opps)));
           await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(sc(s.negotiationReads));

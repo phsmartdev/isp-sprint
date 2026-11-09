@@ -73,3 +73,32 @@ it('seções automáticas: serviços com fotos, composição do investimento (ab
   const bad = await lucas.post(`/opportunities/${o.id}/proposal/preview`, { ...body, services: { text: '', photos: [{ data: Buffer.from('not an image').toString('base64'), mime: 'image/jpeg' }] } });
   expect(bad.statusCode).toBe(422);
 });
+
+it('entrar na etapa Proposta gera a proposta no modelo padrão da filial; editar regera com o mesmo número', async () => {
+  const { sql } = await import('drizzle-orm');
+  const t = (await carlos.post('/admin/proposal-templates', { name: `Padrão filial ${Date.now()}`, segments: [], variables: [{ key: 'obs', label: 'Observação', type: 'texto', default: 'Padrão' }], fields: [{ id: 'h', page: 0, x: 8, y: 4, w: 80, size: 12, color: '#000000', align: 'left', bold: true, text: '{{proposta.titulo}} {{obs}}' }] })).json();
+  expect((await carlos.post(`/admin/proposal-templates/${t.id}/pages`, { data: PNG })).statusCode).toBe(201);
+  const list = (await carlos.get('/admin/proposal-templates')).json();
+  const branch = list.branches[0];
+  expect(branch).toBeTruthy();
+  expect((await carlos.put(`/admin/proposal-templates/${t.id}/branches`, { branchIds: [branch.id] })).statusCode).toBe(200);
+  expect((await carlos.get('/admin/proposal-templates')).json().items.find((x: { id: string }) => x.id === t.id).defaultBranchIds).toEqual([branch.id]);
+  const plan = (await carlos.get('/meta/lookups')).json().plans[0];
+  const o = (await lucas.post('/opportunities', { newContact: { name: 'Conta Proposta Automática Fictícia', segment: 'empresarial' }, planId: plan.id, branchId: branch.id })).json();
+  // etapa Proposta da jornada da oportunidade
+  const st = (await ctx.db.execute(sql`select st.key, st.name from pipeline_stages st join opportunities o on o.pipeline_id = st.pipeline_id where o.id = ${o.id} and (st.key = 'proposta' or lower(st.name) = 'proposta') limit 1`)).rows[0] as { key: string } | undefined;
+  if (!st) { console.warn('jornada sem etapa Proposta: teste da geração automática pulado'); return; }
+  const cur = (await lucas.get(`/opportunities/${o.id}`)).json();
+  const mv = await lucas.post(`/opportunities/${o.id}/transition`, { toStage: st.key, rowVersion: cur.rowVersion, confirm: true, reason: 'avanço' });
+  expect(mv.statusCode, mv.body).toBe(200);
+  expect(mv.json().autoProposal.filename).toMatch(/^PC \d{6}(-\d+)? - Conta Proposta Automática Fictícia\.pdf$/);
+  const d = (await lucas.get(`/opportunities/${o.id}/proposal-draft`)).json();
+  expect(d.draft.templateId).toBe(t.id);
+  expect(d.branchDefaultTemplateId).toBe(t.id);
+  // editar: nova versão com outro valor, mesmo número
+  const again = await lucas.post(`/opportunities/${o.id}/proposal`, { templateId: t.id, values: { obs: 'Editada' } });
+  expect(again.statusCode, again.body).toBe(201);
+  expect(again.json().filename).toBe(mv.json().autoProposal.filename);
+  expect((await lucas.get(`/opportunities/${o.id}/proposal-draft`)).json().draft.values).toEqual({ obs: 'Editada' });
+  await carlos.put(`/admin/proposal-templates/${t.id}/branches`, { branchIds: [] });
+});

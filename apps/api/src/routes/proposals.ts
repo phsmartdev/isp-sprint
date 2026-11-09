@@ -1,11 +1,11 @@
 /** Modelos de proposta (arte + campos variáveis) e geração do PDF da proposta na oportunidade. */
-import { ensureProposalNumber } from '../services/proposalNumber';
+import { GenBody, branchDefaultTemplate, generateProposal, renderProposal } from '../services/proposalGen';
 import { todayIn } from '../services/vacations';
 import { normalizeSections, proposalTitle, validityDate } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import type { AuthContext } from '../http/context';
 import { createHash } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
@@ -36,12 +36,6 @@ const TemplateBody = z.object({
     validityDays: z.number().int().min(1).max(365), conditionText: z.string().max(2000),
   }).nullable().optional(),
 });
-const Photo = z.object({ data: z.string().max(1_400_000), mime: z.enum(['image/jpeg', 'image/png']) });
-const GenBody = z.object({
-  templateId: z.string().uuid(), values: z.record(z.string(), z.string().max(2000)).default({}),
-  services: z.object({ text: z.string().max(6000).default(''), photos: z.array(Photo).max(8).default([]) }).default({ text: '', photos: [] }),
-  validityDays: z.number().int().min(1).max(365).optional(),
-});
 const PageParams = z.object({ id: z.string().uuid(), pageId: z.string().uuid() });
 
 async function templateOr404(db: Parameters<typeof loadOpportunity>[0], tenantId: string, id: string) {
@@ -58,23 +52,32 @@ const checkVars = (b: z.infer<typeof TemplateBody>) => {
 };
 
 
-/** Variáveis + seções automáticas (serviços, itens da aba Produto, validade) e o PDF. */
-async function renderFor(db: DbOrTx, auth: AuthContext, oppId: string, t: typeof s.proposalTemplates.$inferSelect, body: z.infer<typeof GenBody>) {
-  const cfg = normalizeSections(t.sections);
-  const days = body.validityDays ?? cfg.validityDays;
-  const today = todayIn(auth.timezone);
-  const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
-  const vars = { ...(await systemValues(db, auth.tenantId, oppId, auth.timezone)), 'proposta.validade_dias': String(days), 'proposta.validade_data': validityDate(today, days).split('-').reverse().join('/'), ...custom };
-  const items = await db.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, oppId)).orderBy(asc(s.opportunityItems.position));
-  const photos = body.services.photos.map((p) => ({ data: Buffer.from(p.data, 'base64'), mime: p.mime }));
-  for (const ph of photos) {
-    const ok = ph.mime === 'image/png' ? ph.data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) : ph.data[0] === 0xff && ph.data[1] === 0xd8;
-    if (!ok) throw unprocessable('Foto inválida: envie JPG ou PNG.');
-  }
-  return buildProposalPdf(db, auth.tenantId, t.id, vars, { servicesText: body.services.text, photos, items: items.map((i) => ({ description: i.description, unit: i.unit, qtyMilli: Number(i.qtyMilli), unitCents: Number(i.unitCents), discountCents: Number(i.discountCents), surchargeCents: Number(i.surchargeCents) })) });
-}
+const renderFor = renderProposal;
 
 export const proposalRoutes = [
+  defineRoute({
+    method: 'PUT', url: '/admin/proposal-templates/:id/branches', summary: 'Define em quais filiais este é o modelo padrão (gerado ao entrar na etapa Proposta)', tag: 'Propostas', ...ADMIN, params: IdParams,
+    body: z.object({ branchIds: z.array(z.string().uuid()).max(100) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const t = await templateOr404(app.db, auth.tenantId, params.id);
+      if (t.purpose !== 'proposta') throw unprocessable('Só modelos de proposta podem ser padrão da filial.');
+      await app.db.transaction(async (tx) => {
+        await tx.update(s.salesBranches).set({ defaultProposalTemplateId: null }).where(and(eq(s.salesBranches.tenantId, auth.tenantId), eq(s.salesBranches.defaultProposalTemplateId, t.id)));
+        if (body.branchIds.length) await tx.update(s.salesBranches).set({ defaultProposalTemplateId: t.id }).where(and(eq(s.salesBranches.tenantId, auth.tenantId), inArray(s.salesBranches.id, body.branchIds)));
+      });
+      await audit(app.db, req, { action: 'proposal_template.branches', entityType: 'proposal_template', entityId: t.id, metadata: { branchIds: body.branchIds } });
+      return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/proposal-draft', summary: 'Últimas escolhas da proposta (para editar e gerar de novo) e o modelo padrão da filial', tag: 'Propostas', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const [d] = await app.db.select().from(s.proposalDrafts).where(and(eq(s.proposalDrafts.opportunityId, o.id), eq(s.proposalDrafts.tenantId, auth.tenantId)));
+      const def = await branchDefaultTemplate(app.db, auth.tenantId, o.branchId ?? null);
+      return { draft: d ? { templateId: d.templateId, values: d.values, servicesText: d.servicesText, photos: d.photos, validityDays: d.validityDays, updatedAt: d.updatedAt } : null, branchDefaultTemplateId: def?.id ?? null };
+    },
+  }),
   defineRoute({
     method: 'GET',
     url: '/admin/proposal-templates',
@@ -85,9 +88,10 @@ export const proposalRoutes = [
     handler: async ({ app, auth, query }) => {
       const rows = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.purpose, query.purpose))).orderBy(asc(s.proposalTemplates.name));
       const items = [];
-      for (const t of rows) items.push({ ...t, pages: await pagesOf(app.db, auth.tenantId, t.id) });
+      const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, defaultTemplateId: s.salesBranches.defaultProposalTemplateId }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, auth.tenantId), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
+      for (const t of rows) items.push({ ...t, pages: await pagesOf(app.db, auth.tenantId, t.id), defaultBranchIds: branches.filter((b) => b.defaultTemplateId === t.id).map((b) => b.id) });
       const systemVariables = query.purpose === 'contrato' ? CONTRACT_TEMPLATE_VARIABLES : SYSTEM_VARIABLES.map(([key, label]) => ({ key, label }));
-      return { items, systemVariables };
+      return { items, systemVariables, branches: branches.map((b) => ({ id: b.id, name: b.name })) };
     },
   }),
   defineRoute({
@@ -215,16 +219,8 @@ export const proposalRoutes = [
     handler: async ({ app, auth, params, body, req, reply }) => {
       const o = await loadOpportunity(app.db, auth, params.id);
       const t = await templateOr404(app.db, auth.tenantId, body.templateId);
-      const number = await app.db.transaction((tx) => ensureProposalNumber(tx, auth.tenantId, o.id, todayIn(auth.timezone)));
-      const out = await renderFor(app.db, auth, o.id, t, body);
-      if (!out) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
-      const filename = `${proposalTitle(number, o.contactName)}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
-      const row = await app.db.transaction(async (tx) => {
-        const [r] = await tx.insert(s.opportunityAttachments).values({ tenantId: auth.tenantId, opportunityId: o.id, kind: 'proposta', filename, mime: 'application/pdf', sizeBytes: out.pdf.length, sha256: createHash('sha256').update(out.pdf).digest('hex'), data: out.pdf, uploadedBy: auth.userId }).returning({ id: s.opportunityAttachments.id, filename: s.opportunityAttachments.filename, sizeBytes: s.opportunityAttachments.sizeBytes });
-        if (o.proposalStatus === 'nao_criada') await tx.update(s.opportunities).set({ proposalStatus: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));
-        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'attachment_added', actorId: auth.userId, payload: { filename: r!.filename, kind: 'proposta', sizeBytes: out.pdf.length, template: t.name }, rowVersion: o.rowVersion });
-        return r!;
-      });
+      const row = await app.db.transaction((tx) => generateProposal(tx, auth, o, t, body, { bump: true }));
+      if (!row) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
       await audit(app.db, req, { action: 'proposal.generate', entityType: 'opportunity', entityId: o.id, metadata: { template: t.name } });
       reply.code(201);
       return row;

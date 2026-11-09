@@ -56,4 +56,14 @@ test('modelo com seções automáticas: configurar, preencher serviços com foto
 
   await dlg.getByRole('button', { name: 'Gerar PDF e anexar' }).click();
   await expect(page.getByText(/Proposta gerada e anexada: PC \d{6}/).last()).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // editar ali mesmo, pela aba Anexos: volta com o que foi preenchido
+  await page.getByRole('tab', { name: 'Anexos' }).click();
+  await page.getByRole('button', { name: 'Editar proposta' }).first().click();
+  const ed2 = page.getByRole('dialog', { name: 'Editar proposta' });
+  await expect(ed2.getByLabel('SERVIÇOS PROPOSTOS')).toHaveValue('Recuperação da rede óptica com substituição do trecho rompido.');
+  await expect(ed2.getByRole('list', { name: 'Fotos da proposta' }).getByRole('listitem')).toHaveCount(2);
+  await expect(ed2.getByRole('button', { name: 'Gerar nova versão e anexar' })).toBeVisible();
 });

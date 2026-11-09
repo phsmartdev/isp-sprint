@@ -477,6 +477,8 @@ export const salesBranches = pgTable('sales_branches', {
   state: text('state'),
   /** Tipos fiscais que a filial emite (venda, prestação de serviço, aluguel); vazio = todos. */
   fiscalKinds: text('fiscal_kinds').array().notNull().default(sql`'{}'::text[]`),
+  /** Modelo de proposta padrão da filial: gerado ao entrar na etapa Proposta. */
+  defaultProposalTemplateId: uuid('default_proposal_template_id'),
   createdAt: createdAt(),
 }, (t) => ({
   uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name),
@@ -6077,3 +6079,16 @@ export const emailOpens = pgTable('email_opens', {
   userAgent: text('user_agent'),
   openedAt: ts('opened_at').notNull().defaultNow(),
 }, (t) => ({ msg: index('email_opens_msg_idx').on(t.emailMessageId, t.openedAt) }));
+
+/** Últimas escolhas da proposta da oportunidade (modelo, campos, serviços, fotos, prazo): editar e gerar de novo. */
+export const proposalDrafts = pgTable('proposal_drafts', {
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  templateId: uuid('template_id').notNull(),
+  values: jsonb('values').$type<Record<string, string>>().notNull().default({}),
+  servicesText: text('services_text').notNull().default(''),
+  photos: jsonb('photos').$type<{ data: string; mime: string }[]>().notNull().default([]),
+  validityDays: integer('validity_days'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('proposal_drafts_pk').on(t.opportunityId) }));
