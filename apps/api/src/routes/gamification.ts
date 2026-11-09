@@ -3,6 +3,8 @@
  * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
  * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
  */
+import { opportunityPointsFor } from '../services/scoreJourneys';
+import { loadOpportunity } from '../services/opportunities';
 import { supportCreditsBetween } from './support';
 import { seesAllTeams } from '../services/results';
 import { leadsOrManages } from '../services/vacations';
@@ -10,7 +12,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { atLeast, EVENT_TYPE_KEYS, gamificationSettingsErrors, goldMedalists, levelOf, teamBoards, type CreditSum, type GamificationSettings } from '@isp/domain';
 import { asExtra, journeyCreditsBetween } from '../services/scoreJourneys';
-import { defineRoute } from '../http/route';
+import { defineRoute, IdParams } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
@@ -92,6 +94,16 @@ async function board(db: DbOrTx, auth: AuthContext, st: GamificationSettings, fr
 }
 
 export const gamificationRoutes = [
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/my-points', summary: 'Pontos que você ganhou nesta oportunidade até agora (suas tarefas, sua parte no ganho, seus eventos e apoios), pela regra aprovada', tag: 'Gestão de Times', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const { settings } = await gamificationSettingsOf(app.db, auth.tenantId);
+      if (!settings) return { enabled: false as const };
+      const r = await opportunityPointsFor(app.db, auth.tenantId, settings, o.id, auth.userId);
+      return { enabled: true as const, ...(r ?? { total: 0, parts: {} }) };
+    },
+  }),
   defineRoute({
     method: 'GET', url: '/times/gamificacao', summary: 'Gamificação colaborativa: placar do mês e do ano por time e pessoa, pódio, dispersão (para a liderança), níveis e medalha de ouro', tag: 'Gestão de Times', module: 'resultados',
     query: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }),
