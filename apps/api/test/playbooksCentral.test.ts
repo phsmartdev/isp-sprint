@@ -173,3 +173,21 @@ describe('Diretriz de Gamificação', () => {
     else expect(rule).toEqual({ approved: false });
   });
 });
+
+describe('Importar playbook de PDF', () => {
+  it('cria o primeiro rascunho com o conteúdo estruturado e o PDF original anexado ao fim', async () => {
+    const { readFileSync } = await import('node:fs');
+    const home = ok(await ana.get('/playbooks')).json();
+    const cat = home.categories.find((c: { prefix: string }) => c.prefix === 'COM');
+    const content = { blocks: [{ id: 'a', type: 'heading', level: 1, text: 'Objetivo' }, { id: 'b', type: 'text', text: 'Texto importado.' }, { id: 'c', type: 'steps', items: [{ title: 'Atender' }, { title: 'Resumir' }] }] };
+    const data = readFileSync(new URL('../../../tests/e2e/fixtures/playbook-ficticio.pdf', import.meta.url)).toString('base64');
+    const r = ok(await ana.post('/playbooks/new', { categoryId: cat.id, meta: meta({ title: `Importado ${st}` }), imported: { content, source: { name: 'playbook-ficticio.pdf', data } } }), 201).json();
+    const v = (await ctx.db.execute(sql`select content from playbook_versions where id = ${r.versionId}`)).rows[0] as { content: { blocks: { type: string; fileId?: string }[] } };
+    expect(v.content.blocks.map((b) => b.type)).toEqual(['heading', 'text', 'steps', 'heading', 'pdf']);
+    const f = await ana.get(`/playbook-files/${v.content.blocks[4]!.fileId}`);
+    expect(f.statusCode).toBe(200);
+    // conteúdo inválido é recusado; arquivo que não é PDF também
+    expect((await ana.post('/playbooks/new', { categoryId: cat.id, meta: meta({ title: `Inválido ${st}` }), imported: { content: { blocks: [{ id: 'x', type: 'heading', level: 1, text: '' }] }, source: null } })).statusCode).toBe(422);
+    expect((await ana.post('/playbooks/new', { categoryId: cat.id, meta: meta({ title: `Não PDF ${st}` }), imported: { content, source: { name: 'x.pdf', data: Buffer.from('não é pdf').toString('base64') } } })).statusCode).toBe(422);
+  });
+});

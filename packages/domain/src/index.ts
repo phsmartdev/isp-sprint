@@ -6,6 +6,7 @@ export * from './contracts';
 export * from './measurementReport';
 export * from './proposalSections';
 export * from './automationRules';
+export * from './playbookImport';
 export * from './approvals';
 export * from './arp';
 export * from './cs';
