@@ -911,6 +911,13 @@
       "when": 1794247833805,
       "tag": "0129_proposal_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1794249669370,
+      "tag": "0130_certificates",
+      "breakpoints": true
     }
   ]
 }

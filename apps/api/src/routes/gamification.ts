@@ -3,6 +3,7 @@
  * cada pessoa vê só a própria nota; a liderança vê o próprio time (média, dispersão e notas, para gestão);
  * só o primeiro lugar do ano é reconhecido, com o Selo BK de Qualidade.
  */
+import { certificateCreditsBetween } from './certificates';
 import { opportunityPointsFor } from '../services/scoreJourneys';
 import { loadOpportunity } from '../services/opportunities';
 import { supportCreditsBetween } from './support';
@@ -42,7 +43,9 @@ async function participants(db: DbOrTx, tenantId: string, st: GamificationSettin
 /** Pontos de jornada + pontos de Pedido de Apoio confirmados (quem apoiou e quem pediu), só de quem participa. */
 async function withSupport(db: DbOrTx, tenantId: string, from: string, to: string, st: GamificationSettings, memberIds: string[], journey: Parameters<typeof asExtra>[0]) {
   const support = await supportCreditsBetween(db, tenantId, from, to, st);
-  return [...asExtra(journey.filter((c) => memberIds.includes(c.userId))), ...support.filter((c) => memberIds.includes(c.userId) && c.points > 0).map((c) => ({ userId: c.userId, points: c.points }))];
+  const certs = await certificateCreditsBetween(db, tenantId, from, to, st);
+  return [...asExtra(journey.filter((c) => memberIds.includes(c.userId))), ...support.filter((c) => memberIds.includes(c.userId) && c.points > 0).map((c) => ({ userId: c.userId, points: c.points })),
+    ...certs.filter((c) => memberIds.includes(c.userId) && c.points > 0).map((c) => ({ userId: c.userId, points: c.points }))];
 }
 
 async function creditsBetween(db: DbOrTx, tenantId: string, from: string, to: string, tz: string, userIds: string[]): Promise<CreditSum[]> {
@@ -167,6 +170,7 @@ export const gamificationRoutes = [
       defaultLevelKey: z.string().max(30), defaultLeadLevelKey: z.string().max(30),
       bonuses: z.object({ onTimeBp: z.number().int(), adherenceBp: z.number().int(), extraPerLevelBp: z.number().int(), extraCapBp: z.number().int(), scoreCapBp: z.number().int() }),
       support: z.object({ helperMultiplierBp: z.number().int(), basePoints: z.number().int(), requesterPoints: z.number().int(), monthlyCapPoints: z.number().int() }).optional(),
+      certificates: z.object({ pointsPerCertificate: z.number().int(), pointsPerHourTenths: z.number().int(), maxHoursCounted: z.number().int(), monthlyCapPoints: z.number().int() }).optional(),
       journeys: z.array(z.object({
         key: z.string().trim().max(40), name: z.string().trim().max(80), pipelineId: z.string().uuid(), wonPoints: z.number().int(),
         components: z.array(z.object({ key: z.string().trim().max(40), name: z.string().trim().max(120), stageKey: z.string().trim().max(60).nullable(), points: z.number().int(), dueDays: z.number().int(), level: z.string().max(30).nullable().optional() })).max(60),
@@ -253,6 +257,8 @@ export const gamificationRoutes = [
         items, events,
         support: (await supportCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, settings)).filter((c) => c.userId === auth.userId).map((c) => ({ requestId: c.requestId, title: c.title, role: c.role, points: c.points, capped: c.capped })),
         supportRule: settings.support ?? null,
+        certificates: (await certificateCreditsBetween(app.db, auth.tenantId, mb.from, mb.to, settings)).filter((c) => c.userId === auth.userId).map((c) => ({ certificateId: c.certificateId, title: c.title, points: c.points, capped: c.capped })),
+        certificateRule: settings.certificates ?? null,
       };
     },
   }),

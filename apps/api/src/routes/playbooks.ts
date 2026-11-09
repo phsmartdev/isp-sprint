@@ -338,6 +338,7 @@ export const playbookCentralRoutes = [
         events: Object.entries(st.points).filter(([, v]) => v > 0).map(([k, v]) => ({ key: k, label: label.get(k as never) ?? k, points: v })),
         participationMultiplierBp: st.participationMultiplierBp,
         support: st.support ?? null,
+        certificates: st.certificates ?? null,
         yearBands: st.levels,
       };
     },
