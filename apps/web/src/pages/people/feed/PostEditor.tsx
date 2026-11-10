@@ -13,7 +13,7 @@ import { MentionInput, mentionsIn, type MentionHandle, type Participant } from '
 import { FormatToolbar, formatShortcut, hasFormatting, RichText } from '../../../features/RichText';
 import { errMsg } from '../../../features/contracts/shared';
 import { usePeopleMe, type PersonCard } from '../shared';
-import { mediaUrl, uploadMedia, useDrafts, type FeedPost, type Media } from './api';
+import { mediaUrl, uploadMedia, useDrafts, usePostableCommunities, type FeedPost, type Media } from './api';
 
 type Item = { key: string; media?: Media; preview?: string; name: string; kind: Media['kind']; progress?: number; error?: string };
 const kindOf = (f: File): Media['kind'] => (f.type.startsWith('image/') ? 'imagem' : f.type.startsWith('video/') ? 'video' : 'arquivo');
@@ -25,7 +25,7 @@ export function usePeoplePeople() {
   });
 }
 
-export function PostEditor({ initial, onDone, compact = false }: { initial?: FeedPost; onDone?: () => void; compact?: boolean }) {
+export function PostEditor({ initial, onDone, compact = false, communityId: fixedCommunity }: { initial?: FeedPost; onDone?: () => void; compact?: boolean; /** página da comunidade: o público já é ela */ communityId?: string }) {
   const me = usePeopleMe().data;
   const people = usePeoplePeople().data ?? [];
   const qc = useQueryClient();
@@ -34,6 +34,8 @@ export function PostEditor({ initial, onDone, compact = false }: { initial?: Fee
   const [picked, setPicked] = useState<Participant[]>(() => (initial?.mentions ?? []).map((m) => ({ id: m.id, name: m.name, jobTitle: null, hasAvatar: false })));
   const [items, setItems] = useState<Item[]>(() => (initial?.media ?? []).map((m) => ({ key: m.id, media: m, name: m.filename, kind: m.kind, preview: m.kind === 'imagem' ? mediaUrl(m.id) : undefined })));
   const [asCompany, setAsCompany] = useState(initial?.kind === 'institucional');
+  const [audience, setAudience] = useState<string>(fixedCommunity ?? initial?.community?.id ?? '');
+  const communities = usePostableCommunities().data ?? [];
   const [open, setOpen] = useState(!!initial || !compact);
   const mention = useRef<MentionHandle>(null);
   const taRef = useMemo(() => ({ get current() { return mention.current?.textarea() ?? null; } }), []);
@@ -62,7 +64,7 @@ export function PostEditor({ initial, onDone, compact = false }: { initial?: Fee
     if (it.media && !initial?.media.some((m) => m.id === it.media!.id)) void api(`/pessoas/midias/${it.media.id}`, { method: 'DELETE' }).catch(() => {});
   };
   const reset = () => { setText(''); setPicked([]); setItems([]); setAsCompany(false); if (compact) setOpen(false); };
-  const body = (status: 'publicado' | 'rascunho') => ({ body: text.trim(), mediaIds: items.filter((i) => i.media).map((i) => i.media!.id), mentions: mentionsIn(text, picked), kind: asCompany ? 'institucional' : 'social', ...(editingPublished ? {} : { status }) });
+  const body = (status: 'publicado' | 'rascunho') => ({ body: text.trim(), mediaIds: items.filter((i) => i.media).map((i) => i.media!.id), mentions: mentionsIn(text, picked), kind: asCompany ? 'institucional' : 'social', ...(editingPublished ? {} : { status }), ...(initial ? {} : { communityId: audience || null }) });
   const send = useMutation({
     mutationFn: (status: 'publicado' | 'rascunho') => initial
       ? api<FeedPost>(`/pessoas/posts/${initial.id}`, { method: 'PATCH', body: body(status) })
@@ -94,7 +96,15 @@ export function PostEditor({ initial, onDone, compact = false }: { initial?: Fee
     <section className="card p-4" aria-label={initial ? 'Editar publicação' : 'Nova publicação'}>
       <div className="mb-2 flex items-center gap-3">
         {me && <Avatar name={asCompany ? 'Empresa' : me.me.name} userId={asCompany ? undefined : me.me.id} hasPhoto={!asCompany && me.me.hasPhoto} size={36} />}
-        <div className="min-w-0 flex-1 text-sm"><span className="font-semibold text-ink">{asCompany ? 'Publicação institucional' : me?.me.name}</span><span className="block text-xs text-muted">Visível para toda a empresa</span></div>
+        <div className="min-w-0 flex-1 text-sm">
+          <span className="font-semibold text-ink">{asCompany ? 'Publicação institucional' : me?.me.name}</span>
+          {initial || fixedCommunity ? <span className="block text-xs text-muted">{initial ? initial.audienceLabel : communities.find((c) => c.id === fixedCommunity)?.name ?? 'Comunidade'}</span> : (
+            <select aria-label="Público da publicação" className="mt-0.5 block max-w-full border-0 bg-transparent p-0 text-xs text-muted focus:ring-0" value={audience} onChange={(e) => setAudience(e.target.value)}>
+              <option value="">Toda a empresa</option>
+              {communities.map((c) => <option key={c.id} value={c.id}>Comunidade: {c.name}{c.kind === 'privada' ? ' (privada)' : ''}</option>)}
+            </select>
+          )}
+        </div>
         {!initial && <DraftsButton />}
       </div>
       <FormatToolbar target={taRef} onChange={setText} disabled={send.isPending} />

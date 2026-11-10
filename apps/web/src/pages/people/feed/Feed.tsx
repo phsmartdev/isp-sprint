@@ -14,10 +14,11 @@ function Skeleton() {
   );
 }
 
-export function Feed({ filter, title, emptyTitle, emptyText, orderable = true }: { filter?: FeedFilter; title?: string; emptyTitle: string; emptyText: string; orderable?: boolean }) {
+export function Feed({ filter, title, emptyTitle, emptyText, orderable = true, canPin = false }: { filter?: FeedFilter; title?: string; emptyTitle: string; emptyText: string; orderable?: boolean; /** moderação da comunidade: fixar/desafixar */ canPin?: boolean }) {
   const [ordem, setOrdem] = useState<'recentes' | 'relevantes'>('recentes');
   const q = useFeed({ ...filter, ordem: orderable ? ordem : filter?.ordem });
   const items = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const pinned = q.data?.pages[0]?.pinned ?? [];
   return (
     <section className="space-y-3" aria-label={title ?? 'Feed'}>
       {(title || orderable) && (
@@ -33,11 +34,12 @@ export function Feed({ filter, title, emptyTitle, emptyText, orderable = true }:
         </div>
       )}
       {orderable && ordem === 'relevantes' && <p className="text-xs text-muted">Relevantes: publicações com mais reações e comentários recentes aparecem primeiro. Nada sobre você ou seu desempenho é usado.</p>}
-      {q.isLoading ? <><Skeleton /><Skeleton /></> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !items.length ? (
+      {q.isLoading ? <><Skeleton /><Skeleton /></> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !items.length && !pinned.length ? (
         <div className="card"><EmptyState title={emptyTitle} description={emptyText} /></div>
       ) : (
         <>
-          {items.map((p) => <PostCard key={p.id} post={p} />)}
+          {pinned.map((p) => <PostCard key={p.id} post={p} canPin={canPin} />)}
+          {items.map((p) => <PostCard key={p.id} post={p} canPin={canPin} />)}
           {q.hasNextPage ? <div className="flex justify-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Carregar mais</Button></div>
             : <p className="py-2 text-center text-xs text-muted">Você chegou ao fim.</p>}
         </>

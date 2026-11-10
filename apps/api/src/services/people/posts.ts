@@ -9,15 +9,30 @@ import type { DbOrTx } from '../../db/client';
 import type { AuthContext } from '../../http/context';
 import { institutionalOf, publicCard } from './profiles';
 
-/** O que a pessoa pode ver: publicado para a organização, ou o que ela mesma escreveu (inclusive rascunho). */
+/**
+ * O que a pessoa pode ver: publicado para a organização; publicado numa comunidade pública ou institucional;
+ * publicado numa comunidade privada da qual ela é membro; ou o que ela mesma escreveu (inclusive rascunho).
+ * Nenhum papel (gestão, administração) amplia isso: conteúdo privado depende só de ser membro.
+ */
 export function postVisible(auth: AuthContext): SQL {
   return and(
     eq(s.peoplePosts.tenantId, auth.tenantId),
     isNull(s.peoplePosts.deletedAt),
     or(
       and(eq(s.peoplePosts.status, 'publicado'), eq(s.peoplePosts.audience, 'organizacao')),
+      and(eq(s.peoplePosts.status, 'publicado'), eq(s.peoplePosts.audience, 'comunidade'), sql`exists (
+        select 1 from people_communities c where c.id = ${s.peoplePosts.communityId} and c.tenant_id = ${auth.tenantId}
+          and (c.kind <> 'privada' or exists (select 1 from people_community_members m where m.community_id = c.id and m.user_id = ${auth.userId})))`),
       eq(s.peoplePosts.authorId, auth.userId),
     ),
+  )!;
+}
+
+/** O feed principal: o da organização mais o das comunidades em que a pessoa participa. */
+export function inMyFeed(auth: AuthContext): SQL {
+  return or(
+    eq(s.peoplePosts.audience, 'organizacao'),
+    sql`exists (select 1 from people_community_members m where m.community_id = ${s.peoplePosts.communityId} and m.user_id = ${auth.userId})`,
   )!;
 }
 
@@ -29,18 +44,22 @@ type PostRow = typeof s.peoplePosts.$inferSelect;
 export async function postDtos(db: DbOrTx, auth: AuthContext, rows: PostRow[]) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [people, media, mine, saved, byKind] = await Promise.all([
+  const commIds = [...new Set(rows.map((r) => r.communityId).filter(Boolean) as string[])];
+  const [people, media, mine, saved, byKind, communities] = await Promise.all([
     institutionalOf(db, auth.tenantId, rows.flatMap((r) => [r.authorId, ...r.mentions])),
     db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, kind: s.peopleMedia.kind, mime: s.peopleMedia.mime, filename: s.peopleMedia.filename, sizeBytes: s.peopleMedia.sizeBytes, position: s.peopleMedia.position })
       .from(s.peopleMedia).where(inArray(s.peopleMedia.postId, ids)).orderBy(s.peopleMedia.position),
     db.select({ postId: s.peopleReactions.postId, kind: s.peopleReactions.kind }).from(s.peopleReactions).where(and(inArray(s.peopleReactions.postId, ids), eq(s.peopleReactions.userId, auth.userId))),
     db.select({ postId: s.peopleSavedPosts.postId }).from(s.peopleSavedPosts).where(and(inArray(s.peopleSavedPosts.postId, ids), eq(s.peopleSavedPosts.userId, auth.userId))),
     db.select({ postId: s.peopleReactions.postId, kind: s.peopleReactions.kind, n: sql<number>`count(*)::int` }).from(s.peopleReactions).where(inArray(s.peopleReactions.postId, ids)).groupBy(s.peopleReactions.postId, s.peopleReactions.kind),
+    commIds.length ? db.select({ id: s.peopleCommunities.id, name: s.peopleCommunities.name, kind: s.peopleCommunities.kind }).from(s.peopleCommunities).where(inArray(s.peopleCommunities.id, commIds)) : Promise.resolve([]),
   ]);
   return rows.map((r) => {
     const a = people.get(r.authorId);
+    const comm = r.communityId ? communities.find((c) => c.id === r.communityId) : null;
     return {
-      id: r.id, kind: r.kind, audience: r.audience, audienceLabel: AUDIENCE_LABEL[r.audience] ?? r.audience, status: r.status,
+      id: r.id, kind: r.kind, audience: r.audience, audienceLabel: comm ? comm.name : AUDIENCE_LABEL[r.audience] ?? r.audience, status: r.status,
+      community: comm ? { id: comm.id, name: comm.name, kind: comm.kind } : null, pinnedAt: r.pinnedAt,
       body: r.body, publishedAt: r.publishedAt, editedAt: r.editedAt, createdAt: r.createdAt,
       author: a ? publicCard(a) : { id: r.authorId, name: 'Colaborador', jobTitle: null, hasPhoto: false, area: null, unit: null },
       mentions: r.mentions.map((m) => people.get(m)).filter(Boolean).map((p) => ({ id: p!.id, name: p!.name })),
