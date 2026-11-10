@@ -11,7 +11,7 @@ import { Avatar } from '../components/ui/primitives';
 export type Participant = { id: string; name: string; jobTitle: string | null; hasAvatar: boolean };
 export const useParticipants = (oppId: string | undefined) => useQuery({ queryKey: ['participants', oppId], enabled: !!oppId, queryFn: () => api<{ items: Participant[] }>(`/opportunities/${oppId}/participants`), staleTime: 120_000 });
 
-export type MentionHandle = { clear: () => void; focus: () => void };
+export type MentionHandle = { clear: () => void; focus: () => void; textarea: () => HTMLTextAreaElement | null };
 type Props = {
   /** Negociação: só quem tem acesso a ela. Fora dela (tarefas), passe `people`. */
   oppId?: string;
@@ -25,6 +25,9 @@ type Props = {
   label: string;
   rows?: number;
   className?: string;
+  maxLength?: number;
+  /** teclas extras antes das da menção (ex.: Ctrl+B); devolve true se tratou */
+  onKeyDownExtra?: (e: KeyboardEvent<HTMLTextAreaElement>) => boolean;
 };
 
 const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -35,7 +38,7 @@ export function mentionsIn(text: string, picked: Participant[]) {
 }
 
 export const MentionInput = forwardRef<MentionHandle, Props & { picked: Participant[]; onPick: (p: Participant) => void }>(function MentionInput(
-  { oppId, people: given, value, onChange, onSubmit, enterSends, placeholder, label, rows = 2, className, onPick },
+  { oppId, people: given, value, onChange, onSubmit, enterSends, placeholder, label, rows = 2, className, onPick, maxLength = 2000, onKeyDownExtra },
   ref,
 ) {
   const id = useId();
@@ -44,7 +47,7 @@ export const MentionInput = forwardRef<MentionHandle, Props & { picked: Particip
   const people = given ?? fetched ?? [];
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  useImperativeHandle(ref, () => ({ clear: () => onChange(''), focus: () => ta.current?.focus() }));
+  useImperativeHandle(ref, () => ({ clear: () => onChange(''), focus: () => ta.current?.focus(), textarea: () => ta.current }));
 
   const options = useMemo(() => (query === null ? [] : people.filter((p) => norm(p.name).includes(norm(query))).slice(0, 6)), [people, query]);
 
@@ -65,6 +68,7 @@ export const MentionInput = forwardRef<MentionHandle, Props & { picked: Particip
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(before.length, before.length); });
   }
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (onKeyDownExtra?.(e)) return;
     if (options.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => (a + 1) % options.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => (a - 1 + options.length) % options.length); return; }
@@ -82,7 +86,7 @@ export const MentionInput = forwardRef<MentionHandle, Props & { picked: Particip
         ref={ta}
         rows={rows}
         value={value}
-        maxLength={2000}
+        maxLength={maxLength}
         placeholder={placeholder}
         onChange={(e) => { onChange(e.target.value); detect(e.target.value, e.target.selectionStart); }}
         onKeyDown={onKey}

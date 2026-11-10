@@ -189,5 +189,14 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
 }
 
 /** Texto do aviso de menção: curto, sem dados financeiros. */
-export const mentionText = (author: string, code: number, customer: string, where: 'chat' | 'comentário', body: string, link: string) =>
-  `${author} mencionou você no ${where} da OP-${code} (${customer}):\n"${body.length > 280 ? `${body.slice(0, 277)}...` : body}"\nAbrir: ${link}`;
+export const mentionText = (author: string, code: number, customer: string, where: 'chat' | 'comentário', raw: string, link: string) => {
+  const body = plainText(raw);
+  return `${author} mencionou você no ${where} da OP-${code} (${customer}):\n"${body.length > 280 ? `${body.slice(0, 277)}...` : body}"\nAbrir: ${link}`;
+};
+
+/** Comentário formatado (negrito, itálico, tamanhos, listas e links) como texto simples, para e-mail e WhatsApp. */
+export const plainText = (s: string) => s
+  .replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^)\s]+)\)/g, '$1 ($2)')
+  .replace(/\*\*(.+?)\*\*/g, '$1')
+  .replace(/(^|[\s(])_(\S(?:.*?\S)?)_(?=[\s).,!?:;]|$)/gm, '$1$2')
+  .replace(/^#{1,2} /gm, '');

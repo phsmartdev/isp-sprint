@@ -8,6 +8,8 @@ import { publicLink } from '../services/alerts';
 import { loadForAnalysis } from '../services/approvals';
 import { chatOf, lastReadAt, markRead, mentionText, myMentions, notifyPeople, participants, unreadOf, validateMentions } from '../services/negotiation';
 
+/** comentário do histórico aceita texto maior: a formatação (links, listas) ocupa espaço */
+const CommentPost = z.object({ body: z.string().trim().min(1, 'Escreva o comentário').max(5000), mentions: z.array(z.string().uuid()).max(20).default([]) });
 const Post = z.object({ body: z.string().trim().min(1, 'Escreva a mensagem').max(2000), mentions: z.array(z.string().uuid()).max(20).default([]) });
 
 export const negotiationRoutes = [
@@ -85,7 +87,7 @@ export const negotiationRoutes = [
     tag: 'Negociação',
     anyAuthenticated: true,
     params: IdParams,
-    body: Post,
+    body: CommentPost,
     rateLimit: () => ({ max: 60, timeWindow: '1 minute' }),
     handler: async ({ app, auth, params, body, req, reply }) => {
       const { opp } = await loadForAnalysis(app.db, auth, params.id);

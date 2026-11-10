@@ -66,6 +66,10 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
   const pausedTag = opp.paused ? { tone: 'yellow' as const, label: opp.pausedUntil ? `Pausada até ${compact ? untilShort : fmtDate(opp.pausedUntil)}` : 'Pausada', title: opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}${opp.pauseReason ? ` · ${opp.pauseReason}` : ''}` : opp.pauseReason ?? undefined } : null;
   const tag = closed ?? pausedTag ?? (opp.stage === 'fechamento' ? CLOSING_TAG[opp.contractRequestStatus] : null);
   const tagTitle = tag === pausedTag ? pausedTag?.title : tag?.label;
+  // a tarefa aberta de prazo mais cedo; sem tarefa, a próxima ação anotada na negociação
+  const more = (opp.openTaskCount ?? 0) > 1 ? ` (+${(opp.openTaskCount ?? 0) - 1})` : '';
+  const taskLabel = opp.nextTaskTitle ? `${opp.nextTaskTitle}${more}` : opp.nextAction ?? 'Sem tarefa';
+  const taskTip = opp.nextTaskTitle ? `${opp.openTaskCount} tarefa(s) em aberto · próxima: ${opp.nextTaskTitle}` : opp.nextAction ?? undefined;
   return (
     <li
       ref={setNodeRef}
@@ -98,8 +102,8 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
           </div>
           <div className={clsx('mt-1.5 flex items-center gap-1 border-t border-line pt-1.5 text-2xs', opp.overdue ? 'text-danger' : opp.missingNextAction ? 'text-[#C2610C]' : 'text-muted')}>
             <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
-            <span className="min-w-0 flex-1 truncate" title={opp.nextAction ?? undefined}>{opp.nextAction ?? 'Sem tarefa'}</span>
-            {opp.nextActionAt && <span className="num shrink-0 whitespace-nowrap">{fmtRelativeShort(opp.nextActionAt)}</span>}
+            <span className="min-w-0 flex-1 truncate" title={taskTip}>{taskLabel}</span>
+            {(opp.nextTaskTitle ? opp.nextTaskDueAt : opp.nextActionAt) && <span className="num shrink-0 whitespace-nowrap">{fmtRelativeShort((opp.nextTaskTitle ? opp.nextTaskDueAt : opp.nextActionAt)!)}</span>}
           </div>
           {tag && <div className="mt-1 min-w-0"><Chip tone={tag.tone} title={tagTitle} className="max-w-full !whitespace-normal break-words !px-1.5 !py-0.5 text-left !text-2xs leading-tight">{tag.label}</Chip></div>}
         </>
@@ -132,7 +136,7 @@ const Card = memo(function Card({ opp, onMove, onAction, column, canMove, stages
       )}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         {tag ? <Chip tone={tag.tone} title={tagTitle} className="max-w-full !whitespace-normal break-words text-left">{tag.label}</Chip> : opp.accountContracts ? <span className="text-2xs text-muted">Conta</span> : <SourceChip name={opp.sourceName} />}
-        <span className={clsx('ml-auto shrink-0 whitespace-nowrap text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextActionAt ?? opp.updatedAt)}</span>
+        <span className={clsx('ml-auto shrink-0 whitespace-nowrap text-xs', opp.overdue ? 'font-semibold text-danger' : 'text-muted')}>{fmtRelativeShort(opp.nextTaskDueAt ?? opp.nextActionAt ?? opp.updatedAt)}</span>
       </div>
       </>)}
     </li>

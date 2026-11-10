@@ -1,4 +1,5 @@
 /** Indicador de menções no topo: onde me chamaram com @ (chat e comentários das negociações). */
+import { plainText } from './RichText';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -56,7 +57,7 @@ export function MentionsMenu() {
                         : <span><span className="font-semibold text-ink">{m.author ?? 'Alguém'}</span> no {m.source === 'chat' ? 'chat' : 'comentário'} · OP-{m.code} · {fmtRelative(m.at)}</span>}
                     </p>
                     <p className="text-xs text-muted">{m.kind === 'oportunidade' ? m.contactName : m.title}</p>
-                    {m.body && <p className="mt-0.5 line-clamp-2 text-sm text-text">{m.body}</p>}
+                    {m.body && <p className="mt-0.5 line-clamp-2 text-sm text-text">{plainText(m.body)}</p>}
                   </Link>
                 </li>
               ))}

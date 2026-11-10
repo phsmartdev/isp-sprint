@@ -221,6 +221,10 @@ export const opportunitySelect = {
   planLine: s.plans.line,
   nextAction: s.opportunities.nextAction,
   nextActionAt: s.opportunities.nextActionAt,
+  /** tarefas em aberto ligadas à negociação: o cartão do funil mostra a próxima (a de prazo mais cedo) */
+  openTaskCount: sql<number>`(select count(*)::int from activities a where a.opportunity_id = "opportunities"."id" and a.tenant_id = "opportunities"."tenant_id" and a.deleted_at is null and a.completed_at is null and a.status <> 'cancelada')`,
+  nextTaskTitle: sql<string | null>`(select a.title from activities a where a.opportunity_id = "opportunities"."id" and a.tenant_id = "opportunities"."tenant_id" and a.deleted_at is null and a.completed_at is null and a.status <> 'cancelada' order by a.due_at asc nulls last, a.created_at asc limit 1)`,
+  nextTaskDueAt: sql<Date | null>`(select a.due_at from activities a where a.opportunity_id = "opportunities"."id" and a.tenant_id = "opportunities"."tenant_id" and a.deleted_at is null and a.completed_at is null and a.status <> 'cancelada' order by a.due_at asc nulls last, a.created_at asc limit 1)`,
   notes: s.opportunities.notes,
   lossReason: s.opportunities.lossReason,
   stageChangedAt: s.opportunities.stageChangedAt,
@@ -294,8 +298,9 @@ export function opportunityDto(r: OpportunityRow, now = new Date()) {
     paused,
     ageDays: Math.floor((now.getTime() - r.createdAt.getTime()) / 86_400_000),
     daysInStage: Math.floor((now.getTime() - r.stageChangedAt.getTime()) / 86_400_000),
-    overdue: open && !paused && !!r.nextActionAt && r.nextActionAt < now,
-    missingNextAction: open && !r.nextAction && !r.nextActionAt,
+    nextTaskDueAt: r.nextTaskDueAt ? new Date(r.nextTaskDueAt) : null,
+    overdue: open && !paused && ((!!r.nextActionAt && r.nextActionAt < now) || (!!r.nextTaskDueAt && new Date(r.nextTaskDueAt) < now)),
+    missingNextAction: open && !r.nextAction && !r.nextActionAt && !r.openTaskCount,
   };
 }
 

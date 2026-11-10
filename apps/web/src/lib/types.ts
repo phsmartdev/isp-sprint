@@ -145,6 +145,10 @@ export type Opportunity = {
   planLine: string | null;
   nextAction: string | null;
   nextActionAt: string | null;
+  /** tarefas em aberto ligadas à negociação e a próxima delas (prazo mais cedo) */
+  openTaskCount?: number;
+  nextTaskTitle?: string | null;
+  nextTaskDueAt?: string | null;
   notes: string | null;
   lossReason: string | null;
   stageChangedAt: string;

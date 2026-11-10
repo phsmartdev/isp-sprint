@@ -853,9 +853,10 @@ export function OpportunityWorkspacePage() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <Breadcrumb items={[{ label: 'Oportunidades', to: `/opportunities${qs({ pipelineId: opp.pipelineId })}` }, { label: `OP-${opp.code}` }]} />
-          <h1 className="truncate text-xl font-extrabold text-ink">{opp.contactName}</h1>
+          {/* o nome da negociação em destaque; a conta logo abaixo */}
+          <h1 className="line-clamp-2 break-words text-xl font-extrabold text-ink" title={opp.title || opp.contactName}>{opp.title || opp.contactName}</h1>
           <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
-            <span>{opp.title}</span>
+            <span className="inline-flex items-center gap-1.5 font-semibold text-text"><Building2 className="h-4 w-4 text-primary" aria-hidden /><span>{opp.contactName}</span></span>
             {opp.condominiumName && <span>· {opp.condominiumName}{opp.installBlock ? ` · Bl. ${opp.installBlock}` : ''}{opp.installUnit ? ` · Ap. ${opp.installUnit}` : ''}</span>}
             <SaveStatus state={a.status} onRetry={() => void a.save()} />
           </p>

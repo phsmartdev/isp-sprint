@@ -14,7 +14,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Button, ErrorState, LoadingRows } from '../components/ui/primitives';
 import { useToast } from '../components/ui/overlay';
 import { errMsg } from './contracts/shared';
-import { MentionInput, WithMentions, mentionsIn, type Participant } from './MentionInput';
+import { MentionInput, mentionsIn, type MentionHandle, type Participant } from './MentionInput';
+import { FormatToolbar, formatShortcut, hasFormatting, RichText } from './RichText';
 
 const FIELD_LABELS: Record<string, string> = {
   title: 'Título', ownerId: 'Responsável', sourceId: 'Origem', campaignId: 'Campanha', channel: 'Canal', reasons: 'Motivos', planId: 'Plano', valueCents: 'Valor mensal', nextAction: 'Próxima ação', nextActionAt: 'Data da próxima ação', notes: 'Anotações',
@@ -132,6 +133,8 @@ export function Timeline({ opportunityId }: { opportunityId: string }) {
   const [filter, setFilter] = useState<Category | 'tudo'>('tudo');
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<Participant[]>([]);
+  const mention = useRef<MentionHandle>(null);
+  const taRef = useMemo(() => ({ get current() { return mention.current?.textarea() ?? null; } }), []);
   const q = useQuery({ queryKey: ['timeline', opportunityId], queryFn: () => api<{ items: TimelineItem[]; labels: Record<string, string> }>(`/opportunities/${opportunityId}/timeline`), refetchInterval: 30_000 });
   const read = useMutation({ mutationFn: () => api(`/opportunities/${opportunityId}/read`, { method: 'POST' }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['unread', opportunityId] }); qc.invalidateQueries({ queryKey: ['mentions'] }); } });
   const comments = q.data?.items.filter((i) => i.type === 'comment').length ?? 0;
@@ -149,7 +152,14 @@ export function Timeline({ opportunityId }: { opportunityId: string }) {
   return (
     <div>
       <form className="mb-4 rounded-md border border-line bg-surface-2/60 p-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) post.mutate(); }}>
-        <MentionInput oppId={opportunityId} value={text} onChange={setText} picked={picked} onPick={(p) => setPicked((x) => [...x, p])} label="Comentário" placeholder="Registre um comentário na negociação… use @ para mencionar" rows={3} />
+        <FormatToolbar target={taRef} onChange={setText} disabled={post.isPending} />
+        <MentionInput ref={mention} oppId={opportunityId} value={text} onChange={setText} picked={picked} onPick={(p) => setPicked((x) => [...x, p])} label="Comentário" placeholder="Registre um comentário na negociação… use @ para mencionar" rows={4} maxLength={5000} onKeyDownExtra={(e) => formatShortcut(e, setText)} />
+        {hasFormatting(text) && (
+          <div className="mt-2 rounded-sm border border-dashed border-line bg-surface px-3 py-2" aria-label="Pré-visualização do comentário">
+            <p className="mb-1 text-2xs font-semibold uppercase tracking-wide text-muted">Pré-visualização</p>
+            <RichText text={text} names={picked.filter((p) => text.includes(`@${p.name}`)).map((p) => p.name)} />
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-2xs text-muted">Fica no histórico formal e não pode ser editado nem apagado. Para conversar com o time, use o Chat.</p>
           <Button type="submit" variant="primary" size="sm" loading={post.isPending} disabled={!text.trim()} icon={<MessageSquareText className="h-4 w-4" />}>Comentar</Button>
@@ -174,7 +184,7 @@ export function Timeline({ opportunityId }: { opportunityId: string }) {
               <span className="absolute -left-[21px] top-3 h-2.5 w-2.5 rounded-circle border-2 border-surface bg-[#F5B400]" aria-hidden />
               <div className={clsx('rounded-md border p-3', ((i.payload?.mentionNames as string[] | undefined) ?? []).includes(me?.user.name ?? '') ? 'border-[#F5B400] bg-[#FFF9E6]' : 'border-line bg-surface')}>
                 <p className="flex items-center gap-2 text-xs text-muted"><Avatar name={i.actorName ?? '?'} size={22} /><span className="font-semibold text-ink">{i.actorName ?? 'Sistema'}</span> comentou · <time dateTime={i.occurredAt}>{fmtDateTime(i.occurredAt)}</time></p>
-                <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-ink"><WithMentions text={i.reason ?? ''} names={(i.payload?.mentionNames as string[] | undefined) ?? []} mine={me?.user.name} /></p>
+                <RichText className="mt-1.5" text={i.reason ?? ''} names={(i.payload?.mentionNames as string[] | undefined) ?? []} mine={me?.user.name} />
               </div>
             </li>
           ) : (
