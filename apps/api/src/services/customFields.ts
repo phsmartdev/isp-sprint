@@ -18,7 +18,7 @@ export function mergeCustom(fields: FieldDef[], current: Record<string, unknown>
     if (f.type === 'sim_nao' && typeof v !== 'boolean') throw bad('informe sim ou não');
     if (f.type === 'data' && (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v))) throw bad('informe uma data');
     if (f.type === 'lista' && !f.options.includes(String(v))) throw bad('escolha uma das opções');
-    if ((f.type === 'texto' || f.type === 'texto_longo') && (typeof v !== 'string' || v.length > (f.type === 'texto' ? 300 : 5000))) throw bad('texto inválido ou longo demais');
+    if ((f.type === 'texto' || f.type === 'texto_longo') && (typeof v !== 'string' || v.length > (f.type === 'texto' ? 2000 : 50_000))) throw bad(f.type === 'texto' ? 'no máximo 2.000 caracteres' : 'no máximo 50.000 caracteres');
     merged[k] = v;
   }
   return merged;

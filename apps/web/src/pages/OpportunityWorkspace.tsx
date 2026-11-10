@@ -8,6 +8,7 @@ import { OpportunityContacts } from '../features/opportunity/OpportunityContacts
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economics';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
+import { DeliveryAddressesPanel, ExtraAddressesEditor, extraToInput, type ExtraAddress } from '../features/opportunity/DeliveryAddresses';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
 import { BidItemResults } from '../features/opportunity/BidItemResults';
@@ -89,6 +90,7 @@ export function NewOpportunityPage() {
   const [stage, setStage] = useState('');
   const [reasons, setReasons] = useState<OpportunityReason[]>([]);
   const [address, setAddress] = useState<AddressValue>(emptyAddress);
+  const [extraAddresses, setExtraAddresses] = useState<ExtraAddress[]>([]);
   const [custom, setCustom] = useState<CustomValues>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const dq = useDebounced(search.trim(), 250);
@@ -98,6 +100,11 @@ export function NewOpportunityPage() {
   // tipo de venda é opção do formulário; o funil é o de vendas Corporativo (pedido do Paulo, 23/10)
   const journey = (lookups.data?.pipelines ?? []).find((p) => p.key === 'empresarial' && p.allowed);
   const kindFields = (journey?.fields ?? []).filter((f) => !f.saleKinds?.length || (!!saleKind && f.saleKinds.includes(saleKind)));
+  const fieldName = (path: string) => {
+    if (path.startsWith('custom.')) return kindFields.find((f) => f.key === path.slice(7))?.label ?? path.slice(7);
+    if (path.startsWith('deliveryAddresses.')) return `Endereço ${Number(path.split('.')[1]) + 2} de entrega`;
+    return ({ title: 'Nome do deal', installCep: 'CEP de entrega', installStreet: 'Logradouro de entrega', installNumber: 'Número de entrega', installDistrict: 'Bairro de entrega', installCity: 'Cidade de entrega', 'newContact.name': 'Nome do cliente', 'newContact.document': 'CNPJ', 'newContact.phone': 'Telefone', 'newContact.email': 'E-mail', 'newContact.address.postalCode': 'CEP do cliente', contactId: 'Cliente', branchId: 'Filial', saleKind: 'Tipo de venda', stage: 'Etapa' } as Record<string, string>)[path] ?? path;
+  };
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === seg || (seg !== 'residencial' && p.segment !== 'residencial'));
   const assign = level('oportunidades') !== 'proprio';
 
@@ -121,6 +128,7 @@ export function NewOpportunityPage() {
           stage: stage || null,
           reasons: [],
           ...Object.fromEntries(Object.entries(address).map(([k, v]) => [k, v || null])),
+          deliveryAddresses: extraAddresses.map(extraToInput),
           custom,
         },
       }),
@@ -131,8 +139,11 @@ export function NewOpportunityPage() {
       nav(`/opportunities/${o.id}`, { replace: true });
     },
     onError: (e) => {
-      if (e instanceof ApiError) setErrors(e.fieldErrors());
-      toast({ tone: 'error', message: (e as Error).message });
+      if (!(e instanceof ApiError)) return toast({ tone: 'error', message: (e as Error).message });
+      setErrors(e.fieldErrors());
+      // diz qual campo travou (antes só aparecia "Confira os dados informados")
+      const which = (e.problem.errors ?? []).map((x) => `${fieldName(x.path)}: ${x.message.replace(/^[^:]+: /, '')}`);
+      toast({ tone: 'error', message: which.length ? `${e.message} ${which.slice(0, 3).join('; ')}${which.length > 3 ? '…' : ''}` : e.message });
     },
   });
 
@@ -165,8 +176,8 @@ export function NewOpportunityPage() {
         <div className="space-y-4">
           <Panel title="Oportunidade" icon={<Handshake className="h-5 w-5 text-primary" />}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente">
-                <Input id="no-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
+              <FormField label="Nome do deal" htmlFor="no-title" hint="Em branco: tipo de venda + cliente" error={errors.title}>
+                <Input id="no-title" maxLength={300} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex.: Link dedicado 200 Mb — Prefeitura" />
               </FormField>
               <FormField label="Tipo de venda" htmlFor="no-pipe" required error={errors.saleKind} hint={saleKind ? SALE_TYPE_HINTS[saleKind] : undefined}>
                 <Select id="no-pipe" value={saleKind} invalid={!!errors.saleKind} onChange={(e) => { setSaleKind(e.target.value as SaleTypeKey | ''); setCustom({}); }}>
@@ -280,13 +291,19 @@ export function NewOpportunityPage() {
           </Panel>
 
           <Panel title="Endereço de entrega" icon={<MapPin className="h-5 w-5 text-primary" />}>
+            <p className="mb-2 text-sm font-semibold text-ink">Endereço 1 (principal)</p>
             <AddressFields value={address} onChange={(v) => setAddress((a) => ({ ...a, ...v }))} idPrefix="no-ad" hideCondominium />
+            {errors.installCep && <p className="mt-1 text-sm text-danger">CEP: {errors.installCep}</p>}
+            <div className="mt-4">
+              <ExtraAddressesEditor value={extraAddresses} onChange={setExtraAddresses} idPrefix="no-ea" />
+              {extraAddresses.length > 0 && <p className="mt-2 text-xs text-muted">Depois de criar, em Produtos e serviços você escolhe o endereço de entrega de cada produto.</p>}
+            </div>
           </Panel>
 
           {saleKind && kindFields.length > 0 && (
             <Panel title={`Informações de ${SALE_TYPE_LABELS[saleKind]}`}>
-              <CustomFieldsEditor fields={kindFields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" />
-              {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Preencha os campos obrigatórios da jornada.</p>}
+              <CustomFieldsEditor fields={kindFields} value={custom} onChange={(k, v) => setCustom((c) => ({ ...c, [k]: v }))} idPrefix="no-cf" errors={Object.fromEntries(Object.entries(errors).filter(([k]) => k.startsWith('custom.')).map(([k, v]) => [k.slice(7), v]))} />
+              {Object.keys(errors).some((k) => k.startsWith('custom.')) && <p className="mt-2 text-sm text-danger">Confira os campos destacados acima.</p>}
             </Panel>
           )}
 
@@ -513,6 +530,12 @@ function customText(fd: LookupField, v: unknown): string {
 }
 
 /** Seção da lateral com botão Salvar: depois de salva, mostra só a leitura compacta (como o bloco do Deal) e o Editar. */
+/** Texto longo (ex.: objeto do edital) na lateral: mostra o começo e abre o resto ao clicar. */
+function LongText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return <>{open ? text : `${text.slice(0, 280).trimEnd()}…`} <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setOpen(!open)}>{open ? 'ver menos' : 'ver mais'}</button></>;
+}
+
 function SavableSection({ id, title, summary, view, editable, startEditing, onSave, children }: { id: string; title: string; summary?: string; view: (readonly [string, string])[] | string[][]; editable: boolean; startEditing: boolean; onSave: () => Promise<boolean>; children: ReactNode }) {
   const [editing, setEditing] = useState(startEditing && editable);
   const [saving, setSaving] = useState(false);
@@ -530,7 +553,7 @@ function SavableSection({ id, title, summary, view, editable, startEditing, onSa
       ) : (
         <div>
           <dl className="space-y-1.5 text-sm">
-            {view.map(([k, v]) => <div key={k} className="flex gap-3"><dt className="w-24 shrink-0 text-muted">{k}</dt><dd className="min-w-0 break-words text-text">{v}</dd></div>)}
+            {view.map(([k, v]) => <div key={k} className="flex gap-3"><dt className="w-24 shrink-0 text-muted">{k}</dt><dd className="min-w-0 break-words text-text">{v && v.length > 280 ? <LongText text={v} /> : v}</dd></div>)}
           </dl>
           {editable && <button type="button" className="mt-2 text-sm font-semibold text-primary hover:underline" aria-label={`Editar ${title}`} onClick={() => setEditing(true)}>Editar</button>}
         </div>
@@ -780,7 +803,7 @@ export function OpportunityWorkspacePage() {
         </div>
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
-          {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
+          {centerTab === 'produtos' && <><DeliveryAddressesPanel opp={opp} /><OpportunityItems opp={opp} embedded /></>}
           {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidItemResults oppId={opp.id} /><BidTimeline oppId={opp.id} /></div>}

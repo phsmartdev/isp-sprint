@@ -6,7 +6,7 @@ import { todayIn } from '../services/vacations';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { AnswersPut, AttachmentUpload, OpportunityEmail } from '@isp/shared';
+import { AnswersPut, AttachmentChunk, AttachmentComplete, AttachmentUpload, ATTACHMENT_CHUNK_BYTES, ATTACHMENT_DOWNLOAD_PART_BYTES, MAX_LARGE_ATTACHMENT_BYTES, OpportunityEmail } from '@isp/shared';
 import { decryptSecret } from '../services/email';
 import { integrationRow, logEvent } from '../services/integrations';
 import { publicLink } from '../services/alerts';
@@ -14,6 +14,7 @@ import { signFileToken, verifyFileToken, waPhone, sendWhatsAppDocument, sendZapi
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
+import type { Tx } from '../db/client';
 import { loadOpportunity } from '../services/opportunities';
 import { getActiveInstruction } from '../services/instructions';
 import { brl, renderEmail, sendEmail, tenantName } from '../services/email';
@@ -23,6 +24,23 @@ import { audit } from '../services/audit';
 
 export const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const AttachParams = z.object({ id: z.string().uuid(), aid: z.string().uuid() });
+const ChunkParams = z.object({ id: z.string().uuid(), uploadId: z.string().uuid(), n: z.coerce.number().int().min(0).max(Math.ceil(MAX_LARGE_ATTACHMENT_BYTES / ATTACHMENT_CHUNK_BYTES) - 1) });
+const UploadParams = z.object({ id: z.string().uuid(), uploadId: z.string().uuid() });
+const mb = (n: number) => `${Math.round(n / 1024 / 1024)} MB`;
+
+const fromBase64 = (b64: string) => {
+  const clean = b64.replace(/^data:[^;]+;base64,/, '');
+  if (!/^[A-Za-z0-9+/=\s]+$/.test(clean)) throw unprocessable('Arquivo inválido.', [{ path: 'data', message: 'Conteúdo não está em base64' }]);
+  return Buffer.from(clean, 'base64');
+};
+
+/** Depois de gravar o anexo: proposta muda o status da proposta, e o histórico registra. */
+async function afterAttach(tx: Tx, auth: { tenantId: string; userId: string }, opp: { id: string; proposalStatus: string; rowVersion: number }, row: { filename: string }, kind: string, sizeBytes: number) {
+  if (kind === 'proposta' && opp.proposalStatus === 'nao_criada') {
+    await tx.update(s.opportunities).set({ proposalStatus: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, opp.id));
+  }
+  await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: opp.id, type: 'attachment_added', actorId: auth.userId, payload: { filename: row.filename, kind, sizeBytes }, rowVersion: opp.rowVersion });
+}
 
 const OFFICE: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -145,9 +163,7 @@ export const sprintRoutes = [
     bodyLimit: 4_600_000,
     handler: async ({ app, auth, params, body, req, reply }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
-      const clean = body.data.replace(/^data:[^;]+;base64,/, '');
-      if (!/^[A-Za-z0-9+/=\s]+$/.test(clean)) throw unprocessable('Arquivo inválido.', [{ path: 'data', message: 'Conteúdo não está em base64' }]);
-      const data = Buffer.from(clean, 'base64');
+      const data = fromBase64(body.data);
       if (!data.length) throw unprocessable('Arquivo vazio.');
       if (data.length > MAX_ATTACHMENT_BYTES) throw unprocessable('Arquivo maior que 3 MB.', [{ path: 'data', message: 'Limite de 3 MB por arquivo' }]);
       const mime = detectAttachment(body.filename, data);
@@ -157,13 +173,81 @@ export const sprintRoutes = [
           .insert(s.opportunityAttachments)
           .values({ tenantId: auth.tenantId, opportunityId: params.id, kind: body.kind, filename: safeName(body.filename), mime, sizeBytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), data, uploadedBy: auth.userId })
           .returning({ id: s.opportunityAttachments.id, kind: s.opportunityAttachments.kind, filename: s.opportunityAttachments.filename, mime: s.opportunityAttachments.mime, sizeBytes: s.opportunityAttachments.sizeBytes, createdAt: s.opportunityAttachments.createdAt });
-        if (body.kind === 'proposta' && opp.proposalStatus === 'nao_criada') {
-          await tx.update(s.opportunities).set({ proposalStatus: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, params.id));
-        }
-        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: params.id, type: 'attachment_added', actorId: auth.userId, payload: { filename: r[0]!.filename, kind: body.kind, sizeBytes: data.length }, rowVersion: opp.rowVersion });
+        await afterAttach(tx, auth, opp, r[0]!, body.kind, data.length);
         return r;
       });
       await audit(app.db, req, { action: 'attachment.upload', entityType: 'opportunity', entityId: params.id, metadata: { filename: row!.filename, kind: body.kind } });
+      reply.code(201);
+      return row;
+    },
+  }),
+
+  // anexo grande: as partes chegam uma a uma (cada requisição cabe no limite da hospedagem) e o servidor monta no fim
+  defineRoute({
+    method: 'PUT',
+    url: '/opportunities/:id/attachments/uploads/:uploadId/parts/:n',
+    summary: `Envia uma parte de um anexo grande (até ${mb(MAX_LARGE_ATTACHMENT_BYTES)} no total, em partes de ${(ATTACHMENT_CHUNK_BYTES / 1_000_000).toFixed(1)} MB)`,
+    tag: 'Sprint',
+    module: 'oportunidades',
+    params: ChunkParams,
+    body: AttachmentChunk,
+    bodyLimit: 4_400_000,
+    handler: async ({ app, auth, params, body, reply }) => {
+      await loadOpportunity(app.db, auth, params.id);
+      const data = fromBase64(body.data);
+      if (!data.length) throw unprocessable('Parte vazia.');
+      if (data.length > ATTACHMENT_CHUNK_BYTES) throw unprocessable('Parte maior que o permitido.');
+      // partes esquecidas (envio interrompido) saem depois de um dia
+      await app.db.delete(s.opportunityAttachmentChunks).where(sql`${s.opportunityAttachmentChunks.createdAt} < now() - interval '1 day'`);
+      const r = await app.db.execute(sql`
+        insert into opportunity_attachment_chunks (tenant_id, opportunity_id, upload_id, n, data, uploaded_by)
+        values (${auth.tenantId}, ${params.id}, ${params.uploadId}, ${params.n}, ${data}, ${auth.userId})
+        on conflict (upload_id, n) do update set data = excluded.data, created_at = now()
+          where opportunity_attachment_chunks.uploaded_by = excluded.uploaded_by and opportunity_attachment_chunks.opportunity_id = excluded.opportunity_id
+        returning n`);
+      if (!r.rows.length) throw forbidden('Este envio é de outra pessoa ou de outra oportunidade.');
+      return reply.code(204).send();
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/opportunities/:id/attachments/uploads/:uploadId/complete',
+    summary: 'Conclui o anexo grande: confere as partes, monta o arquivo e registra o anexo',
+    tag: 'Sprint',
+    module: 'oportunidades',
+    params: UploadParams,
+    body: AttachmentComplete,
+    handler: async ({ app, auth, params, body, req, reply }) => {
+      const opp = await loadOpportunity(app.db, auth, params.id);
+      const mine = and(eq(s.opportunityAttachmentChunks.uploadId, params.uploadId), eq(s.opportunityAttachmentChunks.opportunityId, params.id), eq(s.opportunityAttachmentChunks.tenantId, auth.tenantId), eq(s.opportunityAttachmentChunks.uploadedBy, auth.userId));
+      const [st] = await app.db
+        .select({ count: sql<number>`count(*)::int`, maxN: sql<number>`coalesce(max(${s.opportunityAttachmentChunks.n}), -1)::int`, bytes: sql<number>`coalesce(sum(octet_length(${s.opportunityAttachmentChunks.data})), 0)::bigint` })
+        .from(s.opportunityAttachmentChunks).where(mine);
+      if (!st || st.count !== body.parts || st.maxN !== body.parts - 1) throw unprocessable('O envio ficou incompleto. Tente anexar de novo.', [{ path: 'parts', message: `Recebidas ${st?.count ?? 0} de ${body.parts} partes` }]);
+      if (Number(st.bytes) !== body.sizeBytes) throw unprocessable('O arquivo chegou diferente do enviado. Tente anexar de novo.');
+      if (body.sizeBytes > MAX_LARGE_ATTACHMENT_BYTES) throw unprocessable(`Arquivo maior que ${mb(MAX_LARGE_ATTACHMENT_BYTES)}.`);
+      const [head] = await app.db.select({ data: sql<Buffer>`substring(${s.opportunityAttachmentChunks.data} from 1 for 16)` }).from(s.opportunityAttachmentChunks).where(and(mine, eq(s.opportunityAttachmentChunks.n, 0)));
+      const mime = detectAttachment(body.filename, Buffer.from(head!.data));
+      if (!mime) {
+        await app.db.delete(s.opportunityAttachmentChunks).where(mine);
+        throw unprocessable('Formato não aceito. Envie PDF, Word, Excel, PowerPoint, PNG ou JPG.', [{ path: 'data', message: 'Formato não reconhecido' }]);
+      }
+      const filename = safeName(body.filename);
+      const row = await app.db.transaction(async (tx) => {
+        // monta no banco (o arquivo inteiro não passa pela memória do servidor)
+        const ins = await tx.execute<{ id: string; kind: string; filename: string; mime: string; size_bytes: number; created_at: Date }>(sql`
+          insert into opportunity_attachments (tenant_id, opportunity_id, kind, filename, mime, size_bytes, sha256, data, uploaded_by)
+          select ${auth.tenantId}, ${params.id}, ${body.kind}, ${filename}, ${mime}, octet_length(f.data), encode(sha256(f.data), 'hex'), f.data, ${auth.userId}
+          from (select string_agg(c.data, ''::bytea order by c.n) as data from opportunity_attachment_chunks c
+                where c.upload_id = ${params.uploadId} and c.opportunity_id = ${params.id} and c.tenant_id = ${auth.tenantId} and c.uploaded_by = ${auth.userId}) f
+          returning id, kind, filename, mime, size_bytes, created_at`);
+        await tx.delete(s.opportunityAttachmentChunks).where(mine);
+        const r = ins.rows[0]!;
+        await afterAttach(tx, auth, opp, r, body.kind, body.sizeBytes);
+        return { id: r.id, kind: r.kind, filename: r.filename, mime: r.mime, sizeBytes: Number(r.size_bytes), createdAt: r.created_at };
+      });
+      await audit(app.db, req, { action: 'attachment.upload', entityType: 'opportunity', entityId: params.id, metadata: { filename: row.filename, kind: body.kind, sizeBytes: body.sizeBytes, parts: body.parts } });
       reply.code(201);
       return row;
     },
@@ -176,8 +260,25 @@ export const sprintRoutes = [
     tag: 'Sprint',
     module: 'oportunidades',
     params: AttachParams,
-    handler: async ({ app, auth, params, reply }) => {
+    query: z.object({ part: z.coerce.number().int().min(0).max(1000).optional() }),
+    handler: async ({ app, auth, params, query, reply }) => {
       await loadOpportunity(app.db, auth, params.id);
+      if (query.part !== undefined) {
+        // arquivo grande: baixa um pedaço por vez (a resposta também tem limite na hospedagem); a tela junta os pedaços
+        const [p] = await app.db
+          .select({ data: sql<Buffer>`substring(${s.opportunityAttachments.data} from ${query.part * ATTACHMENT_DOWNLOAD_PART_BYTES + 1} for ${ATTACHMENT_DOWNLOAD_PART_BYTES})`, sizeBytes: s.opportunityAttachments.sizeBytes })
+          .from(s.opportunityAttachments)
+          .where(and(eq(s.opportunityAttachments.id, params.aid), eq(s.opportunityAttachments.opportunityId, params.id), eq(s.opportunityAttachments.tenantId, auth.tenantId), isNull(s.opportunityAttachments.deletedAt)))
+          .limit(1);
+        if (!p) throw notFound('Anexo não encontrado.');
+        reply
+          .header('content-type', 'application/octet-stream')
+          .header('x-total-size', String(p.sizeBytes))
+          .header('x-part-size', String(ATTACHMENT_DOWNLOAD_PART_BYTES))
+          .header('x-content-type-options', 'nosniff')
+          .header('cache-control', 'private, no-store');
+        return reply.send(Buffer.from(p.data));
+      }
       const [a] = await app.db
         .select()
         .from(s.opportunityAttachments)

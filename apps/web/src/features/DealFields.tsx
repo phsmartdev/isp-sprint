@@ -114,7 +114,7 @@ export function MoneyInput({ id, value, onChange, disabled }: { id: string; valu
   );
 }
 
-export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix = 'cf' }: { fields: LookupField[]; value: CustomValues; onChange: (key: string, v: string | number | boolean | null) => void; disabled?: boolean; idPrefix?: string }) {
+export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix = 'cf', errors }: { fields: LookupField[]; value: CustomValues; onChange: (key: string, v: string | number | boolean | null) => void; disabled?: boolean; idPrefix?: string; /** erros por chave do campo (ex.: vindos do servidor) */ errors?: Record<string, string> }) {
   if (!fields.length) return null;
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -122,9 +122,10 @@ export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix
         const id = `${idPrefix}-${f.key}`;
         const v = value[f.key];
         const label = f.label;
+        const error = errors?.[f.key];
         if (f.type === 'sim_nao')
           return (
-            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error}>
               <Select id={id} value={v === true ? 'sim' : v === false ? 'nao' : ''} disabled={disabled} onChange={(e) => onChange(f.key, e.target.value === '' ? null : e.target.value === 'sim')}>
                 <option value="">—</option><option value="sim">Sim</option><option value="nao">Não</option>
               </Select>
@@ -132,7 +133,7 @@ export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix
           );
         if (f.type === 'lista')
           return (
-            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error}>
               <Select id={id} value={(v as string) ?? ''} disabled={disabled} onChange={(e) => onChange(f.key, e.target.value || null)}>
                 <option value="">—</option>
                 {f.options.map((o) => <option key={o}>{o}</option>)}
@@ -141,24 +142,24 @@ export function CustomFieldsEditor({ fields, value, onChange, disabled, idPrefix
           );
         if (f.type === 'texto_longo')
           return (
-            <FormField key={f.key} label={label} htmlFor={id} required={f.required} className="sm:col-span-2">
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error} className="sm:col-span-2">
               <Textarea id={id} value={(v as string) ?? ''} disabled={disabled} onChange={(e) => onChange(f.key, e.target.value || null)} />
             </FormField>
           );
         if (f.type === 'moeda')
           return (
-            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error}>
               <MoneyInput id={id} value={typeof v === 'number' ? v : null} disabled={disabled} onChange={(n) => onChange(f.key, n)} />
             </FormField>
           );
         if (f.type === 'numero')
           return (
-            <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+            <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error}>
               <Input id={id} inputMode="decimal" value={v === null || v === undefined ? '' : String(v).replace('.', ',')} disabled={disabled} onChange={(e) => { const t = e.target.value.replace(/\./g, '').replace(',', '.'); onChange(f.key, t === '' ? null : Number.isFinite(Number(t)) ? Number(t) : (v as number) ?? null); }} />
             </FormField>
           );
         return (
-          <FormField key={f.key} label={label} htmlFor={id} required={f.required}>
+          <FormField key={f.key} label={label} htmlFor={id} required={f.required} error={error}>
             <Input id={id} type={f.type === 'data' ? 'date' : 'text'} value={(v as string) ?? ''} disabled={disabled} onChange={(e) => onChange(f.key, e.target.value || null)} />
           </FormField>
         );

@@ -192,6 +192,8 @@ export const dataAdminRoutes = [
           await tx.delete(s.opportunityEconomicsSnapshots).where(sc(s.opportunityEconomicsSnapshots));
           await tx.delete(s.opportunityEconomics).where(sc(s.opportunityEconomics));
           await tx.delete(s.opportunityItems).where(sc(s.opportunityItems));
+          await tx.delete(s.opportunityDeliveryAddresses).where(sc(s.opportunityDeliveryAddresses));
+          await tx.delete(s.opportunityAttachmentChunks).where(sc(s.opportunityAttachmentChunks));
           // catálogo de produtos: sai o que só existia nas negociações apagadas (o que ficou continua valendo)
           await tx.execute(sql`delete from product_catalog pc where pc.tenant_id = ${t} and not exists (select 1 from opportunity_items i where i.tenant_id = pc.tenant_id and lower(trim(i.description)) = lower(pc.description))`);
           await tx.delete(s.bidParticipants).where(sc(s.bidParticipants));
