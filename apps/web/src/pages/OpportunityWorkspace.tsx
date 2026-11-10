@@ -8,7 +8,7 @@ import { OpportunityContacts } from '../features/opportunity/OpportunityContacts
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economics';
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
-import { DeliveryAddressesPanel, ExtraAddressesEditor, extraToInput, type ExtraAddress } from '../features/opportunity/DeliveryAddresses';
+import { ExtraAddressesEditor, extraToInput, type ExtraAddress } from '../features/opportunity/DeliveryAddresses';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
 import { BidItemResults } from '../features/opportunity/BidItemResults';
@@ -803,7 +803,7 @@ export function OpportunityWorkspacePage() {
         </div>
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
-          {centerTab === 'produtos' && <><DeliveryAddressesPanel opp={opp} /><OpportunityItems opp={opp} embedded /></>}
+          {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
           {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidItemResults oppId={opp.id} /><BidTimeline oppId={opp.id} /></div>}

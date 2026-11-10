@@ -31,18 +31,31 @@ test('licitação com objeto longo, endereços por produto', async ({ page }) =>
   const id = page.url().match(/opportunities\/([0-9a-f-]{36})/)![1];
 
   await page.goto(`/opportunities/${id}?aba=produtos`);
-  const addrs = page.getByRole('region', { name: 'Endereços de entrega' });
-  await expect(addrs.locator('#da-main-street')).toHaveValue('Rua da Prefeitura');
-  await expect(addrs.getByLabel('Identificação')).toHaveValue(`Escola Municipal ${tag}`);
+  // a aba Produtos não tem mais o formulário de endereços: só o seletor em cada linha
+  await expect(page.getByRole('region', { name: 'Endereços de entrega' })).toHaveCount(0);
   const items = page.getByRole('region', { name: 'Produtos e serviços' });
   await items.getByRole('button', { name: 'Adicionar item' }).click();
   await items.getByLabel('Produto ou serviço 1').fill(`Roteador ${tag}`);
   await items.getByLabel('Valor 1').fill('100,00');
+  await items.getByRole('button', { name: 'Adicionar item' }).click();
+  await items.getByLabel('Produto ou serviço 2').fill(`Switch ${tag}`);
+  await items.getByLabel('Valor 2').fill('50,00');
+  await expect(items.getByLabel('Endereço de entrega 1').locator('option')).toHaveText(['1 · Principal — Rua da Prefeitura · Aracaju', `2 · Escola Municipal ${tag} — Rua da Escola`, '+ Novo endereço de entrega…']);
   await items.getByLabel('Endereço de entrega 1').selectOption({ label: `2 · Escola Municipal ${tag} — Rua da Escola` });
+  // endereço novo direto da linha do produto
+  await items.getByLabel('Endereço de entrega 2').selectOption({ label: '+ Novo endereço de entrega…' });
+  const dlg = page.getByRole('dialog', { name: 'Novo endereço de entrega' });
+  await dlg.getByLabel('Identificação').fill(`Posto de Saúde ${tag}`);
+  await dlg.getByLabel('Logradouro').fill('Rua do Posto');
+  await dlg.getByRole('button', { name: 'Cadastrar endereço' }).click();
+  await expect(dlg).toHaveCount(0);
+  await expect(items.getByLabel('Endereço de entrega 2').locator('option:checked')).toHaveText(`3 · Posto de Saúde ${tag} — Rua do Posto`);
   await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
   await expect(page.getByText('Produtos e serviços salvos')).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('region', { name: 'Produtos e serviços' }).getByLabel('Endereço de entrega 1').locator('option:checked')).toHaveText(`2 · Escola Municipal ${tag} — Rua da Escola`);
+  const after = page.getByRole('region', { name: 'Produtos e serviços' });
+  await expect(after.getByLabel('Endereço de entrega 1').locator('option:checked')).toHaveText(`2 · Escola Municipal ${tag} — Rua da Escola`);
+  await expect(after.getByLabel('Endereço de entrega 2').locator('option:checked')).toHaveText(`3 · Posto de Saúde ${tag} — Rua do Posto`);
   if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/produtos-enderecos.png` });
 
 });
