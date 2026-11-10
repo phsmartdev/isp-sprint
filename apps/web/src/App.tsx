@@ -11,6 +11,8 @@ const PeopleLayout = lazy(() => import('./pages/people/PeopleLayout').then((m) =
 const MySpacePage = lazy(() => import('./pages/people/MySpace').then((m) => ({ default: m.MySpacePage })));
 const PeopleProfilePage = lazy(() => import('./pages/people/Profile').then((m) => ({ default: m.ProfilePage })));
 const PeopleConfigPage = lazy(() => import('./pages/people/AdminConfig').then((m) => ({ default: m.PeopleConfigPage })));
+const PeoplePostPage = lazy(() => import('./pages/people/feed/PostPage').then((m) => ({ default: m.PostPage })));
+const PeopleSavedPage = lazy(() => import('./pages/people/Saved').then((m) => ({ default: m.SavedPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -151,6 +153,8 @@ export function App() {
         <Route path="pessoas" element={<Gate module="pessoas" feature="pessoas_cultura.experiencia"><PeopleLayout /></Gate>}>
           <Route index element={<MySpacePage />} />
           <Route path="perfil/:userId" element={<PeopleProfilePage />} />
+          <Route path="publicacao/:id" element={<PeoplePostPage />} />
+          <Route path="salvos" element={<PeopleSavedPage />} />
           <Route path="admin/configuracoes" element={<PeopleConfigPage />} />
         </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />

@@ -4,7 +4,7 @@ import { api } from '../../lib/api';
 
 export type PeopleCaps = { member: boolean; communicate: boolean; administer: boolean; moderate: boolean; configure: boolean };
 export type PersonCard = { id: string; name: string; jobTitle: string | null; hasPhoto: boolean; area: string | null; unit: string | null };
-export type PeopleMe = { me: PersonCard & { firstName: string }; caps: PeopleCaps; profileComplete: boolean };
+export type PeopleMe = { me: PersonCard & { firstName: string }; caps: PeopleCaps; profileComplete: boolean; limits: { imageMb: number; videoMb: number; mediaPerPost: number; postChars: number } };
 export type PeopleProfile = PersonCard & {
   teams: string[]; bio: string | null; interests: string[]; skills: string[];
   contact: { email: string | null; phone: string | null }; privacy?: { showEmail: boolean; showPhone: boolean }; self: boolean;

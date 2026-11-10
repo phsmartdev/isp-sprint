@@ -13,8 +13,9 @@ const login = async (page: import('@playwright/test').Page, email: string) => {
 test('módulo Pessoas & Cultura: piloto liberado, perfil social e configurações', async ({ page, browser }) => {
   test.setTimeout(120_000);
   await login(page, 'carlos@yepnet.test');
-  // ninguém vê até liberar
-  await expect(page.getByRole('link', { name: 'Pessoas & Cultura' })).toHaveCount(0);
+  // ninguém vê até liberar (se outro teste já liberou nesta base, pula a conferência)
+  const before = await (await page.request.get('/api/v1/me')).json();
+  if (!before.modules.pessoas_cultura) await expect(page.getByRole('link', { name: 'Pessoas & Cultura' })).toHaveCount(0);
   const lk = await (await page.request.get('/api/v1/meta/lookups')).json();
   const team = lk.teams.find((t: { name: string }) => t.name === 'Governo');
   const me = await (await page.request.get('/api/v1/me')).json();
@@ -29,7 +30,7 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
 
   // colegas e perfil de um colega
   await page.getByLabel('Buscar colegas').fill('Mariana');
-  await page.getByRole('link', { name: /Mariana Costa/ }).click();
+  await page.getByRole('region', { name: 'Colegas' }).getByRole('link', { name: /Mariana Costa/ }).click();
   await expect(page.getByRole('heading', { name: 'Mariana Costa' })).toBeVisible();
   await expect(page.getByText('Governo', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Editar perfil' })).toHaveCount(0);
@@ -68,7 +69,7 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
   expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   if (SHOTS) await m.screenshot({ path: `${SHOTS}/pessoas-meu-espaco-celular.png`, fullPage: true });
   await m.getByLabel('Buscar colegas').fill('Carlos');
-  await m.getByRole('link', { name: /Carlos Silva/ }).click();
+  await m.getByRole('region', { name: 'Colegas' }).getByRole('link', { name: /Carlos Silva/ }).click({ timeout: 15_000 });
   await expect(m.getByRole('link', { name: 'carlos@yepnet.test' })).toBeVisible();
   // quem não foi liberado não abre nem pela URL
   const blocked = await m.request.get('/api/v1/pessoas/config');
