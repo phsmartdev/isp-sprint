@@ -12,6 +12,7 @@ import { useToast } from '../../components/ui/overlay';
 import { Hexagons } from '../../components/brand';
 import { errMsg } from '../../features/contracts/shared';
 import { orgLine, usePeopleMe, type PeopleProfile } from './shared';
+import { Feed } from './feed/Feed';
 
 const list = (s: string) => s.split(/[,;\n]/).map((x) => x.trim()).filter((x) => x.length >= 2);
 
@@ -57,6 +58,7 @@ export function ProfilePage() {
           <Tags title="Competências" items={p.skills} empty={p.self ? 'Compartilhe no que você pode ajudar.' : 'Nenhuma competência informada.'} />
         </section>
       )}
+      {!editing && <Feed filter={{ autor: p.id }} orderable={false} title="Publicações" emptyTitle="Nenhuma publicação ainda" emptyText={p.self ? 'Suas publicações aparecem aqui.' : `${p.name.split(' ')[0]} ainda não publicou.`} />}
     </div>
   );
 }

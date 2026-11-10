@@ -57,8 +57,8 @@ reconhecimentos, comunicados, leituras, denúncias, moderação e a caixa de not
 | Etapa | Escopo | Situação |
 |---|---|---|
 | 1. Fundação | Módulo, navegação, permissões, perfil social, parâmetros | **Entregue** |
-| 2. Feed | Publicações, mídias, comentários e respostas, reações, salvos, rascunho, paginação por cursor | Próxima |
-| 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | — |
+| 2. Feed | Publicações, mídias, comentários e respostas, reações, salvos, rascunho, paginação por cursor | **Entregue** |
+| 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | Próxima |
 | 4. Cultura e Comunicação | Reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | — |
 | 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo | — |
 | 6. Consolidação | Indicadores agregados, testes de permissão e isolamento, responsividade, documentação | — |
@@ -80,3 +80,35 @@ campos opcionais; Configurações do módulo (setores por papel, limites de publ
 **Testes:** `apps/api/test/people.test.ts` (piloto por equipe/pessoa, papéis por setor, perfil e privacidade,
 campos oficiais não editáveis, isolamento entre empresas) e `tests/e2e/pessoas-fundacao.spec.ts`
 (menu, Meu Espaço, perfil de colega, edição, configurações, celular e bloqueio de quem não foi liberado).
+
+## 4. Etapa 2 — entrega (feed)
+
+**Funcionalidades:** editor reutilizável (texto com formatação e menções, fotos, vídeos e documentos com
+pré-visualização e remoção antes de publicar, rascunhos, limite de caracteres e de mídias das Configurações,
+"Publicar em nome da empresa" só para o papel de Comunicação); feed em Meu Espaço com "Mais recentes" e
+"Relevantes"; cartão com autor, cargo/área, data, público, texto, mídias, reações (Curtir, Celebrar, Apoiar,
+Inspirador), comentários, salvar, copiar link e menu do autor (editar, excluir com confirmação); página da
+publicação com comentários e um nível de resposta (editar e remover os próprios); publicações salvas; publicações
+no perfil. Estados: esqueleto, vazio, erro com tentar de novo, fim da lista e avisos de sucesso/erro.
+
+**Relevância (transparente, sem dados pessoais):** (reações + 2 × comentários + 1) ÷ (horas desde a publicação + 2)^1,5.
+
+**Segurança:** visibilidade numa função única no servidor (`postVisible`), usada por feed, publicação, comentários
+e mídias — quem não pode ver recebe 404 mesmo com o ID; só o autor edita/exclui; rascunho só para o autor;
+mídia validada pelos bytes (executável, SVG e HTML recusados), servida com `nosniff` e política de conteúdo
+restrita, por intervalos de até 3 MB (limite de resposta da hospedagem); mídia de outra pessoa não pode ser anexada;
+menções só a colegas ativos da mesma empresa; limites de requisição em publicar, comentar, reagir e enviar.
+
+**Migração `0136_pessoas_feed`** (não destrutiva): `people_posts`, `people_media`, `people_media_chunks`,
+`people_comments`, `people_reactions`, `people_saved_posts`.
+
+**APIs:** `GET /pessoas/feed`, `GET /pessoas/rascunhos`, `POST|GET|PATCH|DELETE /pessoas/posts/:id`,
+`PUT|DELETE /pessoas/posts/:id/reacao`, `PUT|DELETE /pessoas/posts/:id/salvo`, `POST /pessoas/posts/:id/comentarios`,
+`PATCH|DELETE /pessoas/comentarios/:id`, `PUT /pessoas/midias/envios/:uploadId/partes/:n`,
+`POST /pessoas/midias/envios/:uploadId/concluir`, `GET|DELETE /pessoas/midias/:id`.
+
+**Ajuste no topo (todo o sistema):** no celular, Apoio, Playbooks, Ocultar valores e Ajuda foram para o menu da conta;
+o topo passava da largura da tela e a página inteira ficava reduzida (toques caíam no lugar errado).
+
+**Pendências conhecidas:** denúncia de conteúdo e notificações de menção/comentário (Etapa 5); a tela de
+Configurações de contratos ainda passa da largura no celular (fora do módulo).

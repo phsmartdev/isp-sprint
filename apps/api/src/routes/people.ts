@@ -28,6 +28,7 @@ export const peopleRoutes = [
       return {
         me: { ...publicCard(me), firstName: me.name.split(' ')[0] },
         caps: peopleCaps(auth, st),
+        limits: st.limits,
         profileComplete: !!(prof?.bio?.trim() && (prof.interests.length || prof.skills.length)),
       };
     },
@@ -68,7 +69,7 @@ export const peopleRoutes = [
 
   defineRoute({
     method: 'GET', url: '/pessoas/colaboradores', summary: 'Busca de colegas da empresa (nome e cargo) para perfis, menções e reconhecimento', tag, module: 'pessoas',
-    query: z.object({ q: z.string().trim().max(80).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) }),
+    query: z.object({ q: z.string().trim().max(80).optional(), limit: z.coerce.number().int().min(1).max(300).default(20) }),
     handler: async ({ app, auth, query }) => {
       const t = query.q ? `%${query.q.replace(/[%_\\]/g, '\\$&')}%` : null;
       const rows = await app.db.select({ id: s.users.id }).from(s.users)

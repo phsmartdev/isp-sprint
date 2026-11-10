@@ -6,12 +6,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Search, Sparkles, UserRound } from 'lucide-react';
+import { Bookmark, ChevronRight, Search, Sparkles, UserRound } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useDebounced } from '../../lib/hooks';
 import { Avatar, EmptyState, ErrorState, Input, LoadingRows } from '../../components/ui/primitives';
 import { Hexagons } from '../../components/brand';
 import { orgLine, usePeopleMe, type PersonCard } from './shared';
+import { PostEditor } from './feed/PostEditor';
+import { Feed } from './feed/Feed';
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
@@ -48,7 +50,8 @@ export function MySpacePage() {
           </section>
         )}
 
-        <Colleagues />
+        <PostEditor compact />
+        <Feed emptyTitle="O feed está começando" emptyText="Seja a primeira pessoa a compartilhar uma conquista, uma ideia ou um aprendizado." />
       </div>
 
       <aside className="space-y-4">
@@ -56,8 +59,10 @@ export function MySpacePage() {
           <h2 className="mb-2 text-md font-bold text-ink">Atalhos</h2>
           <ul className="divide-y divide-line">
             <li><Link to="/pessoas/perfil/eu" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UserRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Meu perfil</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
+            <li><Link to="/pessoas/salvos" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Bookmark className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Publicações salvas</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
           </ul>
         </section>
+        <Colleagues />
       </aside>
     </div>
   );
@@ -67,12 +72,12 @@ export function MySpacePage() {
 function Colleagues() {
   const [term, setTerm] = useState('');
   const dq = useDebounced(term.trim(), 250);
-  const q = useQuery({ queryKey: ['pessoas', 'colaboradores', dq], queryFn: () => api<{ items: PersonCard[] }>(`/pessoas/colaboradores${qs({ q: dq || undefined, limit: 12 })}`), placeholderData: (p) => p });
+  const q = useQuery({ queryKey: ['pessoas', 'colaboradores', dq], queryFn: () => api<{ items: PersonCard[] }>(`/pessoas/colaboradores${qs({ q: dq || undefined, limit: 8 })}`), placeholderData: (p) => p });
   return (
     <section className="card p-4 sm:p-5" aria-label="Colegas">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-md font-bold text-ink">Colegas</h2>
-        <div className="relative w-full max-w-xs">
+        <div className="relative w-full">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" aria-hidden />
           <Input aria-label="Buscar colegas" className="h-9 pl-9" placeholder="Nome ou cargo" value={term} onChange={(e) => setTerm(e.target.value)} />
         </div>
@@ -80,7 +85,7 @@ function Colleagues() {
       {q.isLoading ? <LoadingRows rows={3} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !q.data?.items.length ? (
         <EmptyState title="Ninguém encontrado" description="Tente outro nome ou cargo." />
       ) : (
-        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-2">
           {q.data.items.map((p) => (
             <li key={p.id}>
               <Link to={`/pessoas/perfil/${p.id}`} className="flex items-center gap-3 border border-line p-2.5 hover:border-primary hover:bg-surface-2">

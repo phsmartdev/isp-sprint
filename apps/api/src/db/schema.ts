@@ -6267,3 +6267,129 @@ export const peopleSettings = pgTable('people_settings', {
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Publicações do feed. Tipo e público preparados para as próximas etapas (comunidade, reconhecimento, comunicado);
+ * "institucional" = em nome da empresa, só com o papel de Comunicação. Rascunho fica só para o autor.
+ * Contadores de reações e comentários ficam na própria publicação (o feed não conta a cada página).
+ */
+export const peoplePosts = pgTable(
+  'people_posts',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    authorId: uuid('author_id').notNull().references(() => users.id),
+    kind: text('kind').notNull().default('social'),
+    audience: text('audience').notNull().default('organizacao'),
+    /** comunidade de destino (Etapa 3) */
+    communityId: uuid('community_id'),
+    body: text('body').notNull().default(''),
+    mentions: uuid('mentions').array().notNull().default(sql`'{}'::uuid[]`),
+    status: text('status').notNull().default('publicado'),
+    reactionCount: integer('reaction_count').notNull().default(0),
+    commentCount: integer('comment_count').notNull().default(0),
+    publishedAt: ts('published_at'),
+    editedAt: ts('edited_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deletedAt: ts('deleted_at'),
+    deletedBy: uuid('deleted_by').references(() => users.id),
+  },
+  (t) => ({
+    feedIdx: index('people_posts_feed_idx').on(t.tenantId, t.status, t.publishedAt, t.id),
+    authorIdx: index('people_posts_author_idx').on(t.tenantId, t.authorId, t.publishedAt),
+    kindCk: check('people_posts_kind_ck', inList('kind', ['social', 'institucional', 'conquista', 'reconhecimento', 'comunidade', 'comunicado'])),
+    audienceCk: check('people_posts_audience_ck', inList('audience', ['organizacao', 'comunidade', 'segmentado'])),
+    statusCk: check('people_posts_status_ck', inList('status', ['rascunho', 'publicado', 'oculto', 'removido'])),
+  }),
+);
+
+/**
+ * Mídias e anexos: o tipo é conferido pelos bytes (nunca pela extensão); executável, SVG e HTML não entram.
+ * Sem publicação = enviada e ainda não publicada (só o dono vê; some se não for usada em 1 dia).
+ */
+export const peopleMedia = pgTable(
+  'people_media',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    postId: uuid('post_id').references(() => peoplePosts.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    mime: text('mime').notNull(),
+    filename: text('filename').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    data: bytea('data').notNull(),
+    position: integer('position').notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    postIdx: index('people_media_post_idx').on(t.postId, t.position),
+    ownerIdx: index('people_media_owner_idx').on(t.tenantId, t.ownerId, t.createdAt),
+    kindCk: check('people_media_kind_ck', inList('kind', ['imagem', 'video', 'arquivo'])),
+  }),
+);
+
+/** Partes de uma mídia grande (vídeo) enviada em pedaços; viram uma linha de people_media ao concluir. */
+export const peopleMediaChunks = pgTable(
+  'people_media_chunks',
+  {
+    tenantId: tenantId(),
+    uploadId: uuid('upload_id').notNull(),
+    n: integer('n').notNull(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    data: bytea('data').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.uploadId, t.n] }), ageIdx: index('people_media_chunks_age_idx').on(t.createdAt) }),
+);
+
+/** Comentários (um nível de resposta: parentId aponta para o comentário principal). */
+export const peopleComments = pgTable(
+  'people_comments',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    postId: uuid('post_id').notNull().references(() => peoplePosts.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').notNull().references(() => users.id),
+    parentId: uuid('parent_id').references((): AnyPgColumn => peopleComments.id),
+    body: text('body').notNull(),
+    mentions: uuid('mentions').array().notNull().default(sql`'{}'::uuid[]`),
+    status: text('status').notNull().default('publicado'),
+    editedAt: ts('edited_at'),
+    createdAt: createdAt(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => ({
+    postIdx: index('people_comments_post_idx').on(t.postId, t.createdAt),
+    statusCk: check('people_comments_status_ck', inList('status', ['publicado', 'oculto', 'removido'])),
+  }),
+);
+
+/** Uma reação por pessoa por publicação (trocar o tipo substitui). */
+export const peopleReactions = pgTable(
+  'people_reactions',
+  {
+    postId: uuid('post_id').notNull().references(() => peoplePosts.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    tenantId: tenantId(),
+    kind: text('kind').notNull().default('curtir'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.postId, t.userId] }),
+    kindCk: check('people_reactions_kind_ck', inList('kind', ['curtir', 'celebrar', 'apoiar', 'inspirador'])),
+  }),
+);
+
+export const peopleSavedPosts = pgTable(
+  'people_saved_posts',
+  {
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    postId: uuid('post_id').notNull().references(() => peoplePosts.id, { onDelete: 'cascade' }),
+    tenantId: tenantId(),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.postId] }), userIdx: index('people_saved_user_idx').on(t.userId, t.createdAt) }),
+);

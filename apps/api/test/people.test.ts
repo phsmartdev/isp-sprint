@@ -9,9 +9,11 @@ const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) =>
 
 beforeAll(async () => {
   ctx = await makeApp();
-  [carlos, lucas, ana, rafael, outro] = await Promise.all(['carlos@yepnet.test', 'lucas@yepnet.test', 'ana@yepnet.test', 'rafael@yepnet.test', 'vendedor@outro.test'].map((e) => login(ctx.app, e)));
+  // começa do zero: nenhuma liberação do módulo (outros arquivos de teste podem ter liberado)
+  await ctx.db.execute(sql`delete from module_grants where module = 'pessoas_cultura'`);
+  [carlos, lucas, ana, rafael, outro] = (await Promise.all(['carlos@yepnet.test', 'lucas@yepnet.test', 'ana@yepnet.test', 'rafael@yepnet.test', 'vendedor@outro.test'].map((e) => login(ctx.app, e)))) as [Client, Client, Client, Client, Client];
 });
-afterAll(async () => ctx.close());
+afterAll(async () => { await ctx.db.execute(sql`delete from module_grants where module = 'pessoas_cultura'`); await ctx.close(); });
 
 const relogin = async (e: string) => login(ctx.app, e);
 /** cargo atual no cadastro (outros testes podem mudar): o módulo só repete o que está lá */
@@ -26,7 +28,7 @@ describe('Pessoas & Cultura · fundação', () => {
     const resid = teams.find((t) => t.name === 'Residencial')!;
     ok(await carlos.post('/admin/modules/pessoas_cultura/grants', { subjectType: 'equipe', subjectId: resid.id, effect: 'liberar', reason: 'Piloto do RH' }), 201);
     ok(await carlos.post('/admin/modules/pessoas_cultura/grants', { subjectType: 'usuario', subjectId: carlos.me.user.id, effect: 'liberar', reason: 'Piloto do RH' }), 201);
-    [lucas, ana, carlos, rafael] = await Promise.all(['lucas@yepnet.test', 'ana@yepnet.test', 'carlos@yepnet.test', 'rafael@yepnet.test'].map(relogin));
+    [lucas, ana, carlos, rafael] = (await Promise.all(['lucas@yepnet.test', 'ana@yepnet.test', 'carlos@yepnet.test', 'rafael@yepnet.test'].map(relogin))) as [Client, Client, Client, Client];
     const me = ok(await lucas.get('/pessoas/me')).json();
     expect(me.me).toMatchObject({ name: 'Lucas Lima', firstName: 'Lucas', jobTitle: await titleOf('lucas@yepnet.test') });
     expect(me.caps).toEqual({ member: true, communicate: false, administer: false, moderate: false, configure: false });
@@ -69,7 +71,7 @@ describe('Pessoas & Cultura · fundação', () => {
 
   it('isolamento: outra empresa não vê perfis nem busca colegas daqui', async () => {
     const t = (await ctx.db.execute(sql`select tenant_id from users where email = 'vendedor@outro.test'`)).rows[0] as { tenant_id: string };
-    await ctx.db.execute(sql`insert into module_grants (tenant_id, module, subject_type, subject_id, effect, reason) values (${t.tenant_id}, 'pessoas_cultura', 'usuario', ${outro.me.user.id}, 'liberar', 'teste')`);
+    await ctx.db.execute(sql`insert into module_grants (tenant_id, module, subject_type, subject_id, effect, reason) values (${t.tenant_id}, 'pessoas_cultura', 'usuario', ${outro.me.user.id}, 'liberar', 'teste') on conflict (tenant_id, module, subject_type, subject_id) do update set effect = 'liberar'`);
     outro = await relogin('vendedor@outro.test');
     ok(await outro.get('/pessoas/me'));
     expect((await outro.get(`/pessoas/perfis/${lucas.me.user.id}`)).statusCode).toBe(404);

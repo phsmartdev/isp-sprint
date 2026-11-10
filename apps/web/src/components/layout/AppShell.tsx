@@ -1,11 +1,11 @@
-import { HeaderMoneyToggle } from '../../lib/privacy';
+import { HeaderMoneyToggle, setMoneyHidden, useMoneyHidden } from '../../lib/privacy';
 import { HeaderSupport } from '../../features/support/Support';
 import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, UsersRound, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
+  BarChart3, Bell, UsersRound, HandHelping, Eye, EyeOff, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -237,6 +237,8 @@ function UserMenu() {
   const { me, logout } = useAuth();
   const [theme, setTheme] = useTheme();
   const [open, setOpen] = useState(false);
+  const [help, setHelp] = useState(false);
+  const moneyHidden = useMoneyHidden();
   const nav = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -268,6 +270,13 @@ function UserMenu() {
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/meus-pontos'); }}>
             <Star className="h-4 w-4" /> Meus pontos
           </button>
+          {/* celular: os atalhos que não cabem no topo */}
+          <div className="border-t border-line sm:hidden">
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/apoio'); }}><HandHelping className="h-4 w-4" /> Pedidos de apoio</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/playbooks'); }}><BookOpen className="h-4 w-4" /> Playbooks</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => setMoneyHidden(!moneyHidden)}>{moneyHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} {moneyHidden ? 'Mostrar valores' : 'Ocultar valores'}</button>
+            <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); setHelp(true); }}><CircleHelp className="h-4 w-4" /> Ajuda</button>
+          </div>
           <div className="border-y border-line px-3 py-2">
             <p id="theme-label" className="mb-1.5 text-xs font-semibold text-muted">Tema da tela</p>
             <div role="group" aria-labelledby="theme-label" className="grid grid-cols-3 gap-1">
@@ -284,7 +293,18 @@ function UserMenu() {
           </button>
         </div>
       )}
+      <Modal open={help} onClose={() => setHelp(false)} title="Ajuda" size="sm"><HelpContent /></Modal>
     </div>
+  );
+}
+
+function HelpContent() {
+  return (
+    <ul className="space-y-2 text-sm">
+      <li><kbd className="rounded border border-line bg-surface-2 px-1.5">/</kbd> busca global</li>
+      <li><kbd className="rounded border border-line bg-surface-2 px-1.5">N</kbd> nova oportunidade (fora de campos de texto)</li>
+      <li>O que você vê em cada módulo depende do nível do seu perfil (Próprio, Equipe ou Total), definido pela gerência em Configurações → Segurança.</li>
+    </ul>
   );
 }
 
@@ -296,11 +316,7 @@ function HelpButton() {
         <CircleHelp className="h-7 w-7" strokeWidth={1.6} />
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="Ajuda" size="sm">
-        <ul className="space-y-2 text-sm">
-          <li><kbd className="rounded border border-line bg-surface-2 px-1.5">/</kbd> busca global</li>
-          <li><kbd className="rounded border border-line bg-surface-2 px-1.5">N</kbd> nova oportunidade (fora de campos de texto)</li>
-          <li>O que você vê em cada módulo depende do nível do seu perfil (Próprio, Equipe ou Total), definido pela gerência em Configurações → Segurança.</li>
-        </ul>
+<HelpContent />
       </Modal>
     </>
   );
@@ -335,16 +351,15 @@ export function AppShell() {
         <header className="sticky top-0 z-20 flex print:hidden h-[72px] items-center gap-3 border-b border-line/60 bg-surface/95 px-4 backdrop-blur sm:px-6">
           <button className="rounded-sm p-1.5 text-ink hover:bg-surface-2 lg:hidden" aria-label="Abrir menu" onClick={() => setMobileOpen(true)}><Menu className="h-6 w-6" /></button>
           <GlobalSearch ref={search} />
-          <div className="ml-auto flex items-center gap-2 sm:gap-4">
+          <div className="ml-auto flex items-center gap-1 sm:gap-4">
             <Link to="/activities" className="relative flex h-11 w-11 items-center justify-center rounded-circle text-ink hover:bg-surface-2" aria-label={notify ? `${notify} atividades para hoje ou vencidas` : 'Sem atividades pendentes hoje'}>
               <Bell className="h-7 w-7" strokeWidth={1.6} />
               {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
             </Link>
-            <HeaderSupport />
-            <HeaderPlaybooks />
-            <HeaderMoneyToggle />
+            {/* no celular estes vão para o menu da conta (o topo não pode passar da largura da tela) */}
+            <div className="hidden items-center gap-4 sm:flex"><HeaderSupport /><HeaderPlaybooks /><HeaderMoneyToggle /></div>
             <MentionsMenu />
-            <HelpButton />
+            <div className="hidden sm:block"><HelpButton /></div>
             <UserMenu />
           </div>
         </header>
