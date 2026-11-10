@@ -31,6 +31,8 @@ export type Lookups = {
   branches: { id: string; name: string; fiscalKinds: string[] }[];
   /** roteiro de cada tipo de tarefa (Configurações → Modelos) */
   activityScripts?: Partial<Record<string, string>>;
+  /** imagens da Personalização já enviadas: espaço → versão */
+  brand?: Partial<Record<string, string>>;
 };
 export type StageRequirements = { proposta?: boolean; plano?: boolean; proximaAcao?: boolean; respostasObrigatorias?: boolean };
 export type LookupStage = { id: string; key: string; name: string; position: number; kind: 'open' | 'won' | 'lost'; isTerminal: boolean; color: string | null; requirements: StageRequirements };

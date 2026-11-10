@@ -57,9 +57,15 @@ function HexRing({ className }: { className?: string }) {
  * o quadro de acesso flutua à direita, sem encostar nas bordas.
  */
 export function AuthFrame({ children }: { children: ReactNode }) {
+  const [bg, setBg] = useState<'loading' | 'ok' | 'none'>('loading');
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#1B2026] text-white">
       <div className="pointer-events-none absolute inset-0" aria-hidden>
+        {/* Personalização → Fundo do login: a imagem enviada cobre a tela; sem ela, o hexágono BKT */}
+        <img src="/api/v1/public/brand/login_fundo" alt="" className={bg === 'ok' ? 'absolute inset-0 h-full w-full object-cover' : 'hidden'} onLoad={() => setBg('ok')} onError={() => setBg('none')} draggable={false} />
+        {bg === 'ok' && <div className="absolute inset-0 bg-gradient-to-r from-[#1B2026]/80 via-[#1B2026]/40 to-[#1B2026]/20" />}
+      </div>
+      <div className={bg === 'ok' ? 'hidden' : 'pointer-events-none absolute inset-0'} aria-hidden>
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_45%,rgba(47,89,134,0.55),transparent_60%)]" />
         <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />
       </div>

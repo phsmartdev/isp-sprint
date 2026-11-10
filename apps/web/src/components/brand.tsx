@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import type { BrandSlot } from '@isp/shared';
+import { useLookups } from '../lib/hooks';
 
 /**
  * Espaços de imagem da Personalização. Nenhuma imagem fica fixa no código:
@@ -58,3 +59,14 @@ export function MascotBubble(_: { slot: BrandSlot; lines: string[]; highlight: R
 }
 export const ConfiarFacil = () => null;
 export const ConfiarFacilPartial = () => null;
+
+/**
+ * Arte de um espaço da Personalização (banner do Início, cartão do menu): a imagem enviada, cobrindo o espaço,
+ * ou o grafismo padrão quando não há imagem.
+ */
+export function BrandArt({ slot, className, fallback }: { slot: BrandSlot; className?: string; fallback: ReactNode }) {
+  const v = useLookups().data?.brand?.[slot];
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!v || failed === v) return <>{fallback}</>;
+  return <img src={`/api/v1/brand/${slot}?v=${v}`} alt="" aria-hidden className={clsx('object-cover', className)} onError={() => setFailed(v)} draggable={false} />;
+}

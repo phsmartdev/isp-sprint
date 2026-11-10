@@ -656,18 +656,22 @@ export const adminRoutes = [
     tag: 'Personalização',
     public: true,
     params: SlotParams,
-    handler: async ({ app, params, reply }) => {
+    handler: async ({ app, params, reply, req }) => {
       const slug = process.env.PRIMARY_TENANT_SLUG ?? 'yepnet';
       const [a] = await app.db
         .select({ mime: s.brandAssets.mime, data: s.brandAssets.data, sha256: s.brandAssets.sha256 })
         .from(s.brandAssets)
         .innerJoin(s.tenants, eq(s.tenants.id, s.brandAssets.tenantId))
-        .where(and(eq(s.tenants.slug, slug), eq(s.brandAssets.slot, params.slot)))
+        // a empresa principal; se o identificador dela for outro, a mais antiga que tiver a imagem
+        .where(eq(s.brandAssets.slot, params.slot))
+        .orderBy(sql`(${s.tenants.slug} = ${slug}) desc`, asc(s.tenants.createdAt))
         .limit(1);
       if (!a) throw notFound('Imagem não enviada.');
+      if (req.headers['if-none-match'] === `"${a.sha256}"`) return reply.code(304).header('etag', `"${a.sha256}"`).header('cache-control', 'public, no-cache').send();
       return reply
         .header('content-type', a.mime)
-        .header('cache-control', 'public, max-age=300')
+        // sempre confere com o servidor (troca e remoção valem na hora); sem mudança, volta 304 sem a imagem
+        .header('cache-control', 'public, no-cache')
         .header('etag', `"${a.sha256}"`)
         .header('content-security-policy', "default-src 'none'")
         .send(a.data);

@@ -100,11 +100,12 @@ test('gerência muda nível na matriz e o vendedor sente na hora', async ({ brow
   await expect(g.getByText('Vendedor · Inteligência: Sem acesso')).toBeVisible();
 });
 
-test('Personalização: identidade BKT fixa, sem envio de imagens', async ({ page }) => {
+test('Personalização: logo e cores BKT fixos; só as artes (login, banner, menu) podem ser trocadas', async ({ page }) => {
   await login(page, 'carlos@yepnet.test');
   await page.goto('/settings/branding');
   await expect(page.getByRole('heading', { name: 'Identidade visual BKT' })).toBeVisible();
   await expect(page.getByText('Mascote — Leads')).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 3 })).toHaveText(['Fundo da tela de login', 'Banner do Início', 'Cartão do menu lateral']);
   await expect(page.getByRole('img', { name: 'BKT' }).first()).toBeVisible();
 });
 

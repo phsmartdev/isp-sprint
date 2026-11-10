@@ -22,7 +22,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Pagination, Select } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { BrandImage, useBrand } from '../../components/brand';
+import { BrandImage, Hexagons, useBrand } from '../../components/brand';
 import { FitText } from '../../components/ui/FitText';
 import { IpAccessCard } from '../../features/admin/IpAccess';
 
@@ -551,17 +551,72 @@ export function AdminSecurity() {
 }
 
 // =================================================================== personalização
+/** Espaços de imagem que a empresa pode trocar; sem imagem, vale o grafismo padrão BKT. */
+const ART_SLOTS: { slot: BrandSlot; title: string; where: string; size: string; maxDim: number; aspect: string }[] = [
+  { slot: 'login_fundo', title: 'Fundo da tela de login', where: 'Cobre a tela de acesso, atrás das boas-vindas e do quadro de login.', size: 'Recomendado: 1920 × 1080 px, paisagem.', maxDim: 2560, aspect: 'aspect-[16/9]' },
+  { slot: 'banner_inicio', title: 'Banner do Início', where: 'O bloco “Nova oportunidade” da tela inicial. O texto fica à esquerda, com um véu escuro por cima da imagem.', size: 'Recomendado: 1600 × 520 px.', maxDim: 2000, aspect: 'aspect-[3/1]' },
+  { slot: 'card_sidebar', title: 'Cartão do menu lateral', where: 'O cartão decorativo no rodapé do menu à esquerda.', size: 'Recomendado: 560 × 240 px.', maxDim: 1200, aspect: 'aspect-[7/3]' },
+];
+
 export function AdminBranding() {
-  const q = useQuery({ queryKey: ['admin', 'branding'], queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null })[] }>('/admin/branding') });
+  const q = useQuery({ queryKey: ['admin', 'branding'], queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null; sha256?: string })[] }>('/admin/branding') });
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { bump } = useBrand();
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['admin', 'branding'] }); void qc.invalidateQueries({ queryKey: ['lookups'] }); bump(); };
+  const up = useMutation({
+    mutationFn: async ({ slot, file, maxDim }: { slot: BrandSlot; file: File; maxDim: number }) => {
+      if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) throw new Error('Envie PNG, JPG ou WebP.');
+      const small = await compressImage(file, { maxBytes: 1_900_000, maxDim });
+      if (small.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB mesmo reduzida. Use uma imagem menor.');
+      return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(small) } });
+    },
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Imagem atualizada' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const del = useMutation({
+    mutationFn: (slot: BrandSlot) => api(`/admin/branding/${slot}`, { method: 'DELETE' }),
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Voltou para a arte padrão' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
   return (
     <div className="space-y-4">
       <section className="card flex flex-wrap items-center gap-5 p-5">
         <img src="/brand/bkt-logo.png" alt="BKT" className="h-12 w-auto" />
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-bold text-ink">Identidade visual BKT</h2>
-          <p className="text-sm text-muted">A identidade segue o Brand Book da BKT: logotipo oficial, azul #2F5986 e grafite #2D3339, títulos em Orbitron, textos em Work Sans e hexágonos como grafismo. Ela é fixa no sistema para não ser alterada por engano, por isso não há imagens a enviar aqui.</p>
+          <p className="text-sm text-muted">Logotipo, cores (azul #2F5986 e grafite #2D3339) e fontes seguem o Brand Book e ficam fixos. As imagens abaixo podem ser trocadas; sem imagem, vale o grafismo de hexágonos.</p>
         </div>
       </section>
+      {q.isLoading ? <div className="card"><LoadingRows rows={4} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          {ART_SLOTS.map((a) => {
+            const cur = q.data!.slots.find((x) => x.slot === a.slot);
+            const busy = (up.isPending && up.variables?.slot === a.slot) || (del.isPending && del.variables === a.slot);
+            return (
+              <section key={a.slot} className="card flex flex-col p-4" aria-label={a.title}>
+                <h3 className="font-bold text-ink">{a.title}</h3>
+                <p className="mt-0.5 text-sm text-muted">{a.where}</p>
+                <div className={clsx('relative mt-3 overflow-hidden bg-gradient-to-br from-navy to-primary', a.aspect)}>
+                  {cur?.hasImage
+                    ? <img src={`/api/v1/brand/${a.slot}?v=${cur.sha256?.slice(0, 12) ?? ''}`} alt={`Imagem atual: ${a.title}`} className="absolute inset-0 h-full w-full object-cover" />
+                    : <><Hexagons className="absolute inset-0 h-full w-full" /><span className="absolute bottom-2 left-2 bg-black/40 px-2 py-0.5 text-2xs font-semibold text-white">Arte padrão</span></>}
+                </div>
+                <p className="mt-2 text-xs text-muted">{a.size} PNG, JPG ou WebP; imagens grandes são reduzidas automaticamente.</p>
+                {cur?.hasImage && cur.updatedAt && <p className="text-xs text-muted">Enviada em {fmtDateTime(cur.updatedAt)}{cur.updatedByName ? ` por ${cur.updatedByName}` : ''}.</p>}
+                <div className="mt-auto flex flex-wrap gap-2 pt-3">
+                  <label className={clsx('inline-flex h-9 cursor-pointer items-center gap-2 bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover', busy && 'pointer-events-none opacity-60')}>
+                    {busy && up.isPending ? 'Enviando…' : cur?.hasImage ? 'Trocar imagem' : 'Enviar imagem'}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label={`Imagem para ${a.title}`} disabled={busy}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate({ slot: a.slot, file: f, maxDim: a.maxDim }); e.target.value = ''; }} />
+                  </label>
+                  {cur?.hasImage && <Button size="sm" variant="secondary" disabled={busy} onClick={() => del.mutate(a.slot)}>Voltar à arte padrão</Button>}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

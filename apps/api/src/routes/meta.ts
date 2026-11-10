@@ -17,7 +17,8 @@ export const metaRoutes = [
       const t = auth.tenantId;
       await ensureTenantSetup(app.db, t, ensureSalesBranches);
       const branchesQ = app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, fiscalKinds: s.salesBranches.fiscalKinds }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, t), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
-      const [branches, scripts, users, sources, campaigns, pipes, teams, plans] = await Promise.all([
+      const [brandRows, branches, scripts, users, sources, campaigns, pipes, teams, plans] = await Promise.all([
+        app.db.select({ slot: s.brandAssets.slot, sha: s.brandAssets.sha256 }).from(s.brandAssets).where(eq(s.brandAssets.tenantId, t)),
         branchesQ,
         latestActivityScripts(app.db, t),
         app.db
@@ -44,7 +45,9 @@ export const metaRoutes = [
       }));
       const def = pipelines.find((p) => p.isDefault) ?? pipelines[0];
       const activityScripts = Object.fromEntries(scripts.filter((x) => x.script).map((x) => [x.type, x.script]));
-      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans, branches, activityScripts };
+      /** imagens da Personalização já enviadas (espaço → versão), para as telas não pedirem imagem que não existe */
+      const brand = Object.fromEntries(brandRows.map((b) => [b.slot, b.sha.slice(0, 12)]));
+      return { users, sources, campaigns, pipelines, stages: def?.stages ?? [], teams, plans, branches, activityScripts, brand };
     },
   }),
 ];
