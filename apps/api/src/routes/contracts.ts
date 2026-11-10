@@ -29,6 +29,7 @@ import {
 } from '../services/contracts';
 import { runContractAlerts } from '../services/contractAlerts';
 import { ledgerOf } from '../services/contractLedger';
+import { carryToContract, contractItemsFromRows, contractSuggestionFromOpportunity, opportunityPeople } from '../services/contractFromOpportunity';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD');
 const optDay = day.nullable().optional();
@@ -167,17 +168,37 @@ export const contractRoutes = [
       const [existing] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
       // Zenith: a empresa detentora do contrato é a filial que vendeu a oportunidade
       const [branch] = await app.db.select({ name: s.salesBranches.name }).from(s.opportunities).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.opportunities.branchId)).where(eq(s.opportunities.id, o.id)).limit(1);
-      const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
-      const items = await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
+      const [[plan], [full], oppRows, people] = await Promise.all([
+        o.planId ? app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : Promise.resolve([]),
+        app.db.select().from(s.opportunities).where(eq(s.opportunities.id, o.id)).limit(1),
+        app.db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, o.id), eq(s.opportunityItems.tenantId, auth.tenantId))).orderBy(asc(s.opportunityItems.position)),
+        opportunityPeople(app.db, auth.tenantId, o.id),
+      ]);
+      const items = oppRows.length ? contractItemsFromRows(oppRows) : await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
+      const sug = await contractSuggestionFromOpportunity(app.db, auth.tenantId, full!, { name: o.contactName }, people, oppRows);
+      const [addr] = await app.db.select({ street: s.addresses.street, number: s.addresses.number, district: s.addresses.district, city: s.addresses.city, state: s.addresses.state, postalCode: s.addresses.postalCode }).from(s.addresses).where(eq(s.addresses.contactId, o.contactId)).limit(1);
+      const [docs] = await app.db.select({ n: sql<number>`count(*)::int` }).from(s.opportunityAttachments).where(and(eq(s.opportunityAttachments.opportunityId, o.id), isNull(s.opportunityAttachments.deletedAt), sql`${s.opportunityAttachments.kind} <> 'email'`));
       const publico = o.segment === 'governamental';
       return {
         opportunity: { id: o.id, code: o.code, stage: o.stage, title: o.title, wonAt: o.wonAt, contactId: o.contactId, customerId: o.customerId },
-        client: { name: o.contactName, document: o.document, segment: o.segment, email: o.email, phone: o.phone },
+        client: { name: o.contactName, document: o.document, segment: o.segment, email: o.email, phone: o.phone, address: addr ?? null },
+        /** o que vem da negociação e o que passa ao cadastrar (contatos e anexos) */
+        imported: [...(items.length ? [`${items.length} produto(s)/serviço(s)`] : []), ...sug.imported],
+        carries: { people: people.length, documents: docs?.n ?? 0 },
         existingContractId: existing?.id ?? null,
         won: o.stage === 'ganha',
         suggestion: {
           kind: publico ? 'publico' : 'privado', legalRegime: publico ? 'lei_14133' : 'privado', commercialOwnerId: o.ownerId,
-          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12, zenith: { ...EMPTY_ZENITH, holderCompany: branch?.name ?? '' } },
+          version: {
+            number: '', object: (sug.object ?? (plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title)).slice(0, 2000), items,
+            monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0),
+            totalCents: contractValuesFromItems(items, 12).totalCents ?? null,
+            signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12,
+            publicTerms: publico ? sug.publicTerms : null,
+            deliveryAddresses: sug.deliveryAddresses,
+            specialConditions: sug.specialConditions,
+            zenith: { ...sug.zenith, holderCompany: branch?.name ?? '' },
+          },
         },
       };
     },
@@ -245,7 +266,13 @@ export const contractRoutes = [
         }
         await syncZenithSlas(tx, auth.tenantId, c!.id, ver.zenith, auth.userId);
         await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Contrato ${ver.number} (${BILLING_TYPE_LABELS[body.billingType]}) cadastrado${oppTitle ? ` a partir da oportunidade “${oppTitle}”` : ''}`, { opportunityId: body.opportunityId });
-        if (body.opportunityId) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: body.opportunityId, type: 'contrato_cadastrado', actorId: auth.userId, payload: { contractId: c!.id, number: ver.number } });
+        if (body.opportunityId) {
+          await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: body.opportunityId, type: 'contrato_cadastrado', actorId: auth.userId, payload: { contractId: c!.id, number: ver.number } });
+          // contatos e anexos da negociação passam para o contrato
+          const [cl] = await tx.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, contactId!)).limit(1);
+          const carried = await carryToContract(tx, auth.tenantId, body.opportunityId, c!.id, auth.userId, cl?.name ?? '');
+          if (carried.people || carried.documents) await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Da negociação: ${carried.people} contato(s) e ${carried.documents} documento(s)`, { opportunityId: body.opportunityId });
+        }
         return c!;
       });
       await audit(app.db, req, { action: 'contract.create', entityType: 'contract', entityId: c.id, metadata: { number: ver.number, opportunityId: body.opportunityId } });
