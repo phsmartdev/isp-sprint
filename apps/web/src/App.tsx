@@ -1,17 +1,3 @@
-import { EmailPage, MailboxesPage } from './pages/email/Email';
-import { AbmPage } from './pages/marketing/Abm';
-import { Abm360Page } from './pages/marketing/Abm360';
-import { ProductPage } from './pages/product/Product';
-import { InterventionsPage } from './pages/results/Interventions';
-import { AnalysisPage } from './pages/results/Analysis';
-import { RitualsPage } from './pages/results/Rituals';
-import { VacationsPage } from './pages/results/Vacations';
-import { GamificationPage } from './pages/results/Gamification';
-import { MyPointsPage } from './pages/MyPoints';
-import { PerformancePage } from './pages/results/Performance';
-import { MeetingPage } from './pages/results/Meeting';
-import { DecisionsPage } from './pages/results/Decisions';
-import { GoalsPage } from './pages/performance/Goals';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SettingsLayout } from './features/settings/SettingsLayout';
 import { lazy, Suspense, type ReactNode } from 'react';
@@ -21,44 +7,79 @@ import { AppShell } from './components/layout/AppShell';
 import { EmptyState, LoadingRows } from './components/ui/primitives';
 import { LoginPage, ResetPasswordPage } from './pages/Login';
 import { useMoneyHidden } from './lib/privacy';
-import { ApprovalPage } from './pages/Approval';
-import { ApprovalsPage } from './pages/Approvals';
-import { HomePage } from './pages/Home';
-import { LeadsPage } from './pages/Leads';
-import { OpportunitiesPage } from './pages/Opportunities';
-import { NewOpportunityPage, OpportunityWorkspacePage } from './pages/OpportunityWorkspace';
-import { BudgetPlanningPage } from './pages/budget/Planning';
-import { BudgetAssetsPage, BudgetContractsPage, BudgetPurchasesPage, BudgetSoftwarePage } from './pages/budget/Resources';
-import { BudgetIndicatorsPage } from './pages/budget/Indicators';
-import { CustomersPage } from './pages/Customers';
-import { CustomerDetailPage } from './pages/CustomerDetail';
-import { ActivitiesPage } from './pages/Activities';
-import { ProjectsPage } from './pages/projects/Projects';
-import { TasksPage } from './pages/tasks/Tasks';
-import { ProjectDetailPage } from './pages/projects/ProjectDetail';
-import { ReportsPage } from './pages/Reports';
-import { IntelligencePage } from './pages/Intelligence';
-import { CampaignDetailPage, CampaignsPage } from './pages/Campaigns';
-import { ContractsPage } from './pages/contracts/Contracts';
-import { ContractDetailPage } from './pages/contracts/ContractDetail';
-import { NewContractPage } from './pages/contracts/NewContract';
-import { ArpDetailPage } from './pages/contracts/ArpDetail';
-import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
-import { TeamPanelPage } from './pages/results/TeamPanel';
-import { GoTo, TeamPeoplePage, TeamTrackingPage } from './pages/results/TeamHubs';
-import { GiftsPage } from './pages/Gifts';
-import { SupportPage } from './features/support/Support';
+// telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
+const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
+const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
+const AbmPage = lazy(() => import('./pages/marketing/Abm').then((m) => ({ default: m.AbmPage })));
+const Abm360Page = lazy(() => import('./pages/marketing/Abm360').then((m) => ({ default: m.Abm360Page })));
+const ProductPage = lazy(() => import('./pages/product/Product').then((m) => ({ default: m.ProductPage })));
+const InterventionsPage = lazy(() => import('./pages/results/Interventions').then((m) => ({ default: m.InterventionsPage })));
+const AnalysisPage = lazy(() => import('./pages/results/Analysis').then((m) => ({ default: m.AnalysisPage })));
+const RitualsPage = lazy(() => import('./pages/results/Rituals').then((m) => ({ default: m.RitualsPage })));
+const VacationsPage = lazy(() => import('./pages/results/Vacations').then((m) => ({ default: m.VacationsPage })));
+const GamificationPage = lazy(() => import('./pages/results/Gamification').then((m) => ({ default: m.GamificationPage })));
+const MyPointsPage = lazy(() => import('./pages/MyPoints').then((m) => ({ default: m.MyPointsPage })));
+const PerformancePage = lazy(() => import('./pages/results/Performance').then((m) => ({ default: m.PerformancePage })));
+const MeetingPage = lazy(() => import('./pages/results/Meeting').then((m) => ({ default: m.MeetingPage })));
+const DecisionsPage = lazy(() => import('./pages/results/Decisions').then((m) => ({ default: m.DecisionsPage })));
+const GoalsPage = lazy(() => import('./pages/performance/Goals').then((m) => ({ default: m.GoalsPage })));
+const ApprovalPage = lazy(() => import('./pages/Approval').then((m) => ({ default: m.ApprovalPage })));
+const ApprovalsPage = lazy(() => import('./pages/Approvals').then((m) => ({ default: m.ApprovalsPage })));
+const HomePage = lazy(() => import('./pages/Home').then((m) => ({ default: m.HomePage })));
+const LeadsPage = lazy(() => import('./pages/Leads').then((m) => ({ default: m.LeadsPage })));
+const OpportunitiesPage = lazy(() => import('./pages/Opportunities').then((m) => ({ default: m.OpportunitiesPage })));
+const NewOpportunityPage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.NewOpportunityPage })));
+const OpportunityWorkspacePage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.OpportunityWorkspacePage })));
+const BudgetPlanningPage = lazy(() => import('./pages/budget/Planning').then((m) => ({ default: m.BudgetPlanningPage })));
+const BudgetAssetsPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetAssetsPage })));
+const BudgetContractsPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetContractsPage })));
+const BudgetPurchasesPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetPurchasesPage })));
+const BudgetSoftwarePage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetSoftwarePage })));
+const BudgetIndicatorsPage = lazy(() => import('./pages/budget/Indicators').then((m) => ({ default: m.BudgetIndicatorsPage })));
+const CustomersPage = lazy(() => import('./pages/Customers').then((m) => ({ default: m.CustomersPage })));
+const CustomerDetailPage = lazy(() => import('./pages/CustomerDetail').then((m) => ({ default: m.CustomerDetailPage })));
+const ActivitiesPage = lazy(() => import('./pages/Activities').then((m) => ({ default: m.ActivitiesPage })));
+const ProjectsPage = lazy(() => import('./pages/projects/Projects').then((m) => ({ default: m.ProjectsPage })));
+const TasksPage = lazy(() => import('./pages/tasks/Tasks').then((m) => ({ default: m.TasksPage })));
+const ProjectDetailPage = lazy(() => import('./pages/projects/ProjectDetail').then((m) => ({ default: m.ProjectDetailPage })));
+const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
+const IntelligencePage = lazy(() => import('./pages/Intelligence').then((m) => ({ default: m.IntelligencePage })));
+const CampaignDetailPage = lazy(() => import('./pages/Campaigns').then((m) => ({ default: m.CampaignDetailPage })));
+const CampaignsPage = lazy(() => import('./pages/Campaigns').then((m) => ({ default: m.CampaignsPage })));
+const ContractsPage = lazy(() => import('./pages/contracts/Contracts').then((m) => ({ default: m.ContractsPage })));
+const ContractDetailPage = lazy(() => import('./pages/contracts/ContractDetail').then((m) => ({ default: m.ContractDetailPage })));
+const NewContractPage = lazy(() => import('./pages/contracts/NewContract').then((m) => ({ default: m.NewContractPage })));
+const ArpDetailPage = lazy(() => import('./pages/contracts/ArpDetail').then((m) => ({ default: m.ArpDetailPage })));
+const CustomerSuccessPage = lazy(() => import('./pages/cs/CustomerSuccess').then((m) => ({ default: m.CustomerSuccessPage })));
+const TeamPanelPage = lazy(() => import('./pages/results/TeamPanel').then((m) => ({ default: m.TeamPanelPage })));
+const TeamPeoplePage = lazy(() => import('./pages/results/TeamHubs').then((m) => ({ default: m.TeamPeoplePage })));
+const TeamTrackingPage = lazy(() => import('./pages/results/TeamHubs').then((m) => ({ default: m.TeamTrackingPage })));
+const GiftsPage = lazy(() => import('./pages/Gifts').then((m) => ({ default: m.GiftsPage })));
+const SupportPage = lazy(() => import('./features/support/Support').then((m) => ({ default: m.SupportPage })));
+const JourneyPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.JourneyPage })));
+const KickoffPrintPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.KickoffPrintPage })));
+const PublicKickoffPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.PublicKickoffPage })));
+const PublicJourneyPage = lazy(() => import('./pages/cs/JourneyTrailTab').then((m) => ({ default: m.PublicJourneyPage })));
+const PublicSurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ default: m.PublicSurveyPage })));
+const SurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ default: m.SurveyPage })));
+const PublicNoticePage = lazy(() => import('./pages/PublicNotice').then((m) => ({ default: m.PublicNoticePage })));
+const KpiBoardPage = lazy(() => import('./pages/KpiBoardPage').then((m) => ({ default: m.KpiBoardPage })));
+
+/** Endereços antigos continuam funcionando (links, favoritos, avisos): vão para a aba certa mantendo os filtros. */
+function GoTo({ to, aba }: { to: string; aba?: string }) {
+  const loc = useLocation();
+  const q = new URLSearchParams(loc.search);
+  if (aba) q.set('aba', aba);
+  const s = q.toString();
+  return <Navigate replace to={`${to}${s ? `?${s}` : ''}${loc.hash}`} />;
+}
+
 const PlaybooksPage = lazy(() => import('./pages/playbooks/Library').then((m) => ({ default: m.PlaybooksPage })));
 const PlaybookReaderPage = lazy(() => import('./pages/playbooks/Reader').then((m) => ({ default: m.PlaybookReaderPage })));
 const PlaybookNewPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookNewPage })));
 const PlaybookEditorPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookEditorPage })));
 const PlaybookApprovePage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookApprovePage })));
 const PlaybookVersionsPage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookVersionsPage })));
-import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
-import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
-import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
-import { PublicNoticePage } from './pages/PublicNotice';
-import { KpiBoardPage } from './pages/KpiBoardPage';
 
 // Configurações carregam sob demanda: o código de cada tela só baixa quando ela é aberta
 const AdminModules = lazy(() => import('./pages/admin/Modules').then((m) => ({ default: m.AdminModules })));
@@ -111,6 +132,7 @@ export function App() {
   // olhinho dos valores: redesenha as telas ao ocultar/mostrar (sem perder o estado)
   useMoneyHidden();
   return (
+    <Suspense fallback={<div className="p-6"><LoadingRows rows={6} /></div>}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/k/:token" element={<PublicKickoffPage />} />
@@ -221,6 +243,7 @@ export function App() {
         <Route path="*" element={<div className="card"><EmptyState title="Esta página não existe" description="Confira o endereço ou volte para o início." /></div>} />
       </Route>
     </Routes>
+    </Suspense>
   );
 }
 

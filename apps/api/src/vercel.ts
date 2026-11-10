@@ -15,7 +15,9 @@ function getApp() {
   if (!ready) {
     ready = (async () => {
       const config = loadConfig();
-      const { db } = createDb(serverlessUrl(config.databaseUrl), 3, { idleMs: 5_000 });
+      // 5 conexões por instância: as telas disparam consultas independentes em paralelo (modo transação do pooler,
+      // que aguenta muitas conexões de cliente); DB_POOL_MAX ajusta sem novo deploy
+      const { db } = createDb(serverlessUrl(config.databaseUrl), Math.min(10, Math.max(1, Number(process.env.DB_POOL_MAX) || 5)), { idleMs: 5_000 });
       const app = await buildApp({ config, db });
       await app.ready();
       return app;

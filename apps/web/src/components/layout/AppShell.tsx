@@ -1,6 +1,6 @@
 import { HeaderMoneyToggle } from '../../lib/privacy';
 import { HeaderSupport } from '../../features/support/Support';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -14,7 +14,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
 import { useHotkey } from '../../lib/hooks';
 import { useTheme, type ThemeChoice } from '../../lib/theme';
-import { Avatar } from '../ui/primitives';
+import { Avatar, LoadingRows } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
@@ -346,7 +346,7 @@ export function AppShell() {
           </div>
         </header>
         <main id="conteudo" className="min-w-0 flex-1 px-4 py-6 sm:px-6 2xl:px-8">
-          <AppErrorBoundary resetKey={loc.pathname}><Outlet /></AppErrorBoundary>
+          <AppErrorBoundary resetKey={loc.pathname}><Suspense fallback={<div className="card"><LoadingRows rows={6} /></div>}><Outlet /></Suspense></AppErrorBoundary>
         </main>
       </div>
     </div>
