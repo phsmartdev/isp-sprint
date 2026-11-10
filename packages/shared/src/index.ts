@@ -384,6 +384,19 @@ export const AttachmentUpload = z.object({
   data: z.string().min(8).max(4_300_000),
 });
 
+/** Anexo grande: enviado em partes (cada uma cabe numa requisição da hospedagem) e montado no servidor. */
+export const ATTACHMENT_CHUNK_BYTES = 2_500_000;
+export const MAX_LARGE_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+/** Download em partes do mesmo tamanho (a resposta também tem limite na hospedagem). */
+export const ATTACHMENT_DOWNLOAD_PART_BYTES = 3_000_000;
+export const AttachmentChunk = z.object({ data: z.string().min(4).max(3_400_000) });
+export const AttachmentComplete = z.object({
+  kind: z.enum(ATTACHMENT_KINDS).default('proposta'),
+  filename: z.string().trim().min(1).max(160),
+  parts: z.number().int().min(1).max(Math.ceil(MAX_LARGE_ATTACHMENT_BYTES / ATTACHMENT_CHUNK_BYTES)),
+  sizeBytes: z.number().int().min(1).max(MAX_LARGE_ATTACHMENT_BYTES),
+});
+
 export const OpportunityEmail = z.object({
   kind: z.enum(['proposta', 'followup']),
   to: z.string().trim().toLowerCase().email('E-mail do cliente inválido').max(200),

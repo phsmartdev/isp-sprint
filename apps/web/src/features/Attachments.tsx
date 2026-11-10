@@ -4,7 +4,8 @@ import { Download, FileText, Mail, MessageCircle, Paperclip, Trash2 } from 'luci
 import { EmailViewer } from './opportunity/EmailViewer';
 import { api } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
-import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, fileToBase64, fmtBytes } from '../lib/files';
+import { ATTACHMENT_ACCEPT, fmtBytes } from '../lib/files';
+import { OPP_ATTACHMENT_LIMIT_LABEL, attachmentUrl, downloadOppAttachment, needsPartedDownload, uploadOppAttachment } from '../lib/attachmentTransfer';
 import { useAuth } from '../auth/AuthProvider';
 import { Button, Chip, EmptyState, LoadingRows } from '../components/ui/primitives';
 import { useToast } from '../components/ui/overlay';
@@ -25,14 +26,18 @@ export function Attachments({ oppId, onEditProposal }: { oppId: string; onEditPr
   const kindRef = useRef<'proposta' | 'outro'>('proposta');
   const q = useAttachments(oppId);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['attachments', oppId] }); qc.invalidateQueries({ queryKey: ['opportunity', oppId] }); qc.invalidateQueries({ queryKey: ['timeline', oppId] }); };
+  const [progress, setProgress] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState<{ id: string; p: number } | null>(null);
   const up = useMutation({
-    mutationFn: async (f: File) => {
-      if (f.size > MAX_ATTACHMENT_BYTES) throw new Error('O arquivo passa de 3 MB.');
-      return api(`/opportunities/${oppId}/attachments`, { method: 'POST', body: { kind: kindRef.current, filename: f.name, data: await fileToBase64(f) } });
-    },
+    mutationFn: (f: File) => uploadOppAttachment(oppId, kindRef.current, f, setProgress),
     onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Arquivo anexado' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+    onSettled: () => setProgress(null),
   });
+  const download = async (a: Attachment) => {
+    setDownloading({ id: a.id, p: 0 });
+    try { await downloadOppAttachment(oppId, a, (p) => setDownloading({ id: a.id, p })); } catch (e) { toast({ tone: 'error', message: (e as Error).message }); } finally { setDownloading(null); }
+  };
   const del = useMutation({
     mutationFn: (id: string) => api(`/opportunities/${oppId}/attachments/${id}`, { method: 'DELETE' }),
     onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Anexo removido' }); },
@@ -44,7 +49,7 @@ export function Attachments({ oppId, onEditProposal }: { oppId: string; onEditPr
       <div className="mb-3 flex flex-wrap gap-2">
         <Button variant="primary" size="sm" icon={<Paperclip className="h-4 w-4" />} loading={up.isPending && kindRef.current === 'proposta'} onClick={() => pick('proposta')}>Anexar proposta</Button>
         <Button size="sm" icon={<Paperclip className="h-4 w-4" />} loading={up.isPending && kindRef.current === 'outro'} onClick={() => pick('outro')}>Outro arquivo</Button>
-        <span className="self-center text-xs text-muted">PDF, Word, Excel, PowerPoint, PNG ou JPG até 3 MB</span>
+        <span className="self-center text-xs text-muted">{progress !== null ? `Enviando… ${Math.round(progress * 100)}%` : `PDF, Word, Excel, PowerPoint, PNG ou JPG até ${OPP_ATTACHMENT_LIMIT_LABEL}`}</span>
         <input ref={file} type="file" className="hidden" accept={ATTACHMENT_ACCEPT} aria-label="Arquivo para anexar" onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate(f); e.target.value = ''; }} />
       </div>
       {q.isLoading ? <LoadingRows rows={2} /> : !q.data?.items.length ? <EmptyState title="Nenhum anexo" description="Anexe a proposta para enviar ao cliente e avançar nas etapas que exigem." /> : (
@@ -60,7 +65,11 @@ export function Attachments({ oppId, onEditProposal }: { oppId: string; onEditPr
               {a.kind === 'email' && <Button size="sm" variant="outline" icon={<Mail className="h-4 w-4" />} onClick={() => setViewing(a.id)}>Ver e-mail</Button>}
               {a.kind === 'proposta' && onEditProposal && <Button size="sm" variant="outline" onClick={onEditProposal}>Editar proposta</Button>}
               <button type="button" className="rounded-sm p-1.5 text-success hover:bg-surface-2" onClick={() => setWa({ id: a.id, filename: a.filename })} aria-label={`Enviar ${a.filename} pelo WhatsApp`} title="Enviar pelo WhatsApp"><MessageCircle className="h-4 w-4" /></button>
-              <a className="rounded-sm p-1.5 text-ink hover:bg-surface-2" href={`/api/v1/opportunities/${oppId}/attachments/${a.id}/download`} aria-label={`Baixar ${a.filename}`}><Download className="h-4 w-4" /></a>
+              {needsPartedDownload(a.sizeBytes) ? (
+                <button type="button" className="inline-flex items-center gap-1 rounded-sm p-1.5 text-ink hover:bg-surface-2 disabled:opacity-60" disabled={!!downloading} onClick={() => void download(a)} aria-label={`Baixar ${a.filename}`}>
+                  <Download className="h-4 w-4" />{downloading?.id === a.id && <span className="text-xs">{Math.round(downloading.p * 100)}%</span>}
+                </button>
+              ) : <a className="rounded-sm p-1.5 text-ink hover:bg-surface-2" href={attachmentUrl(oppId, a.id)} aria-label={`Baixar ${a.filename}`}><Download className="h-4 w-4" /></a>}
               {(a.uploadedBy === me?.user.id || can('oportunidades', 'equipe')) && (
                 <button className="rounded-sm p-1.5 text-danger hover:bg-danger-soft" aria-label={`Remover ${a.filename}`} onClick={() => del.mutate(a.id)}><Trash2 className="h-4 w-4" /></button>
               )}
