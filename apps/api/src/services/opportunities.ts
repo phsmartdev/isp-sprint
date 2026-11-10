@@ -2,7 +2,7 @@ import type { FastifyRequest } from 'fastify';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { OpportunityReason } from '@isp/domain';
-import type { ContactCreate, OpportunityDetails } from '@isp/shared';
+import type { ContactCreate, DeliveryAddressInput, OpportunityDetails } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { mergeCustom } from './customFields';
@@ -28,6 +28,8 @@ export type CreateOpportunityInput = Partial<OpportunityDetails> & {
   stage?: string | null;
   channel: string | null;
   reasons: OpportunityReason[];
+  /** Outros endereços de entrega, além do principal. */
+  deliveryAddresses?: DeliveryAddressInput[];
   title: string | null;
 };
 
@@ -143,12 +145,19 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
     rowVersion: 1,
     payload: { pipeline: pipeline.key, reasons: input.reasons, channel: input.channel, fromLead: input.leadId ?? null, provisionalContact: !input.contactId, planId: plan?.id ?? null },
   });
+  const extra = (input.deliveryAddresses ?? []).filter(hasAddress);
+  if (extra.length) {
+    await tx.insert(s.opportunityDeliveryAddresses).values(extra.map((a, position) => ({ tenantId: auth.tenantId, opportunityId: opp!.id, position, label: a.label ?? null, cep: a.cep ?? null, street: a.street ?? null, number: a.number ?? null, district: a.district ?? null, city: a.city ?? null, notes: a.notes ?? null, createdBy: auth.userId })));
+  }
   await audit(tx, req, { action: 'opportunity.create', entityType: 'opportunity', entityId: opp!.id });
   // campo obrigatório só vale para o tipo de venda escolhido (ou para todos, se não tiver tipo)
   const missing = pipeline.fields.filter((f) => (!f.saleKinds?.length || (input.saleKind && f.saleKinds.includes(input.saleKind))) && f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
   if (missing.length) throw unprocessable(`Preencha: ${missing.map((f) => f.label).join(', ')}.`, missing.map((f) => ({ path: `custom.${f.key}`, message: 'Obrigatório' })));
   return { ...opp!, pipelineId: pipeline.id, stage: firstStage.key };
 }
+
+/** Endereço com ao menos um dado preenchido (linhas em branco da tela não viram endereço). */
+export const hasAddress = (a: DeliveryAddressInput) => !!(a.label || a.cep || a.street || a.number || a.district || a.city || a.notes);
 
 const owner = alias(s.users, 'opp_owner');
 

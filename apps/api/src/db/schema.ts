@@ -661,6 +661,8 @@ export const opportunityItems = pgTable('opportunity_items', {
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   /** Tipo de negociação do item: venda (pagamento único), recorrência ou locação/aluguel (mensais). */
   dealKind: text('deal_kind').notNull().default('recorrencia'),
+  /** Endereço de entrega do item: um dos endereços extras da oportunidade; vazio = o endereço principal. */
+  deliveryAddressId: uuid('delivery_address_id').references((): AnyPgColumn => opportunityDeliveryAddresses.id, { onDelete: 'set null' }),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ oppIdx: index('opportunity_items_opp_idx').on(t.opportunityId), unitCk: check('opportunity_items_unit_ck', sql`unit in ('un','km','rs','h')`), kindCk: check('opportunity_items_deal_kind_ck', inList('deal_kind', ['venda', 'servico', 'recorrencia', 'locacao'])) }));
@@ -911,6 +913,30 @@ export const opportunityAnswers = pgTable(
     answeredAt: ts('answered_at').notNull().defaultNow(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.opportunityId, t.questionId] }) }),
+);
+
+/**
+ * Endereços de entrega além do principal (o principal fica nos campos install* da oportunidade).
+ * Licitação costuma entregar em várias unidades do órgão; cada produto pode apontar o seu endereço.
+ */
+export const opportunityDeliveryAddresses = pgTable(
+  'opportunity_delivery_addresses',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    position: integer('position').notNull().default(0),
+    label: text('label'),
+    cep: text('cep'),
+    street: text('street'),
+    number: text('number'),
+    district: text('district'),
+    city: text('city'),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ oppIdx: index('opp_delivery_addr_opp_idx').on(t.tenantId, t.opportunityId) }),
 );
 
 /** Anexos da oportunidade (proposta e outros). Guardados no banco, até 3 MB. */

@@ -10,6 +10,7 @@ import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { bumpVersion, loadOpportunity, opportunityDto } from '../services/opportunities';
 import { pipelinesOf } from '../services/instructions';
+import { assertDeliveryAddresses, deliveryAddressesOf } from './deliveryAddresses';
 
 const OppParams = z.object({ id: z.string().uuid() });
 const cents = z.number().int().min(0).max(100_000_000_000);
@@ -17,6 +18,7 @@ const ItemBody = z.object({
   description: z.string().trim().min(2).max(300), unit: z.enum(ITEM_UNITS), qtyMilli: z.number().int().min(1).max(1_000_000_000),
   unitCents: cents, discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(), dealKind: z.enum(DEAL_KINDS).default('recorrencia'),
   /** documento fiscal do item (tributos da viabilidade econômica) */ fiscalDocTypeId: z.string().uuid().nullable().optional(),
+  /** endereço de entrega do item (um dos outros endereços da oportunidade); vazio = o principal */ deliveryAddressId: z.string().uuid().nullable().optional(),
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
@@ -49,6 +51,9 @@ export const opportunityItemRoutes = [
         bid: await isBid(app.db, auth.tenantId, opp),
         bidMode: opp.bidMode ?? null, bidGlobalCents: opp.bidGlobalCents ?? null,
         rowVersion: opp.rowVersion,
+        /** endereços de entrega para escolher em cada produto (o principal é o vazio) */
+        deliveryAddresses: await deliveryAddressesOf(app.db, auth.tenantId, opp.id),
+        principalAddress: [[opp.installStreet, opp.installNumber].filter(Boolean).join(', '), opp.installDistrict, opp.installCity].filter(Boolean).join(' · ') || null,
         editable: !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]),
       };
     },
@@ -70,6 +75,7 @@ export const opportunityItemRoutes = [
           const found = await tx.select({ id: s.fiscalDocTypes.id }).from(s.fiscalDocTypes).where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), inArray(s.fiscalDocTypes.id, docIds)));
           if (found.length !== docIds.length) throw unprocessable('Documento fiscal inválido em algum item.');
         }
+        await assertDeliveryAddresses(tx, auth.tenantId, opp.id, body.items.map((i) => i.deliveryAddressId).filter(Boolean) as string[]);
         const bid = await isBid(tx, auth.tenantId, opp);
         const before = await tx.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, opp.id));
         const beforeTotals = itemsTotals(before);
@@ -85,7 +91,7 @@ export const opportunityItemRoutes = [
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
             ...(bid ? carry(it.description) : {}),
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
-            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, dealKind: it.dealKind, createdBy: auth.userId,
+            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, dealKind: it.dealKind, createdBy: auth.userId,
           })));
         }
         // cada item lançado/importado fica no catálogo para as próximas negociações (último valor e tipo usados)

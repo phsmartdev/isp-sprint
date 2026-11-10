@@ -70,6 +70,7 @@ import { commitmentControlRoutes } from './routes/commitmentControl';
 import { opportunityContactRoutes } from './routes/opportunityContacts';
 import { salesBranchRoutes } from './routes/salesBranches';
 import { opportunityItemRoutes } from './routes/opportunityItems';
+import { deliveryAddressRoutes } from './routes/deliveryAddresses';
 import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants';
 import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
@@ -263,6 +264,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...opportunityContactRoutes,
     ...salesBranchRoutes,
     ...opportunityItemRoutes,
+    ...deliveryAddressRoutes,
     ...bidParticipantRoutes,
     ...bidActionRoutes,
     ...competitorRoutes,

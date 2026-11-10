@@ -19,6 +19,11 @@ const phone = z
 const email = z.string().trim().toLowerCase().email('E-mail inválido').max(200).optional().nullable().or(z.literal('').transform(() => null));
 const cents = z.number().int().min(0).max(100_000_000);
 const rowVersion = z.number().int().min(1);
+/** CEP aceita 00000-000, 00000000 ou 00.000-000 (como costuma vir de edital); guarda 00000-000. */
+const cep = z.preprocess(
+  (v) => (typeof v === 'string' && /^\s*\d{2}\.?\d{3}-?\d{3}\s*$/.test(v) ? v.replace(/\D/g, '').replace(/^(\d{5})(\d{3})$/, '$1-$2') : v),
+  z.string().trim().regex(/^\d{5}-\d{3}$/, 'CEP no formato 00000-000').optional().nullable().or(z.literal('').transform(() => null)),
+);
 const stageKey = z.string().trim().regex(/^[a-z][a-z0-9_]{1,39}$/, 'Etapa inválida');
 
 // ------------------------------------------------------------------ auth
@@ -113,7 +118,7 @@ export type OpportunityListQuery = z.infer<typeof OpportunityListQuery>;
 
 /** Endereço de instalação, viabilidade e campos personalizados (criação e edição). */
 export const OpportunityDetails = z.object({
-  installCep: z.string().trim().regex(/^\d{5}-?\d{3}$/, 'CEP no formato 00000-000').optional().nullable().or(z.literal('').transform(() => null)),
+  installCep: cep,
   installStreet: optText(200),
   installNumber: optText(20),
   installDistrict: optText(100),
@@ -129,16 +134,31 @@ export const OpportunityDetails = z.object({
   engineeringStatus: z.enum(['nao_necessaria', 'pendente', 'aprovada', 'reprovada']).optional(),
   engineeringTicket: optText(60),
   executiveTicket: optText(60),
-  custom: z.record(z.string(), z.union([z.string().max(2000), z.number(), z.boolean(), z.null()])).optional(),
+  /** texto longo (ex.: objeto da licitação) cabe inteiro; o limite por tipo de campo é conferido no servidor */
+  custom: z.record(z.string(), z.union([z.string().max(50_000), z.number(), z.boolean(), z.null()])).optional(),
 });
 export type OpportunityDetails = z.infer<typeof OpportunityDetails>;
+
+/** Endereço de entrega (além do principal): licitação costuma entregar em várias unidades. */
+export const DeliveryAddressInput = z.object({
+  id: uuid.optional().nullable(),
+  label: optText(120),
+  cep: cep,
+  street: optText(200),
+  number: optText(20),
+  district: optText(100),
+  city: optText(100),
+  notes: optText(500),
+});
+export type DeliveryAddressInput = z.infer<typeof DeliveryAddressInput>;
+export const MAX_DELIVERY_ADDRESSES = 200;
 
 export const OpportunityCreate = z
   .object({
     contactId: uuid.optional().nullable(),
     newContact: ContactCreate.optional().nullable(),
     leadId: uuid.optional().nullable(),
-    title: optText(160),
+    title: optText(300),
     sourceId: uuid.optional().nullable(),
     campaignId: uuid.optional().nullable(),
     channel: optText(40),
@@ -155,6 +175,8 @@ export const OpportunityCreate = z
     stage: stageKey.optional().nullable(),
     /** Cliente da base: true duplica a oportunidade no funil Sucesso do Cliente. */
     customerSuccess: z.boolean().optional(),
+    /** Outros endereços de entrega, além do principal (campos install*). */
+    deliveryAddresses: z.array(DeliveryAddressInput).max(MAX_DELIVERY_ADDRESSES).default([]),
   })
   .merge(OpportunityDetails)
   .refine((v) => !!v.contactId !== !!v.newContact, {
@@ -164,7 +186,7 @@ export const OpportunityCreate = z
 export type OpportunityCreate = z.infer<typeof OpportunityCreate>;
 
 export const OpportunityUpdate = z.object({
-  title: optText(160),
+  title: optText(300),
   ownerId: uuid.optional(),
   sourceId: uuid.optional().nullable(),
   campaignId: uuid.optional().nullable(),

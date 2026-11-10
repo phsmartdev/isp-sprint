@@ -14,19 +14,20 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Input, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { addressLine, type DeliveryAddress } from './DeliveryAddresses';
 
-type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind };
+type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
-type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean };
+type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean; deliveryAddresses?: DeliveryAddress[]; principalAddress?: string | null };
 type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
-type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind };
+type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind; addr: string };
 
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
-const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind });
-const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
-const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind });
+const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind, addr: '' });
+const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
+const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null });
 
 export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
@@ -55,6 +56,9 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const bid = !!q.data?.bid;
   const bidTotal = bid ? (bidMode === 'global' ? parseMoney(bidGlobal) : parsed.reduce((t, i) => t + (i.qtyMilli && i.bidUnitCents != null ? Math.round((i.qtyMilli * i.bidUnitCents) / 1000) : 0), 0)) : null;
   const editable = !!q.data?.editable;
+  // endereços de entrega: com mais de um, cada produto escolhe o seu (vazio = o principal)
+  const addrs = q.data?.deliveryAddresses ?? [];
+  const principalLabel = `Principal${q.data?.principalAddress ? ` — ${q.data.principalAddress}` : ''}`;
   const set = (k: string, patch: Partial<Row>) => setRows(cur.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   // documentos fiscais da filial da oportunidade (agrupados por tipo fiscal); o produto do catálogo sugere o seu documento padrão
   // catálogo: itens já usados nas negociações (preenche medida, valor, tipo e documento ao escolher)
@@ -116,7 +120,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       ) : (
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', ...(addrs.length ? ['Entrega'] : []), 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
                 const lt = lineTotal(parsed[i]!);
@@ -128,6 +132,14 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                       const doc = !r.doc ? (c?.fiscalDocTypeId ?? docForPlan(v)) : '';
                       set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
                     }} /></td>
+                    {addrs.length > 0 && (
+                      <td className="px-1.5 py-1.5">
+                        <Select aria-label={`Endereço de entrega ${i + 1}`} className="h-9 w-[180px] min-w-[180px]" value={r.addr} disabled={!editable} title={r.addr ? addressLine(addrs.find((a) => a.id === r.addr) ?? { label: null, street: null, number: null, district: null, city: null }) : principalLabel} onChange={(e) => set(r.key, { addr: e.target.value })}>
+                          <option value="">1 · {principalLabel}</option>
+                          {addrs.map((a, n) => <option key={a.id} value={a.id}>{n + 2} · {addressLine(a)}</option>)}
+                        </Select>
+                      </td>
+                    )}
                     <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
