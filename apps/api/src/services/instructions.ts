@@ -18,26 +18,47 @@ const TIPO = { open: 'aberta', won: 'ganha', lost: 'perdida' } as const;
 
 export type ActiveInstruction = { id: string; version: number; content: Instruction };
 
-export async function pipelinesOf(db: DbOrTx, tenantId: string, opts: { includeInactive?: boolean } = {}) {
-  const pipes = await db
-    .select()
-    .from(s.pipelines)
-    .where(and(eq(s.pipelines.tenantId, tenantId), opts.includeInactive ? undefined : eq(s.pipelines.active, true)))
-    .orderBy(asc(s.pipelines.position), asc(s.pipelines.createdAt));
-  if (!pipes.length) return [];
-  const ids = pipes.map((p) => p.id);
-  // sequencial: pode rodar dentro de transação (uma conexão só)
-  const stages = await db.select().from(s.pipelineStages).where(and(inArray(s.pipelineStages.pipelineId, ids), eq(s.pipelineStages.active, true))).orderBy(asc(s.pipelineStages.position));
-  const members = await db.select({ pipelineId: s.pipelineMembers.pipelineId, userId: s.pipelineMembers.userId, email: s.users.email, name: s.users.name }).from(s.pipelineMembers).innerJoin(s.users, eq(s.users.id, s.pipelineMembers.userId)).where(inArray(s.pipelineMembers.pipelineId, ids));
-  const fields = await db.select().from(s.pipelineFields).where(and(inArray(s.pipelineFields.pipelineId, ids), eq(s.pipelineFields.active, true))).orderBy(asc(s.pipelineFields.position));
-  const autos = await db.select().from(s.pipelineAutomations).where(inArray(s.pipelineAutomations.pipelineId, ids)).orderBy(asc(s.pipelineAutomations.position), asc(s.pipelineAutomations.createdAt));
-  return pipes.map((p) => ({
-    ...p,
-    stages: stages.filter((st) => st.pipelineId === p.id),
-    members: members.filter((m) => m.pipelineId === p.id),
-    fields: fields.filter((f) => f.pipelineId === p.id),
-    automations: autos.filter((a) => a.pipelineId === p.id),
-  }));
+type PipeRow = typeof s.pipelines.$inferSelect;
+type Bundle = PipeRow & {
+  stages: (typeof s.pipelineStages.$inferSelect)[];
+  members: { pipelineId: string; userId: string; email: string; name: string }[];
+  fields: (typeof s.pipelineFields.$inferSelect)[];
+  automations: (typeof s.pipelineAutomations.$inferSelect)[];
+};
+
+/**
+ * Jornadas com etapas, membros, campos e automações numa única ida ao banco (antes eram cinco, em sequência).
+ * Muitas telas passam por aqui: no banco remoto, cada consulta a menos é uma viagem a menos.
+ */
+export async function pipelinesOf(db: DbOrTx, tenantId: string, opts: { includeInactive?: boolean } = {}): Promise<Bundle[]> {
+  const r = await db.execute<{ p: Record<string, unknown> }>(sql`
+    select json_build_object(
+      'id', p.id, 'tenantId', p.tenant_id, 'key', p.key, 'name', p.name, 'description', p.description, 'segments', p.segments,
+      'isDefault', p.is_default, 'position', p.position, 'active', p.active, 'createdAt', p.created_at,
+      'stages', coalesce((select json_agg(json_build_object('id', st.id, 'tenantId', st.tenant_id, 'pipelineId', st.pipeline_id, 'key', st.key, 'name', st.name, 'position', st.position,
+          'isTerminal', st.is_terminal, 'kind', st.kind, 'color', st.color, 'requirements', st.requirements, 'active', st.active) order by st.position)
+        from pipeline_stages st where st.pipeline_id = p.id and st.active), '[]'),
+      'members', coalesce((select json_agg(json_build_object('pipelineId', pm.pipeline_id, 'userId', pm.user_id, 'email', u.email, 'name', u.name))
+        from pipeline_members pm join users u on u.id = pm.user_id where pm.pipeline_id = p.id), '[]'),
+      'fields', coalesce((select json_agg(json_build_object('id', f.id, 'tenantId', f.tenant_id, 'pipelineId', f.pipeline_id, 'key', f.key, 'label', f.label, 'type', f.type, 'options', f.options,
+          'required', f.required, 'position', f.position, 'active', f.active, 'saleKinds', f.sale_kinds) order by f.position)
+        from pipeline_fields f where f.pipeline_id = p.id and f.active), '[]'),
+      'automations', coalesce((select json_agg(json_build_object('id', a.id, 'tenantId', a.tenant_id, 'pipelineId', a.pipeline_id, 'name', a.name, 'active', a.active, 'trigger', a.trigger,
+          'actions', a.actions, 'position', a.position, 'createdBy', a.created_by, 'createdAt', a.created_at, 'updatedAt', a.updated_at) order by a.position, a.created_at)
+        from pipeline_automations a where a.pipeline_id = p.id), '[]')
+    ) as p
+    from pipelines p
+    where p.tenant_id = ${tenantId} ${opts.includeInactive ? sql`` : sql`and p.active`}
+    order by p.position, p.created_at`);
+  // datas voltam do JSON como texto: devolve como Date, igual às consultas normais
+  return r.rows.map(({ p }) => {
+    const b = p as unknown as Bundle;
+    return {
+      ...b,
+      createdAt: new Date(b.createdAt as unknown as string),
+      automations: b.automations.map((a) => ({ ...a, createdAt: new Date(a.createdAt as unknown as string), updatedAt: new Date(a.updatedAt as unknown as string) })),
+    };
+  });
 }
 export type PipelineFull = Awaited<ReturnType<typeof pipelinesOf>>[number];
 
@@ -232,8 +253,9 @@ export function pipelineAllowed(p: { members: { userId: string }[] }, userId: st
 
 /** Jornada para uma nova oportunidade: a informada, a do segmento do cliente ou a padrão. */
 export async function resolvePipeline(db: DbOrTx, tenantId: string, opts: { pipelineId?: string | null; segment?: string | null; userId?: string; total?: boolean }) {
-  await getActiveInstruction(db, tenantId);
-  const all = await pipelinesOf(db, tenantId);
+  // o modelo inicial cria as jornadas: com jornadas no banco, ele já existe (uma consulta em vez de quatro)
+  let all = await pipelinesOf(db, tenantId);
+  if (!all.length) { await getActiveInstruction(db, tenantId); all = await pipelinesOf(db, tenantId); }
   if (!all.length) throw unprocessable('Nenhuma jornada de venda ativa.');
   if (opts.pipelineId) {
     const p = all.find((x) => x.id === opts.pipelineId);
@@ -328,6 +350,35 @@ export async function ensureBidFields(db: DbOrTx, tenantId: string) {
 
 /** Campos que saíram do formulário do tipo de venda (ex.: itens/lotes passaram para Produtos e serviços). Os valores já gravados ficam no histórico. */
 const RETIRED_SALE_FIELDS = ['lotes_interesse', 'valor_pregao', 'valor_vitorioso'];
+
+/**
+ * Ajustes automáticos da empresa (modelo inicial, formulário por tipo de venda, campos aposentados, campos do
+ * pregão e filiais) conferidos numa única consulta; cada ajuste só roda quando de fato falta.
+ * Antes eram ~13 consultas em sequência a cada carregamento de tela.
+ */
+export async function ensureTenantSetup(db: DbOrTx, tenantId: string, ensureBranches: (db: DbOrTx, tenantId: string) => Promise<void>) {
+  const modes = sql.join(BID_DISPUTE_MODES.map((m) => sql`${m}`), sql`, `);
+  const retired = sql.join(RETIRED_SALE_FIELDS.map((k) => sql`${k}`), sql`, `);
+  const legacy = sql.join(SALE_TYPE_KEYS.map((k) => sql`${k}`), sql`, `);
+  const r = await db.execute<{ has_instr: boolean; corp: string | null; legacy: boolean; sale_fields: boolean; retired: boolean; bid_ok: boolean; branches: boolean }>(sql`
+    with corp as (select id from pipelines where tenant_id = ${tenantId} and key = 'empresarial' and active limit 1),
+         f as (select key, options, sale_kinds from pipeline_fields where pipeline_id = (select id from corp) and active)
+    select
+      exists(select 1 from business_instructions where tenant_id = ${tenantId} and status = 'ativa') as has_instr,
+      (select id from corp) as corp,
+      exists(select 1 from pipelines where tenant_id = ${tenantId} and active and key in (${legacy})) as legacy,
+      exists(select 1 from f where cardinality(sale_kinds) > 0) as sale_fields,
+      exists(select 1 from f where key in (${retired})) as retired,
+      (not exists(select 1 from f where key = 'tipo_disputa' and not (options @> array[${modes}]::text[]))
+        and exists(select 1 from f where key = 'lance_inicial') and exists(select 1 from f where key = 'lance_minimo')) as bid_ok,
+      exists(select 1 from sales_branches where tenant_id = ${tenantId}) as branches`);
+  const x = r.rows[0]!;
+  if (!x.has_instr) await getActiveInstruction(db, tenantId);
+  if (!x.has_instr || (x.corp && (x.legacy || !x.sale_fields))) await ensureSaleTypeForm(db, tenantId);
+  if (!x.has_instr || (x.corp && x.retired)) await ensureRetiredSaleFields(db, tenantId);
+  if (!x.has_instr || (x.corp && !x.bid_ok)) await ensureBidFields(db, tenantId);
+  if (!x.branches) await ensureBranches(db, tenantId);
+}
 export async function ensureRetiredSaleFields(db: DbOrTx, tenantId: string) {
   const [corp] = await db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, tenantId), eq(s.pipelines.key, 'empresarial'), eq(s.pipelines.active, true))).limit(1);
   if (!corp) return false;

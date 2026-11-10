@@ -102,6 +102,16 @@ function normalizeVersion<T extends Partial<z.infer<typeof VersionFields>>>(v: T
   return out;
 }
 
+/**
+ * Dispara a consulta já (o Drizzle só executa no await) para rodar em paralelo com as outras.
+ * O erro continua sendo lançado no ponto em que o resultado é esperado.
+ */
+function startQuery<T>(q: PromiseLike<T>): Promise<T> {
+  const p = Promise.resolve(q);
+  p.catch(() => {});
+  return p;
+}
+
 const canManage = (auth: AuthContext) => isAdmin(auth) || level(auth, 'contratos') === 'total' || hasSector(auth, ['administracao', 'inteligencia_comercial', 'diretoria']);
 const canEdit = (auth: AuthContext, c: ContractRow) => canManage(auth) || (c.stage === 'cadastro_validacao' && c.commercialOwnerId === auth.userId) || (level(auth, 'contratos') === 'equipe' && auth.teamMemberIds.includes(c.commercialOwnerId));
 
@@ -323,14 +333,26 @@ export const contractRoutes = [
       if (to < from || daysBetween(from, to) > 1100) throw unprocessable('Período inválido (até 3 anos).');
       const span = daysBetween(from, to) + 1;
       const prevTo = addDays(from, -1), prevFrom = addDays(prevTo, -(span - 1));
+      const renewOpenQ = startQuery(app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status }).from(s.contractProcesses).where(and(eq(s.contractProcesses.tenantId, auth.tenantId), eq(s.contractProcesses.kind, 'renovacao'))));
       const rows = await decorate(app.db, await listQuery(app.db).where(contractScope(auth)));
       const active = rows.filter((r) => r.stage !== 'arquivado' && r.validatedAt);
-      const within = (d: number) => active.filter((r) => r.endAt && r.endAt >= today && r.endAt <= addDays(today, d));
-      const renewOpen = await app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status }).from(s.contractProcesses).where(and(eq(s.contractProcesses.tenantId, auth.tenantId), eq(s.contractProcesses.kind, 'renovacao')));
-      const atRisk = active.filter((r) => r.closureExpected || (r.endAt && r.endAt <= addDays(today, 90) && !renewOpen.some((p) => p.contractId === r.id && p.cycleKey === r.endAt && p.status === 'concluido')));
+      // consultas independentes saem juntas (no banco remoto, cada espera em fila custa uma viagem)
       const ids = rows.map((r) => r.id);
-      const alerts = ids.length ? await app.db.select({ kind: s.contractAlerts.kind, dueAt: s.contractAlerts.dueAt, contractId: s.contractAlerts.contractId, id: s.contractAlerts.id, detail: s.contractAlerts.detail }).from(s.contractAlerts).where(and(inArray(s.contractAlerts.contractId, ids), eq(s.contractAlerts.status, 'aberto'))).orderBy(asc(s.contractAlerts.dueAt)) : [];
-      const ledger = ids.length ? await app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : [];
+      const liveIds = active.map((r) => r.id);
+      const alertsQ = startQuery(ids.length ? app.db.select({ kind: s.contractAlerts.kind, dueAt: s.contractAlerts.dueAt, contractId: s.contractAlerts.contractId, id: s.contractAlerts.id, detail: s.contractAlerts.detail }).from(s.contractAlerts).where(and(inArray(s.contractAlerts.contractId, ids), eq(s.contractAlerts.status, 'aberto'))).orderBy(asc(s.contractAlerts.dueAt)) : Promise.resolve([]));
+      const ledgerQ = startQuery(ids.length ? app.db.select({ contractId: s.contractLedger.contractId, kind: s.contractLedger.kind, amountCents: s.contractLedger.amountCents, occurredOn: s.contractLedger.occurredOn }).from(s.contractLedger).where(inArray(s.contractLedger.contractId, ids)) : Promise.resolve([]));
+      const erpRowsQ = startQuery(liveIds.length ? app.db.select({ contractId: s.contractErpRecords.contractId, status: s.contractErpRecords.status, seq: s.contractErpRecords.seq }).from(s.contractErpRecords).where(inArray(s.contractErpRecords.contractId, liveIds)) : Promise.resolve([]));
+      const adjQ = startQuery(ids.length ? app.db.select({ status: s.contractProcesses.status, steps: s.contractProcesses.steps, cycleKey: s.contractProcesses.cycleKey }).from(s.contractProcesses)
+        .where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : Promise.resolve([]));
+      const tasksQ = startQuery(ids.length ? app.db.select({ id: s.activities.id, title: s.activities.title, contractId: s.activities.contractId, dueAt: s.activities.dueAt, acceptStatus: s.activities.acceptStatus, ownerName: s.users.name })
+        .from(s.activities).innerJoin(s.users, eq(s.users.id, s.activities.ownerId))
+        .where(and(inArray(s.activities.contractId, ids), isNull(s.activities.deletedAt), isNull(s.activities.completedAt), sql`${s.activities.status} <> 'cancelada'`)) : Promise.resolve([]));
+      const adjProcsQ = startQuery(ids.length ? app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status }).from(s.contractProcesses).where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : Promise.resolve([]));
+      const within = (d: number) => active.filter((r) => r.endAt && r.endAt >= today && r.endAt <= addDays(today, d));
+      const renewOpen = await renewOpenQ;
+      const atRisk = active.filter((r) => r.closureExpected || (r.endAt && r.endAt <= addDays(today, 90) && !renewOpen.some((p) => p.contractId === r.id && p.cycleKey === r.endAt && p.status === 'concluido')));
+      const alerts = await alertsQ;
+      const ledger = await ledgerQ;
       const ledBy = groupBy(ledger, (e) => e.contractId);
       // faturamento do período por contrato (registrado no CRM; recorrente = previsto pela mensalidade)
       const billed = (r: (typeof rows)[number], f: string, t: string) => {
@@ -378,19 +400,15 @@ export const contractRoutes = [
         publicAnnualCents: live.filter((r) => r.kind === 'publico').reduce((t, r) => t + annual(r), 0),
       };
       // operação: o que exige decisão ou ação (Cadastro ERP, divergências, reajustes, pendências e aceite)
-      const liveIds = active.map((r) => r.id);
-      const erpRows = liveIds.length ? await app.db.select({ contractId: s.contractErpRecords.contractId, status: s.contractErpRecords.status, seq: s.contractErpRecords.seq }).from(s.contractErpRecords).where(inArray(s.contractErpRecords.contractId, liveIds)) : [];
+      const erpRows = await erpRowsQ;
       const latestBy = new Map<string, { status: string; seq: number }>();
       for (const r of erpRows) if ((latestBy.get(r.contractId)?.seq ?? 0) < r.seq) latestBy.set(r.contractId, r);
       const erpLatest = [...latestBy.values()];
       const erpBy = (st: string) => erpLatest.filter((x) => x.status === st).length;
       const yearAgo = addDays(today, -365);
-      const adj = ids.length ? await app.db.select({ status: s.contractProcesses.status, steps: s.contractProcesses.steps, cycleKey: s.contractProcesses.cycleKey }).from(s.contractProcesses)
-        .where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : [];
+      const adj = await adjQ;
       const adjEligible = adj.filter((p) => p.status !== 'cancelado' && /^\d{4}-\d{2}-\d{2}$/.test(p.cycleKey) && p.cycleKey >= yearAgo && p.cycleKey <= today);
-      const tasks = ids.length ? await app.db.select({ id: s.activities.id, title: s.activities.title, contractId: s.activities.contractId, dueAt: s.activities.dueAt, acceptStatus: s.activities.acceptStatus, ownerName: s.users.name })
-        .from(s.activities).innerJoin(s.users, eq(s.users.id, s.activities.ownerId))
-        .where(and(inArray(s.activities.contractId, ids), isNull(s.activities.deletedAt), isNull(s.activities.completedAt), sql`${s.activities.status} <> 'cancelada'`)) : [];
+      const tasks = await tasksQ;
       const overdueTasks = tasks.filter((t) => t.dueAt && t.dueAt < new Date());
       const clientOf = new Map(rows.map((r) => [r.id, { name: r.clientName, number: r.number }]));
       const operations = {
@@ -408,7 +426,7 @@ export const contractRoutes = [
       const pc = active.map((r) => ({ id: r.id, endAt: r.endAt, monthlyCents: r.monthlyCents, closureExpected: r.closureExpected, renewal: renewalOf(r), overdue: r.pendencies.overdue, overdueTasks: overdueBy.get(r.id) ?? 0, erpStatus: latestBy.get(r.id)?.status ?? null }));
       const pcBy = new Map(pc.map((x) => [x.id, x]));
       const healthOf = (id: string) => contractHealth(pcBy.get(id)!, today);
-      const adjProcs = ids.length ? await app.db.select({ contractId: s.contractProcesses.contractId, cycleKey: s.contractProcesses.cycleKey, status: s.contractProcesses.status }).from(s.contractProcesses).where(and(inArray(s.contractProcesses.contractId, ids), eq(s.contractProcesses.kind, 'reajuste'))) : [];
+      const adjProcs = await adjProcsQ;
       const adjDue = adjustmentsDue(active.map((r) => ({ id: r.id, adjustmentBaseDate: r.adjustmentBaseDate, adjustmentIndex: r.adjustmentIndex, monthlyCents: r.monthlyCents, processes: adjProcs.filter((p) => p.contractId === r.id) })), today, 90);
       const owners = new Map<string, { name: string; n: number; monthlyCents: number; riskCents: number; overdueTasks: number; pendencias: number; erpPending: number }>();
       for (const r of active) {
