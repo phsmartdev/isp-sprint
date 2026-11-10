@@ -11,7 +11,8 @@ import { defaultPeriod, useStageInfo, useUrlState } from '../lib/hooks';
 import { DateRange } from '../components/ui/DateRange';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar, Chip, Delta, ErrorState, LoadingRows, formatKpi } from '../components/ui/primitives';
-import { Hexagons } from '../components/brand';
+import { BrandArt, Hexagons } from '../components/brand';
+import { useLookups } from '../lib/hooks';
 import { Progress } from '../components/charts/charts';
 import { StageChip, inkOf, productLabel, stageColor } from '../components/badges';
 import { useToast } from '../components/ui/overlay';
@@ -64,6 +65,7 @@ export function HomePage() {
   const stageInfo = useStageInfo();
   const { me } = useAuth();
   const nav = useNavigate();
+  const brandBanner = !!useLookups().data?.brand?.banner_inicio;
   const qc = useQueryClient();
   const toast = useToast();
   const p0 = defaultPeriod();
@@ -114,7 +116,9 @@ export function HomePage() {
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_minmax(400px,1fr)]">
         {/* Banner */}
         <section className="relative min-h-[260px] overflow-hidden rounded-lg bg-gradient-to-br from-navy to-primary text-white xl:col-span-2" aria-label="Nova oportunidade">
-          <Hexagons className="absolute inset-y-0 right-0 h-full w-[70%]" />
+          <BrandArt slot="banner_inicio" className="absolute inset-0 h-full w-full" fallback={<Hexagons className="absolute inset-y-0 right-0 h-full w-[70%]" />} />
+          {/* com imagem enviada: um véu escuro à esquerda mantém o texto legível */}
+          {brandBanner && <div className="absolute inset-0 bg-gradient-to-r from-navy/85 via-navy/50 to-transparent" aria-hidden />}
           <div className="relative z-10 max-w-[480px] p-8 sm:p-10">
             <h2 className="font-display text-[30px] font-bold leading-[1.15] tracking-wide sm:text-[34px]">Nova oportunidade</h2>
             <p className="mt-4 text-md text-white/90">Qualifique o cliente, consulte a cobertura e monte a proposta em um passo a passo guiado.</p>
