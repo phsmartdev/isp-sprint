@@ -14,7 +14,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Input, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
-import { addressLine, type DeliveryAddress } from './DeliveryAddresses';
+import { addressLine, NewDeliveryAddressModal, type DeliveryAddress } from './DeliveryAddresses';
 
 type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
@@ -22,6 +22,7 @@ type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCe
 type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
 type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind; addr: string };
 
+const NEW_ADDR = '__novo__';
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
@@ -58,7 +59,8 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const editable = !!q.data?.editable;
   // endereços de entrega: com mais de um, cada produto escolhe o seu (vazio = o principal)
   const addrs = q.data?.deliveryAddresses ?? [];
-  const principalLabel = `Principal${q.data?.principalAddress ? ` — ${q.data.principalAddress}` : ''}`;
+  const principalLabel = q.data?.principalAddress ? `Principal — ${q.data.principalAddress}` : 'Principal (sem endereço)';
+  const [addrFor, setAddrFor] = useState<string | null>(null);
   const set = (k: string, patch: Partial<Row>) => setRows(cur.map((r) => (r.key === k ? { ...r, ...patch } : r)));
   // documentos fiscais da filial da oportunidade (agrupados por tipo fiscal); o produto do catálogo sugere o seu documento padrão
   // catálogo: itens já usados nas negociações (preenche medida, valor, tipo e documento ao escolher)
@@ -120,7 +122,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       ) : (
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', ...(addrs.length ? ['Entrega'] : []), 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Endereço de entrega', 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
                 const lt = lineTotal(parsed[i]!);
@@ -132,14 +134,14 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                       const doc = !r.doc ? (c?.fiscalDocTypeId ?? docForPlan(v)) : '';
                       set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
                     }} /></td>
-                    {addrs.length > 0 && (
-                      <td className="px-1.5 py-1.5">
-                        <Select aria-label={`Endereço de entrega ${i + 1}`} className="h-9 w-[180px] min-w-[180px]" value={r.addr} disabled={!editable} title={r.addr ? addressLine(addrs.find((a) => a.id === r.addr) ?? { label: null, street: null, number: null, district: null, city: null }) : principalLabel} onChange={(e) => set(r.key, { addr: e.target.value })}>
-                          <option value="">1 · {principalLabel}</option>
-                          {addrs.map((a, n) => <option key={a.id} value={a.id}>{n + 2} · {addressLine(a)}</option>)}
-                        </Select>
-                      </td>
-                    )}
+                    <td className="px-1.5 py-1.5">
+                      <Select aria-label={`Endereço de entrega ${i + 1}`} className="h-9 w-[200px] min-w-[200px]" value={r.addr} disabled={!editable} title={r.addr ? addressLine(addrs.find((a) => a.id === r.addr) ?? { label: null, street: null, number: null, district: null, city: null }) : principalLabel}
+                        onChange={(e) => (e.target.value === NEW_ADDR ? setAddrFor(r.key) : set(r.key, { addr: e.target.value }))}>
+                        <option value="">{addrs.length ? `1 · ${principalLabel}` : principalLabel}</option>
+                        {addrs.map((a, n) => <option key={a.id} value={a.id}>{n + 2} · {addressLine(a)}</option>)}
+                        <option value={NEW_ADDR}>+ Novo endereço de entrega…</option>
+                      </Select>
+                    </td>
                     <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
@@ -188,6 +190,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
           <Button variant="primary" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate()}>{dirty ? 'Salvar produtos e serviços' : 'Salvo'}</Button>
         </div>
       )}
+      <NewDeliveryAddressModal opp={opp} open={addrFor !== null} onClose={() => setAddrFor(null)} onCreated={(id) => { if (addrFor) setRows((rs) => (rs ?? []).map((x) => (x.key === addrFor ? { ...x, addr: id } : x))); }} />
       <Modal open={pasting} onClose={() => setPasting(false)} title="Colar do Excel"
         footer={<><Button variant="secondary" onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" onClick={() => { const ta = document.getElementById('paste-items') as HTMLTextAreaElement | null; if (ta?.value.trim()) addImported(ta.value.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); }}>Incluir itens</Button></>}>
         <div className="space-y-2 text-sm">

@@ -2,13 +2,13 @@
  * Endereços de entrega: o principal e quantos outros forem precisos (licitação costuma entregar em várias unidades).
  * Cada produto da oportunidade pode apontar um deles.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import type { Opportunity } from '../../lib/types';
 import { Button, FormField, Input } from '../../components/ui/primitives';
-import { useToast } from '../../components/ui/overlay';
+import { Modal, useToast } from '../../components/ui/overlay';
 import { AddressFields, emptyAddress, type AddressValue } from '../DealFields';
 import { errMsg } from '../contracts/shared';
 
@@ -56,57 +56,47 @@ export function ExtraAddressesEditor({ value, onChange, disabled, idPrefix = 'ea
 type Data = { principal: { cep: string | null; street: string | null; number: string | null; district: string | null; city: string | null }; items: DeliveryAddress[]; rowVersion: number; editable: boolean };
 export const useDeliveryAddresses = (oppId: string) => useQuery({ queryKey: ['delivery-addresses', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/delivery-addresses`) });
 
-/** No acompanhamento: edita o principal e os demais endereços de entrega. */
-export function DeliveryAddressesPanel({ opp }: { opp: Opportunity }) {
+/**
+ * Na tabela de produtos: cadastra um endereço de entrega novo sem sair da linha.
+ * Sem endereço principal ainda, o novo vira o principal. Devolve o id do endereço criado ('' = principal).
+ */
+export function NewDeliveryAddressModal({ opp, open, onClose, onCreated }: { opp: Opportunity; open: boolean; onClose: () => void; onCreated: (id: string) => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const q = useDeliveryAddresses(opp.id);
-  const [principal, setPrincipal] = useState<AddressValue | null>(null);
-  const [extras, setExtras] = useState<ExtraAddress[] | null>(null);
-  useEffect(() => {
-    if (q.data && principal === null) {
-      const p = q.data.principal;
-      setPrincipal({ ...emptyAddress, installCep: p.cep ?? '', installStreet: p.street ?? '', installNumber: p.number ?? '', installDistrict: p.district ?? '', installCity: p.city ?? '' });
-      setExtras(q.data.items.map(fromSaved));
-    }
-  }, [q.data, principal]);
-  const dirty = useMemo(() => {
-    if (!q.data || !principal || !extras) return false;
-    const p = q.data.principal;
-    const savedP = [p.cep, p.street, p.number, p.district, p.city].map((x) => x ?? '').join('|');
-    const curP = [principal.installCep, principal.installStreet, principal.installNumber, principal.installDistrict, principal.installCity].map((x) => x.trim()).join('|');
-    return savedP !== curP || JSON.stringify(extras.filter((e) => !isBlank(e)).map(extraToInput)) !== JSON.stringify(q.data.items.map(fromSaved).map(extraToInput));
-  }, [q.data, principal, extras]);
-  const editable = !!q.data?.editable;
+  const [draft, setDraft] = useState<ExtraAddress>(blankExtra);
+  useEffect(() => { if (open) setDraft(blankExtra()); }, [open]);
+  const p = q.data?.principal;
+  const noPrincipal = !!q.data && !(p?.cep || p?.street || p?.number || p?.district || p?.city);
   const save = useMutation({
-    mutationFn: () => api<{ opportunity: Opportunity; items: DeliveryAddress[] }>(`/opportunities/${opp.id}/delivery-addresses`, {
-      method: 'PUT',
-      body: { rowVersion: opp.rowVersion, principal: { cep: principal!.installCep.trim() || null, street: principal!.installStreet.trim() || null, number: principal!.installNumber.trim() || null, district: principal!.installDistrict.trim() || null, city: principal!.installCity.trim() || null }, items: extras!.filter((e) => !isBlank(e)).map(extraToInput) },
-    }),
+    mutationFn: () => {
+      if (isBlank(draft)) throw new Error('Preencha ao menos o logradouro ou a cidade.');
+      const d = extraToInput(draft);
+      const principal = noPrincipal ? { cep: d.cep, street: d.street, number: d.number, district: d.district, city: d.city } : p!;
+      const items = [...q.data!.items.map(fromSaved).map(extraToInput), ...(noPrincipal ? [] : [d])];
+      return api<{ opportunity: Opportunity; items: DeliveryAddress[] }>(`/opportunities/${opp.id}/delivery-addresses`, { method: 'PUT', body: { rowVersion: opp.rowVersion, principal, items } });
+    },
     onSuccess: (r) => {
       qc.setQueryData(['opportunity', opp.id], r.opportunity);
-      setPrincipal(null); setExtras(null);
       for (const k of [['delivery-addresses', opp.id], ['opp-items', opp.id], ['timeline', opp.id]]) void qc.invalidateQueries({ queryKey: k });
-      toast({ tone: 'success', message: 'Endereços de entrega salvos' });
+      onCreated(noPrincipal ? '' : r.items[r.items.length - 1]!.id);
+      toast({ tone: 'success', message: 'Endereço de entrega cadastrado' });
+      onClose();
     },
-    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'A oportunidade mudou enquanto você editava. Aguarde salvar os outros campos e tente de novo.' : errMsg(e) }),
+    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'A oportunidade mudou enquanto você editava. Salve os produtos e tente de novo.' : errMsg(e) }),
   });
-  if (!principal || !extras) return <p className="text-sm text-muted">{q.isError ? errMsg(q.error) : 'Carregando…'}</p>;
   return (
-    <section aria-label="Endereços de entrega" className="mb-6">
-      <h2 className="mb-1 flex items-center gap-2 text-md font-bold text-ink"><MapPin className="h-5 w-5 text-primary" aria-hidden />Endereços de entrega</h2>
-      <p className="mb-3 text-sm text-muted">Inclua quantos endereços a entrega tiver. Depois, escolha em cada produto onde ele será entregue.</p>
-      <fieldset className="mb-3 rounded-md border border-line p-3">
-        <legend className="px-1 text-sm font-semibold text-ink">Endereço 1 (principal)</legend>
-        <AddressFields value={principal} onChange={(v) => setPrincipal((a) => ({ ...a!, ...v }))} disabled={!editable} idPrefix="da-main" hideCondominium />
-      </fieldset>
-      <ExtraAddressesEditor value={extras} onChange={setExtras} disabled={!editable} idPrefix="da" />
-      {editable && dirty && (
-        <div className="mt-3 flex justify-end gap-2">
-          <Button variant="secondary" onClick={() => { setPrincipal(null); setExtras(null); }}>Descartar</Button>
-          <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar endereços</Button>
-        </div>
-      )}
-    </section>
+    <Modal open={open} onClose={onClose} title={noPrincipal ? 'Endereço de entrega (principal)' : 'Novo endereço de entrega'} size="lg"
+      footer={<><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} disabled={!q.data} onClick={() => save.mutate()}>Cadastrar endereço</Button></>}>
+      <div className="space-y-3">
+        <FormField label="Identificação" htmlFor="nda-label" hint="Ex.: Escola Municipal X, Secretaria de Saúde, Lote 2">
+          <Input id="nda-label" value={draft.label} maxLength={120} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} />
+        </FormField>
+        <AddressFields value={draft.address} onChange={(v) => setDraft((d) => ({ ...d, address: { ...d.address, ...v } }))} idPrefix="nda" hideCondominium />
+        <FormField label="Observação" htmlFor="nda-notes">
+          <Input id="nda-notes" value={draft.notes} maxLength={500} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} placeholder="Responsável pelo recebimento, horário, referência…" />
+        </FormField>
+      </div>
+    </Modal>
   );
 }
