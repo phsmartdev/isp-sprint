@@ -87,7 +87,13 @@ describe('matriz de acesso padrão', () => {
     expect(DEFAULT_ACCESS.supervisor.oportunidades).toBe('equipe');
     expect(DEFAULT_ACCESS.supervisor.configuracoes).toBe('nenhum');
     expect(DEFAULT_ACCESS.gerencia.configuracoes).toBe('total');
-    expect(Object.values(DEFAULT_ACCESS.gerencia).every((l) => l === 'total')).toBe(true);
+    expect(Object.entries(DEFAULT_ACCESS.gerencia).filter(([m]) => m !== 'pessoas').every(([, l]) => l === 'total')).toBe(true);
+  });
+  it('Pessoas & Cultura: cargo de gestão não administra o módulo; só o Administrador nasce com Total', () => {
+    expect(DEFAULT_ACCESS.gerencia.pessoas).toBe('equipe');
+    expect(DEFAULT_ACCESS.diretoria.pessoas).toBe('equipe');
+    expect(DEFAULT_ACCESS.operacao.pessoas).toBe('proprio');
+    expect(DEFAULT_ACCESS.administrador.pessoas).toBe('total');
   });
   it('níveis comparáveis e combinação pelo maior nível', () => {
     expect(atLeast('equipe', 'proprio')).toBe(true);

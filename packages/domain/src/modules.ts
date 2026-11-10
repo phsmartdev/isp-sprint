@@ -13,10 +13,10 @@
  */
 import type { AccessLevel, Module } from './access';
 
-export const BUSINESS_MODULES = ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento'] as const;
+export const BUSINESS_MODULES = ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento', 'pessoas_cultura'] as const;
 export type BusinessModule = (typeof BUSINESS_MODULES)[number];
 export const BUSINESS_MODULE_LABELS: Record<BusinessModule, string> = {
-  crm: 'CRM', marketing: 'Marketing', produto: 'Produto', gestao_time: 'Gestão de Time', contratos: 'Contratos', projetos: 'Projetos', relatorios: 'Relatórios', orcamento: 'Recursos e Orçamento',
+  crm: 'CRM', marketing: 'Marketing', produto: 'Produto', gestao_time: 'Gestão de Time', contratos: 'Contratos', projetos: 'Projetos', relatorios: 'Relatórios', orcamento: 'Recursos e Orçamento', pessoas_cultura: 'Pessoas & Cultura',
 };
 export const BUSINESS_MODULE_HINTS: Record<BusinessModule, string> = {
   crm: 'Oportunidades, propostas, aprovações, contas, atividades, Sucesso do Cliente e e-mail.',
@@ -27,6 +27,7 @@ export const BUSINESS_MODULE_HINTS: Record<BusinessModule, string> = {
   projetos: 'Projetos, marcos e o quadro de tarefas.',
   relatorios: 'Relatórios e Inteligência; cada seção depende do módulo de origem estar ligado.',
   orcamento: 'Planejamento orçamentário por centro de custo, gastos, Budget Guardião, ferramentas, softwares, contratos, compras e indicadores de custo.',
+  pessoas_cultura: 'Experiência do colaborador: Meu Espaço, comunidade, perfis, reconhecimento e comunicados. Começa liberado só para quem a empresa escolher.',
 };
 
 /** Dono de negócio de cada módulo técnico. 'fundacao' = cadastro ou serviço compartilhado, nunca desligado. */
@@ -40,6 +41,7 @@ export const MODULE_OWNER: Record<Module, BusinessModule | 'fundacao'> = {
   desempenho: 'gestao_time', resultados: 'gestao_time',
   relatorios: 'relatorios', inteligencia: 'relatorios',
   orcamento: 'orcamento',
+  pessoas: 'pessoas_cultura',
 };
 
 // ------------------------------------------------------------------ funcionalidades
@@ -71,6 +73,7 @@ export const FEATURES = [
   { key: 'relatorios.contratos', module: 'relatorios', label: 'Inteligência de contratos', requires: ['contratos'] },
   { key: 'orcamento.planejamento', module: 'orcamento', label: 'Planejamento, gastos, Budget Guardião e indicadores de custo' },
   { key: 'orcamento.recursos', module: 'orcamento', label: 'Ferramentas, softwares, contratos, assinaturas, compras e fornecedores' },
+  { key: 'pessoas_cultura.experiencia', module: 'pessoas_cultura', label: 'Meu Espaço, comunidade, perfis, reconhecimento e comunicados' },
 ] as const satisfies readonly FeatureDef[];
 export type FeatureKey = (typeof FEATURES)[number]['key'];
 export const featureDef = (k: FeatureKey): FeatureDef => FEATURES.find((f) => f.key === k)!;
@@ -81,6 +84,8 @@ export const featureDef = (k: FeatureKey): FeatureDef => FEATURES.find((f) => f.
  * Rotas que não casam ficam só com a checagem do módulo técnico (cujo dono já desliga o que for preciso).
  */
 export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: string[]; feature: FeatureKey | null }[] = [
+  // Pessoas & Cultura
+  { prefix: '/pessoas', feature: 'pessoas_cultura.experiencia' },
   // compartilhados que ficam na fundação mesmo começando com um prefixo de módulo
   { prefix: '/abm/settings', feature: null },
   { prefix: '/catalog/plans', feature: null },
@@ -152,7 +157,8 @@ export type TenantModule = { module: BusinessModule; enabled: boolean; mode: Rel
 export type ModuleGrant = { module: BusinessModule; subjectType: 'equipe' | 'usuario'; subjectId: string; effect: 'liberar' | 'bloquear'; validUntil: string | null };
 
 /** Sem configuração gravada = módulo ligado para todos (comportamento anterior à Etapa 1). */
-export const defaultTenantModule = (module: BusinessModule): TenantModule => ({ module, enabled: true, mode: 'todos', disabledFeatures: [] });
+/** Pessoas & Cultura nasce em teste: ligado, mas só para quem a empresa liberar (equipe ou pessoa). */
+export const defaultTenantModule = (module: BusinessModule): TenantModule => ({ module, enabled: true, mode: module === 'pessoas_cultura' ? 'liberados' : 'todos', disabledFeatures: [] });
 
 export type ModuleDecision = { enabled: boolean; reason: 'empresa_desligou' | 'pessoa_bloqueada' | 'pessoa_liberada' | 'equipe_bloqueada' | 'equipe_liberada' | 'todos' | 'nao_liberado' };
 

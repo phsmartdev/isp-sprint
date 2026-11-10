@@ -7,6 +7,10 @@ import { AppShell } from './components/layout/AppShell';
 import { EmptyState, LoadingRows } from './components/ui/primitives';
 import { LoginPage, ResetPasswordPage } from './pages/Login';
 import { useMoneyHidden } from './lib/privacy';
+const PeopleLayout = lazy(() => import('./pages/people/PeopleLayout').then((m) => ({ default: m.PeopleLayout })));
+const MySpacePage = lazy(() => import('./pages/people/MySpace').then((m) => ({ default: m.MySpacePage })));
+const PeopleProfilePage = lazy(() => import('./pages/people/Profile').then((m) => ({ default: m.ProfilePage })));
+const PeopleConfigPage = lazy(() => import('./pages/people/AdminConfig').then((m) => ({ default: m.PeopleConfigPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -144,6 +148,11 @@ export function App() {
       <Route path="/painel/indicadores" element={<RequireAuth><Gate module="inteligencia"><KpiBoardPage /></Gate></RequireAuth>} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
+        <Route path="pessoas" element={<Gate module="pessoas" feature="pessoas_cultura.experiencia"><PeopleLayout /></Gate>}>
+          <Route index element={<MySpacePage />} />
+          <Route path="perfil/:userId" element={<PeopleProfilePage />} />
+          <Route path="admin/configuracoes" element={<PeopleConfigPage />} />
+        </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />
         <Route path="opportunities" element={<Gate module="oportunidades"><OpportunitiesPage /></Gate>} />
         <Route path="pipeline" element={<Navigate to="/opportunities" replace />} />

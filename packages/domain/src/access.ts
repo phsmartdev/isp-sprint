@@ -10,7 +10,7 @@
  * em Configurações → Segurança. O servidor é a única autoridade.
  */
 
-export const MODULES = ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'orcamento', 'configuracoes'] as const;
+export const MODULES = ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'orcamento', 'pessoas', 'configuracoes'] as const;
 export type Module = (typeof MODULES)[number];
 
 export const MODULE_LABELS: Record<Module, string> = {
@@ -28,6 +28,7 @@ export const MODULE_LABELS: Record<Module, string> = {
   resultados: 'Gestão de Times',
   inteligencia: 'Inteligência',
   email: 'E-mail',
+  pessoas: 'Pessoas & Cultura',
   configuracoes: 'Configurações',
 };
 
@@ -52,11 +53,11 @@ export const PROFILE_LABELS: Record<ProfileKey, string> = { administrador: 'Admi
 export const ADMIN_PROFILES: readonly ProfileKey[] = ['administrador', 'diretoria', 'gerencia'];
 
 export const DEFAULT_ACCESS: Record<ProfileKey, Record<Module, AccessLevel>> = {
-  administrador: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', configuracoes: 'total' },
-  operacao: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', projetos: 'proprio', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', orcamento: 'nenhum', configuracoes: 'nenhum' },
-  supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', projetos: 'equipe', desempenho: 'equipe', resultados: 'equipe', inteligencia: 'equipe', email: 'equipe', orcamento: 'proprio', configuracoes: 'nenhum' },
-  diretoria: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', configuracoes: 'total' },
-  gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', configuracoes: 'total' },
+  administrador: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', pessoas: 'total', configuracoes: 'total' },
+  operacao: { inicio: 'proprio', leads: 'proprio', oportunidades: 'proprio', clientes: 'proprio', atividades: 'proprio', relatorios: 'proprio', campanhas: 'nenhum', contratos: 'proprio', projetos: 'proprio', desempenho: 'proprio', resultados: 'proprio', inteligencia: 'nenhum', email: 'proprio', orcamento: 'nenhum', pessoas: 'proprio', configuracoes: 'nenhum' },
+  supervisor: { inicio: 'equipe', leads: 'equipe', oportunidades: 'equipe', clientes: 'equipe', atividades: 'equipe', relatorios: 'equipe', campanhas: 'equipe', contratos: 'equipe', projetos: 'equipe', desempenho: 'equipe', resultados: 'equipe', inteligencia: 'equipe', email: 'equipe', orcamento: 'proprio', pessoas: 'equipe', configuracoes: 'nenhum' },
+  diretoria: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', pessoas: 'equipe', configuracoes: 'total' },
+  gerencia: { inicio: 'total', leads: 'total', oportunidades: 'total', clientes: 'total', atividades: 'total', relatorios: 'total', campanhas: 'total', contratos: 'total', projetos: 'total', desempenho: 'total', resultados: 'total', inteligencia: 'total', email: 'total', orcamento: 'total', pessoas: 'equipe', configuracoes: 'total' },
 };
 
 export function atLeast(level: AccessLevel | undefined, min: AccessLevel) {

@@ -96,7 +96,7 @@ export const accessPolicies = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.roleId, t.module] }),
-    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'orcamento', 'configuracoes'])),
+    moduleCk: check('access_module_ck', inList('module', ['inicio', 'leads', 'oportunidades', 'clientes', 'atividades', 'relatorios', 'campanhas', 'contratos', 'projetos', 'desempenho', 'resultados', 'inteligencia', 'email', 'orcamento', 'pessoas', 'configuracoes'])),
     levelCk: check('access_level_ck', inList('level', ['nenhum', 'proprio', 'equipe', 'total'])),
   }),
 );
@@ -4730,7 +4730,7 @@ export const tenantModules = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.module] }),
-    moduleCk: check('tenant_modules_module_ck', inList('module', ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento'])),
+    moduleCk: check('tenant_modules_module_ck', inList('module', ['crm', 'marketing', 'produto', 'gestao_time', 'contratos', 'projetos', 'relatorios', 'orcamento', 'pessoas_cultura'])),
     modeCk: check('tenant_modules_mode_ck', inList('mode', ['todos', 'liberados'])),
   }),
 );
@@ -6237,3 +6237,33 @@ export const accountOccurrences = pgTable(
     impactCk: check('account_occurrences_impact_ck', inList('impact', ['positivo', 'neutro', 'negativo'])),
   }),
 );
+
+
+// =============================================================== Pessoas & Cultura (experiência do colaborador)
+/**
+ * Perfil social: só o que a pessoa escolhe mostrar. Nome, foto, cargo, área e unidade NÃO ficam aqui:
+ * vêm do cadastro de usuários e da estrutura organizacional (times → unidades), sem cadastro paralelo.
+ */
+export const peopleProfiles = pgTable(
+  'people_profiles',
+  {
+    userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: tenantId(),
+    bio: text('bio'),
+    interests: text('interests').array().notNull().default(sql`'{}'::text[]`),
+    skills: text('skills').array().notNull().default(sql`'{}'::text[]`),
+    /** contatos que a própria pessoa autorizou mostrar a colegas */
+    showEmail: boolean('show_email').notNull().default(false),
+    showPhone: boolean('show_phone').notNull().default(false),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ tenantIdx: index('people_profiles_tenant_idx').on(t.tenantId) }),
+);
+
+/** Parâmetros funcionais do módulo por empresa (papéis por setor, limites de envio…), versionados no próprio registro. */
+export const peopleSettings = pgTable('people_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});

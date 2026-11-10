@@ -5,7 +5,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
+  BarChart3, Bell, UsersRound, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -53,6 +53,7 @@ const NAV: NavEntry[] = [
     { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
     { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
   ] },
+  { to: '/pessoas', label: 'Pessoas & Cultura', icon: <UsersRound className={ICON} />, module: 'pessoas', feature: 'pessoas_cultura.experiencia' },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [

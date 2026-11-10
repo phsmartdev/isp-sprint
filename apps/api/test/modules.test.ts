@@ -44,13 +44,14 @@ afterAll(async () => {
 });
 
 describe('Etapa 1: módulos de negócio', () => {
-  it('padrão: tudo ligado; /me informa módulos e ações; só Configurações total administra', async () => {
+  it('padrão: tudo ligado (Pessoas & Cultura nasce só para liberados); /me informa módulos e ações; só Configurações total administra', async () => {
     const me = ok(await lucas.get('/me')).json();
-    expect(Object.values(me.modules).every(Boolean)).toBe(true);
+    expect(Object.entries(me.modules).filter(([k]) => k !== 'pessoas_cultura').every(([, v]) => v)).toBe(true);
+    expect(me.modules.pessoas_cultura).toBe(false);
     expect(Object.keys(me.modules).sort()).toEqual([...BUSINESS_MODULES].sort());
     expect(me.actions).toMatchObject({ ver_financeiro: true, exportar: true });
     expect((await lucas.get('/admin/modules')).statusCode).toBe(403);
-    expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(8);
+    expect(ok(await carlos.get('/admin/modules')).json().items).toHaveLength(BUSINESS_MODULES.length);
   });
 
   it('perfil restrito: Contratos e Projetos sem financeiro; sem CRM; não exporta nem exclui', async () => {
