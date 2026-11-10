@@ -42,7 +42,14 @@ export const peopleRoutes = [
       if (!inst || !inst.active) throw notFound('Perfil não encontrado.');
       const [prof] = await app.db.select().from(s.peopleProfiles).where(and(eq(s.peopleProfiles.userId, params.userId), eq(s.peopleProfiles.tenantId, auth.tenantId))).limit(1);
       const self = params.userId === auth.userId;
+      // comunidades da pessoa: privadas só aparecem para quem também é membro
+      const comms = await app.db.execute<{ id: string; name: string; kind: string; role: string }>(sql`
+        select c.id, c.name, c.kind, m.role from people_community_members m join people_communities c on c.id = m.community_id
+        where m.user_id = ${params.userId} and c.tenant_id = ${auth.tenantId} and c.status = 'ativa'
+          and (c.kind <> 'privada' or exists (select 1 from people_community_members me where me.community_id = c.id and me.user_id = ${auth.userId}))
+        order by c.name limit 50`);
       return {
+        communities: comms.rows,
         ...publicCard(inst),
         teams: inst.teams,
         bio: prof?.bio ?? null,

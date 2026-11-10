@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bookmark, ChevronRight, Search, Sparkles, UserRound } from 'lucide-react';
+import { Bookmark, ChevronRight, Search, Sparkles, UserRound, UsersRound } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useDebounced } from '../../lib/hooks';
 import { Avatar, EmptyState, ErrorState, Input, LoadingRows } from '../../components/ui/primitives';
@@ -59,6 +59,7 @@ export function MySpacePage() {
           <h2 className="mb-2 text-md font-bold text-ink">Atalhos</h2>
           <ul className="divide-y divide-line">
             <li><Link to="/pessoas/perfil/eu" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UserRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Meu perfil</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
+            <li><Link to="/pessoas/comunidades" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UsersRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Minhas comunidades</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/salvos" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Bookmark className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Publicações salvas</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
           </ul>
         </section>

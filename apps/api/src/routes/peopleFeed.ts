@@ -9,7 +9,8 @@ import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { peopleCaps, peopleSettingsOf } from '../services/people/settings';
-import { postDtos, postVisible, validMentions } from '../services/people/posts';
+import { inMyFeed, postDtos, postVisible, validMentions } from '../services/people/posts';
+import { communityPerms, loadCommunity } from '../services/people/communities';
 import { detectMedia, safeFilename } from '../services/people/media';
 import { institutionalOf, publicCard } from '../services/people/profiles';
 import type { DbOrTx } from '../db/client';
@@ -39,6 +40,10 @@ async function ownPost(db: DbOrTx, auth: AuthContext, id: string) {
 async function livePost(db: DbOrTx, auth: AuthContext, id: string) {
   const p = await visiblePost(db, auth, id);
   if (p.status !== 'publicado') throw unprocessable('Esta publicação ainda não foi publicada.');
+  if (p.communityId) {
+    const [c] = await db.select({ status: s.peopleCommunities.status }).from(s.peopleCommunities).where(eq(s.peopleCommunities.id, p.communityId)).limit(1);
+    if (c?.status !== 'ativa') throw unprocessable('Comunidade arquivada: só leitura.');
+  }
   return p;
 }
 
@@ -47,7 +52,7 @@ async function attachMedia(db: DbOrTx, auth: AuthContext, postId: string, mediaI
   if (mediaIds.length > max) throw unprocessable(`No máximo ${max} mídias por publicação.`);
   if (mediaIds.length) {
     const own = await db.select({ id: s.peopleMedia.id }).from(s.peopleMedia)
-      .where(and(eq(s.peopleMedia.tenantId, auth.tenantId), eq(s.peopleMedia.ownerId, auth.userId), inArray(s.peopleMedia.id, mediaIds), or(isNull(s.peopleMedia.postId), eq(s.peopleMedia.postId, postId))));
+      .where(and(eq(s.peopleMedia.tenantId, auth.tenantId), eq(s.peopleMedia.ownerId, auth.userId), isNull(s.peopleMedia.communityId), inArray(s.peopleMedia.id, mediaIds), or(isNull(s.peopleMedia.postId), eq(s.peopleMedia.postId, postId))));
     if (own.length !== new Set(mediaIds).size) throw unprocessable('Alguma mídia não é sua ou já está em outra publicação.');
   }
   // mídias que saíram da publicação são apagadas; as que ficam seguem a nova ordem
@@ -62,6 +67,8 @@ const PostBody = z.object({
   /** institucional = em nome da empresa (só Comunicação) */
   kind: z.enum(['social', 'institucional']).default('social'),
   status: z.enum(['publicado', 'rascunho']).default('publicado'),
+  /** comunidade de destino (vazio = toda a empresa) */
+  communityId: z.string().uuid().nullable().optional(),
 });
 
 export const peopleFeedRoutes = [
@@ -72,11 +79,21 @@ export const peopleFeedRoutes = [
       ordem: z.enum(['recentes', 'relevantes']).default('recentes'),
       cursor: z.string().max(200).optional(),
       autor: z.string().uuid().optional(),
+      comunidade: z.string().uuid().optional(),
       salvos: z.coerce.boolean().optional(),
       limite: z.coerce.number().int().min(1).max(30).default(10),
     }),
     handler: async ({ app, auth, query }) => {
       const where = [postVisible(auth), eq(s.peoplePosts.status, 'publicado')];
+      let pinned: (typeof s.peoplePosts.$inferSelect)[] = [];
+      if (query.comunidade) {
+        const { c, role } = await loadCommunity(app.db, auth, query.comunidade);
+        if (!communityPerms(c, role, peopleCaps(auth, await peopleSettingsOf(app.db, auth.tenantId))).read) throw forbidden('Conteúdo só para membros desta comunidade.');
+        where.push(eq(s.peoplePosts.communityId, c.id));
+        // fixadas vêm à parte, no topo (só na primeira página) e saem da lista normal
+        if (!query.cursor) pinned = await app.db.select().from(s.peoplePosts).where(and(...where, sql`${s.peoplePosts.pinnedAt} is not null`)).orderBy(desc(s.peoplePosts.pinnedAt)).limit(3);
+        where.push(isNull(s.peoplePosts.pinnedAt));
+      } else if (!query.autor && !query.salvos) where.push(inMyFeed(auth));
       if (query.autor) where.push(eq(s.peoplePosts.authorId, query.autor));
       if (query.salvos) where.push(sql`exists (select 1 from people_saved_posts sp where sp.post_id = ${s.peoplePosts.id} and sp.user_id = ${auth.userId})`);
       let rows: (typeof s.peoplePosts.$inferSelect)[];
@@ -97,7 +114,7 @@ export const peopleFeedRoutes = [
         rows = await app.db.select().from(s.peoplePosts).where(and(...where)).orderBy(desc(s.peoplePosts.publishedAt), desc(s.peoplePosts.id)).limit(query.limite + 1);
         if (rows.length > query.limite) { rows = rows.slice(0, query.limite); const l = rows[rows.length - 1]!; next = Buffer.from(`${l.publishedAt!.toISOString()}|${l.id}`).toString('base64url'); }
       }
-      return { items: await postDtos(app.db, auth, rows), next };
+      return { items: await postDtos(app.db, auth, rows), pinned: pinned.length ? await postDtos(app.db, auth, pinned) : [], next };
     },
   }),
 
@@ -118,9 +135,13 @@ export const peopleFeedRoutes = [
       if (body.kind === 'institucional' && !peopleCaps(auth, st).communicate) throw forbidden('Publicar em nome da empresa exige o papel de Comunicação Interna.');
       if (body.body.length > st.limits.postChars) throw unprocessable(`Texto acima de ${st.limits.postChars} caracteres.`, [{ path: 'body', message: `No máximo ${st.limits.postChars} caracteres` }]);
       if (body.status === 'publicado' && !body.body && !body.mediaIds.length) throw unprocessable('Escreva algo ou adicione uma mídia.', [{ path: 'body', message: 'Obrigatório' }]);
+      if (body.communityId) {
+        const { c, role } = await loadCommunity(app.db, auth, body.communityId);
+        if (!communityPerms(c, role, peopleCaps(auth, st)).post) throw forbidden(c.kind === 'institucional' ? 'Nesta comunidade só responsável e moderadores publicam.' : 'Participe da comunidade para publicar nela.');
+      }
       const mentions = await validMentions(app.db, auth.tenantId, body.mentions);
       const post = await app.db.transaction(async (tx) => {
-        const [p] = await tx.insert(s.peoplePosts).values({ tenantId: auth.tenantId, authorId: auth.userId, kind: body.kind, body: body.body, mentions, status: body.status, publishedAt: body.status === 'publicado' ? new Date() : null }).returning();
+        const [p] = await tx.insert(s.peoplePosts).values({ tenantId: auth.tenantId, authorId: auth.userId, kind: body.kind, body: body.body, mentions, status: body.status, publishedAt: body.status === 'publicado' ? new Date() : null, audience: body.communityId ? 'comunidade' : 'organizacao', communityId: body.communityId ?? null }).returning();
         await attachMedia(tx, auth, p!.id, body.mediaIds, st.limits.mediaPerPost);
         return p!;
       });
@@ -282,7 +303,7 @@ export const peopleFeedRoutes = [
       if (!data.length || data.length > CHUNK) throw unprocessable('Parte inválida.');
       // limpeza: partes abandonadas e mídias enviadas e não usadas há mais de um dia
       await app.db.delete(s.peopleMediaChunks).where(sql`${s.peopleMediaChunks.createdAt} < now() - interval '1 day'`);
-      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.tenantId, auth.tenantId), isNull(s.peopleMedia.postId), sql`${s.peopleMedia.createdAt} < now() - interval '1 day'`));
+      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.tenantId, auth.tenantId), isNull(s.peopleMedia.postId), isNull(s.peopleMedia.communityId), sql`${s.peopleMedia.createdAt} < now() - interval '1 day'`));
       const r = await app.db.execute(sql`insert into people_media_chunks (tenant_id, upload_id, n, owner_id, data) values (${auth.tenantId}, ${params.uploadId}, ${params.n}, ${auth.userId}, ${data})
         on conflict (upload_id, n) do update set data = excluded.data, created_at = now() where people_media_chunks.owner_id = excluded.owner_id returning n`);
       if (!r.rows.length) throw forbidden('Este envio é de outra pessoa.');
@@ -323,11 +344,13 @@ export const peopleFeedRoutes = [
   defineRoute({
     method: 'GET', url: '/pessoas/midias/:id', summary: 'Abre a mídia de uma publicação visível (vídeo em partes, por intervalo de bytes)', ...M, params: Id,
     handler: async ({ app, auth, params, req, reply }) => {
-      const [m] = await app.db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, ownerId: s.peopleMedia.ownerId, mime: s.peopleMedia.mime, kind: s.peopleMedia.kind, filename: s.peopleMedia.filename, size: s.peopleMedia.sizeBytes, sha: s.peopleMedia.sha256 })
+      const [m] = await app.db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, communityId: s.peopleMedia.communityId, ownerId: s.peopleMedia.ownerId, mime: s.peopleMedia.mime, kind: s.peopleMedia.kind, filename: s.peopleMedia.filename, size: s.peopleMedia.sizeBytes, sha: s.peopleMedia.sha256 })
         .from(s.peopleMedia).where(and(eq(s.peopleMedia.id, params.id), eq(s.peopleMedia.tenantId, auth.tenantId))).limit(1);
       if (!m) throw notFound('Mídia não encontrada.');
-      // solta (ainda no editor): só o dono; publicada: segue a visibilidade da publicação
-      if (!m.postId) { if (m.ownerId !== auth.userId) throw notFound('Mídia não encontrada.'); } else await visiblePost(app.db, auth, m.postId);
+      // capa/avatar de comunidade: como nome e descrição, visível a quem usa o módulo; solta (no editor): só o dono;
+      // publicada: segue a visibilidade da publicação
+      if (m.postId) await visiblePost(app.db, auth, m.postId);
+      else if (!m.communityId && m.ownerId !== auth.userId) throw notFound('Mídia não encontrada.');
       reply.header('content-type', m.mime).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=3600').header('etag', `"${m.sha}"`).header('accept-ranges', 'bytes')
         .header('content-security-policy', "default-src 'none'; media-src 'self'; img-src 'self'")
         .header('content-disposition', `${m.kind === 'arquivo' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(m.filename)}`);
@@ -346,7 +369,7 @@ export const peopleFeedRoutes = [
   defineRoute({
     method: 'DELETE', url: '/pessoas/midias/:id', summary: 'Descarta mídia enviada e ainda não publicada', ...M, params: Id,
     handler: async ({ app, auth, params, reply }) => {
-      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.id, params.id), eq(s.peopleMedia.tenantId, auth.tenantId), eq(s.peopleMedia.ownerId, auth.userId), isNull(s.peopleMedia.postId)));
+      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.id, params.id), eq(s.peopleMedia.tenantId, auth.tenantId), eq(s.peopleMedia.ownerId, auth.userId), isNull(s.peopleMedia.postId), isNull(s.peopleMedia.communityId)));
       return reply.code(204).send();
     },
   }),

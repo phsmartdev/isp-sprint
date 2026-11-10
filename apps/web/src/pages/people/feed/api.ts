@@ -14,16 +14,17 @@ export type FeedPost = {
   id: string; kind: 'social' | 'institucional' | string; audience: string; audienceLabel: string; status: 'publicado' | 'rascunho' | string;
   body: string; publishedAt: string | null; editedAt: string | null; createdAt: string;
   author: PersonCard; mentions: { id: string; name: string }[]; media: Media[];
+  community: { id: string; name: string; kind: string } | null; pinnedAt: string | null;
   reactionCount: number; commentCount: number; reactions: Partial<Record<Reaction, number>>; myReaction: Reaction | null; saved: boolean; mine: boolean;
 };
 export type Comment = { id: string; parentId: string | null; body: string; createdAt: string; editedAt: string | null; mine: boolean; author: PersonCard; mentions: { id: string; name: string }[] };
 
-export type FeedFilter = { ordem?: 'recentes' | 'relevantes'; autor?: string; salvos?: boolean };
-export const feedKey = (f: FeedFilter) => ['pessoas', 'feed', f.ordem ?? 'recentes', f.autor ?? '', f.salvos ? 'salvos' : ''];
+export type FeedFilter = { ordem?: 'recentes' | 'relevantes'; autor?: string; salvos?: boolean; comunidade?: string };
+export const feedKey = (f: FeedFilter) => ['pessoas', 'feed', f.ordem ?? 'recentes', f.autor ?? '', f.salvos ? 'salvos' : '', f.comunidade ?? ''];
 export const useFeed = (f: FeedFilter) => useInfiniteQuery({
   queryKey: feedKey(f),
   initialPageParam: null as string | null,
-  queryFn: ({ pageParam }) => api<{ items: FeedPost[]; next: string | null }>(`/pessoas/feed${qs({ ordem: f.ordem, autor: f.autor, salvos: f.salvos ? 1 : undefined, cursor: pageParam, limite: 10 })}`),
+  queryFn: ({ pageParam }) => api<{ items: FeedPost[]; pinned: FeedPost[]; next: string | null }>(`/pessoas/feed${qs({ ordem: f.ordem, autor: f.autor, comunidade: f.comunidade, salvos: f.salvos ? 1 : undefined, cursor: pageParam, limite: 10 })}`),
   getNextPageParam: (last) => last.next,
 });
 export const useDrafts = () => useQuery({ queryKey: ['pessoas', 'rascunhos'], queryFn: () => api<{ items: FeedPost[] }>('/pessoas/rascunhos') });
@@ -48,3 +49,12 @@ export async function uploadMedia(file: File, limits: { imageMb: number; videoMb
   onProgress?.(1);
   return m;
 }
+
+export type CommunityPerms = { read: boolean; post: boolean; moderate: boolean; manage: boolean; join: boolean };
+export type Community = {
+  id: string; name: string; description: string | null; rules: string | null; category: string | null; kind: 'publica' | 'privada' | 'institucional'; kindLabel: string; status: 'ativa' | 'arquivada';
+  coverMediaId: string | null; avatarMediaId: string | null; memberCount: number; createdAt: string; archivedAt: string | null;
+  myRole: 'responsavel' | 'moderador' | 'membro' | null; perms: CommunityPerms; pending: { id: string; kind: 'pedido' | 'convite' } | null;
+};
+/** Comunidades em que a pessoa pode publicar (para o seletor de público do editor). */
+export const usePostableCommunities = () => useQuery({ queryKey: ['pessoas', 'comunidades', 'minhas'], staleTime: 60_000, queryFn: async () => (await api<{ items: Community[] }>('/pessoas/comunidades?minhas=1')).items.filter((c) => c.perms.post) });

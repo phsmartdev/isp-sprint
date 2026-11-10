@@ -58,8 +58,8 @@ reconhecimentos, comunicados, leituras, denúncias, moderação e a caixa de not
 |---|---|---|
 | 1. Fundação | Módulo, navegação, permissões, perfil social, parâmetros | **Entregue** |
 | 2. Feed | Publicações, mídias, comentários e respostas, reações, salvos, rascunho, paginação por cursor | **Entregue** |
-| 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | Próxima |
-| 4. Cultura e Comunicação | Reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | — |
+| 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | **Entregue** |
+| 4. Cultura e Comunicação | Reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | Próxima |
 | 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo | — |
 | 6. Consolidação | Indicadores agregados, testes de permissão e isolamento, responsividade, documentação | — |
 
@@ -112,3 +112,31 @@ o topo passava da largura da tela e a página inteira ficava reduzida (toques ca
 
 **Pendências conhecidas:** denúncia de conteúdo e notificações de menção/comentário (Etapa 5); a tela de
 Configurações de contratos ainda passa da largura no celular (fora do módulo).
+
+## 5. Etapa 3 — entrega (comunidades)
+
+**Tipos:** pública interna (todos do módulo veem e entram), privada (só membros veem o conteúdo; entra por convite
+aceito ou pedido aprovado), institucional (todos veem e entram; só responsável e moderadores publicam).
+Nome, descrição, categoria e capa aparecem na lista para quem usa o módulo (para poder pedir participação).
+
+**Papéis na comunidade:** responsável (edita, define moderadores e responsáveis, arquiva), moderador (aprova pedidos,
+convida, remove membros comuns, fixa publicações), membro (lê e publica). Sempre há ao menos um responsável.
+**Quem cria:** pública/privada — nível Equipe ou Total no módulo, Comunicação ou Pessoas e Cultura;
+institucional — só Comunicação ou Pessoas e Cultura.
+
+**Privacidade:** a regra única `postVisible` passou a incluir as comunidades; conteúdo de comunidade privada só para
+membros, inclusive por ID direto, comentários e mídias. A administração do módulo gerencia participantes e dados da
+comunidade, mas **não lê** o conteúdo privado sem ser membro. O feed do Meu Espaço traz a organização e as
+comunidades em que a pessoa participa; comunidade pública de que a pessoa não participa é lida na página dela.
+
+**Fixar e arquivar:** até 3 publicações fixadas no topo; arquivada sai da lista, fica só para leitura (sem publicar,
+comentar ou reagir) e pode ser reativada. Ações de gestão ficam em auditoria.
+
+**Migração `0137_pessoas_comunidades`** (não destrutiva): `people_communities`, `people_community_members`,
+`people_community_requests`; `people_posts.pinned_at` e chave para a comunidade; `people_media.community_id` (capa).
+
+**APIs:** `GET|POST /pessoas/comunidades`, `GET|PATCH /pessoas/comunidades/:id`, `POST /pessoas/comunidades/:id/arquivo`,
+`POST /pessoas/comunidades/:id/participar|sair`, `GET /pessoas/comunidades/:id/membros|pedidos`,
+`POST /pessoas/comunidades/:id/convites`, `GET /pessoas/comunidades-convites`, `POST /pessoas/comunidades-pedidos/:id/decisao`,
+`PATCH|DELETE /pessoas/comunidades/:id/membros/:userId`, `PUT /pessoas/posts/:id/fixar`; o feed aceita `comunidade`
+e devolve as fixadas; publicar aceita `communityId`.

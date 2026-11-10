@@ -3,7 +3,7 @@
  * a pessoa escolhe a bio, os interesses, as competências que quer compartilhar e se mostra e-mail/telefone.
  */
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Mail, Pencil, Phone } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -56,6 +56,11 @@ export function ProfilePage() {
           </div>
           <Tags title="Interesses profissionais" items={p.interests} empty={p.self ? 'Adicione seus interesses para colegas com os mesmos assuntos te encontrarem.' : 'Nenhum interesse informado.'} />
           <Tags title="Competências" items={p.skills} empty={p.self ? 'Compartilhe no que você pode ajudar.' : 'Nenhuma competência informada.'} />
+          <div>
+            <h3 className="mb-1.5 text-md font-bold text-ink">Comunidades</h3>
+            {p.communities.length ? <div className="flex flex-wrap gap-1.5">{p.communities.map((c) => <Link key={c.id} to={`/pessoas/comunidades/${c.id}`}><Chip tone={c.role === 'membro' ? 'neutral' : 'blue'}>{c.name}{c.role !== 'membro' ? (c.role === 'responsavel' ? ' · responsável' : ' · moderação') : ''}</Chip></Link>)}</div>
+              : <p className="text-sm text-muted">{p.self ? <>Você ainda não participa de comunidades. <Link className="link" to="/pessoas/comunidades">Ver comunidades</Link></> : 'Nenhuma comunidade em comum para mostrar.'}</p>}
+          </div>
         </section>
       )}
       {!editing && <Feed filter={{ autor: p.id }} orderable={false} title="Publicações" emptyTitle="Nenhuma publicação ainda" emptyText={p.self ? 'Suas publicações aparecem aqui.' : `${p.name.split(' ')[0]} ainda não publicou.`} />}

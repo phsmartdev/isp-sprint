@@ -73,6 +73,7 @@ import { opportunityItemRoutes } from './routes/opportunityItems';
 import { deliveryAddressRoutes } from './routes/deliveryAddresses';
 import { peopleRoutes } from './routes/people';
 import { peopleFeedRoutes } from './routes/peopleFeed';
+import { peopleCommunityRoutes } from './routes/peopleCommunities';
 import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants';
 import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
@@ -269,6 +270,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...deliveryAddressRoutes,
     ...peopleRoutes,
     ...peopleFeedRoutes,
+    ...peopleCommunityRoutes,
     ...bidParticipantRoutes,
     ...bidActionRoutes,
     ...competitorRoutes,

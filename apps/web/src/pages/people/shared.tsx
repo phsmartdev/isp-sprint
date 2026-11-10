@@ -8,6 +8,7 @@ export type PeopleMe = { me: PersonCard & { firstName: string }; caps: PeopleCap
 export type PeopleProfile = PersonCard & {
   teams: string[]; bio: string | null; interests: string[]; skills: string[];
   contact: { email: string | null; phone: string | null }; privacy?: { showEmail: boolean; showPhone: boolean }; self: boolean;
+  communities: { id: string; name: string; kind: string; role: string }[];
 };
 
 export const usePeopleMe = () => useQuery({ queryKey: ['pessoas', 'me'], queryFn: () => api<PeopleMe>('/pessoas/me'), staleTime: 60_000 });

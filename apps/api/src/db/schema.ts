@@ -6282,7 +6282,7 @@ export const peoplePosts = pgTable(
     kind: text('kind').notNull().default('social'),
     audience: text('audience').notNull().default('organizacao'),
     /** comunidade de destino (Etapa 3) */
-    communityId: uuid('community_id'),
+    communityId: uuid('community_id').references((): AnyPgColumn => peopleCommunities.id),
     body: text('body').notNull().default(''),
     mentions: uuid('mentions').array().notNull().default(sql`'{}'::uuid[]`),
     status: text('status').notNull().default('publicado'),
@@ -6290,12 +6290,15 @@ export const peoplePosts = pgTable(
     commentCount: integer('comment_count').notNull().default(0),
     publishedAt: ts('published_at'),
     editedAt: ts('edited_at'),
+    /** fixada no topo da comunidade (responsável ou moderador) */
+    pinnedAt: ts('pinned_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: ts('deleted_at'),
     deletedBy: uuid('deleted_by').references(() => users.id),
   },
   (t) => ({
+    communityIdx: index('people_posts_community_idx').on(t.tenantId, t.communityId, t.status, t.publishedAt),
     feedIdx: index('people_posts_feed_idx').on(t.tenantId, t.status, t.publishedAt, t.id),
     authorIdx: index('people_posts_author_idx').on(t.tenantId, t.authorId, t.publishedAt),
     kindCk: check('people_posts_kind_ck', inList('kind', ['social', 'institucional', 'conquista', 'reconhecimento', 'comunidade', 'comunicado'])),
@@ -6315,6 +6318,8 @@ export const peopleMedia = pgTable(
     tenantId: tenantId(),
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     postId: uuid('post_id').references(() => peoplePosts.id, { onDelete: 'cascade' }),
+    /** capa ou avatar de comunidade (visível a quem usa o módulo, como o nome e a descrição) */
+    communityId: uuid('community_id'),
     kind: text('kind').notNull(),
     mime: text('mime').notNull(),
     filename: text('filename').notNull(),
@@ -6392,4 +6397,76 @@ export const peopleSavedPosts = pgTable(
     createdAt: createdAt(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.postId] }), userIdx: index('people_saved_user_idx').on(t.userId, t.createdAt) }),
+);
+
+/**
+ * Comunidades. Pública interna: quem usa o módulo vê e participa. Privada: só membros veem o conteúdo; entra por
+ * convite ou pedido aprovado. Institucional: todos veem; só responsável e moderadores publicam.
+ * Nome, descrição, categoria e capa de qualquer comunidade ativa aparecem na lista (para pedir participação).
+ */
+export const peopleCommunities = pgTable(
+  'people_communities',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    description: text('description'),
+    rules: text('rules'),
+    category: text('category'),
+    kind: text('kind').notNull().default('publica'),
+    status: text('status').notNull().default('ativa'),
+    coverMediaId: uuid('cover_media_id'),
+    avatarMediaId: uuid('avatar_media_id'),
+    memberCount: integer('member_count').notNull().default(0),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    archivedAt: ts('archived_at'),
+  },
+  (t) => ({
+    nameUq: uniqueIndex('people_communities_name_uq').on(t.tenantId, sql`lower(${t.name})`),
+    listIdx: index('people_communities_list_idx').on(t.tenantId, t.status, t.name),
+    kindCk: check('people_communities_kind_ck', inList('kind', ['publica', 'privada', 'institucional'])),
+    statusCk: check('people_communities_status_ck', inList('status', ['ativa', 'arquivada'])),
+  }),
+);
+
+export const peopleCommunityMembers = pgTable(
+  'people_community_members',
+  {
+    communityId: uuid('community_id').notNull().references(() => peopleCommunities.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: tenantId(),
+    role: text('role').notNull().default('membro'),
+    joinedAt: createdAt(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.communityId, t.userId] }),
+    userIdx: index('people_community_members_user_idx').on(t.tenantId, t.userId),
+    roleCk: check('people_community_members_role_ck', inList('role', ['responsavel', 'moderador', 'membro'])),
+  }),
+);
+
+/** Pedidos de participação (da pessoa) e convites (de responsável/moderador), com a decisão registrada. */
+export const peopleCommunityRequests = pgTable(
+  'people_community_requests',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    communityId: uuid('community_id').notNull().references(() => peopleCommunities.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    status: text('status').notNull().default('pendente'),
+    message: text('message'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    pendingUq: uniqueIndex('people_community_requests_pending_uq').on(t.communityId, t.userId).where(sql`status = 'pendente'`),
+    userIdx: index('people_community_requests_user_idx').on(t.tenantId, t.userId, t.status),
+    kindCk: check('people_community_requests_kind_ck', inList('kind', ['pedido', 'convite'])),
+    statusCk: check('people_community_requests_status_ck', inList('status', ['pendente', 'aprovado', 'recusado', 'cancelado'])),
+  }),
 );

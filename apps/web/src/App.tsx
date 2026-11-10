@@ -13,6 +13,8 @@ const PeopleProfilePage = lazy(() => import('./pages/people/Profile').then((m) =
 const PeopleConfigPage = lazy(() => import('./pages/people/AdminConfig').then((m) => ({ default: m.PeopleConfigPage })));
 const PeoplePostPage = lazy(() => import('./pages/people/feed/PostPage').then((m) => ({ default: m.PostPage })));
 const PeopleSavedPage = lazy(() => import('./pages/people/Saved').then((m) => ({ default: m.SavedPage })));
+const PeopleCommunitiesPage = lazy(() => import('./pages/people/Communities').then((m) => ({ default: m.CommunitiesPage })));
+const PeopleCommunityPage = lazy(() => import('./pages/people/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -155,6 +157,8 @@ export function App() {
           <Route path="perfil/:userId" element={<PeopleProfilePage />} />
           <Route path="publicacao/:id" element={<PeoplePostPage />} />
           <Route path="salvos" element={<PeopleSavedPage />} />
+          <Route path="comunidades" element={<PeopleCommunitiesPage />} />
+          <Route path="comunidades/:id" element={<PeopleCommunityPage />} />
           <Route path="admin/configuracoes" element={<PeopleConfigPage />} />
         </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />

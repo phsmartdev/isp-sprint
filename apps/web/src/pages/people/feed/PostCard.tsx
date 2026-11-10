@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Bookmark, BookmarkCheck, Building2, Download, FileText, Link2, MessageCircle, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Bookmark, BookmarkCheck, Building2, Download, FileText, Link2, MessageCircle, MoreHorizontal, Pencil, Pin, Trash2 } from 'lucide-react';
 import { api } from '../../../lib/api';
 import { fmtBytes } from '../../../lib/files';
 import { fmtDateTime, fmtRelative } from '../../../lib/format';
@@ -15,7 +15,7 @@ import { orgLine } from '../shared';
 import { mediaUrl, REACTIONS, type FeedPost, type Reaction } from './api';
 import { PostEditor } from './PostEditor';
 
-export function PostCard({ post, detail = false }: { post: FeedPost; detail?: boolean }) {
+export function PostCard({ post, detail = false, canPin = false }: { post: FeedPost; detail?: boolean; canPin?: boolean }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [menu, setMenu] = useState(false);
@@ -37,6 +37,11 @@ export function PostCard({ post, detail = false }: { post: FeedPost; detail?: bo
     onSuccess: () => { refresh(); setConfirmDel(false); toast({ tone: 'success', message: 'Publicação excluída' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
+  const pin = useMutation({
+    mutationFn: () => api(`/pessoas/posts/${post.id}/fixar`, { method: 'PUT', body: { pinned: !post.pinnedAt } }),
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: post.pinnedAt ? 'Publicação desafixada' : 'Publicação fixada no topo' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const copyLink = async () => {
     try { await navigator.clipboard.writeText(`${location.origin}/pessoas/publicacao/${post.id}`); toast({ tone: 'success', message: 'Link copiado. Só quem pode ver a publicação consegue abrir.' }); } catch { toast({ tone: 'error', message: 'Não foi possível copiar o link.' }); }
   };
@@ -54,13 +59,15 @@ export function PostCard({ post, detail = false }: { post: FeedPost; detail?: bo
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-center gap-x-2 text-sm"><Link to={`/pessoas/perfil/${post.author.id}`} className="font-semibold text-ink hover:underline">{post.author.name}</Link>{institutional && <Chip tone="blue"><Building2 className="mr-1 inline h-3 w-3" aria-hidden />Institucional</Chip>}</p>
           {orgLine(post.author) && <p className="truncate text-xs text-muted">{orgLine(post.author)}</p>}
-          <p className="text-xs text-muted"><time dateTime={post.publishedAt ?? post.createdAt} title={fmtDateTime(post.publishedAt ?? post.createdAt)}>{fmtRelative(post.publishedAt ?? post.createdAt)}</time> · {post.audienceLabel}{post.editedAt ? ' · editada' : ''}</p>
+          <p className="text-xs text-muted"><time dateTime={post.publishedAt ?? post.createdAt} title={fmtDateTime(post.publishedAt ?? post.createdAt)}>{fmtRelative(post.publishedAt ?? post.createdAt)}</time> · {post.community ? <Link to={`/pessoas/comunidades/${post.community.id}`} className="hover:underline">{post.community.name}</Link> : post.audienceLabel}{post.editedAt ? ' · editada' : ''}</p>
+          {post.pinnedAt && <p className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-primary"><Pin className="h-3 w-3" aria-hidden />Fixada</p>}
         </div>
         <div className="relative">
           <button type="button" className="rounded-sm p-1.5 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Ações da publicação" aria-expanded={menu} onClick={() => setMenu((v) => !v)}><MoreHorizontal className="h-5 w-5" /></button>
           {menu && (
             <ul className="absolute right-0 z-20 mt-1 w-48 border border-line bg-surface py-1 shadow-overlay" role="menu" onMouseLeave={() => setMenu(false)}>
               <li><button role="menuitem" type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2" onClick={() => { setMenu(false); void copyLink(); }}><Link2 className="h-4 w-4" aria-hidden />Copiar link</button></li>
+              {canPin && post.community && <li><button role="menuitem" type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2" onClick={() => { setMenu(false); pin.mutate(); }}><Pin className="h-4 w-4" aria-hidden />{post.pinnedAt ? 'Desafixar' : 'Fixar no topo'}</button></li>}
               {post.mine && <li><button role="menuitem" type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-2" onClick={() => { setMenu(false); setEditing(true); }}><Pencil className="h-4 w-4" aria-hidden />Editar</button></li>}
               {post.mine && <li><button role="menuitem" type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-danger hover:bg-danger-soft" onClick={() => { setMenu(false); setConfirmDel(true); }}><Trash2 className="h-4 w-4" aria-hidden />Excluir</button></li>}
             </ul>

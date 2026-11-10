@@ -22,6 +22,7 @@ export function PeopleLayout() {
       <nav aria-label="Seções de Pessoas & Cultura" className="scroll-thin mb-5 flex items-end gap-5 overflow-x-auto border-b border-line">
         <span className="whitespace-nowrap pb-3 text-xs font-semibold uppercase tracking-wide text-muted">Experiência</span>
         <NavLink to="/pessoas" end className={link}>Meu Espaço</NavLink>
+        <NavLink to="/pessoas/comunidades" className={link}>Comunidades</NavLink>
         <NavLink to="/pessoas/perfil/eu" className={link}>Meu Perfil</NavLink>
         {adminItems.length > 0 && <>
           <span className="whitespace-nowrap pb-3 pl-3 text-xs font-semibold uppercase tracking-wide text-muted">Administração</span>

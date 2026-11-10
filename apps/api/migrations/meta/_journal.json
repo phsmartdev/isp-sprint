@@ -960,6 +960,13 @@
       "when": 1794347118182,
       "tag": "0136_pessoas_feed",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1794350149967,
+      "tag": "0137_pessoas_comunidades",
+      "breakpoints": true
     }
   ]
 }
