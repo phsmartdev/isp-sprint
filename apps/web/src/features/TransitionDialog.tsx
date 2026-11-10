@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, CircleAlert, Paperclip } from 'lucide-react';
 import { LOSS_REASONS, LOSS_REASON_LABELS, type LossReason } from '@isp/domain';
 import { api } from '../lib/api';
-import { ATTACHMENT_ACCEPT, MAX_ATTACHMENT_BYTES, fileToBase64 } from '../lib/files';
+import { ATTACHMENT_ACCEPT } from '../lib/files';
+import { uploadOppAttachment } from '../lib/attachmentTransfer';
 import type { Opportunity, StageRequirements } from '../lib/types';
 import { ConfirmDialog, useToast } from '../components/ui/overlay';
 import { Button, FormField, Notice, Select, Textarea } from '../components/ui/primitives';
@@ -61,10 +62,9 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
   const title = reopening ? 'Reabrir oportunidade' : to === 'ganha' ? 'Marcar venda fechada' : to === 'perdida' ? 'Marcar como perdida' : `Mover para ${request.toName}`;
 
   const upload = async (f: File) => {
-    if (f.size > MAX_ATTACHMENT_BYTES) return toast({ tone: 'error', message: 'O arquivo passa de 3 MB.' });
     setUploading(true);
     try {
-      await api(`/opportunities/${opp.id}/attachments`, { method: 'POST', body: { kind: 'proposta', filename: f.name, data: await fileToBase64(f) } });
+      await uploadOppAttachment(opp.id, 'proposta', f);
       setUploaded((n) => n + 1);
       qc.invalidateQueries({ queryKey: ['attachments', opp.id] });
       qc.invalidateQueries({ queryKey: ['opportunity', opp.id] });

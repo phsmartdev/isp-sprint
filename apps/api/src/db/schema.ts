@@ -939,7 +939,25 @@ export const opportunityDeliveryAddresses = pgTable(
   (t) => ({ oppIdx: index('opp_delivery_addr_opp_idx').on(t.tenantId, t.opportunityId) }),
 );
 
-/** Anexos da oportunidade (proposta e outros). Guardados no banco, até 3 MB. */
+/**
+ * Partes de um anexo grande enviado em pedaços (a hospedagem limita cada requisição a ~4,5 MB).
+ * Ao concluir, as partes viram um único anexo em opportunity_attachments e saem daqui.
+ */
+export const opportunityAttachmentChunks = pgTable(
+  'opportunity_attachment_chunks',
+  {
+    tenantId: tenantId(),
+    opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+    uploadId: uuid('upload_id').notNull(),
+    n: integer('n').notNull(),
+    data: bytea('data').notNull(),
+    uploadedBy: uuid('uploaded_by').notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.uploadId, t.n] }), ageIdx: index('opp_attach_chunks_age_idx').on(t.createdAt) }),
+);
+
+/** Anexos da oportunidade (proposta e outros). Guardados no banco; os grandes chegam em partes. */
 export const opportunityAttachments = pgTable(
   'opportunity_attachments',
   {

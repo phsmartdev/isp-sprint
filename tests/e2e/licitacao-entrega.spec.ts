@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-/** Licitação: abrir com objeto longo e vários endereços de entrega; ligar produto a endereço. */
+/** Licitação: abrir com objeto longo e vários endereços de entrega; ligar produto a endereço; anexo grande (edital) em partes. */
 const SHOTS = process.env.E2E_SHOTS;
-test('licitação com objeto longo, endereços por produto', async ({ page }) => {
+test('licitação com objeto longo, endereços por produto e edital grande', async ({ page }) => {
   test.setTimeout(150_000);
   await page.goto('/login');
   await page.getByLabel('E-mail').fill('lucas@yepnet.test');
@@ -58,4 +58,23 @@ test('licitação com objeto longo, endereços por produto', async ({ page }) =>
   await expect(after.getByLabel('Endereço de entrega 2').locator('option:checked')).toHaveText(`3 · Posto de Saúde ${tag} — Rua do Posto`);
   if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/produtos-enderecos.png` });
 
+  // edital de ~7 MB: vai em partes e volta igual
+  const size = 7 * 1024 * 1024;
+  const pdf = Buffer.alloc(size, 0x41);
+  pdf.write('%PDF-1.4\n', 0, 'latin1');
+  await page.goto(`/opportunities/${id}?aba=anexos`);
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Outro arquivo' }).click();
+  await (await chooser).setFiles({ name: 'edital.pdf', mimeType: 'application/pdf', buffer: pdf });
+  await expect(page.getByText('Arquivo anexado')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('7,0 MB')).toBeVisible();
+  if (SHOTS) await page.locator('main').screenshot({ path: `${SHOTS}/anexo-grande.png` });
+  const dl = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Baixar edital.pdf' }).click();
+  const file = await dl;
+  expect(file.suggestedFilename()).toBe('edital.pdf');
+  const fs = await import('node:fs/promises');
+  const got = await fs.readFile((await file.path())!);
+  expect(got.length).toBe(size);
+  expect(got.subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
 });
