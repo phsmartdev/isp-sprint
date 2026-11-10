@@ -1,5 +1,5 @@
 {
-  "id": "4c5e29bd-4c06-4cbb-a692-9650e03cabe1",
+  "id": "558da507-8580-41ba-bdee-aea4d3678849",
   "prevId": "d4de6691-042f-496c-b7dc-238ba97473d0",
   "version": "7",
   "dialect": "postgresql",
@@ -2176,311 +2176,6 @@
         "access_level_ck": {
           "name": "access_level_ck",
           "value": "level in ('nenhum','proprio','equipe','total')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.account_occurrences": {
-      "name": "account_occurrences",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "contact_id": {
-          "name": "contact_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "occurred_on": {
-          "name": "occurred_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "impact": {
-          "name": "impact",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'neutro'"
-        },
-        "channel": {
-          "name": "channel",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "aspects": {
-          "name": "aspects",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "stakeholder_id": {
-          "name": "stakeholder_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "opportunity_id": {
-          "name": "opportunity_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "contract_id": {
-          "name": "contract_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response_due_on": {
-          "name": "response_due_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "responded_on": {
-          "name": "responded_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "response_note": {
-          "name": "response_note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_by": {
-          "name": "updated_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_at": {
-          "name": "removed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_by": {
-          "name": "removed_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "removed_reason": {
-          "name": "removed_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "row_version": {
-          "name": "row_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "account_occurrences_idx": {
-          "name": "account_occurrences_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "contact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "occurred_on",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "account_occurrences_tenant_id_tenants_id_fk": {
-          "name": "account_occurrences_tenant_id_tenants_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_contact_id_contacts_id_fk": {
-          "name": "account_occurrences_contact_id_contacts_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "contacts",
-          "columnsFrom": [
-            "contact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_stakeholder_id_account_stakeholders_id_fk": {
-          "name": "account_occurrences_stakeholder_id_account_stakeholders_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "account_stakeholders",
-          "columnsFrom": [
-            "stakeholder_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_opportunity_id_opportunities_id_fk": {
-          "name": "account_occurrences_opportunity_id_opportunities_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "opportunities",
-          "columnsFrom": [
-            "opportunity_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_contract_id_contracts_id_fk": {
-          "name": "account_occurrences_contract_id_contracts_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "contracts",
-          "columnsFrom": [
-            "contract_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_created_by_users_id_fk": {
-          "name": "account_occurrences_created_by_users_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_updated_by_users_id_fk": {
-          "name": "account_occurrences_updated_by_users_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "users",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "account_occurrences_removed_by_users_id_fk": {
-          "name": "account_occurrences_removed_by_users_id_fk",
-          "tableFrom": "account_occurrences",
-          "tableTo": "users",
-          "columnsFrom": [
-            "removed_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "account_occurrences_kind_ck": {
-          "name": "account_occurrences_kind_ck",
-          "value": "kind in ('notificacao','reclamacao','feedback_positivo','mudanca_negociacao','mudanca_gestao','reuniao_decisao','marco','outro')"
-        },
-        "account_occurrences_impact_ck": {
-          "name": "account_occurrences_impact_ck",
-          "value": "impact in ('positivo','neutro','negativo')"
         }
       },
       "isRLSEnabled": false
@@ -23904,6 +23599,151 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.fiscal_envelopes": {
+      "name": "fiscal_envelopes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "branch_id": {
+          "name": "branch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ibge_code": {
+          "name": "ibge_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "municipality": {
+          "name": "municipality",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "values": {
+          "name": "values",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "fiscal_envelopes_idx": {
+          "name": "fiscal_envelopes_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "branch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ibge_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "year",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fiscal_envelopes_tenant_id_tenants_id_fk": {
+          "name": "fiscal_envelopes_tenant_id_tenants_id_fk",
+          "tableFrom": "fiscal_envelopes",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "fiscal_envelopes_branch_id_sales_branches_id_fk": {
+          "name": "fiscal_envelopes_branch_id_sales_branches_id_fk",
+          "tableFrom": "fiscal_envelopes",
+          "tableTo": "sales_branches",
+          "columnsFrom": [
+            "branch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "fiscal_envelopes_ibge_ck": {
+          "name": "fiscal_envelopes_ibge_ck",
+          "value": "ibge_code ~ '^[0-9]{7}$'"
+        },
+        "fiscal_envelopes_year_ck": {
+          "name": "fiscal_envelopes_year_ck",
+          "value": "year between 2020 and 2100"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.glpi_ticket_events": {
       "name": "glpi_ticket_events",
       "schema": "",
@@ -36991,6 +36831,12 @@
         },
         "state": {
           "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ibge_code": {
+          "name": "ibge_code",
           "type": "text",
           "primaryKey": false,
           "notNull": false

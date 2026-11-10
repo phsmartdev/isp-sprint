@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
-let carlos: Client, ana: Client, lucas: Client;
+let carlos: Client, ana: Client, lucas: Client, dir: Client;
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const now = new Date();
 const year = now.getFullYear();
@@ -16,6 +16,10 @@ let ccMkt = '', ccCom = '', crm = '', midia = '', passagens = '';
 beforeAll(async () => {
   ctx = await makeApp();
   [carlos, ana, lucas] = (await Promise.all(['carlos', 'ana', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client, Client];
+  // Diretoria (aprovação final do orçamento e decisão do Budget Guardião)
+  const email = `diretoria-orc-${Date.now().toString(36)}@yepnet.test`;
+  const u = ok(await carlos.post('/admin/users', { name: 'Diretora Fictícia', email, profile: 'diretoria', teamIds: [] }), 201).json();
+  dir = await login(ctx.app, email, u.temporaryPassword);
 });
 afterAll(async () => ctx.close());
 
@@ -37,7 +41,11 @@ describe('estrutura: plano de contas e centros de custo', () => {
     ok(await carlos.patch(`/budget/cost-centers/${ccMkt}`, { leaderId: ana.me.user.id }));
     // líder só vê o próprio centro
     const mine = ok(await ana.get('/budget/structure')).json().costCenters;
-    expect(mine.map((c: { code: string }) => c.code)).toEqual(['MKT']);
+    // e os centros dos times que ela lidera (cada time é um centro de custo)
+    const codes = mine.map((c: { code: string }) => c.code);
+    expect(codes).toContain('MKT');
+    expect(codes.filter((c: string) => c !== 'MKT').every((c: string) => c.startsWith('T-'))).toBe(true);
+    expect(codes).not.toContain('COM');
     expect((await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${ccCom}`)).statusCode).toBe(403);
   });
 });
@@ -54,14 +62,18 @@ describe('planejamento trimestral e aprovação da Diretoria', () => {
     const cat = st.accounts.find((x: { code: string }) => x.code === '3.1').id;
     expect((await ana.post('/budget/plan/lines', { costCenterId: ccMkt, accountId: cat, what: 'Na categoria', month, amountCents: 1000 })).json().detail).toMatch(/subcategoria/);
   });
-  it('envia; Diretoria recusa um item e aprova o total do centro; plano aprovado não recebe item novo', async () => {
-    expect(ok(await ana.post('/budget/plan/submit', { costCenterId: ccMkt, year, quarter })).json()).toMatchObject({ lines: 3, totalCents: 1_500_000 });
+  it('liderança envia à Gerência; Gerência recusa um item e aprova o resto (vai à Diretoria); Diretoria aprova; plano aprovado não recebe item novo', async () => {
+    expect(ok(await ana.post('/budget/plan/submit', { costCenterId: ccMkt, year, quarter })).json()).toMatchObject({ lines: 3, totalCents: 1_500_000, stage: 'gerencia' });
     const plan = ok(await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${ccMkt}`)).json();
     expect(plan.plan.status).toBe('em_aprovacao');
     expect((await ana.post('/budget/plan/decide', { planId: plan.plan.id, decision: 'aprovar' })).statusCode).toBe(403);
     expect((await carlos.post('/budget/plan/decide', { planId: plan.plan.id, lineIds: [lines[2]], decision: 'recusar' })).statusCode).toBe(422); // motivo obrigatório
     ok(await carlos.post('/budget/plan/decide', { planId: plan.plan.id, lineIds: [lines[2]], decision: 'recusar', note: 'Feira fora da estratégia do trimestre' }));
-    expect(ok(await carlos.post('/budget/plan/decide', { planId: plan.plan.id, decision: 'aprovar' })).json()).toMatchObject({ lines: 2, totalCents: 1_300_000, planStatus: 'aprovado' });
+    expect(ok(await carlos.post('/budget/plan/decide', { planId: plan.plan.id, decision: 'aprovar' })).json()).toMatchObject({ lines: 2, totalCents: 1_300_000, planStatus: 'em_aprovacao' });
+    const fwd = ok(await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${ccMkt}`)).json();
+    expect(fwd.lines.filter((l: { status: string }) => l.status === 'em_aprovacao').map((l: { approvalStage: string }) => l.approvalStage)).toEqual(['diretoria', 'diretoria']);
+    expect((await carlos.post('/budget/plan/decide', { planId: plan.plan.id, decision: 'aprovar' })).statusCode).toBe(422); // com a Diretoria agora
+    expect(ok(await dir.post('/budget/plan/decide', { planId: plan.plan.id, decision: 'aprovar' })).json()).toMatchObject({ lines: 2, totalCents: 1_300_000, planStatus: 'aprovado' });
     expect((await ana.post('/budget/plan/lines', { costCenterId: ccMkt, accountId: midia, what: 'Outra', month, amountCents: 1000 })).json().detail).toMatch(/Budget Guardião/);
     const q = ok(await carlos.get(`/budget/quarter?year=${year}&quarter=${quarter}`)).json();
     expect(q.items.find((i: { costCenter: { code: string } }) => i.costCenter.code === 'MKT')).toMatchObject({ planStatus: 'aprovado', approved: 1_300_000, realized: 0, band: 'subexecucao' });
@@ -76,30 +88,42 @@ describe('consumo pelo líder, Budget Guardião e revisão mensal', () => {
     const over = await ana.post('/budget/expenses', { ...base, amountCents: 300_000, financeCheck: true });
     expect(over.statusCode).toBe(422);
     expect(over.json().detail).toMatch(/Budget Guardião/);
-    // Guardião: até 15% do trimestre do centro (1,3 mi → 195 mil) entra com justificativa
-    expect((await ana.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 150_000, justification: 'curta' })).statusCode).toBe(422);
-    expect(ok(await ana.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 150_000, justification: 'Campanha com retorno acima do previsto' }), 201).json()).toMatchObject({ status: 'registrado', needsDirector: false });
+    // Guardião: só a Gerência pede, sempre com a aprovação da Diretoria
+    expect((await ana.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 150_000, justification: 'Campanha com retorno acima do previsto' })).statusCode).toBe(403);
+    expect((await carlos.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 150_000, justification: 'curta' })).statusCode).toBe(422);
+    const g1 = ok(await carlos.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 150_000, justification: 'Campanha com retorno acima do previsto' }), 201).json();
+    expect(g1).toMatchObject({ status: 'pendente', needsDirector: true });
+    expect((await carlos.post(`/budget/adjustments/${g1.id}/decide`, { approve: true })).statusCode).toBe(403);
+    ok(await dir.post(`/budget/adjustments/${g1.id}/decide`, { approve: true }));
     ok(await ana.post('/budget/expenses', { ...base, amountCents: 250_000, financeCheck: true }), 201);
-    // acumulado passa de 15%: vai para a Diretoria
-    const big = ok(await ana.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 100_000, justification: 'Ampliação da campanha para nova região' }), 201).json();
+    const big = ok(await carlos.post('/budget/adjustments', { costCenterId: ccMkt, accountId: midia, month, deltaCents: 100_000, justification: 'Ampliação da campanha para nova região' }), 201).json();
     expect(big).toMatchObject({ status: 'pendente', needsDirector: true });
     expect((await ana.post(`/budget/adjustments/${big.id}/decide`, { approve: true })).statusCode).toBe(403);
-    ok(await carlos.post(`/budget/adjustments/${big.id}/decide`, { approve: true, note: 'Ok, região prioritária' }));
+    ok(await dir.post(`/budget/adjustments/${big.id}/decide`, { approve: true, note: 'Ok, região prioritária' }));
+    // remanejar saldo entre contas do centro: só a Gerência; o total não muda
+    const tr = { costCenterId: ccMkt, fromAccountId: midia, toAccountId: crm, month, amountCents: 50_000, justification: 'Mídia rendeu mais; reforço na licença do CRM' };
+    expect((await ana.post('/budget/transfers', tr)).statusCode).toBe(403);
+    expect((await carlos.post('/budget/transfers', { ...tr, amountCents: 999_999_999 })).statusCode).toBe(422);
+    ok(await carlos.post('/budget/transfers', tr), 201);
     const q = ok(await ana.get(`/budget/quarter?year=${year}&quarter=${quarter}`)).json().items[0];
     expect(q).toMatchObject({ approved: 1_300_000, adjusted: 250_000, planned: 1_550_000, realized: 1_150_000 });
+    const pl = ok(await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${ccMkt}`)).json();
+    expect(pl.accounts.find((a: { accountId: string }) => a.accountId === crm).adjusted).toBe(50_000);
     expect(q.band).toBe('adequada');
   });
   it('revisão do mês aponta desvio acima de 15% por categoria e registra a justificativa; histórico reporta à Diretoria', async () => {
     let r = ok(await ana.get(`/budget/review?costCenterId=${ccMkt}&month=${month}`)).json();
     const ferr = r.items.find((i: { code: string }) => i.code === '3.2');
-    expect(ferr).toMatchObject({ planned: 300_000, realized: 0, needsJustification: true });
+    expect(ferr).toMatchObject({ planned: 350_000, realized: 0, needsJustification: true });
     expect(r.pending).toBeGreaterThan(0);
     ok(await ana.post('/budget/reviews', { costCenterId: ccMkt, month, accountId: ferr.accountId, justification: 'Licença renovada só no próximo mês' }), 201);
     r = ok(await ana.get(`/budget/review?costCenterId=${ccMkt}&month=${month}`)).json();
     expect(r.items.find((i: { code: string }) => i.code === '3.2').justification).toMatch(/próximo mês/);
     const ev = ok(await carlos.get('/budget/events?limit=50')).json().items.map((e: { summary: string }) => e.summary).join('\n');
-    expect(ev).toMatch(/Budget Guardião MKT.*registrado dentro do limite de 15% e reportado/);
-    expect(ev).toMatch(/Diretoria recusou 1 item/);
+    expect(ev).toMatch(/Budget Guardião MKT: Gerência pediu acréscimo/);
+    expect(ev).toMatch(/Gerência recusou 1 item/);
+    expect(ev).toMatch(/Gerência aprovou e enviou à Diretoria/);
+    expect(ev).toMatch(/Remanejamento MKT/);
   });
 });
 

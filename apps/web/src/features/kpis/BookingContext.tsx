@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
-import { MASK, MoneyToggle, moneyHidden, useMoneyHidden } from '../../lib/privacy';
+import { MASK, moneyHidden, useMoneyHidden } from '../../lib/privacy';
 import type { KpiItem } from './KpiBoard';
 
 export type BookingCtx = {
@@ -180,7 +180,6 @@ export function BookingChart({ it, r, onOpen, fill }: { it: KpiItem; r: Revenue;
           <span className="text-right text-xs text-muted">{y - 1} (ano todo)<b className="num block text-md text-ink">{brlShort(r.totals[String(y - 1)] ?? 0)}</b></span>
           <span className="text-right text-xs text-muted">{y} até {r.upTo ? MONTHS[r.upTo - 1] : '—'}<b className="num block text-md text-ink">{brlShort(r.totals[`${y}_ate_mes`] ?? 0)}</b></span>
           <span className="text-right text-xs text-muted">Crescimento sem reajuste<b className="num block text-md text-primary">{pctTxt(g?.growthComparable ?? null)}</b></span>
-          <MoneyToggle compact />
           {onOpen && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => onOpen(it)}>Ver ficha</button>}
         </div>
       </div>

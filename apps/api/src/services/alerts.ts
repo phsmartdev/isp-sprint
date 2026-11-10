@@ -15,7 +15,7 @@ export async function notifyDealWon(db: DbOrTx, config: Config, auth: AuthContex
   const managers = await db.execute<{ id: string; name: string; email: string }>(sql`
     select distinct u.id, u.name, u.email from users u
     where u.tenant_id = ${auth.tenantId} and u.active and u.id <> ${auth.userId} and (
-      exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = u.id and r.key in ('gerencia', 'administrador'))
+      exists (select 1 from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = u.id and r.key in ('gerencia', 'diretoria', 'administrador'))
       or exists (select 1 from team_memberships lead join team_memberships m on m.team_id = lead.team_id where lead.user_id = u.id and lead.is_lead and m.user_id = ${opp.ownerId})
     )`);
   const empresa = await tenantName(db, auth.tenantId);

@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax } from '@isp/domain';
+import { defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -24,13 +24,21 @@ export async function econSettingsOf(db: DbOrTx, tenantId: string, on = today())
   return r ? { id: r.id, validFrom: r.validFrom, createdAt: r.createdAt, createdBy: r.createdBy, settings: r.values as unknown as EconSettings } : null;
 }
 
+/** Envelopes fiscais da empresa (todas as publicações; a escolha da chave ativa é do motor). */
+export async function fiscalEnvelopesOf(db: DbOrTx, tenantId: string, branchId?: string | null): Promise<FiscalEnvelope[]> {
+  const rows = await db.select().from(s.fiscalEnvelopes).where(branchId ? and(eq(s.fiscalEnvelopes.tenantId, tenantId), eq(s.fiscalEnvelopes.branchId, branchId)) : eq(s.fiscalEnvelopes.tenantId, tenantId))
+    .orderBy(asc(s.fiscalEnvelopes.branchId), desc(s.fiscalEnvelopes.year), desc(s.fiscalEnvelopes.createdAt));
+  return rows.map((r) => ({ id: r.id, branchId: r.branchId, year: r.year, values: r.values as unknown as FiscalEnvelopeValues, createdAt: r.createdAt }));
+}
+
 export async function econSettingsHistory(db: DbOrTx, tenantId: string) {
   return db.select({ id: s.econSettingsVersions.id, values: s.econSettingsVersions.values, validFrom: s.econSettingsVersions.validFrom, createdAt: s.econSettingsVersions.createdAt, createdByName: s.users.name })
     .from(s.econSettingsVersions).leftJoin(s.users, eq(s.users.id, s.econSettingsVersions.createdBy))
     .where(eq(s.econSettingsVersions.tenantId, tenantId)).orderBy(desc(s.econSettingsVersions.validFrom), desc(s.econSettingsVersions.createdAt)).limit(50);
 }
 
-export async function fiscalDocsOf(db: DbOrTx, tenantId: string, branchId?: string | null) {
+/** Documentos fiscais com os tributos; com year, os tributos daquele ano (envelope temporal) e de que ano vieram. */
+export async function fiscalDocsOf(db: DbOrTx, tenantId: string, branchId?: string | null, year?: number | null) {
   const rows = await db.select().from(s.fiscalDocTypes)
     .where(branchId ? and(eq(s.fiscalDocTypes.tenantId, tenantId), eq(s.fiscalDocTypes.branchId, branchId)) : eq(s.fiscalDocTypes.tenantId, tenantId))
     .orderBy(asc(s.fiscalDocTypes.position), asc(s.fiscalDocTypes.code));
@@ -39,16 +47,20 @@ export async function fiscalDocsOf(db: DbOrTx, tenantId: string, branchId?: stri
     .from(s.fiscalDocVersions).where(inArray(s.fiscalDocVersions.docId, rows.map((d) => d.id))).orderBy(s.fiscalDocVersions.docId, desc(s.fiscalDocVersions.version)) : [];
   return rows.map((d) => {
     const v = versions.find((x) => x.docId === d.id);
-    return { id: d.id, branchId: d.branchId, fiscalKind: d.fiscalKind, code: d.code, name: d.name, active: d.active, taxes: d.taxes as FiscalTax[], rates: fiscalDocRates({ active: d.active, taxes: d.taxes as FiscalTax[] }, t), version: v?.version ?? null, versionId: v?.id ?? null, versionAt: v?.createdAt ?? null };
+    const byYear = (d.taxesByYear ?? {}) as Record<string, FiscalTax[]>;
+    const y = year ? docTaxesForYear({ taxes: d.taxes as FiscalTax[], taxesByYear: byYear }, year) : { taxes: d.taxes as FiscalTax[], fromYear: null };
+    const date = year && String(year) !== t.slice(0, 4) ? `${year}-01-01` : t;
+    return { id: d.id, branchId: d.branchId, fiscalKind: d.fiscalKind, code: d.code, name: d.name, active: d.active, taxes: y.taxes, taxesYear: y.fromYear, years: Object.keys(byYear).map(Number).sort(), baseTaxes: d.taxes as FiscalTax[], taxesByYear: byYear, rates: fiscalDocRates({ active: d.active, taxes: y.taxes }, date), version: v?.version ?? null, versionId: v?.id ?? null, versionAt: v?.createdAt ?? null };
   });
 }
 
 /** Grava a próxima versão dos tributos quando eles mudaram (a primeira, se o documento é novo). */
-export async function recordFiscalDocVersion(db: DbOrTx, tenantId: string, docId: string, taxes: FiscalTax[], actorId: string | null) {
-  const [last] = await db.select({ version: s.fiscalDocVersions.version, taxes: s.fiscalDocVersions.taxes }).from(s.fiscalDocVersions).where(eq(s.fiscalDocVersions.docId, docId)).orderBy(desc(s.fiscalDocVersions.version)).limit(1);
-  if (last && stableStringify(last.taxes) === stableStringify(taxes)) return last.version;
+export async function recordFiscalDocVersion(db: DbOrTx, tenantId: string, docId: string, taxes: FiscalTax[], actorId: string | null, year: number | null = null) {
+  const [lastY] = await db.select({ version: s.fiscalDocVersions.version, taxes: s.fiscalDocVersions.taxes }).from(s.fiscalDocVersions).where(and(eq(s.fiscalDocVersions.docId, docId), year == null ? sql`${s.fiscalDocVersions.year} is null` : eq(s.fiscalDocVersions.year, year))).orderBy(desc(s.fiscalDocVersions.version)).limit(1);
+  const [last] = await db.select({ version: s.fiscalDocVersions.version }).from(s.fiscalDocVersions).where(eq(s.fiscalDocVersions.docId, docId)).orderBy(desc(s.fiscalDocVersions.version)).limit(1);
+  if (lastY && stableStringify(lastY.taxes) === stableStringify(taxes)) return lastY.version;
   const version = (last?.version ?? 0) + 1;
-  await db.insert(s.fiscalDocVersions).values({ tenantId, docId, version, taxes: taxes as unknown as Record<string, unknown>[], createdBy: actorId });
+  await db.insert(s.fiscalDocVersions).values({ tenantId, docId, version, year, taxes: taxes as unknown as Record<string, unknown>[], createdBy: actorId });
   return version;
 }
 
@@ -78,7 +90,7 @@ type Opp = { id: string; tenantId: string; contactId: string; branchId: string |
 
 /** Tudo que o cálculo precisa: itens com a resolução fiscal, parâmetros vigentes, segmento e o que foi salvo. */
 export async function economicsContext(db: DbOrTx, opp: Opp) {
-  const [version, items, docs, [contact], [saved], [branch], fm] = await Promise.all([
+  const [version, items, docs, [contact], [saved], [branch], fm, envelopes] = await Promise.all([
     econSettingsOf(db, opp.tenantId),
     db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, opp.tenantId))).orderBy(asc(s.opportunityItems.position)),
     fiscalDocsOf(db, opp.tenantId),
@@ -86,11 +98,12 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     db.select().from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1),
     opp.branchId ? db.select({ name: s.salesBranches.name, cnpj: s.salesBranches.cnpj, taxRegime: s.salesBranches.taxRegime, city: s.salesBranches.city, state: s.salesBranches.state }).from(s.salesBranches).where(eq(s.salesBranches.id, opp.branchId)).limit(1) : Promise.resolve([]),
     modelFor(db, opp.tenantId),
+    opp.branchId ? fiscalEnvelopesOf(db, opp.tenantId, opp.branchId) : Promise.resolve([] as FiscalEnvelope[]),
   ]);
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null } : null };
+    return { description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {
@@ -102,13 +115,15 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)),
     /** modelo de fórmulas vigente (Financial Studio): padrão do sistema + fórmulas publicadas */
     model: fm.model, modelOverrides: fm.overrides,
+    /** envelope fiscal por vigência (Reforma Tributária): publicações da filial; a chave ativa sai da simulação (ano e município) */
+    fiscal: { envelopes, branchId: opp.branchId, today: today() },
   };
 }
 export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 
 /** null = sem parâmetros vigentes (a empresa ainda não informou em Configurações → Viabilidade). */
 export const computeEconomics = (ctx: EconContext, input?: EconInput) =>
-  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model }) : null;
+  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal }) : null;
 
 /**
  * O resultado salvo deixou de valer? Recalcula as mesmas entradas com os itens, tributos, parâmetros e motor de hoje
@@ -134,7 +149,8 @@ export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, acto
   await db.insert(s.opportunityEconomics).values({ opportunityId: opp.id, tenantId: opp.tenantId, input, result, updatedBy: actorId, updatedAt: now })
     .onConflictDoUpdate({ target: s.opportunityEconomics.opportunityId, set: { input, result, updatedBy: actorId, updatedAt: now } });
   // a fotografia guarda a versão de cada fórmula publicada usada (o histórico não muda com publicações futuras)
-  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
+  const envUsed = result.fiscal?.envelope ? ctx.fiscal.envelopes.find((e) => e.id === result.fiscal!.envelope!.id) ?? null : null;
+  const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, fiscalYear: result.fiscal?.year ?? null, fiscalEnvelope: envUsed ? { id: envUsed.id, year: envUsed.year, values: envUsed.values } : null, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
   await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId: ctx.settingsVersion?.id ?? null, sha256: snapshotHash({ input, settings, result }) });
   return result;
 }

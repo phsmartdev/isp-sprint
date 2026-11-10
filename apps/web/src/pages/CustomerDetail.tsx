@@ -1,4 +1,5 @@
 import { WorkLinks } from '../features/tasks/WorkLinks';
+import { MeasurementTab } from '../features/measurement/MeasurementTab';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +15,9 @@ import { Account360 } from '../features/cs/Account360';
 import { AddToAbmButton } from '../features/abm/shared';
 import { AccountEvolution } from '../features/account/AccountEvolution';
 import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, Input, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
+import { StakeholdersPanel } from '../features/abm/stakeholders';
+import { AccountGifts } from '../features/gifts/AccountGifts';
+import { AccountRelationsPanel } from '../features/accounts/AccountRelations';
 import { LifecycleChip, StageChip, productLabel } from '../components/badges';
 import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
@@ -198,11 +202,13 @@ export function CustomerDetailPage() {
             ...(can('oportunidades') ? [{ key: 'oportunidades', label: 'Oportunidades', count: c.opportunities.length }] : []),
             { key: 'atividades', label: 'Interações', count: acts.data?.total },
             ...(feature('crm.sucesso_cliente') ? [{ key: 'sucesso', label: 'Sucesso do Cliente' }] : []),
-            ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }] : []),
+            ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }, { key: 'medicao', label: 'Medição' }] : []),
             ...(can('projetos') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
             { key: 'evolucao', label: 'Evolução' },
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
+            ...(c.segment !== 'residencial' ? [{ key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Contas relacionadas' }] : []),
+            { key: 'brindes', label: 'Brindes' },
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
@@ -235,6 +241,7 @@ export function CustomerDetailPage() {
           )}
           {tab === 'sucesso' && <Account360 contactId={c.id} />}
           {tab === 'contratos' && <AccountContracts contactId={c.id} />}
+          {tab === 'medicao' && <MeasurementTab contactId={c.id} />}
           {tab === 'evolucao' && <AccountEvolution contactId={c.id} />}
           {tab === 'projetos' && <WorkLinks prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
@@ -254,6 +261,9 @@ export function CustomerDetailPage() {
           {tab === 'atividades' && (!can('atividades') ? <p className="text-sm text-muted">Seu perfil não tem acesso ao módulo Atividades.</p> : acts.isLoading ? <LoadingRows rows={3} /> : acts.data?.items.length ? <ul className="divide-y divide-line">{acts.data.items.map((a) => <ActivityRow key={a.id} a={a} showOwner compact />)}</ul> : <EmptyState title="Nenhuma interação registrada" />)}
           {tab === 'financeiro' && (action('ver_financeiro') ? <IxcFinance contactId={c.id} /> : <EmptyState title="Sem acesso aos valores financeiros" description="Seu perfil não vê valores financeiros. Fale com a administração." />)}
           {tab === 'atendimentos' && <IxcOrders contactId={c.id} />}
+          {tab === 'stakeholders' && <StakeholdersPanel contactId={c.id} />}
+          {tab === 'brindes' && <AccountGifts contactId={c.id} name={c.name} />}
+          {tab === 'relacoes' && <AccountRelationsPanel contactId={c.id} />}
           {FUTURE_TABS[tab] && <EmptyState title="Ainda sem dados" description={FUTURE_TABS[tab]} />}
         </div>
       </div>

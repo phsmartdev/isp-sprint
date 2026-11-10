@@ -1,4 +1,8 @@
 /** Sprint: roteiro (respostas), anexos de proposta e e-mail ao cliente a partir da oportunidade. */
+import { randomBytes } from 'node:crypto';
+import { textToHtml } from '../services/email';
+import { ensureProposalNumber } from '../services/proposalNumber';
+import { todayIn } from '../services/vacations';
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -252,12 +256,16 @@ export const sprintRoutes = [
         if (!a) throw unprocessable('Anexo não encontrado nesta oportunidade.', [{ path: 'attachmentId', message: 'Anexo inválido' }]);
         attachment = a;
       }
+      // leitura do e-mail: pixel 1×1 com token próprio (gatilho "Cliente leu o e-mail" das jornadas)
+      const openToken = randomBytes(24).toString('base64url');
       const result = await sendEmail(app.db, {
         tenantId: auth.tenantId,
         kind: body.kind,
         to: body.to,
         subject: body.subject,
         text: body.body,
+        openToken,
+        html: `${textToHtml(body.body)}<img src="${publicLink(app.config, `/api/v1/public/mail-open/${openToken}`)}" width="1" height="1" alt="" style="display:block;border:0;width:1px;height:1px">`,
         attachments: attachment ? [{ filename: attachment.filename, content: attachment.data, contentType: attachment.mime }] : undefined,
         opportunityId: params.id,
         attachmentId: attachment?.id ?? null,
@@ -266,6 +274,7 @@ export const sprintRoutes = [
       });
       if (!result.ok) throw unprocessable(`O e-mail não foi enviado: ${result.error}`, [{ path: 'smtp', message: result.error }]);
       await app.db.transaction(async (tx) => {
+        if (body.kind === 'proposta') await ensureProposalNumber(tx, auth.tenantId, params.id, todayIn(auth.timezone));
         if (body.kind === 'proposta' && ['nao_criada', 'rascunho'].includes(opp.proposalStatus)) {
           await tx.update(s.opportunities).set({ proposalStatus: 'enviada', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, params.id));
         }
@@ -337,6 +346,7 @@ export const sprintRoutes = [
       }
       await app.db.transaction(async (tx) => {
         await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'whatsapp_sent', actorId: auth.userId, payload: { filename: a.filename, to, mode: body.mode }, rowVersion: o.rowVersion });
+        if (a.kind === 'proposta') await ensureProposalNumber(tx, auth.tenantId, o.id, todayIn(auth.timezone));
         if (a.kind === 'proposta' && ['nao_criada', 'rascunho'].includes(o.proposalStatus)) await tx.update(s.opportunities).set({ proposalStatus: 'enviada', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));
       });
       await audit(app.db, req, { action: 'attachment.whatsapp', entityType: 'opportunity', entityId: o.id, metadata: { filename: a.filename, mode: body.mode } });

@@ -1,5 +1,6 @@
 /** Configurações → Base de dados: planilha modelo, importação de clientes e limpeza da base. */
 import { useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Download, Upload } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
@@ -43,6 +44,7 @@ function ImportCard() {
   };
   return (
     <section className="card p-5">
+      <div className="mb-4"><Notice tone="info">Vai trazer o histórico do RD Station (planilha exportada de negociações e tarefas)? Use o <Link className="link font-semibold" to="/settings/importacao">Data Import Engine</Link> → "Importar planilha (Excel ou CSV)".</Notice></div>
       <h2 className="text-lg font-bold text-ink">Importar clientes por planilha</h2>
       <p className="mb-4 max-w-3xl text-sm text-muted">Baixe o modelo com os campos do CRM, preencha no Excel (uma linha por cliente) e salve como CSV. O sistema confere tudo antes de gravar. Se o código do cliente já existir, a linha atualiza o cadastro.</p>
       <div className="mb-4 flex flex-wrap gap-2">
@@ -101,6 +103,22 @@ function KeepPicker({ kind, value, onChange }: { kind: 'opp' | 'ctr'; value: Kep
   );
 }
 
+/** Exemplo fictício do Relatório de Medição (sai com Limpar base). */
+function ExampleCard() {
+  const { me } = useAuth();
+  const toast = useToast();
+  const navigate = useNavigate();
+  const isAdmin = me?.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p));
+  const m = useMutation({ mutationFn: () => api<{ contactId: string; created: boolean }>('/admin/demo/measurement-example', { method: 'POST' }), onSuccess: (r) => { toast({ tone: 'success', message: r.created ? 'Exemplo carregado' : 'O exemplo já existia' }); navigate(`/customers/${r.contactId}?t=medicao`); }, onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }) });
+  return (
+    <section className="card p-5">
+      <h2 className="text-lg font-bold text-ink">Exemplo: Relatório de Medição</h2>
+      <p className="mb-3 max-w-3xl text-sm text-muted">Cria uma conta pública fictícia com envio de Relatório de Medição, 1 contrato por medição com os itens numerados e 6 medições lançadas pelas oportunidades de consumo no mês passado (proposta em PDF, envio registrado e consumo no saldo). Tudo marcado como demonstração: sai com "Limpar base". Carregar de novo não duplica.</p>
+      {isAdmin ? <Button variant="primary" loading={m.isPending} onClick={() => m.mutate()}>Carregar exemplo</Button> : <Notice tone="warning">Só a administração ou a gerência carrega exemplos.</Notice>}
+    </section>
+  );
+}
+
 function ClearCard() {
   const { me } = useAuth();
   const qc = useQueryClient();
@@ -112,7 +130,7 @@ function ClearCard() {
   const [error, setError] = useState<string | null>(null);
   const [keepOpps, setKeepOpps] = useState<Kept[]>([]);
   const [keepCtrs, setKeepCtrs] = useState<Kept[]>([]);
-  const isAdmin = me?.profiles.includes('gerencia') || me?.profiles.includes('administrador');
+  const isAdmin = me?.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p));
   const clear = useMutation({
     mutationFn: () => api<{ counts: Record<string, number> }>('/admin/clear-base', { method: 'POST', body: { password, confirm, scopes, keep: { opportunityIds: keepOpps.map((x) => x.id), contractIds: keepCtrs.map((x) => x.id) } } }),
     onSuccess: (r) => {
@@ -160,6 +178,7 @@ export function AdminData() {
   return (
     <div className="space-y-4">
       <ImportCard />
+      <ExampleCard />
       <ClearCard />
     </div>
   );

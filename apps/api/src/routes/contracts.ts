@@ -6,8 +6,11 @@ import { z } from 'zod';
 import {
   BILLING_TYPES, BILLING_TYPE_LABELS, CONTRACT_KINDS, CONTRACT_STAGES, CONTRACT_STAGE_LABELS, CONTRACT_TABS, DASHBOARD_SECTIONS, DEFAULT_CONTRACT_SETTINGS, LEGAL_REGIMES, ALERT_LABELS, PROFILE_KEYS,
   SEGMENT_LABELS, addDays, annualValueCents, backlogCents, concentration, daysBetween, revenueAtRisk, endFromTerm, ledgerTotals, nextAnniversary, recurringBilledInPeriod, HEALTH_STATES, adjustmentsDue, contractHealth, contractPerformance, expiringPlan, healthSummary, pareto, renewalState, type AlertKind, type Segment,
-  SECTORS, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
+  SECTOR_KEY, CONTRACT_ITEM_KINDS, itemKindOf, contractItemFromOpportunity, contractValuesFromItems, reportTermsIssues, type ReportTerms,
 } from '@isp/domain';
+import { deliveryErrors, DELIVERY_MAX_COLUMNS, DELIVERY_MAX_ROWS } from '@isp/domain';
+import { ZenithBody, syncZenithSlas } from './zenith';
+import { EMPTY_ZENITH, CONTRACT_SERVICE_TYPES, needsZenith } from '@isp/domain';
 import { reportOnboarding } from '../services/contractReports';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -47,9 +50,16 @@ const VersionFields = z.object({
   items: z.array(Item).max(50).default([]),
   guarantee: Guarantee.optional(),
   publicTerms: PublicTerms.optional(),
-  reportTerms: z.object({ required: z.boolean(), sector: z.enum(SECTORS).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
+  reportTerms: z.object({ required: z.boolean(), sector: z.string().regex(SECTOR_KEY).nullable().default(null), validatorId: uuid.nullable().default(null), dueDay: z.number().int().min(1).max(31).nullable().default(null), alertDaysBefore: z.number().int().min(0).max(60).nullable().default(null) }).nullable().optional(),
   adjustmentIndex: optText(60), adjustmentBaseDate: optDay, adjustmentRule: optText(1000),
   specialConditions: optText(4000),
+  deliveryAddresses: z.object({
+    columns: z.array(z.string().trim().min(1).max(60)).max(DELIVERY_MAX_COLUMNS).default([]),
+    rows: z.array(z.object({ seq: z.number().int().min(1).max(1_000_000), address: z.string().trim().min(1).max(500), service: z.string().trim().max(200).nullable().default(null), extra: z.record(z.string(), z.string().max(300)).default({}) })).max(DELIVERY_MAX_ROWS).default([]),
+  }).superRefine((d, ctx) => { for (const m of deliveryErrors(d)) ctx.addIssue({ code: 'custom', message: m }); }).optional(),
+  /** Cadastro Zenith: quando enviado, precisa estar completo (a tela exige). */
+  zenith: ZenithBody.nullable().optional(),
+  serviceType: z.enum(CONTRACT_SERVICE_TYPES).nullable().optional(),
 });
 const Header = z.object({
   kind: z.enum(CONTRACT_KINDS).default('privado'),
@@ -155,6 +165,8 @@ export const contractRoutes = [
         .where(and(eq(s.opportunities.id, query.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
       if (!o) throw notFound('Oportunidade não encontrada.');
       const [existing] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
+      // Zenith: a empresa detentora do contrato é a filial que vendeu a oportunidade
+      const [branch] = await app.db.select({ name: s.salesBranches.name }).from(s.opportunities).innerJoin(s.salesBranches, eq(s.salesBranches.id, s.opportunities.branchId)).where(eq(s.opportunities.id, o.id)).limit(1);
       const [plan] = o.planId ? await app.db.select().from(s.plans).where(eq(s.plans.id, o.planId)).limit(1) : [];
       const items = await opportunityContractItems(app.db, auth.tenantId, o.id, plan ?? null);
       const publico = o.segment === 'governamental';
@@ -165,7 +177,7 @@ export const contractRoutes = [
         won: o.stage === 'ganha',
         suggestion: {
           kind: publico ? 'publico' : 'privado', legalRegime: publico ? 'lei_14133' : 'privado', commercialOwnerId: o.ownerId,
-          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12 },
+          version: { number: '', object: plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title, items, monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0), signedAt: o.wonAt ? o.wonAt.toISOString().slice(0, 10) : null, termMonths: 12, zenith: { ...EMPTY_ZENITH, holderCompany: branch?.name ?? '' } },
         },
       };
     },
@@ -216,6 +228,9 @@ export const contractRoutes = [
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const ver = normalizeVersion(body.version);
+      // só serviços de telecom vão para o Zenith; nos demais o cadastro Zenith não é guardado
+      if (ver.serviceType !== undefined && !needsZenith(ver.serviceType)) ver.zenith = null;
+      if (needsZenith(ver.serviceType) && !ver.zenith) throw unprocessable('Serviço de telecom: preencha o cadastro Zenith.', [{ path: 'version.zenith', message: 'Obrigatório' }]);
       if (ver.reportTerms?.validatorId) await assertUsers(app.db, auth, [ver.reportTerms.validatorId]);
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
@@ -228,6 +243,7 @@ export const contractRoutes = [
         if (body.billingType === 'medicao' && body.initialBalanceCents > 0) {
           await tx.insert(s.contractLedger).values({ tenantId: auth.tenantId, contractId: c!.id, kind: 'credito', amountCents: body.initialBalanceCents, occurredOn: ver.signedAt ?? new Date().toISOString().slice(0, 10), description: 'Saldo inicial do contrato', createdBy: auth.userId });
         }
+        await syncZenithSlas(tx, auth.tenantId, c!.id, ver.zenith, auth.userId);
         await addEvent(tx, auth.tenantId, c!.id, auth.userId, 'cadastro', `Contrato ${ver.number} (${BILLING_TYPE_LABELS[body.billingType]}) cadastrado${oppTitle ? ` a partir da oportunidade “${oppTitle}”` : ''}`, { opportunityId: body.opportunityId });
         if (body.opportunityId) await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: body.opportunityId, type: 'contrato_cadastrado', actorId: auth.userId, payload: { contractId: c!.id, number: ver.number } });
         return c!;
@@ -751,7 +767,11 @@ export const contractRoutes = [
           if (patch.items && patch.monthlyCents === undefined) patch.monthlyCents = contractValuesFromItems(patch.items as { qty: number; unitCents: number; kind?: string }[], null).monthlyCents;
           if (patch.reportTerms !== undefined) patch.reportTerms = normalizeVersion({ reportTerms: patch.reportTerms as ReportTerms | null }).reportTerms;
           if ((patch.reportTerms as ReportTerms | null)?.validatorId) await assertUsers(tx, auth, [(patch.reportTerms as ReportTerms).validatorId]);
+          const svc = patch.serviceType === undefined ? cur.serviceType : (patch.serviceType as string | null);
+          if (patch.serviceType !== undefined && !needsZenith(svc)) patch.zenith = null;
+          if (needsZenith(svc) && !(patch.zenith === undefined ? cur.zenith : patch.zenith)) throw unprocessable('Serviço de telecom: preencha o cadastro Zenith.', [{ path: 'version.zenith', message: 'Obrigatório' }]);
           const r = await newVersion(tx, c, auth.userId, patch as VersionPatch, 'edicao', body.reason ?? 'Ajuste no cadastro antes da validação');
+          await syncZenithSlas(tx, auth.tenantId, c.id, body.version.zenith, auth.userId);
           version = r.version;
         }
         return { version, changedHeader };

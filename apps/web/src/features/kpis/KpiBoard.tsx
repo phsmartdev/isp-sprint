@@ -4,6 +4,7 @@
  * Embaixo, as outras visões: evolução do indicador escolhido, atingimento de todos no trimestre,
  * desdobramento das metas por trimestre e o que pede atenção.
  */
+import { MASK, moneyHidden } from '../../lib/privacy';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -34,6 +35,7 @@ export function kpiParts(v: number | null, unit: IndicatorDef['unit']): [string,
   if (unit === 'dias') return [nf(v), Math.abs(v) === 1 ? ' dia' : ' dias'];
   if (unit === 'horas') return [nf(v), ' h'];
   if (unit === 'minutos') return [nf(v, 0), ' min'];
+  if (unit === 'reais' && moneyHidden()) return [MASK, ''];
   if (unit === 'reais') return [v >= 1e6 ? `R$ ${nf(v / 1e6)} mi` : v >= 1e3 ? `R$ ${nf(v / 1e3)} mil` : `R$ ${nf(v, 2)}`, ''];
   return [nf(v), ''];
 }

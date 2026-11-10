@@ -163,7 +163,14 @@ export function renderComm(text: string, vars: Partial<Record<string, string | n
   return text.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, k: string) => { const v = vars[k]; const s = v == null || v === '' ? '—' : String(v); return escapeHtml ? esc(s) : s; });
 }
 
-export const COMM_FORMATS = ['texto', 'html'] as const;
+/**
+ * texto = texto formatado na moldura institucional · html = HTML da empresa ·
+ * modelo = modelo genérico: cabeçalho e rodapé em imagem, assunto = nome do modelo (com variáveis), só o corpo é digitado.
+ */
+export const COMM_FORMATS = ['texto', 'html', 'modelo'] as const;
+export const COMM_FORMAT_LABELS: Record<(typeof COMM_FORMATS)[number], string> = { texto: 'Texto formatado', html: 'HTML', modelo: 'Modelo com imagens' };
+/** Limites da área do corpo no modelo com imagens (altura em px no e-mail de 600 px de largura). */
+export const FRAME_HEIGHT = { min: 120, max: 1200, default: 320 } as const;
 export type CommFormat = (typeof COMM_FORMATS)[number];
 export type CommTemplateContent = { subject: string; body: string; whatsapp: string; format?: CommFormat };
 

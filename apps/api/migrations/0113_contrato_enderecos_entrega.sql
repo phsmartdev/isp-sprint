@@ -1,0 +1,1 @@
+ALTER TABLE "contract_versions" ADD COLUMN "delivery_addresses" jsonb DEFAULT '{"columns":[],"rows":[]}'::jsonb NOT NULL;

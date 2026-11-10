@@ -1,5 +1,6 @@
 /** Ficha individual do contrato. */
 import { useAuth } from '../../auth/AuthProvider';
+import { DeliveryList } from '../../features/contracts/DeliveryAddresses';
 import { WorkLinks } from '../../features/tasks/WorkLinks';
 import { EntityPeoplePanel } from '../../features/abm/EntityPeoplePanel';
 import { useState } from 'react';
@@ -20,6 +21,8 @@ import { CommitmentControl } from '../../features/contracts/CommitmentControl';
 import { AmendmentsPanel } from '../../features/contracts/AmendmentsPanel';
 import { ExecutionPanel } from '../../features/contracts/ExecutionPanel';
 import { ErpPanel } from '../../features/contracts/ErpPanel';
+import { ZenithPanel } from '../../features/contracts/Zenith';
+import { CONTRACT_SERVICE_LABELS, needsZenith } from '@isp/domain';
 import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { ReportNotices, ReportTermsText } from '../../features/contracts/ReportNotices';
 import { ContractJourneySteps } from '../../features/contracts/ContractJourneySteps';
@@ -27,7 +30,7 @@ import { GenerateModal, SignModal } from '../../features/contracts/SignaturePane
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'zenith' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -166,6 +169,7 @@ export function ContractDetailPage() {
             ...(c.billingType === 'medicao' || c.kind === 'publico' ? [{ key: 'consumo' as Tab, label: c.billingType === 'medicao' ? (c.kind === 'publico' ? 'Consumo por valor' : 'Consumo') : 'Empenho por valor' }] : []),
             ...(c.billingType !== 'recorrente' ? [{ key: 'extrato' as Tab, label: c.billingType === 'medicao' ? 'Saldo e consumo' : 'Lançamentos' }] : []),
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
+            ...(needsZenith(v.serviceType) ? [{ key: 'zenith' as Tab, label: 'Zenith' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
             { key: 'documentos', label: 'Documentos' },
@@ -180,6 +184,7 @@ export function ContractDetailPage() {
           {tab === 'resumo' && (
             <div className="space-y-6">
               <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Info label="Serviço">{v.serviceType ? CONTRACT_SERVICE_LABELS[v.serviceType as keyof typeof CONTRACT_SERVICE_LABELS] ?? v.serviceType : <span className="text-[#C2610C]">Não informado</span>}</Info>
                 <Info label="Objeto"><span className="whitespace-pre-line">{v.object}</span></Info>
                 <Info label="Assinatura">{fmtDate(v.signedAt)}</Info>
                 <Info label="Ativação técnica">{v.activationAt ? fmtDate(v.activationAt) : <span className="text-[#C2610C]">Pendente</span>}</Info>
@@ -209,6 +214,7 @@ export function ContractDetailPage() {
                   </table></div>
                 )}
               </div>
+              <DeliveryList value={v.deliveryAddresses} />
               {v.specialConditions && <div><h2 className="mb-1 font-bold text-ink">Condições específicas</h2><p className="whitespace-pre-line text-sm text-text">{v.specialConditions}</p></div>}
               <div><h2 className="mb-1 font-bold text-ink">Cliente</h2><p className="text-sm text-text">{c.contact.name}{c.contact.email ? ` · ${c.contact.email}` : ''}{c.contact.phone ? ` · ${c.contact.phone}` : ''}{c.address ? ` · ${[c.address.street, c.address.number, c.address.district, c.address.city, c.address.state].filter(Boolean).join(', ')}` : ''}</p><p className="text-xs text-muted">Dados do cadastro do cliente no CRM (não são copiados para o contrato).</p></div>
             </div>
@@ -219,6 +225,7 @@ export function ContractDetailPage() {
             </div>
           )}
           {tab === 'erp' && <ErpPanel c={c} />}
+          {tab === 'zenith' && <ZenithPanel contractId={c.id} />}
           {tab === 'empenhos' && <CommitmentControl contractId={c.id} />}
           {tab === 'consumo' && <ConsumptionPanel c={c} />}
           {tab === 'aditivos' && <AmendmentsPanel c={c} />}

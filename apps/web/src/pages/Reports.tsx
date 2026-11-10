@@ -17,7 +17,6 @@ import { BarRows, CHART, ComboChart, Donut, FunnelShape, Legend } from '../compo
 import { stageColor } from '../components/badges';
 import { PortsReport } from '../features/PortsReport';
 import { CommissionsReport } from '../features/CommissionsReport';
-import { MoneyToggle } from '../lib/privacy';
 import { ArrangeButton, useArrangement } from '../features/Arrange';
 import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 
@@ -76,7 +75,6 @@ export function ReportsPage() {
         actions={
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
-            <MoneyToggle />
             {f.tab === 'geral' && <ArrangeButton a={arr} />}
             <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>

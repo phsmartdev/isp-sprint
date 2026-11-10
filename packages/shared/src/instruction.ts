@@ -107,19 +107,38 @@ export const FieldSchema = z.object({
 });
 export type CustomField = z.infer<typeof FieldSchema>;
 
-export const TRIGGER_TYPES = ['criada', 'entrou_na_etapa', 'ganha', 'perdida', 'parada'] as const;
+export const TRIGGER_TYPES = ['criada', 'entrou_na_etapa', 'ganha', 'perdida', 'parada', 'chamado_retorno', 'email_lido'] as const;
 export const TRIGGER_LABELS: Record<(typeof TRIGGER_TYPES)[number], string> = {
   criada: 'Oportunidade criada',
   entrou_na_etapa: 'Entrou na etapa',
   ganha: 'Venda fechada',
   perdida: 'Marcada como perdida',
   parada: 'Parada na etapa por X dias',
+  chamado_retorno: 'Retorno de chamado (GLPI, IXC ou e-mail)',
+  email_lido: 'Cliente leu o e-mail',
 };
+export const TICKET_ORIGINS = ['qualquer', 'glpi', 'ixc', 'email'] as const;
+export const TICKET_ORIGIN_LABELS: Record<(typeof TICKET_ORIGINS)[number], string> = { qualquer: 'Qualquer origem', glpi: 'Chamado do GLPI', ixc: 'Ordem de serviço do IXC', email: 'Resposta do cliente por e-mail' };
+/** Exceção: a automação NÃO roda quando a oportunidade bate com a regra (qualquer exceção basta). */
+export const EXCEPTION_FIELDS = ['tipo_venda', 'segmento', 'natureza', 'filial', 'valor_ate', 'valor_acima'] as const;
+export const EXCEPTION_FIELD_LABELS: Record<(typeof EXCEPTION_FIELDS)[number], string> = {
+  tipo_venda: 'Tipo de venda é', segmento: 'Segmento é', natureza: 'Natureza da conta é', filial: 'Filial é', valor_ate: 'Valor até (R$)', valor_acima: 'Valor acima de (R$)',
+};
+export const AutomationExceptionSchema = z.object({
+  campo: z.enum(EXCEPTION_FIELDS),
+  /** listas: valores que disparam a exceção; valor_*: um número em reais */
+  valores: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
+  valor: z.number().min(0).max(1e10).optional().nullable(),
+}).refine((e) => (e.campo.startsWith('valor_') ? e.valor != null : e.valores.length > 0), 'Preencha a exceção');
 export const AutomationTriggerSchema = z.object({
   tipo: z.enum(TRIGGER_TYPES),
   etapa: slug.optional().nullable(),
   dias: z.number().int().min(1).max(365).optional().nullable(),
+  /** retorno de chamado: de onde vem */
+  origem: z.enum(TICKET_ORIGINS).optional().nullable(),
+  excecoes: z.array(AutomationExceptionSchema).max(10).optional(),
 });
+export type AutomationException = z.infer<typeof AutomationExceptionSchema>;
 /** Responsável: 'dono' (o da oportunidade) ou o id/e-mail de um usuário. */
 const person = z.string().trim().min(3).max(200);
 export const ACTION_TYPES = ['criar_tarefa', 'enviar_email', 'mover_etapa', 'duplicar', 'atribuir'] as const;

@@ -1,5 +1,6 @@
 /** Chat interno, comentários e menções da negociação. */
 import { z } from 'zod';
+import { ensureVacationAlerts, todayIn } from '../services/vacations';
 import * as s from '../db/schema';
 import { defineRoute, IdParams } from '../http/route';
 import { audit } from '../services/audit';
@@ -103,6 +104,10 @@ export const negotiationRoutes = [
     summary: 'Onde me mencionaram (chat e comentários), com não lidas',
     tag: 'Negociação',
     anyAuthenticated: true,
-    handler: async ({ app, auth }) => myMentions(app.db, auth),
+    handler: async ({ app, auth }) => {
+      // aviso de férias N dias antes (gerado aqui, quando o sino consulta)
+      await ensureVacationAlerts(app.db, app.config, auth.tenantId, todayIn(auth.timezone)).catch((e) => console.error('aviso de férias', e));
+      return myMentions(app.db, auth);
+    },
   }),
 ];

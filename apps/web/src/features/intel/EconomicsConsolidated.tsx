@@ -17,7 +17,7 @@ type Data = {
   items: Item[];
 };
 const STATUS = [{ key: 'todas', label: 'Todas' }, { key: 'ganhas', label: 'Ganhas' }, { key: 'andamento', label: 'Em andamento' }] as const;
-const VERDICT_TONE: Record<EconVerdict, 'green' | 'yellow' | 'red' | 'neutral'> = { viavel: 'green', abaixo_recomendado: 'yellow', fora_politica: 'red', abaixo_minimo: 'red', inviavel: 'red', sem_preco: 'neutral' };
+const VERDICT_TONE: Record<EconVerdict, 'green' | 'yellow' | 'red' | 'neutral'> = { viavel: 'green', abaixo_recomendado: 'yellow', fora_politica: 'red', abaixo_minimo: 'red', inviavel: 'red', sem_preco: 'neutral', abaixo_faixa: 'red', acima_faixa: 'yellow', aguardando_sugerido: 'neutral', sem_margem_liquida: 'neutral' };
 const money = (v: number) => (v < 0 ? `− ${fmtBRL(-v)}` : fmtBRL(Math.abs(v)));
 
 function Tile({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: 'bad' }) {

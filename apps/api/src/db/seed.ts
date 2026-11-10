@@ -454,9 +454,9 @@ export async function seed(url: string) {
       users: [
         { name: 'Carlos Silva', email: 'carlos@yepnet.test', profiles: ['gerencia'], jobTitle: 'Comercial', teams: [], goals: [10, 12, 50] },
         { name: 'Ana Souza', email: 'ana@yepnet.test', profiles: ['supervisor'], jobTitle: 'Supervisora comercial', teams: ['Residencial', 'Empresarial'], leads: ['Residencial', 'Empresarial'] },
-        { name: 'Lucas Lima', email: 'lucas@yepnet.test', profiles: ['vendedor'], jobTitle: 'Consultor de vendas', teams: ['Residencial'] },
-        { name: 'Rafael Mendes', email: 'rafael@yepnet.test', profiles: ['vendedor'], jobTitle: 'Consultor de vendas', teams: ['Empresarial'] },
-        { name: 'Mariana Costa', email: 'mariana@yepnet.test', profiles: ['vendedor'], jobTitle: 'Consultora de vendas', teams: ['Governo'] },
+        { name: 'Lucas Lima', email: 'lucas@yepnet.test', profiles: ['operacao'], jobTitle: 'Consultor de vendas', teams: ['Residencial'] },
+        { name: 'Rafael Mendes', email: 'rafael@yepnet.test', profiles: ['operacao'], jobTitle: 'Consultor de vendas', teams: ['Empresarial'] },
+        { name: 'Mariana Costa', email: 'mariana@yepnet.test', profiles: ['operacao'], jobTitle: 'Consultora de vendas', teams: ['Governo'] },
       ],
     });
     await seedTenant(db, {
@@ -464,7 +464,7 @@ export async function seed(url: string) {
       slug: 'outro',
       seed: 7,
       volume: 4,
-      users: [{ name: 'Vendedor Outro', email: 'vendedor@outro.test', profiles: ['vendedor'], jobTitle: 'Vendedor', teams: ['Vendas'] }],
+      users: [{ name: 'Vendedor Outro', email: 'vendedor@outro.test', profiles: ['operacao'], jobTitle: 'Vendedor', teams: ['Vendas'] }],
     });
   } finally {
     await pool.end();

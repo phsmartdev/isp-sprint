@@ -1,4 +1,5 @@
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
+import { GenBody, branchDefaultTemplate, generateProposal, hasProposal, isProposalStage } from '../services/proposalGen';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
 import { freshSnapshot } from '../services/cs';
 import { snapshotEconomicsOnWon } from '../services/economics';
@@ -14,7 +15,7 @@ import { notifyDealWon } from '../services/alerts';
 import { runAutomations } from '../services/automations';
 import { TERMINAL_STAGES, atLeast, validateTransition, type OpportunityStage } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
-import { conflict, unprocessable } from '../http/errors';
+import { conflict, unprocessable, forbidden } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -237,6 +238,32 @@ export const opportunityRoutes = [
   }),
 
   defineRoute({
+    method: 'GET', url: '/opportunities/:id/auto-proposal', summary: 'Modelo em que a proposta é gerada sozinha ao entrar na etapa Proposta (padrão da filial ou o único modelo ativo)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const t = await branchDefaultTemplate(app.db, auth.tenantId, o.branchId ?? null);
+      return { template: t ? { id: t.id, name: t.name } : null, hasProposal: await hasProposal(app.db, auth.tenantId, o.id) };
+    },
+  }),
+
+  defineRoute({
+    method: 'DELETE', url: '/opportunities/:id', summary: 'Exclui a negociação (some das listas, funil e indicadores; fica no histórico de auditoria). Venda fechada não se exclui: reabra antes', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    body: z.object({ rowVersion: z.number().int(), reason: z.string().trim().min(3).max(500) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      await app.db.transaction(async (tx) => {
+        const cur = await loadOpportunity(tx, auth, params.id);
+        if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
+        if (cur.ownerId !== auth.userId && !atLeast(level(auth, 'oportunidades'), 'equipe')) throw forbidden('Só o responsável pela negociação ou a supervisão exclui.');
+        if (cur.stage === 'ganha') throw unprocessable('Venda fechada não pode ser excluída. Reabra a negociação antes, se for o caso.');
+        await tx.update(s.opportunities).set({ deletedAt: new Date(), updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, cur.id));
+        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: cur.id, type: 'excluida', actorId: auth.userId, payload: { reason: body.reason, stage: cur.stage } });
+        await audit(tx, req, { action: 'opportunity.delete', entityType: 'opportunity', entityId: cur.id, metadata: { reason: body.reason, stage: cur.stage, contact: cur.contactName } });
+      });
+      return { ok: true };
+    },
+  }),
+
+  defineRoute({
     method: 'PATCH',
     url: '/opportunities/:id',
     summary: 'Atualiza campos da oportunidade (não altera etapa nem status externos)',
@@ -364,6 +391,7 @@ export const opportunityRoutes = [
     body: OpportunityTransition,
     handler: async ({ app, auth, params, body, req }) => {
       let wasWon = false;
+      let autoProposal: { filename: string; number: string; template: string } | null = null;
       await app.db.transaction(async (tx) => {
         const cur = await loadOpportunity(tx, auth, params.id);
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
@@ -376,6 +404,16 @@ export const opportunityRoutes = [
         if (!pipe || !target) throw unprocessable('Etapa não existe nesta jornada.', [{ path: 'toStage', message: 'Etapa inválida para a jornada da oportunidade' }]);
         const v = validateTransition({ from, to: body.toStage as OpportunityStage, reason: body.reason, lossReason: body.lossReason, confirm: body.confirm, canReopen: atLeast(level(auth, 'oportunidades'), 'equipe') });
         if (!v.ok) throw unprocessable(v.message, [{ path: v.code, message: v.message }]);
+        // entrou na etapa Proposta sem proposta anexada: gera no modelo padrão da filial (com as últimas escolhas, se houver)
+        if (target.kind === 'open' && isProposalStage(target) && !(await hasProposal(tx, auth.tenantId, cur.id))) {
+          const tpl = await branchDefaultTemplate(tx, auth.tenantId, cur.branchId ?? null);
+          if (tpl) {
+            const [d] = await tx.select().from(s.proposalDrafts).where(and(eq(s.proposalDrafts.opportunityId, cur.id), eq(s.proposalDrafts.tenantId, auth.tenantId)));
+            const input = GenBody.parse({ templateId: tpl.id, values: d?.templateId === tpl.id ? d.values : {}, services: { text: d?.servicesText ?? '', photos: d?.photos ?? [] }, ...(d?.validityDays ? { validityDays: d.validityDays } : {}) });
+            const g = await generateProposal(tx, auth, { id: cur.id, contactName: cur.contactName, proposalStatus: cur.proposalStatus, rowVersion: cur.rowVersion }, tpl, input, { bump: false, automatic: true });
+            if (g) autoProposal = { filename: g.filename, number: g.number, template: g.template };
+          }
+        }
         if (target.kind !== 'lost') {
           const { content } = await getActiveInstruction(tx, auth.tenantId);
           const issues = await checkStageRequirements(tx, auth.tenantId, cur, target, content, pipe.key);
@@ -444,7 +482,7 @@ export const opportunityRoutes = [
       // ganhar (ou reabrir uma ganha) muda o valor anual consolidado da conta: Tier e IPC recalculam na hora
       if (body.toStage === 'ganha' || wasWon) await freshSnapshot(app.db, auth.tenantId, dto.contactId).catch((e) => req.log.error(e, 'tier da conta'));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
-      return dto;
+      return autoProposal ? { ...dto, autoProposal } : dto;
     },
   }),
 

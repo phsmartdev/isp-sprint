@@ -1,5 +1,9 @@
 /** Formulário do contrato (cadastro e edição). Datas de assinatura, vigência, ativação e faturamento ficam separadas. */
+import { useSectors } from '../../lib/hooks';
 import { useMemo, useState } from 'react';
+import { deliveryErrors, type DeliveryAddresses, EMPTY_ZENITH, zenithErrors, normalizeZenith, type ZenithContract, CONTRACT_SERVICE_TYPES, CONTRACT_SERVICE_LABELS, needsZenith, type ContractServiceType } from '@isp/domain';
+import { ZenithFieldset } from './Zenith';
+import { DeliveryEditor, EMPTY_DELIVERY } from './DeliveryAddresses';
 import { AlertTriangle, ClipboardPaste, Download, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
@@ -19,6 +23,9 @@ export type FormState = {
   hasGuarantee: boolean; gType: string; gAmount: string; gInsurer: string; gPolicy: string; gExpires: string; gRenewal: string;
   agency: string; processNumber: string; modality: string; commitmentNote: string; budgetLine: string; extensionMax: string;
   adjustmentIndex: string; adjustmentBaseDate: string; adjustmentRule: string; specialConditions: string; reason: string;
+  delivery: DeliveryAddresses;
+  zenith: ZenithContract;
+  serviceType: ContractServiceType | '';
 };
 
 export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
@@ -34,6 +41,10 @@ export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: 
     hasGuarantee: !!g, gType: g?.type ?? '', gAmount: dec(g?.amountCents ?? null), gInsurer: g?.insurer ?? '', gPolicy: g?.policy ?? '', gExpires: g?.expiresAt ?? '', gRenewal: g?.renewalAt ?? '',
     agency: p?.agency ?? '', processNumber: p?.processNumber ?? '', modality: p?.modality ?? '', commitmentNote: p?.commitmentNote ?? '', budgetLine: p?.budgetLine ?? '', extensionMax: p?.extensionMaxMonths ? String(p.extensionMaxMonths) : '',
     adjustmentIndex: v.adjustmentIndex ?? '', adjustmentBaseDate: v.adjustmentBaseDate ?? '', adjustmentRule: v.adjustmentRule ?? '', specialConditions: v.specialConditions ?? '', reason: '',
+    delivery: v.deliveryAddresses ?? EMPTY_DELIVERY,
+    zenith: v.zenith ?? EMPTY_ZENITH,
+    // valores antigos (cloud, energia, cidades inteligentes) passam a ser outros serviços
+    serviceType: !v.serviceType ? '' : (CONTRACT_SERVICE_TYPES as readonly string[]).includes(v.serviceType) ? (v.serviceType as ContractServiceType) : 'outro',
   };
 }
 
@@ -56,6 +67,11 @@ export function payloadOf(f: FormState) {
   const reportTerms: ReportTerms = f.hasReport
     ? { required: true, sector: f.rSector as Sector, validatorId: f.rValidator, dueDay: Number(f.rDueDay), alertDaysBefore: f.rAlertDays.trim() === '' ? null : Number(f.rAlertDays) }
     : { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
+  const dErr = deliveryErrors(f.delivery);
+  if (dErr.length) throw new Error(`Endereços de entrega: ${dErr.slice(0, 3).join(' ')}`);
+  if (!f.serviceType) throw new Error('Escolha o serviço do contrato.');
+  const zErr = needsZenith(f.serviceType) ? zenithErrors(f.zenith) : [];
+  if (zErr.length) throw new Error(`Cadastro Zenith: falta ${zErr.map((e) => e.message.toLowerCase()).join(', ')}.`);
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
@@ -65,6 +81,8 @@ export function payloadOf(f: FormState) {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
       items, guarantee, publicTerms, reportTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
+      serviceType: f.serviceType, zenith: needsZenith(f.serviceType) ? normalizeZenith(f.zenith) : null,
+      deliveryAddresses: { columns: f.delivery.columns.map((c) => c.trim()), rows: f.delivery.rows.map((r) => ({ ...r, address: r.address.trim(), service: r.service?.trim() || null })) },
     },
   };
 }
@@ -159,6 +177,7 @@ function Fieldset({ title, children, hint }: { title: string; children: React.Re
 }
 
 export function ContractForm({ value, onChange, editing, validated, contactId }: { value: FormState; onChange: (patch: Partial<FormState>) => void; editing?: boolean; validated?: boolean; contactId?: string | null }) {
+  const sectorList = useSectors().items;
   const lookups = useLookups();
   const f = value;
   const users = lookups.data?.users ?? [];
@@ -195,6 +214,16 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
         )}
         <FormField label="Objeto" htmlFor="cf-object" required className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-object" className="min-h-[64px]" value={f.object} onChange={(e) => onChange({ object: e.target.value })} /></FormField>
       </Fieldset>
+
+      <fieldset className="rounded-md border border-line p-4">
+        <legend className="px-1 text-md font-bold text-ink">Serviço do contrato<span className="text-danger"> *</span></legend>
+        <p className="-mt-1 mb-3 text-sm text-muted">Serviços de telecom são cadastrados também no Zenith; os demais não.</p>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Serviço do contrato">
+          {CONTRACT_SERVICE_TYPES.map((t) => <label key={t} className={`flex cursor-pointer items-center gap-2 border px-3 py-2 text-sm font-semibold ${f.serviceType === t ? 'border-primary bg-primary-soft text-ink' : 'border-line text-text hover:border-primary/60'}`}><input type="radio" name="cf-service" className="accent-primary" checked={f.serviceType === t} onChange={() => onChange({ serviceType: t })} />{CONTRACT_SERVICE_LABELS[t]}</label>)}
+        </div>
+      </fieldset>
+
+      {needsZenith(f.serviceType) && <ZenithFieldset z={f.zenith} set={(zenith) => onChange({ zenith })} />}
 
       <Fieldset title="Datas" hint="Assinatura, vigência, ativação técnica e início do faturamento são datas diferentes. O término sai do prazo; a renovação prevista é o dia seguinte ao término.">
         <FormField label="Assinatura" htmlFor="cf-signed" required><Input id="cf-signed" type="date" value={f.signedAt} onChange={(e) => onChange({ signedAt: e.target.value })} /></FormField>
@@ -245,6 +274,12 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
         </div>
       </fieldset>
 
+      <section aria-label="Endereços de entrega" className="mb-5">
+        <h3 className="mb-1 text-sm font-bold text-ink">Endereços de entrega</h3>
+        <p className="mb-2 text-xs text-muted">Um ou vários pontos: sequência, endereço e banda/serviço. Crie colunas se precisar (ex.: contato local, prazo de ativação).</p>
+        <DeliveryEditor value={f.delivery} onChange={(delivery) => onChange({ delivery })} />
+      </section>
+
       <Fieldset title="Valores e faturamento">
         {f.billingType === 'medicao' && !editing && <FormField label="Saldo contratado (R$)" htmlFor="cf-balance" required hint="Crédito inicial do contrato; as oportunidades consomem esse saldo."><Input id="cf-balance" inputMode="decimal" value={f.initialBalance} onChange={(e) => onChange({ initialBalance: e.target.value })} placeholder="100.000,00" /></FormField>}
         <AutoValue id="cf-monthly" label={f.billingType === 'recorrente' ? 'Valor mensal (R$)' : 'Valor mensal estimado (R$)'} auto={f.monthlyAuto} autoCents={auto.monthlyCents} value={f.monthly}
@@ -292,7 +327,7 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
           <>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <FormField label="Setor responsável pelo envio" htmlFor="cf-rsector" required>
-                <Select id="cf-rsector" value={f.rSector} onChange={(e) => onChange({ rSector: e.target.value })}><option value="">Escolha o setor</option>{SECTORS.map((x) => <option key={x} value={x}>{SECTOR_LABELS[x]}</option>)}</Select>
+                <Select id="cf-rsector" value={f.rSector} onChange={(e) => onChange({ rSector: e.target.value })}><option value="">Escolha o setor</option>{sectorList.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}</Select>
               </FormField>
               <FormField label="Responsável por validar" htmlFor="cf-rval" required>
                 <Select id="cf-rval" value={f.rValidator} onChange={(e) => onChange({ rValidator: e.target.value })}><option value="">Escolha a pessoa</option>{users.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select>

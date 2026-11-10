@@ -1,4 +1,5 @@
 import { CompetitorsPanel } from '../features/intel/Competitors';
+import { BidItemPrices } from '../features/intel/BidItemPrices';
 import { StageFunnel } from '../features/intel/StageFunnel';
 import { KpiPanel } from '../features/kpis/KpiPanel';
 import { useRef } from 'react';
@@ -18,7 +19,6 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { BarRows, CHART, ComboChart, Donut, Legend } from '../components/charts/charts';
 import { SergipeMap } from '../components/charts/SergipeMap';
 import { brlShort, monthLabel, monthYear } from './Reports';
-import { MoneyToggle } from '../lib/privacy';
 import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 import { useAuth } from '../auth/AuthProvider';
 import { FrontsPanel } from '../features/projects/fronts';
@@ -52,23 +52,22 @@ const KPI_LOOK = [
 export function IntelligencePage() {
   const p0 = defaultPeriod();
   const [f, setF] = useUrlState({ from: p0.from, to: p0.to, v: 'indicadores', tag: '' });
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const q = useQuery({ queryKey: ['intelligence', f.from, f.to], enabled: f.v === 'comercial', queryFn: () => api<Data>(`/intelligence/overview${qs({ from: f.from, to: f.to })}`) });
   const d = q.data;
   const exportHref = `/api/v1/reports/export${qs({ from: f.from, to: f.to, kind: 'leads' })}`;
   const tvRef = useRef<HTMLDivElement>(null);
   const tv = useTvMode(tvRef);
-  const TABS = [{ key: 'indicadores', label: 'Indicadores principais' }, { key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, { key: 'economia', label: 'Viabilidade econômica' }, { key: 'atas', label: 'Atas de registro de preços' }, { key: 'concorrentes', label: 'Concorrentes' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
+  const TABS = [{ key: 'indicadores', label: 'Indicadores principais' }, { key: 'geral', label: 'Geral' }, { key: 'comercial', label: 'Comercial' }, { key: 'negocio', label: 'Negócio' }, { key: 'relacionamento', label: 'Relacionamento com o cliente' }, { key: 'contratos', label: 'Contratos' }, ...(feature('crm.viabilidade') ? [{ key: 'economia', label: 'Viabilidade econômica' }] : []), { key: 'atas', label: 'Atas de registro de preços' }, { key: 'concorrentes', label: 'Concorrentes' }, { key: 'precos', label: 'Preços por item' }, ...(can('projetos') ? [{ key: 'projetos', label: 'Projetos' }] : [])];
   return (
     <div className="w-full">
       <PageHeader
         icon={<Lightbulb className="h-9 w-9" strokeWidth={2.2} />}
         title="Inteligência"
         subtitle="Transforme dados em oportunidades e tome decisões mais estratégicas."
-        actions={f.v === 'indicadores' || f.v === 'economia' ? undefined :
+        actions={f.v === 'indicadores' || f.v === 'economia' || f.v === 'precos' ? undefined :
           <>
             <DateRange from={f.from} to={f.to} onChange={(r) => setF(r)} />
-            <MoneyToggle />
             <TvButton onClick={() => void tv.enter()} />
             <a href={exportHref} download className="inline-flex h-12 items-center gap-2 rounded-md border border-primary/60 bg-surface px-5 text-md font-semibold text-primary hover:bg-primary-soft"><Download className="h-5 w-5" />Exportar</a>
           </>
@@ -83,7 +82,7 @@ export function IntelligencePage() {
         onChange={(v) => setF({ v })}
         tabs={TABS}
       />
-      {f.v === 'indicadores' ? <KpiPanel /> : f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'concorrentes' ? <CompetitorsPanel /> : f.v === 'economia' ? <EconomicsConsolidated /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
+      {f.v === 'indicadores' ? <KpiPanel /> : f.v === 'projetos' ? <FrontsPanel tag={f.tag} onTag={(tag) => setF({ tag })} allowCreate={false} /> : f.v === 'atas' ? <ArpDashboard from={f.from} to={f.to} /> : f.v === 'concorrentes' ? <CompetitorsPanel /> : f.v === 'precos' ? <BidItemPrices /> : f.v === 'economia' && feature('crm.viabilidade') ? <EconomicsConsolidated /> : f.v === 'contratos' ? <ContractInsights from={f.from} to={f.to} /> : <GeneralInsights from={f.from} to={f.to} view={f.v as InsightView} />}
       {f.v === 'comercial' && (<div className="mt-6">
       {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
       <section aria-label="Indicadores" className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

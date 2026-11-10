@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { Download, Plus, UserPlus } from 'lucide-react';
 import {
   ENTITY_LINK_ROLE_LABELS, type EntityLinkRole,
+  INNOVATION_LABELS, POWER_CLASS_DESC, POWER_CLASS_LABELS, PROFILE_SOURCE_KINDS, PROFILE_SOURCE_LABELS, type InnovationOpenness, type PowerClass, type ProfileSource, type ProfileSourceKind,
   INFLUENCE_CONTEXT_LABELS, INTEREST_LABELS, PARTICIPATION_LABELS, QUADRANT_LABELS, RELATIONSHIP_LABELS, STAKEHOLDER_ACCESS_LABELS, STAKEHOLDER_ROLE_LABELS, STANCE_LABELS, ABM_PRIORITY_LABELS,
   type InfluenceContext, type InfluenceLevel, type Interest, type Participation, type Quadrant, type RelationshipStrength, type StakeholderAccess, type StakeholderRole, type Stance, type AbmPriority,
 } from '@isp/domain';
@@ -14,14 +15,19 @@ import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useDebounced, useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
+import { StakeholderGifts } from '../gifts/AccountGifts';
 import { errMsg } from '../contracts/shared';
 import { InviteDialog } from '../../pages/cs/Surveys';
+import { AnalysisSummary, BySector, OrgChart, OriginChips, PowerChip } from './stakeholderAnalysis';
+import { Tabs } from '../../components/ui/primitives';
 
 export type StakeholderRow = {
   id: string; personId: string; contactId: string; name: string; email: string | null; phone: string | null; title: string | null; unitId: string | null; unitName: string | null; account: string;
   roles: StakeholderRole[]; customRoles: string[]; interest: Interest; stance: Stance; relationshipStrength: RelationshipStrength; access: StakeholderAccess; participation: Participation; priority: AbmPriority;
   relationshipOwnerId: string | null; relationshipOwnerName: string | null; nextInteractionOn: string | null; notes: string | null; active: boolean; rowVersion: number;
   influence: InfluenceLevel | null; influenceContexts: { contextType: InfluenceContext; contextKey: string; contextLabel: string | null; level: InfluenceLevel }[]; influencePending: boolean;
+  powerClass: PowerClass; powerClassSuggestion: PowerClass | null; hiddenAgent: boolean; reportsToId: string | null; innovationOpenness: InnovationOpenness;
+  institutionalHistory: string | null; resistancePoints: string | null; sources: ProfileSource[]; origins: { type: string; count: number }[];
 };
 type Policy = { labels: Record<InfluenceLevel, string>; view: boolean; edit: boolean; requireApproval: boolean };
 const INF_TONE: Record<InfluenceLevel, Tone> = { muito_alto: 'red', alto: 'orange', medio: 'sky', baixo: 'neutral', muito_baixo: 'neutral', nao_avaliado: 'neutral' };
@@ -30,27 +36,36 @@ export const InfluenceChip = ({ l, labels, pending }: { l: InfluenceLevel | null
 
 type AccountData = { items: StakeholderRow[]; relations: { id: string; fromId: string; toId: string; kind: string; notes: string | null }[]; units: { id: string; name: string; parentId: string | null; active: boolean }[]; policy: Policy };
 
+type View = 'setor' | 'organograma' | 'relacionamento';
 export function StakeholdersPanel({ contactId }: { contactId: string }) {
   const q = useQuery({ queryKey: ['stakeholders', contactId], queryFn: () => api<AccountData>(`/accounts/${contactId}/stakeholders`) });
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<View>('setor');
   if (q.isLoading) return <LoadingRows rows={5} />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
   const active = d.items.filter((i) => i.active);
   return (
     <section className="card overflow-hidden" aria-label="Stakeholders da conta">
-      <div className="flex flex-wrap items-center justify-between gap-2 p-4">
-        <p className="text-sm text-muted"><b className="num text-ink">{active.length}</b> stakeholder(s) · <b className="num text-ink">{active.filter((i) => i.roles.includes('decisor')).length}</b> decisor(es){d.policy.view && <> · <b className="num text-ink">{active.filter((i) => i.influence === 'nao_avaliado').length}</b> sem influência avaliada</>}</p>
-        <Button variant="primary" icon={<UserPlus className="h-4 w-4" />} onClick={() => setAdding(true)}>Adicionar stakeholder</Button>
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><h3 className="font-bold text-ink">Análise de stakeholders</h3><p className="max-w-3xl text-sm text-muted">Quem decide, aprova, opera ou influencia nesta conta: os contatos cadastrados nas negociações entram sozinhos; adicione os demais, inclusive os agentes ocultos.</p></div>
+          <Button variant="primary" icon={<UserPlus className="h-4 w-4" />} onClick={() => setAdding(true)}>Adicionar stakeholder</Button>
+        </div>
+        <AnalysisSummary items={d.items} />
+        <p className="text-xs text-muted"><b className="num text-ink">{active.filter((i) => i.roles.includes('decisor')).length}</b> decisor(es){d.policy.view && <> · <b className="num text-ink">{active.filter((i) => i.influence === 'nao_avaliado').length}</b> sem influência avaliada</>}</p>
+        <Tabs<View> label="Visão dos stakeholders" value={view} onChange={setView} tabs={[{ key: 'setor', label: 'Por setor' }, { key: 'organograma', label: 'Organograma' }, { key: 'relacionamento', label: 'Relacionamento' }]} />
       </div>
-      {!d.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum stakeholder mapeado" description="Registre quem participa das decisões: decisores, influenciadores, avaliadores técnicos, fiscais de contrato…" /></div> : (
+      {view === 'setor' ? <div className="border-t border-line p-4"><BySector items={d.items} onOpen={setOpen} /></div>
+        : view === 'organograma' ? <div className="border-t border-line p-4"><OrgChart items={d.items} relations={d.relations} onOpen={setOpen} /></div>
+        : !d.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum stakeholder mapeado" description="Registre quem participa das decisões: decisores, influenciadores, avaliadores técnicos, fiscais de contrato…" /></div> : (
         <div className="scroll-thin overflow-x-auto border-t border-line">
           <table className="w-full min-w-[1000px] text-left text-sm">
             <thead className="bg-surface-2 text-xs text-muted"><tr>{['Pessoa', 'Papéis', 'Influência', 'Interesse', 'Posicionamento', 'Relacionamento', 'Responsável', 'Próxima interação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>{d.items.map((s) => (
               <tr key={s.id} className={clsx('border-t border-line align-top', !s.active && 'opacity-60')}>
-                <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setOpen(s.id)}>{s.name}</button><span className="block text-xs text-muted">{[s.title, s.unitName].filter(Boolean).join(' · ') || '—'}</span>{s.priority === 'critica' && <Chip tone="red">Prioridade crítica</Chip>}</td>
+                <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setOpen(s.id)}>{s.name}</button><span className="block text-xs text-muted">{[s.title, s.unitName].filter(Boolean).join(' · ') || '—'}</span><span className="flex flex-wrap gap-1">{s.priority === 'critica' && <Chip tone="red">Prioridade crítica</Chip>}{s.hiddenAgent && <Chip tone="orange">Agente oculto</Chip>}<OriginChips o={s.origins} /></span></td>
                 <td className="px-3 py-2.5"><span className="flex flex-wrap gap-1">{s.roles.map((r) => <Chip key={r} tone={r === 'bloqueador' ? 'red' : r === 'decisor' ? 'blue' : 'neutral'}>{STAKEHOLDER_ROLE_LABELS[r]}</Chip>)}{s.customRoles.map((r) => <Chip key={r}>{r}</Chip>)}</span></td>
                 <td className="px-3 py-2.5"><InfluenceChip l={s.influence} labels={d.policy.labels} pending={s.influencePending} /></td>
                 <td className="px-3 py-2.5">{INTEREST_LABELS[s.interest]}</td>
@@ -63,22 +78,22 @@ export function StakeholdersPanel({ contactId }: { contactId: string }) {
           </table>
         </div>
       )}
-      <AddStakeholder open={adding} contactId={contactId} units={d.units} onClose={() => setAdding(false)} onCreated={(id) => { setAdding(false); setOpen(id); }} />
+      <AddStakeholder open={adding} contactId={contactId} units={d.units} peers={d.items} onClose={() => setAdding(false)} onCreated={(id) => { setAdding(false); setOpen(id); }} />
       <StakeholderDrawer id={open} contactId={contactId} units={d.units} peers={d.items} onClose={() => setOpen(null)} />
     </section>
   );
 }
 
-function AddStakeholder({ open, contactId, units, onClose, onCreated }: { open: boolean; contactId: string; units: AccountData['units']; onClose: () => void; onCreated: (id: string) => void }) {
+function AddStakeholder({ open, contactId, units, peers, onClose, onCreated }: { open: boolean; contactId: string; units: AccountData['units']; peers: StakeholderRow[]; onClose: () => void; onCreated: (id: string) => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const term = useDebounced(search, 250);
   const found = useQuery({ queryKey: ['people', term], enabled: open && term.trim().length >= 2, queryFn: () => api<{ items: { id: string; name: string; email: string | null; accounts: { account: string; title: string | null }[] }[] }>(`/people/search?q=${encodeURIComponent(term)}`) });
-  const blank = { personId: '', personName: '', name: '', email: '', phone: '', title: '', unitId: '', roles: [] as StakeholderRole[], interest: 'desconhecido' as Interest, priority: 'media' as AbmPriority };
+  const blank = { personId: '', personName: '', name: '', email: '', phone: '', title: '', unitId: '', roles: [] as StakeholderRole[], interest: 'desconhecido' as Interest, priority: 'media' as AbmPriority, powerClass: 'nao_avaliado' as PowerClass, hiddenAgent: false, reportsToId: '' };
   const [f, setF] = useState(blank);
   const m = useMutation({
-    mutationFn: () => api<{ id: string }>(`/accounts/${contactId}/stakeholders`, { method: 'POST', body: { ...(f.personId ? { personId: f.personId } : { person: { name: f.name, email: f.email || null, phone: f.phone || null } }), title: f.title || null, unitId: f.unitId || null, roles: f.roles, interest: f.interest, priority: f.priority } }),
+    mutationFn: () => api<{ id: string }>(`/accounts/${contactId}/stakeholders`, { method: 'POST', body: { ...(f.personId ? { personId: f.personId } : { person: { name: f.name, email: f.email || null, phone: f.phone || null } }), title: f.title || null, unitId: f.unitId || null, roles: f.roles, interest: f.interest, priority: f.priority, powerClass: f.powerClass, hiddenAgent: f.hiddenAgent, reportsToId: f.reportsToId || null } }),
     onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['stakeholders'] }); setF(blank); setSearch(''); toast({ tone: 'success', message: 'Stakeholder incluído. A influência começa como "não avaliado".' }); onCreated(r.id); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -102,7 +117,10 @@ function AddStakeholder({ open, contactId, units, onClose, onCreated }: { open: 
           <FormField label="Departamento" htmlFor="sk-u"><Select id="sk-u" value={f.unitId} onChange={(e) => setF({ ...f, unitId: e.target.value })}><option value="">Não informado</option>{units.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
           <FormField label="Interesse" htmlFor="sk-i"><Select id="sk-i" value={f.interest} onChange={(e) => setF({ ...f, interest: e.target.value as Interest })}>{(Object.keys(INTEREST_LABELS) as Interest[]).map((k) => <option key={k} value={k}>{INTEREST_LABELS[k]}</option>)}</Select></FormField>
           <FormField label="Prioridade" htmlFor="sk-pr"><Select id="sk-pr" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value as AbmPriority })}>{(Object.keys(ABM_PRIORITY_LABELS) as AbmPriority[]).map((k) => <option key={k} value={k}>{ABM_PRIORITY_LABELS[k]}</option>)}</Select></FormField>
+          <FormField label="Classificação (influência × autoridade)" htmlFor="sk-pc"><Select id="sk-pc" value={f.powerClass} onChange={(e) => setF({ ...f, powerClass: e.target.value as PowerClass })}>{(Object.keys(POWER_CLASS_LABELS) as PowerClass[]).map((k) => <option key={k} value={k}>{k === 'nao_avaliado' ? 'Ainda não classificado' : `${POWER_CLASS_LABELS[k]} — ${POWER_CLASS_DESC[k]}`}</option>)}</Select></FormField>
+          <FormField label="Reporta a" htmlFor="sk-rt"><Select id="sk-rt" value={f.reportsToId} onChange={(e) => setF({ ...f, reportsToId: e.target.value })}><option value="">Ninguém do mapa (topo)</option>{peers.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` · ${p.title}` : ''}</option>)}</Select></FormField>
         </div>
+        <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={f.hiddenAgent} onChange={(e) => setF({ ...f, hiddenAgent: e.target.checked })} /><span><b>Agente oculto</b><span className="block text-xs text-muted">Influencia a decisão sem papel formal ou sem aparecer no processo (assessor, ex-gestor, parceiro político…). Fica ao lado do organograma.</span></span></label>
         <RolesPicker value={f.roles} onChange={(roles) => setF({ ...f, roles })} />
         <p className="text-xs text-muted">O poder de influência não é preenchido aqui: ele é avaliado depois, manualmente, com justificativa.</p>
       </div>
@@ -164,6 +182,7 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
         <div className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-lg font-bold text-ink">{d.name}</h3><p className="text-sm text-muted">{[d.title, d.unitName, d.account].filter(Boolean).join(' · ')}</p>{(d.email || d.phone) && <p className="text-sm">{[d.email, d.phone].filter(Boolean).join(' · ')}</p>}</div><Button size="sm" variant="secondary" onClick={() => setSurvey(true)}>Enviar pesquisa</Button></div>
           {survey && <InviteDialog preset={{ contactId, account: d.account, stakeholderId: d.id }} onClose={() => setSurvey(false)} />}
+          <StakeholderGifts id={d.id} />
 
           <section className="space-y-3 rounded-lg border border-line p-3" aria-label="Poder de influência">
             <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-ink">Poder de influência</h4><InfluenceChip l={d.influence} labels={d.policy.labels} pending={d.influencePending} /></div>
@@ -193,6 +212,22 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
                 )}
               </>
             )}
+          </section>
+
+          <section className="space-y-3 rounded-lg border border-line p-3" aria-label="Análise do stakeholder">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-bold text-ink">Análise do stakeholder</h4><PowerChip c={cur.powerClass} /></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FormField label="Classificação (influência × autoridade)" htmlFor="sd-pc" hint={d.powerClassSuggestion && d.powerClassSuggestion !== cur.powerClass ? `Sugestão pelos papéis e pela influência avaliada: ${POWER_CLASS_LABELS[d.powerClassSuggestion]}` : 'IA, INA, NIA ou NINA'}>
+                <Select id="sd-pc" value={cur.powerClass} onChange={(e) => setF({ ...f, powerClass: e.target.value as PowerClass })}>{(Object.keys(POWER_CLASS_LABELS) as PowerClass[]).map((k) => <option key={k} value={k}>{k === 'nao_avaliado' ? 'Ainda não classificado' : `${POWER_CLASS_LABELS[k]} — ${POWER_CLASS_DESC[k]}`}</option>)}</Select>
+              </FormField>
+              <FormField label="Reporta a (organograma)" htmlFor="sd-rt"><Select id="sd-rt" value={cur.reportsToId ?? ''} onChange={(e) => setF({ ...f, reportsToId: e.target.value || null })}><option value="">Ninguém do mapa (topo)</option>{peers.filter((p) => p.id !== d.id && p.active).map((p) => <option key={p.id} value={p.id}>{p.name}{p.title ? ` · ${p.title}` : ''}</option>)}</Select></FormField>
+              {sel('innovationOpenness', INNOVATION_LABELS, 'Abertura à inovação')}
+              <label className="flex items-start gap-2 self-end pb-2 text-sm"><input type="checkbox" className="mt-1" checked={!!cur.hiddenAgent} onChange={(e) => setF({ ...f, hiddenAgent: e.target.checked })} /><span><b>Agente oculto</b><span className="block text-xs text-muted">Influencia sem papel formal.</span></span></label>
+            </div>
+            <FormField label="Histórico institucional" htmlFor="sd-hist" hint="Trajetória no órgão/empresa, gestões anteriores, decisões que já tomou"><Textarea id="sd-hist" rows={2} value={cur.institutionalHistory ?? ''} onChange={(e) => setF({ ...f, institutionalHistory: e.target.value || null })} /></FormField>
+            <FormField label="Pontos de resistência" htmlFor="sd-res" hint="O que pode travar: orçamento, fornecedor atual, risco político, mudança de processo…"><Textarea id="sd-res" rows={2} value={cur.resistancePoints ?? ''} onChange={(e) => setF({ ...f, resistancePoints: e.target.value || null })} /></FormField>
+            <SourcesEditor value={cur.sources ?? []} onChange={(sources) => setF({ ...f, sources })} />
+            {f && <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar alterações</Button>}
           </section>
 
           <section className="space-y-3" aria-label="Classificações">
@@ -233,6 +268,28 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
         </div>
       )}
     </Drawer>
+  );
+}
+
+/** Fontes do perfil (LinkedIn, imprensa, site oficial…): tipo, link e nota. */
+function SourcesEditor({ value, onChange }: { value: ProfileSource[]; onChange: (v: ProfileSource[]) => void }) {
+  const [n, setN] = useState<{ kind: ProfileSourceKind; url: string; note: string }>({ kind: 'linkedin', url: '', note: '' });
+  const okUrl = !n.url || /^https?:\/\/\S+\.\S+/.test(n.url);
+  return (
+    <fieldset aria-label="Fontes do perfil"><legend className="mb-1 text-sm font-semibold text-ink">Fontes do perfil</legend>
+      {!value.length ? <p className="text-xs text-muted">Nenhuma fonte registrada.</p> : (
+        <ul className="mb-2 space-y-1 text-sm">{value.map((s, k) => (
+          <li key={k} className="flex items-start justify-between gap-2"><span className="min-w-0"><b>{PROFILE_SOURCE_LABELS[s.kind]}</b>{s.url && <> · <a href={s.url} target="_blank" rel="noreferrer noopener" className="break-all text-primary hover:underline">{s.url}</a></>}{s.note && <span className="block text-xs text-muted">{s.note}</span>}</span>
+            <button type="button" className="text-xs text-danger hover:underline" onClick={() => onChange(value.filter((_, i) => i !== k))}>remover</button></li>
+        ))}</ul>
+      )}
+      <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+        <FormField label="Fonte" htmlFor="src-k"><Select id="src-k" value={n.kind} onChange={(e) => setN({ ...n, kind: e.target.value as ProfileSourceKind })}>{PROFILE_SOURCE_KINDS.map((k) => <option key={k} value={k}>{PROFILE_SOURCE_LABELS[k]}</option>)}</Select></FormField>
+        <FormField label="Link" htmlFor="src-u"><Input id="src-u" placeholder="https://" value={n.url} invalid={!okUrl} onChange={(e) => setN({ ...n, url: e.target.value })} /></FormField>
+        <FormField label="O que diz" htmlFor="src-n"><Input id="src-n" value={n.note} onChange={(e) => setN({ ...n, note: e.target.value })} /></FormField>
+        <Button size="sm" disabled={!okUrl || (!n.url && !n.note.trim())} onClick={() => { onChange([...value, { kind: n.kind, url: n.url.trim() || null, note: n.note.trim() || null, at: new Date().toISOString().slice(0, 10) }]); setN({ kind: n.kind, url: '', note: '' }); }}>Adicionar fonte</Button>
+      </div>
+    </fieldset>
   );
 }
 
@@ -436,19 +493,36 @@ export function StakeholderDrawerFor({ id, contactId, onClose, preset }: { id: s
 }
 
 type DirRow = StakeholderRow & { abmId: string | null };
+/** Aba Stakeholders do ABM: escolha a conta para ver a análise e o organograma dela; "todas" mostra a lista geral. */
 export function StakeholdersDirectory() {
-  const [f, setF] = useState({ q: '', role: '', influence: '', priority: '' });
+  const [acc, setAcc] = useState(() => { try { return new URLSearchParams(window.location.search).get('conta') ?? ''; } catch { return ''; } });
+  const accounts = useQuery({ queryKey: ['abm', 'accounts-min'], queryFn: () => api<{ items: { id: string; contactId: string; name: string }[] }>('/abm') });
+  const pick = (v: string) => { setAcc(v); try { const u = new URL(window.location.href); if (v) u.searchParams.set('conta', v); else u.searchParams.delete('conta'); window.history.replaceState(null, '', u); } catch { /* sem histórico */ } };
+  const chosen = accounts.data?.items.find((a) => a.contactId === acc);
+  return (
+    <div className="space-y-4">
+      <div className="card flex flex-wrap items-end gap-3 p-4">
+        <FormField label="Conta" htmlFor="sd-acc" hint="Escolha a conta para ver todos os envolvidos, a análise por setor e o organograma"><Select id="sd-acc" className="min-w-[280px]" value={acc} onChange={(e) => pick(e.target.value)}><option value="">Todas as contas (lista geral)</option>{(accounts.data?.items ?? []).map((a) => <option key={a.contactId} value={a.contactId}>{a.name}</option>)}</Select></FormField>
+        {chosen && <Link to={`/abm/contas/${chosen.id}?t=stakeholders`} className="pb-2 text-sm font-semibold text-primary hover:underline">Abrir a Conta 360</Link>}
+      </div>
+      {acc ? <StakeholdersPanel key={acc} contactId={acc} /> : <StakeholdersAll onPick={pick} />}
+    </div>
+  );
+}
+
+function StakeholdersAll({ onPick }: { onPick: (contactId: string) => void }) {
+  const [f, setF] = useState({ q: '', role: '', influence: '', priority: '', powerClass: '', hidden: '' });
   const term = useDebounced(f.q, 300);
   const [open, setOpen] = useState<{ id: string; contactId: string } | null>(null);
   const params = new URLSearchParams(Object.entries({ ...f, q: term }).filter(([, v]) => v) as [string, string][]).toString();
-  const q = useQuery({ queryKey: ['stakeholders', 'all', params], queryFn: () => api<{ items: DirRow[]; policy: { labels: Record<InfluenceLevel, string>; view: boolean }; counts: { total: number; decisores: number; naoAvaliados: number | null; criticos: number } }>(`/abm/stakeholders${params ? `?${params}` : ''}`) });
+  const q = useQuery({ queryKey: ['stakeholders', 'all', params], queryFn: () => api<{ items: DirRow[]; policy: { labels: Record<InfluenceLevel, string>; view: boolean }; counts: { total: number; decisores: number; naoAvaliados: number | null; criticos: number; ia: number; ocultos: number; semClasse: number } }>(`/abm/stakeholders${params ? `?${params}` : ''}`) });
   const d = q.data;
   return (
     <div className="space-y-4">
       <PendingInfluenceRequests />
       {d && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {[['Stakeholders ativos', d.counts.total], ['Decisores', d.counts.decisores], ['Prioridade crítica', d.counts.criticos], ['Sem influência avaliada', d.counts.naoAvaliados ?? '—']].map(([l, v]) => (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
+          {[['Stakeholders ativos', d.counts.total], ['Decisores', d.counts.decisores], ['IA (influência e autoridade)', d.counts.ia], ['Agentes ocultos', d.counts.ocultos], ['Sem classificação', d.counts.semClasse], ['Prioridade crítica', d.counts.criticos], ['Sem influência avaliada', d.counts.naoAvaliados ?? '—']].map(([l, v]) => (
             <div key={l} className="card p-4"><p className="text-xs text-muted">{l}</p><p className="num text-2xl font-bold text-ink">{v}</p></div>
           ))}
         </div>
@@ -459,15 +533,18 @@ export function StakeholdersDirectory() {
           <FormField label="Papel" htmlFor="sd-r"><Select id="sd-r" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="">Todos</option>{(Object.keys(STAKEHOLDER_ROLE_LABELS) as StakeholderRole[]).map((r) => <option key={r} value={r}>{STAKEHOLDER_ROLE_LABELS[r]}</option>)}</Select></FormField>
           {d?.policy.view !== false && <FormField label="Influência" htmlFor="sd-i"><Select id="sd-i" value={f.influence} onChange={(e) => setF({ ...f, influence: e.target.value })}><option value="">Todas</option>{(Object.keys(d?.policy.labels ?? {}) as InfluenceLevel[]).map((l) => <option key={l} value={l}>{d!.policy.labels[l]}</option>)}</Select></FormField>}
           <FormField label="Prioridade" htmlFor="sd-p"><Select id="sd-p" value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}><option value="">Todas</option>{(Object.keys(ABM_PRIORITY_LABELS) as AbmPriority[]).map((k) => <option key={k} value={k}>{ABM_PRIORITY_LABELS[k]}</option>)}</Select></FormField>
+          <FormField label="Classificação" htmlFor="sd-pc"><Select id="sd-pc" value={f.powerClass} onChange={(e) => setF({ ...f, powerClass: e.target.value })}><option value="">Todas</option>{(Object.keys(POWER_CLASS_LABELS) as PowerClass[]).map((k) => <option key={k} value={k}>{k === 'nao_avaliado' ? 'Sem classificação' : `${POWER_CLASS_LABELS[k]} — ${POWER_CLASS_DESC[k]}`}</option>)}</Select></FormField>
+          <FormField label="Agentes ocultos" htmlFor="sd-h"><Select id="sd-h" value={f.hidden} onChange={(e) => setF({ ...f, hidden: e.target.value })}><option value="">Todos</option><option value="sim">Só agentes ocultos</option><option value="nao">Sem agentes ocultos</option></Select></FormField>
         </div>
-        {q.isLoading ? <LoadingRows rows={5} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d!.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum stakeholder encontrado" description="Mapeie as pessoas na Conta 360 de cada conta estratégica, na aba Stakeholders." /></div> : (
+        {q.isLoading ? <LoadingRows rows={5} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d!.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum stakeholder encontrado" description="Escolha uma conta acima para mapear as pessoas dela (contatos do CRM entram sozinhos) e montar o organograma." /></div> : (
           <div className="scroll-thin overflow-x-auto border-t border-line">
             <table className="w-full min-w-[900px] text-left text-sm">
-              <thead className="bg-surface-2 text-xs text-muted"><tr>{['Pessoa', 'Conta', 'Papéis', 'Influência', 'Posicionamento', 'Responsável', 'Próxima interação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
+              <thead className="bg-surface-2 text-xs text-muted"><tr>{['Pessoa', 'Conta', 'Classificação', 'Papéis', 'Influência', 'Posicionamento', 'Responsável', 'Próxima interação'].map((h) => <th key={h} className="px-3 py-2.5 font-medium">{h}</th>)}</tr></thead>
               <tbody>{d!.items.map((s) => (
                 <tr key={s.id} className={clsx('border-t border-line align-top', !s.active && 'opacity-60')}>
                   <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setOpen({ id: s.id, contactId: s.contactId })}>{s.name}</button><span className="block text-xs text-muted">{[s.title, s.unitName].filter(Boolean).join(' · ') || '—'}</span></td>
-                  <td className="px-3 py-2.5">{s.abmId ? <Link to={`/abm/contas/${s.abmId}?t=stakeholders`} className="hover:underline">{s.account}</Link> : s.account}</td>
+                  <td className="px-3 py-2.5"><button type="button" className="text-left hover:underline" onClick={() => onPick(s.contactId)}>{s.account}</button></td>
+                  <td className="px-3 py-2.5"><span className="flex flex-wrap gap-1"><Chip tone={s.powerClass === 'ia' ? 'blue' : s.powerClass === 'ina' ? 'orange' : s.powerClass === 'nia' ? 'sky' : 'neutral'} title={POWER_CLASS_DESC[s.powerClass]}>{s.powerClass === 'nao_avaliado' ? '—' : POWER_CLASS_LABELS[s.powerClass]}</Chip>{s.hiddenAgent && <Chip tone="orange">Oculto</Chip>}</span></td>
                   <td className="px-3 py-2.5"><span className="flex flex-wrap gap-1">{s.roles.map((r) => <Chip key={r} tone={r === 'bloqueador' ? 'red' : r === 'decisor' ? 'blue' : 'neutral'}>{STAKEHOLDER_ROLE_LABELS[r]}</Chip>)}</span></td>
                   <td className="px-3 py-2.5"><InfluenceChip l={s.influence} labels={d!.policy.labels} pending={s.influencePending} /></td>
                   <td className="px-3 py-2.5"><Chip tone={STANCE_TONE[s.stance]}>{STANCE_LABELS[s.stance]}</Chip></td>

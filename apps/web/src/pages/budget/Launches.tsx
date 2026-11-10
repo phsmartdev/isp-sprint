@@ -17,13 +17,13 @@ import { AccountSelect, errMsg, type Structure } from '../../features/budget/sha
 
 type Baixa = { id: string; occurredOn: string; description: string; amountCents: number; paymentMethod: string | null; docName: string | null; status: 'valido' | 'cancelado'; cancelReason: string | null; createdBy: string | null };
 type Paid = 'pago' | 'parcial' | 'aberto';
-type Item = { id: string; planId: string; costCenterId: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; supplierId: string | null; status: LineStatus; decisionNote: string | null; costCenter: { id: string; code: string; name: string }; executedCents: number; paid: Paid; baixas: Baixa[] };
+type Item = { id: string; planId: string; costCenterId: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; approvalStage?: 'gerencia' | 'diretoria' | null; supplierId: string | null; status: LineStatus; decisionNote: string | null; costCenter: { id: string; code: string; name: string }; executedCents: number; paid: Paid; baixas: Baixa[] };
 type Data = {
   label: string; months: string[]; items: Item[];
   totals: { planned: number; executed: number; deviation: number; unlinkedCents: number; unlinkedCount: number };
   drafts: { costCenterId: string; code: string; name: string; count: number; cents: number }[];
   costCenters: { id: string; code: string; name: string }[];
-  can: { create: boolean; delete: boolean; editAmount: boolean; cancelBaixa: boolean; approve: boolean };
+  can: { create: boolean; delete: boolean; editAmount: boolean; cancelBaixa: boolean; approve: boolean; decideStages: ('gerencia' | 'diretoria')[]; role: 'diretoria' | 'gerencia' | 'lideranca' };
 };
 
 const monthShort = (m: string) => new Date(`${m}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '').replace(/^./, (c) => c.toUpperCase());
@@ -60,7 +60,7 @@ export function BudgetLaunches({ st, year, quarter }: { st: Structure; year: num
   const accById = useMemo(() => new Map(st.accounts.map((a) => [a.id, a])), [st.accounts]);
   const submit = useMutation({
     mutationFn: async (ids: string[]) => { for (const id of ids) await api('/budget/plan/submit', { method: 'POST', body: { costCenterId: id, year, quarter } }); },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Enviado à Diretoria' }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: d.can.role === 'lideranca' ? 'Enviado à Gerência' : 'Enviado à Diretoria' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (!q.data) return <div className="card"><LoadingRows /></div>;
@@ -94,7 +94,7 @@ export function BudgetLaunches({ st, year, quarter }: { st: Structure; year: num
       {d.drafts.length > 0 && (
         <section className="flex flex-wrap items-center gap-3 border border-warning/40 bg-warning-soft/40 px-4 py-3" aria-label="Rascunhos">
           <p className="text-sm text-ink"><strong>{d.drafts.reduce((a, x) => a + x.count, 0)} lançamento(s) em rascunho</strong> ({fmtBRL(d.drafts.reduce((a, x) => a + x.cents, 0))}) em {d.drafts.map((x) => x.code).join(', ')}. A baixa fica liberada depois da aprovação da Diretoria.</p>
-          <Button className="ml-auto" size="sm" variant="primary" icon={<Send className="h-4 w-4" />} loading={submit.isPending} onClick={() => submit.mutate(d.drafts.map((x) => x.costCenterId))}>Enviar à Diretoria</Button>
+          <Button className="ml-auto" size="sm" variant="primary" icon={<Send className="h-4 w-4" />} loading={submit.isPending} onClick={() => submit.mutate(d.drafts.map((x) => x.costCenterId))}>{d.can.role === 'lideranca' ? 'Enviar à Gerência' : 'Enviar à Diretoria'}</Button>
         </section>
       )}
 
@@ -137,7 +137,7 @@ export function BudgetLaunches({ st, year, quarter }: { st: Structure; year: num
                   <td className="px-3 py-3 text-right tabular-nums text-ink">{fmtBRL(i.amountCents)}</td>
                   <td className={clsx('px-3 py-3 text-right tabular-nums', i.executedCents > i.amountCents ? 'font-semibold text-danger' : 'text-ink')}>{fmtBRL(i.executedCents)}</td>
                   <td className="px-3 py-3 text-center"><ExecPill pct={pctOf(i)} /></td>
-                  <td className="px-3 py-3">{i.status === 'aprovado' ? <Pill className={PAID[i.paid].cls}>{PAID[i.paid].label}</Pill> : <Pill className={STATUS[i.status]}>{i.status === 'em_aprovacao' ? 'Com a Diretoria' : LINE_STATUS_LABELS[i.status]}</Pill>}</td>
+                  <td className="px-3 py-3">{i.status === 'aprovado' ? <Pill className={PAID[i.paid].cls}>{PAID[i.paid].label}</Pill> : <Pill className={STATUS[i.status]}>{i.status === 'em_aprovacao' ? (i.approvalStage === 'gerencia' ? 'Com a Gerência' : 'Com a Diretoria') : LINE_STATUS_LABELS[i.status]}</Pill>}</td>
                   <td className="px-4 py-3 text-right">{canPay && <Button size="sm" variant="outline" icon={<Check className="h-4 w-4" />} onClick={(e) => { e.stopPropagation(); setOpen({ id: i.id, baixa: true }); }}>Dar baixa</Button>}</td>
                 </tr>
               );
@@ -179,7 +179,7 @@ function ItemPanel({ item: i, st, can, year, quarter, focusBaixa, onClose }: { i
     onSuccess: () => { done('Lançamento alterado'); setEditing(false); }, onError: fail,
   });
   const remove = useMutation({ mutationFn: () => api(`/budget/plan/lines/${i.id}`, { method: 'DELETE' }), onSuccess: () => { done('Lançamento excluído'); onClose(); }, onError: fail });
-  const submit = useMutation({ mutationFn: () => api('/budget/plan/submit', { method: 'POST', body: { costCenterId: i.costCenterId, year, quarter } }), onSuccess: () => done('Enviado à Diretoria'), onError: fail });
+  const submit = useMutation({ mutationFn: () => api('/budget/plan/submit', { method: 'POST', body: { costCenterId: i.costCenterId, year, quarter } }), onSuccess: () => done(can.role === 'lideranca' ? 'Enviado à Gerência' : 'Enviado à Diretoria'), onError: fail });
   const decide = useMutation({ mutationFn: (decision: 'aprovar' | 'recusar') => api('/budget/plan/decide', { method: 'POST', body: { planId: i.planId, lineIds: [i.id], decision, note: decision === 'recusar' ? reason : null } }), onSuccess: (_r, dc) => { done(dc === 'aprovar' ? 'Aprovado' : 'Recusado'); setRefuse(false); setReason(''); }, onError: fail });
   const draft = i.status === 'rascunho' || i.status === 'recusado';
   const pct = pctOf(i);
@@ -188,7 +188,7 @@ function ItemPanel({ item: i, st, can, year, quarter, focusBaixa, onClose }: { i
       footer={draft ? <>
         {can.delete && <Button variant="ghost" icon={<Trash2 className="h-4 w-4 text-danger" />} loading={remove.isPending} onClick={() => { if (confirm(`Excluir “${i.what}”?`)) remove.mutate(); }}>Excluir</Button>}
         {!editing && <Button onClick={() => setEditing(true)}>Editar</Button>}
-        <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={submit.isPending} onClick={() => submit.mutate()}>Enviar à Diretoria</Button>
+        <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={submit.isPending} onClick={() => submit.mutate()}>{can.role === 'lideranca' ? 'Enviar à Gerência' : 'Enviar à Diretoria'}</Button>
       </> : <Button onClick={onClose}>Fechar</Button>}>
       <div className="space-y-5">
         <p className="-mt-2 text-sm text-muted">{i.costCenter.code} · {i.costCenter.name} · {a?.path.split(' › ').slice(1).join(' › ') || a?.name} · {monthShort(i.month)}/{i.month.slice(0, 4)} · {isInvestment(i.itemType) ? 'Investimento' : 'Custo'}{i.how ? ` · ${i.how}` : ''}</p>
@@ -203,8 +203,8 @@ function ItemPanel({ item: i, st, can, year, quarter, focusBaixa, onClose }: { i
         {/* status e decisões */}
         {i.status !== 'aprovado' && (
           <div className={clsx('border px-4 py-3 text-sm', i.status === 'recusado' ? 'border-danger/40 bg-danger-soft/40' : 'border-warning/40 bg-warning-soft/40')}>
-            <p className="text-ink"><strong>{LINE_STATUS_LABELS[i.status]}.</strong> {i.status === 'em_aprovacao' ? 'A Diretoria está avaliando; a baixa fica liberada depois da aprovação.' : i.status === 'recusado' ? `Diretoria: ${i.decisionNote ?? 'sem observação'}. Ajuste e envie de novo.` : 'Envie à Diretoria para aprovar; depois disso, dê baixa aqui.'}</p>
-            {i.status === 'em_aprovacao' && can.approve && (
+            <p className="text-ink"><strong>{LINE_STATUS_LABELS[i.status]}.</strong> {i.status === 'em_aprovacao' ? `${i.approvalStage === 'gerencia' ? 'A Gerência' : 'A Diretoria'} está avaliando${i.approvalStage === 'gerencia' ? ' (depois segue para a Diretoria)' : ''}; a baixa fica liberada depois da aprovação final.` : i.status === 'recusado' ? `Diretoria: ${i.decisionNote ?? 'sem observação'}. Ajuste e envie de novo.` : 'Envie à Diretoria para aprovar; depois disso, dê baixa aqui.'}</p>
+            {i.status === 'em_aprovacao' && can.decideStages.includes(i.approvalStage ?? 'diretoria') && (
               refuse ? (
                 <div className="mt-2 space-y-2">
                   <Textarea aria-label="Motivo da recusa" rows={2} value={reason} onChange={(ev) => setReason(ev.target.value)} placeholder="Motivo para o líder do centro" />
@@ -293,7 +293,7 @@ function NewLaunch({ st, d, year, quarter, onClose }: { st: Structure; d: Data; 
   const [v, setV] = useState({ costCenterId: d.costCenters[0]?.id ?? '', kind: 'custo' as 'custo' | 'investimento', what: '', accountId: '', month: months.includes(cur) ? cur : months[0]!, amount: '', itemType: 'servico', supplierId: '', how: '' });
   const save = useMutation({
     mutationFn: () => api('/budget/plan/lines', { method: 'POST', body: { costCenterId: v.costCenterId, accountId: v.accountId, what: v.what, how: v.how || null, month: v.month, amountCents: toCents(v.amount), itemType: v.itemType, supplierId: v.supplierId || null } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Lançado como rascunho. Envie à Diretoria para liberar a baixa.' }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Lançado como rascunho. Envie para aprovação para liberar a baixa.' }); onClose(); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const kinds = v.kind === 'investimento' ? ITEM_TYPES.filter((t) => t === 'ativo' || t === 'software') : ITEM_TYPES.filter((t) => t !== 'ativo');

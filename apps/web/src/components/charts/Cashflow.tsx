@@ -2,6 +2,7 @@
  * Fluxo de caixa mensal: entradas para cima, saídas para baixo a partir do zero e a linha do saldo acumulado
  * (mesma escala em R$, um eixo só). Marca o mês em que o acumulado volta a ficar positivo.
  */
+import { MASK, moneyHidden } from '../../lib/privacy';
 import { useEffect, useRef, useState } from 'react';
 import { fmtBRL } from '../../lib/format';
 
@@ -16,6 +17,7 @@ function niceStep(span: number) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * exp;
 }
 const short = (cents: number) => {
+  if (moneyHidden()) return MASK;
   const v = Math.abs(cents) / 100, sign = cents < 0 ? '−' : '';
   return v >= 1_000_000 ? `${sign}R$ ${(v / 1_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : v >= 1000 ? `${sign}R$ ${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : `${sign}R$ ${Math.round(v)}`;
 };

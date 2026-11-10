@@ -14,6 +14,9 @@ export type Version = {
   monthlyCents: number; totalCents: number | null; billingDay: number | null; billingTerms: string | null; items: ContractItem[];
   guarantee: Guarantee | null; publicTerms: PublicTerms | null; reportTerms?: import('@isp/domain').ReportTerms | null; adjustmentIndex: string | null; adjustmentBaseDate: string | null; adjustmentRule: string | null; specialConditions: string | null;
   createdAt: string; createdBy: string | null; effectiveFrom?: string | null;
+  deliveryAddresses?: import('@isp/domain').DeliveryAddresses;
+  zenith?: import('@isp/domain').ZenithContract | null;
+  serviceType?: string | null;
 };
 export type StepState = { doneAt: string; doneBy: string; doneByName: string; note: string | null; value: Record<string, unknown> | null; skipped?: boolean };
 export type Process = { id: string; kind: 'implantacao' | 'renovacao' | 'reajuste' | 'encerramento'; cycleKey: string; status: 'aberto' | 'concluido' | 'cancelado'; steps: Record<string, StepState>; data: Record<string, unknown>; dueAt: string | null; outcome: string | null; openedAt: string; closedAt: string | null };

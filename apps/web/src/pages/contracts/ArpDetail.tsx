@@ -12,7 +12,6 @@ import { Breadcrumb, Button, ErrorState, FormField, Input, LoadingRows, Select, 
 import { ConfirmDialog, Modal, useToast } from '../../components/ui/overlay';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { TvArea, TvBar, TvButton, useTvMode } from '../../features/TvMode';
-import { MoneyToggle } from '../../lib/privacy';
 import { ArpStatusChip, errMsg, useArp, useArpRefresh, type ArpDetail } from '../../features/arp/shared';
 import { ItemsPanel } from '../../features/arp/ItemsPanel';
 import { ImportWizard } from '../../features/arp/ImportWizard';
@@ -103,7 +102,7 @@ export function ArpDetailPage() {
         icon={<ScrollText className="h-9 w-9" strokeWidth={2.2} />}
         title={`Ata ${a.number}`}
         subtitle={a.object}
-        actions={<><MoneyToggle /><TvButton onClick={() => void tv.enter()} />{a.can.manage && a.status !== 'encerrada' && a.status !== 'cancelada' && <Button variant="secondary" onClick={() => setEditing(true)}>Editar dados</Button>}<StatusAction arp={a} /></>}
+        actions={<><TvButton onClick={() => void tv.enter()} />{a.can.manage && a.status !== 'encerrada' && a.status !== 'cancelada' && <Button variant="secondary" onClick={() => setEditing(true)}>Editar dados</Button>}<StatusAction arp={a} /></>}
       />
       <section className="card mb-4 grid grid-cols-2 gap-x-6 gap-y-3 p-5 text-sm md:grid-cols-3 xl:grid-cols-6">
         <div><p className="text-xs text-muted">Situação</p><div className="mt-1"><ArpStatusChip status={a.status} /></div></div>

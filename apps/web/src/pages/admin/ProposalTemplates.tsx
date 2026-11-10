@@ -1,4 +1,5 @@
 /** Configurações → Modelos de proposta e de contrato: arte (timbrado/Canva) como fundo, campos variáveis posicionados por clique. */
+import { normalizeSections, type ProposalSectionsConfig } from '@isp/domain';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Plus, Trash2, Upload } from 'lucide-react';
@@ -11,8 +12,8 @@ import { ProposalCanvas, type PField, type PPage } from '../../features/Proposal
 
 type Variable = { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string };
 type Purpose = 'proposta' | 'contrato';
-type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[]; purpose: Purpose; billingType: BillingType | null };
-type Data = { items: Template[]; systemVariables: { key: string; label: string }[] };
+type Template = { id: string; name: string; segments: Segment[]; fields: PField[]; variables: Variable[]; active: boolean; pages: PPage[]; purpose: Purpose; billingType: BillingType | null; sections?: Partial<ProposalSectionsConfig> | null; defaultBranchIds?: string[] };
+type Data = { items: Template[]; systemVariables: { key: string; label: string }[]; branches?: { id: string; name: string }[] };
 
 const SAMPLE: Record<string, string> = {
   'cliente.nome': 'EMPRESA EXEMPLO LTDA', 'cliente.documento': '00.000.000/0001-00', 'cliente.telefone': '(79) 99999-0000', 'cliente.email': 'contato@exemplo.com', 'cliente.endereco': 'Rua Exemplo, 100 · Centro · Aracaju',
@@ -21,12 +22,12 @@ const SAMPLE: Record<string, string> = {
   'contrato.prazo_meses': '12', 'contrato.valor_mensal': 'R$ 1.890,00', 'contrato.valor_global': 'R$ 22.680,00', 'contrato.saldo': 'R$ 120.000,00', 'contrato.dia_faturamento': '10', 'contrato.condicoes_faturamento': 'Fatura mensal, vencimento no dia 10',
   'contrato.indice_reajuste': 'IPCA', 'contrato.data_base': '15/01/2026', 'contrato.condicoes_especificas': 'SLA de 99,5%', 'contrato.orgao': 'Secretaria Municipal', 'contrato.processo': 'PROC-2025-0099',
   'contrato.itens_texto': '1 × Link dedicado 300 Mbps — R$ 1.890,00', 'responsavel.nome': 'Responsável Exemplo', data_hoje: new Date().toLocaleDateString('pt-BR'), data_extenso: new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' }),
-  'oportunidade.taxa_ativacao': 'R$ 0,00', 'oportunidade.titulo': 'Link dedicado escritório', 'vendedor.nome': 'Vendedor Exemplo', 'vendedor.email': 'vendas@exemplo.com', 'empresa.nome': 'BKT', 'data.hoje': new Date().toLocaleDateString('pt-BR'),
+  'oportunidade.taxa_ativacao': 'R$ 0,00', 'oportunidade.titulo': 'Link dedicado escritório', 'proposta.numero': 'PC 261109', 'proposta.titulo': 'PC 261109 - EMPRESA EXEMPLO LTDA', 'proposta.validade_dias': '15', 'proposta.validade_data': '24/11/2026', 'vendedor.nome': 'Vendedor Exemplo', 'vendedor.email': 'vendas@exemplo.com', 'empresa.nome': 'BKT', 'data.hoje': new Date().toLocaleDateString('pt-BR'),
 };
 const newId = () => Math.random().toString(36).slice(2, 10);
 const errMsg = (e: unknown) => (e instanceof ApiError ? [e.problem.detail ?? e.message, ...(e.problem.errors ?? []).map((x) => x.message)].join(' ') : (e as Error).message);
 
-function Editor({ template, systemVariables, onClose }: { template: Template; systemVariables: Data['systemVariables']; onClose: () => void }) {
+function Editor({ template, systemVariables, branches, onClose }: { template: Template; systemVariables: Data['systemVariables']; branches: { id: string; name: string }[]; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -42,7 +43,7 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
   const allVars = [...systemVariables, ...t.variables.map((v) => ({ key: v.key, label: `${v.label} (sua variável)` }))];
 
   const save = useMutation({
-    mutationFn: () => api(`/admin/proposal-templates/${t.id}`, { method: 'PUT', body: { name: t.name, segments: t.segments, fields: t.fields, variables: t.variables, active: t.active, purpose: t.purpose, billingType: t.billingType } }),
+    mutationFn: () => api(`/admin/proposal-templates/${t.id}`, { method: 'PUT', body: { name: t.name, segments: t.segments, fields: t.fields, variables: t.variables, active: t.active, purpose: t.purpose, billingType: t.billingType, ...(t.purpose === 'proposta' ? { sections: normalizeSections(t.sections) } : {}) } }),
     onSuccess: () => { setDirty(false); qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }); toast({ tone: 'success', message: 'Modelo salvo' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -122,6 +123,9 @@ function Editor({ template, systemVariables, onClose }: { template: Template; sy
               <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4 text-danger" />} onClick={() => { update({ fields: t.fields.filter((f) => f.id !== sel) }); setSel(null); }}>Remover campo</Button>
             </fieldset>
           ) : <p className="rounded-md bg-surface-2 p-3 text-sm text-muted">Selecione um campo na arte para editar, ou use “Adicionar campo”.</p>}
+
+          {t.purpose === 'proposta' && <BranchDefaults templateId={t.id} branches={branches} current={t.defaultBranchIds ?? []} />}
+          {t.purpose === 'proposta' && <SectionsPanel s={normalizeSections(t.sections)} pages={t.pages.length} set={(sections) => update({ sections })} />}
 
           <fieldset className="space-y-2">
             <legend className="mb-1 text-sm font-semibold text-ink">Suas variáveis</legend>
@@ -215,7 +219,57 @@ function TemplatesAdmin({ purpose }: { purpose: Purpose }) {
           ))}
         </ul>
       )}
-      {current && <Editor key={current.id} template={current} systemVariables={q.data!.systemVariables} onClose={() => setEditing(null)} />}
+      {current && <Editor key={current.id} template={current} systemVariables={q.data!.systemVariables} branches={q.data!.branches ?? []} onClose={() => setEditing(null)} />}
     </section>
+  );
+}
+
+/** Seções automáticas: serviços propostos (texto + fotos), composição do investimento (aba Produto) e condição. */
+function SectionsPanel({ s, pages, set }: { s: ProposalSectionsConfig; pages: number; set: (s: ProposalSectionsConfig) => void }) {
+  const pg = Array.from({ length: pages }, (_, i) => i);
+  return (
+    <fieldset className="space-y-3 border border-line p-3">
+      <legend className="px-1 text-sm font-semibold text-ink">Seções automáticas</legend>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={s.enabled} onChange={(e) => set({ ...s, enabled: e.target.checked })} />
+        <span><span className="font-semibold text-ink">Gerar páginas com Serviços propostos, Composição do investimento e Condição da proposta</span><span className="block text-xs text-muted">Texto e fotos de quem gera a proposta; itens da aba Produto da oportunidade; prazo de validade. Quebram em quantas páginas precisar.</span></span></label>
+      {s.enabled && (
+        <div className="space-y-3">
+          <FormField label="Página de fundo das seções" hint="essa página da arte vira o papel timbrado das páginas geradas" htmlFor="ps-bg">
+            <Select id="ps-bg" value={s.backgroundPage ?? ''} onChange={(e) => set({ ...s, backgroundPage: e.target.value === '' ? null : Number(e.target.value) })}><option value="">Página branca</option>{pg.map((i) => <option key={i} value={i}>Página {i + 1}</option>)}</Select>
+          </FormField>
+          <FormField label="Entram depois da" htmlFor="ps-after">
+            <Select id="ps-after" value={s.insertAfter} onChange={(e) => set({ ...s, insertAfter: Number(e.target.value) })}><option value={-1}>Antes de tudo</option>{pg.map((i) => <option key={i} value={i}>Página {i + 1}</option>)}</Select>
+          </FormField>
+          <div className="grid grid-cols-4 gap-2">
+            {(['top', 'bottom', 'left', 'right'] as const).map((k) => <FormField key={k} label={{ top: 'Topo %', bottom: 'Base %', left: 'Esq. %', right: 'Dir. %' }[k]} htmlFor={`ps-m-${k}`}><Input id={`ps-m-${k}`} type="number" min={0} max={40} value={s.margins[k]} onChange={(e) => set({ ...s, margins: { ...s.margins, [k]: Math.max(0, Math.min(40, Number(e.target.value) || 0)) } })} /></FormField>)}
+          </div>
+          <p className="-mt-1 text-xs text-muted">Margens: deixe livre o cabeçalho e o rodapé da arte de fundo.</p>
+          <div className="grid grid-cols-[1fr_80px] gap-2">
+            <FormField label="Título: serviços" htmlFor="ps-t1"><Input id="ps-t1" value={s.titles.services} onChange={(e) => set({ ...s, titles: { ...s.titles, services: e.target.value } })} /></FormField>
+            <FormField label="Cor" htmlFor="ps-color"><input id="ps-color" type="color" className="h-10 w-full cursor-pointer border border-line" value={s.color} onChange={(e) => set({ ...s, color: e.target.value.toUpperCase() })} /></FormField>
+          </div>
+          <FormField label="Título: investimento" htmlFor="ps-t2"><Input id="ps-t2" value={s.titles.investment} onChange={(e) => set({ ...s, titles: { ...s.titles, investment: e.target.value } })} /></FormField>
+          <FormField label="Título: condição" htmlFor="ps-t3"><Input id="ps-t3" value={s.titles.condition} onChange={(e) => set({ ...s, titles: { ...s.titles, condition: e.target.value } })} /></FormField>
+          <FormField label="Prazo da proposta (dias)" htmlFor="ps-days"><Input id="ps-days" type="number" min={1} max={365} value={s.validityDays} onChange={(e) => set({ ...s, validityDays: Math.max(1, Math.min(365, Number(e.target.value) || 15)) })} /></FormField>
+          <FormField label="Texto da condição" hint="{{proposta.validade_dias}} e {{proposta.validade_data}} viram o prazo" htmlFor="ps-cond"><Textarea id="ps-cond" rows={3} value={s.conditionText} onChange={(e) => set({ ...s, conditionText: e.target.value })} /></FormField>
+        </div>
+      )}
+    </fieldset>
+  );
+}
+
+/** Filiais em que este é o modelo padrão: a proposta é gerada nele ao entrar na etapa Proposta. */
+function BranchDefaults({ templateId, branches, current }: { templateId: string; branches: { id: string; name: string }[]; current: string[] }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [sel, setSel] = useState(current);
+  const m = useMutation({ mutationFn: (ids: string[]) => api(`/admin/proposal-templates/${templateId}/branches`, { method: 'PUT', body: { branchIds: ids } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'proposal-templates'] }); toast({ tone: 'success', message: 'Filiais atualizadas' }); }, onError: (e) => toast({ tone: 'error', message: (e as Error).message }) });
+  if (!branches.length) return null;
+  return (
+    <fieldset className="space-y-2 border border-line p-3">
+      <legend className="px-1 text-sm font-semibold text-ink">Padrão nas filiais</legend>
+      <p className="text-xs text-muted">Ao entrar na etapa Proposta sem proposta anexada, a oportunidade dessas filiais ganha a proposta neste modelo (PC AAMMDD - Nome da Conta.pdf), editável na aba Anexos. Cada filial tem um só modelo padrão.</p>
+      {branches.map((b) => <label key={b.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={sel.includes(b.id)} onChange={(e) => { const next = e.target.checked ? [...sel, b.id] : sel.filter((x) => x !== b.id); setSel(next); m.mutate(next); }} />{b.name}</label>)}
+    </fieldset>
   );
 }

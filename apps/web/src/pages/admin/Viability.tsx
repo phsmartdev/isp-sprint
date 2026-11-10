@@ -29,7 +29,7 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
   );
 }
 
-const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
+const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'netMarginTargetBp', 'netMarginMinBp', 'netMarginMaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
 type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; blockOutsidePolicy: boolean; validFrom: string };
 type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; blockOutsidePolicy: boolean };
@@ -53,6 +53,9 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa, inadimplência e despesas fixas; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [
     { key: 'overheadBp', label: 'Despesas fixas rateadas', hint: 'Estrutura e administrativo, em % da receita' },
     { key: 'incomeTaxBp', label: 'IR/CSLL', hint: 'Sobre a margem operacional positiva' },
+    { key: 'netMarginMinBp', label: 'Margem líquida mínima (viável acima de)', hint: 'Viabilidade pela margem líquida dos meses 1 a D: viável acima da mínima e abaixo da máxima. Em branco = regra anterior (payback e piso de margem)', optional: true },
+    { key: 'netMarginMaxBp', label: 'Margem líquida máxima (viável abaixo de)', hint: 'Acima dela o preço fica fora da faixa (risco de perder a venda)', optional: true },
+    { key: 'netMarginTargetBp', label: 'Margem líquida alvo', hint: 'Gera a margem de contribuição recomendada: alvo ÷ (1 − IR/CSLL) + despesas fixas + glosa + inadimplência. Em branco = sem recomendação', optional: true },
   ] },
   { title: 'Premissas da projeção de caixa', desc: 'Alimentam o fluxo de caixa: VPL, TIR e payback descontado.', fields: [
     { key: 'tmaAnnualBp', label: 'TMA anual', hint: 'Custo de capital; a mensal é (1 + anual)^(1/12) − 1' },
@@ -126,7 +129,7 @@ function EconEngine() {
       {!cur && <div className="mt-3"><Notice tone="warning">A viabilidade econômica não calcula até você preencher e publicar.</Notice></div>}
 
       <p className="mt-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-text" aria-label="Como o cálculo usa os parâmetros">
-        Preço exato = (investimento ÷ payback + custos mensais + tributo fixo) ÷ (1 − tributos − comissão − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
+        Preço exato = (parcela do investimento pela TMA no payback + custos mensais + tributo fixo) ÷ (1 − tributos da nota − despesas variáveis − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -157,7 +160,7 @@ function EconEngine() {
           <summary className="cursor-pointer font-semibold text-ink">Histórico de publicações ({q.data.versions.length})</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[960px] text-xs">
-              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Margem líq. alvo', 'Faixa líq.', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{q.data.versions.map((v) => (
                 <tr key={v.id} className="border-t border-line">
                   <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>
@@ -168,6 +171,8 @@ function EconEngine() {
                   <td className="num py-1 pr-3">{p2(v.values.contingencyCapexBp)} / {p2(v.values.contingencyOpexBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.overheadBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.incomeTaxBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.netMarginTargetBp)}</td>
+                  <td className="num py-1 pr-3">{v.values.netMarginMinBp != null && v.values.netMarginMaxBp != null ? `${p2(v.values.netMarginMinBp)}–${p2(v.values.netMarginMaxBp)}` : '—'}</td>
                   <td className="num py-1 pr-3">{v.values.paybackMaxPrivate} / {v.values.paybackMaxPublic} meses</td>
                   <td className="py-1 pr-3">{v.createdByName ?? '—'} · {fmtDateTime(v.createdAt)}</td>
                 </tr>

@@ -10,6 +10,7 @@
  * Validação real pendente: exige projeto no Google Cloud com a Gmail API ativa e os escopos aprovados.
  * Nos testes, `GOOGLE_FAKE_BASE` aponta para um servidor simulado (só fora de produção).
  */
+import { enqueueEmailReply } from './automationQueue';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   autoLinkContact, domainAllowed, evaluateRules, folderFor, externalParticipants, parseAddresses, pickAssignee, statusAfterMessage,
@@ -232,6 +233,9 @@ export async function ingestMessage(db: DbOrTx, box: Box, ctx: Ctx, m: GMessage,
   }
   await db.update(s.mailThreads).set({ ...patch, rowVersion: sql`${s.mailThreads.rowVersion} + 1` }).where(eq(s.mailThreads.id, t.id));
   if (events.length) await db.insert(s.mailThreadEvents).values(events);
+  // resposta do cliente numa conversa da oportunidade → automações de retorno de chamado (origem e-mail)
+  const oppId = patch.opportunityId ?? t.opportunityId;
+  if (direction === 'entrada' && oppId && !isNewThread) await enqueueEmailReply(db, tenantId, oppId, ins.id, p.subject);
   return true;
 }
 

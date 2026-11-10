@@ -69,6 +69,16 @@ test('oportunidade fechada: cadastrar contrato com os dados do CRM', async ({ pa
   await page.getByLabel('Número do contrato').fill('CT-E2E-900');
   await page.getByLabel('Início da vigência').fill('2026-11-01');
   await expect(page.getByLabel('Término da vigência')).toHaveValue('2027-10-31');
+  await page.getByRole('radiogroup', { name: 'Serviço do contrato' }).getByLabel('Serviços de telecom').check();
+  const z = page.getByRole('group', { name: 'Cadastro Zenith' });
+  await z.getByLabel('Empresa detentora do contrato').selectOption('UPNET');
+  await z.getByLabel('Alias / apelido').fill('Contrato E2E');
+  await z.getByLabel('Tipo de SLA').selectOption({ index: 1 });
+  await z.getByRole('group', { name: 'Contrato de rede gerenciada' }).getByLabel('Não').check();
+  await z.getByRole('group', { name: 'Possuirá IP público' }).getByLabel('Não').check();
+  await z.getByLabel('Ilimitado').check();
+  await z.getByRole('textbox', { name: 'Nome' }).first().fill('Técnico Fictício');
+  await z.getByRole('textbox', { name: 'Nome' }).nth(1).fill('Administrativo Fictício');
   await page.screenshot({ path: 'test-results/contracts-novo.png', fullPage: true });
   await page.getByRole('button', { name: 'Cadastrar contrato' }).click();
   await expect(page.getByRole('heading', { name: 'Contrato CT-E2E-900' })).toBeVisible();

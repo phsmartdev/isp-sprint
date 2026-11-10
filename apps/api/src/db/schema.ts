@@ -7,7 +7,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
-  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, doublePrecision, type AnyPgColumn,
+  pgTable, uuid, text, timestamp, boolean, integer, jsonb, primaryKey, uniqueIndex, index, check, bigint, serial, date, customType, doublePrecision, foreignKey, type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -55,6 +55,8 @@ export const users = pgTable(
     goalLeads: integer('goal_leads').notNull().default(0),
     /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
+    /** CSM (Sucesso do Cliente): recebe carteira e aparece nos filtros de CSM */
+    isCsm: boolean('is_csm').notNull().default(false),
     /** Papéis do Playbook Comercial que a pessoa ocupa (GC, SC, ANC, ASC...): parametrizado no cadastro do usuário. */
     playbookRoles: text('playbook_roles').array().notNull().default(sql`'{}'::text[]`),
     /** Conta Google vinculada no primeiro login com Google (identificador "sub"). */
@@ -173,6 +175,10 @@ export const teams = pgTable(
     /** Gestão de Resultados: unidade organizacional a que o time pertence e líder substituto */
     orgUnitId: uuid('org_unit_id'),
     substituteLeadId: uuid('substitute_lead_id'),
+    /** Gestores do time (um gestor pode ter vários times; veem e acompanham só os times que gerem). */
+    managerIds: uuid('manager_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Time excluído: some de todas as escolhas e listas; o histórico continua apontando para ele. */
+    deletedAt: ts('deleted_at'),
     createdAt: createdAt(),
   },
   (t) => ({ uq: uniqueIndex('teams_tenant_name_uq').on(t.tenantId, t.name) }),
@@ -471,6 +477,8 @@ export const salesBranches = pgTable('sales_branches', {
   state: text('state'),
   /** Tipos fiscais que a filial emite (venda, prestação de serviço, aluguel); vazio = todos. */
   fiscalKinds: text('fiscal_kinds').array().notNull().default(sql`'{}'::text[]`),
+  /** Modelo de proposta padrão da filial: gerado ao entrar na etapa Proposta. */
+  defaultProposalTemplateId: uuid('default_proposal_template_id'),
   createdAt: createdAt(),
 }, (t) => ({
   uq: uniqueIndex('sales_branches_name_uq').on(t.tenantId, t.name),
@@ -509,6 +517,8 @@ export const fiscalDocTypes = pgTable('fiscal_doc_types', {
   code: text('code').notNull(),
   name: text('name').notNull(),
   taxes: jsonb('taxes').$type<{ name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[]>().notNull().default([]),
+  /** envelope temporal (Reforma Tributária): tributos por ano de vigência ({"2026": [...], "2027": [...]}); o ano corrente também fica em taxes */
+  taxesByYear: jsonb('taxes_by_year').$type<Record<string, { name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[]>>().notNull().default({}),
   active: boolean('active').notNull().default(true),
   position: integer('position').notNull().default(0),
   updatedBy: uuid('updated_by'),
@@ -585,6 +595,8 @@ export const opportunities = pgTable(
     stage: text('stage').notNull().default('novo_lead'),
     planId: uuid('plan_id').references(() => plans.id),
     proposalStatus: text('proposal_status').notNull().default('nao_criada'),
+    /** Número da proposta gerada no CRM: PC AAMMDD (sufixo -2… no mesmo dia), único na empresa. */
+    proposalNumber: text('proposal_number'),
     contractRequestStatus: text('contract_request_status').notNull().default('nao_solicitada'),
     coverageStatus: text('coverage_status').notNull().default('nao_consultada'),
     reasons: text('reasons').array().notNull().default(sql`'{}'::text[]`),
@@ -638,6 +650,13 @@ export const opportunityItems = pgTable('opportunity_items', {
   notes: text('notes'),
   /** Licitação: valor do lance por unidade deste item. */
   bidUnitCents: bigint('bid_unit_cents', { mode: 'number' }),
+  /** Licitação, resultado do pregão: nosso preço unitário final (depois da disputa de lances). */
+  finalUnitCents: bigint('final_unit_cents', { mode: 'number' }),
+  /** Licitação, resultado: vencemos este item. */
+  winnerIsUs: boolean('winner_is_us').notNull().default(false),
+  /** Licitação, resultado: empresa vencedora do item (quando não fomos nós) e o preço unitário dela. */
+  winnerCompany: text('winner_company'),
+  winnerUnitCents: bigint('winner_unit_cents', { mode: 'number' }),
   /** Documento fiscal do item (da filial da oportunidade): define os tributos na viabilidade econômica. */
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   /** Tipo de negociação do item: venda (pagamento único), recorrência ou locação/aluguel (mensais). */
@@ -788,6 +807,12 @@ export const activities = pgTable(
     arpId: uuid('arp_id'),
     /** ABM Fase 6: pessoas da conta (stakeholders) com quem foi a interação */
     stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Jornada de pontuação: componente desta tarefa (jornada:tarefa); concluída pontua quem concluiu, excluída ou reaberta deixa de pontuar. */
+    scoreComponent: text('score_component'),
+    /** Qualificação opcional da tarefa da jornada pela gerência (aprovada dá bônus de aderência; reprovada não tira pontos). */
+    qualification: text('qualification'),
+    qualifiedBy: uuid('qualified_by').references(() => users.id),
+    qualifiedAt: ts('qualified_at'),
     /** Playbook: transferência entre áreas exige aceite de quem recebe; sem aceite a demanda segue pendente com quem enviou. */
     acceptStatus: text('accept_status'),
     handoffFrom: uuid('handoff_from').references(() => users.id),
@@ -960,9 +985,12 @@ export const emailMessages = pgTable(
     ccAddress: text('cc_address'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
+    /** rastreio de leitura (pixel) dos e-mails enviados pela oportunidade; as aberturas ficam em email_opens */
+    openToken: text('open_token'),
   },
   (t) => ({
     tenantIdx: index('email_messages_tenant_idx').on(t.tenantId, t.createdAt),
+    openTokenUq: uniqueIndex('email_messages_open_token_uq').on(t.openToken),
     statusCk: check('email_messages_status_ck', inList('status', ['enviado', 'falhou', 'ignorado'])),
   }),
 );
@@ -1248,6 +1276,8 @@ export const proposalTemplates = pgTable('proposal_templates', {
   segments: text('segments').array().notNull().default(sql`'{}'::text[]`),
   fields: jsonb('fields').$type<ProposalField[]>().notNull().default([]),
   variables: jsonb('variables').$type<ProposalVariable[]>().notNull().default([]),
+  /** Seções automáticas (serviços propostos, composição do investimento, condição) geradas sobre a arte de fundo. */
+  sections: jsonb('sections').$type<Record<string, unknown>>(),
   /** proposta (oportunidade) ou contrato (Gestão de Contratos): mesmo editor de arte + campos. */
   purpose: text('purpose').notNull().default('proposta'),
   /** Para modelos de contrato: tipo de contrato que usa o modelo (vazio = todos). */
@@ -1385,6 +1415,12 @@ export const contractVersions = pgTable(
     adjustmentBaseDate: date('adjustment_base_date', { mode: 'string' }),
     adjustmentRule: text('adjustment_rule'),
     specialConditions: text('special_conditions'),
+    /** Endereços de entrega (um ou vários): sequência, endereço, banda/serviço e colunas extras definidas no cadastro. */
+    deliveryAddresses: jsonb('delivery_addresses').$type<import('@isp/domain').DeliveryAddresses>().notNull().default(sql`'{"columns":[],"rows":[]}'::jsonb`),
+    /** Campos que o Zenith pede e o CRM não tinha (modalidade, empresa detentora, alias, saldos, SLA, contatos). */
+    /** Serviço do contrato (telecom, cloud, energia…). Só telecom tem cadastro Zenith. */
+    serviceType: text('service_type'),
+    zenith: jsonb('zenith').$type<import('@isp/domain').ZenithContract>(),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },
@@ -1500,6 +1536,10 @@ export const commTemplates = pgTable('comm_templates', {
   format: text('format').notNull().default('texto'),
   /** no HTML: usar a moldura institucional (cabeçalho e rodapé) em volta */
   layout: boolean('layout').notNull().default(true),
+  /** formato 'modelo': imagens de cabeçalho e rodapé e a altura (px) da área do corpo */
+  headerAssetId: uuid('header_asset_id'),
+  footerAssetId: uuid('footer_asset_id'),
+  frameHeight: integer('frame_height').notNull().default(320),
   status: text('status').notNull().default('rascunho'),
   version: integer('version').notNull().default(0),
   createdBy: uuid('created_by').references(() => users.id),
@@ -1519,9 +1559,29 @@ export const commTemplateVersions = pgTable('comm_template_versions', {
   whatsapp: text('whatsapp').notNull(),
   format: text('format').notNull().default('texto'),
   layout: boolean('layout').notNull().default(true),
+  headerAssetId: uuid('header_asset_id'),
+  footerAssetId: uuid('footer_asset_id'),
+  frameHeight: integer('frame_height').notNull().default(320),
   publishedBy: uuid('published_by').references(() => users.id),
   publishedAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('comm_template_versions_uq').on(t.templateId, t.version) }));
+
+/**
+ * Imagens dos modelos de e-mail (cabeçalho e rodapé). Imutáveis: trocar a imagem grava outra linha, então a versão
+ * publicada de um modelo continua apontando para a imagem com que foi publicada. No envio vão anexadas em linha (cid).
+ */
+export const commAssets = pgTable('comm_assets', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  filename: text('filename').notNull(),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('comm_assets_idx').on(t.tenantId), kindCk: check('comm_assets_kind_ck', inList('kind', ['cabecalho', 'rodape'])) }));
 
 /** Esteira (fluxo) desenhada pela empresa. O rascunho é editável; a versão publicada é a que roda. */
 export const commFlows = pgTable('comm_flows', {
@@ -1569,7 +1629,7 @@ export const commRunSteps = pgTable('comm_run_steps', {
   status: text('status').notNull().default('agendado'),
   dueOn: date('due_on', { mode: 'string' }).notNull(),
   /** envio: o que vai sair (já com as variáveis), para quem e por qual canal */
-  preview: jsonb('preview').$type<{ raw?: { subject: string; body: string; whatsapp: string; format?: string; layout?: boolean }; vars?: Record<string, string | null>; subject: string; html: string; text: string; whatsapp: string; recipients: { name: string; email: string | null; phone: string | null; kind: string; userId: string | null; actorId: string | null }[]; channels: string[]; templateId: string; templateVersion: number } | null>(),
+  preview: jsonb('preview').$type<{ raw?: { subject: string; body: string; whatsapp: string; format?: string; layout?: boolean; headerAssetId?: string | null; footerAssetId?: string | null; frameHeight?: number }; vars?: Record<string, string | null>; subject: string; html: string; text: string; whatsapp: string; recipients: { name: string; email: string | null; phone: string | null; kind: string; userId: string | null; actorId: string | null }[]; channels: string[]; templateId: string; templateVersion: number } | null>(),
   approverRole: text('approver_role'),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
@@ -3810,6 +3870,17 @@ export const accountStakeholders = pgTable(
     relationshipOwnerId: uuid('relationship_owner_id').references(() => users.id),
     nextInteractionOn: date('next_interaction_on', { mode: 'string' }),
     notes: text('notes'),
+    /** análise de stakeholders: IA, INA, NIA, NINA (influência × autoridade) */
+    powerClass: text('power_class').notNull().default('nao_avaliado'),
+    /** agente oculto: influencia a decisão sem papel formal ou sem aparecer no processo */
+    hiddenAgent: boolean('hidden_agent').notNull().default(false),
+    /** organograma: a quem a pessoa reporta (stakeholder da mesma conta) */
+    reportsToId: uuid('reports_to_id'),
+    innovationOpenness: text('innovation_openness').notNull().default('nao_avaliado'),
+    institutionalHistory: text('institutional_history'),
+    resistancePoints: text('resistance_points'),
+    /** fontes do perfil: LinkedIn, imprensa, site oficial… */
+    sources: jsonb('sources').$type<{ kind: string; url: string | null; note: string | null; at?: string | null }[]>().notNull().default(sql`'[]'::jsonb`),
     active: boolean('active').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     rowVersion: integer('row_version').notNull().default(1),
@@ -3817,6 +3888,9 @@ export const accountStakeholders = pgTable(
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
   (t) => ({
+    powerCk: check('account_stakeholders_power_ck', inList('power_class', ['ia', 'ina', 'nia', 'nina', 'nao_avaliado'])),
+    innovCk: check('account_stakeholders_innov_ck', inList('innovation_openness', ['alta', 'media', 'baixa', 'nao_avaliado'])),
+    reportsFk: foreignKey({ columns: [t.reportsToId], foreignColumns: [t.id], name: 'account_stakeholders_reports_fk' }).onDelete('set null'),
     uq: uniqueIndex('account_stakeholders_uq').on(t.contactId, t.personId),
     idx: index('account_stakeholders_idx').on(t.tenantId, t.contactId),
     interestCk: check('account_stakeholders_interest_ck', inList('interest', ['alto', 'medio', 'baixo', 'desconhecido'])),
@@ -3825,6 +3899,90 @@ export const accountStakeholders = pgTable(
     accessCk: check('account_stakeholders_access_ck', inList('access', ['direto', 'indireto', 'sem_acesso', 'nao_avaliado'])),
     partCk: check('account_stakeholders_part_ck', inList('participation', ['ativo', 'ocasional', 'inativo', 'nao_avaliado'])),
     prioCk: check('account_stakeholders_prio_ck', inList('priority', ['critica', 'alta', 'media', 'baixa'])),
+  }),
+);
+
+/**
+ * Estruturas: a macro entidade (programa, projeto, rede, consórcio, convênio, grupo) que reúne várias contas e
+ * contratos — ex.: uma rede estadual que liga vários órgãos. Contas e contratos são vinculados a ela; desvincular
+ * desativa (fica o histórico com o motivo).
+ */
+export const accountStructures = pgTable('account_structures', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull().default('programa'),
+  description: text('description'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({
+  nameUq: uniqueIndex('account_structures_name_uq').on(t.tenantId, sql`lower(${t.name})`),
+  kindCk: check('account_structures_kind_ck', inList('kind', ['programa', 'projeto', 'rede', 'consorcio', 'convenio', 'grupo_economico', 'outro'])),
+}));
+export const structureMembers = pgTable('structure_members', {
+  id: id(),
+  tenantId: tenantId(),
+  structureId: uuid('structure_id').notNull().references(() => accountStructures.id),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  role: text('role').notNull().default('participante'),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  removedBy: uuid('removed_by').references(() => users.id),
+  removedAt: ts('removed_at'),
+  removedReason: text('removed_reason'),
+}, (t) => ({
+  uq: uniqueIndex('structure_members_uq').on(t.structureId, t.contactId).where(sql`active`),
+  idx: index('structure_members_contact_idx').on(t.tenantId, t.contactId),
+  roleCk: check('structure_members_role_ck', inList('role', ['gestor', 'participante', 'executor', 'financiador', 'parceiro', 'outro'])),
+}));
+export const structureContracts = pgTable('structure_contracts', {
+  id: id(),
+  tenantId: tenantId(),
+  structureId: uuid('structure_id').notNull().references(() => accountStructures.id),
+  contractId: uuid('contract_id').notNull().references(() => contracts.id),
+  notes: text('notes'),
+  active: boolean('active').notNull().default(true),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  removedBy: uuid('removed_by').references(() => users.id),
+  removedAt: ts('removed_at'),
+  removedReason: text('removed_reason'),
+}, (t) => ({
+  uq: uniqueIndex('structure_contracts_uq').on(t.structureId, t.contractId).where(sql`active`),
+  idx: index('structure_contracts_contract_idx').on(t.tenantId, t.contractId),
+}));
+
+/**
+ * Relações entre contas (organizações): matriz/filial, órgão superior/vinculado, membro de consórcio, parceria,
+ * fornecimento, concorrência, influência. Registradas por pessoa; remover desativa (fica o histórico com o motivo).
+ */
+export const accountRelations = pgTable(
+  'account_relations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    fromContactId: uuid('from_contact_id').notNull().references(() => contacts.id),
+    toContactId: uuid('to_contact_id').notNull().references(() => contacts.id),
+    kind: text('kind').notNull(),
+    notes: text('notes'),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    removedBy: uuid('removed_by').references(() => users.id),
+    removedAt: ts('removed_at'),
+    removedReason: text('removed_reason'),
+  },
+  (t) => ({
+    fromIdx: index('account_relations_from_idx').on(t.tenantId, t.fromContactId),
+    toIdx: index('account_relations_to_idx').on(t.tenantId, t.toContactId),
+    kindCk: check('account_relations_kind_ck', inList('kind', ['matriz', 'orgao_superior', 'membro', 'parceira', 'fornecedora', 'concorrente', 'influencia', 'outro'])),
+    selfCk: check('account_relations_self_ck', sql`from_contact_id <> to_contact_id`),
   }),
 );
 
@@ -4874,10 +5032,12 @@ export const costCenters = pgTable('cost_centers', {
   name: text('name').notNull(),
   leaderId: uuid('leader_id').references(() => users.id),
   memberIds: uuid('member_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** Centro de custo do time (cada time é um centro; nome e responsáveis acompanham o time). */
+  teamId: uuid('team_id').references(() => teams.id),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
-}, (t) => ({ uq: uniqueIndex('cost_centers_uq').on(t.tenantId, t.code) }));
+}, (t) => ({ uq: uniqueIndex('cost_centers_uq').on(t.tenantId, t.code), teamUq: uniqueIndex('cost_centers_team_uq').on(t.teamId) }));
 
 /** Planejamento trimestral de um centro de custo (validado pela Diretoria). */
 export const budgetPlans = pgTable('budget_plans', {
@@ -4912,6 +5072,8 @@ export const budgetLines = pgTable('budget_lines', {
   supplierId: uuid('supplier_id'),
   resourceId: uuid('resource_id'),
   status: text('status').notNull().default('rascunho'),
+  /** em aprovação: com quem está (a Gerência aprova o que a liderança lança e envia à Diretoria, que dá a aprovação final) */
+  approvalStage: text('approval_stage'),
   decisionNote: text('decision_note'),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
@@ -4934,6 +5096,10 @@ export const budgetAdjustments = pgTable('budget_adjustments', {
   justification: text('justification').notNull(),
   pct: doublePrecision('pct'),
   status: text('status').notNull(),
+  /** guardiao (muda o total do centro; Gerência pede, Diretoria aprova) ou remanejamento (move saldo entre contas do centro; só a Gerência) */
+  kind: text('kind').notNull().default('guardiao'),
+  /** remanejamento: liga a saída e a entrada */
+  transferId: uuid('transfer_id'),
   requestedBy: uuid('requested_by').references(() => users.id),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
@@ -5143,6 +5309,24 @@ export const econSettingsVersions = pgTable('econ_settings_versions', {
   createdAt: createdAt(),
 }, (t) => ({ idx: index('econ_settings_versions_idx').on(t.tenantId, t.validFrom, t.createdAt) }));
 
+/**
+ * Envelope fiscal por vigência (Reforma Tributária): DRE (alíquota efetiva sobre o lucro) e retenções na fonte de
+ * cada empresa (filial) por ano — Filiais → Documentos fiscais. Os tributos da nota ficam nos documentos, por ano.
+ * Append-only: cada publicação é uma nova linha e vale a mais recente de cada (filial, ano).
+ */
+export const fiscalEnvelopes = pgTable('fiscal_envelopes', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id),
+  year: integer('year').notNull(),
+  values: jsonb('values').$type<Record<string, unknown>>().notNull(),
+  createdBy: uuid('created_by'),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('fiscal_envelopes_idx').on(t.tenantId, t.branchId, t.year, t.createdAt),
+  yearCk: check('fiscal_envelopes_year_ck', sql`year between 2020 and 2100`),
+}));
+
 /** Versões dos tributos de cada documento fiscal (append-only): cada mudança gera a próxima; o cálculo guarda a versão usada. */
 export const fiscalDocVersions = pgTable('fiscal_doc_versions', {
   id: id(),
@@ -5150,6 +5334,8 @@ export const fiscalDocVersions = pgTable('fiscal_doc_versions', {
   docId: uuid('doc_id').notNull().references(() => fiscalDocTypes.id),
   version: integer('version').notNull(),
   taxes: jsonb('taxes').$type<Record<string, unknown>[]>().notNull(),
+  /** ano de vigência dos tributos desta versão (null = cadastro sem ano) */
+  year: integer('year'),
   createdBy: uuid('created_by'),
   createdAt: createdAt(),
 }, (t) => ({ uq: uniqueIndex('fiscal_doc_versions_uq').on(t.docId, t.version) }));
@@ -5257,6 +5443,718 @@ export const financialFormulaEvents = pgTable('financial_formula_events', {
   actorId: uuid('actor_id'),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('financial_formula_events_idx').on(t.tenantId, t.code, t.createdAt) }));
+
+// ---------------------------------------------------------------- Gestão de Times → Férias
+/** Regras de férias da empresa (versões append-only; vale a de maior versão). */
+export const vacationSettings = pgTable('vacation_settings', {
+  id: id(),
+  tenantId: tenantId(),
+  version: integer('version').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  note: text('note').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('vacation_settings_uq').on(t.tenantId, t.version) }));
+
+/** Admissão da pessoa (base dos períodos aquisitivos). */
+export const vacationPeople = pgTable('vacation_people', {
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  admissionDate: date('admission_date', { mode: 'string' }).notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.userId] }) }));
+
+/** Blocos de férias: sugerida (automática) → programada (confirmada pela liderança); cancelada fica guardada. Histórico em governance_events (entity = 'ferias'). */
+export const vacations = pgTable('vacations', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** início do período aquisitivo a que o bloco pertence */
+  periodStart: date('period_start', { mode: 'string' }).notNull(),
+  startDate: date('start_date', { mode: 'string' }).notNull(),
+  days: integer('days').notNull(),
+  status: text('status').notNull().default('sugerida'),
+  source: text('source').notNull().default('manual'),
+  note: text('note'),
+  /** aviso de N dias antes já enviado (pessoa e liderança) */
+  alertedAt: ts('alerted_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('vacations_tenant_idx').on(t.tenantId, t.startDate),
+  statusCk: check('vacations_status_ck', sql`status in ('sugerida','programada','cancelada')`),
+  daysCk: check('vacations_days_ck', sql`days between 1 and 60`),
+}));
+
+// ---------------------------------------------------------------- Gestão de Times → Gamificação colaborativa
+/**
+ * Regras da gamificação (pontos por evento, pesos por hierarquia, faixas de dispersão, níveis) — versões append-only.
+ * Cada versão nasce proposta; só vale depois de aprovada (por quem administra e não propôs). Vale a aprovada mais recente.
+ */
+export const gamificationSettings = pgTable('gamification_settings', {
+  id: id(),
+  tenantId: tenantId(),
+  version: integer('version').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  note: text('note').notNull(),
+  status: text('status').notNull().default('proposta'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('gamification_settings_uq').on(t.tenantId, t.version),
+  statusCk: check('gamification_settings_status_ck', sql`status in ('proposta','aprovada','recusada')`),
+}));
+
+// ---------------------------------------------------------------- Marketing → Brindes
+export const giftKitCategories = pgTable('gift_kit_categories', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('gift_kit_categories_uq').on(t.tenantId, t.name) }));
+
+/** Item de brinde: custo por unidade (médio ponderado pelas entradas) e estoque atual (os movimentos guardam o histórico). */
+export const giftItems = pgTable('gift_items', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  supplierId: uuid('supplier_id').references(() => suppliers.id),
+  unitCostCents: integer('unit_cost_cents').notNull().default(0),
+  stock: integer('stock').notNull().default(0),
+  minStock: integer('min_stock').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('gift_items_uq').on(t.tenantId, t.name), stockCk: check('gift_items_stock_ck', sql`${t.stock} >= 0`) }));
+
+export const giftKits = pgTable('gift_kits', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  categoryId: uuid('category_id').references(() => giftKitCategories.id),
+  items: jsonb('items').$type<{ itemId: string; qty: number }[]>().notNull().default(sql`'[]'::jsonb`),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('gift_kits_uq').on(t.tenantId, t.name) }));
+
+/** Envio para a conta (e stakeholders que receberam): itens e custos congelados no dia. Cancelar devolve ao estoque; nada é apagado. */
+export const giftDeliveries = pgTable('gift_deliveries', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  kitId: uuid('kit_id').references(() => giftKits.id),
+  kitName: text('kit_name'),
+  categoryName: text('category_name'),
+  kits: integer('kits').notNull().default(0),
+  items: jsonb('items').$type<{ itemId: string; name: string; qty: number; unitCostCents: number }[]>().notNull(),
+  totalCents: integer('total_cents').notNull(),
+  stakeholderIds: uuid('stakeholder_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+  note: text('note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  cancelledAt: ts('cancelled_at'),
+  cancelledBy: uuid('cancelled_by').references(() => users.id),
+  cancelReason: text('cancel_reason'),
+}, (t) => ({ idx: index('gift_deliveries_idx').on(t.tenantId, t.contactId, t.occurredOn) }));
+
+/** Movimentos de estoque (append-only): entrada (compra, com fornecedor e custo), saída (envio), devolução (envio cancelado) e ajuste. */
+export const giftMovements = pgTable('gift_movements', {
+  id: id(),
+  tenantId: tenantId(),
+  itemId: uuid('item_id').notNull().references(() => giftItems.id),
+  kind: text('kind').notNull(),
+  qty: integer('qty').notNull(),
+  unitCostCents: integer('unit_cost_cents').notNull(),
+  supplierId: uuid('supplier_id').references(() => suppliers.id),
+  deliveryId: uuid('delivery_id').references(() => giftDeliveries.id),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('gift_movements_idx').on(t.tenantId, t.itemId, t.createdAt), kindCk: check('gift_movements_kind_ck', inList('kind', ['entrada', 'saida', 'devolucao', 'ajuste'])) }));
+
+// ---------------------------------------------------------------- Pedido de Apoio
+/** Pedido de apoio ao time (grupo) ou a um colega, ligado (opcionalmente) ao item onde a pessoa estava. Histórico em support_request_events. */
+export const supportRequests = pgTable('support_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  requesterId: uuid('requester_id').notNull().references(() => users.id),
+  teamId: uuid('team_id').references(() => teams.id),
+  targetUserId: uuid('target_user_id').references(() => users.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  dueOn: date('due_on', { mode: 'string' }),
+  entityType: text('entity_type'),
+  entityId: uuid('entity_id'),
+  entityLabel: text('entity_label'),
+  /** pontos da tarefa (jornada) ligada, congelados na abertura; sem tarefa com pontos: null (vale a base) */
+  taskPoints: integer('task_points'),
+  status: text('status').notNull().default('aberto'),
+  helperId: uuid('helper_id').references(() => users.id),
+  acceptedAt: ts('accepted_at'),
+  doneAt: ts('done_at'),
+  doneNote: text('done_note'),
+  confirmedAt: ts('confirmed_at'),
+  confirmedOn: date('confirmed_on', { mode: 'string' }),
+  cancelledAt: ts('cancelled_at'),
+  cancelReason: text('cancel_reason'),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('support_requests_idx').on(t.tenantId, t.status),
+  statusCk: check('support_requests_status_ck', inList('status', ['aberto', 'assumido', 'atendido', 'confirmado', 'cancelado'])),
+  targetCk: check('support_requests_target_ck', sql`(${t.teamId} is not null) <> (${t.targetUserId} is not null)`),
+}));
+
+export const supportRequestEvents = pgTable('support_request_events', {
+  id: id(),
+  tenantId: tenantId(),
+  requestId: uuid('request_id').notNull().references(() => supportRequests.id),
+  type: text('type').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('support_request_events_idx').on(t.requestId, t.createdAt) }));
+
+/**
+ * Setores da Gestão de Contratos por empresa: os do sistema (renomeáveis; os que têm etapas do processo não podem ser excluídos)
+ * e os criados pela empresa. Sem linha = setor do sistema com o nome padrão.
+ */
+export const contractSectors = pgTable('contract_sectors', {
+  id: id(),
+  tenantId: tenantId(),
+  key: text('key').notNull(),
+  label: text('label').notNull(),
+  system: boolean('system').notNull().default(false),
+  deletedAt: ts('deleted_at'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('contract_sectors_uq').on(t.tenantId, t.key) }));
+
+// ---------------------------------------------------------------- Central de Playbooks
+/** Categorias da biblioteca (prefixo do código, ícone, alçada de aprovação). */
+export const playbookCategories = pgTable('playbook_categories', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  prefix: text('prefix').notNull(),
+  icon: text('icon').notNull().default('book'),
+  description: text('description'),
+  approval: jsonb('approval').$type<{ gerencia: boolean; diretoria: boolean }>().notNull().default(sql`'{"gerencia":true,"diretoria":true}'::jsonb`),
+  active: boolean('active').notNull().default(true),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_categories_uq').on(t.tenantId, t.name) }));
+
+export const playbookSettings = pgTable('playbook_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  codePattern: text('code_pattern').notNull().default('{CAT}-PB-{NUM}'),
+  alertDays: integer('alert_days').array().notNull().default(sql`'{30,15,7,0}'::int[]`),
+  updatedAt: updatedAt(),
+});
+
+/** Playbook: identidade (código, categoria, dono) e o retrato da versão vigente (para busca e permissão). */
+export const playbooks = pgTable('playbooks', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  categoryId: uuid('category_id').notNull().references(() => playbookCategories.id),
+  title: text('title').notNull(),
+  description: text('description'),
+  ownerTeamId: uuid('owner_team_id').references(() => teams.id),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+  maintainerId: uuid('maintainer_id').references(() => users.id),
+  visibility: text('visibility').notNull().default('corporativo'),
+  teamIds: uuid('team_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  costCenterIds: uuid('cost_center_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  profiles: text('profiles').array().notNull().default(sql`'{}'::text[]`),
+  userIds: uuid('user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  reviewPeriod: text('review_period').notNull().default('anual'),
+  reviewCustomDays: integer('review_custom_days'),
+  lastReviewOn: date('last_review_on', { mode: 'string' }),
+  nextReviewOn: date('next_review_on', { mode: 'string' }),
+  requiresAck: boolean('requires_ack').notNull().default(false),
+  status: text('status').notNull().default('ativo'),
+  suspendedReason: text('suspended_reason'),
+  suspendedBy: uuid('suspended_by').references(() => users.id),
+  suspendedAt: ts('suspended_at'),
+  currentVersionId: uuid('current_version_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('playbooks_code_uq').on(t.tenantId, t.code), statusCk: check('playbooks_status_ck', inList('status', ['ativo', 'suspenso'])) }));
+
+/** Versões: rascunho editável; a partir do envio o conteúdo trava; publicada é imutável. Metadados (título, público, revisão) viajam com a versão. */
+export const playbookVersions = pgTable('playbook_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  number: text('number').notNull(),
+  status: text('status').notNull().default('rascunho'),
+  meta: jsonb('meta').$type<Record<string, unknown>>().notNull(),
+  content: jsonb('content').$type<{ blocks: unknown[] }>().notNull(),
+  searchText: text('search_text').notNull().default(''),
+  changeSummary: text('change_summary'),
+  relevant: boolean('relevant').notNull().default(false),
+  stages: text('stages').array().notNull().default(sql`'{}'::text[]`),
+  basedOnVersionId: uuid('based_on_version_id'),
+  authorId: uuid('author_id').references(() => users.id),
+  submittedAt: ts('submitted_at'),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  managerApprovedBy: uuid('manager_approved_by').references(() => users.id),
+  managerApprovedAt: ts('manager_approved_at'),
+  directorApprovedBy: uuid('director_approved_by').references(() => users.id),
+  directorApprovedAt: ts('director_approved_at'),
+  effectiveFrom: date('effective_from', { mode: 'string' }),
+  publishedAt: ts('published_at'),
+  validTo: ts('valid_to'),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('playbook_versions_idx').on(t.playbookId, t.status),
+  statusCk: check('playbook_versions_status_ck', inList('status', ['rascunho', 'revisao_gerencia', 'homologacao_diretoria', 'aprovada', 'vigente', 'encerrada', 'rejeitada', 'descartada'])),
+  oneLive: uniqueIndex('playbook_versions_one_live').on(t.playbookId).where(sql`status = 'vigente'`),
+  oneOpen: uniqueIndex('playbook_versions_one_open').on(t.playbookId).where(sql`status in ('rascunho','revisao_gerencia','homologacao_diretoria','aprovada')`),
+}));
+
+/** Decisões e comentários do fluxo (append-only). */
+export const playbookDecisions = pgTable('playbook_decisions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull().references(() => playbookVersions.id),
+  stage: text('stage').notNull(),
+  decision: text('decision').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('playbook_decisions_idx').on(t.versionId) }));
+
+/** Histórico do playbook (criação, edição, envio, decisões, publicação, suspensão, revisões, alertas). */
+export const playbookEvents = pgTable('playbook_events', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id'),
+  type: text('type').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('playbook_events_idx').on(t.playbookId, t.createdAt) }));
+
+export const playbookFiles = pgTable('playbook_files', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  data: bytea('data').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+});
+
+export const playbookFavorites = pgTable('playbook_favorites', {
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  createdAt: createdAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.playbookId] }) }));
+
+/** Leitura: visualizações e progresso (abrir não é ciência). */
+export const playbookReads = pgTable('playbook_reads', {
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull(),
+  views: integer('views').notNull().default(1),
+  progress: jsonb('progress').$type<{ section?: string | null; checks?: string[]; done?: string[] }>().notNull().default(sql`'{}'::jsonb`),
+  firstAt: createdAt(),
+  lastAt: ts('last_at').notNull().defaultNow(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.playbookId] }) }));
+
+/** Ciência por versão (append-only). */
+export const playbookAcks = pgTable('playbook_acks', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').notNull().references(() => playbookVersions.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_acks_uq').on(t.userId, t.versionId) }));
+
+export const playbookSuggestions = pgTable('playbook_suggestions', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  versionId: uuid('version_id').references(() => playbookVersions.id),
+  authorId: uuid('author_id').notNull().references(() => users.id),
+  kind: text('kind').notNull().default('melhoria'),
+  description: text('description').notNull(),
+  excerpt: text('excerpt'),
+  reason: text('reason'),
+  fileId: uuid('file_id').references(() => playbookFiles.id),
+  status: text('status').notNull().default('recebida'),
+  response: text('response'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ statusCk: check('playbook_suggestions_status_ck', inList('status', ['recebida', 'em_analise', 'aceita', 'rejeitada', 'incorporada'])) }));
+
+/** Alertas de revisão já enviados (um por playbook, data de revisão e antecedência). */
+export const playbookAlerts = pgTable('playbook_alerts', {
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  days: integer('days').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.playbookId, t.dueOn, t.days] }) }));
+
+export const playbookTemplates = pgTable('playbook_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  type: text('type').notNull(),
+  description: text('description'),
+  content: jsonb('content').$type<{ blocks: unknown[] }>().notNull(),
+  system: boolean('system').notNull().default(false),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('playbook_templates_uq').on(t.tenantId, t.name) }));
+
+// ------------------------------------------------------------------ Data Import Engine (infraestrutura administrativa, separada do CRM)
+/** Fontes de dados. Credenciais cifradas (AES-256-GCM) ficam aqui, nunca nos modelos. */
+export const importConnectors = pgTable('import_connectors', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
+  secrets: jsonb('secrets').$type<Record<string, string>>().notNull().default({}),
+  status: text('status').notNull().default('nao_testado'),
+  lastTestAt: ts('last_test_at'),
+  lastTestResult: text('last_test_result'),
+  archivedAt: ts('archived_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  kindCk: check('import_connectors_kind_ck', inList('kind', ['rdstation_crm', 'csv'])),
+  statusCk: check('import_connectors_status_ck', inList('status', ['nao_testado', 'ok', 'falhou'])),
+  nameUq: uniqueIndex('import_connectors_name_uq').on(t.tenantId, t.name),
+}));
+/** Arquivos enviados a um conector CSV (cada arquivo = uma entidade de origem). */
+export const importSourceFiles = pgTable('import_source_files', {
+  id: id(),
+  tenantId: tenantId(),
+  connectorId: uuid('connector_id').notNull().references(() => importConnectors.id),
+  entity: text('entity').notNull(),
+  name: text('name').notNull(),
+  idColumn: text('id_column'),
+  content: text('content').notNull(),
+  rows: integer('rows').notNull(),
+  uploadedBy: uuid('uploaded_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('import_source_files_uq').on(t.connectorId, t.entity) }));
+
+/** Biblioteca permanente de modelos. A lógica fica nas versões (imutáveis depois de usadas). */
+export const importTemplates = pgTable('import_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  source: text('source').notNull(),
+  connectorId: uuid('connector_id').references(() => importConnectors.id),
+  currentVersionId: uuid('current_version_id'),
+  archivedAt: ts('archived_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ nameUq: uniqueIndex('import_templates_name_uq').on(t.tenantId, t.name) }));
+export const importTemplateVersions = pgTable('import_template_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  templateId: uuid('template_id').notNull().references(() => importTemplates.id),
+  number: text('number').notNull(),
+  config: jsonb('config').$type<import('@isp/domain').ImportConfig>().notNull(),
+  justification: text('justification').notNull(),
+  /** rascunho (editável) → aprovada (usável em execução) → substituida; usada em execução = travada */
+  status: text('status').notNull().default('rascunho'),
+  basedOnVersionId: uuid('based_on_version_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  lockedAt: ts('locked_at'),
+  rowVersion: integer('row_version').notNull().default(1),
+}, (t) => ({
+  uq: uniqueIndex('import_template_versions_uq').on(t.templateId, t.number),
+  statusCk: check('import_template_versions_status_ck', inList('status', ['rascunho', 'aprovada', 'substituida'])),
+}));
+
+/** Execução (simulação ou importação) com retrato imutável da configuração usada. */
+export const importRuns = pgTable('import_runs', {
+  id: id(),
+  tenantId: tenantId(),
+  code: serial('code').notNull(),
+  mode: text('mode').notNull(),
+  templateId: uuid('template_id').references(() => importTemplates.id),
+  templateVersionId: uuid('template_version_id').references(() => importTemplateVersions.id),
+  /** alterações temporárias desta execução não mudam o modelo */
+  temporaryChanges: boolean('temporary_changes').notNull().default(false),
+  configSnapshot: jsonb('config_snapshot').$type<import('@isp/domain').ImportConfig>().notNull(),
+  configHash: text('config_hash').notNull(),
+  connectorId: uuid('connector_id').notNull().references(() => importConnectors.id),
+  source: text('source').notNull(),
+  scope: jsonb('scope').$type<import('@isp/domain').ImportScope>().notNull(),
+  scopeHash: text('scope_hash').notNull(),
+  /** importação: a simulação válida em que se baseia */
+  simulationRunId: uuid('simulation_run_id'),
+  status: text('status').notNull().default('na_fila'),
+  phase: text('phase').notNull().default('extracao'),
+  counters: jsonb('counters').$type<import('@isp/domain').RunCounters>().notNull(),
+  checkpoint: jsonb('checkpoint').$type<Record<string, unknown>>().notNull().default({}),
+  warnings: jsonb('warnings').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  error: text('error'),
+  startedBy: uuid('started_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  largeVolumeBy: uuid('large_volume_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  finishedAt: ts('finished_at'),
+  lockedUntil: ts('locked_until'),
+}, (t) => ({
+  modeCk: check('import_runs_mode_ck', inList('mode', ['simulacao', 'importacao'])),
+  statusCk: check('import_runs_status_ck', inList('status', ['na_fila', 'em_andamento', 'pausada', 'cancelada', 'concluida', 'concluida_com_pendencias', 'falhou'])),
+  phaseCk: check('import_runs_phase_ck', inList('phase', ['extracao', 'processamento', 'fim'])),
+  tenantIdx: index('import_runs_tenant_idx').on(t.tenantId, t.createdAt),
+}));
+/** Fila de buscas na origem (paginação, dependências, retentativas). */
+export const importFetchJobs = pgTable('import_fetch_jobs', {
+  id: id(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  seq: serial('seq').notNull(),
+  job: jsonb('job').$type<Record<string, unknown>>().notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  status: text('status').notNull().default('pendente'),
+  attempts: integer('attempts').notNull().default(0),
+  notBefore: ts('not_before'),
+  lastError: text('last_error'),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_fetch_jobs_uq').on(t.runId, t.dedupeKey),
+  pendIdx: index('import_fetch_jobs_pend_idx').on(t.runId, t.status, t.seq),
+  statusCk: check('import_fetch_jobs_status_ck', inList('status', ['pendente', 'feito', 'falhou'])),
+}));
+/** Dado bruto da origem, como veio (separado dos dados operacionais). */
+export const importRawRecords = pgTable('import_raw_records', {
+  id: id(),
+  tenantId: tenantId(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  seq: serial('seq').notNull(),
+  entity: text('entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  /** por que entrou: selecionado ou dependência (de qual registro) */
+  reason: text('reason').notNull().default('selecionado'),
+  fetchedAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('import_raw_records_uq').on(t.runId, t.entity, t.sourceId), seqIdx: index('import_raw_records_seq_idx').on(t.runId, t.seq) }));
+/** Resultado por registro: original → transformado → destino, com pendências e legado. */
+export const importRecordResults = pgTable('import_record_results', {
+  id: id(),
+  tenantId: tenantId(),
+  runId: uuid('run_id').notNull().references(() => importRuns.id, { onDelete: 'cascade' }),
+  rawId: uuid('raw_id').notNull().references(() => importRawRecords.id, { onDelete: 'cascade' }),
+  sourceEntity: text('source_entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  targetEntity: text('target_entity').notNull(),
+  action: text('action').notNull(),
+  targetId: uuid('target_id'),
+  values: jsonb('values').$type<Record<string, unknown>>().notNull(),
+  originals: jsonb('originals').$type<Record<string, unknown>>().notNull(),
+  converted: text('converted').array().notNull().default(sql`'{}'::text[]`),
+  issues: jsonb('issues').$type<import('@isp/domain').Issue[]>().notNull(),
+  legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
+  reason: text('reason'),
+  duplicate: boolean('duplicate').notNull().default(false),
+  /** chave alternativa (ex.: nome da negociação + empresa) para outras entidades acharem este registro */
+  altKey: text('alt_key'),
+  /** decisão administrativa de um registro em revisão */
+  decision: text('decision'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_record_results_uq').on(t.runId, t.targetEntity, t.sourceEntity, t.sourceId),
+  actionCk: check('import_record_results_action_ck', inList('action', ['criar', 'atualizar', 'ignorar', 'revisar', 'erro'])),
+  runIdx: index('import_record_results_run_idx').on(t.runId, t.action),
+}));
+/** Correspondência permanente origem → ISP Sprint (impede duplicar em importações sucessivas). */
+export const importLinks = pgTable('import_links', {
+  id: id(),
+  tenantId: tenantId(),
+  source: text('source').notNull(),
+  sourceEntity: text('source_entity').notNull(),
+  sourceId: text('source_id').notNull(),
+  targetEntity: text('target_entity').notNull(),
+  targetId: uuid('target_id').notNull(),
+  firstRunId: uuid('first_run_id').notNull().references(() => importRuns.id),
+  lastRunId: uuid('last_run_id').notNull().references(() => importRuns.id),
+  /** quando o motor gravou por último: se o registro mudou depois, foi alteração manual → revisão */
+  lastWrittenAt: ts('last_written_at').notNull(),
+  altKey: text('alt_key'),
+  legacy: jsonb('legacy').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('import_links_uq').on(t.tenantId, t.source, t.targetEntity, t.sourceEntity, t.sourceId),
+  targetIdx: index('import_links_target_idx').on(t.tenantId, t.targetEntity, t.targetId),
+  altIdx: index('import_links_alt_idx').on(t.tenantId, t.source, t.targetEntity, t.altKey),
+}));
+
+/** Relatório de Medição: contas com obrigação de envio (dia previsto, destinatários e textos do e-mail). */
+export const measurementReportSettings = pgTable('measurement_report_settings', {
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  enabled: boolean('enabled').notNull().default(false),
+  dueDay: integer('due_day').notNull().default(5),
+  toAddress: text('to_address'),
+  ccAddress: text('cc_address'),
+  texts: jsonb('texts').$type<{ greeting: string; intro: string; closing: string }>(),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('measurement_report_settings_pk').on(t.tenantId, t.contactId), dayCk: check('measurement_report_settings_day_ck', sql`due_day between 1 and 31`) }));
+
+/** Relatório de Medição do mês (rascunho gerado automaticamente; enviado fica congelado). */
+export const measurementReports = pgTable('measurement_reports', {
+  id: id(),
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  referenceMonth: text('reference_month').notNull(),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  status: text('status').notNull().default('rascunho'),
+  /** Snapshot: propostas (com inclusão), itens consolidados e textos. */
+  data: jsonb('data').$type<Record<string, unknown>>().notNull(),
+  subject: text('subject').notNull(),
+  generatedBy: uuid('generated_by').references(() => users.id),
+  generatedAt: ts('generated_at').notNull().defaultNow(),
+  sentAt: ts('sent_at'),
+  sentBy: uuid('sent_by').references(() => users.id),
+  sentTo: text('sent_to'),
+  sentCc: text('sent_cc'),
+  emailMessageId: uuid('email_message_id'),
+  error: text('error'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('measurement_reports_uq').on(t.tenantId, t.contactId, t.referenceMonth), statusCk: check('measurement_reports_status_ck', inList('status', ['rascunho', 'enviado'])) }));
+
+/** Fila de gatilhos que chegam de fora (retorno de chamado GLPI/IXC/e-mail, leitura de e-mail); idempotente pela chave. */
+export const automationQueue = pgTable('automation_queue', {
+  id: id(),
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  event: jsonb('event').$type<Record<string, unknown>>().notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  createdAt: createdAt(),
+  processedAt: ts('processed_at'),
+  error: text('error'),
+}, (t) => ({ uq: uniqueIndex('automation_queue_uq').on(t.tenantId, t.dedupeKey), pending: index('automation_queue_pending_idx').on(t.tenantId, t.processedAt) }));
+
+/** Última situação vista das ordens de serviço do IXC por conta (para perceber retorno). */
+export const ixcOsWatch = pgTable('ixc_os_watch', {
+  tenantId: tenantId(),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  osId: text('os_id').notNull(),
+  status: text('status').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  seenAt: ts('seen_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('ixc_os_watch_pk').on(t.tenantId, t.contactId, t.osId) }));
+
+/** Aberturas (pixel) dos e-mails enviados pela oportunidade: uma linha por abertura (histórico só cresce). */
+export const emailOpens = pgTable('email_opens', {
+  id: id(),
+  tenantId: tenantId(),
+  emailMessageId: uuid('email_message_id').notNull().references(() => emailMessages.id),
+  userAgent: text('user_agent'),
+  openedAt: ts('opened_at').notNull().defaultNow(),
+}, (t) => ({ msg: index('email_opens_msg_idx').on(t.emailMessageId, t.openedAt) }));
+
+/** Últimas escolhas da proposta da oportunidade (modelo, campos, serviços, fotos, prazo): editar e gerar de novo. */
+export const proposalDrafts = pgTable('proposal_drafts', {
+  tenantId: tenantId(),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  templateId: uuid('template_id').notNull(),
+  values: jsonb('values').$type<Record<string, string>>().notNull().default({}),
+  servicesText: text('services_text').notNull().default(''),
+  photos: jsonb('photos').$type<{ data: string; mime: string }[]>().notNull().default([]),
+  validityDays: integer('validity_days'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({ pk: uniqueIndex('proposal_drafts_pk').on(t.opportunityId) }));
+
+/** Certificados de cursos complementares (pontos extras da gamificação depois de validados pela liderança). */
+export const gamificationCertificates = pgTable('gamification_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  title: text('title').notNull(),
+  institution: text('institution').notNull(),
+  area: text('area').notNull(),
+  hours: integer('hours').notNull(),
+  completedOn: date('completed_on', { mode: 'string' }).notNull(),
+  fileName: text('file_name').notNull(),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  status: text('status').notNull().default('pendente'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  approvedOn: date('approved_on', { mode: 'string' }),
+  decisionNote: text('decision_note'),
+  createdAt: createdAt(),
+}, (t) => ({ user: index('gamification_certificates_user_idx').on(t.tenantId, t.userId), statusCk: check('gamification_certificates_status_ck', inList('status', ['pendente', 'aprovado', 'recusado'])) }));
+
+// ---------------------------------------------------------------- provas e certificados dos treinamentos (Central de Playbooks)
+export const trainingExams = pgTable('training_exams', {
+  id: id(),
+  tenantId: tenantId(),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+  version: integer('version').notNull().default(1),
+  active: boolean('active').notNull().default(true),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  createdAt: createdAt(),
+}, (t) => ({ pb: uniqueIndex('training_exams_playbook_uq').on(t.playbookId) }));
+
+export const trainingAttempts = pgTable('training_attempts', {
+  id: id(),
+  tenantId: tenantId(),
+  examId: uuid('exam_id').notNull().references(() => trainingExams.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  examVersion: integer('exam_version').notNull(),
+  answers: jsonb('answers').$type<Record<string, string[]>>().notNull(),
+  scoreBp: integer('score_bp').notNull(),
+  passed: boolean('passed').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ user: index('training_attempts_user_idx').on(t.examId, t.userId) }));
+
+export const trainingCertificates = pgTable('training_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  examId: uuid('exam_id').notNull().references(() => trainingExams.id),
+  playbookId: uuid('playbook_id').notNull().references(() => playbooks.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  attemptId: uuid('attempt_id').notNull().references(() => trainingAttempts.id),
+  code: text('code').notNull(),
+  title: text('title').notNull(),
+  hours: integer('hours').notNull(),
+  scoreBp: integer('score_bp').notNull(),
+  issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+  data: bytea('data').notNull(),
+  gamificationCertificateId: uuid('gamification_certificate_id').references(() => gamificationCertificates.id),
+  createdAt: createdAt(),
+}, (t) => ({ one: uniqueIndex('training_certificates_user_uq').on(t.examId, t.userId), code: uniqueIndex('training_certificates_code_uq').on(t.tenantId, t.code) }));
 
 // ---------------------------------------------------------------- Ocorrências da conta (evolução do relacionamento)
 /** Fatos registrados pela equipe que ajudam a analisar a conta: notificação, elogio, mudança na negociação… Nada é inferido. */

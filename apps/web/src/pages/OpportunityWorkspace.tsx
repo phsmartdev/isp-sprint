@@ -1,4 +1,5 @@
 import { SALE_TYPE_HINTS, SALE_TYPE_KEYS, SALE_TYPE_LABELS, type SaleTypeKey } from '@isp/shared';
+import { JourneyScore } from '../features/gamification/Gamification';
 import { LinkedTasks } from '../features/tasks/shared';
 import { TaskDrawer } from '../features/tasks/TaskDrawer';
 import { LinkedProjects } from '../features/projects/shared';
@@ -9,12 +10,13 @@ import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economic
 import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
+import { BidItemResults } from '../features/opportunity/BidItemResults';
 import { OriginEmail, useOriginEmail } from '../features/opportunity/OriginEmail';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
+import { Trash2, Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
@@ -26,9 +28,9 @@ import type { Activity, LookupField, Opportunity, Paged } from '../lib/types';
 import { useAuth } from '../auth/AuthProvider';
 import { OpportunityArpPanel } from '../features/arp/OpportunityArp';
 import { Avatar, Breadcrumb, Button, ChipGroup, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, SaveStatus, Select, Tabs, Textarea } from '../components/ui/primitives';
-import { Drawer, Modal, useToast } from '../components/ui/overlay';
+import { ConfirmDialog, Drawer, Modal, useToast } from '../components/ui/overlay';
 import { ContractChip, CoverageChip, LifecycleChip, ProposalChip, StageChip, productLabel } from '../components/badges';
-import { SprintTimer } from '../features/SprintTimer';
+import { MyOpportunityPoints } from '../features/MyOpportunityPoints';
 import { Timeline } from '../features/Timeline';
 import { NegotiationChat, useUnread } from '../features/NegotiationChat';
 import { ActivityComposer } from '../features/ActivityComposer';
@@ -588,6 +590,7 @@ export function OpportunityWorkspacePage() {
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
   const [oppAction, setOppAction] = useState<OppAction | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [releasing, setReleasing] = useState(false);
   const [releaseReason, setReleaseReason] = useState('');
@@ -602,7 +605,8 @@ export function OpportunityWorkspacePage() {
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
   const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
-  const econ = useQuery({ queryKey: ['economics', id], enabled: !!id, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
+  const econOn = feature('crm.viabilidade');
+  const econ = useQuery({ queryKey: ['economics', id], enabled: !!id && econOn, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<'cliente' | 'conversa' | 'passo'>(() => { const t = search.get('aba'); return t === 'chat' ? 'passo' : t === 'pessoas' ? 'cliente' : t ? 'conversa' : 'cliente'; });
   const unread = useUnread(id!);
@@ -765,7 +769,7 @@ export function OpportunityWorkspacePage() {
           <Tabs label="Acompanhamento" className="!gap-x-3 flex-wrap [&_[role=tab]]:text-sm" value={centerTab} onChange={setCenterTab} tabs={[
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
-            { key: 'viabilidade', label: 'Viabilidade econômica' },
+            ...(econOn ? [{ key: 'viabilidade' as const, label: 'Viabilidade econômica' }] : []),
             ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(origin.data?.thread ? [{ key: 'email' as const, label: 'E-mail' }] : []),
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
@@ -777,12 +781,13 @@ export function OpportunityWorkspacePage() {
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
-          {centerTab === 'viabilidade' && <EconomicsTab oppId={opp.id} />}
+          {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
-          {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidTimeline oppId={opp.id} /></div>}
+          {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidItemResults oppId={opp.id} /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
             <div className="space-y-5">
+              <JourneyScore oppId={opp.id} onOpen={setTaskOpen} editable={editable} />
               <LinkedTasks prefill={workPrefill} onOpen={setTaskOpen} />
               <section aria-label="Retornos e interações">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -796,7 +801,7 @@ export function OpportunityWorkspacePage() {
               <TaskDrawer id={taskOpen} onClose={() => setTaskOpen(null)} onOpen={setTaskOpen} />
             </div>
           )}
-          {centerTab === 'anexos' && <Attachments oppId={opp.id} />}
+          {centerTab === 'anexos' && <Attachments oppId={opp.id} onEditProposal={() => setGenProposal(true)} />}
           {centerTab === 'chamados' && <GlpiTickets oppId={opp.id} contactName={opp.contactName} hasCustomer={!!opp.customerId} />}
         </div>
       </section>
@@ -806,7 +811,7 @@ export function OpportunityWorkspacePage() {
   const right = (
     <div className="space-y-4">
       {/* resultado do motor financeiro salvo; sem ele, o atalho para a aba */}
-      {econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
+      {!econOn ? null : econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
         <section className="card p-5">
           <h2 className="text-md font-bold text-ink">Viabilidade econômica</h2>
           <p className="mt-1 text-sm text-muted">Ainda não calculada. Informe investimento, custos e prazo na aba Viabilidade econômica.</p>
@@ -836,7 +841,7 @@ export function OpportunityWorkspacePage() {
           {opp.stage === 'ganha' && can('contratos') && (opp.contractId
             ? <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/${opp.contractId}`)}>{opp.handoffStage === 'sucesso_cliente' ? 'Contrato · Sucesso do Cliente' : 'Ver contrato'}</Button>
             : <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} onClick={() => nav(`/contracts/new?opportunityId=${opp.id}`)}>Cadastrar contrato</Button>)}
-          <SprintTimer startedAt={opp.sprintStartedAt} baseSeconds={opp.sprintElapsedSeconds} running={running} />
+          <MyOpportunityPoints oppId={opp.id} />
         </div>
       </div>
 
@@ -859,7 +864,9 @@ export function OpportunityWorkspacePage() {
         {editable && opp.paused && <span className="rounded-sm bg-[#FFF6D6] px-2 py-0.5 text-xs font-bold text-[#9A6B00]" title={opp.pauseReason ?? undefined}>{opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada'}</span>}
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? '' : '. Reabrir é com a supervisão.'}</span>}
         {isClosed(opp.stage) && canReopen && <Button variant="primary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOppAction('reabrir')}>Reabrir negociação</Button>}
+        {opp.stage !== 'ganha' && <Button variant="ghost" className="text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Excluir negociação</Button>}
       </div>
+      {deleting && <DeleteOpportunity id={opp.id} rowVersion={opp.rowVersion} title={opp.contactName} onClose={() => setDeleting(false)} />}
 
       <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
 
@@ -887,5 +894,24 @@ export function OpportunityWorkspacePage() {
       {oppAction && <OppActionDialog act={{ opp, kind: oppAction }} stages={stages} onClose={() => setOppAction(null)} />}
       <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
     </div>
+  );
+}
+
+/** Excluir a negociação: some do funil, das listas e dos indicadores; o motivo fica na auditoria. Venda fechada não se exclui. */
+function DeleteOpportunity({ id, rowVersion, title, onClose }: { id: string; rowVersion: number; title: string; onClose: () => void }) {
+  const [reason, setReason] = useState('');
+  const qc = useQueryClient();
+  const toast = useToast();
+  const nav = useNavigate();
+  const del = useMutation({
+    mutationFn: () => api(`/opportunities/${id}`, { method: 'DELETE', body: { rowVersion, reason: reason.trim() } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['opportunities'] }); void qc.invalidateQueries({ queryKey: ['opportunity', id] }); toast({ tone: 'success', message: 'Negociação excluída' }); onClose(); nav('/opportunities'); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  return (
+    <ConfirmDialog open title="Excluir negociação" tone="danger" confirmLabel="Excluir" loading={del.isPending} confirmDisabled={reason.trim().length < 3} onCancel={onClose} onConfirm={() => del.mutate()}>
+      <p><strong>{title}</strong> sai do funil, das listas e dos indicadores. Tarefas e pontos ligados a ela deixam de contar. O registro e o motivo ficam na auditoria.</p>
+      <FormField label="Motivo da exclusão" htmlFor="del-opp-reason" required><Textarea id="del-opp-reason" value={reason} onChange={(e) => setReason(e.target.value)} className="min-h-[64px]" data-autofocus /></FormField>
+    </ConfirmDialog>
   );
 }

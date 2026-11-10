@@ -2,10 +2,13 @@ import { EmailPage, MailboxesPage } from './pages/email/Email';
 import { AbmPage } from './pages/marketing/Abm';
 import { Abm360Page } from './pages/marketing/Abm360';
 import { ProductPage } from './pages/product/Product';
-import { ResultsPage } from './pages/results/Results';
 import { InterventionsPage } from './pages/results/Interventions';
 import { AnalysisPage } from './pages/results/Analysis';
 import { RitualsPage } from './pages/results/Rituals';
+import { VacationsPage } from './pages/results/Vacations';
+import { GamificationPage } from './pages/results/Gamification';
+import { MyPointsPage } from './pages/MyPoints';
+import { PerformancePage } from './pages/results/Performance';
 import { MeetingPage } from './pages/results/Meeting';
 import { DecisionsPage } from './pages/results/Decisions';
 import { GoalsPage } from './pages/performance/Goals';
@@ -41,6 +44,16 @@ import { ContractDetailPage } from './pages/contracts/ContractDetail';
 import { NewContractPage } from './pages/contracts/NewContract';
 import { ArpDetailPage } from './pages/contracts/ArpDetail';
 import { CustomerSuccessPage } from './pages/cs/CustomerSuccess';
+import { TeamPanelPage } from './pages/results/TeamPanel';
+import { GoTo, TeamPeoplePage, TeamTrackingPage } from './pages/results/TeamHubs';
+import { GiftsPage } from './pages/Gifts';
+import { SupportPage } from './features/support/Support';
+const PlaybooksPage = lazy(() => import('./pages/playbooks/Library').then((m) => ({ default: m.PlaybooksPage })));
+const PlaybookReaderPage = lazy(() => import('./pages/playbooks/Reader').then((m) => ({ default: m.PlaybookReaderPage })));
+const PlaybookNewPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookNewPage })));
+const PlaybookEditorPage = lazy(() => import('./pages/playbooks/Editor').then((m) => ({ default: m.PlaybookEditorPage })));
+const PlaybookApprovePage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookApprovePage })));
+const PlaybookVersionsPage = lazy(() => import('./pages/playbooks/Versions').then((m) => ({ default: m.PlaybookVersionsPage })));
 import { JourneyPage, KickoffPrintPage, PublicKickoffPage } from './pages/cs/Journey';
 import { PublicJourneyPage } from './pages/cs/JourneyTrailTab';
 import { PublicSurveyPage, SurveyPage } from './pages/cs/Surveys';
@@ -52,6 +65,9 @@ const AdminModules = lazy(() => import('./pages/admin/Modules').then((m) => ({ d
 const AdminSalesBranches = lazy(() => import('./pages/admin/SalesBranches').then((m) => ({ default: m.AdminSalesBranches })));
 const AdminGmailSettings = lazy(() => import('./pages/admin/GmailSettings').then((m) => ({ default: m.AdminGmailSettings })));
 const AdminResultsSettings = lazy(() => import('./pages/admin/ResultsSettings').then((m) => ({ default: m.AdminResultsSettings })));
+const ImportEnginePage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportEnginePage })));
+const ImportTemplatePage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportTemplatePage })));
+const ImportRunPage = lazy(() => import('./pages/admin/import/ImportEngine').then((m) => ({ default: m.ImportRunPage })));
 const AdminAbmSettings = lazy(() => import('./pages/admin/AbmSettings').then((m) => ({ default: m.AdminAbmSettings })));
 const AdminPerformanceSettings = lazy(() => import('./pages/admin/PerformanceSettings').then((m) => ({ default: m.AdminPerformanceSettings })));
 const AdminContractComms = lazy(() => import('./pages/admin/ContractComms').then((m) => ({ default: m.AdminContractComms })));
@@ -121,13 +137,28 @@ export function App() {
         <Route path="activities" element={<Gate module="atividades" feature="crm.atividades"><ActivitiesPage /></Gate>} />
         <Route path="tarefas" element={<Gate module="atividades" feature="projetos.tarefas"><TasksPage /></Gate>} />
         <Route path="projetos" element={<Gate module="projetos"><ProjectsPage /></Gate>} />
-        <Route path="desempenho/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
-        <Route path="times" element={<Gate module="resultados"><ResultsPage /></Gate>} />
-        <Route path="times/intervencoes" element={<Gate module="resultados"><InterventionsPage /></Gate>} />
+        <Route path="desempenho/metas" element={<GoTo to="/times/metas" />} />
+        <Route path="times/metas" element={<Gate module="desempenho"><GoalsPage /></Gate>} />
+        <Route path="times" element={<Gate module="resultados"><TeamPanelPage /></Gate>} />
+        <Route path="times/acompanhamento" element={<Gate module="resultados"><TeamTrackingPage /></Gate>} />
+        <Route path="times/pessoas" element={<TeamPeoplePage />} />
+        <Route path="times/intervencoes" element={<GoTo to="/times/acompanhamento" aba="intervencoes" />} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
-        <Route path="times/rituais" element={<Gate module="resultados"><RitualsPage /></Gate>} />
+        <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />
+        <Route path="apoio" element={<SupportPage />} />
+        <Route path="playbooks" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybooksPage /></Suspense>} />
+        <Route path="playbooks/novo" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookNewPage /></Suspense>} />
+        <Route path="playbooks/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookReaderPage /></Suspense>} />
+        <Route path="playbooks/:id/editar" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookEditorPage /></Suspense>} />
+        <Route path="playbooks/:id/versoes" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookVersionsPage /></Suspense>} />
+        <Route path="playbooks/:id/aprovar/:versionId" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookApprovePage /></Suspense>} />
+        <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
+        <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
+        <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
+        <Route path="meus-pontos" element={<MyPointsPage />} />
+        <Route path="times/performance" element={<GoTo to="/times/pessoas" aba="performance" />} />
         <Route path="times/rituais/reunioes/:id" element={<Gate module="resultados"><MeetingPage /></Gate>} />
-        <Route path="times/decisoes" element={<Gate module="resultados"><DecisionsPage /></Gate>} />
+        <Route path="times/decisoes" element={<GoTo to="/times/acompanhamento" aba="decisoes" />} />
         <Route path="resultados" element={<Navigate to="/times" replace />} />
         <Route path="email" element={<Gate module="email"><EmailPage /></Gate>} />
         <Route path="email/caixas" element={<Gate module="email"><MailboxesPage /></Gate>} />
@@ -157,12 +188,15 @@ export function App() {
           <Route path="journeys" element={<AdminJourneys />} />
           <Route path="stages" element={<Navigate to="/settings/journeys" replace />} />
           <Route path="area" element={<AdminArea />} />
-          <Route path="viability" element={<AdminViability />} />
-          <Route path="financial-studio" element={<AdminFinancialStudio />} />
+          <Route path="viability" element={<EconGate><AdminViability /></EconGate>} />
+          <Route path="financial-studio" element={<EconGate><AdminFinancialStudio /></EconGate>} />
           <Route path="modelos" element={<AdminModels />} />
           <Route path="instructions" element={<Navigate to="/settings/modelos?aba=instrucao" replace />} />
           <Route path="email" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="data" element={<AdminData />} />
+          <Route path="importacao" element={<ImportEnginePage />} />
+          <Route path="importacao/modelos/:id" element={<ImportTemplatePage />} />
+          <Route path="importacao/execucoes/:id" element={<ImportRunPage />} />
           <Route path="fields" element={<AdminCustomFields />} />
           <Route path="contracts" element={<Navigate to="/settings/modulos?cfg=contratos" replace />} />
           <Route path="approvals" element={<AdminApprovalSettings />} />
@@ -187,5 +221,17 @@ export function App() {
         <Route path="*" element={<div className="card"><EmptyState title="Esta página não existe" description="Confira o endereço ou volte para o início." /></div>} />
       </Route>
     </Routes>
+  );
+}
+
+/** Viabilidade econômica é uma funcionalidade do CRM que a empresa liga ou desliga (Configurações → Permissões → Módulos e liberação). */
+function EconGate({ children }: { children: ReactNode }) {
+  const { feature } = useAuth();
+  if (feature('crm.viabilidade')) return <>{children}</>;
+  return (
+    <section className="card p-5">
+      <h2 className="text-md font-bold text-ink">Viabilidade econômica desligada</h2>
+      <p className="mt-1 text-sm text-muted">Esta funcionalidade do CRM não está liberada na empresa. Quem administra liga em Configurações → Permissões → Módulos e liberação, no módulo CRM.</p>
+    </section>
   );
 }

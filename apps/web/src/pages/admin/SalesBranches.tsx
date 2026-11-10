@@ -16,7 +16,7 @@ import { errMsg } from '../../features/contracts/shared';
 type Row = { id: string | null; name: string; active: boolean; fiscalKinds: FiscalKind[]; cnpj: string | null; taxRegime: TaxRegime | null; city: string | null; state: string | null };
 type Tax = { name: string; percent: string; fixed: string; active: boolean; validFrom: string; validTo: string };
 type Doc = { key: string; id: string | null; fiscalKind: FiscalKind; code: string; name: string; active: boolean; taxes: Tax[]; version?: number | null; versionAt?: string | null };
-type SavedDoc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; active: boolean; version?: number | null; versionAt?: string | null; taxes: { name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[] };
+type SavedDoc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; active: boolean; version?: number | null; versionAt?: string | null; taxesYear?: number | null; taxes: { name: string; percentBp: number; fixedCents: number; active: boolean; validFrom?: string | null; validTo?: string | null }[] };
 
 let seq = 0;
 const PLACEHOLDER: Record<FiscalKind, { code: string; name: string }> = { venda: { code: 'NF-e', name: 'Nota fiscal de venda' }, servico: { code: 'NFS-e', name: 'Nota fiscal de serviço' }, locacao: { code: 'FAT-LOC', name: 'Fatura de locação' } };
@@ -35,23 +35,102 @@ const docRate = (d: Doc) => {
   return `${pct.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%${fixed ? ` + ${fmtBRL(fixed)}` : ''}`;
 };
 
+const THIS_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: 6 }, (_, i) => THIS_YEAR - 1 + i);
+const bpText = (v: number | null | undefined) => (v == null ? '' : (v / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 }));
+const textBp = (s: string) => (s.trim() === '' ? null : Math.round(Number(s.replace(',', '.')) * 100));
+
+type EnvelopeResp = {
+  year: number; regimeLabel: string; retentions: { key: string; label: string }[];
+  current: { id: string; year: number; values: { profitTaxBp: number | null; retentions?: Record<string, number>; note?: string | null }; createdAt: string; createdByName: string | null; inherited: boolean } | null;
+};
+
+/** DRE e retenções na fonte da empresa no ano (envelope temporal): a alíquota efetiva sobre o lucro entra na DRE e no target seeking; as retenções só informam. */
+function BranchEnvelope({ branch, year }: { branch: Row & { id: string }; year: number }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['admin', 'fiscal-envelope', branch.id, year], queryFn: () => api<EnvelopeResp>(`/admin/fiscal-docs/${branch.id}/envelope?year=${year}`) });
+  const [profit, setProfit] = useState('');
+  const [ret, setRet] = useState<Record<string, string>>({});
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    const v = q.data?.current?.values;
+    setProfit(bpText(v?.profitTaxBp));
+    setRet(Object.fromEntries(Object.entries(v?.retentions ?? {}).map(([k, x]) => [k, bpText(x)])));
+    setNote(q.data?.current && !q.data.current.inherited ? q.data.current.values.note ?? '' : '');
+  }, [q.data]);
+  const save = useMutation({
+    mutationFn: () => api(`/admin/fiscal-docs/${branch.id}/envelope`, { method: 'POST', body: { year, profitTaxBp: textBp(profit), retentions: Object.fromEntries(Object.entries(ret).map(([k, v]) => [k, textBp(v)])), note: note.trim() || null } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'fiscal-envelope', branch.id] }); toast({ tone: 'success', message: `${branch.name}: DRE e retenções de ${year} salvas` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const cur = q.data?.current;
+  return (
+    <section aria-label={`DRE e retenções na fonte de ${branch.name}`} className="border border-line p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-bold text-ink">DRE e retenções na fonte</h3>
+        {q.data && <Chip tone="blue">Vigência {year} · {q.data.regimeLabel}</Chip>}
+      </div>
+      {q.isLoading ? <LoadingRows rows={2} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
+        <div className="bg-surface-2 p-3">
+          <table className="w-full text-sm">
+            <thead className="text-xs text-muted"><tr><th className="py-1 text-left font-medium">Item</th><th className="py-1 text-left font-medium">Alíquota %</th><th className="py-1 text-left font-medium">Onde entra</th></tr></thead>
+            <tbody>
+              <tr className="border-t border-line">
+                <td className="py-1 pr-2">Alíquota efetiva sobre o lucro (IRPJ + CSLL)</td>
+                <td className="py-1 pr-2"><Input aria-label="Alíquota efetiva sobre o lucro" inputMode="decimal" className="num h-8 w-[90px]" placeholder="0" value={profit} onChange={(e) => setProfit(e.target.value)} /></td>
+                <td className="py-1 text-xs text-muted">DRE de viabilidade (meses 1 a D e D+1 a N) e target seeking</td>
+              </tr>
+              {(q.data?.retentions ?? []).map((r) => (
+                <tr key={r.key} className="border-t border-line">
+                  <td className="py-1 pr-2">{r.label}</td>
+                  <td className="py-1 pr-2"><Input aria-label={`Retenção ${r.label}`} inputMode="decimal" className="num h-8 w-[90px]" placeholder="0" value={ret[r.key] ?? ''} onChange={(e) => setRet({ ...ret, [r.key]: e.target.value })} /></td>
+                  <td className="py-1 text-xs text-muted">Retenção na fonte: informativa, não entra no preço nem na DRE</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Input aria-label="Observação da DRE e retenções" className="mt-2 h-9" placeholder="Observação (ex.: presunção do Lucro Presumido)" value={note} onChange={(e) => setNote(e.target.value)} />
+          <p className="mt-2 text-xs text-muted">
+            {cur ? (cur.inherited ? `Sem cadastro para ${year}: mostrando ${cur.year} (vale até haver um de ${year}). Salve para criar a vigência ${year}.` : `Vigência ${year} salva em ${new Date(cur.createdAt).toLocaleString('pt-BR')}${cur.createdByName ? ` por ${cur.createdByName}` : ''}. Salvar de novo cria nova versão; a anterior fica no histórico.`) : `Sem DRE e retenções para ${year}: a viabilidade usa o IR/CSLL dos parâmetros de viabilidade.`}
+          </p>
+          <div className="mt-2 flex justify-end"><Button size="sm" variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar DRE e retenções de {year}</Button></div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function BranchDocs({ branch }: { branch: Row & { id: string } }) {
   const toast = useToast();
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ['admin', 'fiscal-docs'], queryFn: () => api<{ items: SavedDoc[] }>('/admin/fiscal-docs') });
+  const [year, setYear] = useState(THIS_YEAR);
+  const q = useQuery({ queryKey: ['admin', 'fiscal-docs', year], queryFn: () => api<{ items: SavedDoc[] }>(`/admin/fiscal-docs?year=${year}`) });
   const [docs, setDocs] = useState<Doc[] | null>(null);
   useEffect(() => { if (q.data) setDocs(q.data.items.filter((d) => d.branchId === branch.id).map(fromSaved)); }, [q.data, branch.id]);
+  const savedYear = new Map((q.data?.items ?? []).map((d) => [d.id, d.taxesYear ?? null]));
   const kinds = branch.fiscalKinds.length ? branch.fiscalKinds : [...FISCAL_KINDS];
   const save = useMutation({
-    mutationFn: () => api(`/admin/fiscal-docs/${branch.id}`, { method: 'PUT', body: { items: (docs ?? []).filter((d) => d.code.trim() || d.name.trim()).map(toBody) } }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'fiscal-docs'] }); void qc.invalidateQueries({ queryKey: ['fiscal-docs'] }); toast({ tone: 'success', message: `${branch.name}: documentos fiscais salvos` }); },
+    mutationFn: () => api(`/admin/fiscal-docs/${branch.id}`, { method: 'PUT', body: { year, items: (docs ?? []).filter((d) => d.code.trim() || d.name.trim()).map(toBody) } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['admin', 'fiscal-docs'] }); void qc.invalidateQueries({ queryKey: ['fiscal-docs'] }); toast({ tone: 'success', message: `${branch.name}: documentos fiscais de ${year} salvos` }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
-  if (q.isLoading || !docs) return <LoadingRows rows={3} />;
+  const yearSel = (
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="flex items-center gap-2 text-sm font-semibold text-ink">Vigência fiscal
+        <Select aria-label="Ano de vigência fiscal" className="h-9 w-[110px]" value={String(year)} onChange={(e) => { setDocs(null); setYear(Number(e.target.value)); }}>
+          {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+        </Select>
+      </label>
+      <span className="text-xs text-muted">Os tributos e a DRE abaixo valem para {year}{year >= 2027 ? ' (Reforma Tributária: CBS/IBS)' : ' (regime atual)'}. A oportunidade escolhe o ano no campo Vigência fiscal.</span>
+    </div>
+  );
+  if (q.isLoading || !docs) return <div className="space-y-4">{yearSel}<LoadingRows rows={3} /></div>;
   const setDoc = (k: string, p: Partial<Doc>) => setDocs(docs.map((d) => (d.key === k ? { ...d, ...p } : d)));
   const setTax = (k: string, i: number, p: Partial<Tax>) => setDocs(docs.map((d) => (d.key === k ? { ...d, taxes: d.taxes.map((t, j) => (j === i ? { ...t, ...p } : t)) } : d)));
   return (
     <div className="space-y-5">
+      {yearSel}
       {kinds.map((kind) => {
         const list = docs.filter((d) => d.fiscalKind === kind);
         return (
@@ -67,6 +146,7 @@ function BranchDocs({ branch }: { branch: Row & { id: string } }) {
                   <Input aria-label="Código do documento" className="h-9 w-[120px] uppercase" placeholder={PLACEHOLDER[d.fiscalKind].code} value={d.code} onChange={(e) => setDoc(d.key, { code: e.target.value })} />
                   <Input aria-label="Nome do documento" className="h-9 min-w-[200px] flex-1" placeholder={PLACEHOLDER[d.fiscalKind].name} value={d.name} onChange={(e) => setDoc(d.key, { name: e.target.value })} />
                   <Chip tone="blue">Total {docRate(d)}</Chip>
+                  {d.id && savedYear.get(d.id) !== year && <span className="text-xs text-warning">{savedYear.get(d.id) != null ? `mostrando os tributos de ${savedYear.get(d.id)}; salve para criar a vigência ${year}` : `sem tributos por ano: mostrando o cadastro base; salve para criar a vigência ${year}`}</span>}
                   {d.version != null && <span className="text-xs text-muted" title={d.versionAt ? `desde ${new Date(d.versionAt).toLocaleString('pt-BR')}` : undefined}>tributos v{d.version}</span>}
                   <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={d.active} onChange={(e) => setDoc(d.key, { active: e.target.checked })} />Ativo</label>
                 </div>
@@ -90,7 +170,8 @@ function BranchDocs({ branch }: { branch: Row & { id: string } }) {
         );
       })}
       <p className="text-xs text-muted">O código liga o documento ao produto: no cadastro do produto, escolha o código do documento padrão; na oportunidade, o item já vem com o documento da filial. Documento tirado da lista é só desativado (o histórico continua apontando para ele). Cada mudança nos tributos gera uma nova versão; o cálculo salvo guarda a versão que usou.</p>
-      <div className="flex justify-end"><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar documentos de {branch.name}</Button></div>
+      <div className="flex justify-end"><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar documentos de {branch.name} ({year})</Button></div>
+      <BranchEnvelope branch={branch} year={year} />
     </div>
   );
 }

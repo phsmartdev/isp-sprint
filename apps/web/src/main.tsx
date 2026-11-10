@@ -7,6 +7,7 @@ import { ToastProvider } from './components/ui/overlay';
 import { BrandProvider } from './components/brand';
 import { ApiError } from './lib/api';
 import { App } from './App';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles/index.css';
 
 const queryClient = new QueryClient({
@@ -27,7 +28,7 @@ createRoot(document.getElementById('root')!).render(
         <AuthProvider>
           <BrandProvider>
             <ToastProvider>
-              <App />
+              <AppErrorBoundary><App /></AppErrorBoundary>
             </ToastProvider>
           </BrandProvider>
         </AuthProvider>

@@ -19,6 +19,7 @@ import { CommercialChip, PriorityChip, StatusChip } from '../../features/abm/sha
 import { AccountDrawer } from './Abm';
 import { InfluenceMapPanel, StakeholdersPanel } from '../../features/abm/stakeholders';
 import { AccountEvolution } from '../../features/account/AccountEvolution';
+import { AccountRelationsPanel } from '../../features/accounts/AccountRelations';
 import { AccountPlaysPanel } from '../../features/abm/plays';
 import { CoverageCard } from '../../features/abm/intel';
 import { AccountFollowup } from '../../features/abm/followup';
@@ -42,7 +43,7 @@ const OBJ_TONE: Record<AbmObjectiveStatus, Tone> = { planejado: 'neutral', em_an
 const NATURE = { publica: 'Pública', privada: 'Privada' } as const;
 const TABS = [
   { key: 'resumo', label: 'Resumo estratégico' }, { key: 'dados', label: 'Dados da organização' }, { key: 'estrutura', label: 'Estrutura organizacional' },
-  { key: 'stakeholders', label: 'Stakeholders' }, { key: 'mapa', label: 'Mapa de influência' }, { key: 'plays', label: 'Plays' }, { key: 'acompanhamento', label: 'Acompanhamento' },
+  { key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Contas relacionadas' }, { key: 'mapa', label: 'Mapa de influência' }, { key: 'plays', label: 'Plays' }, { key: 'acompanhamento', label: 'Acompanhamento' },
   { key: 'comercial', label: 'Leads e oportunidades' }, { key: 'contratos', label: 'Contratos' }, { key: 'trabalho', label: 'Projetos e tarefas' }, { key: 'evolucao', label: 'Evolução' }, { key: 'historico', label: 'Histórico' },
 ] as const;
 type Tab = (typeof TABS)[number]['key'];
@@ -86,6 +87,7 @@ export function Abm360Page() {
       {tab === 'dados' && <Organization d={d} />}
       {tab === 'estrutura' && <Structure d={d} />}
       {tab === 'stakeholders' && <StakeholdersPanel contactId={d.abm.contactId} />}
+      {tab === 'relacoes' && <AccountRelationsPanel contactId={d.abm.contactId} prefer="abm" />}
       {tab === 'mapa' && <InfluenceMapPanel contactId={d.abm.contactId} />}
       {tab === 'plays' && <AccountPlaysPanel contactId={d.abm.contactId} />}
       {tab === 'acompanhamento' && <AccountFollowup contactId={d.abm.contactId} />}

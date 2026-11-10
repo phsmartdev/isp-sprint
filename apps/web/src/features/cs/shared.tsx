@@ -1,4 +1,6 @@
 /** Sucesso do Cliente: tipos das respostas, selos e o visualizador de slides do kickoff. */
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../lib/api';
 import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -184,4 +186,6 @@ export function PrintDeck({ slides, client, ctx }: { slides: Slide[]; client?: s
 }
 
 /** CSMs = usuários com o setor Sucesso do Cliente no cadastro (só eles aparecem nas listas de CSM). */
+/** CSMs: membros do time Sucesso do Cliente (sem esse time, quem tem o setor no cadastro). */
+export const useCsms = () => useQuery({ queryKey: ['cs-csms'], staleTime: 60_000, queryFn: () => api<{ items: { id: string; name: string; source: 'time' | 'setor' }[] }>('/cs/csms') }).data?.items ?? [];
 export const csmsOf = <U extends { sectors?: string[] }>(users: U[] | undefined) => (users ?? []).filter((u) => u.sectors?.includes('sucesso_cliente'));

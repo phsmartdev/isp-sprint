@@ -1,6 +1,11 @@
 /** Modelos de proposta (arte + campos variáveis) e geração do PDF da proposta na oportunidade. */
+import { GenBody, branchDefaultTemplate, generateProposal, renderProposal } from '../services/proposalGen';
+import { todayIn } from '../services/vacations';
+import { normalizeSections, proposalTitle, validityDate } from '@isp/domain';
+import type { DbOrTx } from '../db/client';
+import type { AuthContext } from '../http/context';
 import { createHash } from 'node:crypto';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
@@ -24,6 +29,12 @@ const TemplateBody = z.object({
   active: z.boolean().default(true),
   purpose: z.enum(['proposta', 'contrato']).default('proposta'),
   billingType: z.enum(['recorrente', 'frequente', 'medicao']).nullable().default(null),
+  sections: z.object({
+    enabled: z.boolean(), backgroundPage: z.number().int().min(0).max(40).nullable(), insertAfter: z.number().int().min(-1).max(40),
+    margins: z.object({ top: z.number().min(0).max(40), bottom: z.number().min(0).max(40), left: z.number().min(0).max(40), right: z.number().min(0).max(40) }),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/), titles: z.object({ services: z.string().max(80), investment: z.string().max(80), condition: z.string().max(80) }),
+    validityDays: z.number().int().min(1).max(365), conditionText: z.string().max(2000),
+  }).nullable().optional(),
 });
 const PageParams = z.object({ id: z.string().uuid(), pageId: z.string().uuid() });
 
@@ -40,7 +51,33 @@ const checkVars = (b: z.infer<typeof TemplateBody>) => {
   for (const v of b.variables) { if (keys.has(v.key)) throw unprocessable(`Variável repetida: ${v.key}`); if (v.key.includes('.')) throw unprocessable('Variável própria não pode ter ponto.'); keys.add(v.key); }
 };
 
+
+const renderFor = renderProposal;
+
 export const proposalRoutes = [
+  defineRoute({
+    method: 'PUT', url: '/admin/proposal-templates/:id/branches', summary: 'Define em quais filiais este é o modelo padrão (gerado ao entrar na etapa Proposta)', tag: 'Propostas', ...ADMIN, params: IdParams,
+    body: z.object({ branchIds: z.array(z.string().uuid()).max(100) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const t = await templateOr404(app.db, auth.tenantId, params.id);
+      if (t.purpose !== 'proposta') throw unprocessable('Só modelos de proposta podem ser padrão da filial.');
+      await app.db.transaction(async (tx) => {
+        await tx.update(s.salesBranches).set({ defaultProposalTemplateId: null }).where(and(eq(s.salesBranches.tenantId, auth.tenantId), eq(s.salesBranches.defaultProposalTemplateId, t.id)));
+        if (body.branchIds.length) await tx.update(s.salesBranches).set({ defaultProposalTemplateId: t.id }).where(and(eq(s.salesBranches.tenantId, auth.tenantId), inArray(s.salesBranches.id, body.branchIds)));
+      });
+      await audit(app.db, req, { action: 'proposal_template.branches', entityType: 'proposal_template', entityId: t.id, metadata: { branchIds: body.branchIds } });
+      return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/opportunities/:id/proposal-draft', summary: 'Últimas escolhas da proposta (para editar e gerar de novo) e o modelo padrão da filial', tag: 'Propostas', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const [d] = await app.db.select().from(s.proposalDrafts).where(and(eq(s.proposalDrafts.opportunityId, o.id), eq(s.proposalDrafts.tenantId, auth.tenantId)));
+      const def = await branchDefaultTemplate(app.db, auth.tenantId, o.branchId ?? null);
+      return { draft: d ? { templateId: d.templateId, values: d.values, servicesText: d.servicesText, photos: d.photos, validityDays: d.validityDays, updatedAt: d.updatedAt } : null, branchDefaultTemplateId: def?.id ?? null };
+    },
+  }),
   defineRoute({
     method: 'GET',
     url: '/admin/proposal-templates',
@@ -51,9 +88,10 @@ export const proposalRoutes = [
     handler: async ({ app, auth, query }) => {
       const rows = await app.db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.tenantId, auth.tenantId), eq(s.proposalTemplates.purpose, query.purpose))).orderBy(asc(s.proposalTemplates.name));
       const items = [];
-      for (const t of rows) items.push({ ...t, pages: await pagesOf(app.db, auth.tenantId, t.id) });
+      const branches = await app.db.select({ id: s.salesBranches.id, name: s.salesBranches.name, defaultTemplateId: s.salesBranches.defaultProposalTemplateId }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, auth.tenantId), eq(s.salesBranches.active, true))).orderBy(asc(s.salesBranches.position), asc(s.salesBranches.name));
+      for (const t of rows) items.push({ ...t, pages: await pagesOf(app.db, auth.tenantId, t.id), defaultBranchIds: branches.filter((b) => b.defaultTemplateId === t.id).map((b) => b.id) });
       const systemVariables = query.purpose === 'contrato' ? CONTRACT_TEMPLATE_VARIABLES : SYSTEM_VARIABLES.map(([key, label]) => ({ key, label }));
-      return { items, systemVariables };
+      return { items, systemVariables, branches: branches.map((b) => ({ id: b.id, name: b.name })) };
     },
   }),
   defineRoute({
@@ -153,9 +191,20 @@ export const proposalRoutes = [
       for (const t of rows) {
         const pages = await pagesOf(app.db, auth.tenantId, t.id);
         if (!pages.length) continue;
-        items.push({ id: t.id, name: t.name, segments: t.segments, matches: !t.segments.length || t.segments.includes(o.contactSegment), variables: t.variables, fields: t.fields, pages });
+        items.push({ id: t.id, name: t.name, segments: t.segments, matches: !t.segments.length || t.segments.includes(o.contactSegment), variables: t.variables, fields: t.fields, pages, sections: normalizeSections(t.sections) });
       }
       return { items: items.sort((a, b) => Number(b.matches) - Number(a.matches)), system: await systemValues(app.db, auth.tenantId, o.id, auth.timezone) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/opportunities/:id/proposal/preview', summary: 'Prévia exata do PDF da proposta (não anexa nem numera)', tag: 'Propostas', module: 'oportunidades', params: IdParams,
+    body: GenBody, bodyLimit: 4_400_000,
+    handler: async ({ app, auth, params, body, reply }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const t = await templateOr404(app.db, auth.tenantId, body.templateId);
+      const out = await renderFor(app.db, auth, o.id, t, body);
+      if (!out) throw unprocessable('O modelo ainda não tem páginas.');
+      return reply.header('content-type', 'application/pdf').header('cache-control', 'no-store').send(out.pdf);
     },
   }),
   defineRoute({
@@ -165,21 +214,13 @@ export const proposalRoutes = [
     tag: 'Propostas',
     module: 'oportunidades',
     params: IdParams,
-    body: z.object({ templateId: z.string().uuid(), values: z.record(z.string(), z.string().max(2000)).default({}) }),
+    body: GenBody,
+    bodyLimit: 4_400_000,
     handler: async ({ app, auth, params, body, req, reply }) => {
       const o = await loadOpportunity(app.db, auth, params.id);
       const t = await templateOr404(app.db, auth.tenantId, body.templateId);
-      const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
-      const vars = { ...(await systemValues(app.db, auth.tenantId, o.id, auth.timezone)), ...custom };
-      const out = await buildProposalPdf(app.db, auth.tenantId, t.id, vars);
-      if (!out) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
-      const filename = `Proposta ${o.contactName} - ${t.name}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
-      const row = await app.db.transaction(async (tx) => {
-        const [r] = await tx.insert(s.opportunityAttachments).values({ tenantId: auth.tenantId, opportunityId: o.id, kind: 'proposta', filename, mime: 'application/pdf', sizeBytes: out.pdf.length, sha256: createHash('sha256').update(out.pdf).digest('hex'), data: out.pdf, uploadedBy: auth.userId }).returning({ id: s.opportunityAttachments.id, filename: s.opportunityAttachments.filename, sizeBytes: s.opportunityAttachments.sizeBytes });
-        if (o.proposalStatus === 'nao_criada') await tx.update(s.opportunities).set({ proposalStatus: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.opportunities.rowVersion} + 1` }).where(eq(s.opportunities.id, o.id));
-        await tx.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: o.id, type: 'attachment_added', actorId: auth.userId, payload: { filename: r!.filename, kind: 'proposta', sizeBytes: out.pdf.length, template: t.name }, rowVersion: o.rowVersion });
-        return r!;
-      });
+      const row = await app.db.transaction((tx) => generateProposal(tx, auth, o, t, body, { bump: true }));
+      if (!row) throw unprocessable('O modelo ainda não tem páginas. Envie a arte em Configurações → Modelos de proposta.');
       await audit(app.db, req, { action: 'proposal.generate', entityType: 'opportunity', entityId: o.id, metadata: { template: t.name } });
       reply.code(201);
       return row;

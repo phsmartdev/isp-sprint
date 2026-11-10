@@ -5,6 +5,7 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  featureOn,
   APPROVAL_LEVELS, APPROVAL_LEVEL_LABELS, CLASSIFICATION_DIMENSIONS, DECISIONS, DECISION_LABELS, NEGOTIATION_TYPES, NEGOTIATION_TYPE_LABELS,
   canDecide, renderApprovalTemplate, userApprovalLevel, type ApprovalLevel,
 } from '@isp/domain';
@@ -150,7 +151,8 @@ export const approvalRoutes = [
       if (opp.stage === 'perdida') throw unprocessable('Oportunidade perdida: reabra antes de pedir aprovação.');
       // trava de segmento do motor financeiro: com a viabilidade econômica preenchida, retorno fora da política não vai para aprovação
       const [econ] = await app.db.select({ opportunityId: s.opportunityEconomics.opportunityId }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
-      if (econ) {
+      // com a viabilidade econômica desligada na empresa (CRM → funcionalidades), a trava não vale
+      if (econ && featureOn('crm.viabilidade', auth.modules, auth.disabledFeatures, auth.access)) {
         // decide pelo cálculo salvo; desatualizado, sem parâmetros ou com tributo faltando, pede para resolver antes
         const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
         const er = ctx.savedResult!;

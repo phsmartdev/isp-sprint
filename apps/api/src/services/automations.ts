@@ -4,22 +4,24 @@
  * Proteção contra laço: no máximo 3 níveis (ex.: perdida → duplica → criada → move …).
  */
 import { CS_KEY } from './customerSuccess';
+import { ensureJourneyTasks } from './scoreJourneys';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { renderTemplate, type Automation, type AutomationAction } from '@isp/shared';
+import { exceptionHit, type ExceptionRule } from '@isp/domain';
 import type { Config } from '../config';
 import type { DB } from '../db/client';
 import * as s from '../db/schema';
 import { brl, sendEmail, tenantName } from './email';
 import { publicLink } from './alerts';
 
-export type AutomationEvent = { type: 'criada' | 'entrou_na_etapa' | 'ganha' | 'perdida' | 'parada'; stage?: string; automationId?: string };
+export type AutomationEvent = { type: 'criada' | 'entrou_na_etapa' | 'ganha' | 'perdida' | 'parada' | 'chamado_retorno' | 'email_lido'; stage?: string; automationId?: string; origem?: 'glpi' | 'ixc' | 'email'; detail?: string };
 type Ctx = { db: DB; config: Config; tenantId: string; actorId: string | null; depth: number };
 
 const MAX_DEPTH = 3;
 
 async function loadOpp(db: DB, tenantId: string, id: string) {
   const [o] = await db
-    .select({ opp: s.opportunities, contactName: s.contacts.name, contactPhone: s.contacts.phone, contactEmail: s.contacts.email, pipelineKey: s.pipelines.key, pipelineName: s.pipelines.name, planName: s.plans.name, ownerName: s.users.name, ownerEmail: s.users.email })
+    .select({ opp: s.opportunities, contactName: s.contacts.name, contactPhone: s.contacts.phone, contactEmail: s.contacts.email, pipelineKey: s.pipelines.key, pipelineName: s.pipelines.name, planName: s.plans.name, ownerName: s.users.name, ownerEmail: s.users.email, contactSegment: s.contacts.segment, contactNature: s.contacts.nature })
     .from(s.opportunities)
     .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
     .innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId))
@@ -34,6 +36,10 @@ export async function runAutomations(db: DB, config: Config, tenantId: string, a
   if (depth >= MAX_DEPTH) return [];
   const o = await loadOpp(db, tenantId, opportunityId);
   if (!o) return [];
+  // jornada de pontuação: tarefas da etapa nascem com o peso (falha aqui não impede as automações)
+  if (event.type === 'criada' || event.type === 'entrou_na_etapa') {
+    await ensureJourneyTasks(db, tenantId, actorId, opportunityId, { stage: event.type === 'criada' ? o.opp.stage : event.stage ?? o.opp.stage, creation: event.type === 'criada' }).catch((e) => console.error('tarefas da jornada', e));
+  }
   const autos = await db
     .select()
     .from(s.pipelineAutomations)
@@ -44,10 +50,18 @@ export async function runAutomations(db: DB, config: Config, tenantId: string, a
     if (event.automationId) return a.id === event.automationId;
     if (t.tipo !== event.type) return false;
     if (t.tipo === 'entrou_na_etapa') return t.etapa === event.stage;
+    if (t.tipo === 'chamado_retorno') return !t.origem || t.origem === 'qualquer' || t.origem === event.origem;
     return true;
   });
   const results: { automation: string; status: string }[] = [];
   for (const a of matching) {
+    // exceções: não roda (fica registrado o porquê)
+    const skip = exceptionHit((a.trigger as Automation['gatilho']).excecoes as ExceptionRule[] | undefined, { saleKind: o.opp.saleKind ?? null, segment: o.contactSegment ?? null, nature: o.contactNature ?? null, branchId: o.opp.branchId ?? null, valueCents: o.opp.valueCents ?? null });
+    if (skip) {
+      await db.insert(s.automationRuns).values({ tenantId, automationId: a.id, opportunityId, status: 'ignorado', detail: { event: event.type, stage: event.stage ?? null, reason: skip } });
+      results.push({ automation: a.name, status: 'ignorado' });
+      continue;
+    }
     const detail: Record<string, unknown>[] = [];
     let status: 'ok' | 'erro' = 'ok';
     for (const action of a.actions as AutomationAction[]) {
@@ -58,7 +72,7 @@ export async function runAutomations(db: DB, config: Config, tenantId: string, a
         detail.push({ action: action.tipo, error: (e as Error).message.slice(0, 300) });
       }
     }
-    await db.insert(s.automationRuns).values({ tenantId, automationId: a.id, opportunityId, status, detail: { event: event.type, stage: event.stage ?? null, actions: detail } });
+    await db.insert(s.automationRuns).values({ tenantId, automationId: a.id, opportunityId, status, detail: { event: event.type, stage: event.stage ?? null, origem: event.origem ?? null, about: event.detail ?? null, actions: detail } });
     await db.insert(s.opportunityEvents).values({ tenantId, opportunityId, type: 'automation_ran', actorId, payload: { automation: a.name, status, actions: detail.map((d) => d.action) } });
     results.push({ automation: a.name, status });
   }

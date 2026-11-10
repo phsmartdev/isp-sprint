@@ -1,6 +1,9 @@
 /** Distribuição da carteira entre CSMs (só setor Sucesso do Cliente) e Tier/IPC no resumo da conta. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { login, makeApp, type Client } from './helpers';
+import { eq } from 'drizzle-orm';
+import * as s from '../src/db/schema';
+import { csmUsers } from '../src/services/cs';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client;
@@ -10,7 +13,7 @@ afterAll(async () => ctx.close());
 
 async function csm(name: string) {
   const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  return ok(await carlos.post('/admin/users', { name, email: `${stamp}@yepnet.test`, profile: 'analista', sectors: ['sucesso_cliente'] }), 201).json().id as string;
+  return ok(await carlos.post('/admin/users', { name, email: `${stamp}@yepnet.test`, profile: 'operacao', sectors: ['sucesso_cliente'] }), 201).json().id as string;
 }
 
 describe('distribuir carteira', () => {
@@ -46,5 +49,19 @@ describe('distribuir carteira', () => {
     const plan = (await lucas.get('/meta/lookups')).json().plans[0];
     const o = ok(await lucas.post('/opportunities', { newContact: { name: `Prospect Tier ${Date.now()}`, segment: 'residencial' }, planId: plan.id }), 201).json();
     expect(ok(await carlos.get(`/contacts/${o.contactId}`)).json().strategic).toBeNull();
+  });
+
+  it('CSMs = membros do time Sucesso do Cliente; sem esse time, quem tem o setor', async () => {
+    const [{ tenantId }] = (await ctx.app.db.select({ tenantId: s.users.tenantId }).from(s.users).where(eq(s.users.id, lucas.me.user.id))) as [{ tenantId: string }];
+    const before = await csmUsers(ctx.app.db, tenantId);
+    expect(before.every((u) => u.source === 'setor')).toBe(true);
+    const rollback = new Error('rollback');
+    await expect(ctx.app.db.transaction(async (tx) => {
+      const [t] = await tx.insert(s.teams).values({ tenantId, name: `Time de Sucesso do Cliente ${Date.now()}` }).returning();
+      await tx.insert(s.teamMemberships).values({ teamId: t!.id, userId: lucas.me.user.id });
+      const inTeam = await csmUsers(tx, tenantId);
+      expect(inTeam).toEqual([{ id: lucas.me.user.id, name: lucas.me.user.name, source: 'time' }]); // só o time; o setor deixa de valer
+      throw rollback;
+    })).rejects.toBe(rollback);
   });
 });

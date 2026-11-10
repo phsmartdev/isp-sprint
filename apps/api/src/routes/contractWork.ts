@@ -4,7 +4,7 @@ import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
-  ALERT_LABELS, DOC_TYPES, PROCESS_LABELS, TIMELINE_CATEGORIES, timelineCategory, timelineCritical, upcomingOf, SECTORS, SECTOR_LABELS, adjustedCents, documentName, endFromTerm, fillSubject, fillTemplate,
+  ALERT_LABELS, DOC_TYPES, PROCESS_LABELS, TIMELINE_CATEGORIES, SECTOR_KEY, sectorLabel, timelineCategory, timelineCritical, upcomingOf, SECTORS, SECTOR_LABELS, adjustedCents, documentName, endFromTerm, fillSubject, fillTemplate,
   type AlertKind, type ProcessKind, type StepDef, type Upcoming,
 } from '@isp/domain';
 import { defineRoute } from '../http/route';
@@ -376,7 +376,7 @@ export const contractWorkRoutes = [
     bodyLimit: 14_000_000,
     body: z.object({
       category: z.enum(DOC_TYPES), docDate: day, summary: z.string().trim().min(2).max(120), mime: z.enum(['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']),
-      data: z.string().min(8).max(13_500_000), signed: z.boolean().default(false), restrictedTo: z.array(z.enum(SECTORS)).max(8).default([]),
+      data: z.string().min(8).max(13_500_000), signed: z.boolean().default(false), restrictedTo: z.array(z.string().regex(SECTOR_KEY)).max(8).default([]),
       groupId: z.string().uuid().optional(), processId: z.string().uuid().optional(),
     }),
     handler: async ({ app, auth, params, body, req, reply }) => {
@@ -396,7 +396,7 @@ export const contractWorkRoutes = [
       if (body.processId) await loadProcess(app.db, c, body.processId);
       const name = documentName(body.docDate, body.category, contact?.name ?? '', body.summary);
       const [row] = await app.db.insert(s.contractDocuments).values({ tenantId: auth.tenantId, contractId: c.id, processId: body.processId ?? null, groupId, version, category: body.category, name, docDate: body.docDate, summary: body.summary, mime: body.mime, size: data.length, sha256: createHash('sha256').update(data).digest('hex'), data, signed: body.signed, restrictedTo: body.restrictedTo, folder: c.stage === 'arquivado' ? 'Encerrados' : 'Ativos', uploadedBy: auth.userId }).returning({ id: s.contractDocuments.id });
-      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'documento', `Documento ${version > 1 ? `nova versão (v${version}) ` : ''}enviado: ${name}${body.signed ? ' (assinado)' : ''}${body.restrictedTo.length ? ` · restrito a ${body.restrictedTo.map((x) => SECTOR_LABELS[x]).join(', ')}` : ''}`, { documentId: row!.id, category: body.category, version });
+      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'documento', `Documento ${version > 1 ? `nova versão (v${version}) ` : ''}enviado: ${name}${body.signed ? ' (assinado)' : ''}${body.restrictedTo.length ? ` · restrito a ${body.restrictedTo.map((x) => sectorLabel(x)).join(', ')}` : ''}`, { documentId: row!.id, category: body.category, version });
       await audit(app.db, req, { action: 'contract.document', entityType: 'contract', entityId: c.id, metadata: { name, version } });
       reply.code(201);
       return { id: row!.id, name, version };
@@ -426,14 +426,14 @@ export const contractWorkRoutes = [
     tag: 'Contratos',
     module: 'contratos',
     params: DocP,
-    body: z.object({ folder: z.enum(['Ativos', 'Encerrados']).optional(), restrictedTo: z.array(z.enum(SECTORS)).max(8).optional(), signed: z.boolean().optional() }),
+    body: z.object({ folder: z.enum(['Ativos', 'Encerrados']).optional(), restrictedTo: z.array(z.string().regex(SECTOR_KEY)).max(8).optional(), signed: z.boolean().optional() }),
     handler: async ({ app, auth, params, body }) => {
       const c = await loadContract(app.db, auth, params.id);
       const [d] = await app.db.select().from(s.contractDocuments).where(and(eq(s.contractDocuments.id, params.docId), eq(s.contractDocuments.contractId, c.id), isNull(s.contractDocuments.deletedAt))).limit(1);
       if (!d) throw notFound('Documento não encontrado.');
       if (!(isAdmin(auth) || hasSector(auth, ['administracao', 'inteligencia_comercial', 'juridico']) || d.uploadedBy === auth.userId)) throw forbidden();
       await app.db.update(s.contractDocuments).set(body).where(eq(s.contractDocuments.id, d.id));
-      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'documento', `Documento ${d.name}: ${[body.folder && `pasta ${body.folder}`, body.restrictedTo && (body.restrictedTo.length ? `restrito a ${body.restrictedTo.map((x) => SECTOR_LABELS[x]).join(', ')}` : 'acesso liberado'), body.signed !== undefined && (body.signed ? 'marcado como assinado' : 'desmarcado como assinado')].filter(Boolean).join('; ')}`, { documentId: d.id });
+      await addEvent(app.db, auth.tenantId, c.id, auth.userId, 'documento', `Documento ${d.name}: ${[body.folder && `pasta ${body.folder}`, body.restrictedTo && (body.restrictedTo.length ? `restrito a ${body.restrictedTo.map((x) => sectorLabel(x)).join(', ')}` : 'acesso liberado'), body.signed !== undefined && (body.signed ? 'marcado como assinado' : 'desmarcado como assinado')].filter(Boolean).join('; ')}`, { documentId: d.id });
       return { ok: true };
     },
   }),

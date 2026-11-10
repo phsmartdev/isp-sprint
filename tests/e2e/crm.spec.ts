@@ -91,12 +91,12 @@ test('gerência muda nível na matriz e o vendedor sente na hora', async ({ brow
   const g = await (await browser.newContext()).newPage();
   await login(g, 'carlos@yepnet.test');
   await g.goto('/settings/security');
-  await g.getByLabel('Vendedor em Inteligência').selectOption('proprio');
+  await g.getByLabel('Operação em Inteligência').selectOption('proprio');
   await expect(g.getByText('Vendedor · Inteligência: Próprio')).toBeVisible();
   const v = await (await browser.newContext()).newPage();
   await login(v, 'lucas@yepnet.test');
   await expect(v.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Inteligência/ })).toBeVisible();
-  await g.getByLabel('Vendedor em Inteligência').selectOption('nenhum');
+  await g.getByLabel('Operação em Inteligência').selectOption('nenhum');
   await expect(g.getByText('Vendedor · Inteligência: Sem acesso')).toBeVisible();
 });
 
@@ -114,13 +114,11 @@ test('Sprint: cria, salva sozinho, sobrevive a refresh sem zerar o tempo', async
   await page.getByRole('button', { name: 'Editar Dados do deal' }).click();
   await page.getByLabel('Nome do deal').fill('Autosave — 500 Mega com Wi-Fi 6');
   await expect(page.getByRole('status').filter({ hasText: 'Salvo' })).toBeVisible();
-  await page.waitForTimeout(2200);
-  const before = await page.getByRole('timer').locator('p').first().textContent();
   await page.reload();
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Autosave — 500 Mega com Wi-Fi 6');
-  const after = await page.getByRole('timer').locator('p').first().textContent();
-  expect(after).not.toBe('00:00');
-  expect(after! >= before!).toBe(true);
+  // no topo: os pontos que esta oportunidade já rendeu para quem está vendo (no lugar do cronômetro)
+  await expect(page.getByRole('status', { name: 'Seus pontos nesta oportunidade' })).toBeVisible();
+  await expect(page.getByTestId('my-opp-points')).not.toHaveText('…');
   await page.getByRole('tab', { name: 'Histórico' }).click();
   await expect(page.getByText('Oportunidade criada')).toBeVisible();
   // avançar pela faixa de etapas

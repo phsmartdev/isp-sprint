@@ -1,9 +1,11 @@
+import { HeaderMoneyToggle } from '../../lib/privacy';
+import { HeaderSupport } from '../../features/support/Support';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet } from 'lucide-react';
+  BarChart3, Bell, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -16,6 +18,8 @@ import { Avatar } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
 import { Hexagons, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
+import { AppErrorBoundary } from '../AppErrorBoundary';
+import { HeaderSelo } from '../../features/gamification/Gamification';
 
 type NavLeaf = {
   to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: 'approvals'; also?: string[];
@@ -23,7 +27,10 @@ type NavLeaf = {
 };
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
 type NavEntry = NavLeaf | NavGroup;
-const ICON = 'h-[22px] w-[22px] shrink-0';
+const ICON = 'h-[18px] w-[18px] shrink-0';
+/** Item do menu lateral: texto 14px numa linha, ícone fino; ativo = fundo sutil e filete na lateral (sem bloco cheio). */
+const NAV_ITEM = 'relative flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-sm font-medium leading-tight tracking-[0.005em] transition-colors [&>svg]:stroke-[1.75]';
+const NAV_ON = 'bg-white/[0.07] before:absolute before:inset-y-2 before:left-0 before:w-[2px] before:bg-lime';
 const isGroup = (n: NavEntry): n is NavGroup => 'children' in n;
 /** Menu na ordem combinada com o Paulo (21/10/2026). Grupos abrem e fecham; abrem sozinhos quando a página atual está dentro. */
 const NAV: NavEntry[] = [
@@ -52,14 +59,14 @@ const NAV: NavEntry[] = [
     { to: '/leads', label: 'Leads', module: 'leads' },
     { to: '/abm', label: 'ABM', module: 'clientes', feature: 'marketing.abm' },
     { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
+    { to: '/brindes', label: 'Brindes', module: 'campanhas' },
   ] },
   { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
-    { to: '/times', label: 'Visão geral', module: 'resultados' },
-    { to: '/times/intervencoes', label: 'Intervenções', module: 'resultados' },
-    { to: '/times/rituais', label: 'Rituais', module: 'resultados' },
-    { to: '/times/decisoes', label: 'Decisões e impedimentos', module: 'resultados' },
-    { to: '/desempenho/metas', label: 'Objetivos e metas', module: 'desempenho' },
+    { to: '/times', label: 'Painel', module: 'resultados' },
+    { to: '/times/metas', label: 'Metas e indicadores', module: 'desempenho' },
+    { to: '/times/acompanhamento', label: 'Acompanhamento', module: 'resultados' },
+    { to: '/times/pessoas', label: 'Pessoas', module: 'resultados' },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
     { to: '/projetos', label: 'Projetos', module: 'projetos' },
@@ -91,9 +98,9 @@ function useOpenActivities() {
 
 /** Configuração no menu: grupos por assunto; só o grupo da página aberta fica expandido (os outros abrem com um clique). */
 function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
-  const { can } = useAuth();
+  const { can, feature } = useAuth();
   const loc = useLocation();
-  const groups = visibleGroups(can('configuracoes', 'total'));
+  const groups = visibleGroups(can('configuracoes', 'total'), feature);
   const current = settingsLocate(loc.pathname)?.group.key ?? groups[0]?.key;
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => setOpen(null), [current]);
@@ -151,7 +158,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <span className="border-l border-white/25 pl-3 font-display text-sm font-semibold text-white/70">RevOps</span>
       </Link>
       <nav aria-label="Navegação principal" className="scroll-thin flex-1 overflow-y-auto px-3 pb-3">
-        <ul className="space-y-1">
+        <ul className="space-y-0.5">
           {NAV.map((n) => {
             if (isGroup(n)) {
               const kids = n.children.filter((c) => show(c));
@@ -160,17 +167,17 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               const open = openGroups[n.key] ?? active;
               return (
                 <li key={n.key}>
-                  <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx('relative flex h-12 w-full items-center gap-3.5 rounded-md px-4 text-left text-md transition-colors', active && !open ? 'bg-navy-active font-semibold text-lime' : 'text-white/95 hover:bg-white/5')}>
+                  <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx(NAV_ITEM, active ? 'text-white [&>svg:first-child]:text-lime' : 'text-white/70 hover:bg-white/[0.04] hover:text-white', active && !open && NAV_ON)}>
                     {n.icon}
-                    <span className="min-w-0 flex-1 leading-[1.15]">{n.label}</span>
-                    <ChevronDown className={clsx('h-4 w-4 shrink-0 transition-transform', open && 'rotate-180')} aria-hidden />
+                    <span className="min-w-0 flex-1 text-balance">{n.label}</span>
+                    <ChevronDown className={clsx('h-3.5 w-3.5 shrink-0 text-white/35 transition-transform duration-200', open && 'rotate-180')} aria-hidden />
                   </button>
                   {open && (
-                    <ul className="mb-1 mt-0.5 space-y-0.5 pl-9">
+                    <ul className="mb-2 ml-[25px] mt-0.5 space-y-px border-l border-white/10 pl-3">
                       {kids.map((c) => (
                         <li key={c.to}>
                           {(() => {
-                            const cls = (on: boolean) => clsx('flex items-center gap-2 rounded-sm px-3 py-2 text-sm', on ? 'border-l-2 border-lime bg-navy-active font-semibold text-lime' : 'text-white/90 hover:bg-white/5');
+                            const cls = (on: boolean) => clsx('relative flex items-center gap-2 px-2.5 py-[7px] text-[13px] leading-snug transition-colors', on ? 'bg-white/[0.06] font-medium text-white before:absolute before:-left-[13px] before:inset-y-1 before:w-[2px] before:bg-lime' : 'text-white/60 hover:bg-white/[0.04] hover:text-white');
                             const inner = <>
                               <span className="min-w-0 flex-1">{c.label}</span>
                               {c.badge === 'approvals' && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
@@ -188,20 +195,20 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             }
             if (!(show(n) || (n.module === 'configuracoes' && inSettings))) return null;
             return (
-              <li key={n.to}>
+              <li key={n.to} className={clsx(n.to === '/reports' && 'mt-3 border-t border-white/10 pt-3')}>
                 <NavLink
                   to={n.to}
                   end={n.to === '/'}
                   onClick={onNavigate}
                   className={({ isActive }) =>
                     clsx(
-                      'relative flex h-12 items-center gap-3.5 rounded-md px-4 text-md transition-colors',
-                      isActive || (n.to === '/settings' && inSettings) ? 'bg-navy-active font-semibold text-lime before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-lime' : 'text-white/95 hover:bg-white/5',
+                      NAV_ITEM,
+                      isActive || (n.to === '/settings' && inSettings) ? clsx(NAV_ON, 'text-white [&>svg]:text-lime') : 'text-white/70 hover:bg-white/[0.04] hover:text-white',
                     )
                   }
                 >
                   {n.icon}
-                  <span className="line-clamp-2 min-w-0 flex-1 leading-[1.15]">{n.label}</span>
+                  <span className="min-w-0 flex-1 text-balance">{n.label}</span>
                 </NavLink>
                 {n.to === '/settings' && inSettings && <SettingsMenu onNavigate={onNavigate} />}
               </li>
@@ -209,7 +216,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </ul>
       </nav>
-      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[140px] shrink-0 [@media(max-height:960px)]:hidden' : 'h-[200px] min-h-[140px] shrink-0 [@media(max-height:720px)]:hidden')} aria-hidden>
+      <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[110px] shrink-0 [@media(max-height:1000px)]:hidden' : 'h-[120px] shrink-0 [@media(max-height:900px)]:hidden')} aria-hidden>
         <Hexagons className="absolute inset-0 h-full w-full" />
         <img src="/brand/bkt-symbol-white.png" alt="" className="absolute bottom-4 left-5 h-10 w-auto opacity-90" draggable={false} />
       </div>
@@ -236,7 +243,8 @@ function UserMenu() {
   }, []);
   if (!me) return null;
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative flex items-center gap-1" ref={ref}>
+      <HeaderSelo />
       <button aria-label={`Conta de ${me.user.name}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((v) => !v)} className="flex items-center gap-3 rounded-md px-2 py-1 hover:bg-surface-2">
         <Avatar name={me.user.name} userId={me.user.id} hasPhoto={me.user.hasAvatar} size={44} />
         <span className="hidden text-left leading-tight md:block">
@@ -253,6 +261,9 @@ function UserMenu() {
           </div>
           <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/settings/profile'); }}>
             <UserRound className="h-4 w-4" /> Meu perfil
+          </button>
+          <button role="menuitem" className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm hover:bg-surface-2" onClick={() => { setOpen(false); nav('/meus-pontos'); }}>
+            <Star className="h-4 w-4" /> Meus pontos
           </button>
           <div className="border-y border-line px-3 py-2">
             <p id="theme-label" className="mb-1.5 text-xs font-semibold text-muted">Tema da tela</p>
@@ -326,15 +337,30 @@ export function AppShell() {
               <Bell className="h-7 w-7" strokeWidth={1.6} />
               {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
             </Link>
+            <HeaderSupport />
+            <HeaderPlaybooks />
+            <HeaderMoneyToggle />
             <MentionsMenu />
             <HelpButton />
             <UserMenu />
           </div>
         </header>
         <main id="conteudo" className="min-w-0 flex-1 px-4 py-6 sm:px-6 2xl:px-8">
-          <Outlet />
+          <AppErrorBoundary resetKey={loc.pathname}><Outlet /></AppErrorBoundary>
         </main>
       </div>
     </div>
+  );
+}
+
+/** Atalho global para a Central de Playbooks (fica ativo dentro de /playbooks). */
+function HeaderPlaybooks() {
+  const { pathname } = useLocation();
+  const on = pathname === '/playbooks' || pathname.startsWith('/playbooks/');
+  return (
+    <Link to="/playbooks" aria-label="Playbooks" title="Playbooks" aria-current={on ? 'page' : undefined}
+      className={clsx('flex h-11 w-11 items-center justify-center rounded-circle hover:bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary', on ? 'bg-navy text-lime hover:bg-navy' : 'text-ink')}>
+      <BookOpen className="h-6 w-6" strokeWidth={1.6} aria-hidden />
+    </Link>
   );
 }

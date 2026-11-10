@@ -26,7 +26,7 @@ describe('abas e painel de contratos', () => {
   it('nega a aba por perfil na tela e na API; os parâmetros de contratos não apagam a configuração', async () => {
     ok(await lucas.put('/admin/contract-view', { tabAccess: {}, dashboard: DEFAULT_DASHBOARD }), 403);
     const dashboard = { ...DEFAULT_DASHBOARD, order: ['executivo', ...DEFAULT_DASHBOARD.order.filter((k) => k !== 'executivo')], hidden: ['clientes'], compactValues: false };
-    ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'] }, dashboard }));
+    ok(await carlos.put('/admin/contract-view', { tabAccess: { operacao: ['painel', 'relatorios', 'atencao'] }, dashboard }));
 
     const v = ok(await lucas.get('/contracts/view')).json();
     expect(v.tabs).not.toContain('painel');
@@ -42,11 +42,11 @@ describe('abas e painel de contratos', () => {
     expect(ok(await carlos.get('/contracts/view')).json().tabs).toContain('painel');
 
     // a regra vale também para a administração (antes ela via tudo e a tabela parecia não funcionar)
-    ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'], gerencia: ['painel'] }, dashboard }));
+    ok(await carlos.put('/admin/contract-view', { tabAccess: { operacao: ['painel', 'relatorios', 'atencao'], gerencia: ['painel'] }, dashboard }));
     expect(ok(await carlos.get('/contracts/view')).json().tabs).not.toContain('painel');
     ok(await carlos.get('/contracts/dashboard'), 403);
     ok(await carlos.get('/admin/contract-view')); // a configuração continua acessível
-    ok(await carlos.put('/admin/contract-view', { tabAccess: { vendedor: ['painel', 'relatorios', 'atencao'] }, dashboard }));
+    ok(await carlos.put('/admin/contract-view', { tabAccess: { operacao: ['painel', 'relatorios', 'atencao'] }, dashboard }));
 
     // abas removidas do sistema que ficaram gravadas não quebram a configuração
     await ctx.db.execute(sql`update contract_settings set settings = jsonb_set(settings, '{tabAccess,supervisor}', '["renovacoes", "lista"]') where tenant_id = ${carlos.me.tenant.id}`);
@@ -55,7 +55,7 @@ describe('abas e painel de contratos', () => {
     // salvar os parâmetros de contratos mescla, sem perder abas e painel
     const settings = ok(await carlos.get('/admin/contract-settings')).json();
     ok(await carlos.put('/admin/contract-settings', settings));
-    expect(ok(await carlos.get('/admin/contract-view')).json().tabAccess.vendedor).toEqual(['painel', 'relatorios', 'atencao']);
+    expect(ok(await carlos.get('/admin/contract-view')).json().tabAccess.operacao).toEqual(['painel', 'relatorios', 'atencao']);
 
     ok(await carlos.put('/admin/contract-view', { tabAccess: {}, dashboard: DEFAULT_DASHBOARD }));
     ok(await lucas.get('/contracts/dashboard'));

@@ -79,9 +79,9 @@ describe('máscaras, dinheiro e CSV', () => {
 
 describe('matriz de acesso padrão', () => {
   it('vendedor: próprio nos módulos de trabalho, sem Configurações nem Inteligência', () => {
-    expect(DEFAULT_ACCESS.vendedor.oportunidades).toBe('proprio');
-    expect(DEFAULT_ACCESS.vendedor.relatorios).toBe('proprio');
-    expect(DEFAULT_ACCESS.vendedor.configuracoes).toBe('nenhum');
+    expect(DEFAULT_ACCESS.operacao.oportunidades).toBe('proprio');
+    expect(DEFAULT_ACCESS.operacao.relatorios).toBe('proprio');
+    expect(DEFAULT_ACCESS.operacao.configuracoes).toBe('nenhum');
   });
   it('supervisão vê a equipe; gerência vê tudo e administra', () => {
     expect(DEFAULT_ACCESS.supervisor.oportunidades).toBe('equipe');

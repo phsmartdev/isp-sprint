@@ -35,6 +35,9 @@ import { contractLedgerRoutes } from './routes/contractLedger';
 import { contractTemplateRoutes } from './routes/contractTemplates';
 import { playbookRoutes } from './routes/playbook';
 import { contractReportRoutes } from './routes/contractReports';
+import { measurementReportRoutes } from './routes/measurementReports';
+import { certificateRoutes } from './routes/certificates';
+import { trainingExamRoutes } from './routes/trainingExams';
 import { contractErpRoutes } from './routes/contractErp';
 import { publicNoticeRoutes } from './routes/publicNotices';
 import { commRoutes } from './routes/comm';
@@ -79,8 +82,20 @@ import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
 import { accountOccurrenceRoutes } from './routes/accountOccurrences';
+import { accountRelationRoutes } from './routes/accountRelations';
+import { structureRoutes } from './routes/structures';
 import { interventionRoutes } from './routes/interventions';
 import { ritualRoutes } from './routes/rituals';
+import { vacationRoutes } from './routes/vacations';
+import { giftRoutes } from './routes/gifts';
+import { supportRoutes } from './routes/support';
+import { contractSectorRoutes } from './routes/contractSectors';
+import { playbookCentralRoutes } from './routes/playbooks';
+import { zenithRoutes } from './routes/zenith';
+import { dataImportRoutes } from './routes/dataImport';
+import { gamificationRoutes } from './routes/gamification';
+import { scoreJourneyRoutes } from './routes/scoreJourneys';
+import { hierarchyPerformanceRoutes } from './routes/hierarchyPerformance';
 import { campaignRoutes } from './routes/campaigns';
 import { dataAdminRoutes } from './routes/dataAdmin';
 import { proposalRoutes } from './routes/proposals';
@@ -213,6 +228,9 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...contractTemplateRoutes,
     ...playbookRoutes,
     ...contractReportRoutes,
+    ...measurementReportRoutes,
+    ...certificateRoutes,
+    ...trainingExamRoutes,
     ...contractErpRoutes,
     ...publicNoticeRoutes,
     ...commRoutes,
@@ -258,8 +276,20 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...abmFollowupRoutes,
     ...stakeholderRoutes,
     ...accountOccurrenceRoutes,
+    ...accountRelationRoutes,
+    ...structureRoutes,
     ...interventionRoutes,
     ...ritualRoutes,
+    ...vacationRoutes,
+    ...giftRoutes,
+    ...supportRoutes,
+    ...contractSectorRoutes,
+    ...playbookCentralRoutes,
+    ...zenithRoutes,
+    ...dataImportRoutes,
+    ...gamificationRoutes,
+    ...scoreJourneyRoutes,
+    ...hierarchyPerformanceRoutes,
     ...campaignRoutes,
     ...dataAdminRoutes,
     ...proposalRoutes,

@@ -1,0 +1,1 @@
+ALTER TABLE "opportunities" ADD COLUMN "proposal_number" text;CREATE UNIQUE INDEX IF NOT EXISTS "opportunities_proposal_number_uq" ON "opportunities" ("tenant_id","proposal_number") WHERE "proposal_number" IS NOT NULL;

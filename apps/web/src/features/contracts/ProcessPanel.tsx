@@ -1,9 +1,10 @@
 /** Processo do contrato (implantação, renovação, reajuste, encerramento): roteiro de etapas com o que cada uma exige. */
+import { useSectors } from '../../lib/hooks';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { CheckCircle2, Circle, FileText, Mail, MinusCircle } from 'lucide-react';
-import { PROCESS_LABELS, SECTOR_LABELS, adjustedCents, addDays, processSteps, toCents, type StepDef } from '@isp/domain';
+import { PROCESS_LABELS, sectorLabel, adjustedCents, addDays, processSteps, toCents, type StepDef } from '@isp/domain';
 import { api } from '../../lib/api';
 import { useLookups } from '../../lib/hooks';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
@@ -167,6 +168,7 @@ function OficioActions({ c, p }: { c: ContractDetail; p: Process }) {
 }
 
 export function ProcessPanel({ c, p, onUpload }: { c: ContractDetail; p: Process; onUpload: (category: string, processId: string) => void }) {
+  const sectorList = useSectors().items;
   const qc = useQueryClient();
   const toast = useToast();
   const defs = processSteps(p.kind, c.kind);
@@ -202,7 +204,7 @@ export function ProcessPanel({ c, p, onUpload }: { c: ContractDetail; p: Process
                 <span className="mt-0.5" aria-hidden>{st ? (st.skipped ? <MinusCircle className="h-5 w-5 text-muted" /> : <CheckCircle2 className="h-5 w-5 text-success" />) : <Circle className="h-5 w-5 text-line-strong" />}</span>
                 <div className="min-w-0 flex-1">
                   <p className={clsx('font-semibold', st ? 'text-ink' : 'text-text')}>{d.label}{d.optional && <span className="font-normal text-muted"> (opcional)</span>}</p>
-                  <p className="text-xs text-muted">Setor: {d.sectors.map((x) => SECTOR_LABELS[x]).join(' ou ')}</p>
+                  <p className="text-xs text-muted">Setor: {d.sectors.map((x) => sectorLabel(x, sectorList)).join(' ou ')}</p>
                   {st && (
                     <p className="mt-1 text-sm text-text">
                       {st.skipped ? 'Pulada' : 'Feita'} por {st.doneByName} em {fmtDateTime(st.doneAt)}

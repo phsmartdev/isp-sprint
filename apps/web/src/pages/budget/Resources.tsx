@@ -1,4 +1,5 @@
 /** Recursos do comercial: ferramentas e equipamentos, softwares e licenças, contratos e assinaturas, compras e fornecedores. */
+import { MASK, moneyHidden } from '../../lib/privacy';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -143,7 +144,7 @@ function ResourcesPage({ kind }: { kind: 'software' | 'contratos' }) {
                 <tr key={r.id} className={clsx('cursor-pointer border-b border-line last:border-0 hover:bg-surface-2', r.status !== 'ativo' && 'opacity-60')} onClick={() => setEdit(r)}>
                   <td className="px-4 py-2.5"><button type="button" className="text-left font-semibold text-ink hover:text-primary">{r.name}</button><span className="block text-xs text-muted">{soft ? `${r.seats ? `${r.seats} usuário(s) · ` : ''}${r.vaultRegistered ? 'no Vault' : 'fora do Vault'}` : RESOURCE_KIND_LABELS[r.kind]}{r.supplierName ? ` · ${r.supplierName}` : ''}{r.status !== 'ativo' ? ` · ${r.status}` : ''}</span></td>
                   <td className="px-3 py-2.5 text-text">{ccName(st.data!, r.costCenterId)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{r.currency === 'USD' ? 'US$ ' : 'R$ '}{(r.amountCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}<span className="block text-xs text-muted">{RESOURCE_PERIOD_LABELS[r.period as keyof typeof RESOURCE_PERIOD_LABELS]}{r.currency === 'USD' && r.fxRate ? ` · US$ 1 = R$ ${r.fxRate.toFixed(2).replace('.', ',')}` : ''}</span></td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{moneyHidden() ? (r.currency === 'USD' ? 'US$ •••••' : MASK) : `${r.currency === 'USD' ? 'US$ ' : 'R$ '}${(r.amountCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}<span className="block text-xs text-muted">{RESOURCE_PERIOD_LABELS[r.period as keyof typeof RESOURCE_PERIOD_LABELS]}{r.currency === 'USD' && r.fxRate ? ` · US$ 1 = R$ ${r.fxRate.toFixed(2).replace('.', ',')}` : ''}</span></td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{fmtBRL(r.monthlyBrlCents)}</td>
                   <td className="px-3 py-2.5 text-text">{fmtDate(r.startOn)}{r.renewalOn ? <span className={clsx('block text-xs', r.renewsSoon ? 'font-semibold text-[#C2610C]' : 'text-muted')}>renova {fmtDate(r.renewalOn)}</span> : null}</td>
                   <td className="px-3 py-2.5 text-text">{r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] : '—'}{r.paymentDay ? <span className="block text-xs text-muted">dia {r.paymentDay}</span> : null}</td>

@@ -6,9 +6,11 @@ import { Settings } from 'lucide-react';
 import { LoadingRows } from '../../components/ui/primitives';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { settingsLocate } from './nav';
+import { useAuth } from '../../auth/AuthProvider';
 
 export function SettingsLayout() {
   const loc = useLocation();
+  const { feature } = useAuth();
   const hit = settingsLocate(loc.pathname);
   const group = hit?.group;
   return (
@@ -17,7 +19,7 @@ export function SettingsLayout() {
       {group && (
         <nav aria-label={`Páginas de ${group.label}`} className="scroll-thin mb-5 flex items-end gap-5 overflow-x-auto border-b border-line">
           <span className="whitespace-nowrap pb-3 text-xs font-semibold uppercase tracking-wide text-muted">{group.label}</span>
-          {group.items.map((t) => (
+          {group.items.filter((t) => !t.feature || feature(t.feature)).map((t) => (
             <NavLink key={t.to} to={t.to} end className={({ isActive }) => clsx('-mb-px whitespace-nowrap border-b-2 px-1 pb-3 pt-1 text-md', isActive ? 'border-primary font-semibold text-primary' : 'border-transparent text-muted hover:text-ink')}>
               {t.label}
             </NavLink>

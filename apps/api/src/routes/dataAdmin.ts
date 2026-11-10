@@ -1,4 +1,6 @@
 /** Base de clientes: modelo de planilha, importação com prévia e limpeza da base (gerência + senha). */
+import { loadMeasurementExample } from '../services/measurementExample';
+import { todayIn } from '../services/vacations';
 import { customerFieldList } from '../services/customFields';
 import { or, and, eq, inArray, isNull, notExists, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -49,6 +51,15 @@ export const dataAdminRoutes = [
     },
   }),
   defineRoute({
+    method: 'POST', url: '/admin/demo/measurement-example', summary: 'Carrega o exemplo fictício do Relatório de Medição: 1 contrato por medição com 6 medições pelas oportunidades (sai com Limpar base)', tag: 'Base de dados', ...ADMIN,
+    handler: async ({ app, auth, req }) => {
+      if (!auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p))) throw forbidden('Só a administração ou a gerência carrega exemplos.');
+      const r = await loadMeasurementExample(app.db, auth.tenantId, auth.userId, todayIn(auth.timezone));
+      await audit(app.db, req, { action: 'base.measurement_example', entityType: 'contact', entityId: r.contactId, metadata: { created: r.created } });
+      return r;
+    },
+  }),
+  defineRoute({
     method: 'POST',
     url: '/admin/clear-base',
     summary: 'Limpa a base (clientes e/ou comercial). Só gerência, com a própria senha e a frase de confirmação.',
@@ -57,7 +68,7 @@ export const dataAdminRoutes = [
     rateLimit: () => ({ max: 5, timeWindow: '10 minutes' }),
     body: z.object({ password: z.string().min(1).max(200), confirm: z.string(), scopes: z.array(z.enum(CLEAR_SCOPES)).min(1), keep: z.object({ opportunityIds: z.array(z.string().uuid()).max(50).default([]), contractIds: z.array(z.string().uuid()).max(50).default([]) }).default({}) }),
     handler: async ({ app, auth, body, req }) => {
-      if (!auth.profiles.includes('gerencia') && !auth.profiles.includes('administrador')) throw forbidden('Só a administração ou a gerência pode limpar a base.');
+      if (!auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p))) throw forbidden('Só a administração ou a gerência pode limpar a base.');
       if (body.confirm.trim().toUpperCase() !== CONFIRM) throw unprocessable(`Digite exatamente "${CONFIRM}" para confirmar.`, [{ path: 'confirm', message: 'Frase de confirmação incorreta' }]);
       const [u] = await app.db.select({ hash: s.users.passwordHash }).from(s.users).where(eq(s.users.id, auth.userId)).limit(1);
       if (!u || !(await verifyPassword(body.password, u.hash))) {
@@ -99,8 +110,11 @@ export const dataAdminRoutes = [
           const ctrs = tx.select({ id: s.contracts.id }).from(s.contracts).where(sc(s.contracts));
           // e-mails ficam (são correspondência real); só perdem o vínculo com contas e oportunidades apagadas
           await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(sc(s.mailThreads));
+          // brindes enviados às contas: o estoque baixado continua no histórico de movimentos (só perde o vínculo com o envio)
+          await tx.update(s.giftMovements).set({ deliveryId: null }).where(sc(s.giftMovements));
+          await tx.delete(s.giftDeliveries).where(sc(s.giftDeliveries));
           // ABM (depende de contatos)
-          for (const tbl of [s.accountOccurrences, s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(sc(tbl));
+          for (const tbl of [s.accountOccurrences, s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.accountRelations, s.structureMembers, s.structureContracts, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(sc(tbl));
           // Sucesso do Cliente (depende de contatos, contratos, oportunidades e atividades)
           for (const tbl of [s.csJourneyLinkEvents, s.csJourneyLinks, s.csMilestoneEvents, s.csFiles, s.csVisits, s.csMilestones, s.csPresentations, s.csJourneys, s.csAlerts, s.csActionPlans, s.csSurveys, s.csAssessments, s.csAccounts]) await tx.delete(tbl).where(sc(tbl));
           // atas de registro de preços (dependem de oportunidades, contratos e contatos)
@@ -132,6 +146,7 @@ export const dataAdminRoutes = [
           await tx.delete(s.contractProcesses).where(sc(s.contractProcesses));
           await tx.delete(s.contractEvents).where(sc(s.contractEvents));
           await tx.delete(s.contractVersions).where(sc(s.contractVersions));
+          await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)));
           await tx.update(s.activities).set({ contractId: null }).where(sc(s.activities));
           await del('contratos', tx.delete(s.contracts).where(sc(s.contracts)).returning({ id: s.contracts.id }));
@@ -160,6 +175,9 @@ export const dataAdminRoutes = [
           for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(sc(tbl));
           counts.projetos = (await tx.delete(s.projects).where(sc(s.projects)).returning({ id: s.projects.id })).length;
           await tx.delete(s.automationRuns).where(sc(s.automationRuns));
+          await tx.delete(s.automationQueue).where(and(eq(s.automationQueue.tenantId, t), inArray(s.automationQueue.opportunityId, opps)));
+          await tx.delete(s.proposalDrafts).where(and(eq(s.proposalDrafts.tenantId, t), inArray(s.proposalDrafts.opportunityId, opps)));
+          await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.opportunityId, opps)));
           await tx.delete(s.negotiationReads).where(sc(s.negotiationReads));
           await tx.delete(s.negotiationMessages).where(sc(s.negotiationMessages));
@@ -196,6 +214,9 @@ export const dataAdminRoutes = [
         // contatos que não estão mais em lead, oportunidade, cliente ou atividade
         const used = (tbl: typeof s.leads | typeof s.opportunities | typeof s.customers | typeof s.activities) => tx.select({ x: sql`1` }).from(tbl).where(eq((tbl as typeof s.leads).contactId, s.contacts.id));
         await tx.delete(s.addresses).where(and(eq(s.addresses.tenantId, t), isNull(s.addresses.customerId), notExists(tx.select({ x: sql`1` }).from(s.leads).where(eq(s.leads.contactId, s.addresses.contactId)))));
+        await tx.delete(s.ixcOsWatch).where(eq(s.ixcOsWatch.tenantId, t)); // só memória da última leitura do IXC
+        // Relatório de Medição das contas que vão sair (configuração e relatórios)
+        for (const tb of ['measurement_reports', 'measurement_report_settings']) await tx.execute(sql`delete from ${sql.identifier(tb)} m where m.tenant_id = ${t} and not exists (select 1 from opportunities o where o.contact_id = m.contact_id) and not exists (select 1 from leads l where l.contact_id = m.contact_id) and not exists (select 1 from customers c where c.contact_id = m.contact_id) and not exists (select 1 from activities a where a.contact_id = m.contact_id)`);
         await del('contatos', tx.delete(s.contacts).where(and(eq(s.contacts.tenantId, t), notExists(used(s.leads)), notExists(used(s.opportunities)), notExists(used(s.customers)), notExists(used(s.activities)), notExists(tx.select({ x: sql`1` }).from(s.contactClassifications).where(eq(s.contactClassifications.contactId, s.contacts.id))), notExists(tx.select({ x: sql`1` }).from(s.contactIdentityLinks).where(or(eq(s.contactIdentityLinks.contactId, s.contacts.id), eq(s.contactIdentityLinks.otherContactId, s.contacts.id)))), notExists(tx.select({ x: sql`1` }).from(s.addresses).where(eq(s.addresses.contactId, s.contacts.id))))).returning({ id: s.contacts.id }));
       });
       await audit(app.db, req, { action: 'base.clear', entityType: 'tenant', entityId: t, metadata: { scopes: body.scopes, counts, keep: body.keep } });
