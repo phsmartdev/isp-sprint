@@ -6,7 +6,6 @@ import { useAuth } from '../auth/AuthProvider';
 import { api, ApiError } from '../lib/api';
 import type { Me } from '../lib/types';
 import { Button, FormField, Input } from '../components/ui/primitives';
-import { Hexagons } from '../components/brand';
 
 const GOOGLE_ERRORS: Record<string, string> = {
   google_desligado: 'O login com Google ainda não foi configurado. Entre com e-mail e senha.',
@@ -22,23 +21,63 @@ const GOOGLE_ERRORS: Record<string, string> = {
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.problem.detail ?? err.problem.title : 'Não foi possível concluir. Verifique a conexão.');
 
-/** Quadro da direita com a logo; a imagem fixa (Personalização → Fundo do login) fica à esquerda. */
+/** Hexágono 3D (forma do símbolo BKT) em anel, com luz azul: o grafismo do fundo do login. */
+function HexRing({ className }: { className?: string }) {
+  const hex = (r: number, cx = 300, cy = 300) => Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 3) * i - Math.PI / 2; return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`; });
+  const ring = (outer: number, inner: number, cx = 300, cy = 300) => `M${hex(outer, cx, cy).join('L')}Z M${hex(inner, cx, cy).reverse().join('L')}Z`;
+  return (
+    <svg className={className} viewBox="0 0 600 600" aria-hidden focusable="false">
+      <defs>
+        <linearGradient id="hx-face" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#4FBBFF" stopOpacity="0.55" />
+          <stop offset="0.45" stopColor="#2F5986" stopOpacity="0.85" />
+          <stop offset="1" stopColor="#0E1A27" stopOpacity="0.2" />
+        </linearGradient>
+        <linearGradient id="hx-side" x1="1" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#0B1622" stopOpacity="0.95" />
+          <stop offset="1" stopColor="#2F5986" stopOpacity="0.6" />
+        </linearGradient>
+        <radialGradient id="hx-glow" cx="0.5" cy="0.5" r="0.5">
+          <stop offset="0" stopColor="#4FBBFF" stopOpacity="0.28" />
+          <stop offset="1" stopColor="#4FBBFF" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <circle cx="300" cy="300" r="300" fill="url(#hx-glow)" />
+      {/* espessura: o mesmo anel deslocado, mais escuro, dá a profundidade */}
+      <path d={ring(250, 150, 322, 330)} fill="url(#hx-side)" fillRule="evenodd" />
+      <path d={ring(250, 150)} fill="url(#hx-face)" fillRule="evenodd" />
+      <polygon points={hex(250).join(' ')} fill="none" stroke="#4FBBFF" strokeOpacity="0.45" strokeWidth="1.5" />
+      <polygon points={hex(150).join(' ')} fill="none" stroke="#4FBBFF" strokeOpacity="0.3" strokeWidth="1" />
+    </svg>
+  );
+}
+
+/**
+ * Login no padrão BKT: fundo grafite com o hexágono em 3D e as boas-vindas à esquerda;
+ * o quadro de acesso flutua à direita, sem encostar nas bordas.
+ */
 export function AuthFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="relative flex min-h-screen bg-navy">
-      <div className="fixed inset-0 overflow-hidden bg-gradient-to-br from-navy to-primary lg:right-[520px]" aria-hidden>
-        <Hexagons className="absolute inset-0 h-full w-full" />
-        <img src="/brand/bkt-logo-white.png" alt="" className="absolute bottom-10 left-10 hidden h-16 w-auto lg:block" draggable={false} />
+    <div className="relative min-h-screen overflow-hidden bg-[#1B2026] text-white">
+      <div className="pointer-events-none absolute inset-0" aria-hidden>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_45%,rgba(47,89,134,0.55),transparent_60%)]" />
+        <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />
       </div>
-      <div className="relative ml-auto flex min-h-screen w-full items-center justify-center px-4 py-10 lg:w-[520px] lg:bg-surface lg:px-12 lg:shadow-overlay">
-        <div className="w-full max-w-sm space-y-5 rounded-lg bg-surface p-7 shadow-overlay lg:p-0 lg:shadow-none">
-          <div className="flex items-center justify-center gap-3 pb-2">
-            <img src="/brand/bkt-logo.png" alt="BKT" className="h-14 w-auto object-contain" draggable={false} />
+      <div className="relative mx-auto flex min-h-screen w-full max-w-[1400px] flex-col items-center justify-center gap-8 px-4 py-10 lg:flex-row lg:justify-between lg:gap-12 lg:px-[6vw]">
+        <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
+          <img src="/brand/bkt-logo-white.png" alt="BKT" className="mb-10 hidden h-16 w-auto lg:block" draggable={false} />
+          <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
+          <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
+        </section>
+        <div className="w-full max-w-[420px] shrink-0 rounded-xl bg-surface p-7 text-text shadow-overlay ring-1 ring-black/5 sm:p-10">
+          <div className="mb-6 flex items-center justify-center gap-3">
+            <img src="/brand/bkt-logo.png" alt="BKT" className="h-12 w-auto object-contain" draggable={false} />
             <span className="border-l border-line pl-3 font-display text-base font-semibold text-muted">RevOps</span>
           </div>
           {children}
         </div>
       </div>
+      <p className="relative pb-6 text-center text-xs text-white/50 lg:absolute lg:bottom-6 lg:left-[6vw] lg:pb-0 lg:text-left">Acesso restrito a colaboradores BKT.</p>
     </div>
   );
 }
