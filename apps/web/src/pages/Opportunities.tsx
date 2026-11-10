@@ -17,6 +17,7 @@ import { CLOSING_TAG, SourceChip, StageChip, inkOf, productLabel, stageColor } f
 import { TransitionDialog, needsDialog, type TransitionRequest } from '../features/TransitionDialog';
 import { useTransitionMutation } from '../features/useTransition';
 import { OppActionDialog, type OppAction } from '../features/OppActionDialog';
+import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 
 function CardMenu({ opp, onMove, stages, onAction }: { opp: Opportunity; onMove: (to: string) => void; stages: LookupStage[]; onAction: (k: OppAction) => void }) {
   const closed = opp.stage === 'ganha' || opp.stage === 'perdida';
@@ -190,6 +191,12 @@ export function OpportunitiesPage() {
   const list = useQuery({ queryKey: ['opportunities', 'list', f], enabled: !kanban, placeholderData: keepPreviousData, queryFn: () => api<Paged<Opportunity>>(`/opportunities${qs({ ...filters, status: f.status, stage: f.stage, page: f.page, pageSize: f.size })}`) });
   const transition = useTransitionMutation();
   const [pending, setPending] = useState<TransitionRequest | null>(null);
+  // arrastar para venda fechada também comemora; perdida lamenta
+  const [outcome, setOutcome] = useState<Outcome>(null);
+  const closeOutcome = useCallback(() => setOutcome(null), []);
+  const celebrate = (opp: Opportunity, kind: string | undefined) => {
+    if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName, oppId: opp.id });
+  };
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
   const stages = pipe.data?.stages ?? [];
   const canMove = can('oportunidades');
@@ -203,7 +210,7 @@ export function OpportunitiesPage() {
     if (!target) return;
     const req: TransitionRequest = { opp, from: opp.stage, to, fromName: list.find((x) => x.key === opp.stage)?.name ?? opp.stage, toName: target.name, toKind: target.kind, requirements: target.requirements ?? {}, title: opp.contactName };
     if (needsDialog(req)) setPending(req);
-    else transition.mutate({ opp, payload: { toStage: to } });
+    else transition.mutate({ opp, payload: { toStage: to } }, { onSuccess: () => celebrate(opp, target.kind) });
   };
   moveRef.current = requestMove;
   const [act, setAct] = useState<{ opp: Opportunity; kind: OppAction; column?: string } | null>(null);
@@ -364,8 +371,9 @@ export function OpportunitiesPage() {
         request={pending}
         loading={transition.isPending}
         onCancel={() => setPending(null)}
-        onConfirm={(payload) => { if (pending) transition.mutate({ opp: pending.opp, payload }, { onSettled: () => setPending(null) }); }}
+        onConfirm={(payload) => { if (pending) { const { opp, toKind } = pending; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => celebrate(opp, toKind) }); } }}
       />
+      <OutcomeCelebration outcome={outcome} onClose={closeOutcome} />
       {act && <OppActionDialog act={act} stages={stageList(act.opp.pipelineId)} onClose={() => setAct(null)} />}
     </div>
   );

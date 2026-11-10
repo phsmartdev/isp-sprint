@@ -602,6 +602,7 @@ export function OpportunityWorkspacePage() {
   const { id = '' } = useParams();
   const { can, feature, level } = useAuth();
   const [outcome, setOutcome] = useState<Outcome>(null);
+  const closeOutcome = useCallback(() => setOutcome(null), []);
   const nav = useNavigate();
   const lookups = useLookups();
   const toast = useToast();
@@ -693,7 +694,7 @@ export function OpportunityWorkspacePage() {
   };
   // venda fechada comemora; perdida lamenta
   const celebrate = (kind: string | undefined) => {
-    if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName });
+    if (kind === 'won' || kind === 'lost') setOutcome({ kind, who: (opp.ownerName ?? '').split(' ')[0] || 'time', deal: opp.title || opp.contactName, oppId: opp.id });
   };
 
   const left = (
@@ -915,7 +916,7 @@ export function OpportunityWorkspacePage() {
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
       <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => { const kind = pending?.toKind; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => { void q.refetch(); celebrate(kind); } }); }} />
       {oppAction && <OppActionDialog act={{ opp, kind: oppAction }} stages={stages} onClose={() => setOppAction(null)} />}
-      <OutcomeCelebration outcome={outcome} onClose={() => setOutcome(null)} />
+      <OutcomeCelebration outcome={outcome} onClose={closeOutcome} />
     </div>
   );
 }
