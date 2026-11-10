@@ -63,9 +63,8 @@ export function AuthFrame({ children }: { children: ReactNode }) {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_45%,rgba(47,89,134,0.55),transparent_60%)]" />
         <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />
       </div>
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[1400px] flex-col items-center justify-center gap-8 px-4 py-10 lg:flex-row lg:justify-between lg:gap-12 lg:px-[6vw]">
+      <div className="relative flex min-h-screen w-full flex-col items-center justify-center gap-8 px-4 py-10 lg:flex-row lg:justify-between lg:gap-12 lg:pl-[6vw] lg:pr-[7vw]">
         <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
-          <img src="/brand/bkt-logo-white.png" alt="BKT" className="mb-10 hidden h-16 w-auto lg:block" draggable={false} />
           <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
           <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
         </section>
