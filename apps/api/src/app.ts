@@ -81,6 +81,7 @@ import { activityScriptRoutes } from './routes/activityScripts';
 import { abmIntelRoutes } from './routes/abmIntel';
 import { abmFollowupRoutes } from './routes/abmFollowup';
 import { stakeholderRoutes } from './routes/stakeholders';
+import { accountOccurrenceRoutes } from './routes/accountOccurrences';
 import { accountRelationRoutes } from './routes/accountRelations';
 import { structureRoutes } from './routes/structures';
 import { interventionRoutes } from './routes/interventions';
@@ -274,6 +275,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...abmIntelRoutes,
     ...abmFollowupRoutes,
     ...stakeholderRoutes,
+    ...accountOccurrenceRoutes,
     ...accountRelationRoutes,
     ...structureRoutes,
     ...interventionRoutes,

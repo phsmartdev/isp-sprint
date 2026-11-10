@@ -13,6 +13,7 @@ import { useToast } from '../components/ui/overlay';
 import { useAuth } from '../auth/AuthProvider';
 import { Account360 } from '../features/cs/Account360';
 import { AddToAbmButton } from '../features/abm/shared';
+import { AccountEvolution } from '../features/account/AccountEvolution';
 import { Avatar, Breadcrumb, Button, Chip, EmptyState, ErrorState, Input, LoadingRows, Notice, Tabs } from '../components/ui/primitives';
 import { StakeholdersPanel } from '../features/abm/stakeholders';
 import { AccountGifts } from '../features/gifts/AccountGifts';
@@ -203,6 +204,7 @@ export function CustomerDetailPage() {
             ...(feature('crm.sucesso_cliente') ? [{ key: 'sucesso', label: 'Sucesso do Cliente' }] : []),
             ...(can('contratos') ? [{ key: 'contratos', label: 'Contratos' }, { key: 'medicao', label: 'Medição' }] : []),
             ...(can('projetos') ? [{ key: 'projetos', label: 'Tarefas e projetos' }] : []),
+            { key: 'evolucao', label: 'Evolução' },
             { key: 'financeiro', label: 'Financeiro' },
             { key: 'atendimentos', label: 'Atendimentos/OS' },
             ...(c.segment !== 'residencial' ? [{ key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Contas relacionadas' }] : []),
@@ -240,6 +242,7 @@ export function CustomerDetailPage() {
           {tab === 'sucesso' && <Account360 contactId={c.id} />}
           {tab === 'contratos' && <AccountContracts contactId={c.id} />}
           {tab === 'medicao' && <MeasurementTab contactId={c.id} />}
+          {tab === 'evolucao' && <AccountEvolution contactId={c.id} />}
           {tab === 'projetos' && <WorkLinks prefill={{ contactId: c.id, label: c.name, kind: 'implantacao' }} />}
           {tab === 'resumo' && <ClassificationSection contactId={c.id} />}
           {tab === 'resumo' && <CustomerCustomFields key={c.id} contactId={c.id} initial={c.custom} />}
