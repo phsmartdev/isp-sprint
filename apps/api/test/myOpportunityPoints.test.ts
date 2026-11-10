@@ -28,3 +28,16 @@ it('cada um vê só o que ganhou na oportunidade', async () => {
   }
   expect(mine.parts.tarefas).toBeGreaterThan(0);
 });
+
+it('comemoração da venda: quem vendeu (mesmo vista pela supervisão) e os pontos dele', async () => {
+  const lk = (await carlos.get('/meta/lookups')).json();
+  const o = (await lucas.post('/opportunities', { newContact: { name: 'Conta Comemoração Fictícia', segment: 'empresarial' }, planId: lk.plans[0].id })).json();
+  // a comemoração atualiza os eventos antes de contar; depois disso, os pontos batem com os que o vendedor vê
+  const seen = (await carlos.get(`/opportunities/${o.id}/celebration`)).json();
+  const mine = (await lucas.get(`/opportunities/${o.id}/my-points`)).json();
+  expect(mine.total).toBeGreaterThan(0);
+  expect(seen.owner).toMatchObject({ id: lucas.me.user.id, name: lucas.me.user.name, hasPhoto: false });
+  expect(seen.points).toMatchObject({ enabled: true, total: mine.total });
+  const own = (await lucas.get(`/opportunities/${o.id}/celebration`)).json();
+  expect(own.owner.id).toBe(lucas.me.user.id);
+});

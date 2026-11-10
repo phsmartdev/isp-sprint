@@ -124,6 +124,21 @@ export const gamificationRoutes = [
     },
   }),
   defineRoute({
+    method: 'GET', url: '/opportunities/:id/celebration', summary: 'Comemoração da venda fechada: quem vendeu (nome e foto) e quantos pontos ganhou nesta oportunidade', tag: 'Gestão de Times', module: 'oportunidades', params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const o = await loadOpportunity(app.db, auth, params.id);
+      const [u] = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.id, o.ownerId), eq(s.users.tenantId, auth.tenantId))).limit(1);
+      const photo = (await app.db.execute<{ n: number }>(sql`select count(*)::int n from user_avatars where user_id = ${o.ownerId}`)).rows[0]?.n ?? 0;
+      const owner = { id: o.ownerId, name: u?.name ?? o.ownerName ?? '', hasPhoto: photo > 0 };
+      const { settings } = await gamificationSettingsOf(app.db, auth.tenantId);
+      if (!settings) return { owner, points: { enabled: false as const } };
+      // a venda acabou de fechar: os eventos de negócio precisam estar em dia para contar o ganho
+      await ensureFreshEvents(app.db, auth.tenantId, 5_000);
+      const r = await opportunityPointsFor(app.db, auth.tenantId, settings, o.id, o.ownerId);
+      return { owner, points: { enabled: true as const, ...(r ?? { total: 0, parts: {} }) } };
+    },
+  }),
+  defineRoute({
     method: 'GET', url: '/times/gamificacao', summary: 'Gamificação colaborativa: placar do mês e do ano por time e pessoa, pódio, dispersão (para a liderança), níveis e medalha de ouro', tag: 'Gestão de Times', module: 'resultados',
     query: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }),
     handler: async ({ app, auth, query }) => {
