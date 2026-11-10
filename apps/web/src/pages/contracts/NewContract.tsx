@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { FileSignature, Search } from 'lucide-react';
+import { CheckCircle2, FileSignature, Search } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useDebounced } from '../../lib/hooks';
 import { useAuth } from '../../auth/AuthProvider';
@@ -12,7 +12,8 @@ import { errMsg, type Version } from '../../features/contracts/shared';
 
 type Prefill = {
   opportunity: { id: string; code: number; title: string; stage: string; contactId: string };
-  client: { name: string; document: string | null; segment: string; email: string | null; phone: string | null };
+  client: { name: string; document: string | null; segment: string; email: string | null; phone: string | null; address: { street: string | null; number: string | null; district: string | null; city: string | null; state: string | null; postalCode: string | null } | null };
+  imported?: string[]; carries?: { people: number; documents: number };
   existingContractId: string | null; won: boolean;
   suggestion: { kind: 'publico' | 'privado'; legalRegime: 'privado' | 'lei_14133'; commercialOwnerId: string; version: Partial<Version> };
 };
@@ -48,8 +49,20 @@ export function NewContractPage() {
       {p && (
         <div className="mb-4 space-y-2">
           <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
-            <div><p className="text-sm text-muted">Oportunidade de origem</p><p className="font-semibold text-ink"><Link className="link" to={`/opportunities/${p.opportunity.id}`}>OP-{p.opportunity.code}</Link> · {p.client.name}{p.client.document ? ` · ${p.client.document}` : ''}</p><p className="text-sm text-text">{[p.client.email, p.client.phone].filter(Boolean).join(' · ')}</p></div>
+            <div><p className="text-sm text-muted">Oportunidade de origem</p><p className="font-semibold text-ink"><Link className="link" to={`/opportunities/${p.opportunity.id}`}>OP-{p.opportunity.code}</Link> · {p.client.name}{p.client.document ? ` · ${p.client.document}` : ''}</p><p className="text-sm text-text">{[p.client.email, p.client.phone].filter(Boolean).join(' · ')}</p>{p.client.address && <p className="text-sm text-text">{[[p.client.address.street, p.client.address.number].filter(Boolean).join(', '), p.client.address.district, [p.client.address.city, p.client.address.state].filter(Boolean).join('/'), p.client.address.postalCode].filter(Boolean).join(' · ')}</p>}</div>
           </div>
+          {(!!p.imported?.length || !!p.carries?.people || !!p.carries?.documents) && (
+            <div className="card border-l-4 border-l-success p-4" aria-label="Trazido da negociação">
+              <p className="mb-1.5 flex items-center gap-2 font-semibold text-ink"><CheckCircle2 className="h-4 w-4 text-success" aria-hidden />Já preenchido com os dados da negociação</p>
+              <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text">
+                {p.imported?.map((x) => <li key={x}>✓ {x}</li>)}
+                <li>✓ Valor, data de assinatura e empresa detentora</li>
+                <li>✓ Dados da negociação nas condições especiais</li>
+              </ul>
+              {(!!p.carries?.people || !!p.carries?.documents) && <p className="mt-2 text-sm text-muted">Ao cadastrar, também vão para o contrato: {[p.carries.people ? `${p.carries.people} contato(s)` : null, p.carries.documents ? `${p.carries.documents} documento(s) anexado(s) (proposta, edital…)` : null].filter(Boolean).join(' e ')}.</p>}
+              <p className="mt-1 text-xs text-muted">Confira e complete o que faltar (número do contrato, vigência e cadastro Zenith).</p>
+            </div>
+          )}
           {p.existingContractId && <Notice tone="warning">Esta oportunidade já tem contrato. <Link className="link" to={`/contracts/${p.existingContractId}`}>Abrir contrato</Link></Notice>}
           {!p.won && <Notice tone="warning">A oportunidade ainda não está como venda fechada. O contrato é cadastrado depois da conclusão com o contrato assinado.</Notice>}
         </div>
