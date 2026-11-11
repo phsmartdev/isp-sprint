@@ -118,6 +118,29 @@ describe('Pessoas & Gestão · feedback ascendente', () => {
   });
 });
 
+describe('Pessoas & Gestão · ficha do colaborador', () => {
+  it('a própria pessoa, a liderança direta e o RH abrem; feedback só em números; consulta auditada', async () => {
+    const list = ok(await ana.get('/pessoas/desenvolvimento/pessoas')).json().items.map((p: { name: string; relation: string }) => `${p.name}:${p.relation}`);
+    expect(list).toEqual(expect.arrayContaining(['Ana Souza:eu', 'Lucas Lima:liderado']));
+    const ficha = ok(await ana.get(`/pessoas/desenvolvimento/pessoas/${lucas.me.user.id}`)).json();
+    expect(ficha).toMatchObject({ relation: 'liderado', person: { name: 'Lucas Lima' }, leadership: { current: [{ name: 'Ana Souza' }] } });
+    expect(ficha.feedback.received).toBeGreaterThanOrEqual(1);
+    // vale para qualquer área: indicadores da função (scorecard) e contribuições de todos os módulos
+    expect(ficha.scorecards).toHaveProperty('cards');
+    expect(Array.isArray(ficha.contributions)).toBe(true);
+    expect(ficha.timeline.some((e: { kind: string }) => e.kind === 'feedback')).toBe(true);
+    expect(JSON.stringify(ficha)).not.toContain(SBI.behavior); // nada de conteúdo
+    expect((await lucas.get(`/pessoas/desenvolvimento/pessoas/${ana.me.user.id}`)).statusCode).toBe(403); // liderado não abre a da liderança
+    expect((await rafael.get(`/pessoas/desenvolvimento/pessoas/${lucas.me.user.id}`)).statusCode).toBe(403);
+    expect(ok(await mariana.get(`/pessoas/desenvolvimento/pessoas/${lucas.me.user.id}`)).json().relation).toBe('rh');
+    expect(ok(await mariana.get('/pessoas/desenvolvimento/pessoas')).json().items.length).toBeGreaterThanOrEqual(5);
+    expect(ok(await lucas.get(`/pessoas/desenvolvimento/pessoas/${lucas.me.user.id}`)).json().relation).toBe('eu');
+    expect((await outro.get(`/pessoas/desenvolvimento/pessoas/${lucas.me.user.id}`)).statusCode).toBe(403);
+    const logs = (await ctx.db.execute(sql`select count(*)::int as n from audit_logs where action = 'dev.record.view' and entity_id = ${lucas.me.user.id}`)).rows[0] as { n: number };
+    expect(logs.n).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('Pessoas & Gestão · troca de liderança', () => {
   it('a nova liderança não enxerga o que foi registrado antes; a antiga deixa de poder registrar', async () => {
     const before = ok(await ana.post('/pessoas/desenvolvimento/feedbacks', { recipientId: lucas.me.user.id, modality: 'reconhecimento', occurredOn: today, ...SBI, send: true }), 201).json();

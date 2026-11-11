@@ -29,6 +29,8 @@ const DevFeedbacks = lazy(() => import('./pages/people/dev/Feedbacks').then((m) 
 const DevFeedbackForm = lazy(() => import('./pages/people/dev/FeedbackForm').then((m) => ({ default: m.FeedbackFormPage })));
 const DevFeedbackDetail = lazy(() => import('./pages/people/dev/FeedbackDetail').then((m) => ({ default: m.FeedbackDetailPage })));
 const DevAdminPolicy = lazy(() => import('./pages/people/dev/AdminPolicy').then((m) => ({ default: m.AdminPolicyPage })));
+const DevPeople = lazy(() => import('./pages/people/dev/People').then((m) => ({ default: m.DevPeoplePage })));
+const DevRecord = lazy(() => import('./pages/people/dev/Record').then((m) => ({ default: m.RecordPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -183,6 +185,8 @@ export function App() {
           <Route path="desenvolvimento/feedbacks" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbacks /></Gate>} />
           <Route path="desenvolvimento/feedbacks/novo" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbackForm /></Gate>} />
           <Route path="desenvolvimento/feedbacks/:id" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbackDetail /></Gate>} />
+          <Route path="desenvolvimento/pessoas" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevPeople /></Gate>} />
+          <Route path="desenvolvimento/pessoas/:userId" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevRecord /></Gate>} />
           {/* toda a administração do módulo num lugar só */}
           <Route path="admin" element={<PeopleAdminLayout />}>
             <Route index element={null} />

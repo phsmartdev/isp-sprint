@@ -20,7 +20,7 @@ export const BADGE_LOOK: Record<string, { emoji: string; from: string; to: strin
   crescimento: { emoji: '🚀', from: '#34D399', to: '#047857' },
   compromisso: { emoji: '🎯', from: '#A78BFA', to: '#6D28D9' },
 };
-const look = (k: string) => BADGE_LOOK[k] ?? { emoji: '🏆', from: '#FBBF24', to: '#B45309' };
+export const look = (k: string) => BADGE_LOOK[k] ?? { emoji: '🏆', from: '#FBBF24', to: '#B45309' };
 
 const CSS = `
 @keyframes ach-burst { 0% { transform: translate(0,0) scale(.2); opacity: 0 } 15% { opacity: 1 } 100% { transform: translate(var(--dx), var(--dy)) scale(1); opacity: 0 } }

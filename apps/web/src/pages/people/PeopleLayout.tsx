@@ -7,7 +7,7 @@ import { Suspense } from 'react';
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Award, Heart, Home, LayoutGrid, MessageSquareHeart, Send, Shield, UsersRound } from 'lucide-react';
+import { Award, Heart, Home, IdCard, LayoutGrid, MessageSquareHeart, Send, Shield, UsersRound } from 'lucide-react';
 import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
 import { ErrorState, LoadingRows } from '../../components/ui/primitives';
@@ -50,7 +50,10 @@ export function PeopleLayout() {
   // áreas separadas no menu: Comunidade e Feedback
   const groups: { title: string; items: Item[] }[] = [
     { title: 'Comunidade', items },
-    ...(dev ? [{ title: 'Feedback', items: [{ to: '/pessoas/desenvolvimento/feedbacks', label: 'Feedbacks', icon: MessageSquareHeart, badge: counters.data?.feedbacks ?? 0 }] }] : []),
+    ...(dev ? [{ title: 'Feedback', items: [
+      { to: '/pessoas/desenvolvimento/feedbacks', label: 'Feedbacks', icon: MessageSquareHeart, badge: counters.data?.feedbacks ?? 0 },
+      { to: '/pessoas/desenvolvimento/pessoas', label: 'Colaboradores', icon: IdCard },
+    ] }] : []),
   ];
   const link = (active: boolean) => clsx('group flex items-center gap-4 rounded-lg p-3 text-[15px] transition-colors hover:bg-surface-2', active ? 'font-bold text-ink' : 'text-ink');
   return (
