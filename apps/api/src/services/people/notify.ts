@@ -29,6 +29,9 @@ export const PEOPLE_EVENTS = {
   comunicado_urgente: { label: 'Comunicado oficial urgente', mandatory: true },
   comunicado_pendente: { label: 'Comunicado com confirmação de leitura pendente', mandatory: true },
   moderacao: { label: 'Atualização de moderação', mandatory: true },
+  feedback: { label: 'Feedback recebido', mandatory: true },
+  feedback_ciencia: { label: 'Ciência ou manifestação no feedback que enviei', mandatory: false },
+  feedback_mediacao: { label: 'Mediação de feedback confidencial (RH e quem enviou)', mandatory: true },
 } as const;
 export type PeopleEvent = keyof typeof PEOPLE_EVENTS;
 /** Vão para o @ do topo (marcação para mim e comunicação institucional); os demais ficam em Notificações do módulo. */

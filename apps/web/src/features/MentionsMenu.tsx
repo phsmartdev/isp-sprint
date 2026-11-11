@@ -41,7 +41,7 @@ export function MentionsMenu() {
       {open && (
         <div role="dialog" aria-label="Menções" className="absolute right-0 top-full z-40 mt-2 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
           <p className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Menções</p>
-          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações, tarefas e Pessoas & Cultura, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui.</p> : (
+          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações, tarefas e Pessoas & Gestão, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui.</p> : (
             <ul className="max-h-[420px] divide-y divide-line overflow-y-auto">
               {q.data.items.map((m, i) => (
                 <li key={i}>
@@ -49,7 +49,7 @@ export function MentionsMenu() {
                     <p className="flex items-center gap-2 text-xs text-muted">
                       {m.unread && <span className="h-2 w-2 rounded-circle bg-[#F5B400]" aria-label="não lida" />}
                       {m.kind === 'aviso'
-                        ? <span><span className="font-semibold text-ink">Pessoas & Cultura</span> · {fmtRelative(m.at)}</span>
+                        ? <span><span className="font-semibold text-ink">Pessoas & Gestão</span> · {fmtRelative(m.at)}</span>
                         : m.kind === 'gestao'
                         ? <span>{m.author && <span className="font-semibold text-ink">{m.author} </span>}{TASK_TEXT[m.source] ?? 'Atualização de gestão'} · {fmtRelative(m.at)}</span>
                         : m.kind === 'intervencao'

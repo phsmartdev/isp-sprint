@@ -53,7 +53,7 @@ const NAV: NavEntry[] = [
     { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
     { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
   ] },
-  { to: '/pessoas', label: 'Pessoas & Cultura', icon: <UsersRound className={ICON} />, module: 'pessoas', feature: 'pessoas_cultura.experiencia' },
+  { to: '/pessoas', label: 'Pessoas & Gestão', icon: <UsersRound className={ICON} />, module: 'pessoas', feature: 'pessoas_cultura.experiencia' },
   { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [

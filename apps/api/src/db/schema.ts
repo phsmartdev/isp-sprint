@@ -6774,3 +6774,142 @@ export const peopleMessages = pgTable(
   },
   (t) => ({ convIdx: index('people_messages_conv_idx').on(t.conversationId, t.createdAt) }),
 );
+
+// ================================================================== Pessoas & Gestão — Desempenho & Desenvolvimento
+
+/**
+ * Vínculo de liderança com vigência (quem lidera quem e desde quando). É derivado dos times e das unidades
+ * (não é cadastro paralelo): a sincronização fecha o vínculo que deixou de existir e abre o novo.
+ * Troca de liderança não dá à nova liderança acesso ao que foi registrado antes.
+ */
+export const reportingLines = pgTable(
+  'reporting_lines',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    managerId: uuid('manager_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    /** time = líder do time da pessoa; gestao = gestor do time ou responsável da unidade acima (para líderes) */
+    source: text('source').notNull(),
+    teamId: uuid('team_id'),
+    orgUnitId: uuid('org_unit_id'),
+    validFrom: ts('valid_from').notNull().defaultNow(),
+    validTo: ts('valid_to'),
+  },
+  (t) => ({
+    openUq: uniqueIndex('reporting_lines_open_uq').on(t.tenantId, t.userId, t.managerId).where(sql`valid_to is null`),
+    userIdx: index('reporting_lines_user_idx').on(t.tenantId, t.userId, t.validFrom),
+    managerIdx: index('reporting_lines_manager_idx').on(t.tenantId, t.managerId, t.validFrom),
+    sourceCk: check('reporting_lines_source_ck', inList('source', ['time', 'gestao'])),
+  }),
+);
+
+/** Política de desenvolvimento (feedback, 1:1, metas…), versionada: a versão vigente vale; as anteriores ficam. */
+export const devPolicies = pgTable(
+  'dev_policies',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    version: integer('version').notNull(),
+    config: jsonb('config').$type<Record<string, unknown>>().notNull(),
+    note: text('note'),
+    effectiveFrom: ts('effective_from').notNull().defaultNow(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({ uq: uniqueIndex('dev_policies_uq').on(t.tenantId, t.version) }),
+);
+
+/**
+ * Feedback situacional (Situação–Comportamento–Impacto). Descendente (liderança → liderado) ou ascendente
+ * (liderado → liderança). Ascendente confidencial vai primeiro ao RH, que media e repassa só uma síntese.
+ */
+export const peopleFeedbacks = pgTable(
+  'people_feedbacks',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    senderId: uuid('sender_id').notNull().references(() => users.id),
+    recipientId: uuid('recipient_id').notNull().references(() => users.id),
+    direction: text('direction').notNull(),
+    modality: text('modality').notNull(),
+    mode: text('mode').notNull().default('identificado'),
+    occurredOn: date('occurred_on', { mode: 'string' }).notNull(),
+    situation: text('situation').notNull(),
+    behavior: text('behavior').notNull(),
+    impact: text('impact').notNull(),
+    guidance: text('guidance'),
+    nextSteps: text('next_steps'),
+    /** competência relacionada (biblioteca de competências chega na F3) */
+    competencyId: uuid('competency_id'),
+    status: text('status').notNull().default('rascunho'),
+    policyVersion: integer('policy_version').notNull().default(0),
+    sentAt: ts('sent_at'),
+    /** ciência do destinatário (não é concordância) e manifestação dele */
+    acknowledgedAt: ts('acknowledged_at'),
+    response: text('response'),
+    respondedAt: ts('responded_at'),
+    /** mediação do RH (ascendente confidencial) */
+    mediatorId: uuid('mediator_id').references(() => users.id),
+    synthesis: text('synthesis'),
+    mediationNote: text('mediation_note'),
+    mediatedAt: ts('mediated_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    recipientIdx: index('people_feedbacks_recipient_idx').on(t.tenantId, t.recipientId, t.sentAt),
+    senderIdx: index('people_feedbacks_sender_idx').on(t.tenantId, t.senderId, t.createdAt),
+    statusIdx: index('people_feedbacks_status_idx').on(t.tenantId, t.status),
+    directionCk: check('people_feedbacks_direction_ck', inList('direction', ['descendente', 'ascendente'])),
+    modalityCk: check('people_feedbacks_modality_ck', inList('modality', ['reconhecimento', 'orientacao', 'melhoria', 'reforco', 'desenvolvimento', 'alinhamento'])),
+    modeCk: check('people_feedbacks_mode_ck', inList('mode', ['identificado', 'confidencial'])),
+    statusCk: check('people_feedbacks_status_ck', inList('status', ['rascunho', 'enviado', 'ciente', 'em_mediacao', 'repassado', 'tratado_sem_repasse'])),
+  }),
+);
+
+/** Histórico do feedback (append-only): criado, enviado, ciência, manifestação, mediação… */
+export const peopleFeedbackEvents = pgTable(
+  'people_feedback_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    feedbackId: uuid('feedback_id').notNull().references(() => peopleFeedbacks.id, { onDelete: 'cascade' }),
+    type: text('type').notNull(),
+    actorId: uuid('actor_id').notNull().references(() => users.id),
+    note: text('note'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ idx: index('people_feedback_events_idx').on(t.feedbackId, t.createdAt) }),
+);
+
+/**
+ * Eventos de domínio (outbox): gravados na mesma transação da mudança e despachados depois (assinantes internos,
+ * webhooks e conectores). Payload mínimo — nunca texto de feedback. Idempotente por (tenant, chave).
+ */
+export const domainEvents = pgTable(
+  'domain_events',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    type: text('type').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    version: integer('version').notNull().default(1),
+    source: text('source').notNull(),
+    correlationId: uuid('correlation_id'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    idemKey: text('idem_key').notNull(),
+    status: text('status').notNull().default('pendente'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    occurredAt: ts('occurred_at').notNull().defaultNow(),
+    processedAt: ts('processed_at'),
+  },
+  (t) => ({
+    idemUq: uniqueIndex('domain_events_idem_uq').on(t.tenantId, t.idemKey),
+    pendingIdx: index('domain_events_pending_idx').on(t.status, t.occurredAt),
+    typeIdx: index('domain_events_type_idx').on(t.tenantId, t.type, t.occurredAt),
+    statusCk: check('domain_events_status_ck', inList('status', ['pendente', 'processado', 'falhou'])),
+  }),
+);

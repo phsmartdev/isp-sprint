@@ -25,6 +25,10 @@ const PeopleAdminPanel = lazy(() => import('./pages/people/AdminPanel').then((m)
 const PeopleFeedHome = lazy(() => import('./pages/people/FeedHome').then((m) => ({ default: m.FeedHomePage })));
 const PeopleMessages = lazy(() => import('./pages/people/Messages').then((m) => ({ default: m.MessagesPage })));
 const PeopleAdminLayout = lazy(() => import('./pages/people/PeopleLayout').then((m) => ({ default: m.PeopleAdminLayout })));
+const DevFeedbacks = lazy(() => import('./pages/people/dev/Feedbacks').then((m) => ({ default: m.FeedbacksPage })));
+const DevFeedbackForm = lazy(() => import('./pages/people/dev/FeedbackForm').then((m) => ({ default: m.FeedbackFormPage })));
+const DevFeedbackDetail = lazy(() => import('./pages/people/dev/FeedbackDetail').then((m) => ({ default: m.FeedbackDetailPage })));
+const DevAdminPolicy = lazy(() => import('./pages/people/dev/AdminPolicy').then((m) => ({ default: m.AdminPolicyPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -175,6 +179,10 @@ export function App() {
           <Route path="reconhecimento" element={<PeopleRecognitionPage />} />
           <Route path="notificacoes" element={<PeopleNotifications />} />
           <Route path="denuncias" element={<PeopleMyReports />} />
+          {/* Desempenho & Desenvolvimento (funcionalidade liberável) */}
+          <Route path="desenvolvimento/feedbacks" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbacks /></Gate>} />
+          <Route path="desenvolvimento/feedbacks/novo" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbackForm /></Gate>} />
+          <Route path="desenvolvimento/feedbacks/:id" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevFeedbackDetail /></Gate>} />
           {/* toda a administração do módulo num lugar só */}
           <Route path="admin" element={<PeopleAdminLayout />}>
             <Route index element={null} />
@@ -183,6 +191,7 @@ export function App() {
             <Route path="comunicados" element={<PeopleAdminAnnouncements />} />
             <Route path="reconhecimentos" element={<PeopleAdminRecognition />} />
             <Route path="configuracoes" element={<PeopleConfigPage />} />
+            <Route path="politicas" element={<Gate module="pessoas" feature="pessoas_cultura.desenvolvimento"><DevAdminPolicy /></Gate>} />
           </Route>
         </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />

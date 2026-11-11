@@ -28,7 +28,7 @@ export const MODULE_LABELS: Record<Module, string> = {
   resultados: 'Gestão de Times',
   inteligencia: 'Inteligência',
   email: 'E-mail',
-  pessoas: 'Pessoas & Cultura',
+  pessoas: 'Pessoas & Gestão',
   configuracoes: 'Configurações',
 };
 

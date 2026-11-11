@@ -67,6 +67,8 @@ export type PeopleCaps = {
   moderate: boolean;
   /** parâmetros do módulo (papéis por setor, limites): administração do módulo ou administração do sistema; não abre conteúdo privado */
   configure: boolean;
+  /** RH (setor de Pessoas e Cultura): políticas de desenvolvimento e mediação de feedback confidencial; a administração técnica não ganha isso */
+  hr: boolean;
 };
 
 export function peopleCaps(auth: AuthContext, st: PeopleSettings): PeopleCaps {
@@ -80,5 +82,6 @@ export function peopleCaps(auth: AuthContext, st: PeopleSettings): PeopleCaps {
     communicate: total || pc || has(st.roles.comunicacao),
     moderate: total || pc || has(st.roles.moderacao) || has(st.roles.comunicacao),
     configure: total || pc || auth.access.configuracoes === 'total',
+    hr: pc,
   };
 }

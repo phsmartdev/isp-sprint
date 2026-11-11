@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/** Pessoas & Cultura · Etapa 3: criar comunidade privada, pedir participação, aprovar, publicar nela e fixar. */
+/** Pessoas & Gestão · Etapa 3: criar comunidade privada, pedir participação, aprovar, publicar nela e fixar. */
 const SHOTS = process.env.E2E_SHOTS;
 const login = async (page: Page, email: string) => {
   await page.goto('/login');

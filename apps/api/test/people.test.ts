@@ -31,7 +31,7 @@ describe('Pessoas & Cultura · fundação', () => {
     [lucas, ana, carlos, rafael] = (await Promise.all(['lucas@yepnet.test', 'ana@yepnet.test', 'carlos@yepnet.test', 'rafael@yepnet.test'].map(relogin))) as [Client, Client, Client, Client];
     const me = ok(await lucas.get('/pessoas/me')).json();
     expect(me.me).toMatchObject({ name: 'Lucas Lima', firstName: 'Lucas', jobTitle: await titleOf('lucas@yepnet.test') });
-    expect(me.caps).toEqual({ member: true, communicate: false, administer: false, moderate: false, configure: false });
+    expect(me.caps).toEqual({ member: true, communicate: false, administer: false, moderate: false, configure: false, hr: false });
     expect((await rafael.get('/pessoas/me')).statusCode).toBe(403); // time Empresarial não foi liberado
     // a gerência (sistema) configura os papéis, mas não vira administração do módulo por isso
     expect(ok(await carlos.get('/pessoas/me')).json().caps).toMatchObject({ member: true, administer: false, configure: true });
@@ -43,7 +43,7 @@ describe('Pessoas & Cultura · fundação', () => {
     const users = (await carlos.get('/admin/users')).json().users as { id: string; email: string }[];
     ok(await carlos.patch(`/admin/users/${users.find((u) => u.email === 'ana@yepnet.test')!.id}`, { sectors: ['administracao'] }));
     ana = await relogin('ana@yepnet.test');
-    expect(ok(await ana.get('/pessoas/me')).json().caps).toEqual({ member: true, communicate: true, administer: true, moderate: true, configure: true });
+    expect(ok(await ana.get('/pessoas/me')).json().caps).toEqual({ member: true, communicate: true, administer: true, moderate: true, configure: true, hr: true });
     expect(ok(await ana.get('/pessoas/config')).json().settings.limits.videoMb).toBe(40);
     expect((await carlos.put('/pessoas/config', { limits: { videoMb: 500 } })).statusCode).toBe(422);
   });

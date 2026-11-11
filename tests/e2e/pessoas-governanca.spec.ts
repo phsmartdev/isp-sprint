@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 
-/** Pessoas & Cultura · Etapa 5: card no formato do Instagram, denúncia, decisão da moderação, aviso ao autor e painel. */
+/** Pessoas & Gestão · Etapa 5: card no formato do Instagram, denúncia, decisão da moderação, aviso ao autor e painel. */
 const SHOTS = process.env.E2E_SHOTS;
 const DB = process.env.TEST_DATABASE_URL ?? 'postgres://isp:isp@localhost:5432/isp_sprint_test';
 const psql = (q: string) => execFileSync('psql', [DB, '-Atc', q]).toString().trim();
@@ -92,7 +92,7 @@ test('instagram, denúncia, moderação e painel', async ({ page, browser }) => 
   // Ana recebe o aviso e vê o motivo no perfil
   // aviso de moderação fica nas Notificações do módulo (o @ do topo é só marcação e institucional)
   await a.reload();
-  await a.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Notificações' }).click();
+  await a.getByRole('navigation', { name: 'Seções de Pessoas & Gestão' }).getByRole('link', { name: 'Notificações' }).click();
   await expect(a.getByRole('region', { name: 'Avisos' }).getByText('A moderação pediu que você edite sua publicação')).toBeVisible();
   await a.goto('/pessoas/perfil/eu');
   const own = a.getByRole('article').filter({ hasText: `Bastidores da nova loja ${tag}` });

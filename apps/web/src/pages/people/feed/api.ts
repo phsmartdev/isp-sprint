@@ -1,4 +1,4 @@
-/** Feed de Pessoas & Cultura: tipos, consultas e envio de mídias. */
+/** Feed de Pessoas & Gestão: tipos, consultas e envio de mídias. */
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, qs } from '../../../lib/api';
 import { canEncodeWebp, compressImage, drawScaled, fileToBase64 } from '../../../lib/files';

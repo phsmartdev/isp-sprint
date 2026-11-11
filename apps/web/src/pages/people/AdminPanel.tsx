@@ -1,5 +1,5 @@
 /**
- * Painel de Pessoas & Cultura: visão geral agregada do período (sem nomes nem ranking) e gestão de conteúdo
+ * Painel de Pessoas & Gestão: visão geral agregada do período (sem nomes nem ranking) e gestão de conteúdo
  * com filtros. A moderação pode ocultar, remover ou restaurar com justificativa; comunidade privada de que a pessoa
  * não participa não aparece aqui.
  */
