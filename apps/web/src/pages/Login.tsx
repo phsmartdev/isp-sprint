@@ -74,12 +74,19 @@ export function AuthFrame({ children }: { children: ReactNode }) {
           <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
           <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
         </section>
-        <div className="w-full max-w-[420px] shrink-0 rounded-xl bg-surface p-7 text-text shadow-overlay ring-1 ring-black/5 sm:p-10">
-          <div className="mb-6 flex items-center justify-center gap-3">
-            <img src="/brand/bkt-logo.png" alt="BKT" className="h-12 w-auto object-contain" draggable={false} />
-            <span className="border-l border-line pl-3 font-display text-base font-semibold text-muted">RevOps</span>
+        <div className="w-full max-w-[420px] shrink-0">
+          <div className="rounded-xl bg-surface p-7 text-text shadow-overlay ring-1 ring-black/5 sm:p-10">
+            <div className="mb-6 flex items-center justify-center gap-3">
+              <img src="/brand/bkt-logo.png" alt="BKT" className="h-12 w-auto object-contain" draggable={false} />
+              <span className="border-l border-line pl-3 font-display text-base font-semibold text-muted">RevOps</span>
+            </div>
+            {children}
           </div>
-          {children}
+          {/* direitos autorais, no padrão: © ano · razão social · CNPJ */}
+          <p className="mt-4 text-center text-xs leading-relaxed text-white/60" data-testid="copyright">
+            <span className="whitespace-nowrap">© {new Date().getFullYear()} BKT Soluções e Tecnologia</span> · <span className="whitespace-nowrap">CNPJ 18.929.415/0001-00</span>
+            <br />Todos os direitos reservados.
+          </p>
         </div>
       </div>
       <p className="relative pb-6 text-center text-xs text-white/50 lg:absolute lg:bottom-6 lg:left-[6vw] lg:pb-0 lg:text-left">Acesso restrito a colaboradores BKT.</p>
