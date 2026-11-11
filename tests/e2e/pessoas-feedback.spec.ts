@@ -91,6 +91,15 @@ test('feedback descendente e ascendente confidencial', async ({ page, browser })
   await md.getByLabel(/^Registro da mediação/).fill('Conversei com quem enviou; autorizou repassar a síntese.');
   await md.getByRole('button', { name: 'Registrar mediação' }).click();
   await expect(m.getByText('Mediação registrada')).toBeVisible();
+  // ficha do colaborador (RH): tudo consolidado, feedback só em números
+  await m.getByRole('navigation', { name: 'Seções de Pessoas & Gestão' }).getByRole('link', { name: 'Colaboradores' }).click();
+  await m.getByLabel('Buscar colaborador').fill('Lucas');
+  await m.getByRole('link', { name: /Lucas Lima/ }).click();
+  await expect(m.getByRole('heading', { name: 'Lucas Lima' })).toBeVisible();
+  await expect(m.getByRole('region', { name: 'Feedback' })).toContainText('Da liderança');
+  await expect(m.getByRole('region', { name: 'Jornada' })).toContainText('Feedback recebido: Oportunidade de melhoria');
+  await expect(m.locator('body')).not.toContainText(SBI.behavior);
+  if (SHOTS) await m.screenshot({ path: `${SHOTS}/dev-ficha.png`, fullPage: true });
   await mctx.close();
 
   // Ana recebe só a síntese, sem saber quem enviou
