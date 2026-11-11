@@ -12,6 +12,7 @@ import { OpportunityCreate, OpportunityListQuery, OpportunityTransition, Opportu
 import { pipelinesOf, resolvePipeline, getActiveInstruction } from '../services/instructions';
 import { checkStageRequirements } from '../services/requirements';
 import { notifyDealWon } from '../services/alerts';
+import { celebrateDealWon } from '../services/people/achievements';
 import { runAutomations } from '../services/automations';
 import { TERMINAL_STAGES, atLeast, validateTransition, type OpportunityStage } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -482,6 +483,8 @@ export const opportunityRoutes = [
       // ganhar (ou reabrir uma ganha) muda o valor anual consolidado da conta: Tier e IPC recalculam na hora
       if (body.toStage === 'ganha' || wasWon) await freshSnapshot(app.db, auth.tenantId, dto.contactId).catch((e) => req.log.error(e, 'tier da conta'));
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
+      // Pessoas & Cultura: conquista no feed (pontos e badges da venda, nunca o valor)
+      if (body.toStage === 'ganha') await celebrateDealWon(app.db, auth.tenantId, params.id).catch((e) => req.log.error(e, 'conquista de venda no feed'));
       return autoProposal ? { ...dto, autoProposal } : dto;
     },
   }),

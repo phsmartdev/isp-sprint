@@ -11,6 +11,7 @@ import { audit } from '../services/audit';
 import { peopleCaps, peopleSettingsOf } from '../services/people/settings';
 import { inMyFeed, postDtos, postVisible, validMentions } from '../services/people/posts';
 import { communityPerms, loadCommunity } from '../services/people/communities';
+import { visibleAnnouncementMedia } from './peopleCulture';
 import { detectMedia, safeFilename } from '../services/people/media';
 import { institutionalOf, publicCard } from '../services/people/profiles';
 import type { DbOrTx } from '../db/client';
@@ -303,7 +304,7 @@ export const peopleFeedRoutes = [
       if (!data.length || data.length > CHUNK) throw unprocessable('Parte inválida.');
       // limpeza: partes abandonadas e mídias enviadas e não usadas há mais de um dia
       await app.db.delete(s.peopleMediaChunks).where(sql`${s.peopleMediaChunks.createdAt} < now() - interval '1 day'`);
-      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.tenantId, auth.tenantId), isNull(s.peopleMedia.postId), isNull(s.peopleMedia.communityId), sql`${s.peopleMedia.createdAt} < now() - interval '1 day'`));
+      await app.db.delete(s.peopleMedia).where(and(eq(s.peopleMedia.tenantId, auth.tenantId), isNull(s.peopleMedia.postId), isNull(s.peopleMedia.communityId), isNull(s.peopleMedia.announcementId), sql`${s.peopleMedia.createdAt} < now() - interval '1 day'`));
       const r = await app.db.execute(sql`insert into people_media_chunks (tenant_id, upload_id, n, owner_id, data) values (${auth.tenantId}, ${params.uploadId}, ${params.n}, ${auth.userId}, ${data})
         on conflict (upload_id, n) do update set data = excluded.data, created_at = now() where people_media_chunks.owner_id = excluded.owner_id returning n`);
       if (!r.rows.length) throw forbidden('Este envio é de outra pessoa.');
@@ -344,12 +345,13 @@ export const peopleFeedRoutes = [
   defineRoute({
     method: 'GET', url: '/pessoas/midias/:id', summary: 'Abre a mídia de uma publicação visível (vídeo em partes, por intervalo de bytes)', ...M, params: Id,
     handler: async ({ app, auth, params, req, reply }) => {
-      const [m] = await app.db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, communityId: s.peopleMedia.communityId, ownerId: s.peopleMedia.ownerId, mime: s.peopleMedia.mime, kind: s.peopleMedia.kind, filename: s.peopleMedia.filename, size: s.peopleMedia.sizeBytes, sha: s.peopleMedia.sha256 })
+      const [m] = await app.db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, communityId: s.peopleMedia.communityId, announcementId: s.peopleMedia.announcementId, ownerId: s.peopleMedia.ownerId, mime: s.peopleMedia.mime, kind: s.peopleMedia.kind, filename: s.peopleMedia.filename, size: s.peopleMedia.sizeBytes, sha: s.peopleMedia.sha256 })
         .from(s.peopleMedia).where(and(eq(s.peopleMedia.id, params.id), eq(s.peopleMedia.tenantId, auth.tenantId))).limit(1);
       if (!m) throw notFound('Mídia não encontrada.');
       // capa/avatar de comunidade: como nome e descrição, visível a quem usa o módulo; solta (no editor): só o dono;
       // publicada: segue a visibilidade da publicação
       if (m.postId) await visiblePost(app.db, auth, m.postId);
+      else if (m.announcementId) await visibleAnnouncementMedia(app.db, auth, m.announcementId);
       else if (!m.communityId && m.ownerId !== auth.userId) throw notFound('Mídia não encontrada.');
       reply.header('content-type', m.mime).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=3600').header('etag', `"${m.sha}"`).header('accept-ranges', 'bytes')
         .header('content-security-policy', "default-src 'none'; media-src 'self'; img-src 'self'")

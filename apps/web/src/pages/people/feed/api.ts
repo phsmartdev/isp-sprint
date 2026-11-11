@@ -15,6 +15,8 @@ export type FeedPost = {
   body: string; publishedAt: string | null; editedAt: string | null; createdAt: string;
   author: PersonCard; mentions: { id: string; name: string }[]; media: Media[];
   community: { id: string; name: string; kind: string } | null; pinnedAt: string | null;
+  /** conquista (venda/badge) ou reconhecimento: dados do cartão animado */
+  meta?: Record<string, unknown> | null;
   reactionCount: number; commentCount: number; reactions: Partial<Record<Reaction, number>>; myReaction: Reaction | null; saved: boolean; mine: boolean;
 };
 export type Comment = { id: string; parentId: string | null; body: string; createdAt: string; editedAt: string | null; mine: boolean; author: PersonCard; mentions: { id: string; name: string }[] };

@@ -31,6 +31,17 @@ export const PeopleSettings = z.object({
     mediaPerPost: z.number().int().min(1).max(10).default(6),
     postChars: z.number().int().min(100).max(5000).default(3000),
   }).default({}),
+  /** conquistas automáticas no feed */
+  celebrations: z.object({
+    /** venda fechada: pontos e badges da negociação (nunca o valor) */
+    dealWon: z.boolean().default(true),
+    /** nome da conta (cliente) no cartão da venda */
+    showClient: z.boolean().default(true),
+    /** nova faixa de badge alcançada */
+    badges: z.boolean().default(true),
+  }).default({}),
+  /** implantação das celebrações de badge: faixas que já existiam foram registradas sem publicar */
+  badgeBaselineAt: z.string().nullable().default(null),
 });
 export type PeopleSettings = z.infer<typeof PeopleSettings>;
 
