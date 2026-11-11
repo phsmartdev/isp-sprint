@@ -128,13 +128,17 @@ export async function renderOffice(input: OfficeRenderInput) {
     for (const raw of lines) {
       if (!raw.trim()) { y -= b.paraGap * MM + lineH * 0.35; paraStart = true; continue; }
       if (raw.trim() === '{{assinatura}}') {
-        const h = 13 * MM;
-        if (sigImg) {
-          const ratio = sigImg.width / sigImg.height;
+        const h = (b.sigH ?? 13) * MM;
+        // a imagem inserida no bloco vale mais que a da filial
+        let img = sigImg;
+        if (b.sigImage) { const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.sigImage); if (m) { try { const bytes = Buffer.from(m[2]!, 'base64'); img = m[1] === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes); } catch { /* imagem inválida: segue sem */ } } }
+        if (img) {
+          const sigImgUse = img;
+          const ratio = sigImgUse.width / sigImgUse.height;
           const w = Math.min(width, h * ratio);
-          const x = b.align === 'left' ? left : b.align === 'right' ? left + width - w : left + (width - w) / 2;
+          const x = (b.align === 'left' ? left : b.align === 'right' ? left + width - w : left + (width - w) / 2) + (b.sigDx ?? 0) * MM;
           if (y - h < bottomMm * MM) { pg++; page(pg); y = H - topMm * MM; }
-          page(pg).drawImage(sigImg, { x, y: y - h, width: w, height: h });
+          page(pg).drawImage(sigImgUse, { x, y: y - h - (b.sigDy ?? 0) * MM, width: w, height: h });
         }
         y -= h;
         continue;

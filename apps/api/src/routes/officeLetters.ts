@@ -23,6 +23,9 @@ const Block = z.object({
   x: z.number().min(0).max(200), y: z.number().min(0).max(290), w: z.number().min(10).max(210),
   align: z.enum(['left', 'right', 'center', 'justify']), size: z.number().min(6).max(28), lineGap: z.number().min(1).max(3),
   indent: z.number().min(0).max(60), paraGap: z.number().min(0).max(30), text: z.string().max(10000),
+  // assinatura digitalizada no próprio bloco (até ~600 KB) e o ajuste dela
+  sigImage: z.string().max(820_000).regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/, 'Assinatura em PNG ou JPG').nullable().optional(),
+  sigH: z.number().min(5).max(60).optional(), sigDx: z.number().min(-80).max(80).optional(), sigDy: z.number().min(-40).max(40).optional(),
 });
 const Blocks = z.array(Block).min(1).max(30);
 const Vars = z.record(z.string().max(60), z.string().max(2000));
@@ -47,7 +50,7 @@ export const officeLetterRoutes = [
     },
   }),
   defineRoute({
-    method: 'POST', url: '/admin/oficios', summary: 'Cria modelo de ofício (começa do modelo de reajuste, se não vierem blocos)', ...ADMIN,
+    method: 'POST', url: '/admin/oficios', bodyLimit: 2_000_000, summary: 'Cria modelo de ofício (começa do modelo de reajuste, se não vierem blocos)', ...ADMIN,
     body: z.object({ name: z.string().trim().min(2).max(120), description: z.string().trim().max(500).nullable().default(null), branchIds: z.array(z.string().uuid()).max(50).default([]), blocks: Blocks.optional() }),
     handler: async ({ app, auth, body, req, reply }) => {
       const [t] = await app.db.insert(s.officeTemplates).values({ tenantId: auth.tenantId, name: body.name, description: body.description, branchIds: body.branchIds, blocks: (body.blocks ?? DEFAULT_BLOCKS) as OfficeBlock[], createdBy: auth.userId, updatedBy: auth.userId }).returning({ id: s.officeTemplates.id });
@@ -57,7 +60,7 @@ export const officeLetterRoutes = [
     },
   }),
   defineRoute({
-    method: 'PATCH', url: '/admin/oficios/:id', summary: 'Edita o modelo (texto, posição dos blocos, filiais); cada gravação é uma nova versão', ...ADMIN, params: IdParams,
+    method: 'PATCH', url: '/admin/oficios/:id', bodyLimit: 2_000_000, summary: 'Edita o modelo (texto, posição dos blocos, filiais); cada gravação é uma nova versão', ...ADMIN, params: IdParams,
     body: z.object({ name: z.string().trim().min(2).max(120).optional(), description: z.string().trim().max(500).nullable().optional(), branchIds: z.array(z.string().uuid()).max(50).optional(), blocks: Blocks.optional(), active: z.boolean().optional() }),
     handler: async ({ app, auth, params, body, req }) => {
       const [t] = await app.db.update(s.officeTemplates).set({ ...body, ...(body.blocks ? { blocks: body.blocks as OfficeBlock[] } : {}), version: sql`${s.officeTemplates.version} + 1`, updatedBy: auth.userId, updatedAt: new Date() })
@@ -78,7 +81,7 @@ export const officeLetterRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/admin/oficios/previa', summary: 'Prévia do modelo em PDF com valores de exemplo, no timbrado da filial escolhida', ...ADMIN,
-    body: z.object({ blocks: Blocks, branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 400_000,
+    body: z.object({ blocks: Blocks, branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 2_000_000,
     handler: async ({ app, auth, body }) => {
       const art = await branchArt(app.db, auth.tenantId, body.branchId);
       const r = await renderOffice({ blocks: body.blocks as OfficeBlock[], vars: SAMPLE_VARS, ...art });
@@ -147,7 +150,7 @@ export const officeLetterRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/contracts/:id/oficios/previa', summary: 'Prévia exata do ofício (não numera nem guarda)', ...CTR, params: IdParams,
-    body: z.object({ blocks: Blocks, vars: Vars, branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 400_000,
+    body: z.object({ blocks: Blocks, vars: Vars, branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 2_000_000,
     handler: async ({ app, auth, params, body }) => {
       const c = await loadContract(app.db, auth, params.id);
       const d = await officeDefaults(app.db, auth.tenantId, c.id, todayIn(auth.timezone), { branchId: body.branchId });
@@ -158,7 +161,7 @@ export const officeLetterRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/contracts/:id/oficios', summary: 'Emite o ofício: número sequencial da filial no ano, PDF guardado e o texto como saiu', ...CTR, params: IdParams,
-    body: z.object({ templateId: z.string().uuid().nullable().default(null), blocks: Blocks, vars: Vars, subject: z.string().trim().max(200).nullable().default(null), branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 400_000,
+    body: z.object({ templateId: z.string().uuid().nullable().default(null), blocks: Blocks, vars: Vars, subject: z.string().trim().max(200).nullable().default(null), branchId: z.string().uuid().nullable().default(null) }), bodyLimit: 2_000_000,
     handler: async ({ app, auth, params, body, req, reply }) => {
       const c = await loadContract(app.db, auth, params.id);
       const today = todayIn(auth.timezone);

@@ -6919,7 +6919,9 @@ export const domainEvents = pgTable(
 // ================================================================== Ofícios (Configurações → Modelos → Ofícios)
 
 /** Bloco posicionado na página A4 (em mm a partir do canto superior esquerdo). Texto com {{variáveis}} e **negrito**, __sublinhado__, _itálico_. */
-export type OfficeBlock = { id: string; kind: 'texto' | 'assinatura'; label?: string; x: number; y: number; w: number; align: 'left' | 'right' | 'center' | 'justify'; size: number; lineGap: number; indent: number; paraGap: number; text: string };
+export type OfficeBlock = { id: string; kind: 'texto' | 'assinatura'; label?: string; x: number; y: number; w: number; align: 'left' | 'right' | 'center' | 'justify'; size: number; lineGap: number; indent: number; paraGap: number; text: string;
+  /** assinatura digitalizada inserida no bloco (data URL PNG/JPG); sem ela, a da filial. Altura e deslocamento em mm. */
+  sigImage?: string | null; sigH?: number; sigDx?: number; sigDy?: number };
 
 /** Modelo de ofício: quantos a empresa quiser; vale para todas as filiais ou só para algumas (o fundo é o timbrado da filial). */
 export const officeTemplates = pgTable('office_templates', {
