@@ -1,8 +1,8 @@
-/** Pessoas & Cultura: tipos e consultas compartilhadas pelas telas do módulo. */
+/** Pessoas & Gestão: tipos e consultas compartilhadas pelas telas do módulo. */
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
-export type PeopleCaps = { member: boolean; communicate: boolean; administer: boolean; moderate: boolean; configure: boolean };
+export type PeopleCaps = { member: boolean; communicate: boolean; administer: boolean; moderate: boolean; configure: boolean; hr?: boolean };
 export type PersonCard = { id: string; name: string; jobTitle: string | null; hasPhoto: boolean; area: string | null; unit: string | null };
 export type PeopleMe = { me: PersonCard & { firstName: string }; caps: PeopleCaps; communityModerator?: boolean; profileComplete: boolean; limits: { imageMb: number; videoMb: number; mediaPerPost: number; postChars: number } };
 export type PeopleProfile = PersonCard & {

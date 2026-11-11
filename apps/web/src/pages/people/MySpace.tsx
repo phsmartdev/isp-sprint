@@ -5,19 +5,21 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Award, Bell, Bookmark, Flag, Send, ChevronRight, Search, Sparkles, UserRound, UsersRound } from 'lucide-react';
+import { Award, Bell, Bookmark, Flag, MessageSquareHeart, Send, ChevronRight, Search, Sparkles, UserRound, UsersRound } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useDebounced } from '../../lib/hooks';
 import { Avatar, EmptyState, ErrorState, Input, LoadingRows } from '../../components/ui/primitives';
 import { Hexagons } from '../../components/brand';
 import { orgLine, usePeopleMe, type PersonCard } from './shared';
 import { RecognitionList } from './Recognition';
+import { useAuth } from '../../auth/AuthProvider';
 import { AnnouncementsBlock } from './Announcements';
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
 export function MySpacePage() {
   const q = usePeopleMe();
+  const dev = useAuth().feature('pessoas_cultura.desenvolvimento');
   if (q.isLoading) return <div className="card"><LoadingRows rows={5} /></div>;
   if (q.isError || !q.data) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   return (
@@ -39,6 +41,7 @@ export function MySpacePage() {
             <li><Link to="/pessoas/perfil/eu" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UserRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Meu perfil</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/comunidades" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UsersRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Minhas comunidades</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/reconhecimento" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Award className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Reconhecer colega</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
+            {dev && <li><Link to="/pessoas/desenvolvimento/feedbacks" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><MessageSquareHeart className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Feedbacks</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>}
             <li><Link to="/pessoas/mensagens" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Send className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Mensagens</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/notificacoes" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Bell className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Notificações</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/denuncias" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Flag className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Minhas denúncias</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>

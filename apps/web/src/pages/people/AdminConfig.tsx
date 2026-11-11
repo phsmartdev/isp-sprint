@@ -43,7 +43,7 @@ export function PeopleConfigPage() {
     <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <section className="card p-5" aria-label="Papéis do módulo">
         <h2 className="text-md font-bold text-ink">Papéis do módulo</h2>
-        <p className="mb-3 text-sm text-muted">Marque os setores da empresa (definidos no cadastro de cada usuário) que exercem cada papel. Quem tem nível Total em Pessoas & Cultura (Configurações → Segurança) também administra. Nenhum papel dá acesso a conteúdo privado de comunidades.</p>
+        <p className="mb-3 text-sm text-muted">Marque os setores da empresa (definidos no cadastro de cada usuário) que exercem cada papel. Quem tem nível Total em Pessoas & Gestão (Configurações → Segurança) também administra. Nenhum papel dá acesso a conteúdo privado de comunidades.</p>
         {!sectors.items.length ? <Notice tone="warning">Nenhum setor cadastrado. Crie os setores em Configurações e associe às pessoas.</Notice> : (
           <div className="grid gap-4 lg:grid-cols-3">
             {ROLES.map((r) => (

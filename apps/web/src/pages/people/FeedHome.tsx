@@ -1,5 +1,5 @@
 /**
- * Feed de Pessoas & Cultura no formato do Instagram web: fileira de fotos de quem publicou há pouco, comunicados
+ * Feed de Pessoas & Gestão no formato do Instagram web: fileira de fotos de quem publicou há pouco, comunicados
  * oficiais, "compartilhe algo" e o feed numa coluna estreita; à direita, o meu cartão, sugestões de colegas e rodapé.
  */
 import { Link, useNavigate } from 'react-router-dom';

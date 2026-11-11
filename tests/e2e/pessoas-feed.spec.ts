@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { deflateSync } from 'node:zlib';
 
-/** Pessoas & Cultura · Etapa 2: publicar com foto e menção, reagir, comentar e responder, salvar, rascunho, editar e excluir. */
+/** Pessoas & Gestão · Etapa 2: publicar com foto e menção, reagir, comentar e responder, salvar, rascunho, editar e excluir. */
 const SHOTS = process.env.E2E_SHOTS;
 function png(w: number, h: number, rgb: [number, number, number]) {
   const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });

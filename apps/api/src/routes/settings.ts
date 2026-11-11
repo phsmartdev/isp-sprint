@@ -1,6 +1,8 @@
 /** Configurações: modelo de instrução, jornadas, SMTP, notificações, registro de e-mails e agendamento. */
 import { checkBadges } from '../services/people/achievements';
 import { announcementRoutine } from '../services/people/notify';
+import { syncReportingLines } from '../services/people/reporting';
+import { dispatchDomainEvents } from '../services/domainEvents';
 import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
 import { runMeasurementDrafts } from '../services/measurementReports';
@@ -322,10 +324,13 @@ export const settingsRoutes = [
           const ids = (await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, t.id), eq(s.users.active, true)))).map((u) => u.id);
           badges[t.id] = {
             badges: [...(await checkBadges(app.db, t.id, ids)).values()].flat().length,
+            lideranca: await syncReportingLines(app.db, t.id, { force: true }),
             comunicados: await announcementRoutine(app.db, app.config, t.id, new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())),
           };
         } catch (e) { badges[t.id] = { error: (e as Error).message }; }
       }
+      // eventos de domínio pendentes (assinantes internos, webhooks e conectores)
+      const domainEventsRun = await dispatchDomainEvents(app.db, 500).catch((e) => ({ error: (e as Error).message }));
       const glpi: Record<string, unknown> = {};
       for (const t of tenants) glpi[t.id] = await syncOpenTickets(app.db, t.id).catch((e) => ({ error: (e as Error).message }));
       // Automações por retorno de chamado/leitura de e-mail: IXC (comparação das OS) e fila
@@ -334,7 +339,7 @@ export const settingsRoutes = [
         try { automations[t.id] = { ixc: await pollIxcReturns(app.db, t.id), fila: await drainAutomationQueue(app.db, app.config, t.id, 200) }; }
         catch (e) { automations[t.id] = { error: (e as Error).message }; }
       }
-      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement, automations, badges };
+      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement, automations, badges, domainEvents: domainEventsRun };
     },
   }),
 ];

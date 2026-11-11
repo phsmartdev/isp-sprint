@@ -209,7 +209,11 @@ export const peopleMessageRoutes = [
          where m.tenant_id = ${auth.tenantId} and m.deleted_at is null and m.author_id <> ${auth.userId} and (me.last_read_at is null or m.created_at > me.last_read_at)`)).rows;
       const [notif] = await app.db.select({ n: sql<number>`count(*)::int` }).from(s.userNotifications)
         .where(and(eq(s.userNotifications.tenantId, auth.tenantId), eq(s.userNotifications.userId, auth.userId), eq(s.userNotifications.module, 'pessoas'), isNull(s.userNotifications.readAt), sql`${s.userNotifications.event} not in (${sql.join(BELL_EVENTS.map((e) => sql`${e}`), sql`, `)})`));
-      return { messages: Number(msg?.n ?? 0), notifications: Number(notif?.n ?? 0) };
+      // feedbacks que aguardam a minha ciência
+      const [fb] = (await app.db.execute<{ n: number }>(sql`
+        select count(*)::int as n from people_feedbacks where tenant_id = ${auth.tenantId} and recipient_id = ${auth.userId} and acknowledged_at is null
+           and (status = 'enviado' or status = 'repassado')`)).rows;
+      return { messages: Number(msg?.n ?? 0), notifications: Number(notif?.n ?? 0), feedbacks: Number(fb?.n ?? 0) };
     },
   }),
   defineRoute({

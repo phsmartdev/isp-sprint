@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 
-/** Pessoas & Cultura · Etapa 4: comunicado oficial com confirmação de leitura e reconhecimento público com post animado. */
+/** Pessoas & Gestão · Etapa 4: comunicado oficial com confirmação de leitura e reconhecimento público com post animado. */
 const SHOTS = process.env.E2E_SHOTS;
 const DB = process.env.TEST_DATABASE_URL ?? 'postgres://isp:isp@localhost:5432/isp_sprint_test';
 const psql = (q: string) => execFileSync('psql', [DB, '-Atc', q]).toString().trim();
@@ -57,7 +57,7 @@ test('comunicado com ciência e reconhecimento animado no feed', async ({ page, 
   await expect(card.getByText('Leitura confirmada')).toBeVisible();
 
   // Ana reconhece Lucas publicamente
-  await a.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Reconhecimento' }).click();
+  await a.getByRole('navigation', { name: 'Seções de Pessoas & Gestão' }).getByRole('link', { name: 'Reconhecimento' }).click();
   await expect(a).toHaveURL(/\/pessoas\/reconhecimento/);
   await a.getByRole('form', { name: 'Reconhecer um colega' }).getByPlaceholder('Digite o nome').fill('Lucas');
   await a.getByRole('option', { name: /Lucas/ }).first().click();
