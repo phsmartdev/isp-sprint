@@ -567,8 +567,9 @@ export function AdminBranding() {
   const up = useMutation({
     mutationFn: async ({ slot, file, maxDim }: { slot: BrandSlot; file: File; maxDim: number }) => {
       if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) throw new Error('Envie PNG, JPG ou WebP.');
-      const small = await compressImage(file, { maxBytes: 1_900_000, maxDim });
-      if (small.size > 2 * 1024 * 1024) throw new Error('A imagem passa de 2 MB mesmo reduzida. Use uma imagem menor.');
+      // artes grandes (fundo do login): até 3 MB, WebP de alta qualidade quando o navegador suporta
+      const small = await compressImage(file, { maxBytes: 2_900_000, maxDim, format: 'webp' });
+      if (small.size > 3 * 1024 * 1024) throw new Error('A imagem passa de 3 MB mesmo reduzida. Use uma imagem menor.');
       return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(small) } });
     },
     onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Imagem atualizada' }); },

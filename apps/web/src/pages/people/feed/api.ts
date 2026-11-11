@@ -1,7 +1,7 @@
 /** Feed de Pessoas & Cultura: tipos, consultas e envio de mídias. */
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api, qs } from '../../../lib/api';
-import { compressImage, fileToBase64 } from '../../../lib/files';
+import { canEncodeWebp, compressImage, drawScaled, fileToBase64 } from '../../../lib/files';
 import type { PersonCard } from '../shared';
 
 export type Media = { id: string; kind: 'imagem' | 'video' | 'arquivo'; mime: string; filename: string; sizeBytes: number; width?: number | null; height?: number | null };
@@ -42,7 +42,7 @@ export async function uploadMedia(file: File, limits: { imageMb: number; videoMb
   if (/^image\/(png|jpe?g|webp)$/.test(file.type)) {
     const ig = await instagramImage(file);
     if (ig) { f = ig.file; dims = { width: ig.width, height: ig.height }; }
-    if (f.size > 1_500_000) f = await compressImage(f, { maxBytes: Math.min(limits.imageMb * 1024 * 1024, 4_000_000), maxDim: 2560 });
+    if (f.size > 1_500_000) f = await compressImage(f, { maxBytes: Math.min(limits.imageMb * 1024 * 1024, 4_000_000), maxDim: 2560, format: 'webp' });
   } else if (file.type.startsWith('image/') || file.type.startsWith('video/')) dims = await mediaDims(file);
   const isVideo = file.type.startsWith('video/');
   const max = (file.type.startsWith('image/') ? limits.imageMb : isVideo ? limits.videoMb : Math.min(20, limits.videoMb)) * 1024 * 1024;
@@ -84,17 +84,12 @@ export async function instagramImage(file: File): Promise<{ file: File; width: n
   if (sw / sh > t) sw = Math.round(sh * t); else sh = Math.round(sw / t);
   const sx = Math.round((bmp.width - sw) / 2), sy = Math.round((bmp.height - sh) / 2);
   const w = Math.min(1080, sw), h = Math.round(w / t);
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) { bmp.close(); return null; }
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+  const canvas = drawScaled(bmp, w, h, '#fff', { sx, sy, sw, sh });
   bmp.close();
-  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.9));
+  const webp = await canEncodeWebp();
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, webp ? 'image/webp' : 'image/jpeg', 0.92));
   if (!blob) return null;
-  return { file: new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }), width: w, height: h };
+  return { file: new File([blob], file.name.replace(/\.\w+$/, '') + (webp ? '.webp' : '.jpg'), { type: blob.type || 'image/jpeg' }), width: w, height: h };
 }
 
 /** Dimensões de GIF e vídeo (para o quadro do cartão); sem conseguir ler, segue sem. */

@@ -218,6 +218,12 @@ describe('Personalização (imagens)', () => {
     expect((await carlos.del('/admin/branding/mascote_leads')).statusCode).toBe(204);
     expect((await lucas.get('/brand/mascote_leads')).statusCode).toBe(404);
   });
+  it('fundo do login aceita arte de até 3 MB (mais nitidez) e recusa acima disso', async () => {
+    const jpeg = (n: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(n - 4, 7)]).toString('base64');
+    expect((await carlos.put('/admin/branding/login_fundo', { data: jpeg(2_800_000) })).statusCode).toBe(200);
+    expect((await carlos.put('/admin/branding/login_fundo', { data: jpeg(3_150_000) })).statusCode).toBe(422);
+    expect((await carlos.del('/admin/branding/login_fundo')).statusCode).toBe(204);
+  });
   it('recusa SVG e arquivo que não é imagem; só a gerência envia', async () => {
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64');
     expect((await carlos.put('/admin/branding/logo_escuro', { data: svg })).statusCode).toBe(422);
