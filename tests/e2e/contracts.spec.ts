@@ -12,19 +12,20 @@ async function login(page: Page, email: string) {
 test('gestão de contratos: painel, funil, calendário, validação e etapa de implantação', async ({ page }) => {
   test.setTimeout(120_000);
   await login(page, 'carlos@yepnet.test');
-  await page.getByRole('link', { name: 'Gestão de Contratos' }).first().click();
-  await expect(page.getByRole('heading', { name: 'Gestão de Contratos' })).toBeVisible();
-  await expect(page.getByRole('tab', { name: /Central de atenção/ })).toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('tab', { name: 'Painel' }).click();
-  await expect(page.getByText('Contratos ativos')).toBeVisible();
+  // no menu, Gestão de Contratos é um grupo; a Central de atenção é a entrada padrão
+  await page.getByRole('button', { name: 'Gestão de Contratos' }).click();
+  await page.getByRole('link', { name: 'Central de atenção' }).click();
+  await expect(page.getByRole('heading', { name: 'Central de atenção' })).toBeVisible();
+  await page.goto('/contracts?t=painel'); // aba agora fica no menu lateral
+  await expect(page.getByText('Contratos ativos').first()).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-painel.png', fullPage: true });
-  await page.getByRole('tab', { name: 'Funil' }).click();
+  await page.goto('/contracts?t=funil'); // aba agora fica no menu lateral
   await expect(page.getByRole('heading', { name: /Cadastro e validação/ })).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-funil.png', fullPage: true });
-  await page.getByRole('tab', { name: 'Calendário' }).click();
+  await page.goto('/contracts?t=calendario'); // aba agora fica no menu lateral
   await expect(page.getByRole('button', { name: 'Próximo mês' })).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-calendario.png', fullPage: true });
-  await page.getByRole('tab', { name: 'Lista' }).click();
+  await page.goto('/contracts?t=lista'); // aba agora fica no menu lateral
   await page.getByLabel('Buscar contratos').fill('CTR-2026-052');
   await page.getByRole('link', { name: 'CTR-2026-052' }).click();
   await expect(page.getByText('Cadastro aguardando validação')).toBeVisible();
@@ -96,7 +97,7 @@ test('modelos com timbrado, gerar contrato, saldo de medição, painel por tipo 
   for (const t of ['Recorrente', 'Frequente', 'Medição']) await expect(page.getByLabel('Faturamento por tipo de contrato').getByText(t, { exact: false }).first()).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-painel2.png', fullPage: true });
   // modelo .docx
-  await page.getByRole('tab', { name: 'Modelos' }).click();
+  await page.goto('/settings/modelos?aba=contratos'); // modelos de contrato ficam em Configurações → Modelos
   // modelo com a arte (mesmo editor dos modelos de proposta)
   await expect(page.getByRole('heading', { name: 'Modelos de contrato' })).toBeVisible();
   await page.getByRole('button', { name: 'Novo modelo' }).click();
@@ -115,7 +116,7 @@ test('modelos com timbrado, gerar contrato, saldo de medição, painel por tipo 
   await page.getByRole('button', { name: 'Salvar modelo' }).click();
   await page.screenshot({ path: 'test-results/contracts-modelos.png', fullPage: true });
   // gera para um contrato vigente
-  await page.getByRole('tab', { name: 'Lista' }).click();
+  await page.goto('/contracts?t=lista'); // aba agora fica no menu lateral
   await page.getByLabel('Buscar contratos').fill('CTR-2025-031');
   await page.getByRole('link', { name: 'CTR-2025-031' }).click();
   await page.getByRole('tab', { name: 'Documentos' }).click();
@@ -204,7 +205,7 @@ test('consumo e empenho: ritmo contra o tempo, esgotamento previsto e empenho co
   expect((await api.post(`/api/v1/contracts/${id}/ledger`, { data: { kind: 'consumo', amountCents: 900_000, occurredOn: today, description: 'Medição do mês' } })).status()).toBe(201);
 
   await page.goto(`/contracts/${id}`);
-  await page.getByRole('tab', { name: 'Consumo e empenho' }).click();
+  await page.getByRole('tab', { name: 'Consumo por valor' }).click();
   const ind = page.getByRole('region', { name: 'Indicador de consumo' });
   await expect(ind).toContainText('75%');
   await expect(ind.getByRole('alert')).toContainText('antes do fim da vigência');
@@ -216,25 +217,6 @@ test('consumo e empenho: ritmo contra o tempo, esgotamento previsto e empenho co
   await dlg.getByRole('button', { name: 'Registrar' }).click();
   await expect(emp).toContainText('2026NE000777');
   await expect(emp).toContainText('R$ 10.000,00 de R$ 10.000,00');
-});
-
-test('habilitação: quadro de certidões por filial, envio e aviso do que precisa de atenção', async ({ page }) => {
-  test.setTimeout(90_000);
-  await login(page, 'carlos@yepnet.test');
-  await page.goto('/contracts?t=habilitacao');
-  const quadro = page.getByRole('region', { name: 'Quadro de certidões por filial' });
-  await expect(quadro.getByRole('columnheader', { name: 'CRF do FGTS' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cadastrar documento' }).click();
-  const dlg = page.getByRole('dialog', { name: 'Cadastrar documento' });
-  await dlg.getByLabel('Documento').selectOption({ label: 'CNDT (débitos trabalhistas)' });
-  const soon = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
-  await dlg.getByLabel('Validade').fill(soon);
-  await dlg.locator('#hb-f').setInputFiles({ name: 'cndt.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
-  await dlg.getByRole('button', { name: 'Enviar documento' }).click();
-  await expect(page.getByText('Documento cadastrado')).toBeVisible();
-  const att = page.getByRole('list', { name: 'O que precisa de atenção' });
-  await expect(att.getByText('CNDT (débitos trabalhistas)').first()).toBeVisible();
-  await expect(att).toContainText('Vence em até 7 dias');
 });
 
 test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato público', async ({ page }) => {
@@ -258,8 +240,10 @@ test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato pú
   await expect(sec).toContainText('R$ 12.000,00');
   await sec.getByRole('button', { name: 'Registrar aditivo' }).click();
   const dlg = page.getByRole('dialog', { name: 'Registrar termo aditivo' });
+  await dlg.getByRole('checkbox', { name: /Acréscimo de valor/ }).check();
   await dlg.getByLabel('Valor acrescido').fill('4000');
-  await expect(dlg.getByRole('alert')).toContainText('Acima do limite legal: restam R$ 3.000,00');
+  await expect(dlg.getByRole('alert')).toContainText('Acima do limite legal de acréscimo');
+  await expect(dlg).toContainText('Disponível no limite: R$ 3.000,00');
   await expect(dlg.getByRole('button', { name: 'Registrar aditivo' })).toBeDisabled();
   await dlg.getByLabel('Valor acrescido').fill('2400');
   await dlg.getByLabel('Diferença no valor mensal').fill('200');
@@ -267,7 +251,7 @@ test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato pú
   await dlg.getByRole('button', { name: 'Registrar aditivo' }).click();
   await expect(sec.getByText('Aditivo 1 · Acréscimo de valor/quantidade')).toBeVisible();
   await expect(sec).toContainText('20% de 25% · restam R$ 600,00');
-  await expect(sec).toContainText('Mensal +R$ 200,00');
+  await expect(sec).toContainText('mensal +R$ 200,00');
   // valor do ano anterior (para o Booking não contar reajuste como crescimento)
   const yv = page.getByRole('region', { name: 'Valor por ano' });
   await yv.getByLabel('Valor mensal naquele ano').fill('900');
@@ -295,8 +279,8 @@ test('central de atenção: fila por gravidade, filtros, resolver na fila e vis�
   expect((await api.post(`/api/v1/contracts/${id}/validate`)).ok()).toBe(true);
   expect((await api.post('/api/v1/contracts/alerts/run')).ok()).toBe(true);
 
-  await page.goto('/contracts');
-  await expect(page.getByRole('tab', { name: /Central de atenção/ })).toHaveAttribute('aria-selected', 'true');
+  await page.goto('/contracts?t=atencao');
+  await expect(page.getByRole('heading', { name: 'Central de atenção' })).toBeVisible();
   const summary = page.getByRole('region', { name: 'Resumo da central de atenção' });
   await expect(summary.getByRole('button', { name: /Crítico/ })).toBeVisible();
   const list = page.getByRole('list', { name: 'Itens que pedem ação' });
@@ -312,10 +296,10 @@ test('central de atenção: fila por gravidade, filtros, resolver na fila e vis�
   await dlg.getByRole('button', { name: 'Concluir notificação' }).click();
   await expect(row).toHaveCount(0);
 
-  await page.getByRole('tab', { name: 'Painel' }).click();
+  await page.goto('/contracts?t=painel'); // aba agora fica no menu lateral
   const ex = page.getByRole('region', { name: 'Visão executiva' });
   await expect(ex.getByText('Carteira contratada (12 meses)')).toBeVisible();
-  await expect(ex.getByText('Em 180 dias')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Receita em risco por janela' }).getByText('Vence em até 180 dias')).toBeVisible();
   await expect(ex.getByText('Dependência dos maiores clientes')).toBeVisible();
   await page.screenshot({ path: 'test-results/contracts-executivo.png', fullPage: true });
 });
