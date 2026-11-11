@@ -73,9 +73,18 @@ const Header = z.object({
   adminOwnerId: uuid.nullable().default(null),
   legalLimitAt: optDay,
   nextAction: optText(300), nextActionAt: optDay,
+  /** filial do contrato (emitente dos ofícios, no timbrado dela); sem informar, herda da negociação */
+  branchId: uuid.nullable().default(null),
 });
 const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null), contactId: uuid.nullable().default(null), initialBalanceCents: z.number().int().min(0).max(1_000_000_000_000).default(0), version: VersionFields });
 const UpdateBody = Header.partial().extend({ version: VersionFields.partial().optional(), reason: z.string().trim().max(500).optional() });
+
+/** A filial precisa ser da empresa. */
+async function assertBranch(db: DbOrTx, tenantId: string, branchId: string | null | undefined) {
+  if (!branchId) return;
+  const [b] = await db.select({ id: s.salesBranches.id }).from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.id, branchId))).limit(1);
+  if (!b) throw unprocessable('Filial inválida.', [{ path: 'branchId', message: 'Escolha uma filial da empresa' }]);
+}
 
 /** Datas derivadas: término pelo prazo e renovação prevista no dia seguinte ao término. */
 /** Produtos lançados na oportunidade (com lance, desconto e cobrança); sem itens, os produtos do plano. */
@@ -243,14 +252,14 @@ export const contractRoutes = [
     module: 'contratos',
     body: CreateBody,
     handler: async ({ app, auth, body, req, reply }) => {
-      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null, arpFromOpp: string | null = null;
+      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null, arpFromOpp: string | null = null, branchId: string | null = body.branchId;
       if (body.opportunityId) {
         const [o] = await app.db.select().from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
         if (!o) throw notFound('Oportunidade não encontrada.');
         if (o.stage !== 'ganha') throw unprocessable('O contrato é cadastrado depois que a oportunidade é concluída (venda fechada).');
         const [dup] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
         if (dup) throw unprocessable('Esta oportunidade já tem contrato cadastrado.', [{ path: 'opportunityId', message: dup.id }]);
-        contactId = o.contactId; customerId = o.customerId; oppTitle = o.title; arpFromOpp = o.arpId;
+        contactId = o.contactId; customerId = o.customerId; oppTitle = o.title; arpFromOpp = o.arpId; branchId = branchId ?? o.branchId;
       }
       if (!contactId) throw unprocessable('Informe a oportunidade ou o cliente.', [{ path: 'contactId', message: 'Obrigatório' }]);
       const [contact] = await app.db.select({ id: s.contacts.id }).from(s.contacts).where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId))).limit(1);
@@ -258,6 +267,7 @@ export const contractRoutes = [
       if (!customerId) customerId = (await app.db.select({ id: s.customers.id }).from(s.customers).where(eq(s.customers.contactId, contactId)).limit(1))[0]?.id ?? null;
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
+      await assertBranch(app.db, auth.tenantId, branchId);
       const ver = normalizeVersion(body.version);
       // só serviços de telecom vão para o Zenith; nos demais o cadastro Zenith não é guardado
       if (ver.serviceType !== undefined && !needsZenith(ver.serviceType)) ver.zenith = null;
@@ -266,7 +276,7 @@ export const contractRoutes = [
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
-          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
+          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, branchId, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
           commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, adminOwnerId: body.adminOwnerId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
@@ -792,7 +802,8 @@ export const contractRoutes = [
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
-        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
+        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt', 'branchId'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
+        if (header.branchId) await assertBranch(tx, auth.tenantId, header.branchId);
         if (header.kind === 'privado') header.legalRegime = 'privado';
         const changedHeader = Object.keys(header).filter((k) => JSON.stringify((header as Record<string, unknown>)[k]) !== JSON.stringify((c as Record<string, unknown>)[k]));
         if (changedHeader.length) {

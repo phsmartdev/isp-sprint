@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { ContractJourney } from '../../features/cs/ContractJourney';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, FileSignature, Pencil } from 'lucide-react';
+import { CheckCircle2, FileSignature, FileText, Pencil } from 'lucide-react';
 import { CONTRACT_STAGES, CONTRACT_STAGE_LABELS, LEGAL_REGIME_LABELS, type ContractStage, CONTRACT_ITEM_KIND_LABELS, itemKindOf } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
@@ -27,6 +27,7 @@ import { ContractCommRuns } from '../../features/contracts/CommApprovals';
 import { ReportNotices, ReportTermsText } from '../../features/contracts/ReportNotices';
 import { ContractJourneySteps } from '../../features/contracts/ContractJourneySteps';
 import { GenerateModal, SignModal } from '../../features/contracts/SignaturePanels';
+import { IssueOfficeModal, OfficesList } from '../../features/offices/ContractOffices';
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
@@ -113,6 +114,7 @@ export function ContractDetailPage() {
   const [edit, setEdit] = useState(false);
   const [validate, setValidate] = useState(false);
   const [move, setMove] = useState(false);
+  const [office, setOffice] = useState(false);
   const [generate, setGenerate] = useState(false);
   const [sign, setSign] = useState<{ id: string; name: string } | null>(null);
   const [upload, setUpload] = useState<null | { category?: string; processId?: string; newVersionOf?: Parameters<typeof UploadModal>[0]['newVersionOf'] }>(null);
@@ -144,10 +146,13 @@ export function ContractDetailPage() {
           {c.permissions.validate && <Button variant="primary" icon={<FileSignature className="h-4 w-4" />} onClick={() => setValidate(true)}>Validar cadastro</Button>}
           {c.permissions.edit && c.stage !== 'arquivado' && <Button icon={<Pencil className="h-4 w-4" />} onClick={() => setEdit(true)}>Editar</Button>}
           {c.permissions.edit && c.validatedAt && c.stage !== 'arquivado' && <Button onClick={() => setMove(true)}>Mover no funil</Button>}
+          {c.stage !== 'arquivado' && <Button icon={<FileText className="h-4 w-4" />} onClick={() => setOffice(true)}>Emitir ofício</Button>}
         </div>
       </header>
 
       <ContractJourneySteps stage={c.stage} nextAction={c.nextAction} />
+      <div className="mb-4"><OfficesList contractId={c.id} /></div>
+      {office && <IssueOfficeModal contractId={c.id} open={office} onClose={() => setOffice(false)} />}
 
       <section aria-label="Situação" className="card mb-4 grid grid-cols-2 gap-4 p-4 sm:grid-cols-3 xl:grid-cols-6">
         <Info label="Vigência">{fmtDate(v.startAt)} a {fmtDate(v.endAt)}</Info>
