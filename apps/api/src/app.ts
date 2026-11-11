@@ -80,6 +80,7 @@ import { peopleAdminRoutes } from './routes/peopleAdmin';
 import { peopleMessageRoutes } from './routes/peopleMessages';
 import { peopleDevelopmentRoutes } from './routes/peopleDevelopment';
 import { peopleRecordRoutes } from './routes/peopleRecord';
+import { officeLetterRoutes } from './routes/officeLetters';
 import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants';
 import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
@@ -283,6 +284,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...peopleMessageRoutes,
     ...peopleDevelopmentRoutes,
     ...peopleRecordRoutes,
+    ...officeLetterRoutes,
     ...bidParticipantRoutes,
     ...bidActionRoutes,
     ...competitorRoutes,

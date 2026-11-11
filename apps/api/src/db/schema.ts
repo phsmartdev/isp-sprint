@@ -1360,6 +1360,8 @@ export const contracts = pgTable(
     code: serial('code').notNull(),
     contactId: uuid('contact_id').notNull().references(() => contacts.id),
     customerId: uuid('customer_id').references(() => customers.id),
+    /** filial do contrato (emitente dos documentos: ofícios no timbrado dela); herda da negociação de origem */
+    branchId: uuid('branch_id').references(() => salesBranches.id),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     /** Contratação decorrente de ata de registro de preços (registro jurídico próprio, vinculado à ARP). */
     arpId: uuid('arp_id'),
@@ -6913,3 +6915,70 @@ export const domainEvents = pgTable(
     statusCk: check('domain_events_status_ck', inList('status', ['pendente', 'processado', 'falhou'])),
   }),
 );
+
+// ================================================================== Ofícios (Configurações → Modelos → Ofícios)
+
+/** Bloco posicionado na página A4 (em mm a partir do canto superior esquerdo). Texto com {{variáveis}} e **negrito**, __sublinhado__, _itálico_. */
+export type OfficeBlock = { id: string; kind: 'texto' | 'assinatura'; label?: string; x: number; y: number; w: number; align: 'left' | 'right' | 'center' | 'justify'; size: number; lineGap: number; indent: number; paraGap: number; text: string };
+
+/** Modelo de ofício: quantos a empresa quiser; vale para todas as filiais ou só para algumas (o fundo é o timbrado da filial). */
+export const officeTemplates = pgTable('office_templates', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  description: text('description'),
+  /** filiais que usam o modelo; vazio = todas */
+  branchIds: uuid('branch_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  blocks: jsonb('blocks').$type<OfficeBlock[]>().notNull().default([]),
+  active: boolean('active').notNull().default(true),
+  version: integer('version').notNull().default(1),
+  createdBy: uuid('created_by').references(() => users.id),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ idx: index('office_templates_idx').on(t.tenantId, t.active) }));
+
+/** Quem assina os ofícios da filial: razão social, assinante e imagem da assinatura (PNG/JPG). */
+export const branchSigners = pgTable('branch_signers', {
+  branchId: uuid('branch_id').primaryKey().references(() => salesBranches.id, { onDelete: 'cascade' }),
+  tenantId: tenantId(),
+  legalName: text('legal_name'),
+  signerName: text('signer_name'),
+  signerRole: text('signer_role'),
+  signatureMime: text('signature_mime'),
+  signatureData: bytea('signature_data'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+});
+
+/** Numeração dos ofícios por filial e ano (o próximo número a emitir). */
+export const officeLetterSeq = pgTable('office_letter_seq', {
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id, { onDelete: 'cascade' }),
+  year: integer('year').notNull(),
+  nextNumber: integer('next_number').notNull().default(1),
+}, (t) => ({ pk: primaryKey({ columns: [t.branchId, t.year] }) }));
+
+/** Ofício emitido: número, os valores usados, o texto como saiu (fotografia) e o PDF. Não se altera depois de emitido. */
+export const officeLetters = pgTable('office_letters', {
+  id: id(),
+  tenantId: tenantId(),
+  branchId: uuid('branch_id').notNull().references(() => salesBranches.id),
+  templateId: uuid('template_id').references(() => officeTemplates.id, { onDelete: 'set null' }),
+  templateVersion: integer('template_version'),
+  opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+  contractId: uuid('contract_id').references(() => contracts.id),
+  year: integer('year').notNull(),
+  number: integer('number').notNull(),
+  label: text('label').notNull(),
+  subject: text('subject'),
+  vars: jsonb('vars').$type<Record<string, string>>().notNull().default({}),
+  blocks: jsonb('blocks').$type<OfficeBlock[]>().notNull().default([]),
+  pdf: bytea('pdf').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  numUq: uniqueIndex('office_letters_number_uq').on(t.tenantId, t.branchId, t.year, t.number),
+  oppIdx: index('office_letters_opp_idx').on(t.tenantId, t.opportunityId, t.createdAt),
+}));

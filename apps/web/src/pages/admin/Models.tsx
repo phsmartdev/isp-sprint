@@ -10,11 +10,13 @@ import { AdminEmail } from './Email';
 import { AdminInstructions } from './Instructions';
 import { AdminTaskScripts } from './TaskScripts';
 import { AdminLetterheads } from './Letterheads';
+import { AdminOffices } from '../../features/offices/AdminOffices';
 import { StructuresAdmin } from '../../features/accounts/Structures';
 
 const TABS = [
   { key: 'contratos', label: 'Contratos' },
   { key: 'propostas', label: 'Propostas' },
+  { key: 'oficios', label: 'Ofícios' },
   { key: 'timbrado', label: 'Timbrado das filiais' },
   { key: 'emails', label: 'E-mails' },
   { key: 'instrucao', label: 'Instrução' },
@@ -29,11 +31,12 @@ export function AdminModels() {
   const tab: Tab = TABS.some((t) => t.key === raw) ? (raw as Tab) : 'contratos';
   return (
     <div className="space-y-4">
-      <div><h1 className="text-xl font-bold text-ink">Modelos</h1><p className="text-sm text-muted">Contratos, propostas, timbrado das filiais, e-mails, a instrução do negócio e os roteiros de cada tipo de tarefa.</p></div>
+      <div><h1 className="text-xl font-bold text-ink">Modelos</h1><p className="text-sm text-muted">Contratos, propostas, ofícios, timbrado das filiais, e-mails, a instrução do negócio e os roteiros de cada tipo de tarefa.</p></div>
       <Tabs label="Modelos" value={tab} onChange={(k) => setSearch({ aba: k }, { replace: true })} tabs={[...TABS]} />
       <div>
         {tab === 'contratos' && <div className="space-y-6"><AdminContractTemplates /><TemplatesManager /></div>}
         {tab === 'propostas' && <AdminProposalTemplates />}
+        {tab === 'oficios' && <AdminOffices />}
         {tab === 'timbrado' && <AdminLetterheads />}
         {tab === 'emails' && <AdminEmail />}
         {tab === 'instrucao' && <AdminInstructions />}

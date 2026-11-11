@@ -1002,6 +1002,20 @@
       "when": 1794419731702,
       "tag": "0142_pessoas_gestao_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1794423828024,
+      "tag": "0143_oficios",
+      "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1794424239660,
+      "tag": "0144_contrato_filial",
+      "breakpoints": true
     }
   ]
 }

@@ -16,7 +16,7 @@ import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version 
 
 type ItemRow = { planId: string; description: string; qty: string; unit: string; kind: ContractItemKind };
 export type FormState = {
-  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string;
+  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string; branchId: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
   items: ItemRow[]; monthly: string; total: string; monthlyAuto: boolean; totalAuto: boolean; billingDay: string; billingTerms: string;
   hasReport: boolean; rSector: string; rValidator: string; rDueDay: string; rAlertDays: string;
@@ -28,10 +28,10 @@ export type FormState = {
   serviceType: ContractServiceType | '';
 };
 
-export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null }>, v: Partial<Version>): FormState {
+export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null; branchId: string | null }>, v: Partial<Version>): FormState {
   const g = v.guarantee, p = v.publicTerms;
   return {
-    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '',
+    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '', branchId: h.branchId ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
     items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), kind: itemKindOf(i) })),
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null),
@@ -76,7 +76,7 @@ export function payloadOf(f: FormState) {
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
     initialBalanceCents,
-    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, adminOwnerId: f.adminOwnerId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt) },
+    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, adminOwnerId: f.adminOwnerId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt), branchId: f.branchId || null },
     version: {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
@@ -297,6 +297,7 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
       </Fieldset>
 
       <Fieldset title="Responsáveis">
+        <FormField label="Filial do contrato" htmlFor="cf-branch" hint="Emitente dos ofícios (no timbrado dela)"><Select id="cf-branch" value={f.branchId} onChange={(e) => onChange({ branchId: e.target.value })}><option value="">{f.branchId ? 'Sem filial' : 'Herda da negociação'}</option>{(lookups.data?.branches ?? []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</Select></FormField>
         {u('cf-owner', 'Responsável comercial', 'commercialOwnerId', true)}
         {u('cf-ops', 'Responsável operacional', 'operationalOwnerId')}
         {u('cf-csm', 'Sucesso do Cliente (CSM)', 'csmId')}
