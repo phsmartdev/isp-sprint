@@ -22,14 +22,14 @@ export function PostPage() {
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
   if (q.isLoading) return <div className="card"><LoadingRows rows={6} /></div>;
   if (q.isError || !q.data) return (
-    <div className="mx-auto max-w-2xl"><ErrorState error={q.error} /><p className="mt-2 text-sm"><Link to="/pessoas" className="link">Voltar ao Meu Espaço</Link></p></div>
+    <div className="mx-auto max-w-2xl"><ErrorState error={q.error} /><p className="mt-2 text-sm"><Link to="/pessoas" className="link">Voltar ao feed</Link></p></div>
   );
   const top = q.data.comments.filter((c) => !c.parentId);
   const replies = (cid: string) => q.data!.comments.filter((c) => c.parentId === cid);
   return (
     <div className="mx-auto w-full max-w-[560px] space-y-3">
-      <Link to="/pessoas" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ArrowLeft className="h-4 w-4" aria-hidden />Meu Espaço</Link>
-      {q.data.post.status !== 'rascunho' ? <PostCard post={q.data.post} detail /> : <div className="card p-4 text-sm text-muted">Rascunho: só você vê. Publique pelo editor em Meu Espaço → Rascunhos.</div>}
+      <Link to="/pessoas" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ArrowLeft className="h-4 w-4" aria-hidden />Feed</Link>
+      {q.data.post.status !== 'rascunho' ? <PostCard post={q.data.post} detail /> : <div className="card p-4 text-sm text-muted">Rascunho: só você vê. Publique pelo editor no Feed → Rascunhos.</div>}
       {q.data.post.status === 'publicado' && (
         <section className="card p-4" aria-label="Comentários">
           <h2 className="mb-3 text-md font-bold text-ink">Comentários ({q.data.post.commentCount})</h2>

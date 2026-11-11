@@ -19,6 +19,7 @@ import { eligibleMembers, inAudience, type Audience } from './audience';
 
 export const PEOPLE_EVENTS = {
   mencao: { label: 'Menção em publicação ou comentário', mandatory: false },
+  institucional: { label: 'Publicação institucional', mandatory: false },
   comentario: { label: 'Comentário na minha publicação', mandatory: false },
   resposta: { label: 'Resposta ao meu comentário', mandatory: false },
   reconhecimento: { label: 'Reconhecimento recebido', mandatory: false },
@@ -30,6 +31,8 @@ export const PEOPLE_EVENTS = {
   moderacao: { label: 'Atualização de moderação', mandatory: true },
 } as const;
 export type PeopleEvent = keyof typeof PEOPLE_EVENTS;
+/** Vão para o @ do topo (marcação para mim e comunicação institucional); os demais ficam em Notificações do módulo. */
+export const BELL_EVENTS: PeopleEvent[] = ['mencao', 'institucional', 'comunicado', 'comunicado_urgente'];
 export const CHANNELS = ['interna', 'email', 'whatsapp'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
@@ -102,10 +105,10 @@ export async function canSeePost(db: DbOrTx, post: { communityId: string | null 
 }
 
 /** Avisos do módulo para o ícone do topo. */
-export async function myPeopleNotifications(db: DbOrTx, tenantId: string, userId: string, limit = 30) {
+export async function myPeopleNotifications(db: DbOrTx, tenantId: string, userId: string, limit = 30, onlyBell = false) {
   return db.select({ id: s.userNotifications.id, event: s.userNotifications.event, title: s.userNotifications.title, body: s.userNotifications.body, link: s.userNotifications.link, at: s.userNotifications.createdAt, readAt: s.userNotifications.readAt, author: s.users.name })
     .from(s.userNotifications).leftJoin(s.users, eq(s.users.id, s.userNotifications.actorId))
-    .where(and(eq(s.userNotifications.tenantId, tenantId), eq(s.userNotifications.userId, userId)))
+    .where(and(eq(s.userNotifications.tenantId, tenantId), eq(s.userNotifications.userId, userId), onlyBell ? inArray(s.userNotifications.event, BELL_EVENTS) : undefined))
     .orderBy(sql`${s.userNotifications.createdAt} desc`).limit(limit);
 }
 
@@ -171,4 +174,12 @@ export async function announcementRoutine(db: DbOrTx, config: Config | null, ten
     reminders += (await notifyPeople(db, config, tenantId, pending.map((m) => ({ userId: m.id, event: 'comunicado_pendente' as const, title: `Confirme a leitura: ${a.title}`, link: '/pessoas', actorId: a.createdBy, dedupeKey: `pendente:${a.id}:v${a.version}` })))).created;
   }
   return { published, reminders };
+}
+
+/** Publicação institucional publicada: avisa quem pode vê-la (empresa toda ou membros da comunidade). */
+export async function notifyInstitutional(db: DbOrTx, config: Config | null, tenantId: string, post: { id: string; kind: string; status: string; communityId: string | null; authorId: string }, today: string) {
+  if (post.kind !== 'institucional' || post.status !== 'publicado') return;
+  const members = [...(await eligibleMembers(db, tenantId, today)).keys()];
+  const ok = await canSeePost(db, post, members);
+  await notifyPeople(db, config, tenantId, [...ok].map((u) => ({ userId: u, event: 'institucional' as const, title: 'Nova publicação institucional', link: `/pessoas/publicacao/${post.id}`, actorId: post.authorId, dedupeKey: `institucional:${post.id}` })));
 }

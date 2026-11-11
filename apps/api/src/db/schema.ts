@@ -6725,3 +6725,45 @@ export const peopleActivityDays = pgTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.day, t.userId] }) }),
 );
+
+/**
+ * Pessoas & Cultura — mensagens diretas entre colegas. Só quem participa da conversa lê; nenhum papel
+ * (gestão, administração, moderação) abre conversas de outras pessoas.
+ */
+export const peopleConversations = pgTable(
+  'people_conversations',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    /** conversa direta: os dois ids em ordem, para não abrir duas conversas com a mesma pessoa */
+    pairKey: text('pair_key').notNull(),
+    lastMessageAt: ts('last_message_at'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ pairUq: uniqueIndex('people_conversations_pair_uq').on(t.tenantId, t.pairKey) }),
+);
+
+export const peopleConversationMembers = pgTable(
+  'people_conversation_members',
+  {
+    conversationId: uuid('conversation_id').notNull().references(() => peopleConversations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: tenantId(),
+    lastReadAt: ts('last_read_at'),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.conversationId, t.userId] }), userIdx: index('people_conversation_members_user_idx').on(t.tenantId, t.userId) }),
+);
+
+export const peopleMessages = pgTable(
+  'people_messages',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    conversationId: uuid('conversation_id').notNull().references(() => peopleConversations.id, { onDelete: 'cascade' }),
+    authorId: uuid('author_id').notNull().references(() => users.id),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => ({ convIdx: index('people_messages_conv_idx').on(t.conversationId, t.createdAt) }),
+);

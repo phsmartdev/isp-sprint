@@ -57,7 +57,7 @@ test('comunicado com ciência e reconhecimento animado no feed', async ({ page, 
   await expect(card.getByText('Leitura confirmada')).toBeVisible();
 
   // Ana reconhece Lucas publicamente
-  await a.getByRole('link', { name: 'Reconhecer colega' }).first().click();
+  await a.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Reconhecimento' }).click();
   await expect(a).toHaveURL(/\/pessoas\/reconhecimento/);
   await a.getByRole('form', { name: 'Reconhecer um colega' }).getByPlaceholder('Digite o nome').fill('Lucas');
   await a.getByRole('option', { name: /Lucas/ }).first().click();

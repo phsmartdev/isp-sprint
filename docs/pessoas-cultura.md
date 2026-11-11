@@ -225,3 +225,27 @@ período) e ação direta da moderação com justificativa; comunidade privada d
 
 **Testes:** `apps/api/test/peopleGovernance.test.ts` (6) e `tests/e2e/pessoas-governanca.spec.ts`.
 
+## 8. Layout do Instagram web, mensagens e @ do topo
+
+**Navegação:** o módulo tem o próprio menu lateral, como no Instagram web: Feed, Mensagens, Meu Espaço,
+Comunidades, Reconhecimento e Notificações, com o número de não lidas. Abaixo, para quem administra, um único item
+**Administração** reúne Painel, Moderação, Comunicados Oficiais, Reconhecimentos e Configurações em abas. No celular, o
+menu vira a barra de ícones embaixo. O cabeçalho com o ícone do módulo continua no topo.
+
+**Feed (`/pessoas`):** coluna central de 470 px com a capa de boas-vindas, a fileira de fotos de quem publicou nas
+últimas 48 horas (institucional não entra), comunicados, "compartilhe algo" e o feed. À direita: o meu cartão, colegas
+para conhecer (com "Mensagem") e o rodapé. **Meu Espaço (`/pessoas/meu-espaco`):** capa, atalhos, comunicados,
+reconhecimentos recebidos e busca de colegas.
+
+**Mensagens diretas:** conversa entre dois colegas que têm o módulo (uma por par), não lidas, "Visto", apagar a
+própria mensagem. Privada: nem a administração nem a moderação leem. Tabelas `people_conversations`,
+`people_conversation_members`, `people_messages` (migração `0140_pessoas_mensagens`, não destrutiva). APIs:
+`GET /pessoas/mensagens`, `POST /pessoas/mensagens/conversas`, `GET|POST /pessoas/mensagens/conversas/:id`,
+`DELETE /pessoas/mensagens/:id`, `GET /pessoas/contadores`, `GET /pessoas/destaques`.
+
+**@ do topo:** só marcação para mim (menção em publicação ou comentário), publicação institucional (novo aviso para
+quem pode vê-la) e comunicado oficial. Comentários, respostas, reconhecimentos, convites e moderação ficam em
+Notificações, dentro do módulo.
+
+**Testes:** `apps/api/test/peopleMessages.test.ts` e `tests/e2e/pessoas-mensagens.spec.ts`.
+

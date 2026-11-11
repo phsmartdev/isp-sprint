@@ -22,6 +22,9 @@ const PeopleNotifications = lazy(() => import('./pages/people/Notifications').th
 const PeopleMyReports = lazy(() => import('./pages/people/MyReports').then((m) => ({ default: m.MyReportsPage })));
 const PeopleAdminModeration = lazy(() => import('./pages/people/AdminModeration').then((m) => ({ default: m.AdminModerationPage })));
 const PeopleAdminPanel = lazy(() => import('./pages/people/AdminPanel').then((m) => ({ default: m.AdminPanelPage })));
+const PeopleFeedHome = lazy(() => import('./pages/people/FeedHome').then((m) => ({ default: m.FeedHomePage })));
+const PeopleMessages = lazy(() => import('./pages/people/Messages').then((m) => ({ default: m.MessagesPage })));
+const PeopleAdminLayout = lazy(() => import('./pages/people/PeopleLayout').then((m) => ({ default: m.PeopleAdminLayout })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -160,20 +163,27 @@ export function App() {
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
         <Route path="pessoas" element={<Gate module="pessoas" feature="pessoas_cultura.experiencia"><PeopleLayout /></Gate>}>
-          <Route index element={<MySpacePage />} />
+          <Route index element={<PeopleFeedHome />} />
+          <Route path="meu-espaco" element={<MySpacePage />} />
+          <Route path="mensagens" element={<PeopleMessages />} />
+          <Route path="mensagens/:id" element={<PeopleMessages />} />
           <Route path="perfil/:userId" element={<PeopleProfilePage />} />
           <Route path="publicacao/:id" element={<PeoplePostPage />} />
           <Route path="salvos" element={<PeopleSavedPage />} />
           <Route path="comunidades" element={<PeopleCommunitiesPage />} />
           <Route path="comunidades/:id" element={<PeopleCommunityPage />} />
-          <Route path="admin/configuracoes" element={<PeopleConfigPage />} />
           <Route path="reconhecimento" element={<PeopleRecognitionPage />} />
-          <Route path="admin/comunicados" element={<PeopleAdminAnnouncements />} />
-          <Route path="admin/reconhecimentos" element={<PeopleAdminRecognition />} />
           <Route path="notificacoes" element={<PeopleNotifications />} />
           <Route path="denuncias" element={<PeopleMyReports />} />
-          <Route path="admin/moderacao" element={<PeopleAdminModeration />} />
-          <Route path="admin/painel" element={<PeopleAdminPanel />} />
+          {/* toda a administração do módulo num lugar só */}
+          <Route path="admin" element={<PeopleAdminLayout />}>
+            <Route index element={null} />
+            <Route path="painel" element={<PeopleAdminPanel />} />
+            <Route path="moderacao" element={<PeopleAdminModeration />} />
+            <Route path="comunicados" element={<PeopleAdminAnnouncements />} />
+            <Route path="reconhecimentos" element={<PeopleAdminRecognition />} />
+            <Route path="configuracoes" element={<PeopleConfigPage />} />
+          </Route>
         </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />
         <Route path="opportunities" element={<Gate module="oportunidades"><OpportunitiesPage /></Gate>} />
