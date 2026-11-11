@@ -1,5 +1,6 @@
 /** Configurações: modelo de instrução, jornadas, SMTP, notificações, registro de e-mails e agendamento. */
 import { checkBadges } from '../services/people/achievements';
+import { announcementRoutine } from '../services/people/notify';
 import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
 import { runMeasurementDrafts } from '../services/measurementReports';
@@ -319,7 +320,10 @@ export const settingsRoutes = [
       for (const t of tenants) {
         try {
           const ids = (await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, t.id), eq(s.users.active, true)))).map((u) => u.id);
-          badges[t.id] = [...(await checkBadges(app.db, t.id, ids)).values()].flat().length;
+          badges[t.id] = {
+            badges: [...(await checkBadges(app.db, t.id, ids)).values()].flat().length,
+            comunicados: await announcementRoutine(app.db, app.config, t.id, new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())),
+          };
         } catch (e) { badges[t.id] = { error: (e as Error).message }; }
       }
       const glpi: Record<string, unknown> = {};

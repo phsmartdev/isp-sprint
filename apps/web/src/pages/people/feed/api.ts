@@ -4,7 +4,7 @@ import { api, qs } from '../../../lib/api';
 import { compressImage, fileToBase64 } from '../../../lib/files';
 import type { PersonCard } from '../shared';
 
-export type Media = { id: string; kind: 'imagem' | 'video' | 'arquivo'; mime: string; filename: string; sizeBytes: number };
+export type Media = { id: string; kind: 'imagem' | 'video' | 'arquivo'; mime: string; filename: string; sizeBytes: number; width?: number | null; height?: number | null };
 export type Reaction = 'curtir' | 'celebrar' | 'apoiar' | 'inspirador';
 export const REACTIONS: { key: Reaction; label: string; emoji: string }[] = [
   { key: 'curtir', label: 'Curtir', emoji: '👍' }, { key: 'celebrar', label: 'Celebrar', emoji: '🎉' },
@@ -18,6 +18,8 @@ export type FeedPost = {
   /** conquista (venda/badge) ou reconhecimento: dados do cartão animado */
   meta?: Record<string, unknown> | null;
   reactionCount: number; commentCount: number; reactions: Partial<Record<Reaction, number>>; myReaction: Reaction | null; saved: boolean; mine: boolean;
+  /** só para o autor: por que a publicação saiu do ar */
+  moderation?: { measure: string; note: string | null } | null;
 };
 export type Comment = { id: string; parentId: string | null; body: string; createdAt: string; editedAt: string | null; mine: boolean; author: PersonCard; mentions: { id: string; name: string }[] };
 
@@ -36,7 +38,12 @@ const PART = 2_500_000;
 /** Envia a mídia em partes (cada requisição cabe no limite da hospedagem); imagem grande é reduzida antes. */
 export async function uploadMedia(file: File, limits: { imageMb: number; videoMb: number }, onProgress?: (p: number) => void): Promise<Media> {
   let f = file;
-  if (/^image\/(png|jpe?g|webp)$/.test(file.type) && file.size > 1_500_000) f = await compressImage(file, { maxBytes: Math.min(limits.imageMb * 1024 * 1024, 4_000_000), maxDim: 2560 });
+  let dims: { width: number; height: number } | null = null;
+  if (/^image\/(png|jpe?g|webp)$/.test(file.type)) {
+    const ig = await instagramImage(file);
+    if (ig) { f = ig.file; dims = { width: ig.width, height: ig.height }; }
+    if (f.size > 1_500_000) f = await compressImage(f, { maxBytes: Math.min(limits.imageMb * 1024 * 1024, 4_000_000), maxDim: 2560 });
+  } else if (file.type.startsWith('image/') || file.type.startsWith('video/')) dims = await mediaDims(file);
   const isVideo = file.type.startsWith('video/');
   const max = (file.type.startsWith('image/') ? limits.imageMb : isVideo ? limits.videoMb : Math.min(20, limits.videoMb)) * 1024 * 1024;
   if (f.size > max) throw new Error(`${file.name}: acima de ${Math.round(max / 1024 / 1024)} MB.`);
@@ -47,7 +54,7 @@ export async function uploadMedia(file: File, limits: { imageMb: number; videoMb
     await api(`/pessoas/midias/envios/${id}/partes/${n}`, { method: 'PUT', body: { data } });
     onProgress?.((n + 1) / (parts + 1));
   }
-  const m = await api<Media>(`/pessoas/midias/envios/${id}/concluir`, { method: 'POST', body: { filename: f.name, parts, sizeBytes: f.size } });
+  const m = await api<Media>(`/pessoas/midias/envios/${id}/concluir`, { method: 'POST', body: { filename: f.name, parts, sizeBytes: f.size, width: dims?.width ?? null, height: dims?.height ?? null } });
   onProgress?.(1);
   return m;
 }
@@ -60,3 +67,55 @@ export type Community = {
 };
 /** Comunidades em que a pessoa pode publicar (para o seletor de público do editor). */
 export const usePostableCommunities = () => useQuery({ queryKey: ['pessoas', 'comunidades', 'minhas'], staleTime: 60_000, queryFn: async () => (await api<{ items: Community[] }>('/pessoas/comunidades?minhas=1')).items.filter((c) => c.perms.post) });
+
+/** Proporções do Instagram: retrato 4:5, quadrado 1:1 e paisagem 1,91:1. */
+export function igRatio(width?: number | null, height?: number | null) {
+  if (!width || !height) return 1;
+  const r = width / height;
+  return r >= 1.4 ? 1.91 : r > 0.9 ? 1 : 0.8;
+}
+
+/** Como no Instagram: recorte central na proporção mais próxima e 1080 px de largura (sem ampliar foto pequena). */
+export async function instagramImage(file: File): Promise<{ file: File; width: number; height: number } | null> {
+  let bmp: ImageBitmap;
+  try { bmp = await createImageBitmap(file); } catch { return null; }
+  const t = igRatio(bmp.width, bmp.height);
+  let sw = bmp.width, sh = bmp.height;
+  if (sw / sh > t) sw = Math.round(sh * t); else sh = Math.round(sw / t);
+  const sx = Math.round((bmp.width - sw) / 2), sy = Math.round((bmp.height - sh) / 2);
+  const w = Math.min(1080, sw), h = Math.round(w / t);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { bmp.close(); return null; }
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+  bmp.close();
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.9));
+  if (!blob) return null;
+  return { file: new File([blob], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }), width: w, height: h };
+}
+
+/** Dimensões de GIF e vídeo (para o quadro do cartão); sem conseguir ler, segue sem. */
+async function mediaDims(file: File): Promise<{ width: number; height: number } | null> {
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve) => {
+      const done = (v: { width: number; height: number } | null) => { clearTimeout(timer); resolve(v); };
+      const timer = setTimeout(() => done(null), 4000);
+      if (file.type.startsWith('video/')) {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.onloadedmetadata = () => done(v.videoWidth ? { width: v.videoWidth, height: v.videoHeight } : null);
+        v.onerror = () => done(null);
+        v.src = url;
+      } else {
+        const i = new Image();
+        i.onload = () => done({ width: i.naturalWidth, height: i.naturalHeight });
+        i.onerror = () => done(null);
+        i.src = url;
+      }
+    });
+  } finally { URL.revokeObjectURL(url); }
+}

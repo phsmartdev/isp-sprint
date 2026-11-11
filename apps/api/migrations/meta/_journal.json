@@ -974,6 +974,13 @@
       "when": 1794355079293,
       "tag": "0138_pessoas_cultura_comunicacao",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1794359238142,
+      "tag": "0139_pessoas_governanca",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@
  * - Comentário: registro formal no histórico da oportunidade (opportunity_events tipo 'comment').
  * - Menção (@): só quem tem acesso à negociação; avisa por e-mail/WhatsApp com resumo curto.
  */
+import { myPeopleNotifications } from './people/notify';
 import { and, eq, gt, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import * as s from '../db/schema';
@@ -184,7 +185,10 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
      order by e.created_at desc
      limit 30`);
   const gvItems = gv.rows.map((r) => ({ kind: 'gestao' as const, opportunityId: null as string | null, taskId: r.entity_id, code: null as number | null, contactName: r.entity as string | null, title: r.title, source: `${r.entity}_${r.type}` as (typeof opp)[number]['source'], body: '', author: r.author, at: r.at, unread: r.unread }));
-  const items = [...opp, ...tk, ...iv, ...gvItems].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
+  // avisos genéricos (Pessoas & Cultura e, no futuro, outros módulos)
+  const un = await myPeopleNotifications(db, auth.tenantId, auth.userId, 30);
+  const unItems = un.map((r) => ({ kind: 'aviso' as const, opportunityId: null as string | null, taskId: r.id, code: null as number | null, contactName: r.link as string | null, title: r.title as string | null, source: `pessoas_${r.event}` as (typeof opp)[number]['source'], body: r.body ?? '', author: r.author, at: r.at, unread: !r.readAt }));
+  const items = [...opp, ...tk, ...iv, ...gvItems, ...unItems].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };
 }
 

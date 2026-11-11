@@ -39,7 +39,7 @@ test('feed: publicar, reagir, comentar, responder, salvar, rascunho, editar e ex
   await editor.getByRole('button', { name: 'Publicar' }).click();
   await expect(page.getByText('Publicado!')).toBeVisible();
   const card = page.getByRole('article').filter({ hasText: `Inauguramos a nova sala ${tag}` });
-  await expect(card.getByRole('img', { name: 'sala.png' })).toBeVisible();
+  await expect(card.getByRole('img', { name: /^sala\./ })).toBeVisible();
   await expect(card.locator('mark')).toHaveText('@Lucas Lima');
 
   // rascunho: salva, não aparece no feed, publica depois
@@ -65,7 +65,7 @@ test('feed: publicar, reagir, comentar, responder, salvar, rascunho, editar e ex
   await ctx.close();
 
   await page.reload();
-  await expect(card.getByText('1 comentário')).toBeVisible();
+  await expect(card.getByText('Ver 1 comentário')).toBeVisible();
   await card.getByRole('link', { name: 'Comentar' }).click();
   await page.getByRole('button', { name: 'Responder' }).first().click();
   await page.getByLabel('Responder comentário').fill('Obrigado, Lucas!');

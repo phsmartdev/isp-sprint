@@ -16,6 +16,8 @@ export function PeopleLayout() {
   const q = usePeopleMe();
   const caps = q.data?.caps;
   const adminItems = [
+    ...(caps?.administer || caps?.communicate || caps?.moderate ? [{ to: '/pessoas/admin/painel', label: 'Painel' }] : []),
+    ...(caps?.moderate || q.data?.communityModerator ? [{ to: '/pessoas/admin/moderacao', label: 'Moderação' }] : []),
     ...(caps?.communicate ? [{ to: '/pessoas/admin/comunicados', label: 'Comunicados Oficiais' }] : []),
     ...(caps?.administer ? [{ to: '/pessoas/admin/reconhecimentos', label: 'Reconhecimentos' }] : []),
     ...(caps?.configure ? [{ to: '/pessoas/admin/configuracoes', label: 'Configurações' }] : []),
@@ -29,6 +31,7 @@ export function PeopleLayout() {
         <NavLink to="/pessoas/comunidades" className={link}>Comunidades</NavLink>
         <NavLink to="/pessoas/reconhecimento" className={link}>Reconhecimento</NavLink>
         <NavLink to="/pessoas/perfil/eu" className={link}>Meu Perfil</NavLink>
+        <NavLink to="/pessoas/notificacoes" className={link}>Notificações</NavLink>
         {adminItems.length > 0 && <>
           <span className="whitespace-nowrap pb-3 pl-3 text-xs font-semibold uppercase tracking-wide text-muted">Administração</span>
           {adminItems.map((i) => <NavLink key={i.to} to={i.to} className={link}>{i.label}</NavLink>)}

@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { fmtRelative } from '../lib/format';
 
 type Source = 'chat' | 'comentario' | 'tarefa_comentario' | 'tarefa_atribuida' | 'tarefa_aprovacao' | 'tarefa_devolvida' | `intervencao_${string}` | `playbook_${string}`;
-type Mention = { kind: 'oportunidade' | 'tarefa' | 'intervencao' | 'gestao'; opportunityId: string | null; taskId: string | null; code: number | null; contactName: string | null; title: string | null; source: Source; body: string; author: string | null; at: string; unread: boolean };
+type Mention = { kind: 'oportunidade' | 'tarefa' | 'intervencao' | 'gestao' | 'aviso'; opportunityId: string | null; taskId: string | null; code: number | null; contactName: string | null; title: string | null; source: Source; body: string; author: string | null; at: string; unread: boolean };
 const TASK_TEXT: Record<string, string> = {
   impedimento_registrado: 'pediu para você remover um impedimento', impedimento_escalado: 'escalou um impedimento', impedimento_reatribuido: 'passou um impedimento para você', impedimento_removido: 'removeu o impedimento', impedimento_aceito: 'aceitou o impedimento', impedimento_em_tratamento: 'começou a tratar o impedimento', impedimento_aberto: 'reabriu o impedimento',
   apoio_pedido: 'pediu seu apoio', apoio_assumido: 'assumiu seu pedido de apoio', apoio_atendido: 'atendeu seu pedido de apoio: confirme', apoio_confirmado: 'confirmou o seu apoio: pontos lançados', apoio_reaberto: 'disse que ainda falta algo no apoio', apoio_devolvido: 'devolveu o pedido de apoio', apoio_cancelado: 'cancelou o pedido de apoio',
@@ -41,14 +41,16 @@ export function MentionsMenu() {
       {open && (
         <div role="dialog" aria-label="Menções" className="absolute right-0 top-full z-40 mt-2 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
           <p className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Menções</p>
-          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações e tarefas, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui.</p> : (
+          {!q.data?.items.length ? <p className="px-4 py-6 text-sm text-muted">Nada por aqui. Menções (@) em negociações, tarefas e Pessoas & Cultura, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui.</p> : (
             <ul className="max-h-[420px] divide-y divide-line overflow-y-auto">
               {q.data.items.map((m, i) => (
                 <li key={i}>
-                  <Link to={m.kind === 'gestao' ? (m.contactName === 'apoio' ? `/apoio#apoio-${m.taskId}` : m.contactName === 'playbook' ? (m.source === 'playbook_enviado' || m.source === 'playbook_aprovado_gerencia' ? '/playbooks?aba=aprovacoes' : m.source === 'playbook_sugestao' || m.source === 'playbook_reporte_desatualizado' || m.source === 'playbook_revisao' ? '/playbooks?aba=gestao' : `/playbooks/${m.taskId}`) : m.contactName === 'ferias' ? '/times/ferias' : m.contactName === 'reuniao' ? `/times/rituais/reunioes/${m.taskId}` : m.contactName === 'ritual' ? '/times/rituais' : `/times/decisoes?tab=${m.contactName === 'impedimento' ? 'impedimentos' : 'decisoes'}&id=${m.taskId}`) : m.kind === 'intervencao' ? `/times/intervencoes?id=${m.taskId}` : m.kind === 'tarefa' ? `/tarefas?task=${m.taskId}` : `/opportunities/${m.opportunityId}?aba=${m.source === 'chat' ? 'chat' : 'historico'}`} onClick={() => setOpen(false)} className={clsx('block px-4 py-2.5 hover:bg-surface-2', m.unread && 'bg-[#FFF9E6]')}>
+                  <Link onClick={() => { setOpen(false); if (m.kind === 'aviso' && m.unread) void api(`/me/notificacoes/${m.taskId}/lida`, { method: 'POST' }).then(() => q.refetch()); }} to={m.kind === 'aviso' ? m.contactName ?? '/pessoas/notificacoes' : m.kind === 'gestao' ? (m.contactName === 'apoio' ? `/apoio#apoio-${m.taskId}` : m.contactName === 'playbook' ? (m.source === 'playbook_enviado' || m.source === 'playbook_aprovado_gerencia' ? '/playbooks?aba=aprovacoes' : m.source === 'playbook_sugestao' || m.source === 'playbook_reporte_desatualizado' || m.source === 'playbook_revisao' ? '/playbooks?aba=gestao' : `/playbooks/${m.taskId}`) : m.contactName === 'ferias' ? '/times/ferias' : m.contactName === 'reuniao' ? `/times/rituais/reunioes/${m.taskId}` : m.contactName === 'ritual' ? '/times/rituais' : `/times/decisoes?tab=${m.contactName === 'impedimento' ? 'impedimentos' : 'decisoes'}&id=${m.taskId}`) : m.kind === 'intervencao' ? `/times/intervencoes?id=${m.taskId}` : m.kind === 'tarefa' ? `/tarefas?task=${m.taskId}` : `/opportunities/${m.opportunityId}?aba=${m.source === 'chat' ? 'chat' : 'historico'}`} className={clsx('block px-4 py-2.5 hover:bg-surface-2', m.unread && 'bg-[#FFF9E6]')}>
                     <p className="flex items-center gap-2 text-xs text-muted">
                       {m.unread && <span className="h-2 w-2 rounded-circle bg-[#F5B400]" aria-label="não lida" />}
-                      {m.kind === 'gestao'
+                      {m.kind === 'aviso'
+                        ? <span><span className="font-semibold text-ink">Pessoas & Cultura</span> · {fmtRelative(m.at)}</span>
+                        : m.kind === 'gestao'
                         ? <span>{m.author && <span className="font-semibold text-ink">{m.author} </span>}{TASK_TEXT[m.source] ?? 'Atualização de gestão'} · {fmtRelative(m.at)}</span>
                         : m.kind === 'intervencao'
                         ? <span>{m.author && <span className="font-semibold text-ink">{m.author} </span>}{TASK_TEXT[m.source] ?? 'Atualização de intervenção'} · {fmtRelative(m.at)}</span>
@@ -56,7 +58,7 @@ export function MentionsMenu() {
                         ? <span><span className="font-semibold text-ink">{m.author ?? 'Alguém'}</span> {TASK_TEXT[m.source]} · {fmtRelative(m.at)}</span>
                         : <span><span className="font-semibold text-ink">{m.author ?? 'Alguém'}</span> no {m.source === 'chat' ? 'chat' : 'comentário'} · OP-{m.code} · {fmtRelative(m.at)}</span>}
                     </p>
-                    <p className="text-xs text-muted">{m.kind === 'oportunidade' ? m.contactName : m.title}</p>
+                    {m.kind === 'aviso' ? <p className="text-sm font-semibold text-ink">{m.title}</p> : <p className="text-xs text-muted">{m.kind === 'oportunidade' ? m.contactName : m.title}</p>}
                     {m.body && <p className="mt-0.5 line-clamp-2 text-sm text-text">{plainText(m.body)}</p>}
                   </Link>
                 </li>

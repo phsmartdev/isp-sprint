@@ -18,6 +18,10 @@ const PeopleCommunityPage = lazy(() => import('./pages/people/CommunityPage').th
 const PeopleRecognitionPage = lazy(() => import('./pages/people/Recognition').then((m) => ({ default: m.RecognitionPage })));
 const PeopleAdminAnnouncements = lazy(() => import('./pages/people/AdminAnnouncements').then((m) => ({ default: m.AdminAnnouncementsPage })));
 const PeopleAdminRecognition = lazy(() => import('./pages/people/AdminRecognition').then((m) => ({ default: m.AdminRecognitionPage })));
+const PeopleNotifications = lazy(() => import('./pages/people/Notifications').then((m) => ({ default: m.NotificationsPage })));
+const PeopleMyReports = lazy(() => import('./pages/people/MyReports').then((m) => ({ default: m.MyReportsPage })));
+const PeopleAdminModeration = lazy(() => import('./pages/people/AdminModeration').then((m) => ({ default: m.AdminModerationPage })));
+const PeopleAdminPanel = lazy(() => import('./pages/people/AdminPanel').then((m) => ({ default: m.AdminPanelPage })));
 // telas carregadas só quando abertas: o arquivo inicial fica pequeno e o sistema abre mais rápido
 const EmailPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.EmailPage })));
 const MailboxesPage = lazy(() => import('./pages/email/Email').then((m) => ({ default: m.MailboxesPage })));
@@ -166,6 +170,10 @@ export function App() {
           <Route path="reconhecimento" element={<PeopleRecognitionPage />} />
           <Route path="admin/comunicados" element={<PeopleAdminAnnouncements />} />
           <Route path="admin/reconhecimentos" element={<PeopleAdminRecognition />} />
+          <Route path="notificacoes" element={<PeopleNotifications />} />
+          <Route path="denuncias" element={<PeopleMyReports />} />
+          <Route path="admin/moderacao" element={<PeopleAdminModeration />} />
+          <Route path="admin/painel" element={<PeopleAdminPanel />} />
         </Route>
         <Route path="leads" element={<Gate module="leads"><LeadsPage /></Gate>} />
         <Route path="opportunities" element={<Gate module="oportunidades"><OpportunitiesPage /></Gate>} />

@@ -47,13 +47,20 @@ export async function postDtos(db: DbOrTx, auth: AuthContext, rows: PostRow[]) {
   const commIds = [...new Set(rows.map((r) => r.communityId).filter(Boolean) as string[])];
   const [people, media, mine, saved, byKind, communities] = await Promise.all([
     institutionalOf(db, auth.tenantId, rows.flatMap((r) => [r.authorId, ...r.mentions])),
-    db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, kind: s.peopleMedia.kind, mime: s.peopleMedia.mime, filename: s.peopleMedia.filename, sizeBytes: s.peopleMedia.sizeBytes, position: s.peopleMedia.position })
+    db.select({ id: s.peopleMedia.id, postId: s.peopleMedia.postId, kind: s.peopleMedia.kind, mime: s.peopleMedia.mime, filename: s.peopleMedia.filename, sizeBytes: s.peopleMedia.sizeBytes, width: s.peopleMedia.width, height: s.peopleMedia.height, position: s.peopleMedia.position })
       .from(s.peopleMedia).where(inArray(s.peopleMedia.postId, ids)).orderBy(s.peopleMedia.position),
     db.select({ postId: s.peopleReactions.postId, kind: s.peopleReactions.kind }).from(s.peopleReactions).where(and(inArray(s.peopleReactions.postId, ids), eq(s.peopleReactions.userId, auth.userId))),
     db.select({ postId: s.peopleSavedPosts.postId }).from(s.peopleSavedPosts).where(and(inArray(s.peopleSavedPosts.postId, ids), eq(s.peopleSavedPosts.userId, auth.userId))),
     db.select({ postId: s.peopleReactions.postId, kind: s.peopleReactions.kind, n: sql<number>`count(*)::int` }).from(s.peopleReactions).where(inArray(s.peopleReactions.postId, ids)).groupBy(s.peopleReactions.postId, s.peopleReactions.kind),
     commIds.length ? db.select({ id: s.peopleCommunities.id, name: s.peopleCommunities.name, kind: s.peopleCommunities.kind }).from(s.peopleCommunities).where(inArray(s.peopleCommunities.id, commIds)) : Promise.resolve([]),
   ]);
+  // o autor vê por que a publicação dele saiu do ar (a última medida da moderação), sem saber quem denunciou
+  const hidden = rows.filter((r) => r.authorId === auth.userId && (r.status === 'oculto' || r.status === 'removido')).map((r) => r.id);
+  const modRows = hidden.length ? await db.execute<{ target_id: string; measure: string; note: string | null }>(sql`
+    select distinct on (target_id) target_id, measure, note from people_moderation_actions
+     where tenant_id = ${auth.tenantId} and target_type = 'publicacao' and measure is not null and target_id in (${sql.join(hidden.map((h) => sql`${h}::uuid`), sql`, `)})
+     order by target_id, created_at desc`) : { rows: [] };
+  const moderation = new Map(modRows.rows.map((m) => [m.target_id, { measure: m.measure, note: m.note }]));
   return rows.map((r) => {
     const a = people.get(r.authorId);
     const comm = r.communityId ? communities.find((c) => c.id === r.communityId) : null;
@@ -71,6 +78,7 @@ export async function postDtos(db: DbOrTx, auth: AuthContext, rows: PostRow[]) {
       myReaction: mine.find((x) => x.postId === r.id)?.kind ?? null,
       saved: saved.some((x) => x.postId === r.id),
       mine: r.authorId === auth.userId,
+      moderation: moderation.get(r.id) ?? null,
     };
   });
 }

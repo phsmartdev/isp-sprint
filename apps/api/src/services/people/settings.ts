@@ -40,6 +40,11 @@ export const PeopleSettings = z.object({
     /** nova faixa de badge alcançada */
     badges: z.boolean().default(true),
   }).default({}),
+  /** canais externos por evento (a notificação interna é sempre o canal principal); nunca levam o conteúdo da publicação */
+  notifications: z.record(z.string(), z.object({ email: z.boolean().default(false), whatsapp: z.boolean().default(false) })).default({
+    comunicado_urgente: { email: true, whatsapp: false },
+    comunicado_pendente: { email: true, whatsapp: false },
+  }),
   /** implantação das celebrações de badge: faixas que já existiam foram registradas sem publicar */
   badgeBaselineAt: z.string().nullable().default(null),
 });

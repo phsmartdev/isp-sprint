@@ -60,8 +60,8 @@ reconhecimentos, comunicados, leituras, denúncias, moderação e a caixa de not
 | 2. Feed | Publicações, mídias, comentários e respostas, reações, salvos, rascunho, paginação por cursor | **Entregue** |
 | 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | **Entregue** |
 | 4. Cultura e Comunicação | Conquistas ligadas à gamificação (venda e badges), reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | **Entregue** |
-| 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo | Próxima |
-| 6. Consolidação | Indicadores agregados, testes de permissão e isolamento, responsividade, documentação | — |
+| 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo; feed no formato do Instagram | **Entregue** |
+| 6. Consolidação | Indicadores agregados, testes de permissão e isolamento, responsividade, documentação | Próxima |
 
 ## 3. Etapa 1 — entrega
 
@@ -179,4 +179,49 @@ diária disparam as conquistas.
 
 **Pendências conhecidas:** notificação de comunicado novo/urgente e de reconhecimento recebido (Etapa 5); ligação
 das categorias aos valores oficiais da empresa (campo `value_key` já existe).
+
+## 7. Etapa 5 — entrega (governança)
+
+**Feed no formato do Instagram** (familiar para todos): cabeçalho com foto e nome, mídia de ponta a ponta em
+carrossel com contador e bolinhas, curtir/comentar/compartilhar (copiar link)/salvar logo abaixo da mídia, reações,
+legenda com o nome em negrito e "ver todos os comentários". Duplo toque na foto curte. Coluna do feed com 520 px no
+computador. **Dimensões das imagens:** ao enviar, a foto é recortada no centro na proporção do Instagram mais próxima
+(retrato 4:5, quadrada 1:1 ou paisagem 1,91:1) e reduzida para 1080 px de largura; o cartão usa a proporção da
+primeira mídia. Largura e altura ficam guardadas (`people_media.width/height`).
+
+**Denúncias e moderação:** denunciar publicação, comentário ou reconhecimento (motivos: conteúdo inadequado,
+linguagem ofensiva, exposição indevida, assédio ou discriminação, spam, outros). Fluxo: registro → triagem (assumir)
+→ análise → decisão com justificativa → medida (manter, ocultar, remover, solicitar edição, encaminhar) → aviso →
+revisão (uma vez, em 30 dias, por outra pessoa da moderação). A decisão vale para todas as denúncias abertas do mesmo
+conteúdo. O moderador vê a **cópia do item denunciado**, nunca a comunidade privada; ninguém decide sobre conteúdo
+próprio ou denúncia que fez; quem denunciou não é revelado ao autor. "Solicitar edição" tira do ar até o autor
+editar. Assédio/discriminação mostra a orientação do Canal de Confiança (CIEI). Toda ação fica na trilha
+(`people_moderation_actions`) e na auditoria. Moderam: setores de Moderação/Comunicação/Pessoas e Cultura, a
+administração do módulo e, no conteúdo de uma comunidade, o responsável e os moderadores dela.
+
+**Notificações:** tabela genérica `user_notifications` (reaproveitável por outros módulos), exibida no ícone de
+avisos do topo junto das menções e na página Notificações. Eventos: menção, comentário, resposta, reconhecimento,
+convite para comunidade, participação aprovada, comunicado, comunicado urgente, confirmação pendente (lembrete
+diário, uma vez por versão) e moderação. Canais: interno sempre; e-mail e WhatsApp por evento nas Configurações
+(padrão: só comunicado urgente e confirmação pendente por e-mail). O texto externo leva só título e link. GLPI e IXC
+não recebem avisos sociais. Sem duplicar (chave por evento e pessoa); quem não vê a comunidade privada não é avisado.
+Cada pessoa liga/desliga canais dos avisos não obrigatórios. Cada canal tentado fica em `notification_deliveries`
+(evento, destinatário, canal, situação, resultado), consultável nas Configurações.
+
+**Painel administrativo:** colaboradores elegíveis, usuários ativos, taxa de adoção, publicações, comunidades ativas,
+reconhecimentos, comunicados, denúncias pendentes e tempo médio de moderação, por período; sempre agregado
+(`people_activity_days` guarda só o dia de uso para a adoção). Gestão de conteúdo com filtros (tipo, situação,
+período) e ação direta da moderação com justificativa; comunidade privada de que a pessoa não participa não aparece.
+
+**Migração `0139_pessoas_governanca`** (não destrutiva): `people_reports`, `people_moderation_actions`,
+`user_notifications`, `notification_deliveries`, `user_notification_prefs`, `people_activity_days` e colunas
+`width`/`height` em `people_media`.
+
+**APIs:** `GET /pessoas/denuncias/motivos`, `GET|POST /pessoas/denuncias`, `POST /pessoas/denuncias/:id/revisao`,
+`GET /pessoas/moderacao/denuncias`, `GET /pessoas/moderacao/denuncias/:id/historico`,
+`POST /pessoas/moderacao/denuncias/:id/assumir|decisao`, `POST /pessoas/moderacao/acao`, `GET /pessoas/notificacoes`,
+`PUT /pessoas/notificacoes/preferencias`, `POST /me/notificacoes/:id/lida`, `POST /me/notificacoes/lidas`,
+`GET /pessoas/admin/entregas`, `GET /pessoas/admin/painel`, `GET /pessoas/admin/conteudos`.
+
+**Testes:** `apps/api/test/peopleGovernance.test.ts` (6) e `tests/e2e/pessoas-governanca.spec.ts`.
 
