@@ -44,6 +44,11 @@ describe('Ofícios', () => {
     const pv = ok(await carlos.post('/admin/oficios/previa', { blocks: moved, branchId })).json();
     expect(Buffer.from(pv.pdf, 'base64').subarray(0, 4).toString()).toBe('%PDF');
     expect(pv.boxes.find((b: { id: string }) => b.id === 'assinatura')).toMatchObject({ y: 235 });
+    // assinatura digitalizada no próprio bloco, com altura e deslocamento
+    const withSig = moved.map((b: { id: string }) => (b.id === 'assinatura' ? { ...b, sigImage: `data:image/png;base64,${PNG}`, sigH: 20, sigDx: 5, sigDy: -2 } : b));
+    expect(Buffer.from(ok(await carlos.post('/admin/oficios/previa', { blocks: withSig, branchId })).json().pdf, 'base64').subarray(0, 4).toString()).toBe('%PDF');
+    expect((await carlos.post('/admin/oficios/previa', { blocks: withSig.map((b: { id: string }) => (b.id === 'assinatura' ? { ...b, sigImage: 'data:text/html;base64,PGh0bWw+' } : b)), branchId })).statusCode).toBe(422);
+    ok(await carlos.patch(`/admin/oficios/${tplId}`, { blocks: withSig }));
   });
 
   it('filial: quem assina, assinatura e próximo número; contrato com filial própria', async () => {
@@ -70,7 +75,7 @@ describe('Ofícios', () => {
     const b = ok(await carlos.post(`/contracts/${contractId}/oficios`, { templateId: tplId, blocks: tpl.blocks, vars }), 201).json();
     expect([a.label, b.label]).toEqual([`71/${year}`, `72/${year}`]);
     const saved = (await ctx.db.execute(sql`select vars->>'oficio.numero' as n, vars->>'destinatario.nome' as dest, template_version from office_letters where id = ${a.id}`)).rows[0] as { n: string; dest: string; template_version: number };
-    expect(saved).toMatchObject({ n: `71/${year}`, dest: 'Luciano Gois Paul', template_version: 2 });
+    expect(saved).toMatchObject({ n: `71/${year}`, dest: 'Luciano Gois Paul', template_version: 3 });
     const pdf = await carlos.get(`/oficios/${a.id}/pdf`);
     expect(pdf.statusCode).toBe(200);
     expect(pdf.headers['content-type']).toContain('application/pdf');
