@@ -259,7 +259,7 @@ function UserMenu() {
         <ChevronDown className="h-5 w-5 text-ink" aria-hidden />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-30 mt-2 w-64 rounded-md border border-line bg-surface p-1 shadow-overlay">
+        <div role="menu" className="absolute right-0 top-full z-30 mt-2 max-h-[calc(100vh-88px)] w-64 overflow-y-auto rounded-md border border-line bg-surface p-1 shadow-overlay">
           <div className="border-b border-line px-3 py-2">
             <p className="font-semibold text-ink">{me.user.name}</p>
             <p className="text-sm text-muted">{me.tenant.name}</p>
