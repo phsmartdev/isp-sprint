@@ -19,6 +19,8 @@ import { mediaUrl, REACTIONS, igRatio, type FeedPost, type Reaction } from './ap
 import { PostEditor } from './PostEditor';
 import { AchievementArt, isAchievement } from './Achievement';
 import { ReportDialog } from '../Report';
+import { CommentsThread } from './Comments';
+import { ShareDialog } from './ShareDialog';
 
 const MEASURE_TEXT: Record<string, string> = {
   ocultar: 'ocultou esta publicação temporariamente', remover: 'removeu esta publicação', solicitar_edicao: 'pediu que você edite esta publicação; ao salvar a edição, ela volta a aparecer', encaminhar: 'encaminhou esta publicação para a instância responsável',
@@ -70,6 +72,9 @@ export function PostCard({ post, detail = false, canPin = false }: { post: FeedP
   const [picker, setPicker] = useState(false);
   const [report, setReport] = useState(false);
   const [more, setMore] = useState(detail);
+  const [comments, setComments] = useState(false);
+  const [focus, setFocus] = useState(0);
+  const [share, setShare] = useState(false);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['pessoas', 'feed'] }); void qc.invalidateQueries({ queryKey: ['pessoas', 'post', post.id] }); };
   const react = useMutation({
     mutationFn: (k: Reaction | null) => (k ? api(`/pessoas/posts/${post.id}/reacao`, { method: 'PUT', body: { kind: k } }) : api(`/pessoas/posts/${post.id}/reacao`, { method: 'DELETE' })),
@@ -164,8 +169,8 @@ export function PostCard({ post, detail = false, canPin = false }: { post: FeedP
             {REACTIONS.map((r) => <button key={r.key} type="button" title={r.label} aria-label={r.label} className={clsx('rounded-circle px-1.5 py-1 text-lg hover:bg-surface-2', post.myReaction === r.key && 'bg-primary-soft')} onClick={() => { setPicker(false); react.mutate(post.myReaction === r.key ? null : r.key); }}>{r.emoji}</button>)}
           </div>
         )}
-        {!detail && <Link to={`/pessoas/publicacao/${post.id}`} aria-label="Comentar" className="rounded-sm p-2 text-ink hover:bg-surface-2"><MessageCircle className="h-6 w-6 -scale-x-100" aria-hidden /></Link>}
-        <button type="button" aria-label="Copiar link para compartilhar" className="rounded-sm p-2 text-ink hover:bg-surface-2" onClick={() => void copyLink()}><Send className="h-6 w-6" aria-hidden /></button>
+        {!detail && <button type="button" aria-label="Comentar" aria-expanded={comments} className="rounded-sm p-2 text-ink hover:bg-surface-2" onClick={() => { setComments(true); setFocus((f) => f + 1); }}><MessageCircle className="h-6 w-6 -scale-x-100" aria-hidden /></button>}
+        {post.status === 'publicado' && <button type="button" aria-label="Enviar por mensagem" className="rounded-sm p-2 text-ink hover:bg-surface-2" onClick={() => setShare(true)}><Send className="h-6 w-6" aria-hidden /></button>}
         <button type="button" className="ml-auto rounded-sm p-2 hover:bg-surface-2" aria-label={post.saved ? 'Salva' : 'Salvar'} aria-pressed={post.saved} onClick={() => save.mutate()}>
           <Bookmark className={clsx('h-6 w-6', post.saved ? 'fill-ink text-ink' : 'text-ink')} aria-hidden />
         </button>
@@ -179,15 +184,18 @@ export function PostCard({ post, detail = false, canPin = false }: { post: FeedP
           <li key={m.id}><a href={mediaUrl(m.id)} className="flex items-center gap-2 border border-line px-3 py-2 text-sm hover:bg-surface-2"><FileText className="h-4 w-4 text-primary" aria-hidden /><span className="min-w-0 flex-1 truncate text-ink">{m.filename}</span><span className="text-xs text-muted">{fmtBytes(m.sizeBytes)}</span><Download className="h-4 w-4 text-muted" aria-hidden /></a></li>
         ))}</ul>
       )}
-      {!detail && post.commentCount > 0 && (
-        <Link to={`/pessoas/publicacao/${post.id}`} className="block px-4 pt-1 text-sm text-muted hover:text-ink">{post.commentCount === 1 ? 'Ver 1 comentário' : `Ver todos os ${post.commentCount} comentários`}</Link>
+      {/* comentários no próprio feed: recolhidos (2 últimos), "ver todos" abre ali mesmo */}
+      {!detail && !comments && post.commentCount > 0 && (
+        <button type="button" className="block px-4 pt-1 text-left text-sm text-muted hover:text-ink" onClick={() => setComments(true)}>{post.commentCount === 1 ? 'Ver 1 comentário' : `Ver todos os ${post.commentCount} comentários`}</button>
       )}
+      {!detail && comments && <div className="px-4 pt-2" role="region" aria-label="Comentários"><CommentsThread key={focus} postId={post.id} collapsed autoFocus={focus > 0} /></div>}
       <p className="px-4 pb-3 pt-1 text-2xs uppercase tracking-wide text-muted">{fmtRelative(at)}</p>
       <style>{`@keyframes ig-heart { 0% { transform: translate(-50%,-50%) scale(0); opacity: 0 } 15% { transform: translate(-50%,-50%) scale(1.2); opacity: .95 } 30% { transform: translate(-50%,-50%) scale(.95) } 45%,80% { transform: translate(-50%,-50%) scale(1); opacity: .95 } 100% { transform: translate(-50%,-50%) scale(1); opacity: 0 } } .ig-heart { animation: ig-heart 1s ease-out forwards } @media (prefers-reduced-motion: reduce) { .ig-heart { animation: none; opacity: 0 } }`}</style>
       <ConfirmDialog open={confirmDel} title="Excluir publicação" tone="danger" confirmLabel="Excluir" loading={del.isPending} onCancel={() => setConfirmDel(false)} onConfirm={() => del.mutate()}>
         <p>A publicação sai do feed para todos, com os comentários e reações. Esta ação não pode ser desfeita por você.</p>
       </ConfirmDialog>
       <ReportDialog target={report ? { targetType: 'publicacao', targetId: post.id } : null} onClose={() => setReport(false)} />
+      {share && <ShareDialog postId={post.id} open={share} onClose={() => setShare(false)} />}
     </article>
   );
 }

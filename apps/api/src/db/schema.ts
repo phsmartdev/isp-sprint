@@ -6735,8 +6735,13 @@ export const peopleConversations = pgTable(
   {
     id: id(),
     tenantId: tenantId(),
-    /** conversa direta: os dois ids em ordem, para não abrir duas conversas com a mesma pessoa */
-    pairKey: text('pair_key').notNull(),
+    /** direta (duas pessoas) ou grupo */
+    kind: text('kind').notNull().default('direta'),
+    /** nome do grupo */
+    title: text('title'),
+    createdBy: uuid('created_by').references(() => users.id),
+    /** conversa direta: os dois ids em ordem, para não abrir duas conversas com a mesma pessoa (grupo: vazio) */
+    pairKey: text('pair_key'),
     lastMessageAt: ts('last_message_at'),
     createdAt: createdAt(),
   },
@@ -6762,6 +6767,8 @@ export const peopleMessages = pgTable(
     conversationId: uuid('conversation_id').notNull().references(() => peopleConversations.id, { onDelete: 'cascade' }),
     authorId: uuid('author_id').notNull().references(() => users.id),
     body: text('body').notNull(),
+    /** publicação enviada na conversa (quem não pode vê-la recebe só o aviso de indisponível) */
+    postId: uuid('post_id').references(() => peoplePosts.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     deletedAt: ts('deleted_at'),
   },

@@ -58,23 +58,27 @@ test('feed: publicar, reagir, comentar, responder, salvar, rascunho, editar e ex
   await lc.getByRole('button', { name: 'Escolher reação' }).click();
   await lc.getByRole('button', { name: 'Celebrar' }).click();
   await expect(lc.getByRole('button', { name: /Celebrar/ }).first()).toHaveAttribute('aria-pressed', 'true');
-  await lc.getByRole('link', { name: 'Comentar' }).click();
-  await l.getByLabel('Escrever comentário').fill('Ficou ótima!');
-  await l.getByRole('button', { name: 'Comentar', exact: true }).click();
-  await expect(l.getByRole('region', { name: 'Comentários' })).toContainText('Ficou ótima!');
+  // comentários no próprio feed, sem trocar de página
+  await lc.getByRole('button', { name: 'Comentar' }).click();
+  const lcc = lc.getByRole('region', { name: 'Comentários' });
+  await lcc.getByLabel('Escrever comentário').fill('Ficou ótima!');
+  await lcc.getByRole('button', { name: 'Comentar', exact: true }).click();
+  await expect(lcc).toContainText('Ficou ótima!');
+  await expect(l).toHaveURL(/\/pessoas$/);
   await ctx.close();
 
   await page.reload();
-  await expect(card.getByText('Ver 1 comentário')).toBeVisible();
-  await card.getByRole('link', { name: 'Comentar' }).click();
-  await page.getByRole('button', { name: 'Responder' }).first().click();
-  await page.getByLabel('Responder comentário').fill('Obrigado, Lucas!');
-  await page.getByRole('button', { name: 'Responder', exact: true }).last().click();
-  await expect(page.getByRole('region', { name: 'Comentários' })).toContainText('Obrigado, Lucas!');
+  await card.getByRole('button', { name: 'Ver 1 comentário' }).click();
+  const cc = card.getByRole('region', { name: 'Comentários' });
+  await cc.getByRole('button', { name: 'Responder' }).first().click();
+  await cc.getByLabel('Responder comentário').fill('Obrigado, Lucas!');
+  await cc.getByRole('button', { name: 'Responder', exact: true }).last().click();
+  await expect(cc).toContainText('Obrigado, Lucas!');
+  await expect(page).toHaveURL(/\/pessoas$/);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/pessoas-publicacao.png`, fullPage: true });
 
   // salvar, editar e excluir a própria
-  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await card.getByRole('button', { name: 'Salvar', exact: true }).click();
   await expect(page.getByText('Publicação salva')).toBeVisible();
   await page.goto('/pessoas/salvos');
   await expect(page.getByRole('article').filter({ hasText: `Inauguramos a nova sala ${tag}` })).toBeVisible();
