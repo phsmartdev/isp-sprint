@@ -10,7 +10,7 @@ import { notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import type { OfficeBlock } from '../db/schema';
 import { audit } from '../services/audit';
-import { decodeImage } from '../services/images';
+import { dataUrlImage, decodeImage } from '../services/images';
 import { loadContract } from '../services/contracts';
 import { branchArt, DEFAULT_BLOCKS, OFFICE_VARS, officeDefaults, renderOffice, SAMPLE_VARS, usedVars } from '../services/officeLetters';
 import { todayIn } from '../services/vacations';
@@ -24,7 +24,7 @@ const Block = z.object({
   align: z.enum(['left', 'right', 'center', 'justify']), size: z.number().min(6).max(28), lineGap: z.number().min(1).max(3),
   indent: z.number().min(0).max(60), paraGap: z.number().min(0).max(30), text: z.string().max(10000),
   // assinatura digitalizada no próprio bloco (até ~600 KB) e o ajuste dela
-  sigImage: z.string().max(820_000).regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/, 'Assinatura em PNG ou JPG').nullable().optional(),
+  sigImage: z.string().max(820_000).regex(/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/, 'Assinatura em PNG ou JPG').refine((v) => dataUrlImage(v) !== null, 'Imagem da assinatura corrompida. Exporte o arquivo novamente.').nullable().optional(),
   sigH: z.number().min(5).max(60).optional(), sigDx: z.number().min(-80).max(80).optional(), sigDy: z.number().min(-40).max(40).optional(),
 });
 const Blocks = z.array(Block).min(1).max(30);
