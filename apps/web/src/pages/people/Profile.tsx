@@ -5,7 +5,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Award, Mail, Pencil, Phone } from 'lucide-react';
+import { Award, Mail, Pencil, Phone, Send } from 'lucide-react';
+import { useStartConversation } from './FeedHome';
 import { api } from '../../lib/api';
 import { Avatar, Button, Chip, ErrorState, FormField, Input, LoadingRows, Textarea } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
@@ -20,6 +21,7 @@ const list = (s: string) => s.split(/[,;\n]/).map((x) => x.trim()).filter((x) =>
 export function ProfilePage() {
   const { userId = 'eu' } = useParams();
   const meQ = usePeopleMe();
+  const talk = useStartConversation();
   const id = userId === 'eu' ? meQ.data?.me.id : userId;
   const q = useQuery({ queryKey: ['pessoas', 'perfil', id], enabled: !!id, queryFn: () => api<PeopleProfile>(`/pessoas/perfis/${id}`) });
   const [params, setParams] = useSearchParams();
@@ -35,6 +37,7 @@ export function ProfilePage() {
           <div className="relative z-10 -mt-12 flex flex-wrap items-end justify-between gap-3">
             <Avatar name={p.name} userId={p.id} hasPhoto={p.hasPhoto} size={96} className="ring-4 ring-surface" />
             {p.self && !editing && <Button size="sm" icon={<Pencil className="h-4 w-4" />} onClick={() => setParams({ editar: '1' })}>Editar perfil</Button>}
+            {!p.self && <Button size="sm" variant="primary" icon={<Send className="h-4 w-4" />} loading={talk.isPending} onClick={() => talk.mutate(p.id)}>Mensagem</Button>}
           </div>
           <h2 className="mt-3 font-display text-2xl font-bold tracking-wide text-ink">{p.name}</h2>
           {orgLine(p) && <p className="text-md text-text">{orgLine(p)}</p>}

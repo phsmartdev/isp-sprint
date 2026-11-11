@@ -89,11 +89,11 @@ test('instagram, denúncia, moderação e painel', async ({ page, browser }) => 
   await dd.getByRole('button', { name: 'Registrar decisão' }).click();
   await expect(page.getByText('Decisão registrada')).toBeVisible();
 
-  // Ana recebe o aviso no topo e vê o motivo no perfil
+  // Ana recebe o aviso e vê o motivo no perfil
+  // aviso de moderação fica nas Notificações do módulo (o @ do topo é só marcação e institucional)
   await a.reload();
-  await a.getByRole('button', { name: /menç/ }).click();
-  await expect(a.getByRole('dialog', { name: 'Menções' }).getByText('A moderação pediu que você edite sua publicação')).toBeVisible();
-  await a.keyboard.press('Escape');
+  await a.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Notificações' }).click();
+  await expect(a.getByRole('region', { name: 'Avisos' }).getByText('A moderação pediu que você edite sua publicação')).toBeVisible();
   await a.goto('/pessoas/perfil/eu');
   const own = a.getByRole('article').filter({ hasText: `Bastidores da nova loja ${tag}` });
   await expect(own.getByRole('status')).toContainText('Troque a foto');

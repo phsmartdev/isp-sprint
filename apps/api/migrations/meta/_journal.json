@@ -981,6 +981,13 @@
       "when": 1794359238142,
       "tag": "0139_pessoas_governanca",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1794406136680,
+      "tag": "0140_pessoas_mensagens",
+      "breakpoints": true
     }
   ]
 }

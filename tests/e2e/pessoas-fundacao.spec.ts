@@ -25,8 +25,12 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
   }
   await page.reload();
   await page.getByRole('link', { name: 'Pessoas & Cultura' }).click();
+  const menu = page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' });
+  await expect(menu.getByRole('link', { name: 'Feed' })).toBeVisible();
+  await expect(menu.getByRole('link', { name: 'Administração' })).toBeVisible();
+  if (SHOTS) { await page.waitForTimeout(500); await page.screenshot({ path: `${SHOTS}/pessoas-feed-desktop.png` }); }
+  await menu.getByRole('link', { name: 'Meu Espaço' }).click();
   await expect(page.getByRole('heading', { name: /^(Bom dia|Boa tarde|Boa noite), Carlos!$/ })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Configurações' })).toBeVisible();
 
   // colegas e perfil de um colega
   await page.getByLabel('Buscar colegas').fill('Mariana');
@@ -36,7 +40,8 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
   await expect(page.getByRole('button', { name: 'Editar perfil' })).toHaveCount(0);
 
   // meu perfil: completar
-  await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Meu Perfil' }).click();
+  await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Meu Espaço' }).click();
+  await page.getByRole('region', { name: 'Atalhos' }).getByRole('link', { name: 'Meu perfil' }).click();
   await page.getByRole('button', { name: 'Editar perfil' }).click();
   await page.getByLabel('Bio').fill('Gerente comercial. Gosto de formar times.');
   await page.getByLabel('Interesses profissionais').fill('liderança, vendas consultivas');
@@ -49,7 +54,8 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/pessoas-perfil.png`, fullPage: true });
 
   // configurações: papéis por setor
-  await page.getByRole('link', { name: 'Configurações', exact: true }).last().click();
+  await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Administração' }).click();
+  await page.getByRole('navigation', { name: 'Administração de Pessoas & Cultura' }).getByRole('link', { name: 'Configurações' }).click();
   await expect(page.getByRole('region', { name: 'Papéis do módulo' })).toBeVisible();
   await page.getByLabel('Vídeo (MB)').fill('30');
   await page.getByRole('button', { name: 'Salvar configurações' }).click();
@@ -63,9 +69,10 @@ test('módulo Pessoas & Cultura: piloto liberado, perfil social e configuraçõe
   await m.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
   await m.getByRole('button', { name: 'Entrar' }).click();
   await m.waitForURL((u) => !u.pathname.startsWith('/login'));
-  await m.goto(page.url().replace(/\/pessoas.*$/, '/pessoas'));
+  await m.goto(page.url().replace(/\/pessoas.*$/, '/pessoas/meu-espaco'));
   await expect(m.getByRole('heading', { name: /, Mariana!$/ })).toBeVisible();
-  await expect(m.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Configurações' })).toHaveCount(0);
+  await expect(m.getByRole('navigation', { name: 'Seções de Pessoas & Cultura (celular)' }).getByRole('link', { name: 'Feed' })).toBeVisible();
+  await expect(m.getByRole('link', { name: 'Administração' })).toHaveCount(0);
   expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   if (SHOTS) await m.screenshot({ path: `${SHOTS}/pessoas-meu-espaco-celular.png`, fullPage: true });
   await m.getByLabel('Buscar colegas').fill('Carlos');

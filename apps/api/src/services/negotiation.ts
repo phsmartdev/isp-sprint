@@ -186,7 +186,7 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
      limit 30`);
   const gvItems = gv.rows.map((r) => ({ kind: 'gestao' as const, opportunityId: null as string | null, taskId: r.entity_id, code: null as number | null, contactName: r.entity as string | null, title: r.title, source: `${r.entity}_${r.type}` as (typeof opp)[number]['source'], body: '', author: r.author, at: r.at, unread: r.unread }));
   // avisos genéricos (Pessoas & Cultura e, no futuro, outros módulos)
-  const un = await myPeopleNotifications(db, auth.tenantId, auth.userId, 30);
+  const un = await myPeopleNotifications(db, auth.tenantId, auth.userId, 30, true); // só marcação para mim e comunicação institucional
   const unItems = un.map((r) => ({ kind: 'aviso' as const, opportunityId: null as string | null, taskId: r.id, code: null as number | null, contactName: r.link as string | null, title: r.title as string | null, source: `pessoas_${r.event}` as (typeof opp)[number]['source'], body: r.body ?? '', author: r.author, at: r.at, unread: !r.readAt }));
   const items = [...opp, ...tk, ...iv, ...gvItems, ...unItems].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };

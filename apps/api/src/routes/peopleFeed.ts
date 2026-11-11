@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
-import { notifyComment, notifyPostMentions } from '../services/people/notify';
+import { notifyComment, notifyInstitutional, notifyPostMentions } from '../services/people/notify';
 import { authorEdited } from '../services/people/moderation';
 import { touchActivity } from './peopleAdmin';
 import { todayIn } from '../services/vacations';
@@ -154,6 +154,7 @@ export const peopleFeedRoutes = [
       });
       if (body.kind === 'institucional') await audit(app.db, req, { action: 'people.post.institutional', entityType: 'people_post', entityId: post.id });
       await notifyPostMentions(app.db, app.config, auth.tenantId, post, { id: auth.userId, name: auth.name }).catch((e) => console.error('aviso de menção', e));
+      await notifyInstitutional(app.db, app.config, auth.tenantId, post, todayIn(auth.timezone)).catch((e) => console.error('aviso institucional', e));
       reply.code(201);
       return (await postDtos(app.db, auth, [post]))[0];
     },
@@ -201,6 +202,7 @@ export const peopleFeedRoutes = [
       // edição pedida pela moderação: ao editar, volta ao ar (e fica registrado para conferência)
       if (cur.status === 'oculto' && (await authorEdited(app.db, auth.tenantId, 'publicacao', cur.id, auth.userId))) p.status = 'publicado';
       await notifyPostMentions(app.db, app.config, auth.tenantId, p, { id: auth.userId, name: auth.name }).catch((e) => console.error('aviso de menção', e));
+      await notifyInstitutional(app.db, app.config, auth.tenantId, p, todayIn(auth.timezone)).catch((e) => console.error('aviso institucional', e));
       return (await postDtos(app.db, auth, [p]))[0];
     },
   }),
