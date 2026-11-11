@@ -554,14 +554,15 @@ export const adminRoutes = [
   defineRoute({
     method: 'PUT',
     url: '/admin/branding/:slot',
-    summary: 'Envia imagem para um espaço (PNG, JPG ou WebP até 2 MB; SVG não aceito)',
+    summary: 'Envia imagem para um espaço (PNG, JPG ou WebP até 3 MB; SVG não aceito)',
     tag: 'Administração',
     ...ADMIN,
     params: SlotParams,
-    body: ImageUpload,
-    bodyLimit: 3_200_000,
+    // arte de tela cheia (fundo do login) pede mais nitidez: até 3 MB (o base64 ainda cabe nos 4,5 MB da hospedagem)
+    body: z.object({ data: z.string().min(16).max(4_200_000) }),
+    bodyLimit: 4_400_000,
     handler: async ({ app, auth, params, body, req }) => {
-      const img = decodeImage(body.data);
+      const img = decodeImage(body.data, 3 * 1024 * 1024);
       await app.db
         .insert(s.brandAssets)
         .values({ tenantId: auth.tenantId, slot: params.slot, mime: img.mime, data: img.data, sizeBytes: img.data.length, sha256: img.sha256, updatedBy: auth.userId })
