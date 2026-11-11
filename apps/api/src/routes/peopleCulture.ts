@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
+import { announcementFanout, notifyPeople } from '../services/people/notify';
 import { audit } from '../services/audit';
 import { peopleCaps, peopleSettingsOf } from '../services/people/settings';
 import { communityPerms, loadCommunity } from '../services/people/communities';
@@ -138,6 +139,7 @@ export const peopleCultureRoutes = [
       });
       // registro para integração futura com gamificação/medalhas (sem pontos agora)
       await audit(app.db, req, { action: 'people.recognition.create', entityType: 'people_recognition', entityId: r.id, metadata: { to: to.id, category: cat.name, visibility: body.visibility } });
+      await notifyPeople(app.db, app.config, auth.tenantId, [{ userId: to.id, event: 'reconhecimento', title: `${auth.name.split(' ')[0]} reconheceu você: ${cat.emoji} ${cat.name}`, link: r.postId ? `/pessoas/publicacao/${r.postId}` : '/pessoas/reconhecimento', actorId: auth.userId, dedupeKey: `reconhecimento:${r.id}` }]).catch((e) => console.error('aviso de reconhecimento', e));
       reply.code(201);
       return { id: r.id, postId: r.postId ?? null };
     },
@@ -261,6 +263,7 @@ export const peopleCultureRoutes = [
         await attachAnnouncementMedia(tx, auth, a!.id, body.mediaIds);
         return a!;
       });
+      if (a.status === 'publicado') await announcementFanout(app.db, app.config, auth.tenantId, a.id, todayIn(auth.timezone)).catch((e) => console.error('aviso de comunicado', e));
       await audit(app.db, req, { action: body.publish ? 'people.announcement.publish' : 'people.announcement.create', entityType: 'people_announcement', entityId: a.id, metadata: { title: a.title, priority: a.priority, audience: a.audience, requireAck: a.requireAck } });
       reply.code(201);
       return a;
@@ -287,6 +290,7 @@ export const peopleCultureRoutes = [
         }).where(eq(s.peopleAnnouncements.id, cur.id)).returning();
         return a!;
       });
+      if (a.status === 'publicado') await announcementFanout(app.db, app.config, auth.tenantId, a.id, todayIn(auth.timezone)).catch((e) => console.error('aviso de comunicado', e));
       await audit(app.db, req, { action: status === 'encerrado' ? 'people.announcement.close' : status === 'publicado' ? 'people.announcement.publish' : 'people.announcement.update', entityType: 'people_announcement', entityId: cur.id, metadata: { version: a.version, fields: Object.keys(body) } });
       return a;
     },

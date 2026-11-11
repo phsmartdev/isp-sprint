@@ -20,7 +20,7 @@ export function Feed({ filter, title, emptyTitle, emptyText, orderable = true, c
   const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   const pinned = q.data?.pages[0]?.pinned ?? [];
   return (
-    <section className="space-y-3" aria-label={title ?? 'Feed'}>
+    <section className="mx-auto w-full max-w-[520px] space-y-3" aria-label={title ?? 'Feed'}>
       {(title || orderable) && (
         <div className="flex flex-wrap items-center justify-between gap-2">
           {title && <h2 className="text-md font-bold text-ink">{title}</h2>}

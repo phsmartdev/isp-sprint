@@ -6331,6 +6331,9 @@ export const peopleMedia = pgTable(
     mime: text('mime').notNull(),
     filename: text('filename').notNull(),
     sizeBytes: integer('size_bytes').notNull(),
+    /** dimensões da imagem (proporção do cartão no feed, como no Instagram) */
+    width: integer('width'),
+    height: integer('height'),
     sha256: text('sha256').notNull(),
     data: bytea('data').notNull(),
     position: integer('position').notNull().default(0),
@@ -6585,4 +6588,140 @@ export const peopleAnnouncementReads = pgTable(
     acknowledgedAt: ts('acknowledged_at'),
   },
   (t) => ({ pk: primaryKey({ columns: [t.announcementId, t.userId] }) }),
+);
+
+/**
+ * Pessoas & Cultura · Etapa 5 — denúncias. O moderador vê só o item denunciado (cópia do conteúdo no momento da
+ * denúncia), nunca a comunidade privada inteira. Quem denunciou não é revelado a quem publicou.
+ */
+export const peopleReports = pgTable(
+  'people_reports',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id').notNull(),
+    /** publicação de contexto (a própria, a do comentário ou a do reconhecimento público) */
+    postId: uuid('post_id').references(() => peoplePosts.id, { onDelete: 'set null' }),
+    communityId: uuid('community_id').references(() => peopleCommunities.id, { onDelete: 'set null' }),
+    /** autor do conteúdo denunciado */
+    authorId: uuid('author_id').notNull().references(() => users.id),
+    reporterId: uuid('reporter_id').notNull().references(() => users.id),
+    reason: text('reason').notNull(),
+    details: text('details'),
+    /** cópia do conteúdo denunciado (texto, quando foi publicado) */
+    snapshot: jsonb('snapshot').$type<{ body: string; createdAt: string | null; kind?: string }>().notNull(),
+    status: text('status').notNull().default('aberta'),
+    assigneeId: uuid('assignee_id').references(() => users.id),
+    measure: text('measure'),
+    justification: text('justification'),
+    forwardedTo: text('forwarded_to'),
+    decidedBy: uuid('decided_by').references(() => users.id),
+    decidedAt: ts('decided_at'),
+    reviewRequestedBy: uuid('review_requested_by').references(() => users.id),
+    reviewRequestedAt: ts('review_requested_at'),
+    reviewReason: text('review_reason'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    queueIdx: index('people_reports_queue_idx').on(t.tenantId, t.status, t.createdAt),
+    targetIdx: index('people_reports_target_idx').on(t.tenantId, t.targetType, t.targetId),
+    oneOpenUq: uniqueIndex('people_reports_open_uq').on(t.targetType, t.targetId, t.reporterId).where(sql`status in ('aberta', 'em_analise')`),
+    targetCk: check('people_reports_target_ck', inList('target_type', ['publicacao', 'comentario', 'reconhecimento'])),
+    reasonCk: check('people_reports_reason_ck', inList('reason', ['inadequado', 'ofensivo', 'exposicao', 'assedio', 'spam', 'outro'])),
+    statusCk: check('people_reports_status_ck', inList('status', ['aberta', 'em_analise', 'decidida', 'em_revisao', 'revisada'])),
+    measureCk: check('people_reports_measure_ck', sql`measure is null or measure in ('manter', 'ocultar', 'remover', 'solicitar_edicao', 'encaminhar')`),
+  }),
+);
+
+/** Trilha da moderação: cada passo (triagem, decisão, revisão, ação direta, edição do autor) com quem e por quê. */
+export const peopleModerationActions = pgTable(
+  'people_moderation_actions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    reportId: uuid('report_id').references(() => peopleReports.id, { onDelete: 'cascade' }),
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id').notNull(),
+    action: text('action').notNull(),
+    measure: text('measure'),
+    note: text('note'),
+    actorId: uuid('actor_id').notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    targetIdx: index('people_moderation_actions_target_idx').on(t.tenantId, t.targetType, t.targetId, t.createdAt),
+    reportIdx: index('people_moderation_actions_report_idx').on(t.reportId, t.createdAt),
+  }),
+);
+
+/**
+ * Notificações internas (genéricas, reaproveitáveis por outros módulos): aparecem no ícone de avisos do topo.
+ * dedupeKey evita avisar duas vezes o mesmo evento à mesma pessoa.
+ */
+export const userNotifications = pgTable(
+  'user_notifications',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    module: text('module').notNull(),
+    event: text('event').notNull(),
+    title: text('title').notNull(),
+    body: text('body'),
+    link: text('link').notNull(),
+    actorId: uuid('actor_id').references(() => users.id),
+    dedupeKey: text('dedupe_key').notNull(),
+    readAt: ts('read_at'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    inboxIdx: index('user_notifications_inbox_idx').on(t.tenantId, t.userId, t.createdAt),
+    dedupeUq: uniqueIndex('user_notifications_dedupe_uq').on(t.tenantId, t.userId, t.dedupeKey),
+  }),
+);
+
+/** Rastreabilidade: cada canal tentado para cada aviso (interna, e-mail, WhatsApp) com o resultado. */
+export const notificationDeliveries = pgTable(
+  'notification_deliveries',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    notificationId: uuid('notification_id').notNull().references(() => userNotifications.id, { onDelete: 'cascade' }),
+    channel: text('channel').notNull(),
+    status: text('status').notNull(),
+    detail: text('detail'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    notifIdx: index('notification_deliveries_notif_idx').on(t.notificationId),
+    channelCk: check('notification_deliveries_channel_ck', inList('channel', ['interna', 'email', 'whatsapp'])),
+    statusCk: check('notification_deliveries_status_ck', inList('status', ['entregue', 'enviado', 'falhou', 'nao_configurado', 'sem_contato', 'desativado'])),
+  }),
+);
+
+/** Preferências individuais: desligar um canal de um evento não obrigatório. Sem linha = segue o padrão da empresa. */
+export const userNotificationPrefs = pgTable(
+  'user_notification_prefs',
+  {
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    event: text('event').notNull(),
+    channel: text('channel').notNull(),
+    enabled: boolean('enabled').notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.event, t.channel] }) }),
+);
+
+/** Dias em que a pessoa usou o módulo: só para indicadores agregados (adoção), nunca por pessoa. */
+export const peopleActivityDays = pgTable(
+  'people_activity_days',
+  {
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.day, t.userId] }) }),
 );

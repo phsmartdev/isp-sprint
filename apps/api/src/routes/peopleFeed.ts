@@ -7,6 +7,10 @@ import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
+import { notifyComment, notifyPostMentions } from '../services/people/notify';
+import { authorEdited } from '../services/people/moderation';
+import { touchActivity } from './peopleAdmin';
+import { todayIn } from '../services/vacations';
 import { audit } from '../services/audit';
 import { peopleCaps, peopleSettingsOf } from '../services/people/settings';
 import { inMyFeed, postDtos, postVisible, validMentions } from '../services/people/posts';
@@ -85,7 +89,9 @@ export const peopleFeedRoutes = [
       limite: z.coerce.number().int().min(1).max(30).default(10),
     }),
     handler: async ({ app, auth, query }) => {
-      const where = [postVisible(auth), eq(s.peoplePosts.status, 'publicado')];
+      await touchActivity(app.db, auth.tenantId, auth.userId, todayIn(auth.timezone)).catch(() => undefined);
+      // no próprio perfil, o autor vê também o que a moderação tirou do ar (com o motivo)
+      const where = [postVisible(auth), query.autor === auth.userId ? inArray(s.peoplePosts.status, ['publicado', 'oculto', 'removido']) : eq(s.peoplePosts.status, 'publicado')];
       let pinned: (typeof s.peoplePosts.$inferSelect)[] = [];
       if (query.comunidade) {
         const { c, role } = await loadCommunity(app.db, auth, query.comunidade);
@@ -147,6 +153,7 @@ export const peopleFeedRoutes = [
         return p!;
       });
       if (body.kind === 'institucional') await audit(app.db, req, { action: 'people.post.institutional', entityType: 'people_post', entityId: post.id });
+      await notifyPostMentions(app.db, app.config, auth.tenantId, post, { id: auth.userId, name: auth.name }).catch((e) => console.error('aviso de menção', e));
       reply.code(201);
       return (await postDtos(app.db, auth, [post]))[0];
     },
@@ -191,6 +198,9 @@ export const peopleFeedRoutes = [
         }).where(eq(s.peoplePosts.id, cur.id)).returning();
         return u!;
       });
+      // edição pedida pela moderação: ao editar, volta ao ar (e fica registrado para conferência)
+      if (cur.status === 'oculto' && (await authorEdited(app.db, auth.tenantId, 'publicacao', cur.id, auth.userId))) p.status = 'publicado';
+      await notifyPostMentions(app.db, app.config, auth.tenantId, p, { id: auth.userId, name: auth.name }).catch((e) => console.error('aviso de menção', e));
       return (await postDtos(app.db, auth, [p]))[0];
     },
   }),
@@ -266,6 +276,7 @@ export const peopleFeedRoutes = [
         await tx.update(s.peoplePosts).set({ commentCount: sql`${s.peoplePosts.commentCount} + 1` }).where(eq(s.peoplePosts.id, p.id));
         return c!;
       });
+      await notifyComment(app.db, app.config, auth.tenantId, p, { id: c.id, parentId, mentions }, { id: auth.userId, name: auth.name }).catch((e) => console.error('aviso de comentário', e));
       reply.code(201);
       return { id: c.id, parentId };
     },
@@ -276,6 +287,7 @@ export const peopleFeedRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const c = await ownComment(app.db, auth, params.id);
       await app.db.update(s.peopleComments).set({ body: body.body, mentions: await validMentions(app.db, auth.tenantId, body.mentions), editedAt: new Date() }).where(eq(s.peopleComments.id, c.id));
+      if (c.status === 'oculto') await authorEdited(app.db, auth.tenantId, 'comentario', c.id, auth.userId);
       return { ok: true };
     },
   }),
@@ -285,7 +297,7 @@ export const peopleFeedRoutes = [
       const c = await ownComment(app.db, auth, params.id);
       await app.db.transaction(async (tx) => {
         await tx.update(s.peopleComments).set({ deletedAt: new Date() }).where(eq(s.peopleComments.id, c.id));
-        await tx.update(s.peoplePosts).set({ commentCount: sql`greatest(${s.peoplePosts.commentCount} - 1, 0)` }).where(eq(s.peoplePosts.id, c.postId));
+        await tx.execute(sql`update people_posts set comment_count = (select count(*) from people_comments where post_id = ${c.postId} and status = 'publicado' and deleted_at is null) where id = ${c.postId}`);
       });
       return reply.code(204).send();
     },
@@ -314,7 +326,7 @@ export const peopleFeedRoutes = [
   defineRoute({
     method: 'POST', url: '/pessoas/midias/envios/:uploadId/concluir', summary: 'Conclui o envio: confere tipo e tamanho e guarda a mídia (ainda não publicada)', ...M,
     params: z.object({ uploadId: z.string().uuid() }),
-    body: z.object({ filename: z.string().trim().min(1).max(200), parts: z.number().int().min(1).max(MAX_PARTS), sizeBytes: z.number().int().min(1).max(MAX_PARTS * CHUNK) }),
+    body: z.object({ filename: z.string().trim().min(1).max(200), parts: z.number().int().min(1).max(MAX_PARTS), sizeBytes: z.number().int().min(1).max(MAX_PARTS * CHUNK), width: z.number().int().min(1).max(20000).nullable().default(null), height: z.number().int().min(1).max(20000).nullable().default(null) }),
     handler: async ({ app, auth, params, body, reply }) => {
       const st = await peopleSettingsOf(app.db, auth.tenantId);
       const mine = and(eq(s.peopleMediaChunks.uploadId, params.uploadId), eq(s.peopleMediaChunks.tenantId, auth.tenantId), eq(s.peopleMediaChunks.ownerId, auth.userId));
@@ -331,15 +343,15 @@ export const peopleFeedRoutes = [
       const filename = safeFilename(body.filename);
       const row = await app.db.transaction(async (tx) => {
         const ins = await tx.execute<{ id: string; size_bytes: number }>(sql`
-          insert into people_media (tenant_id, owner_id, kind, mime, filename, size_bytes, sha256, data)
-          select ${auth.tenantId}, ${auth.userId}, ${type.kind}, ${type.mime}, ${filename}, octet_length(f.data), encode(sha256(f.data), 'hex'), f.data
+          insert into people_media (tenant_id, owner_id, kind, mime, filename, size_bytes, width, height, sha256, data)
+          select ${auth.tenantId}, ${auth.userId}, ${type.kind}, ${type.mime}, ${filename}, octet_length(f.data), ${body.width}, ${body.height}, encode(sha256(f.data), 'hex'), f.data
           from (select string_agg(c.data, ''::bytea order by c.n) as data from people_media_chunks c where c.upload_id = ${params.uploadId} and c.tenant_id = ${auth.tenantId} and c.owner_id = ${auth.userId}) f
           returning id, size_bytes`);
         await tx.delete(s.peopleMediaChunks).where(mine);
         return ins.rows[0]!;
       });
       reply.code(201);
-      return { id: row.id, kind: type.kind, mime: type.mime, filename, sizeBytes: Number(row.size_bytes) };
+      return { id: row.id, kind: type.kind, mime: type.mime, filename, sizeBytes: Number(row.size_bytes), width: body.width, height: body.height };
     },
   }),
   defineRoute({

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound } from '../http/errors';
 import * as s from '../db/schema';
+import { moderatedCommunities } from '../services/people/moderation';
 import { audit } from '../services/audit';
 import { PeopleSettings, peopleCaps, peopleSettingsOf } from '../services/people/settings';
 import { institutionalOf, publicCard } from '../services/people/profiles';
@@ -25,9 +26,12 @@ export const peopleRoutes = [
         app.db.select().from(s.peopleProfiles).where(eq(s.peopleProfiles.userId, auth.userId)).limit(1),
       ]);
       const me = inst.get(auth.userId)!;
+      const caps = peopleCaps(auth, st);
+      // responsável/moderador de comunidade também trata as denúncias do conteúdo dela
+      const communityModerator = !caps.moderate && (await moderatedCommunities(app.db, auth)).length > 0;
       return {
         me: { ...publicCard(me), firstName: me.name.split(' ')[0] },
-        caps: peopleCaps(auth, st),
+        caps, communityModerator,
         limits: st.limits,
         profileComplete: !!(prof?.bio?.trim() && (prof.interests.length || prof.skills.length)),
       };

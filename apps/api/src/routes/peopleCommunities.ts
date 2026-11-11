@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
+import type { Config } from '../config';
+import { notifyPeople } from '../services/people/notify';
 import { audit } from '../services/audit';
 import { peopleCaps, peopleSettingsOf } from '../services/people/settings';
 import { canCreateCommunity, communityPerms, KIND_LABEL, loadCommunity, refreshMemberCount, type CommunityRole } from '../services/people/communities';
@@ -205,9 +207,10 @@ export const peopleCommunityRoutes = [
       for (const userId of to) {
         // pedido pendente da própria pessoa + convite = entra direto
         const [req0] = await app.db.select({ id: s.peopleCommunityRequests.id }).from(s.peopleCommunityRequests).where(and(eq(s.peopleCommunityRequests.communityId, c.id), eq(s.peopleCommunityRequests.userId, userId), eq(s.peopleCommunityRequests.kind, 'pedido'), eq(s.peopleCommunityRequests.status, 'pendente'))).limit(1);
-        if (req0) { await decide(app.db, auth, req0.id, true); continue; }
+        if (req0) { await decide(app.db, auth, req0.id, true, app.config); continue; }
         const r = await app.db.insert(s.peopleCommunityRequests).values({ tenantId: auth.tenantId, communityId: c.id, userId, kind: 'convite', createdBy: auth.userId }).onConflictDoNothing().returning({ id: s.peopleCommunityRequests.id });
         invited += r.length;
+        if (r.length) await notifyPeople(app.db, app.config, auth.tenantId, [{ userId, event: 'convite_comunidade', title: `${auth.name.split(' ')[0]} convidou você para a comunidade ${c.name}`, link: '/pessoas/comunidades', actorId: auth.userId, dedupeKey: `convite:${r[0]!.id}` }]).catch((e) => console.error('aviso de convite', e));
       }
       await audit(app.db, req, { action: 'people.community.invite', entityType: 'people_community', entityId: c.id, metadata: { invited, userIds: to } });
       return { invited };
@@ -238,7 +241,7 @@ export const peopleCommunityRoutes = [
     method: 'POST', url: '/pessoas/comunidades-pedidos/:id/decisao', summary: 'Decide pedido (moderação) ou convite (a própria pessoa)', ...M, params: Id,
     body: z.object({ approve: z.boolean() }),
     handler: async ({ app, auth, params, body, req }) => {
-      const r = await decide(app.db, auth, params.id, body.approve);
+      const r = await decide(app.db, auth, params.id, body.approve, app.config);
       await audit(app.db, req, { action: body.approve ? 'people.community.request.approve' : 'people.community.request.reject', entityType: 'people_community', entityId: r.communityId, metadata: { requestId: params.id, kind: r.kind, userId: r.userId } });
       return { ok: true };
     },
@@ -305,7 +308,7 @@ export const peopleCommunityRoutes = [
 ];
 
 /** Pedido: moderação decide. Convite: a própria pessoa aceita ou recusa. */
-async function decide(db: DbOrTx, auth: AuthContext, requestId: string, approve: boolean) {
+async function decide(db: DbOrTx, auth: AuthContext, requestId: string, approve: boolean, config: Config) {
   const [r] = await db.select().from(s.peopleCommunityRequests).where(and(eq(s.peopleCommunityRequests.id, requestId), eq(s.peopleCommunityRequests.tenantId, auth.tenantId), eq(s.peopleCommunityRequests.status, 'pendente'))).limit(1);
   if (!r) throw notFound('Pedido não encontrado ou já decidido.');
   const { c, role } = await loadCommunity(db, auth, r.communityId);
@@ -314,5 +317,6 @@ async function decide(db: DbOrTx, auth: AuthContext, requestId: string, approve:
     await tx.update(s.peopleCommunityRequests).set({ status: approve ? 'aprovado' : 'recusado', decidedBy: auth.userId, decidedAt: new Date() }).where(eq(s.peopleCommunityRequests.id, r.id));
     if (approve) { await tx.insert(s.peopleCommunityMembers).values({ communityId: c.id, userId: r.userId, tenantId: auth.tenantId }).onConflictDoNothing(); await refreshMemberCount(tx, c.id); }
   });
+  if (approve && r.kind === 'pedido') await notifyPeople(db, config, auth.tenantId, [{ userId: r.userId, event: 'participacao_aprovada', title: `Sua participação na comunidade ${c.name} foi aprovada`, link: `/pessoas/comunidades/${c.id}`, actorId: auth.userId, dedupeKey: `participacao:${r.id}` }]).catch((e) => console.error('aviso de comunidade', e));
   return r;
 }

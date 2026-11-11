@@ -13,6 +13,7 @@ import { errMsg } from '../../../features/contracts/shared';
 import { usePeopleMe } from '../shared';
 import type { Comment, FeedPost } from './api';
 import { PostCard } from './PostCard';
+import { ReportDialog } from '../Report';
 import { usePeoplePeople } from './PostEditor';
 
 export function PostPage() {
@@ -26,9 +27,9 @@ export function PostPage() {
   const top = q.data.comments.filter((c) => !c.parentId);
   const replies = (cid: string) => q.data!.comments.filter((c) => c.parentId === cid);
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-3">
+    <div className="mx-auto w-full max-w-[560px] space-y-3">
       <Link to="/pessoas" className="inline-flex items-center gap-1 text-sm text-primary hover:underline"><ArrowLeft className="h-4 w-4" aria-hidden />Meu Espaço</Link>
-      {q.data.post.status === 'publicado' ? <PostCard post={q.data.post} detail /> : <div className="card p-4 text-sm text-muted">Rascunho: só você vê. Publique pelo editor em Meu Espaço → Rascunhos.</div>}
+      {q.data.post.status !== 'rascunho' ? <PostCard post={q.data.post} detail /> : <div className="card p-4 text-sm text-muted">Rascunho: só você vê. Publique pelo editor em Meu Espaço → Rascunhos.</div>}
       {q.data.post.status === 'publicado' && (
         <section className="card p-4" aria-label="Comentários">
           <h2 className="mb-3 text-md font-bold text-ink">Comentários ({q.data.post.commentCount})</h2>
@@ -55,6 +56,7 @@ export function PostPage() {
 }
 
 function CommentItem({ c, postId, onReply }: { c: Comment; postId: string; onReply: () => void }) {
+  const [report, setReport] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
   const [edit, setEdit] = useState<string | null>(null);
@@ -79,6 +81,8 @@ function CommentItem({ c, postId, onReply }: { c: Comment; postId: string; onRep
           <button type="button" className="font-semibold hover:text-ink" onClick={onReply}>Responder</button>
           {c.mine && edit === null && <button type="button" className="font-semibold hover:text-ink" onClick={() => setEdit(c.body)}>Editar</button>}
           {c.mine && <button type="button" className="font-semibold hover:text-danger" onClick={() => del.mutate()}>Remover</button>}
+          {!c.mine && <button type="button" className="font-semibold hover:text-danger" onClick={() => setReport(true)}>Denunciar</button>}
+          <ReportDialog target={report ? { targetType: 'comentario', targetId: c.id } : null} onClose={() => setReport(false)} />
         </p>
       </div>
     </div>
