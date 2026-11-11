@@ -48,6 +48,35 @@ describe('Pessoas & Cultura · mensagens diretas', () => {
   });
 });
 
+describe('Pessoas & Cultura · grupos e envio de publicação', () => {
+  it('grupo com várias pessoas; publicação enviada aparece para quem pode ver; privada fica indisponível', async () => {
+    expect((await carlos.post('/pessoas/mensagens/grupos', { title: 'Time', userIds: [ana.me.user.id] })).statusCode).toBe(422); // mínimo 2
+    const g = ok(await carlos.post('/pessoas/mensagens/grupos', { title: 'Time Residencial', userIds: [ana.me.user.id, lucas.me.user.id] }), 201).json();
+    const post = ok(await ana.post('/pessoas/posts', { body: 'Bastidores da instalação' }), 201).json();
+    expect(ok(await carlos.post(`/pessoas/posts/${post.id}/enviar`, { conversationIds: [g.id], userIds: [lucas.me.user.id], note: 'Olhem isso' })).json().sent).toBe(2);
+    const lg = ok(await lucas.get(`/pessoas/mensagens/conversas/${g.id}`)).json();
+    expect(lg).toMatchObject({ kind: 'grupo', title: 'Time Residencial' });
+    expect(lg.members.map((m: { name: string }) => m.name).sort()).toEqual(['Ana Souza', 'Carlos Silva']);
+    expect(lg.items.at(-1)).toMatchObject({ body: 'Olhem isso', author: { name: 'Carlos Silva' }, post: { id: post.id, unavailable: false, excerpt: 'Bastidores da instalação' } });
+    const list = ok(await lucas.get('/pessoas/mensagens')).json().items;
+    expect(list.find((c: { id: string }) => c.id === g.id)).toMatchObject({ kind: 'grupo', title: 'Time Residencial', last: 'Carlos: Olhem isso' });
+    expect(list.some((c: { kind: string; with: { name: string } | null }) => c.kind === 'direta' && c.with?.name === 'Carlos Silva')).toBe(true);
+    // comunidade privada da Ana: Carlos não é membro, então não envia; Ana envia para o Carlos e ele vê "indisponível"
+    const priv = ok(await ana.post('/pessoas/comunidades', { name: `Privada msg ${Date.now()}`, kind: 'privada' }), 201).json().id;
+    const pp = ok(await ana.post('/pessoas/posts', { body: 'Assunto restrito', communityId: priv }), 201).json();
+    expect((await carlos.post(`/pessoas/posts/${pp.id}/enviar`, { userIds: [lucas.me.user.id] })).statusCode).toBe(404);
+    ok(await ana.post(`/pessoas/posts/${pp.id}/enviar`, { userIds: [carlos.me.user.id] }));
+    const dm = ok(await carlos.get('/pessoas/mensagens')).json().items.find((c: { kind: string; with: { name: string } | null }) => c.kind === 'direta' && c.with?.name === 'Ana Souza');
+    const conv = ok(await carlos.get(`/pessoas/mensagens/conversas/${dm.id}`)).json();
+    expect(conv.items.at(-1).post).toEqual({ id: pp.id, unavailable: true });
+    expect(JSON.stringify(conv)).not.toContain('Assunto restrito');
+    // sair do grupo
+    ok(await lucas.post(`/pessoas/mensagens/conversas/${g.id}/sair`, {}));
+    expect((await lucas.get(`/pessoas/mensagens/conversas/${g.id}`)).statusCode).toBe(404);
+    await ctx.db.execute(sql`update people_communities set status = 'arquivada' where id = ${priv}`);
+  });
+});
+
 describe('Pessoas & Cultura · @ do topo e destaques', () => {
   it('@ mostra marcação e publicação institucional; comentário fica só em Notificações', async () => {
     const inst = ok(await carlos.post('/pessoas/posts', { body: 'Comunicado: horário de fim de ano', kind: 'institucional' }), 201).json();

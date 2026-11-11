@@ -36,7 +36,8 @@ test('mensagem direta entre colegas e marcação no @', async ({ page, browser }
   await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Mensagens' }).click();
   await page.getByRole('button', { name: 'Nova mensagem' }).first().click();
   await page.getByRole('dialog', { name: 'Nova mensagem' }).getByLabel('Para', { exact: true }).fill('Ana');
-  await page.getByRole('dialog', { name: 'Nova mensagem' }).getByRole('button', { name: /Ana Souza/ }).click();
+  await page.getByRole('dialog', { name: 'Nova mensagem' }).getByRole('checkbox', { name: 'Ana Souza' }).click();
+  await page.getByRole('dialog', { name: 'Nova mensagem' }).getByRole('button', { name: 'Conversar' }).click();
   await page.getByLabel('Escrever mensagem').fill(`Oi Ana, vi seu post ${tag}!`);
   await page.getByRole('button', { name: 'Enviar' }).click();
   await expect(page.getByRole('region', { name: 'Conversa', exact: true }).getByText(`Oi Ana, vi seu post ${tag}!`)).toBeVisible();
@@ -52,6 +53,32 @@ test('mensagem direta entre colegas e marcação no @', async ({ page, browser }
   await a.getByRole('button', { name: 'Enviar' }).click();
   await expect(page.getByRole('region', { name: 'Conversa', exact: true }).getByText('Obrigada! 😊')).toBeVisible({ timeout: 15_000 }); // chega sozinho para o Carlos
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/pessoas-mensagens.png` });
+
+  // avião: Carlos envia a publicação da Ana para o Lucas e um grupo novo recebe também
+  await page.getByRole('button', { name: 'Nova mensagem' }).first().click();
+  const nd = page.getByRole('dialog', { name: 'Nova mensagem' });
+  await nd.getByLabel('Para', { exact: true }).fill('a');
+  await nd.getByRole('checkbox', { name: 'Ana Souza' }).click();
+  await nd.getByRole('checkbox', { name: 'Lucas Lima' }).click();
+  await nd.getByLabel('Nome do grupo').fill(`Time ${tag}`);
+  await nd.getByRole('button', { name: 'Criar grupo' }).click();
+  await expect(page.getByRole('region', { name: 'Conversa', exact: true }).getByText(`Time ${tag}`)).toBeVisible();
+  await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: 'Feed' }).click();
+  const post = page.getByRole('article').filter({ hasText: `Reunião de time ${tag}` });
+  await post.getByRole('button', { name: 'Enviar por mensagem' }).click();
+  const sd = page.getByRole('dialog', { name: 'Enviar' });
+  await sd.getByRole('checkbox', { name: `Time ${tag}` }).click();
+  await sd.getByLabel('Pesquisar colega ou grupo').fill('Lucas');
+  await sd.getByRole('checkbox', { name: 'Lucas Lima' }).click();
+  await sd.getByLabel('Escrever um recado').fill('Vejam!');
+  await sd.getByRole('button', { name: 'Enviar para 2' }).click();
+  await expect(page.getByText('Enviada para 2 conversas')).toBeVisible();
+  await page.getByRole('navigation', { name: 'Seções de Pessoas & Cultura' }).getByRole('link', { name: /Mensagens/ }).click();
+  await page.getByRole('region', { name: 'Conversas' }).getByRole('link', { name: new RegExp(`Time ${tag}`) }).click();
+  const thread = page.getByRole('region', { name: 'Conversa', exact: true });
+  await expect(thread.getByRole('link', { name: 'Publicação de Ana Souza' })).toBeVisible();
+  await expect(thread.getByText('Vejam!')).toBeVisible();
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/pessoas-mensagens-grupo.png` });
   void lucasId;
   await actx.close();
 
