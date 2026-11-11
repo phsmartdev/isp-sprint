@@ -7,7 +7,7 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client;
 let tenantId = '', contractId = '', branchId = '';
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
-const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex').toString('base64');
+const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63606060f80f00010401005fe5c34b0000000049454e44ae426082', 'hex').toString('base64');
 
 beforeAll(async () => {
   ctx = await makeApp();
@@ -48,6 +48,10 @@ describe('Ofícios', () => {
     const withSig = moved.map((b: { id: string }) => (b.id === 'assinatura' ? { ...b, sigImage: `data:image/png;base64,${PNG}`, sigH: 20, sigDx: 5, sigDy: -2 } : b));
     expect(Buffer.from(ok(await carlos.post('/admin/oficios/previa', { blocks: withSig, branchId })).json().pdf, 'base64').subarray(0, 4).toString()).toBe('%PDF');
     expect((await carlos.post('/admin/oficios/previa', { blocks: withSig.map((b: { id: string }) => (b.id === 'assinatura' ? { ...b, sigImage: 'data:text/html;base64,PGh0bWw+' } : b)), branchId })).statusCode).toBe(422);
+    // PNG truncado/corrompido é recusado (o leitor de PNG do pdf-lib travaria o servidor em laço)
+    const broken = 'iVBORw0KGgoAAAANSUhEUgAAADwAAAAUCAYAAADRA14pAAAAQklEQVR42u3QMQ0AAAgDIN8/tBV8MAb9I7IsRUZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGDj8fKA0VN4/rTQAAAABJRU5ErkJggg==';
+    expect((await carlos.post('/admin/oficios/previa', { blocks: withSig.map((b: { id: string }) => (b.id === 'assinatura' ? { ...b, sigImage: `data:image/png;base64,${broken}` } : b)), branchId })).statusCode).toBe(422);
+    expect((await carlos.put(`/admin/oficios/filiais/${branchId}/assinatura`, { data: broken })).statusCode).toBe(422);
     ok(await carlos.patch(`/admin/oficios/${tplId}`, { blocks: withSig }));
   });
 

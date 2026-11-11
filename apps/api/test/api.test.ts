@@ -209,7 +209,7 @@ describe('Configurações → Segurança (matriz editável pela gerência)', () 
 });
 
 describe('Personalização (imagens)', () => {
-  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082', 'hex').toString('base64');
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63606060f80f00010401005fe5c34b0000000049454e44ae426082', 'hex').toString('base64');
   it('aceita PNG, serve a imagem e permite remover', async () => {
     expect((await carlos.put('/admin/branding/mascote_leads', { data: png })).statusCode).toBe(200);
     const img = await lucas.get('/brand/mascote_leads');

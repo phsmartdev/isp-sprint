@@ -11,6 +11,7 @@ import type { DbOrTx } from '../db/client';
 import { letterheadForBranch } from './contractErp';
 import { letterheadPainter } from './economicsExport';
 import { safeText } from './proposals';
+import { dataUrlImage, pngIntact } from './images';
 
 export const OFFICE_VARS: { key: string; label: string; sample: string }[] = [
   { key: 'oficio.numero', label: 'Número do ofício (gerado ao emitir)', sample: '71/2026' },
@@ -103,7 +104,7 @@ export async function renderOffice(input: OfficeRenderInput) {
   const fonts: Fonts = { r: await doc.embedFont(StandardFonts.Helvetica), b: await doc.embedFont(StandardFonts.HelveticaBold), i: await doc.embedFont(StandardFonts.HelveticaOblique), bi: await doc.embedFont(StandardFonts.HelveticaBoldOblique) };
   const paint = await letterheadPainter(doc, input.letterhead);
   let sigImg: PDFImage | null = null;
-  if (input.signature) { try { sigImg = input.signature.mime === 'image/png' ? await doc.embedPng(input.signature.data) : await doc.embedJpg(input.signature.data); } catch { sigImg = null; } }
+  if (input.signature && (input.signature.mime !== 'image/png' || pngIntact(input.signature.data))) { try { sigImg = input.signature.mime === 'image/png' ? await doc.embedPng(input.signature.data) : await doc.embedJpg(input.signature.data); } catch { sigImg = null; } }
   const pages: PDFPage[] = [];
   const page = (n: number) => { while (pages.length <= n) { const p = doc.addPage([595.28, 841.89]); paint?.(p); pages.push(p); } return pages[n]!; };
   page(0);
@@ -131,7 +132,7 @@ export async function renderOffice(input: OfficeRenderInput) {
         const h = (b.sigH ?? 13) * MM;
         // a imagem inserida no bloco vale mais que a da filial
         let img = sigImg;
-        if (b.sigImage) { const m = /^data:image\/(png|jpeg);base64,(.+)$/.exec(b.sigImage); if (m) { try { const bytes = Buffer.from(m[2]!, 'base64'); img = m[1] === 'png' ? await doc.embedPng(bytes) : await doc.embedJpg(bytes); } catch { /* imagem inválida: segue sem */ } } }
+        if (b.sigImage) { const im = dataUrlImage(b.sigImage); if (im) { try { img = im.mime === 'png' ? await doc.embedPng(im.bytes) : await doc.embedJpg(im.bytes); } catch { /* imagem inválida: segue sem */ } } }
         if (img) {
           const sigImgUse = img;
           const ratio = sigImgUse.width / sigImgUse.height;

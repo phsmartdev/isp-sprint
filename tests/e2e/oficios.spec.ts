@@ -33,14 +33,16 @@ test('modelo de ofício e emissão pelo contrato', async ({ page }) => {
   await page.getByLabel('Prévia no timbrado da filial').selectOption(branch!);
   const sig = page.getByRole('button', { name: 'Bloco Assinatura' });
   await expect(sig).toBeVisible();
+  await sig.scrollIntoViewIfNeeded();
   const box = (await sig.boundingBox())!;
   await page.mouse.move(box.x + 20, box.y + 10);
   await page.mouse.down();
   await page.mouse.move(box.x + 20, box.y + 40, { steps: 5 });
   await page.mouse.up();
-  await expect(page.getByLabel('Topo (mm)')).not.toHaveValue('228');
+  await page.getByRole('button', { name: 'Assinatura', exact: true }).click();
+  await expect(page.getByLabel('Topo (mm)')).not.toHaveValue('228'); // o arraste mudou a posição do bloco
   // assinatura digitalizada direto no bloco, com altura ajustável
-  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAADwAAAAUCAYAAADRA14pAAAAQklEQVR42u3QMQ0AAAgDIN8/tBV8MAb9I7IsRUZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGDj8fKA0VN4/rTQAAAABJRU5ErkJggg==', 'base64');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAADwAAAAUCAYAAADRA14pAAAAhUlEQVR4nO2WOw7AIAxDOUTnnrO3b7dKQAfycWqiWGLkyU+IQGuVSkWT47zucf3dCZIv0bTiK7JppFeE0ohLBaKkIWxtcbT0y/WEexRGSHdML7hnUShri1Mx7p8YFnjEvYPMA+nQiJyssInP+nZqeqnhLD8keCcWUUkncy8W0TGsvSoMeQCHsSrkpgEIWQAAAABJRU5ErkJggg==', 'base64');
   await page.getByRole('group', { name: 'Assinatura digitalizada' }).getByLabel('Arquivo da assinatura digitalizada').setInputFiles({ name: 'assinatura.png', mimeType: 'image/png', buffer: png });
   await expect(page.getByRole('img', { name: 'Assinatura digitalizada' })).toBeVisible();
   await page.getByLabel('Altura da assinatura (mm)').fill('18');
