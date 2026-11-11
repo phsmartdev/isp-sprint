@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Mail, Pencil, Phone } from 'lucide-react';
+import { Award, Mail, Pencil, Phone } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Avatar, Button, Chip, ErrorState, FormField, Input, LoadingRows, Textarea } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
@@ -13,6 +13,7 @@ import { Hexagons } from '../../components/brand';
 import { errMsg } from '../../features/contracts/shared';
 import { orgLine, usePeopleMe, type PeopleProfile } from './shared';
 import { Feed } from './feed/Feed';
+import { RecognitionList } from './Recognition';
 
 const list = (s: string) => s.split(/[,;\n]/).map((x) => x.trim()).filter((x) => x.length >= 2);
 
@@ -61,6 +62,12 @@ export function ProfilePage() {
             {p.communities.length ? <div className="flex flex-wrap gap-1.5">{p.communities.map((c) => <Link key={c.id} to={`/pessoas/comunidades/${c.id}`}><Chip tone={c.role === 'membro' ? 'neutral' : 'blue'}>{c.name}{c.role !== 'membro' ? (c.role === 'responsavel' ? ' · responsável' : ' · moderação') : ''}</Chip></Link>)}</div>
               : <p className="text-sm text-muted">{p.self ? <>Você ainda não participa de comunidades. <Link className="link" to="/pessoas/comunidades">Ver comunidades</Link></> : 'Nenhuma comunidade em comum para mostrar.'}</p>}
           </div>
+        </section>
+      )}
+      {!editing && (
+        <section className="space-y-2" aria-label="Reconhecimentos recebidos">
+          <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-md font-bold text-ink">Reconhecimentos recebidos</h2>{!p.self && <Link to={`/pessoas/reconhecimento?para=${p.id}`} className="inline-flex h-8 items-center gap-1.5 bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover"><Award className="h-4 w-4" aria-hidden />Reconhecer {p.name.split(' ')[0]}</Link>}</div>
+          <RecognitionList tipo="recebidos" pessoa={p.id} compact />
         </section>
       )}
       {!editing && <Feed filter={{ autor: p.id }} orderable={false} title="Publicações" emptyTitle="Nenhuma publicação ainda" emptyText={p.self ? 'Suas publicações aparecem aqui.' : `${p.name.split(' ')[0]} ainda não publicou.`} />}

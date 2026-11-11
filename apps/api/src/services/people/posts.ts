@@ -60,6 +60,8 @@ export async function postDtos(db: DbOrTx, auth: AuthContext, rows: PostRow[]) {
     return {
       id: r.id, kind: r.kind, audience: r.audience, audienceLabel: comm ? comm.name : AUDIENCE_LABEL[r.audience] ?? r.audience, status: r.status,
       community: comm ? { id: comm.id, name: comm.name, kind: comm.kind } : null, pinnedAt: r.pinnedAt,
+      /** dados do cartão de conquista/reconhecimento (pontos, badges, categoria); nunca valores de venda */
+      meta: r.meta ?? null,
       body: r.body, publishedAt: r.publishedAt, editedAt: r.editedAt, createdAt: r.createdAt,
       author: a ? publicCard(a) : { id: r.authorId, name: 'Colaborador', jobTitle: null, hasPhoto: false, area: null, unit: null },
       mentions: r.mentions.map((m) => people.get(m)).filter(Boolean).map((p) => ({ id: p!.id, name: p!.name })),

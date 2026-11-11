@@ -59,8 +59,8 @@ reconhecimentos, comunicados, leituras, denúncias, moderação e a caixa de not
 | 1. Fundação | Módulo, navegação, permissões, perfil social, parâmetros | **Entregue** |
 | 2. Feed | Publicações, mídias, comentários e respostas, reações, salvos, rascunho, paginação por cursor | **Entregue** |
 | 3. Comunidades | Pública/privada/institucional, pedidos, convites, moderadores, fixar, arquivar | **Entregue** |
-| 4. Cultura e Comunicação | Reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | Próxima |
-| 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo | — |
+| 4. Cultura e Comunicação | Conquistas ligadas à gamificação (venda e badges), reconhecimentos e categorias, comunicados segmentados, confirmação de leitura versionada | **Entregue** |
+| 5. Governança | Denúncias e moderação, notificações internas e por canal, painel administrativo | Próxima |
 | 6. Consolidação | Indicadores agregados, testes de permissão e isolamento, responsividade, documentação | — |
 
 ## 3. Etapa 1 — entrega
@@ -140,3 +140,43 @@ comentar ou reagir) e pode ser reativada. Ações de gestão ficam em auditoria.
 `POST /pessoas/comunidades/:id/convites`, `GET /pessoas/comunidades-convites`, `POST /pessoas/comunidades-pedidos/:id/decisao`,
 `PATCH|DELETE /pessoas/comunidades/:id/membros/:userId`, `PUT /pessoas/posts/:id/fixar`; o feed aceita `comunidade`
 e devolve as fixadas; publicar aceita `communityId`.
+
+## 6. Etapa 4 — entrega (cultura e comunicação)
+
+**Conquistas ligadas à gamificação da ISP** (cartões animados no feed, no estilo das celebrações do LinkedIn):
+- **Venda fechada**: só quando a negociação vai para *ganha*. Publica em nome de quem vendeu, com os pontos que a
+  oportunidade rendeu (`opportunityPointsFor`) e os badges conquistados com ela. **Nunca mostra valores** da negociação;
+  o nome da conta aparece só se a configuração permitir. Uma vez por negociação (chave `venda:<id>`): reabrir e
+  ganhar de novo não duplica.
+- **Badge conquistado**: cada badge tem um texto próprio de comemoração (Humanização, Excelência, Dinamismo,
+  Crescimento, Compromisso; badge criado pela empresa usa texto genérico com a descrição dele). Verificado ao fechar
+  venda e na rotina diária (`/cron/alerts`). Uma vez por pessoa, badge, ano e faixa.
+- **Implantação sem enxurrada**: na primeira verificação, as faixas que cada pessoa já tinha são registradas em
+  silêncio (`badgeBaselineAt`); só o que for conquistado depois vira post.
+- Liga/desliga em *Configurações*: publicar venda fechada, mostrar o cliente, publicar badges.
+
+**Reconhecimentos**: colega → colega, com categoria (6 padrão, editáveis em *Administração › Reconhecimentos*) e
+mensagem; público (vira cartão animado no feed ou na comunidade escolhida) ou privado (só as duas pessoas). Não há
+ranking nem contagem individual; o perfil mostra os reconhecimentos públicos recebidos.
+
+**Comunicados oficiais** (quem tem papel de Comunicação ou Pessoas e Cultura): título, conteúdo com formatação,
+imagens/anexos, categoria, prioridade (informativo, importante, urgente), público (toda a organização, unidades e
+áreas incluindo as de baixo, times, cargos, pessoas), agendamento, expiração, fixar e confirmação de leitura.
+Aparecem no topo do Meu Espaço; editar o conteúdo de um comunicado com confirmação gera nova versão e pede ciência de
+novo. O painel mostra público elegível, alcance (% que abriu), % que confirmou e a lista de pendentes.
+
+**Migração `0138_pessoas_cultura_comunicacao`** (não destrutiva): `people_posts.meta` e `source_key` (único por empresa),
+`people_media.announcement_id`, `people_badge_awards`, `people_recognition_categories`, `people_recognitions`,
+`people_announcements`, `people_announcement_reads`.
+
+**APIs:** `GET|POST /pessoas/reconhecimentos/categorias`, `PATCH /pessoas/reconhecimentos/categorias/:id`,
+`GET|POST /pessoas/reconhecimentos`, `GET /pessoas/comunicados`, `POST /pessoas/comunicados/:id/visto|confirmar`,
+`GET /pessoas/admin/publicos`, `GET|POST /pessoas/admin/comunicados`, `PATCH /pessoas/admin/comunicados/:id`,
+`GET /pessoas/admin/comunicados/:id/pendentes`. Ganho de negociação (`/opportunities/:id/transition`) e a rotina
+diária disparam as conquistas.
+
+**Testes:** `apps/api/test/peopleCulture.test.ts` (6) e `tests/e2e/pessoas-reconhecimento.spec.ts`.
+
+**Pendências conhecidas:** notificação de comunicado novo/urgente e de reconhecimento recebido (Etapa 5); ligação
+das categorias aos valores oficiais da empresa (campo `value_key` já existe).
+

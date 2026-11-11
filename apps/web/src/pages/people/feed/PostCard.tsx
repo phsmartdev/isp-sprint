@@ -14,6 +14,7 @@ import { errMsg } from '../../../features/contracts/shared';
 import { orgLine } from '../shared';
 import { mediaUrl, REACTIONS, type FeedPost, type Reaction } from './api';
 import { PostEditor } from './PostEditor';
+import { AchievementArt, isAchievement } from './Achievement';
 
 export function PostCard({ post, detail = false, canPin = false }: { post: FeedPost; detail?: boolean; canPin?: boolean }) {
   const qc = useQueryClient();
@@ -75,6 +76,7 @@ export function PostCard({ post, detail = false, canPin = false }: { post: FeedP
         </div>
       </header>
       {post.body && <div className="px-4 pb-2"><RichText text={post.body} names={post.mentions.map((m) => m.name)} /></div>}
+      {isAchievement(post) && <AchievementArt post={post} />}
       {images.length > 0 && (
         <div className={clsx('grid gap-0.5', images.length === 1 ? 'grid-cols-1' : 'grid-cols-2')}>
           {images.slice(0, 4).map((m, i) => (

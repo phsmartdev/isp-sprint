@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bookmark, ChevronRight, Search, Sparkles, UserRound, UsersRound } from 'lucide-react';
+import { Award, Bookmark, ChevronRight, Search, Sparkles, UserRound, UsersRound } from 'lucide-react';
 import { api, qs } from '../../lib/api';
 import { useDebounced } from '../../lib/hooks';
 import { Avatar, EmptyState, ErrorState, Input, LoadingRows } from '../../components/ui/primitives';
@@ -14,6 +14,7 @@ import { Hexagons } from '../../components/brand';
 import { orgLine, usePeopleMe, type PersonCard } from './shared';
 import { PostEditor } from './feed/PostEditor';
 import { Feed } from './feed/Feed';
+import { AnnouncementsBlock } from './Announcements';
 
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'; };
 
@@ -36,6 +37,7 @@ export function MySpacePage() {
           </div>
           <div className="relative mt-5 flex flex-wrap gap-2">
             <Link to="/pessoas/perfil/eu" className="inline-flex h-10 items-center gap-2 bg-white px-4 text-sm font-bold text-primary hover:bg-primary-soft"><UserRound className="h-4 w-4" aria-hidden />Meu perfil</Link>
+            <Link to="/pessoas/reconhecimento" className="inline-flex h-10 items-center gap-2 border border-white/60 px-4 text-sm font-bold text-white hover:bg-white/10"><Award className="h-4 w-4" aria-hidden />Reconhecer colega</Link>
           </div>
         </section>
 
@@ -50,6 +52,7 @@ export function MySpacePage() {
           </section>
         )}
 
+        <AnnouncementsBlock />
         <PostEditor compact />
         <Feed emptyTitle="O feed está começando" emptyText="Seja a primeira pessoa a compartilhar uma conquista, uma ideia ou um aprendizado." />
       </div>
@@ -60,6 +63,7 @@ export function MySpacePage() {
           <ul className="divide-y divide-line">
             <li><Link to="/pessoas/perfil/eu" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UserRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Meu perfil</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/comunidades" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><UsersRound className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Minhas comunidades</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
+            <li><Link to="/pessoas/reconhecimento" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Award className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Reconhecer colega</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
             <li><Link to="/pessoas/salvos" className="flex items-center gap-3 py-2.5 text-sm text-ink hover:text-primary"><Bookmark className="h-4 w-4 text-primary" aria-hidden /><span className="flex-1">Publicações salvas</span><ChevronRight className="h-4 w-4 text-muted" aria-hidden /></Link></li>
           </ul>
         </section>

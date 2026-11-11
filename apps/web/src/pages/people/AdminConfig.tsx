@@ -12,7 +12,7 @@ import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { usePeopleMe } from './shared';
 
-type Settings = { roles: { comunicacao: string[]; pessoasCultura: string[]; moderacao: string[] }; limits: { imageMb: number; videoMb: number; mediaPerPost: number; postChars: number } };
+type Settings = { roles: { comunicacao: string[]; pessoasCultura: string[]; moderacao: string[] }; limits: { imageMb: number; videoMb: number; mediaPerPost: number; postChars: number }; celebrations: { dealWon: boolean; showClient: boolean; badges: boolean }; badgeBaselineAt?: string | null };
 const ROLES: { key: keyof Settings['roles']; label: string; desc: string }[] = [
   { key: 'pessoasCultura', label: 'Pessoas e Cultura', desc: 'Categorias de reconhecimento, comunidades institucionais, indicadores agregados e estes parâmetros.' },
   { key: 'comunicacao', label: 'Comunicação Interna', desc: 'Comunicados oficiais e publicações em nome da empresa.' },
@@ -62,6 +62,15 @@ export function PeopleConfigPage() {
           <FormField label="Vídeo (MB)" htmlFor="pl-vid" hint="1 a 50"><Input id="pl-vid" type="number" min={1} max={50} value={f.limits.videoMb} onChange={(e) => lim('videoMb', e.target.value)} /></FormField>
           <FormField label="Mídias por publicação" htmlFor="pl-n" hint="1 a 10"><Input id="pl-n" type="number" min={1} max={10} value={f.limits.mediaPerPost} onChange={(e) => lim('mediaPerPost', e.target.value)} /></FormField>
           <FormField label="Caracteres por publicação" htmlFor="pl-c" hint="100 a 5.000"><Input id="pl-c" type="number" min={100} max={5000} value={f.limits.postChars} onChange={(e) => lim('postChars', e.target.value)} /></FormField>
+        </div>
+      </section>
+      <section className="card p-5" aria-label="Conquistas no feed">
+        <h2 className="text-md font-bold text-ink">Conquistas no feed</h2>
+        <p className="mb-3 text-sm text-muted">Celebrações automáticas ligadas à gamificação da ISP. Nunca mostram valores de venda: só a pessoa, os pontos e os badges.</p>
+        <div className="space-y-2 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.celebrations.dealWon} onChange={(e) => setF({ ...f, celebrations: { ...f.celebrations, dealWon: e.target.checked } })} />Publicar a conquista quando uma negociação é concluída (venda fechada)</label>
+          <label className="ml-6 flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-primary" disabled={!f.celebrations.dealWon} checked={f.celebrations.showClient} onChange={(e) => setF({ ...f, celebrations: { ...f.celebrations, showClient: e.target.checked } })} />Mostrar o nome da conta (cliente)</label>
+          <label className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.celebrations.badges} onChange={(e) => setF({ ...f, celebrations: { ...f.celebrations, badges: e.target.checked } })} />Publicar uma celebração quando alguém conquista um badge (texto próprio de cada badge)</label>
         </div>
       </section>
       <div className="flex flex-wrap items-center justify-end gap-3">

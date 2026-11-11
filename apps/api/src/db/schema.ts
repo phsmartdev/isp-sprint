@@ -6292,6 +6292,10 @@ export const peoplePosts = pgTable(
     editedAt: ts('edited_at'),
     /** fixada no topo da comunidade (responsável ou moderador) */
     pinnedAt: ts('pinned_at'),
+    /** dados da conquista/reconhecimento para o cartão animado (pontos, badges, categoria…) — nunca valores de venda */
+    meta: jsonb('meta').$type<Record<string, unknown>>(),
+    /** origem automática (ex.: venda:<id>, badge:<pessoa>:<badge>:<ano>:<faixa>): evita publicar duas vezes */
+    sourceKey: text('source_key'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: ts('deleted_at'),
@@ -6299,6 +6303,7 @@ export const peoplePosts = pgTable(
   },
   (t) => ({
     communityIdx: index('people_posts_community_idx').on(t.tenantId, t.communityId, t.status, t.publishedAt),
+    sourceUq: uniqueIndex('people_posts_source_uq').on(t.tenantId, t.sourceKey).where(sql`source_key is not null`),
     feedIdx: index('people_posts_feed_idx').on(t.tenantId, t.status, t.publishedAt, t.id),
     authorIdx: index('people_posts_author_idx').on(t.tenantId, t.authorId, t.publishedAt),
     kindCk: check('people_posts_kind_ck', inList('kind', ['social', 'institucional', 'conquista', 'reconhecimento', 'comunidade', 'comunicado'])),
@@ -6320,6 +6325,8 @@ export const peopleMedia = pgTable(
     postId: uuid('post_id').references(() => peoplePosts.id, { onDelete: 'cascade' }),
     /** capa ou avatar de comunidade (visível a quem usa o módulo, como o nome e a descrição) */
     communityId: uuid('community_id'),
+    /** imagem ou anexo de comunicado oficial (visível a quem é do público do comunicado) */
+    announcementId: uuid('announcement_id'),
     kind: text('kind').notNull(),
     mime: text('mime').notNull(),
     filename: text('filename').notNull(),
@@ -6469,4 +6476,113 @@ export const peopleCommunityRequests = pgTable(
     kindCk: check('people_community_requests_kind_ck', inList('kind', ['pedido', 'convite'])),
     statusCk: check('people_community_requests_status_ck', inList('status', ['pendente', 'aprovado', 'recusado', 'cancelado'])),
   }),
+);
+
+/** Faixas de badge já alcançadas (por ano): a celebração sai uma vez só, quando a faixa é alcançada. */
+export const peopleBadgeAwards = pgTable(
+  'people_badge_awards',
+  {
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    badgeKey: text('badge_key').notNull(),
+    year: integer('year').notNull(),
+    tierIndex: integer('tier_index').notNull(),
+    tierName: text('tier_name').notNull(),
+    /** registrada na implantação (já existia antes): não gera celebração */
+    silent: boolean('silent').notNull().default(false),
+    postId: uuid('post_id'),
+    awardedAt: createdAt(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.badgeKey, t.year, t.tierIndex] }), tenantIdx: index('people_badge_awards_tenant_idx').on(t.tenantId, t.awardedAt) }),
+);
+
+/** Categorias de reconhecimento entre colegas (configuráveis; no futuro, ligadas aos valores da empresa). */
+export const peopleRecognitionCategories = pgTable(
+  'people_recognition_categories',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    name: text('name').notNull(),
+    description: text('description'),
+    emoji: text('emoji').notNull().default('⭐'),
+    active: boolean('active').notNull().default(true),
+    position: integer('position').notNull().default(0),
+    /** ponto de extensão: valor oficial da empresa ao qual a categoria se liga */
+    valueKey: text('value_key'),
+    createdAt: createdAt(),
+  },
+  (t) => ({ nameUq: uniqueIndex('people_recognition_categories_uq').on(t.tenantId, sql`lower(${t.name})`) }),
+);
+
+/**
+ * Reconhecimento entre colegas. Sem pontos nesta fase e sem uso como indicador de desempenho individual.
+ * Visibilidade pública = vai para o feed (da empresa ou de uma comunidade); privada = só quem envia e quem recebe.
+ */
+export const peopleRecognitions = pgTable(
+  'people_recognitions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    fromUserId: uuid('from_user_id').notNull().references(() => users.id),
+    toUserId: uuid('to_user_id').notNull().references(() => users.id),
+    categoryId: uuid('category_id').notNull().references(() => peopleRecognitionCategories.id),
+    message: text('message').notNull(),
+    visibility: text('visibility').notNull().default('publica'),
+    postId: uuid('post_id').references(() => peoplePosts.id),
+    status: text('status').notNull().default('valido'),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    toIdx: index('people_recognitions_to_idx').on(t.tenantId, t.toUserId, t.createdAt),
+    fromIdx: index('people_recognitions_from_idx').on(t.tenantId, t.fromUserId, t.createdAt),
+    visCk: check('people_recognitions_vis_ck', inList('visibility', ['publica', 'privada'])),
+    statusCk: check('people_recognitions_status_ck', inList('status', ['valido', 'oculto', 'removido'])),
+  }),
+);
+
+/**
+ * Comunicados oficiais: segmentados (empresa, unidade/área, cargo, time, pessoas), com prioridade, vigência e
+ * confirmação de leitura opcional. Mudança no conteúdo de um publicado sobe a versão (confirmação vale por versão).
+ */
+export const peopleAnnouncements = pgTable(
+  'people_announcements',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    category: text('category'),
+    priority: text('priority').notNull().default('informativo'),
+    audience: jsonb('audience').$type<{ all: boolean; orgUnitIds: string[]; jobTitles: string[]; teamIds: string[]; userIds: string[] }>().notNull(),
+    publishAt: ts('publish_at'),
+    expiresAt: ts('expires_at'),
+    requireAck: boolean('require_ack').notNull().default(false),
+    pinned: boolean('pinned').notNull().default(true),
+    status: text('status').notNull().default('rascunho'),
+    version: integer('version').notNull().default(1),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    closedAt: ts('closed_at'),
+  },
+  (t) => ({
+    listIdx: index('people_announcements_list_idx').on(t.tenantId, t.status, t.publishAt),
+    priorityCk: check('people_announcements_priority_ck', inList('priority', ['informativo', 'importante', 'urgente'])),
+    statusCk: check('people_announcements_status_ck', inList('status', ['rascunho', 'publicado', 'encerrado'])),
+  }),
+);
+
+/** Visualização e confirmação de leitura (por versão). Confirmação de leitura não é aceite formal de política. */
+export const peopleAnnouncementReads = pgTable(
+  'people_announcement_reads',
+  {
+    announcementId: uuid('announcement_id').notNull().references(() => peopleAnnouncements.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: tenantId(),
+    viewedAt: ts('viewed_at').notNull().defaultNow(),
+    ackVersion: integer('ack_version'),
+    acknowledgedAt: ts('acknowledged_at'),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.announcementId, t.userId] }) }),
 );

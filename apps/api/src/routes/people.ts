@@ -101,10 +101,12 @@ export const peopleRoutes = [
     handler: async ({ app, auth, body, req }) => {
       const before = await peopleSettingsOf(app.db, auth.tenantId);
       if (!peopleCaps(auth, before).configure) throw forbidden('Só a administração do módulo (Pessoas e Cultura) ou do sistema altera os parâmetros.');
-      await app.db.insert(s.peopleSettings).values({ tenantId: auth.tenantId, settings: body, updatedBy: auth.userId })
-        .onConflictDoUpdate({ target: s.peopleSettings.tenantId, set: { settings: body, updatedBy: auth.userId, updatedAt: sql`now()` } });
+      // a marca de implantação das celebrações é do servidor (a tela não apaga)
+      const next = { ...body, badgeBaselineAt: before.badgeBaselineAt };
+      await app.db.insert(s.peopleSettings).values({ tenantId: auth.tenantId, settings: next, updatedBy: auth.userId })
+        .onConflictDoUpdate({ target: s.peopleSettings.tenantId, set: { settings: next, updatedBy: auth.userId, updatedAt: sql`now()` } });
       await audit(app.db, req, { action: 'people.settings.update', entityType: 'people_settings', entityId: auth.tenantId, metadata: { before, after: body } });
-      return { settings: body };
+      return { settings: next };
     },
   }),
 ];

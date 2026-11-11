@@ -15,7 +15,11 @@ const link = ({ isActive }: { isActive: boolean }) => clsx('-mb-px whitespace-no
 export function PeopleLayout() {
   const q = usePeopleMe();
   const caps = q.data?.caps;
-  const adminItems = [...(caps?.configure ? [{ to: '/pessoas/admin/configuracoes', label: 'Configurações' }] : [])];
+  const adminItems = [
+    ...(caps?.communicate ? [{ to: '/pessoas/admin/comunicados', label: 'Comunicados Oficiais' }] : []),
+    ...(caps?.administer ? [{ to: '/pessoas/admin/reconhecimentos', label: 'Reconhecimentos' }] : []),
+    ...(caps?.configure ? [{ to: '/pessoas/admin/configuracoes', label: 'Configurações' }] : []),
+  ];
   return (
     <div className="w-full">
       <PageHeader icon={<UsersRound className="h-9 w-9" strokeWidth={2.2} />} title="Pessoas & Cultura" subtitle="Conecte-se com colegas, compartilhe conhecimento e acompanhe a vida na empresa." />
@@ -23,6 +27,7 @@ export function PeopleLayout() {
         <span className="whitespace-nowrap pb-3 text-xs font-semibold uppercase tracking-wide text-muted">Experiência</span>
         <NavLink to="/pessoas" end className={link}>Meu Espaço</NavLink>
         <NavLink to="/pessoas/comunidades" className={link}>Comunidades</NavLink>
+        <NavLink to="/pessoas/reconhecimento" className={link}>Reconhecimento</NavLink>
         <NavLink to="/pessoas/perfil/eu" className={link}>Meu Perfil</NavLink>
         {adminItems.length > 0 && <>
           <span className="whitespace-nowrap pb-3 pl-3 text-xs font-semibold uppercase tracking-wide text-muted">Administração</span>
