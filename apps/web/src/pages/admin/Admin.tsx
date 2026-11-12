@@ -1,4 +1,5 @@
 import { useSectors } from '../../lib/hooks';
+import { SECTOR_ROLES, SECTOR_ROLE_HINTS, SECTOR_ROLE_LABELS, defaultSectorRole, type SectorRole } from '@isp/domain';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { compressImage } from '../../lib/files';
 import { Link } from 'react-router-dom';
@@ -169,7 +170,7 @@ export function AdminOverview() {
 // =================================================================== usuários
 type AdminUser = {
   id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; ipBypass?: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
-  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: string[]; sectorViewer?: boolean; isCsm?: boolean; playbookRoles?: PlaybookRole[];
+  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: string[]; sectorViewer?: boolean; sectorRole?: SectorRole; isCsm?: boolean; playbookRoles?: PlaybookRole[];
 };
 
 async function fileToBase64(file: File) {
@@ -236,7 +237,7 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
   const [editingSectors, setEditingSectors] = useState(false);
   const [form, setForm] = useState({
     name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'operacao') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
-    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: user?.sectors ?? [], sectorViewer: user?.sectorViewer ?? false, isCsm: user?.isCsm ?? false, playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
+    teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: user?.sectors ?? [], sectorRole: (user?.sectorRole ?? defaultSectorRole(user?.profile ?? 'operacao')) as SectorRole, isCsm: user?.isCsm ?? false, playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -245,8 +246,8 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       return user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorViewer: form.sectorViewer, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorViewer: form.sectorViewer, isCsm: form.isCsm, playbookRoles: form.playbookRoles } });
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles } });
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -260,7 +261,7 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
         <FormField label="Cargo" htmlFor="uf-job" hint="Aparece abaixo do nome no topo"><Input id="uf-job" value={form.jobTitle} onChange={(e) => set('jobTitle', e.target.value)} placeholder="Ex.: Comercial" /></FormField>
         <FormField label="WhatsApp" htmlFor="uf-phone" hint="Para avisos internos (pedidos de aprovação)"><Input id="uf-phone" inputMode="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="(79) 99999-0000" /></FormField>
         <FormField label="Perfil de acesso" htmlFor="uf-profile" hint={self ? 'Você não pode tirar o próprio acesso de gerência' : 'Níveis por módulo em Segurança'}>
-          <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => set('profile', e.target.value as ProfileKey)}>{PROFILE_KEYS.map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
+          <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => { set('profile', e.target.value as ProfileKey); if (!user) set('sectorRole', defaultSectorRole(e.target.value)); }}>{PROFILE_KEYS.map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
         </FormField>
       </div>
       {form.profile === 'supervisor' ? (
@@ -307,10 +308,11 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
           {sectors.items.map(({ key: x, label }) => <label key={x} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sectors.includes(x)} onChange={() => set('sectors', form.sectors.includes(x) ? form.sectors.filter((y) => y !== x) : [...form.sectors, x])} />{label}</label>)}
         </div>
         <SectorsManager open={editingSectors} onClose={() => setEditingSectors(false)} />
-        <div role="radiogroup" aria-label="Participação no setor" className="mt-3 border-t border-line pt-2">
-          <p className="mb-1 text-sm font-semibold text-ink">Participação no setor</p>
-          <label className="flex items-start gap-2 text-sm"><input type="radio" name="sector-role" className="mt-0.5" checked={!form.sectorViewer} onChange={() => set('sectorViewer', false)} /><span><b>Participa da operação</b> — recebe as tarefas do setor, conclui etapas e pode ser indicado como responsável.</span></label>
-          <label className="mt-1 flex items-start gap-2 text-sm"><input type="radio" name="sector-role" className="mt-0.5" checked={!!form.sectorViewer} onChange={() => set('sectorViewer', true)} /><span><b>Só visualiza</b> — acompanha o que o setor vê, sem receber tarefas nem concluir etapas.</span></label>
+        <div role="radiogroup" aria-label="Cargo no setor" className="mt-3 border-t border-line pt-2">
+          <p className="mb-1 text-sm font-semibold text-ink">Cargo no setor</p>
+          {SECTOR_ROLES.map((r) => (
+            <label key={r} className="mt-1 flex items-start gap-2 text-sm"><input type="radio" name="sector-role" className="mt-0.5" checked={form.sectorRole === r} onChange={() => set('sectorRole', r)} /><span><b>{SECTOR_ROLE_LABELS[r]}</b> — {SECTOR_ROLE_HINTS[r]}</span></label>
+          ))}
         </div>
       </fieldset>
       <label className="flex items-start gap-2 border border-line px-3 py-2.5 text-sm">
@@ -396,7 +398,7 @@ export function AdminUsers() {
                   </td>
                   <td className="px-5 py-3">{u.profile ? <Chip tone={u.profile === 'administrador' ? 'red' : u.profile === 'gerencia' || u.profile === 'diretoria' ? 'purple' : u.profile === 'supervisor' ? 'blue' : 'green'}>{PROFILE_LABELS[u.profile]}</Chip> : '—'}</td>
                   <td className="px-5 py-3 text-text">{u.teamIds.map((t) => `${teamName(t)}${u.leadTeamIds.includes(t) ? ' (lidera)' : ''}`).join(', ') || '—'}</td>
-                  <td className="px-5 py-3 text-text">{u.sectors?.map((x) => sectorList.label(x)).join(', ') || '—'}{!!u.sectors?.length && u.sectorViewer && <span className="ml-1 text-xs text-muted">(só visualiza)</span>}{u.isCsm && <Chip tone="green">CSM</Chip>}</td>
+                  <td className="px-5 py-3 text-text">{u.sectors?.map((x) => sectorList.label(x)).join(', ') || '—'}{u.sectorRole && <span className="ml-1 text-xs text-muted">({SECTOR_ROLE_LABELS[u.sectorRole].toLowerCase()})</span>}{u.isCsm && <Chip tone="green">CSM</Chip>}</td>
                   <td className="num px-5 py-3 text-text">{u.goalSales} / {u.goalProposals} / {u.goalLeads}</td>
                   <td className="num px-5 py-3 text-text">{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Nunca'}</td>
                   <td className="px-5 py-3"><Chip tone={u.active ? 'green' : 'neutral'}>{u.active ? 'Ativo' : 'Inativo'}</Chip></td>

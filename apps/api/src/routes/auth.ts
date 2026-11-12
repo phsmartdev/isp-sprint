@@ -20,7 +20,7 @@ export function meDto(auth: NonNullable<Awaited<ReturnType<typeof resolveSession
     access: auth.access,
     teamIds: auth.teamIds,
     teamMemberIds: auth.teamMemberIds,
-    sectors: auth.sectors, viewSectors: auth.viewSectors, sectorViewer: auth.sectorViewer,
+    sectors: auth.sectors, viewSectors: auth.viewSectors, sectorViewer: auth.sectorViewer, sectorRole: auth.sectorRole,
     modules: auth.modules,
     moduleReasons: auth.moduleReasons,
     disabledFeatures: auth.disabledFeatures,

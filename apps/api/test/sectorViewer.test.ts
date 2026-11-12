@@ -28,3 +28,19 @@ it('participa da operação x só visualiza', async () => {
   ok(await carlos.patch(`/admin/users/${vis.id}`, { sectorViewer: false }));
   expect((await usersBySector(ctx.db, tid, ['juridico'])).map((u) => u.id)).toContain(vis.id);
 });
+
+it('cargo no setor: só liderança/gestor entra na lista de aprovadores', async () => {
+  const stamp = Date.now().toString(36);
+  const teamId = (await carlos.get('/admin/users')).json().teams[0].id as string;
+  const sup = ok(await carlos.post('/admin/users', { name: 'Supervisora Fictícia', email: `sup-${stamp}@yepnet.test`, profile: 'supervisor', teamIds: [teamId], leadTeamIds: [teamId] }), 201).json();
+  const list = () => carlos.get('/admin/users').then((r) => { const j = r.json(); return (j.users ?? j.items ?? j) as { id: string; sectorRole: string }[]; });
+  expect((await list()).find((u) => u.id === sup.id)?.sectorRole).toBe('lideranca'); // supervisão começa como liderança
+  ok(await carlos.patch(`/admin/users/${sup.id}`, { sectorRole: 'operador' }));
+  const s2 = await login(ctx.app, `sup-${stamp}@yepnet.test`, sup.temporaryPassword);
+  expect(ok(await s2.get('/me')).json().sectorRole).toBe('operador');
+  const { approvalLevelOf } = await import('../src/services/approvals');
+  expect(approvalLevelOf({ profiles: ['supervisor'], sectors: [], sectorRole: 'operador' })).toBe('vendedor');
+  expect(approvalLevelOf({ profiles: ['supervisor'], sectors: [], sectorRole: 'lideranca' })).toBe('supervisor');
+  ok(await carlos.patch(`/admin/users/${sup.id}`, { sectorRole: 'observador' }));
+  expect((await list()).find((u) => u.id === sup.id)).toMatchObject({ sectorRole: 'observador', sectorViewer: true });
+});

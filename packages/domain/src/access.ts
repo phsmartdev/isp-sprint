@@ -46,6 +46,17 @@ export function allowedLevels(m: Module): readonly AccessLevel[] {
  * Perfis de acesso (decisão de 07/11/2026): Administrador, Diretoria, Gerência, Supervisão e Operação.
  * Vendedor e Analista viraram Operação (níveis padrão do antigo Vendedor; ajustáveis em Segurança).
  */
+/** Cargo da pessoa nos setores: observador (só vê), operador (executa) ou liderança/gestor (executa e aprova). */
+export const SECTOR_ROLES = ['observador', 'operador', 'lideranca'] as const;
+export type SectorRole = (typeof SECTOR_ROLES)[number];
+export const SECTOR_ROLE_LABELS: Record<SectorRole, string> = { observador: 'Observador', operador: 'Operador', lideranca: 'Liderança / gestor' };
+export const SECTOR_ROLE_HINTS: Record<SectorRole, string> = {
+  observador: 'Acompanha o que o setor vê, sem receber tarefas, concluir etapas ou aprovar.',
+  operador: 'Recebe as tarefas do setor e conclui etapas; não aprova.',
+  lideranca: 'Executa e entra na lista de aprovadores (pela alçada do perfil).',
+};
+/** Cargo inicial pelo perfil: Supervisão, Gerência, Diretoria e Administrador começam como liderança. */
+export const defaultSectorRole = (profile: string): SectorRole => (['supervisor', 'gerencia', 'diretoria', 'administrador'].includes(profile) ? 'lideranca' : 'operador');
 export const PROFILE_KEYS = ['administrador', 'diretoria', 'gerencia', 'supervisor', 'operacao'] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 export const PROFILE_LABELS: Record<ProfileKey, string> = { administrador: 'Administrador', diretoria: 'Diretoria', gerencia: 'Gerência', supervisor: 'Supervisão', operacao: 'Operação' };

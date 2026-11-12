@@ -32,7 +32,7 @@ export async function recoverAccess(url: string, emailRaw: string, password: str
     const tenantId = tenants[0]!.id;
     return await db.transaction(async (tx) => {
       const roles = await ensureRoles(tx, tenantId);
-      const [u] = await tx.insert(s.users).values({ tenantId, name: email.split('@')[0]!, email, passwordHash: hash, ipBypass: true }).returning();
+      const [u] = await tx.insert(s.users).values({ tenantId, name: email.split('@')[0]!, email, passwordHash: hash, ipBypass: true, sectorRole: 'lideranca' }).returning();
       await tx.insert(s.userRoles).values({ userId: u!.id, roleId: roles.gerencia! });
       await tx.insert(s.auditLogs).values({ tenantId, actorId: u!.id, action: 'auth.recovery_created', metadata: { via: 'deploy' } });
       return 'created' as const;

@@ -1065,6 +1065,13 @@
       "when": 1794510635426,
       "tag": "0151_setor_visualizador",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1794511631557,
+      "tag": "0152_cargo_setor",
+      "breakpoints": true
     }
   ]
 }

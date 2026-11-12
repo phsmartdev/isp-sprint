@@ -57,6 +57,8 @@ export const users = pgTable(
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
     /** true = só acompanha os setores (vê), sem atuar na operação: não recebe tarefas nem conclui etapas */
     sectorViewer: boolean('sector_viewer').notNull().default(false),
+    /** cargo nos setores: observador, operador ou liderança (quem aprova) */
+    sectorRole: text('sector_role').notNull().default('operador'),
     /** CSM (Sucesso do Cliente): recebe carteira e aparece nos filtros de CSM */
     isCsm: boolean('is_csm').notNull().default(false),
     /** Papéis do Playbook Comercial que a pessoa ocupa (GC, SC, ANC, ASC...): parametrizado no cadastro do usuário. */
