@@ -11,12 +11,14 @@ import { AdminInstructions } from './Instructions';
 import { AdminTaskScripts } from './TaskScripts';
 import { AdminLetterheads } from './Letterheads';
 import { AdminOffices } from '../../features/offices/AdminOffices';
+import { BidModelEditor } from '../../features/bids/BidModelEditor';
 import { StructuresAdmin } from '../../features/accounts/Structures';
 
 const TABS = [
   { key: 'contratos', label: 'Contratos' },
   { key: 'propostas', label: 'Propostas' },
   { key: 'oficios', label: 'Ofícios' },
+  { key: 'licitacao', label: 'Projeto de licitação' },
   { key: 'timbrado', label: 'Timbrado das filiais' },
   { key: 'emails', label: 'E-mails' },
   { key: 'instrucao', label: 'Instrução' },
@@ -37,6 +39,7 @@ export function AdminModels() {
         {tab === 'contratos' && <div className="space-y-6"><AdminContractTemplates /><TemplatesManager /></div>}
         {tab === 'propostas' && <AdminProposalTemplates />}
         {tab === 'oficios' && <AdminOffices />}
+        {tab === 'licitacao' && <BidModelEditor />}
         {tab === 'timbrado' && <AdminLetterheads />}
         {tab === 'emails' && <AdminEmail />}
         {tab === 'instrucao' && <AdminInstructions />}

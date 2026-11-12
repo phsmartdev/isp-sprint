@@ -1,3 +1,4 @@
+import { syncBidProject } from './bidProjects';
 import type { FastifyRequest } from 'fastify';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -153,6 +154,8 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
   // campo obrigatório só vale para o tipo de venda escolhido (ou para todos, se não tiver tipo)
   const missing = pipeline.fields.filter((f) => (!f.saleKinds?.length || (input.saleKind && f.saleKinds.includes(input.saleKind))) && f.required && (input.custom?.[f.key] === undefined || input.custom?.[f.key] === null || input.custom?.[f.key] === ''));
   if (missing.length) throw unprocessable(`Preencha: ${missing.map((f) => f.label).join(', ')}.`, missing.map((f) => ({ path: `custom.${f.key}`, message: 'Obrigatório' })));
+  // licitação: o projeto nasce com a oportunidade (uma vez só, mesmo com reprocessamento)
+  if (input.saleKind ? input.saleKind === 'licitacao' : pipeline.key === 'licitacao') await syncBidProject(tx, auth, opp!.id, true);
   return { ...opp!, pipelineId: pipeline.id, stage: firstStage.key };
 }
 

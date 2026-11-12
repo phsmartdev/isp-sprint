@@ -30,11 +30,11 @@ de implantação por feature, cada uma testada e publicada só com autorização
 7. **Telas**: aba "Projeto de Licitação" na oportunidade, planejamento em tabela editável (edição em linha e em lote), Gantt/dependências, entregáveis por área, matriz RACI, aprovações, documentos, notificações, histórico, painel do analista.
 8. **Indicadores** de licitação na Gestão de Resultados.
 
-## 3. Decisões para validar
+## 3. Decisões validadas
 
-1. **O projeto de licitação é um projeto do módulo Projetos** (`kind = 'licitacao'`), não um módulo separado. As tarefas são as tarefas de projeto que já existem.
-2. **Gatilho:** oportunidade com tipo de venda "Licitação" (`sale_kind = 'licitacao'`), ao cadastrar ou ao mudar para esse tipo. Uma oportunidade tem no máximo um projeto de licitação (índice único). Se o tipo mudar depois, o projeto não é apagado: aparece a decisão "continuar" ou "arquivar".
-3. **Coordenador** = responsável comercial da oportunidade.
+1. **O projeto de licitação é um projeto dentro da oportunidade** (aba "Projeto de Licitação"), usando o motor de Projetos (`kind = 'licitacao'`). As tarefas ficam no projeto e não lotam a lista de tarefas da negociação.
+2. **1:N:** o primeiro projeto nasce sozinho quando a oportunidade é de licitação (no máximo um automático: índice único parcial); outros podem ser criados à mão (lotes, frentes). Se o tipo mudar depois, o projeto não é apagado: aparece a decisão "continuar" ou "arquivar".
+3. **Coordenador:** começa com o responsável comercial e pode ser qualquer pessoa ativa da empresa.
 4. **Marcos do edital são informados pelo analista** (a partir do edital) e ficam marcados como "validado". O sistema não presume datas legais.
 5. **Aprovações dentro do sistema**, com um único Accountable por decisão; a alçada segue a matriz RACI e, para preço/margem, as alçadas comerciais que já existem.
 6. **E-mails saem pelo SMTP da empresa** já configurado. Anexo acima do limite vira link seguro com acesso controlado e a exceção fica registrada. Sem SMTP configurado, o envio aparece como "não configurado"; nada é simulado.
@@ -44,7 +44,7 @@ de implantação por feature, cada uma testada e publicada só com autorização
 
 | # | Feature | Fase do prompt | Critérios de aceite cobertos |
 |---|---|---|---|
-| L1 | Modelo de projeto versionado + modelo padrão do rito (11 etapas) + criação automática idempotente a partir da oportunidade + aba "Projeto de Licitação" | 1 | 1, 7 |
+| L1 ✅ | Modelo de projeto versionado + modelo padrão do rito (11 etapas) + criação automática idempotente a partir da oportunidade + aba "Projeto de Licitação" | 1 | 1, 7 |
 | L2 | Planejamento: tabela editável (área, responsável, entregável, aceite, datas, dependência, aprovador, anexos, notificação), marcos do edital e prazos retroativos, edição do projeto sem afetar o modelo | 1–2 | 2, 8 |
 | L3 | Matriz RACI por tarefa e aprovação genérica (plano, Go/No-Go, proposta, exceções, alterações críticas, contratação) | 2 | 3 |
 | L4 | Templates de e-mail por área, conferência antes do disparo, edital anexado, fila com tentativas, notificações posteriores | 3 | 4 |

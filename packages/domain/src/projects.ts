@@ -23,10 +23,11 @@ export const PROJECT_TRANSITIONS: Record<ProjectStatus, readonly ProjectStatus[]
   concluido: ['em_andamento'],
   cancelado: ['em_andamento'],
 };
-export const PROJECT_KINDS = ['implantacao', 'comercial', 'sucesso_cliente', 'interno', 'contrato_publico', 'outro'] as const;
+export const PROJECT_KINDS = ['implantacao', 'comercial', 'sucesso_cliente', 'interno', 'contrato_publico', 'licitacao', 'outro'] as const;
 export type ProjectKind = (typeof PROJECT_KINDS)[number];
 export const PROJECT_KIND_LABELS: Record<ProjectKind, string> = {
   implantacao: 'Implantação',
+  licitacao: 'Licitação',
   comercial: 'Comercial',
   sucesso_cliente: 'Sucesso do Cliente',
   interno: 'Interno',

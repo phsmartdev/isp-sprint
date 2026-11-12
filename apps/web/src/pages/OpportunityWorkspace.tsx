@@ -11,6 +11,7 @@ import { OpportunityItems } from '../features/opportunity/OpportunityItems';
 import { ExtraAddressesEditor, extraToInput, type ExtraAddress } from '../features/opportunity/DeliveryAddresses';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
+import { BidProjectAttention, BidProjectsTab } from '../features/bids/OpportunityBidProjects';
 import { BidItemResults } from '../features/opportunity/BidItemResults';
 import { OriginEmail, useOriginEmail } from '../features/opportunity/OriginEmail';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -628,7 +629,7 @@ export function OpportunityWorkspacePage() {
   const [copilot, setCopilot] = useState(false);
   const [search] = useSearchParams();
   // abas do acompanhamento; endereços antigos (?aba=atividades|trabalho|chat|pessoas) continuam funcionando
-  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
+  const [centerTab, setCenterTab] = useState<'historico' | 'produtos' | 'viabilidade' | 'pregao' | 'licitacao' | 'email' | 'projetos' | 'tarefas' | 'anexos' | 'chamados'>(() => { const t = search.get('aba'); return t === 'produtos' || t === 'viabilidade' || t === 'pregao' || t === 'licitacao' || t === 'email' || t === 'projetos' || t === 'anexos' || t === 'chamados' ? t : t === 'tarefas' || t === 'atividades' || t === 'trabalho' ? 'tarefas' : 'historico'; });
   const econOn = feature('crm.viabilidade');
   const econ = useQuery({ queryKey: ['economics', id], enabled: !!id && econOn, queryFn: () => api<{ saved: unknown }>(`/opportunities/${id}/economics`) });
   const [taskOpen, setTaskOpen] = useState<string | null>(null);
@@ -787,6 +788,7 @@ export function OpportunityWorkspacePage() {
         </div>
       )}
       {a.error && !a.conflict && <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">Não salvou: {a.error}</p>}
+      <BidProjectAttention oppId={opp.id} />
       <OpportunityArpPanel oppId={opp.id} stage={opp.stage} />
       <section className="card">
         <div className="px-5 pt-2">
@@ -794,7 +796,7 @@ export function OpportunityWorkspacePage() {
             { key: 'historico', label: unread.data?.comments ? `Histórico • ${unread.data.comments} novo(s)` : 'Histórico' },
             { key: 'produtos', label: 'Produtos', count: opp.itemCount || undefined },
             ...(econOn ? [{ key: 'viabilidade' as const, label: 'Viabilidade econômica' }] : []),
-            ...(opp.saleKind === 'licitacao' ? [{ key: 'pregao' as const, label: 'Pregão' }] : []),
+            ...(opp.saleKind === 'licitacao' ? [{ key: 'licitacao' as const, label: 'Projeto de Licitação' }, { key: 'pregao' as const, label: 'Pregão' }] : []),
             ...(origin.data?.thread ? [{ key: 'email' as const, label: 'E-mail' }] : []),
             ...(can('projetos') ? [{ key: 'projetos' as const, label: 'Projetos' }] : []),
             { key: 'tarefas', label: 'Tarefas', count: acts.data?.items.filter((x) => !x.completedAt).length || undefined },
@@ -807,6 +809,7 @@ export function OpportunityWorkspacePage() {
           {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
           {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
+          {centerTab === 'licitacao' && <BidProjectsTab oppId={opp.id} />}
           {centerTab === 'pregao' && <div className="space-y-6"><BidParticipants oppId={opp.id} full /><BidItemResults oppId={opp.id} /><BidTimeline oppId={opp.id} /></div>}
           {centerTab === 'projetos' && <LinkedProjects prefill={workPrefill} />}
           {centerTab === 'tarefas' && (
