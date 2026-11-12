@@ -21,6 +21,8 @@ export type BidModelMacro = {
   deliverable?: string; acceptance?: string; instructions?: string;
   /** dias a partir do início da etapa e duração */
   offsetDays: number; durationDays: number;
+  /** prazo pelo marco oficial do edital: entrega = data do marco + anchorOffsetDays − margem de segurança */
+  anchor?: OfficialDateKey | null; anchorOffsetDays?: number;
   tasks: BidModelTask[];
 };
 export type BidModelPhase = { key: string; name: string; objective?: string; deliverable: string; durationDays: number; macros: BidModelMacro[] };
@@ -32,6 +34,21 @@ const M = (phase: string, i: number, name: string, area: BidArea, tasks: string[
   const key = `${phase}_m${i}`;
   return { key, name, area, required: true, offsetDays: 0, durationDays: 2, tasks: T(tasks, key), ...o };
 };
+
+/** Marcos oficiais da licitação (informados e validados pelo analista a partir do edital; nada é presumido). */
+export const OFFICIAL_DATES = [
+  { key: 'publicacao', label: 'Publicação do edital' },
+  { key: 'esclarecimentos', label: 'Limite de esclarecimentos' },
+  { key: 'impugnacoes', label: 'Limite de impugnações' },
+  { key: 'proposta', label: 'Prazo de envio da proposta', crmField: 'prazo_proposta' },
+  { key: 'sessao', label: 'Sessão pública', crmField: 'data_sessao' },
+  { key: 'recursos', label: 'Diligências e recursos' },
+  { key: 'resultado', label: 'Resultado' },
+  { key: 'contratacao', label: 'Contratação' },
+] as const;
+export type OfficialDateKey = (typeof OFFICIAL_DATES)[number]['key'];
+export const OFFICIAL_KEYS = OFFICIAL_DATES.map((d) => d.key) as OfficialDateKey[];
+export const OFFICIAL_LABEL = Object.fromEntries(OFFICIAL_DATES.map((d) => [d.key, d.label])) as Record<OfficialDateKey, string>;
 
 /** Rito padrão de licitações (11 etapas). As etapas podem correr em paralelo quando a natureza permite. */
 export const BID_DEFAULT_MODEL: BidModelDef = {
@@ -126,6 +143,24 @@ export const BID_DEFAULT_MODEL: BidModelDef = {
   ],
 };
 
+// prazos pelo edital: análise até o limite de esclarecimentos; proposta antes do envio; sessão, resultado e contratação nos seus marcos
+const ANCHORS: Record<string, [OfficialDateKey, number]> = {
+  e3: ['esclarecimentos', -1], e3_m6: ['impugnacoes', -1], e4: ['proposta', -10], e5: ['proposta', -7], e6: ['proposta', -3], e7: ['proposta', -1],
+  e7_m6: ['proposta', 0], e7_m7: ['proposta', 0], e8: ['sessao', 0], e9: ['resultado', 0], e10: ['contratacao', 0],
+};
+for (const p of BID_DEFAULT_MODEL.phases) for (const m of p.macros) {
+  const a = ANCHORS[m.key] ?? ANCHORS[p.key];
+  if (a) { m.anchor = a[0]; m.anchorOffsetDays = a[1]; }
+}
+
+/** Vínculo com o edital do rito padrão (vale para modelos salvos antes de existir o campo; null no modelo = sem vínculo). */
+const DEFAULT_ANCHORS = new Map(BID_DEFAULT_MODEL.phases.flatMap((p) => p.macros.filter((m) => m.anchor).map((m) => [m.key, [m.anchor!, m.anchorOffsetDays ?? 0] as const])));
+
+/** Preenche o vínculo com o edital do rito padrão onde o modelo ainda não definiu (para o editor mostrar o que vale). */
+export function withDefaultAnchors(def: BidModelDef): BidModelDef {
+  return { phases: def.phases.map((p) => ({ ...p, macros: p.macros.map((m) => { const d = m.anchor === undefined ? DEFAULT_ANCHORS.get(m.key) : undefined; return d ? { ...m, anchor: d[0], anchorOffsetDays: d[1] } : m; }) })) };
+}
+
 /** Problemas do modelo (vazio = válido): nomes, chaves únicas, prazos coerentes. */
 export function modelProblems(def: BidModelDef): string[] {
   const out: string[] = [];
@@ -141,6 +176,7 @@ export function modelProblems(def: BidModelDef): string[] {
       if (!m.name.trim()) out.push(`Macrotarefa sem nome na etapa "${p.name}".`);
       if (!BID_AREAS.includes(m.area)) out.push(`Área inválida em "${m.name}".`);
       if (m.offsetDays < 0 || m.durationDays < 0) out.push(`Prazo negativo em "${m.name}".`);
+      if (m.anchor && !OFFICIAL_KEYS.includes(m.anchor)) out.push(`Marco do edital inválido em "${m.name}".`);
       m.tasks.forEach((t) => { seen(t.key); if (!t.name.trim()) out.push(`Tarefa sem nome em "${m.name}".`); });
     });
   });
@@ -160,7 +196,7 @@ const addDays = (iso: string, d: number) => new Date(Date.parse(`${iso}T12:00:00
 
 export type BidInstance = {
   milestones: { key: string; name: string; dueOn: string; position: number; acceptanceCriteria: string }[];
-  tasks: { key: string; phaseKey: string; name: string; area: BidArea; required: boolean; deliverable: string | null; acceptance: string | null; instructions: string | null; startOn: string; dueOn: string; position: number; subtasks: { key: string; name: string; required: boolean }[] }[];
+  tasks: { key: string; phaseKey: string; name: string; area: BidArea; required: boolean; deliverable: string | null; acceptance: string | null; instructions: string | null; anchor: OfficialDateKey | null; anchorOffsetDays: number; durationDays: number; startOn: string; dueOn: string; position: number; subtasks: { key: string; name: string; required: boolean }[] }[];
   dueOn: string;
 };
 /**
@@ -177,7 +213,8 @@ export function instantiateBidModel(def: BidModelDef, startOn: string): BidInsta
     p.macros.forEach((m) => {
       const s = addDays(cursor, m.offsetDays);
       const due = addDays(s, m.durationDays);
-      tasks.push({ key: m.key, phaseKey: p.key, name: m.name, area: m.area, required: m.required, deliverable: m.deliverable ?? null, acceptance: m.acceptance ?? null, instructions: m.instructions ?? null, startOn: s, dueOn: due > end ? end : due, position: tasks.length, subtasks: m.tasks.map((t) => ({ ...t })) });
+      const da = m.anchor === undefined ? DEFAULT_ANCHORS.get(m.key) : undefined;
+      tasks.push({ key: m.key, phaseKey: p.key, name: m.name, area: m.area, required: m.required, deliverable: m.deliverable ?? null, acceptance: m.acceptance ?? null, instructions: m.instructions ?? null, anchor: m.anchor === undefined ? da?.[0] ?? null : m.anchor, anchorOffsetDays: m.anchor === undefined ? da?.[1] ?? 0 : m.anchorOffsetDays ?? 0, durationDays: m.durationDays, startOn: s, dueOn: due > end ? end : due, position: tasks.length, subtasks: m.tasks.map((t) => ({ ...t })) });
     });
     cursor = end;
   });
@@ -185,4 +222,55 @@ export function instantiateBidModel(def: BidModelDef, startOn: string): BidInsta
 }
 
 /** Atributos da tarefa de projeto estruturado (guardados na tarefa; editar o projeto não muda o modelo). */
-export type ProjectTaskSpec = { phaseKey: string; sourceKey: string | null; area: BidArea; required: boolean; deliverable: string | null; acceptance: string | null; instructions: string | null };
+export type ProjectTaskSpec = {
+  phaseKey: string; sourceKey: string | null; area: BidArea; required: boolean; deliverable: string | null; acceptance: string | null; instructions: string | null;
+  /** prazo pelo marco oficial (L2) */ anchor?: OfficialDateKey | null; anchorOffsetDays?: number; durationDays?: number;
+  /** aprovador (Accountable) e documentos necessários */ approverId?: string | null; docs?: string | null;
+  /** a área já indicou o responsável (enquanto não, a tarefa fica com o coordenador) */ assigned?: boolean;
+};
+
+export type OfficialDate = { date: string | null; validated: boolean; source: string | null; validatedBy?: string | null; validatedAt?: string | null };
+export type OfficialDates = Partial<Record<OfficialDateKey, OfficialDate>>;
+
+/** Entrega pelo marco: data do marco + deslocamento − margem; início = entrega − duração. Sem data do marco, não calcula. */
+export function anchoredDates(t: { anchor?: OfficialDateKey | null; anchorOffsetDays?: number; durationDays?: number }, dates: OfficialDates, marginDays: number) {
+  const d = t.anchor ? dates[t.anchor]?.date : null;
+  if (!d) return null;
+  const dueOn = addDays(d, (t.anchorOffsetDays ?? 0) - (t.anchorOffsetDays && t.anchorOffsetDays >= 0 ? 0 : Math.max(0, marginDays)));
+  return { dueOn, startOn: addDays(dueOn, -Math.max(0, t.durationDays ?? 0)) };
+}
+
+export type PlanRow = { id: string; parentId: string | null; title: string; ownerId: string; startOn: string | null; dueOn: string | null; done: boolean; spec: ProjectTaskSpec | null; dependsOn: string[] };
+export type PlanIssue = { taskId: string | null; level: 'bloqueio' | 'alerta'; message: string };
+/**
+ * O que impede liberar o plano (bloqueio) e o que merece atenção (alerta):
+ * entregável obrigatório sem responsável da área, sem data ou sem critério de aceite; dependência que começa antes
+ * da predecessora terminar; entrega depois do marco oficial; marco usado sem data validada.
+ */
+export function planIssues(rows: PlanRow[], dates: OfficialDates, coordinatorId: string): PlanIssue[] {
+  const out: PlanIssue[] = [];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  for (const r of rows) {
+    if (r.parentId || r.done) continue;
+    const sp = r.spec;
+    if (sp?.required && sp.deliverable) {
+      if (sp.area !== 'comercial' && !sp.assigned && r.ownerId === coordinatorId) out.push({ taskId: r.id, level: 'bloqueio', message: `"${r.title}": defina o responsável da área.` });
+      if (!r.dueOn) out.push({ taskId: r.id, level: 'bloqueio', message: `"${r.title}": defina a data de entrega.` });
+      if (!sp.acceptance?.trim()) out.push({ taskId: r.id, level: 'bloqueio', message: `"${r.title}": defina o critério de aceite.` });
+    }
+    for (const dep of r.dependsOn) {
+      const p = byId.get(dep);
+      if (p?.dueOn && r.startOn && r.startOn < p.dueOn) out.push({ taskId: r.id, level: 'alerta', message: `"${r.title}": começa (${r.startOn}) antes de "${p.title}" terminar (${p.dueOn}).` });
+    }
+    if (sp?.anchor) {
+      const a = dates[sp.anchor];
+      if (!a?.date) out.push({ taskId: r.id, level: 'alerta', message: `"${r.title}": falta a data "${OFFICIAL_LABEL[sp.anchor]}" do edital.` });
+      else {
+        if (!a.validated) out.push({ taskId: null, level: 'alerta', message: `Valide a data "${OFFICIAL_LABEL[sp.anchor]}" com o edital.` });
+        if (r.dueOn && r.dueOn > a.date) out.push({ taskId: r.id, level: 'alerta', message: `"${r.title}": entrega em ${r.dueOn}, depois de "${OFFICIAL_LABEL[sp.anchor]}" (${a.date}).` });
+      }
+    }
+  }
+  // sem repetir o mesmo aviso de data não validada
+  return out.filter((x, i) => x.taskId !== null || out.findIndex((y) => y.message === x.message) === i);
+}

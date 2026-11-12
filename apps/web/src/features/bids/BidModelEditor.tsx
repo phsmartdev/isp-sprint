@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, GripVertical, Plus, Trash2 } from 'lucide-react';
-import { BID_AREAS, BID_AREA_LABELS, MODEL_STATUS_LABELS, modelProblems, newModelKey, type BidModelDef, type BidModelMacro, type BidModelPhase, type ModelStatus } from '@isp/domain';
+import { BID_AREAS, BID_AREA_LABELS, MODEL_STATUS_LABELS, OFFICIAL_DATES, modelProblems, newModelKey, withDefaultAnchors, type BidModelDef, type BidModelMacro, type BidModelPhase, type ModelStatus } from '@isp/domain';
 import { api } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
@@ -30,7 +30,7 @@ export function BidModelEditor() {
   const toast = useToast();
   const d = q.data;
   const v = d?.versions.find((x) => x.version === sel) ?? d?.versions.find((x) => x.status === 'rascunho' || x.status === 'em_aprovacao') ?? d?.versions.find((x) => x.version === d.template.publishedVersion) ?? d?.versions[0];
-  useEffect(() => { if (v) { setDef(structuredClone(v.def)); setNotes(v.notes ?? ''); setDirty(false); } }, [v?.id, v?.rowVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (v) { setDef(withDefaultAnchors(structuredClone(v.def))); setNotes(v.notes ?? ''); setDirty(false); } }, [v?.id, v?.rowVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const editable = !!d?.canEdit && v?.status === 'rascunho';
   const done = (msg: string) => { void qc.invalidateQueries({ queryKey: ['modelo-licitacao'] }); toast({ tone: 'success', message: msg }); };
   const fail = (e: unknown) => toast({ tone: 'error', message: errMsg(e) });
@@ -136,6 +136,11 @@ function MacroEditor({ m, editable, def, set, remove, moveBy, first, last }: { m
           <button type="button" disabled={last} className="rounded p-1 text-muted disabled:opacity-30" aria-label={`Descer ${m.name}`} onClick={() => moveBy(1)}><ArrowDown className="h-4 w-4" /></button>
           <button type="button" className="rounded p-1 text-muted hover:text-danger" aria-label={`Excluir ${m.name}`} onClick={remove}><Trash2 className="h-4 w-4" /></button>
         </>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted">Prazo pelo edital:</span>
+        <Select aria-label={`Marco do edital de ${m.name}`} disabled={!editable} className="h-8 w-56" value={m.anchor ?? ''} onChange={(e) => set((x) => { x.anchor = (e.target.value || null) as BidModelMacro['anchor']; })}><option value="">Sem vínculo (dias da etapa)</option>{OFFICIAL_DATES.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}</Select>
+        {m.anchor && <label className="inline-flex items-center gap-1">entrega<Input aria-label={`Dias em relação ao marco de ${m.name}`} type="number" disabled={!editable} className="h-8 w-16" value={m.anchorOffsetDays ?? 0} onChange={(e) => set((x) => { x.anchorOffsetDays = Number(e.target.value) || 0; })} />dias do marco (negativo = antes)</label>}
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <Input aria-label={`Entregável de ${m.name}`} placeholder="Entregável" disabled={!editable} className="h-8" value={m.deliverable ?? ''} onChange={(e) => set((x) => { x.deliverable = e.target.value || undefined; })} />

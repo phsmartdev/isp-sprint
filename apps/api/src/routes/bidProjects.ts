@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
-import { BID_AREAS, modelProblems, type BidModelDef } from '@isp/domain';
+import { BID_AREAS, OFFICIAL_KEYS, modelProblems, type BidModelDef } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -25,12 +25,13 @@ const Macro = z.object({
   key: z.string().min(1).max(60), name: z.string().trim().min(1).max(200), area: z.enum(BID_AREAS), required: z.boolean(),
   deliverable: z.string().trim().max(500).optional(), acceptance: z.string().trim().max(1000).optional(), instructions: z.string().trim().max(2000).optional(),
   offsetDays: z.number().int().min(0).max(365), durationDays: z.number().int().min(0).max(365), tasks: z.array(Task).max(40),
+  anchor: z.enum(OFFICIAL_KEYS as [string, ...string[]]).nullable().optional(), anchorOffsetDays: z.number().int().min(-365).max(365).optional(),
 });
 const Phase = z.object({ key: z.string().min(1).max(60), name: z.string().trim().min(1).max(160), objective: z.string().trim().max(1000).optional(), deliverable: z.string().trim().min(1).max(500), durationDays: z.number().int().min(0).max(365), macros: z.array(Macro).max(40) });
 const Def = z.object({ phases: z.array(Phase).min(1).max(30) });
 const VParams = z.object({ v: z.coerce.number().int().min(1) });
 
-async function oppProject(app: { db: Parameters<typeof loadOpportunity>[0] }, auth: AuthContext, projectId: string) {
+export async function oppProject(app: { db: Parameters<typeof loadOpportunity>[0] }, auth: AuthContext, projectId: string) {
   const [p] = await app.db.select().from(s.projects).where(and(eq(s.projects.tenantId, auth.tenantId), eq(s.projects.id, projectId), eq(s.projects.kind, 'licitacao'), isNull(s.projects.deletedAt))).limit(1);
   if (!p || !p.opportunityId) throw notFound('Projeto de licitação não encontrado.');
   await loadOpportunity(app.db, auth, p.opportunityId); // quem vê a oportunidade vê o projeto dela
