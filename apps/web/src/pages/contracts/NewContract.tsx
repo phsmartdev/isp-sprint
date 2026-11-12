@@ -15,7 +15,7 @@ type Prefill = {
   client: { name: string; document: string | null; segment: string; email: string | null; phone: string | null; address: { street: string | null; number: string | null; district: string | null; city: string | null; state: string | null; postalCode: string | null } | null };
   imported?: string[]; carries?: { people: number; documents: number };
   existingContractId: string | null; won: boolean;
-  suggestion: { kind: 'publico' | 'privado'; legalRegime: 'privado' | 'lei_14133'; commercialOwnerId: string; version: Partial<Version> };
+  suggestion: { kind: 'publico' | 'privado'; legalRegime: 'privado' | 'lei_14133'; commercialOwnerId: string; branchId?: string | null; csmId?: string | null; operationalOwnerId?: string | null; adminOwnerId?: string | null; version: Partial<Version> };
 };
 type Contact = { id: string; name: string; phone: string | null; email: string | null; segment: string };
 
@@ -31,7 +31,7 @@ export function NewContractPage() {
   const dq = useDebounced(search, 300);
   const found = useQuery({ queryKey: ['contacts-search', dq], enabled: !oppId && dq.length >= 2, queryFn: () => api<{ items: Contact[] }>(`/contacts${qs({ q: dq })}`) });
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (pre.data) setF(formFrom({ kind: pre.data.suggestion.kind, legalRegime: pre.data.suggestion.legalRegime, commercialOwnerId: pre.data.suggestion.commercialOwnerId }, pre.data.suggestion.version)); }, [pre.data]);
+  useEffect(() => { if (pre.data) { const sg = pre.data.suggestion; setF(formFrom({ kind: sg.kind, legalRegime: sg.legalRegime, commercialOwnerId: sg.commercialOwnerId, branchId: sg.branchId ?? null, csmId: sg.csmId ?? null, operationalOwnerId: sg.operationalOwnerId ?? null, adminOwnerId: sg.adminOwnerId ?? null }, sg.version)); } }, [pre.data]);
   const create = useMutation({
     mutationFn: () => { const p = payloadOf(f); return api<{ id: string }>('/contracts', { method: 'POST', body: { ...p.header, initialBalanceCents: p.initialBalanceCents, opportunityId: oppId, contactId: oppId ? null : contact?.id ?? null, version: p.version } }); },
     onSuccess: (r) => nav(`/contracts/${r.id}`),

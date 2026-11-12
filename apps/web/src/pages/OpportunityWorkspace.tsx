@@ -775,7 +775,7 @@ export function OpportunityWorkspacePage() {
         </div>
       </section>
       <OpportunityContacts oppId={opp.id} editable={editable} />
-      <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={<><MeasurementBox opp={opp} /><ContractItemsBox opp={opp} /></>} />
+      <AccountPanel opp={opp} openMore={search.get('aba') === 'pessoas'} extra={opp.saleKind === 'consumo_contrato' || opp.measurementContractId ? <><MeasurementBox opp={opp} /><ContractItemsBox opp={opp} /></> : undefined} />
     </div>
   );
 

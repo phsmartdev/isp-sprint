@@ -35,7 +35,9 @@ describe('módulos de negócio', () => {
     expect(routeFeature('GET', '/abm/:id/360')).toBe('marketing.abm');
     expect(routeFeature('PUT', '/abm/settings')).toBeNull();
     expect(routeFeature('GET', '/leads/summary')).toBe('marketing.leads');
-    expect(routeFeature('GET', '/tasks')).toBe('projetos.tarefas');
+    expect(routeFeature('GET', '/tasks')).toBeNull(); // tarefas do CRM não dependem do módulo Projetos
+    expect(routeFeature('POST', '/tasks')).toBeNull();
+    expect(routeFeature('POST', '/task-templates')).toBe('projetos.tarefas');
     expect(routeFeature('PATCH', '/tasks/:id')).toBeNull(); // a tarefa é compartilhada
     expect(routeFeature('GET', '/activities')).toBe('crm.atividades');
     expect(routeFeature('POST', '/activities')).toBeNull();
