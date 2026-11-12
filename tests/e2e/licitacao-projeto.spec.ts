@@ -115,3 +115,53 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   await dlg.getByRole('button', { name: 'Salvar' }).click();
   await expect(deps.getByRole('listitem').filter({ hasText: 'Revisão documental' })).toContainText('depende de: Documentação de habilitação');
 });
+
+test('RACI e aprovação do plano: analista submete, aprovador decide no sistema', async ({ browser }) => {
+  test.setTimeout(150_000);
+  const as = async (email: string) => {
+    const ctx = await browser.newContext({ baseURL: 'http://localhost:5174', locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto('/login');
+    await page.getByLabel('E-mail').fill(email);
+    await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
+    return page;
+  };
+  const admin = await as('carlos@yepnet.test');
+  const me = await (await admin.request.get('/api/v1/me')).json();
+  // configuração: áreas e aprovador do plano (pela tela)
+  await admin.goto('/settings/modelos?aba=licitacao');
+  await admin.getByRole('region', { name: 'Aprovadores por decisão' }).getByLabel('Planejamento').selectOption(me.user.id);
+  await expect(admin.getByText('Aprovador salvo')).toBeVisible();
+
+  const analyst = await as('lucas@yepnet.test');
+  const lk = await (await analyst.request.get('/api/v1/meta/lookups')).json();
+  const p = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
+  const tag = Date.now().toString(36);
+  const o = await (await analyst.request.post('/api/v1/opportunities', { data: { newContact: { name: `Órgão Aprov ${tag}`, segment: 'governamental' }, title: `PE ${tag}`, pipelineId: p.id, saleKind: 'licitacao', branchId: lk.branches[0].id, custom: { tipo_disputa: 'Aberta', lance_inicial: 1000, lance_minimo: 800 } } })).json();
+  const pid = (await (await analyst.request.get(`/api/v1/opportunities/${o.id}/licitacao/projetos`)).json()).items[0].id;
+  await analyst.goto(`/licitacoes/projetos/${pid}/planejamento`);
+  await analyst.getByRole('button', { name: 'Enviar plano para aprovação' }).click();
+  const card = analyst.getByRole('region', { name: 'Aprovação: Planejamento' });
+  await card.getByRole('button', { name: 'Submeter' }).click();
+  const dlg = analyst.getByRole('dialog', { name: 'Submeter: Planejamento' });
+  await dlg.getByLabel('Justificativa').fill('Plano inicial com áreas e prazos do edital');
+  await dlg.getByRole('button', { name: /^Enviar para/ }).click();
+  await expect(card).toContainText('Aguardando aprovação');
+  await expect(card).toContainText(`aguardando ${me.user.name}`);
+
+  await admin.goto(`/licitacoes/projetos/${pid}/planejamento`);
+  await admin.getByRole('tab', { name: 'Aprovações' }).click();
+  const c2 = admin.getByRole('region', { name: 'Aprovação: Planejamento' });
+  await c2.getByRole('button', { name: 'Decidir' }).click();
+  const dd = admin.getByRole('dialog', { name: /^Decidir:/ });
+  await dd.getByLabel('Parecer').fill('Plano ok');
+  await dd.getByRole('button', { name: 'Aprovar' }).click();
+  await expect(c2).toContainText('Aprovado');
+  await expect(admin.getByText('Plano: Aprovado')).toBeVisible();
+  await admin.screenshot({ path: 'test-results/licitacao-aprovacoes.png', fullPage: false });
+  await admin.getByRole('tab', { name: 'Matriz RACI' }).click();
+  await expect(admin.getByRole('region', { name: 'Matriz RACI' })).toContainText('Análise técnica');
+  await admin.request.put('/api/v1/licitacoes/governanca/aprovadores/plano', { data: { approverId: null } });
+});

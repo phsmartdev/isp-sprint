@@ -7,7 +7,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, GitBranch, Link2, Plus, Trash2, XCircle } from 'lucide-react';
-import { BID_AREAS, BID_AREA_LABELS, OFFICIAL_DATES, type BidArea, type OfficialDateKey, type OfficialDates, type PlanIssue, type ProjectTaskSpec } from '@isp/domain';
+import { BID_AREAS, BID_AREA_LABELS, BID_PLAN_STATUS_LABELS, GO_LABELS, OFFICIAL_DATES, type BidPlanStatus, type GoDecision, type BidArea, type OfficialDateKey, type OfficialDates, type PlanIssue, type ProjectTaskSpec } from '@isp/domain';
 import { api } from '../../lib/api';
 import { useLookups } from '../../lib/hooks';
 import { fmtDate, fmtDateTime } from '../../lib/format';
@@ -15,14 +15,15 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { ProjectGantt } from '../../features/bids/Gantt';
+import { BidApprovals, RaciMatrix } from '../../features/bids/Governance';
 
 type Row = { id: string; parentId: string | null; title: string; ownerId: string; ownerName: string; startOn: string | null; dueOn: string | null; done: boolean; spec: ProjectTaskSpec | null; milestoneId: string | null; dependsOn: string[]; rowVersion: number };
 type Plan = {
-  project: { id: string; code: number; name: string; status: string; coordinatorId: string; marginDays: number; opportunityId: string; templateVersion: number | null };
+  project: { id: string; code: number; name: string; status: string; coordinatorId: string; marginDays: number; planStatus: BidPlanStatus; goDecision: GoDecision | null; opportunityId: string; templateVersion: number | null };
   canPlan: boolean; officialDates: OfficialDates; phases: { id: string; name: string; dueOn: string | null; position: number; acceptanceCriteria: string | null }[];
   rows: Row[]; issues: PlanIssue[]; recalc: { id: string; title: string; from: { startOn: string | null; dueOn: string | null }; to: { startOn: string; dueOn: string } }[];
 };
-type View = 'tabela' | 'cronograma' | 'dependencias';
+type View = 'tabela' | 'cronograma' | 'dependencias' | 'raci' | 'aprovacoes';
 
 export function BidPlanningPage() {
   const { id = '' } = useParams();
@@ -51,18 +52,25 @@ export function BidPlanningPage() {
       <OfficialDatesCard d={d} onSaved={set} />
       <section className="card p-4" aria-label="Pendências do plano">
         <div className="flex flex-wrap items-center gap-2">
+          <Chip tone={d.project.planStatus === 'aprovado' ? 'green' : d.project.planStatus === 'aguardando' ? 'orange' : d.project.planStatus === 'alterado' || d.project.planStatus === 'devolvido' ? 'red' : 'neutral'}>Plano: {BID_PLAN_STATUS_LABELS[d.project.planStatus]}</Chip>
+          {d.project.goDecision && <Chip tone={d.project.goDecision === 'no_go' ? 'red' : 'green'}>{GO_LABELS[d.project.goDecision]}</Chip>}
           {blocks.length ? <Chip tone="red"><XCircle className="mr-1 inline h-3.5 w-3.5" aria-hidden />{blocks.length} pendência(s) impedem liberar o plano</Chip> : <Chip tone="green"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" aria-hidden />Plano sem pendências obrigatórias</Chip>}
           {alerts.length > 0 && <Chip tone="orange">{alerts.length} alerta(s)</Chip>}
         </div>
         {(blocks.length > 0 || alerts.length > 0) && (
           <ul className="mt-2 max-h-48 space-y-1 overflow-auto text-sm">{[...blocks, ...alerts].map((i, k) => <li key={k} className={i.level === 'bloqueio' ? 'text-danger' : 'text-ink'}>{i.level === 'bloqueio' ? '● ' : '○ '}{i.message}</li>)}</ul>
         )}
-        <p className="mt-2 text-xs text-muted">Entregável obrigatório precisa de responsável da área, data e critério de aceite. A aprovação do plano pela matriz RACI vem na próxima fase.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <p className="flex-1 text-xs text-muted">Entregável obrigatório precisa de responsável da área, data e critério de aceite. O plano é aprovado pelo aprovador da matriz RACI; depois de aprovado, mudar datas, responsáveis ou tarefas obrigatórias pede aprovação da alteração crítica.</p>
+          {d.canPlan && ['em_elaboracao', 'devolvido', 'alterado'].includes(d.project.planStatus) && <Button size="sm" variant="primary" disabled={blocks.length > 0} onClick={() => setView('aprovacoes')}>{d.project.planStatus === 'alterado' ? 'Aprovar alteração crítica' : 'Enviar plano para aprovação'}</Button>}
+        </div>
       </section>
-      <Tabs<View> label="Visões do planejamento" value={view} onChange={setView} tabs={[{ key: 'cronograma', label: 'Cronograma (Gantt)' }, { key: 'tabela', label: 'Tabela' }, { key: 'dependencias', label: 'Dependências' }]} />
+      <Tabs<View> label="Visões do planejamento" value={view} onChange={setView} tabs={[{ key: 'cronograma', label: 'Cronograma (Gantt)' }, { key: 'tabela', label: 'Tabela' }, { key: 'dependencias', label: 'Dependências' }, { key: 'raci', label: 'Matriz RACI' }, { key: 'aprovacoes', label: 'Aprovações' }]} />
       {view === 'tabela' && <PlanTable d={d} edit={edit.mutate} busy={edit.isPending} />}
       {view === 'cronograma' && <ProjectGantt phases={d.phases} rows={d.rows} dates={d.officialDates} editable={d.canPlan} onMove={(rid, startOn, dueOn) => { const r = d.rows.find((x) => x.id === rid)!; edit.mutate({ ids: [rid], patch: { startOn, dueOn }, rowVersions: { [rid]: r.rowVersion } }); }} />}
       {view === 'dependencias' && <Deps d={d} onPlan={set} />}
+      {view === 'raci' && <RaciMatrix projectId={d.project.id} phases={d.phases} rows={d.rows} editable={d.canPlan} edit={(b) => edit.mutate(b)} />}
+      {view === 'aprovacoes' && <BidApprovals projectId={d.project.id} canRequest={d.canPlan} />}
     </div>
   );
 }

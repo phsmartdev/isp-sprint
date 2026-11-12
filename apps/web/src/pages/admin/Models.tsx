@@ -12,6 +12,7 @@ import { AdminTaskScripts } from './TaskScripts';
 import { AdminLetterheads } from './Letterheads';
 import { AdminOffices } from '../../features/offices/AdminOffices';
 import { BidModelEditor } from '../../features/bids/BidModelEditor';
+import { BidGovernanceAdmin } from '../../features/bids/Governance';
 import { StructuresAdmin } from '../../features/accounts/Structures';
 
 const TABS = [
@@ -39,7 +40,7 @@ export function AdminModels() {
         {tab === 'contratos' && <div className="space-y-6"><AdminContractTemplates /><TemplatesManager /></div>}
         {tab === 'propostas' && <AdminProposalTemplates />}
         {tab === 'oficios' && <AdminOffices />}
-        {tab === 'licitacao' && <BidModelEditor />}
+        {tab === 'licitacao' && <div className="space-y-6"><BidGovernanceAdmin /><BidModelEditor /></div>}
         {tab === 'timbrado' && <AdminLetterheads />}
         {tab === 'emails' && <AdminEmail />}
         {tab === 'instrucao' && <AdminInstructions />}
