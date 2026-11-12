@@ -26,9 +26,9 @@ describe('planejamento do projeto de licitação', () => {
     // datas do CRM entram, sem validação; prazos da proposta já calculados para trás (margem 1 dia)
     expect(pl.officialDates.proposta).toMatchObject({ date: proposta, validated: false, source: 'CRM' });
     const rows: Row[] = pl.rows;
-    const prop = rows.find((r) => r.title === 'Proposta comercial')!;
+    const prop = rows.find((r) => r.title === 'Proposta e anexos')!;
     expect(prop.spec!.anchor).toBe('proposta');
-    expect(prop.dueOn).toBe(shift(30 - 3 - 1));
+    expect(prop.dueOn).toBe(shift(30 - 1 - 1));
     expect(pl.issues.some((i: { message: string }) => i.message.includes('Valide a data "Prazo de envio da proposta"'))).toBe(true);
 
     // quem não coordena nem é dono da oportunidade não planeja
@@ -41,9 +41,9 @@ describe('planejamento do projeto de licitação', () => {
     expect(pl.officialDates.proposta).toMatchObject({ validated: true, source: 'Edital, item 6.1' });
     expect(pl.rows.find((r: Row) => r.id === prop.id).dueOn).toBe(prop.dueOn); // ainda não aplicado
     const rc = pl.recalc.find((r: { id: string }) => r.id === prop.id);
-    expect(rc.to.dueOn).toBe(shift(40 - 3 - 2));
+    expect(rc.to.dueOn).toBe(shift(40 - 1 - 2));
     pl = ok(await lucas.post(`/projects/${pid}/licitacao/recalcular`, { ids: [prop.id] })).json();
-    expect(pl.rows.find((r: Row) => r.id === prop.id).dueOn).toBe(shift(35));
+    expect(pl.rows.find((r: Row) => r.id === prop.id).dueOn).toBe(shift(37));
 
     // entregável obrigatório sem responsável da área / critério de aceite bloqueia
     const tec = pl.rows.find((r: Row) => r.title === 'Análise técnica') as Row;
@@ -63,9 +63,9 @@ describe('planejamento do projeto de licitação', () => {
     const nova = ok(await lucas.post(`/projects/${pid}/licitacao/tarefas`, { milestoneId: etapa1, title: 'Reunião de alinhamento exclusiva deste projeto', area: 'engenharia' }), 201).json();
     expect((await lucas.del(`/projects/${pid}/licitacao/tarefas/${tec.id}`)).statusCode).toBe(422);
     // dependências: começa antes da predecessora = alerta; ciclo recusado
-    const adm = (pl.rows as Row[]).find((r) => r.title === 'Análise administrativa')!;
+    const adm = (pl.rows as Row[]).find((r) => r.title === 'Análise administrativa e comercial')!;
     pl = ok(await lucas.put(`/projects/${pid}/licitacao/tarefas/${adm.id}/dependencias`, { dependsOn: [prop.id] })).json();
-    expect(pl.issues.some((i: { taskId: string; message: string }) => i.taskId === adm.id && i.message.includes('antes de "Proposta comercial" terminar'))).toBe(true);
+    expect(pl.issues.some((i: { taskId: string; message: string }) => i.taskId === adm.id && i.message.includes('antes de "Proposta e anexos" terminar'))).toBe(true);
     expect((await lucas.put(`/projects/${pid}/licitacao/tarefas/${prop.id}/dependencias`, { dependsOn: [adm.id] })).statusCode).toBe(422);
     expect((await lucas.del(`/projects/${pid}/licitacao/tarefas/${prop.id}`)).statusCode).toBe(422);
     ok(await lucas.del(`/projects/${pid}/licitacao/tarefas/${nova.id}`));
