@@ -49,6 +49,7 @@ import { arpOpsRoutes } from './routes/arpOps';
 import { arpOpportunityRoutes } from './routes/arpOpportunity';
 import { csRoutes } from './routes/cs';
 import { projectRoutes } from './routes/projects';
+import { bidProjectRoutes } from './routes/bidProjects';
 import { taskRoutes } from './routes/tasks';
 import { performanceRoutes } from './routes/performance';
 import { indicatorRoutes } from './routes/indicators';
@@ -253,6 +254,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...arpOpportunityRoutes,
     ...csRoutes,
     ...projectRoutes,
+    ...bidProjectRoutes,
     ...taskRoutes,
     ...performanceRoutes,
     ...indicatorRoutes,

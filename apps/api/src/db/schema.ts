@@ -787,6 +787,8 @@ export const activities = pgTable(
     projectId: uuid('project_id').references((): AnyPgColumn => projects.id),
     projectStageId: uuid('project_stage_id'),
     milestoneId: uuid('milestone_id'),
+    /** tarefa de projeto estruturado (licitação): etapa, área, obrigatória, entregável, critério de aceite, origem no modelo */
+    spec: jsonb('spec').$type<import('@isp/domain').ProjectTaskSpec>(),
     startOn: date('start_on', { mode: 'string' }),
     position: integer('position').notNull().default(0),
     /** Tarefas (Etapa 4): situação de trabalho; concluída ⇔ completed_at preenchido */
@@ -2998,6 +3000,13 @@ export const projects = pgTable(
     category: text('category'),
     tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
     templateKey: text('template_key'),
+    /** modelo versionado de origem (cópia independente: publicar nova versão não muda o projeto) */
+    templateId: uuid('template_id'),
+    templateVersion: integer('template_version'),
+    /** 'auto' = criado sozinho pela oportunidade de licitação (no máximo um por oportunidade); 'manual' = criado por alguém */
+    origin: text('origin').notNull().default('manual'),
+    /** decisão pendente (ex.: 'modalidade_alterada': a oportunidade deixou de ser licitação — continuar ou arquivar) */
+    attention: text('attention'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -3006,7 +3015,8 @@ export const projects = pgTable(
   },
   (t) => ({
     statusCk: check('projects_status_ck', inList('status', ['planejamento', 'em_andamento', 'pausado', 'concluido', 'cancelado'])),
-    kindCk: check('projects_kind_ck', inList('kind', ['implantacao', 'comercial', 'sucesso_cliente', 'interno', 'contrato_publico', 'outro'])),
+    kindCk: check('projects_kind_ck', inList('kind', ['implantacao', 'comercial', 'sucesso_cliente', 'interno', 'contrato_publico', 'licitacao', 'outro'])),
+    autoUq: uniqueIndex('projects_auto_opp_uq').on(t.opportunityId).where(sql`origin = 'auto' and deleted_at is null`),
     priorityCk: check('projects_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),
     tenantIdx: index('projects_tenant_idx').on(t.tenantId, t.status),
     linkIdx: index('projects_links_idx').on(t.tenantId, t.contactId, t.opportunityId, t.contractId, t.arpId),
@@ -3075,10 +3085,41 @@ export const projectTemplates = pgTable(
     kind: text('kind').notNull().default('interno'),
     def: jsonb('def').$type<import('@isp/domain').ProjectTemplateDef>().notNull(),
     active: boolean('active').notNull().default(true),
+    /** modelo estruturado (ex.: 'licitacao'): o conteúdo fica nas versões (project_template_versions) */
+    key: text('key'),
+    /** versão publicada em uso para novos projetos */
+    publishedVersion: integer('published_version'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },
   (t) => ({ idx: index('project_templates_idx').on(t.tenantId, t.active) }),
+);
+
+/** Versões do modelo estruturado: rascunho → em aprovação → publicado → arquivado. Publicada não se edita. */
+export const projectTemplateVersions = pgTable(
+  'project_template_versions',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    templateId: uuid('template_id').notNull().references(() => projectTemplates.id),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('rascunho'),
+    def: jsonb('def').$type<import('@isp/domain').BidModelDef>().notNull(),
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    submittedAt: ts('submitted_at'),
+    submittedBy: uuid('submitted_by').references(() => users.id),
+    publishedAt: ts('published_at'),
+    publishedBy: uuid('published_by').references(() => users.id),
+    reviewNote: text('review_note'),
+    rowVersion: rowVersion(),
+  },
+  (t) => ({
+    uq: uniqueIndex('project_template_versions_uq').on(t.templateId, t.version),
+    statusCk: check('project_template_versions_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'publicado', 'arquivado'])),
+  }),
 );
 
 /** Histórico do projeto (append-only). */

@@ -1,3 +1,5 @@
+import { syncBidProject } from '../services/bidProjects';
+import { isBid } from './opportunityItems';
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
 import { GenBody, branchDefaultTemplate, generateProposal, hasProposal, isProposalStage } from '../services/proposalGen';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
@@ -321,6 +323,7 @@ export const opportunityRoutes = [
           .where(and(eq(s.opportunities.id, params.id), eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.rowVersion, body.rowVersion)))
           .returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(cur.rowVersion);
+        if (changed.saleKind || changed.pipelineId) await syncBidProject(tx, auth, params.id, await isBid(tx, auth.tenantId, { pipelineId: pipelineChange?.pipelineId ?? cur.pipelineId, saleKind: body.saleKind === undefined ? cur.saleKind : body.saleKind }));
         if (changed.ownerId) await tx.update(s.contacts).set({ ownerId: body.ownerId! }).where(and(eq(s.contacts.id, cur.contactId), eq(s.contacts.tenantId, auth.tenantId)));
         if (Object.keys(changed).length) {
           await tx.insert(s.opportunityEvents).values({
