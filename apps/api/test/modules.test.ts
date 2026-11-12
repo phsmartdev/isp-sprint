@@ -137,6 +137,27 @@ describe('Etapa 1: módulos de negócio', () => {
     ok(await carlos.get(`/opportunities/${opp}/economics`));
   });
 
+  it('projeto de licitação é opção do CRM: desligado, as rotas do projeto param e a licitação nova não cria projeto; religado, volta', async () => {
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const pipe = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
+    const mk = async () => ok(await carlos.post('/opportunities', { newContact: { name: `Órgão Chave ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, segment: 'governamental' }, title: 'PE 1/2026', pipelineId: pipe.id, saleKind: 'licitacao', branchId: lk.branches[0].id, custom: { tipo_disputa: 'Aberta', lance_inicial: 1000, lance_minimo: 800 } }), 201).json();
+    ok(await setModule('crm', { enabled: true, disabledFeatures: ['crm.projeto_licitacao'] }));
+    try {
+      const o = await mk();
+      for (const url of [`/opportunities/${o.id}/licitacao/projetos`, '/modelos-projeto/licitacao', '/licitacoes/governanca']) {
+        const r = await carlos.get(url);
+        expect(r.statusCode, url).toBe(403);
+        expect(r.json().detail, url).toMatch(/Projeto de licitação.*desligada/);
+      }
+      expect((await ctx.db.execute(sql`select count(*)::int n from projects where opportunity_id = ${o.id}`)).rows[0]).toMatchObject({ n: 0 });
+      ok(await carlos.get(`/opportunities/${o.id}`)); // a oportunidade e o pregão seguem
+    } finally {
+      ok(await setModule('crm', { enabled: true }));
+    }
+    const o2 = await mk();
+    expect(ok(await carlos.get(`/opportunities/${o2.id}/licitacao/projetos`)).json().items).toHaveLength(1);
+  });
+
   it('ações sensíveis por perfil: negar exportar ao vendedor bloqueia a planilha e fica na auditoria', async () => {
     ok(await carlos.put('/admin/actions', { profile: 'operacao', action: 'exportar', allowed: false }));
     expect(ok(await carlos.get('/admin/actions')).json().matrix.operacao.exportar).toBe(false);

@@ -5,7 +5,7 @@
  * tarefa, tarefa = subtarefa.
  */
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { BID_DEFAULT_MODEL, DEFAULT_PROJECT_STAGES, OFFICIAL_DATES, anchoredDates, instantiateBidModel, type BidModelDef, type OfficialDates, type ProjectTaskSpec } from '@isp/domain';
+import { BID_DEFAULT_MODEL, DEFAULT_PROJECT_STAGES, featureOn, OFFICIAL_DATES, anchoredDates, instantiateBidModel, type BidModelDef, type OfficialDates, type ProjectTaskSpec } from '@isp/domain';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -116,6 +116,8 @@ export async function syncBidProject(tx: DbOrTx, auth: AuthContext, oppId: strin
   const [auto] = await tx.select({ id: s.projects.id, status: s.projects.status, attention: s.projects.attention }).from(s.projects)
     .where(and(eq(s.projects.tenantId, auth.tenantId), eq(s.projects.opportunityId, oppId), eq(s.projects.origin, 'auto'), isNull(s.projects.deletedAt))).limit(1);
   if (isBidNow) {
+    // funcionalidade desligada na empresa: nada é criado (ao religar, o projeto nasce na próxima alteração ou à mão)
+    if (!auto && !featureOn('crm.projeto_licitacao', auth.modules, auth.disabledFeatures)) return null;
     if (!auto) return createBidProject(tx, auth, oppId, { origin: 'auto' });
     if (auto.attention === 'modalidade_alterada') {
       await tx.update(s.projects).set({ attention: null, updatedAt: new Date() }).where(eq(s.projects.id, auto.id));
