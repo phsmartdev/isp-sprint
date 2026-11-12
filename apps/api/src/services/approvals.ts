@@ -38,7 +38,8 @@ export async function approvalSettingsOf(db: DbOrTx, tenantId: string) {
   };
 }
 
-export const approvalLevelOf = (auth: Pick<AuthContext, 'profiles' | 'sectors'>): ApprovalLevel => userApprovalLevel(auth.profiles, auth.sectors);
+/** Alçada de quem decide: só quem tem cargo de liderança/gestor nos setores aprova (observador e operador não). */
+export const approvalLevelOf = (auth: Pick<AuthContext, 'profiles' | 'sectors'> & { sectorRole?: string }): ApprovalLevel => (auth.sectorRole && auth.sectorRole !== 'lideranca' ? 'vendedor' : userApprovalLevel(auth.profiles, auth.sectors));
 
 // ------------------------------------------------------------------ classificação e identidade
 

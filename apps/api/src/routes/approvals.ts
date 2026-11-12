@@ -60,14 +60,16 @@ const postSystem = (db: DbOrTx, tenantId: string, oppId: string, body: string, r
 
 /** Usuários ativos com alçada para decidir (menos quem pediu). */
 async function approversFor(db: DbOrTx, tenantId: string, required: ApprovalLevel, exceptId: string) {
-  const rows = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone, sectors: sql<string[]>`case when ${s.users.sectorViewer} then '{}'::text[] else ${s.users.sectors} end`, role: s.roles.key }).from(s.users).leftJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).leftJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true)));
+  const rows = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone, sectors: sql<string[]>`case when ${s.users.sectorViewer} then '{}'::text[] else ${s.users.sectors} end`, sectorRole: s.users.sectorRole, role: s.roles.key }).from(s.users).leftJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).leftJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true)));
   const byUser = new Map<string, { id: string; name: string; email: string; phone: string | null; sectors: string[]; profiles: string[] }>();
   for (const r of rows) {
     const u = byUser.get(r.id) ?? { id: r.id, name: r.name, email: r.email, phone: r.phone, sectors: r.sectors, profiles: [] };
     if (r.role) u.profiles.push(r.role);
     byUser.set(r.id, u);
   }
-  return [...byUser.values()].filter((u) => u.id !== exceptId && canDecide(userApprovalLevel(u.profiles, u.sectors), required));
+  // lista de aprovadores pelo cargo: só liderança/gestor
+  const leaders = new Set(rows.filter((r) => r.sectorRole === 'lideranca').map((r) => r.id));
+  return [...byUser.values()].filter((u) => u.id !== exceptId && leaders.has(u.id) && canDecide(userApprovalLevel(u.profiles, u.sectors), required));
 }
 
 /** Avisa por e-mail e WhatsApp com o resumo seguro; o resultado vai para o chat da negociação. */

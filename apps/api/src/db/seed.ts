@@ -108,7 +108,7 @@ export async function seedTenant(
   for (const u of opts.users) {
     const [user] = await db
       .insert(s.users)
-      .values({ tenantId: tenant.id, name: u.name, email: u.email, passwordHash, jobTitle: u.jobTitle, goalSales: u.goals?.[0] ?? 8, goalProposals: u.goals?.[1] ?? 10, goalLeads: u.goals?.[2] ?? 40 })
+      .values({ tenantId: tenant.id, name: u.name, email: u.email, passwordHash, jobTitle: u.jobTitle, goalSales: u.goals?.[0] ?? 8, goalProposals: u.goals?.[1] ?? 10, goalLeads: u.goals?.[2] ?? 40, sectorRole: u.profiles.some((k) => ['supervisor', 'gerencia', 'diretoria', 'administrador'].includes(k)) ? 'lideranca' : 'operador' })
       .returning();
     users.push({ id: user!.id, profiles: u.profiles });
     await db.insert(s.userRoles).values(u.profiles.map((k) => ({ userId: user!.id, roleId: roleIds[k]! })));

@@ -31,6 +31,8 @@ export type AuthContext = {
   viewSectors: Sector[];
   /** Só visualiza os setores (não atua na operação). */
   sectorViewer: boolean;
+  /** cargo nos setores: só liderança aprova */
+  sectorRole: 'observador' | 'operador' | 'lideranca';
   /** Etapa 1: módulos de negócio ligados para a pessoa (e por quê), funcionalidades desligadas na empresa e ações sensíveis. */
   modules: Record<BusinessModule, boolean>;
   moduleReasons: Record<BusinessModule, ModuleDecision['reason']>;
@@ -74,6 +76,7 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
       jobTitle: s.users.jobTitle,
       sectors: s.users.sectors,
       sectorViewer: s.users.sectorViewer,
+      sectorRole: s.users.sectorRole,
       active: s.users.active,
       ipBypass: s.users.ipBypass,
       timezone: s.tenants.timezone,
@@ -93,12 +96,12 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
   return buildAuth(app.db, row);
 }
 
-type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; sectorViewer?: boolean | null; timezone: string; tenantName: string; ipBypass?: boolean };
+type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; sectorViewer?: boolean | null; sectorRole?: string | null; timezone: string; tenantName: string; ipBypass?: boolean };
 
 /** Contexto de acesso de qualquer usuário ativo (ex.: conferir se a pessoa mencionada vê a negociação). */
 export async function authForUser(db: DB, tenantId: string, userId: string): Promise<AuthContext | null> {
   const [row] = await db
-    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, sectorViewer: s.users.sectorViewer, active: s.users.active, ipBypass: s.users.ipBypass, timezone: s.tenants.timezone, tenantName: s.tenants.name })
+    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, sectorViewer: s.users.sectorViewer, sectorRole: s.users.sectorRole, active: s.users.active, ipBypass: s.users.ipBypass, timezone: s.tenants.timezone, tenantName: s.tenants.name })
     .from(s.users)
     .innerJoin(s.tenants, eq(s.tenants.id, s.users.tenantId))
     .where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId)))
@@ -182,5 +185,6 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     sectors: (row.sectorViewer ? [] : row.sectors ?? []) as Sector[],
     viewSectors: (row.sectors ?? []) as Sector[],
     sectorViewer: !!row.sectorViewer,
+    sectorRole: (row.sectorRole === 'observador' || row.sectorRole === 'lideranca' ? row.sectorRole : 'operador') as 'observador' | 'operador' | 'lideranca',
   };
 }
