@@ -217,7 +217,7 @@ export function IssueOfficeModal({ contractId, open, onClose }: { contractId: st
   const ct = d?.contract;
   useEffect(() => { if (ct && !adjItems.length && ct.items.length) setAdjItems(ct.items.map((i) => ({ ...i, pct: 0 }))); if (ct && !anniversary && ct.adjust.anniversary) setAnniversary(ct.adjust.anniversary); if (ct && !ren) setRen(ct.renew.suggestion); }, [ct, adjItems.length, anniversary, ren]);
   const idx = useQuery({ queryKey: ['contrato', contractId, 'oficios', 'indices', anniversary], enabled: open && adjOn && /^\d{4}-\d{2}-\d{2}$/.test(anniversary), staleTime: 3_600_000, queryFn: () => api<{ indices: IndexRef[] }>(`/contracts/${contractId}/oficios/indices${qs({ anniversary })}`) });
-  const mine = idx.data?.indices.find((r) => (ct?.index ?? '').toUpperCase().replace(/\s+/g, '').includes(r.index.replace('-', '')) || (ct?.index ?? '').toUpperCase().includes(r.index));
+  const mine = idx.data?.indices[0]; // só o índice indicado no contrato
   // com o índice do contrato divulgado, os itens começam com ele (cada item continua ajustável)
   const [seeded, setSeeded] = useState('');
   useEffect(() => { if (mine?.pct != null && seeded !== anniversary && adjItems.length) { setAdjItems((it) => it.map((i) => ({ ...i, pct: mine.pct! }))); setSeeded(anniversary); } }, [mine, seeded, anniversary, adjItems.length]);
@@ -266,19 +266,19 @@ export function IssueOfficeModal({ contractId, open, onClose }: { contractId: st
                   </>
                 )}
                 <div>
-                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Índices de referência (Banco Central)</h3>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Índice do contrato (Banco Central)</h3>
                   {idx.isLoading ? <LoadingRows rows={2} /> : idx.isError ? <ErrorState error={idx.error} onRetry={() => idx.refetch()} /> : idx.data ? (
-                    <table className="w-full text-sm" aria-label="Índices de referência">
+                    <table className="w-full text-sm" aria-label="Índice do contrato">
                       <tbody>{idx.data.indices.map((r) => (
                         <tr key={r.index} className="border-b border-line">
-                          <td className="py-1.5 font-medium text-ink">{r.label}{r === mine && <span className="ml-1 text-xs text-primary">· do contrato</span>}</td><td className="text-muted">{mY(r.from)} a {mY(r.to)}</td>
+                          <td className="py-1.5 font-medium text-ink">{r.label}</td><td className="text-muted">{mY(r.from)} a {mY(r.to)}{r.pct === null && r.note ? <span className="block text-xs">{r.note}</span> : null}</td>
                           <td className="text-right font-semibold tabular-nums">{r.pct === null ? <span className="text-xs font-normal text-muted" title={r.note ?? ''}>não divulgado</span> : pctFmt(r.pct)}</td>
                           <td className="w-40 text-right">{r.pct !== null && adjItems.length > 0 && <button type="button" className="text-xs text-primary hover:underline" onClick={() => setAdjItems((it) => it.map((x) => ({ ...x, pct: r.pct! })))}>Usar em todos os itens</button>}</td>
                         </tr>
                       ))}</tbody>
                     </table>
                   ) : null}
-                  <p className="mt-1 text-xs text-muted">Com {'{{tabela.indices}}'} no modelo, esta tabela vai para o ofício; {'{{tabela.reajuste}}'} leva a tabela por item.</p>
+                  <p className="mt-1 text-xs text-muted">Com {'{{tabela.indices}}'} no modelo, o índice vai em tabela para o ofício; {'{{tabela.reajuste}}'} leva a tabela por item.</p>
                 </div>
               </div>
             )}

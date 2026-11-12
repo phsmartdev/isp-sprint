@@ -46,7 +46,7 @@ export const OFFICE_VARS: { key: string; label: string; sample: string }[] = [
   { key: 'renovacao.termino', label: 'Renovação: término da nova vigência', sample: '23 de novembro de 2027' },
   { key: 'renovacao.prazo', label: 'Renovação: prazo', sample: '12 (doze) meses' },
   { key: 'tabela.reajuste', label: 'Tabela: reajuste por item (atual × reajustado)', sample: '' },
-  { key: 'tabela.indices', label: 'Tabela: índices de referência (Banco Central)', sample: '' },
+  { key: 'tabela.indices', label: 'Tabela: índice do contrato (Banco Central)', sample: '' },
   { key: 'negociacao.codigo', label: 'Código da negociação', sample: 'OP-1024' },
   { key: 'negociacao.titulo', label: 'Título da negociação', sample: 'Reajuste DESO' },
 ];
