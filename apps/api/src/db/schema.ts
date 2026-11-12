@@ -3007,6 +3007,10 @@ export const projects = pgTable(
     origin: text('origin').notNull().default('manual'),
     /** decisão pendente (ex.: 'modalidade_alterada': a oportunidade deixou de ser licitação — continuar ou arquivar) */
     attention: text('attention'),
+    /** licitação: marcos oficiais do edital (sessão e envio da proposta ficam nos campos da oportunidade; aqui a validação) */
+    officialDates: jsonb('official_dates').$type<import('@isp/domain').OfficialDates>().notNull().default({}),
+    /** margem de segurança (dias) antes dos marcos oficiais */
+    marginDays: integer('margin_days').notNull().default(1),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

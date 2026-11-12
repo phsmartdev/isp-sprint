@@ -65,6 +65,7 @@ const CustomerDetailPage = lazy(() => import('./pages/CustomerDetail').then((m) 
 const ActivitiesPage = lazy(() => import('./pages/Activities').then((m) => ({ default: m.ActivitiesPage })));
 const ProjectsPage = lazy(() => import('./pages/projects/Projects').then((m) => ({ default: m.ProjectsPage })));
 const TasksPage = lazy(() => import('./pages/tasks/Tasks').then((m) => ({ default: m.TasksPage })));
+const BidPlanningPage = lazy(() => import('./pages/bids/BidPlanning').then((m) => ({ default: m.BidPlanningPage })));
 const ProjectDetailPage = lazy(() => import('./pages/projects/ProjectDetail').then((m) => ({ default: m.ProjectDetailPage })));
 const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
 const IntelligencePage = lazy(() => import('./pages/Intelligence').then((m) => ({ default: m.IntelligencePage })));
@@ -242,6 +243,7 @@ export function App() {
         <Route path="abm/contas/:id" element={<Gate module="clientes" feature="marketing.abm"><Abm360Page /></Gate>} />
         <Route path="produto" element={<Gate module="inicio" feature="produto.catalogo"><ProductPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
+        <Route path="licitacoes/projetos/:id/planejamento" element={<Gate module="oportunidades"><BidPlanningPage /></Gate>} />
         <Route path="reports" element={<Gate module="relatorios" feature="relatorios.comercial"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />

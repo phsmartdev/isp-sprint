@@ -5,7 +5,7 @@
  * tarefa, tarefa = subtarefa.
  */
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { BID_DEFAULT_MODEL, DEFAULT_PROJECT_STAGES, instantiateBidModel, type BidModelDef, type ProjectTaskSpec } from '@isp/domain';
+import { BID_DEFAULT_MODEL, DEFAULT_PROJECT_STAGES, OFFICIAL_DATES, anchoredDates, instantiateBidModel, type BidModelDef, type OfficialDates, type ProjectTaskSpec } from '@isp/domain';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
@@ -46,6 +46,10 @@ export async function createBidProject(tx: DbOrTx, auth: AuthContext, oppId: str
   const custom = (o.custom ?? {}) as Record<string, unknown>;
   const startOn = todayLocal(auth);
   const inst = instantiateBidModel(model.def, startOn);
+  // datas que o CRM já tem (sessão, envio da proposta) entram como ponto de partida, ainda não validadas com o edital
+  const official: OfficialDates = {};
+  for (const d of OFFICIAL_DATES) if ('crmField' in d) { const v = str(custom[d.crmField]); if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) official[d.key] = { date: v, validated: false, source: 'CRM' }; }
+  for (const t of inst.tasks) { const a = anchoredDates(t, official, 1); if (a && a.dueOn >= startOn) { t.dueOn = a.dueOn; t.startOn = a.startOn < startOn ? startOn : a.startOn; } }
   const coordinatorId = opts.coordinatorId ?? o.ownerId;
   const session = str(custom.data_sessao);
   const [p] = await tx.insert(s.projects).values({
@@ -53,7 +57,7 @@ export async function createBidProject(tx: DbOrTx, auth: AuthContext, oppId: str
     description: str(custom.objeto), kind: 'licitacao', priority: 'alta', ownerId: coordinatorId, startOn,
     dueOn: session && /^\d{4}-\d{2}-\d{2}$/.test(session) && session >= startOn ? session : inst.dueOn,
     contactId: o.contactId, opportunityId: o.id, objective: 'Conduzir a preparação, a participação e o acompanhamento da licitação.',
-    templateKey: `custom:${model.template.id}`, templateId: model.template.id, templateVersion: model.version, origin: opts.origin, createdBy: auth.userId,
+    templateKey: `custom:${model.template.id}`, templateId: model.template.id, templateVersion: model.version, origin: opts.origin, officialDates: official, createdBy: auth.userId,
   }).onConflictDoNothing().returning({ id: s.projects.id });
   if (!p) return null; // já existe o projeto automático desta oportunidade
   const pid = p.id;
@@ -69,7 +73,7 @@ export async function createBidProject(tx: DbOrTx, auth: AuthContext, oppId: str
   const macros = await tx.insert(s.activities).values(inst.tasks.map((t) => ({
     ...base, title: t.name, notes: t.instructions, priority: t.required ? 'alta' : 'media', startOn: t.startOn, dueAt: dueAtOf(auth, t.dueOn) as unknown as Date,
     milestoneId: msOf(t.phaseKey), position: t.position,
-    spec: { phaseKey: t.phaseKey, sourceKey: t.key, area: t.area, required: t.required, deliverable: t.deliverable, acceptance: t.acceptance, instructions: t.instructions } satisfies ProjectTaskSpec,
+    spec: { phaseKey: t.phaseKey, sourceKey: t.key, area: t.area, required: t.required, deliverable: t.deliverable, acceptance: t.acceptance, instructions: t.instructions, anchor: t.anchor, anchorOffsetDays: t.anchorOffsetDays, durationDays: t.durationDays } satisfies ProjectTaskSpec,
   }))).returning({ id: s.activities.id, position: s.activities.position });
   const subs = inst.tasks.flatMap((t) => t.subtasks.map((st, k) => ({
     ...base, title: st.name, priority: 'media', startOn: t.startOn, dueAt: dueAtOf(auth, t.dueOn) as unknown as Date, milestoneId: msOf(t.phaseKey), position: k,
