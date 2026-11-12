@@ -50,103 +50,70 @@ export type OfficialDateKey = (typeof OFFICIAL_DATES)[number]['key'];
 export const OFFICIAL_KEYS = OFFICIAL_DATES.map((d) => d.key) as OfficialDateKey[];
 export const OFFICIAL_LABEL = Object.fromEntries(OFFICIAL_DATES.map((d) => [d.key, d.label])) as Record<OfficialDateKey, string>;
 
-/** Rito padrão de licitações (11 etapas). As etapas podem correr em paralelo quando a natureza permite. */
+/**
+ * Rito padrão de licitações (9 etapas), na ordem do processo comercial: cadastro, qualificação e viabilidade,
+ * análise do edital e TR pelos setores, reunião do time, lances, documentação, acompanhamento, recurso e resultado.
+ */
 export const BID_DEFAULT_MODEL: BidModelDef = {
   phases: [
-    { key: 'e1', name: 'Identificação e abertura', deliverable: 'Ficha da licitação e documentação inicial organizada', durationDays: 2, macros: [
-      M('e1', 1, 'Cadastro da oportunidade', 'comercial', ['Identificar órgão contratante', 'Registrar modalidade, processo e objeto', 'Registrar valores e datas', 'Identificar portal de disputa']),
-      M('e1', 2, 'Organização documental', 'comercial', ['Anexar edital completo', 'Anexar termo de referência', 'Anexar minuta contratual', 'Anexar planilhas e documentos complementares', 'Registrar versões']),
-      M('e1', 3, 'Qualificação preliminar', 'comercial', ['Avaliar aderência ao portfólio', 'Identificar restrições evidentes', 'Avaliar relevância estratégica', 'Registrar riscos iniciais'], { offsetDays: 1 }),
+    { key: 'e1', name: 'Cadastrar oportunidade', deliverable: 'Oportunidade cadastrada com edital, TR e datas', durationDays: 1, macros: [
+      M('e1', 1, 'Cadastro da oportunidade', 'comercial', ['Identificar órgão contratante', 'Registrar modalidade, processo e objeto', 'Registrar valor estimado e datas do edital', 'Identificar portal de disputa'], { durationDays: 1 }),
+      M('e1', 2, 'Organização documental', 'comercial', ['Anexar edital completo', 'Anexar termo de referência (TR)', 'Anexar minuta contratual', 'Anexar planilhas e documentos complementares'], { durationDays: 1 }),
     ] },
-    { key: 'e2', name: 'Planejamento e mobilização', deliverable: 'Plano aprovado e notificações enviadas', durationDays: 3, macros: [
-      M('e2', 1, 'Identificação das áreas envolvidas', 'comercial', ['Selecionar departamentos participantes', 'Identificar responsáveis e substitutos', 'Definir atribuições RACI']),
-      M('e2', 2, 'Definição dos entregáveis', 'comercial', ['Estabelecer entregas por área', 'Descrever critérios de aceite', 'Definir documentos necessários', 'Registrar dependências']),
-      M('e2', 3, 'Definição do cronograma', 'comercial', ['Definir datas de início', 'Definir datas de entrega', 'Calcular prazos relativos à sessão', 'Reservar margens de segurança', 'Identificar caminho crítico'], { offsetDays: 1 }),
-      M('e2', 4, 'Aprovação do planejamento', 'diretoria', ['Submeter plano ao aprovador RACI', 'Registrar parecer', 'Aplicar ajustes solicitados', 'Obter liberação'], { offsetDays: 2, durationDays: 1 }),
-      M('e2', 5, 'Mobilização das áreas', 'comercial', ['Gerar e-mails personalizados', 'Anexar edital e documentos aplicáveis', 'Enviar solicitações', 'Solicitar confirmação de ciência'], { offsetDays: 3, durationDays: 1, instructions: 'Nenhuma notificação formal de execução antes da aprovação do plano (entregáveis, responsáveis e prazos).' }),
+    { key: 'e2', name: 'Qualificar e avaliar a viabilidade', objective: 'Decidir se é interessante participar; em caso positivo, avaliar a viabilidade', deliverable: 'Decisão de participar registrada e viabilidade avaliada', durationDays: 5, macros: [
+      M('e2', 1, 'Qualificação: é interessante participarmos?', 'comercial', ['Avaliar aderência ao portfólio', 'Identificar restrições evidentes', 'Avaliar relevância estratégica', 'Registrar riscos iniciais'], { durationDays: 1 }),
+      M('e2', 2, 'Decisão de participar (Go/No-Go)', 'diretoria', ['Registrar Go, Go condicionado ou No-Go', 'Comunicar a decisão ao time'], { offsetDays: 1, durationDays: 1, instructions: 'Em caso negativo (No-Go), o processo se encerra aqui e o motivo fica registrado.' }),
+      M('e2', 3, 'Viabilidade técnica', 'engenharia', ['Cobertura e infraestrutura', 'Capacidade de rede', 'Dimensionamento', 'Recursos necessários'], { offsetDays: 2, durationDays: 3 }),
+      M('e2', 4, 'Viabilidade operacional', 'operacoes', ['Equipes', 'Logística', 'Implantação', 'Sustentação e suporte'], { offsetDays: 2, durationDays: 3 }),
+      M('e2', 5, 'Viabilidade econômica', 'financeiro', ['Cotações e fornecedores', 'CAPEX e OPEX', 'Tributos', 'Margens e retorno esperado'], { offsetDays: 2, durationDays: 3 }),
     ] },
-    { key: 'e3', name: 'Análise do edital', deliverable: 'Matriz de conformidade e pareceres preliminares', durationDays: 5, macros: [
-      M('e3', 1, 'Análise administrativa', 'comercial', ['Condições de participação', 'Habilitação', 'Critérios de julgamento', 'Prazos e procedimentos'], { durationDays: 3 }),
-      M('e3', 2, 'Análise técnica', 'engenharia', ['Especificações', 'Quantitativos', 'Cobertura', 'SLAs', 'Certificações', 'Requisitos de implantação'], { durationDays: 4 }),
-      M('e3', 3, 'Análise jurídica', 'juridico', ['Obrigações contratuais', 'Garantias', 'Penalidades', 'Riscos', 'Restrições de participação'], { durationDays: 4 }),
-      M('e3', 4, 'Análise financeira e fiscal', 'financeiro', ['Condições de pagamento', 'Reajuste', 'Garantias financeiras', 'Tributos', 'Exigências contábeis'], { durationDays: 4 }),
-      M('e3', 5, 'Matriz de requisitos', 'comercial', ['Registrar requisito', 'Indicar cláusula, página e anexo', 'Atribuir responsável', 'Definir evidência', 'Classificar conformidade'], { offsetDays: 1, durationDays: 4 }),
-      M('e3', 6, 'Esclarecimentos e impugnações', 'juridico', ['Consolidar dúvidas', 'Avaliar necessidade de manifestação', 'Controlar prazos', 'Preparar e validar manifestações'], { offsetDays: 2, durationDays: 3, required: false }),
+    { key: 'e3', name: 'Análise do edital e TR pelos setores', objective: 'Cada setor analisa o edital e o TR e aponta a necessidade de esclarecimentos e outros pontos importantes', deliverable: 'Pontos de cada setor registrados e pedidos de esclarecimento definidos', durationDays: 4, macros: [
+      M('e3', 1, 'Envio da oportunidade aos setores', 'comercial', ['Enviar edital e TR aos setores', 'Indicar o que cada setor deve analisar', 'Solicitar confirmação de recebimento'], { durationDays: 1 }),
+      M('e3', 2, 'Análise administrativa e comercial', 'comercial', ['Condições de participação', 'Habilitação exigida', 'Critérios de julgamento', 'Prazos e procedimentos'], { offsetDays: 1, durationDays: 3 }),
+      M('e3', 3, 'Análise técnica', 'engenharia', ['Especificações', 'Quantitativos', 'SLAs', 'Certificações e atestados'], { offsetDays: 1, durationDays: 3 }),
+      M('e3', 4, 'Análise jurídica', 'juridico', ['Obrigações contratuais', 'Garantias e penalidades', 'Restrições de participação'], { offsetDays: 1, durationDays: 3 }),
+      M('e3', 5, 'Análise financeira e fiscal', 'financeiro', ['Condições de pagamento', 'Reajuste', 'Tributos e exigências contábeis'], { offsetDays: 1, durationDays: 3 }),
+      M('e3', 6, 'Pedidos de esclarecimento e impugnação', 'juridico', ['Consolidar dúvidas dos setores', 'Avaliar necessidade de esclarecimento ou impugnação', 'Enviar dentro do prazo do edital'], { offsetDays: 2, durationDays: 2, required: false }),
     ] },
-    { key: 'e4', name: 'Viabilidade e riscos', deliverable: 'Relatório consolidado de viabilidade', durationDays: 5, macros: [
-      M('e4', 1, 'Viabilidade técnica', 'engenharia', ['Cobertura e infraestrutura', 'Capacidade de rede', 'Dimensionamento', 'Recursos necessários'], { durationDays: 4 }),
-      M('e4', 2, 'Viabilidade operacional', 'operacoes', ['Equipes', 'Logística', 'Implantação', 'Sustentação e suporte'], { durationDays: 4 }),
-      M('e4', 3, 'Custos e fornecedores', 'compras', ['Cotações', 'CAPEX', 'OPEX', 'Prazos de fornecimento'], { durationDays: 4 }),
-      M('e4', 4, 'Modelagem econômica', 'financeiro', ['Composição de preços', 'Tributos', 'Margens', 'Fluxo de caixa', 'Retorno esperado'], { offsetDays: 2, durationDays: 3 }),
-      M('e4', 5, 'Matriz de riscos', 'comercial', ['Probabilidade', 'Impacto', 'Mitigação', 'Responsável', 'Risco residual'], { offsetDays: 3, durationDays: 2 }),
+    { key: 'e4', name: 'Reunião com o time comercial', objective: 'Pontuar o que cada um encontrou de importante no edital e no TR (ou só receber as informações e reunir depois um grupo menor)', deliverable: 'Ata com os pontos de cada setor e os encaminhamentos', durationDays: 2, macros: [
+      M('e4', 1, 'Consolidar os pontos dos setores', 'comercial', ['Reunir os apontamentos de cada setor', 'Destacar riscos e exigências críticas'], { durationDays: 1 }),
+      M('e4', 2, 'Reunião com o time comercial (ou recebimento das informações)', 'comercial', ['Apresentar os pontos de cada setor', 'Registrar decisões e responsáveis'], { offsetDays: 1, durationDays: 1 }),
+      M('e4', 3, 'Reunião com grupo menor', 'comercial', ['Definir participantes', 'Aprofundar os pontos críticos', 'Registrar encaminhamentos'], { offsetDays: 1, durationDays: 1, required: false }),
     ] },
-    { key: 'e5', name: 'Decisão Go/No-Go', deliverable: 'Decisão formal registrada', durationDays: 2, macros: [
-      M('e5', 1, 'Consolidar pareceres', 'comercial', [], { durationDays: 1 }),
-      M('e5', 2, 'Avaliar aderência estratégica', 'diretoria', [], { durationDays: 1 }),
-      M('e5', 3, 'Analisar riscos e restrições', 'diretoria', [], { durationDays: 1 }),
-      M('e5', 4, 'Submeter decisão à alçada RACI', 'comercial', [], { offsetDays: 1, durationDays: 0 }),
-      M('e5', 5, 'Registrar Go, Go condicionado ou No-Go', 'diretoria', [], { offsetDays: 1, durationDays: 1 }),
-      M('e5', 6, 'Comunicar decisão às áreas', 'comercial', [], { offsetDays: 2, durationDays: 0 }),
+    { key: 'e5', name: 'Definir lance inicial e menor lance', deliverable: 'Lance inicial e menor lance aprovados', durationDays: 2, macros: [
+      M('e5', 1, 'Composição de custos e preço', 'financeiro', ['Custos diretos e indiretos', 'Tributos', 'Margem mínima aceitável'], { durationDays: 1 }),
+      M('e5', 2, 'Definir valor do lance inicial', 'comercial', ['Propor o lance inicial', 'Registrar a referência usada'], { offsetDays: 1, durationDays: 1 }),
+      M('e5', 3, 'Definir o menor lance', 'diretoria', ['Definir o limite mínimo da disputa', 'Registrar a aprovação'], { offsetDays: 1, durationDays: 1 }),
     ] },
-    { key: 'e6', name: 'Preparação da proposta', deliverable: 'Pacote de proposta e habilitação conforme o edital', durationDays: 5, macros: [
-      M('e6', 1, 'Documentação de habilitação', 'juridico', [], { durationDays: 4 }),
-      M('e6', 2, 'Qualificação técnica', 'engenharia', [], { durationDays: 4 }),
-      M('e6', 3, 'Proposta técnica', 'engenharia', [], { durationDays: 4 }),
-      M('e6', 4, 'Proposta comercial', 'comercial', [], { durationDays: 4 }),
-      M('e6', 5, 'Composição de custos', 'financeiro', [], { durationDays: 3 }),
-      M('e6', 6, 'Validação de fornecedores', 'compras', [], { durationDays: 3 }),
-      M('e6', 7, 'Organização e conferência dos anexos', 'comercial', [], { offsetDays: 4, durationDays: 1 }),
+    { key: 'e6', name: 'Separar as documentações', deliverable: 'Documentação de habilitação e proposta conferidas e enviadas', durationDays: 4, macros: [
+      M('e6', 1, 'Habilitação jurídica e fiscal', 'juridico', ['Certidões negativas', 'Atos constitutivos', 'Declarações exigidas'], { durationDays: 3 }),
+      M('e6', 2, 'Qualificação técnica', 'engenharia', ['Atestados de capacidade técnica', 'Registros e certificações'], { durationDays: 3 }),
+      M('e6', 3, 'Qualificação econômico-financeira', 'financeiro', ['Balanço e índices', 'Garantias exigidas'], { durationDays: 3 }),
+      M('e6', 4, 'Proposta e anexos', 'comercial', ['Montar a proposta conforme o edital', 'Conferir todos os anexos'], { offsetDays: 1, durationDays: 2 }),
+      M('e6', 5, 'Envio no portal', 'comercial', ['Validar o acesso ao portal', 'Enviar proposta e documentos', 'Arquivar o protocolo'], { offsetDays: 3, durationDays: 1 }),
     ] },
-    { key: 'e7', name: 'Revisão e submissão', deliverable: 'Proposta protocolada', durationDays: 2, macros: [
-      M('e7', 1, 'Revisão documental', 'juridico', [], { durationDays: 1 }),
-      M('e7', 2, 'Revisão técnica', 'engenharia', [], { durationDays: 1 }),
-      M('e7', 3, 'Revisão financeira', 'financeiro', [], { durationDays: 1 }),
-      M('e7', 4, 'Aprovação final RACI', 'diretoria', [], { offsetDays: 1, durationDays: 0 }),
-      M('e7', 5, 'Validação de acesso ao portal', 'comercial', [], { durationDays: 1 }),
-      M('e7', 6, 'Submissão', 'comercial', [], { offsetDays: 2, durationDays: 0 }),
-      M('e7', 7, 'Arquivamento de protocolos', 'comercial', [], { offsetDays: 2, durationDays: 0 }),
+    { key: 'e7', name: 'Acompanhar o processo licitatório', deliverable: 'Histórico da sessão, lances, diligências e habilitação', durationDays: 5, macros: [
+      M('e7', 1, 'Sessão pública e lances', 'comercial', ['Acompanhar a disputa', 'Gerir os lances dentro do menor lance aprovado', 'Negociar quando houver'], { durationDays: 1 }),
+      M('e7', 2, 'Diligências e ajustes', 'comercial', ['Atender diligências', 'Enviar ajustes permitidos na proposta'], { offsetDays: 1, durationDays: 3, required: false }),
+      M('e7', 3, 'Acompanhar habilitação e julgamento', 'comercial', ['Acompanhar a análise dos documentos', 'Registrar ocorrências da sessão'], { offsetDays: 1, durationDays: 4 }),
     ] },
-    { key: 'e8', name: 'Sessão pública', deliverable: 'Histórico da sessão', durationDays: 1, macros: [
-      M('e8', 1, 'Preparação da sessão', 'comercial', [], { durationDays: 0 }),
-      M('e8', 2, 'Definição de estratégia e limites', 'diretoria', [], { durationDays: 0 }),
-      M('e8', 3, 'Acompanhamento da disputa', 'comercial', [], { offsetDays: 1, durationDays: 0 }),
-      M('e8', 4, 'Gestão de lances', 'comercial', [], { offsetDays: 1, durationDays: 0 }),
-      M('e8', 5, 'Negociação', 'comercial', [], { offsetDays: 1, durationDays: 0, required: false }),
-      M('e8', 6, 'Registro de resultados e ocorrências', 'comercial', [], { offsetDays: 1, durationDays: 0 }),
+    { key: 'e8', name: 'Enviar recurso ou contrarrazões', deliverable: 'Recurso ou contrarrazões protocolados, quando cabíveis', durationDays: 5, macros: [
+      M('e8', 1, 'Avaliar o cabimento', 'juridico', ['Analisar a decisão e os documentos dos concorrentes', 'Registrar intenção de recurso no prazo'], { durationDays: 1, required: false }),
+      M('e8', 2, 'Elaborar e enviar recurso ou contrarrazões', 'juridico', ['Redigir a peça', 'Validar com o comercial', 'Protocolar no portal'], { offsetDays: 1, durationDays: 4, required: false }),
     ] },
-    { key: 'e9', name: 'Diligências e resultado', deliverable: 'Resultado administrativo consolidado', durationDays: 10, macros: [
-      M('e9', 1, 'Atendimento a diligências', 'comercial', [], { durationDays: 3, required: false }),
-      M('e9', 2, 'Ajustes permitidos na proposta', 'comercial', [], { durationDays: 3, required: false }),
-      M('e9', 3, 'Análise de recursos', 'juridico', [], { offsetDays: 3, durationDays: 3, required: false }),
-      M('e9', 4, 'Recursos e contrarrazões', 'juridico', [], { offsetDays: 3, durationDays: 5, required: false }),
-      M('e9', 5, 'Acompanhamento de adjudicação e homologação', 'comercial', [], { offsetDays: 5, durationDays: 5 }),
-      M('e9', 6, 'Registro do resultado final', 'comercial', [], { offsetDays: 10, durationDays: 0 }),
-    ] },
-    { key: 'e10', name: 'Contratação e transição', deliverable: 'Contrato formalizado e transição concluída', durationDays: 10, macros: [
-      M('e10', 1, 'Conferência das condições contratuais', 'juridico', [], { durationDays: 2 }),
-      M('e10', 2, 'Aprovação da assinatura', 'diretoria', [], { offsetDays: 2, durationDays: 1 }),
-      M('e10', 3, 'Formalização contratual', 'juridico', [], { offsetDays: 3, durationDays: 3 }),
-      M('e10', 4, 'Cadastro no módulo Contratos', 'comercial', [], { offsetDays: 6, durationDays: 1 }),
-      M('e10', 5, 'Reunião de transição', 'operacoes', [], { offsetDays: 7, durationDays: 1 }),
-      M('e10', 6, 'Criação ou vinculação do projeto de implantação', 'operacoes', [], { offsetDays: 8, durationDays: 1 }),
-      M('e10', 7, 'Transferência de documentos e obrigações', 'comercial', [], { offsetDays: 8, durationDays: 2 }),
-    ] },
-    { key: 'e11', name: 'Encerramento e inteligência', deliverable: 'Dossiê final e inteligência comercial registrada', durationDays: 5, macros: [
-      M('e11', 1, 'Encerramento documental', 'comercial', [], { durationDays: 2 }),
-      M('e11', 2, 'Registro de classificação', 'comercial', [], { durationDays: 1 }),
-      M('e11', 3, 'Análise de concorrentes', 'comercial', [], { durationDays: 3 }),
-      M('e11', 4, 'Análise de preço e margem', 'financeiro', [], { durationDays: 3 }),
-      M('e11', 5, 'Registro dos motivos de perda, quando aplicável', 'comercial', [], { durationDays: 1, required: false }),
-      M('e11', 6, 'Lições aprendidas', 'comercial', [], { offsetDays: 3, durationDays: 2 }),
-      M('e11', 7, 'Atualização dos indicadores comerciais', 'comercial', [], { offsetDays: 4, durationDays: 1 }),
+    { key: 'e9', name: 'Resultado (venceu ou perdeu)', deliverable: 'Resultado registrado e próximos passos definidos', durationDays: 3, macros: [
+      M('e9', 1, 'Registrar o resultado', 'comercial', ['Registrar vencedor, valores e classificação', 'Marcar a oportunidade como ganha ou perdida'], { durationDays: 1 }),
+      M('e9', 2, 'Venceu: homologação e contratação', 'comercial', ['Acompanhar adjudicação e homologação', 'Cadastrar o contrato no módulo Contratos'], { offsetDays: 1, durationDays: 2, required: false }),
+      M('e9', 3, 'Perdeu: motivos e concorrentes', 'comercial', ['Registrar os motivos da perda', 'Registrar preços e concorrentes'], { offsetDays: 1, durationDays: 1, required: false }),
+      M('e9', 4, 'Lições aprendidas', 'comercial', ['Registrar o que funcionou e o que mudar'], { offsetDays: 2, durationDays: 1 }),
     ] },
   ],
 };
 
-// prazos pelo edital: análise até o limite de esclarecimentos; proposta antes do envio; sessão, resultado e contratação nos seus marcos
+// prazos pelo edital: análise até o limite de esclarecimentos; lances e documentação antes do envio; sessão, recursos e resultado nos seus marcos
 const ANCHORS: Record<string, [OfficialDateKey, number]> = {
-  e3: ['esclarecimentos', -1], e3_m6: ['impugnacoes', -1], e4: ['proposta', -10], e5: ['proposta', -7], e6: ['proposta', -3], e7: ['proposta', -1],
-  e7_m6: ['proposta', 0], e7_m7: ['proposta', 0], e8: ['sessao', 0], e9: ['resultado', 0], e10: ['contratacao', 0],
+  e3: ['esclarecimentos', -1], e3_m6: ['esclarecimentos', 0], e4: ['esclarecimentos', 0], e2: ['proposta', -10], e5: ['proposta', -2], e6: ['proposta', -1],
+  e6_m5: ['proposta', 0], e7: ['sessao', 0], e8: ['recursos', 0], e9: ['resultado', 0],
 };
 for (const p of BID_DEFAULT_MODEL.phases) for (const m of p.macros) {
   const a = ANCHORS[m.key] ?? ANCHORS[p.key];

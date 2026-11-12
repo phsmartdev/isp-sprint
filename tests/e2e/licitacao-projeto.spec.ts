@@ -19,7 +19,7 @@ test('projeto de licitação na oportunidade e modelo versionado', async ({ page
   await page.goto(`/opportunities/${o.id}?aba=licitacao`);
   const card = page.getByRole('article', { name: `Projeto Licitação · PE ${tag} – Link dedicado` });
   await expect(card).toBeVisible();
-  await expect(card).toContainText('Etapa 1 — Identificação e abertura');
+  await expect(card).toContainText('Etapa 1 — Cadastrar oportunidade');
   await expect(card).toContainText('Criado com a oportunidade');
   await expect(card.getByRole('progressbar', { name: 'Progresso do projeto' })).toBeVisible();
   await expect(page.getByRole('tab', { name: /^Tarefas/ })).toHaveText('Tarefas'); // as tarefas do projeto não lotam a negociação
@@ -70,7 +70,7 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   await marcos.getByLabel('Validada com o edital: Prazo de envio da proposta').check();
   await marcos.getByRole('button', { name: 'Salvar marcos' }).click();
   const rc = page.getByRole('dialog', { name: 'Recalcular prazos pelo edital' });
-  await expect(rc).toContainText('Proposta comercial');
+  await expect(rc).toContainText('Proposta e anexos');
   await rc.getByRole('button', { name: /^Aplicar em/ }).click();
   await expect(page.getByText('Prazos recalculados')).toBeVisible();
 
@@ -78,13 +78,13 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   const gantt = page.getByRole('region', { name: 'Gantt do projeto' });
   await expect(gantt).toBeVisible();
   await gantt.getByRole('button', { name: 'Dia' }).click();
-  const bar = gantt.getByRole('img', { name: /^Proposta comercial:/ });
+  const bar = gantt.getByRole('img', { name: /^Viabilidade técnica:/ });
   await bar.scrollIntoViewIfNeeded();
   const before = await bar.getAttribute('aria-label');
   const bb = (await bar.boundingBox())!;
-  await page.mouse.move(bb.x + 10, bb.y + bb.height / 2);
+  await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
   await page.mouse.down();
-  await page.mouse.move(bb.x + 10 + 34 * 2, bb.y + bb.height / 2, { steps: 6 });
+  await page.mouse.move(bb.x + bb.width / 2 + 34 * 2, bb.y + bb.height / 2, { steps: 6 });
   const saved = page.waitForResponse((r) => r.url().includes('/licitacao/tarefas') && r.request().method() === 'PATCH');
   await page.mouse.up();
   expect((await saved).status()).toBe(200);
@@ -101,19 +101,19 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   await tabela.getByLabel('Critério de aceite: Análise técnica').blur();
   await expect(tabela.getByText('defina o critério de aceite.')).toHaveCount(0);
   // em lote: duas macrotarefas para Jurídico
-  await tabela.getByLabel('Selecionar Análise administrativa').check();
-  await tabela.getByLabel('Selecionar Matriz de requisitos').check();
+  await tabela.getByLabel('Selecionar Análise administrativa e comercial').check();
+  await tabela.getByLabel('Selecionar Envio da oportunidade aos setores').check();
   await page.getByRole('toolbar', { name: 'Ações em lote' }).getByLabel('Área em lote').selectOption('juridico');
-  await expect(tabela.getByLabel('Área: Matriz de requisitos')).toHaveValue('juridico');
+  await expect(tabela.getByLabel('Área: Envio da oportunidade aos setores')).toHaveValue('juridico');
   await page.screenshot({ path: 'test-results/licitacao-planejamento.png', fullPage: false });
 
   await page.getByRole('tab', { name: 'Dependências' }).click();
   const deps = page.getByRole('region', { name: 'Dependências' });
-  await deps.getByRole('listitem').filter({ hasText: 'Revisão documental' }).getByRole('button', { name: 'Predecessoras' }).click();
-  const dlg = page.getByRole('dialog', { name: 'Predecessoras de "Revisão documental"' });
-  await dlg.getByLabel(/Documentação de habilitação/).check();
+  await deps.getByRole('listitem').filter({ hasText: 'Envio no portal' }).getByRole('button', { name: 'Predecessoras' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Predecessoras de "Envio no portal"' });
+  await dlg.getByLabel(/Habilitação jurídica e fiscal/).check();
   await dlg.getByRole('button', { name: 'Salvar' }).click();
-  await expect(deps.getByRole('listitem').filter({ hasText: 'Revisão documental' })).toContainText('depende de: Documentação de habilitação');
+  await expect(deps.getByRole('listitem').filter({ hasText: 'Envio no portal' })).toContainText('depende de: Habilitação jurídica e fiscal');
 });
 
 test('RACI e aprovação do plano: analista submete, aprovador decide no sistema', async ({ browser }) => {

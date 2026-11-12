@@ -17,16 +17,38 @@ export const BID_TEMPLATE_KEY = 'licitacao';
 export async function ensureBidTemplate(db: DbOrTx, tenantId: string, userId: string | null) {
   const find = async () => (await db.select().from(s.projectTemplates).where(and(eq(s.projectTemplates.tenantId, tenantId), eq(s.projectTemplates.key, BID_TEMPLATE_KEY))).limit(1))[0];
   let t = await find();
-  if (t) return t;
+  if (t) return upgradeDefaultRite(db, t, userId);
   // dois pedidos ao mesmo tempo não criam dois modelos
   await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bid-template:${tenantId}`}))`);
   t = await find();
   if (t) return t;
   const [nt] = await db.insert(s.projectTemplates).values({
-    tenantId, name: 'Rito padrão de licitações', description: 'Da identificação do edital ao encerramento: 11 etapas, macrotarefas por área e entregáveis.',
+    tenantId, name: 'Rito padrão de licitações', description: 'Do cadastro ao resultado: 9 etapas, macrotarefas por área e entregáveis.',
     kind: 'licitacao', def: { stages: DEFAULT_PROJECT_STAGES, milestones: [], tasks: [] }, key: BID_TEMPLATE_KEY, publishedVersion: 1, createdBy: userId,
   }).returning();
   await db.insert(s.projectTemplateVersions).values({ tenantId, templateId: nt!.id, version: 1, status: 'publicado', def: BID_DEFAULT_MODEL, notes: 'Versão inicial do rito padrão', createdBy: userId, publishedAt: new Date(), publishedBy: userId });
+  return nt!;
+}
+
+/** Rito padrão antigo (11 etapas), reconhecido pelos nomes das etapas: só ele é trocado sozinho. */
+const OLD_DEFAULT_PHASES = ['Identificação e abertura', 'Planejamento e mobilização', 'Análise do edital', 'Viabilidade e riscos', 'Decisão Go/No-Go', 'Preparação da proposta', 'Revisão e submissão', 'Sessão pública', 'Diligências e resultado', 'Contratação e transição', 'Encerramento e inteligência'];
+const isOldDefault = (def: BidModelDef) => def.phases.length === OLD_DEFAULT_PHASES.length && def.phases.every((p, i) => p.name === OLD_DEFAULT_PHASES[i]);
+
+/**
+ * Empresa ainda no rito padrão antigo sem alterações: publica o rito de 9 etapas como nova versão (a anterior é
+ * arquivada; projetos já criados seguem com a cópia que receberam). Modelo personalizado não é tocado.
+ */
+async function upgradeDefaultRite(db: DbOrTx, t: typeof s.projectTemplates.$inferSelect, userId: string | null) {
+  const versions = await db.select().from(s.projectTemplateVersions).where(eq(s.projectTemplateVersions.templateId, t.id)).orderBy(desc(s.projectTemplateVersions.version));
+  const pub = versions.find((v) => v.version === (t.publishedVersion ?? 1));
+  if (!pub || !isOldDefault(pub.def as BidModelDef) || versions.some((v) => v.status === 'rascunho' || v.status === 'em_aprovacao')) return t;
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`bid-template-upgrade:${t.id}`}))`);
+  const [again] = await db.select({ pv: s.projectTemplates.publishedVersion }).from(s.projectTemplates).where(eq(s.projectTemplates.id, t.id));
+  if ((again?.pv ?? 1) !== pub.version) return t;
+  const version = (versions[0]?.version ?? 1) + 1;
+  await db.update(s.projectTemplateVersions).set({ status: 'arquivado', updatedAt: new Date() }).where(eq(s.projectTemplateVersions.id, pub.id));
+  await db.insert(s.projectTemplateVersions).values({ tenantId: t.tenantId, templateId: t.id, version, status: 'publicado', def: BID_DEFAULT_MODEL, notes: 'Rito padrão atualizado para 9 etapas: cadastro, qualificação e viabilidade, análise do edital e TR pelos setores, reunião do time comercial, lances, documentação, acompanhamento, recurso e resultado.', createdBy: userId, publishedAt: new Date(), publishedBy: userId });
+  const [nt] = await db.update(s.projectTemplates).set({ publishedVersion: version, description: 'Do cadastro ao resultado: 9 etapas, macrotarefas por área e entregáveis.' }).where(eq(s.projectTemplates.id, t.id)).returning();
   return nt!;
 }
 

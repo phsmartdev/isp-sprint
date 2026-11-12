@@ -32,11 +32,11 @@ describe('projeto de licitação na oportunidade', () => {
     const list = ok(await lucas.get(`/opportunities/${o.id}/licitacao/projetos`)).json().items;
     expect(list).toHaveLength(1);
     const p = list[0];
-    expect(p).toMatchObject({ origin: 'auto', coordinatorId: lucas.me.user.id, currentPhase: { name: 'Etapa 1 — Identificação e abertura' }, templateVersion: expect.any(Number) });
+    expect(p).toMatchObject({ origin: 'auto', coordinatorId: lucas.me.user.id, currentPhase: { name: 'Etapa 1 — Cadastrar oportunidade' }, templateVersion: expect.any(Number) });
     expect(p.areas).toEqual(expect.arrayContaining(['comercial', 'engenharia', 'juridico', 'financeiro']));
     expect(await countTasks(p.id)).toEqual({ m: macros, t: subs });
     const ms = (await ctx.db.execute(sql`select count(*)::int as n from project_milestones where project_id = ${p.id}`)).rows[0] as { n: number };
-    expect(ms.n).toBe(11);
+    expect(ms.n).toBe(9);
     // reprocessar não duplica (alterar a oportunidade, sincronizar de novo)
     const cur = ok(await lucas.get(`/opportunities/${o.id}`)).json();
     ok(await lucas.patch(`/opportunities/${o.id}`, { rowVersion: cur.rowVersion, title: 'PE 12/2026 – Link dedicado (retificado)' }));
@@ -95,5 +95,29 @@ describe('modelo versionado', () => {
     expect(p2.templateVersion).toBe(d.version);
     expect((await countTasks(p2.id)).m).toBe(before.m + 1);
     expect(await countTasks(p1.id)).toEqual(before);
+  });
+});
+
+describe('rito padrão de 9 etapas', () => {
+  let c2: Awaited<ReturnType<typeof makeApp>>;
+  let adm: Client;
+  beforeAll(async () => { c2 = await makeApp(); adm = await login(c2.app, 'carlos@yepnet.test'); });
+  afterAll(async () => c2.close());
+  it('empresa no rito antigo sem alterações passa para as 9 etapas; modelo personalizado não é tocado', async () => {
+    const OLD = ['Identificação e abertura', 'Planejamento e mobilização', 'Análise do edital', 'Viabilidade e riscos', 'Decisão Go/No-Go', 'Preparação da proposta', 'Revisão e submissão', 'Sessão pública', 'Diligências e resultado', 'Contratação e transição', 'Encerramento e inteligência'];
+    const tid = adm.me.user.tenantId ?? (await c2.db.execute<{ tenant_id: string }>(sql`select tenant_id from users where email = 'carlos@yepnet.test'`)).rows[0]!.tenant_id;
+    ok(await adm.get('/modelos-projeto/licitacao'));
+    const old = { phases: OLD.map((name, i) => ({ key: `e${i + 1}`, name, deliverable: 'x', durationDays: 1, macros: [{ key: `e${i + 1}_m1`, name: 'Tarefa', area: 'comercial', required: true, offsetDays: 0, durationDays: 1, tasks: [] }] })) };
+    // volta o publicado para o rito antigo (simula empresa criada antes da mudança)
+    await c2.db.execute(sql`update project_template_versions v set def = ${JSON.stringify(old)}::jsonb from project_templates t where t.id = v.template_id and t.tenant_id = ${tid} and t.key = 'licitacao' and v.version = t.published_version`);
+    await c2.db.execute(sql`update project_template_versions v set status = 'arquivado' from project_templates t where t.id = v.template_id and t.tenant_id = ${tid} and t.key = 'licitacao' and v.status in ('rascunho', 'em_aprovacao')`);
+    const m = ok(await adm.get('/modelos-projeto/licitacao')).json();
+    const pub = m.versions.find((v: { version: number }) => v.version === m.template.publishedVersion);
+    expect(pub.def.phases.map((p: { name: string }) => p.name)).toEqual(BID_DEFAULT_MODEL.phases.map((p) => p.name));
+    expect(pub.def.phases).toHaveLength(9);
+    // personalizado: não muda
+    await c2.db.execute(sql`update project_template_versions v set def = jsonb_set(v.def, '{phases,0,name}', '"Minha etapa"') from project_templates t where t.id = v.template_id and t.tenant_id = ${tid} and t.key = 'licitacao' and v.version = t.published_version`);
+    const m2 = ok(await adm.get('/modelos-projeto/licitacao')).json();
+    expect(m2.template.publishedVersion).toBe(m.template.publishedVersion);
   });
 });

@@ -61,7 +61,7 @@ describe('RACI e aprovações do projeto de licitação', () => {
     expect(done.completed_at).not.toBeNull();
     let ap = ok(await lucas.get(`/projects/${pid}/licitacao/aprovacoes`)).json();
     expect(ap.planStatus).toBe('aprovado');
-    expect(ap.items.find((x: { id: string }) => x.id === a2.id).snapshot.rows.length).toBeGreaterThan(50); // versão aprovada congelada
+    expect(ap.items.find((x: { id: string }) => x.id === a2.id).snapshot.rows.length).toBeGreaterThan(30); // versão aprovada congelada
 
     // alteração crítica depois de aprovado
     ok(await lucas.patch(`/projects/${pid}/licitacao/tarefas`, { ids: [tec.id], patch: {}, shiftDays: 2 }));
