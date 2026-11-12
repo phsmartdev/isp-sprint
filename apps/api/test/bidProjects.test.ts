@@ -105,7 +105,7 @@ describe('rito padrão de 9 etapas', () => {
   afterAll(async () => c2.close());
   it('empresa no rito antigo sem alterações passa para as 9 etapas; modelo personalizado não é tocado', async () => {
     const OLD = ['Identificação e abertura', 'Planejamento e mobilização', 'Análise do edital', 'Viabilidade e riscos', 'Decisão Go/No-Go', 'Preparação da proposta', 'Revisão e submissão', 'Sessão pública', 'Diligências e resultado', 'Contratação e transição', 'Encerramento e inteligência'];
-    const tid = adm.me.user.tenantId ?? (await c2.db.execute<{ tenant_id: string }>(sql`select tenant_id from users where email = 'carlos@yepnet.test'`)).rows[0]!.tenant_id;
+    const tid = (await c2.db.execute<{ tenant_id: string }>(sql`select tenant_id from users where email = 'carlos@yepnet.test'`)).rows[0]!.tenant_id;
     ok(await adm.get('/modelos-projeto/licitacao'));
     const old = { phases: OLD.map((name, i) => ({ key: `e${i + 1}`, name, deliverable: 'x', durationDays: 1, macros: [{ key: `e${i + 1}_m1`, name: 'Tarefa', area: 'comercial', required: true, offsetDays: 0, durationDays: 1, tasks: [] }] })) };
     // volta o publicado para o rito antigo (simula empresa criada antes da mudança)

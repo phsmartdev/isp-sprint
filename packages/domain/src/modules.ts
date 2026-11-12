@@ -58,6 +58,7 @@ export const FEATURES = [
   { key: 'crm.email', module: 'crm', label: 'E-mail corporativo' },
   { key: 'crm.chamados', module: 'crm', label: 'Chamados no GLPI a partir da negociação', needs: ['oportunidades'] },
   { key: 'crm.viabilidade', module: 'crm', label: 'Viabilidade econômica (motor financeiro, envelope fiscal, Financial Studio e decisão da viabilidade)', needs: ['oportunidades'] },
+  { key: 'crm.projeto_licitacao', module: 'crm', label: 'Projeto de licitação (rito em etapas, planejamento, prazos pelo edital, RACI, aprovações e Gantt)', needs: ['oportunidades'], requires: ['projetos'] },
   { key: 'marketing.leads', module: 'marketing', label: 'Leads' },
   { key: 'marketing.abm', module: 'marketing', label: 'ABM', needs: ['leads', 'campanhas'] },
   { key: 'marketing.campanhas', module: 'marketing', label: 'Campanhas' },
@@ -109,6 +110,12 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/cost-items', feature: 'crm.viabilidade' },
   { prefix: '/finance-studio', feature: 'crm.viabilidade' },
   { prefix: '/intelligence/economics', feature: 'crm.viabilidade' },
+  // CRM: projeto de licitação (aba da oportunidade, planejamento, modelo do rito, RACI e aprovações)
+  { prefix: '/opportunities/:id/licitacao', feature: 'crm.projeto_licitacao' },
+  { prefix: '/projects/:id/licitacao', feature: 'crm.projeto_licitacao' },
+  { prefix: '/modelos-projeto/licitacao', feature: 'crm.projeto_licitacao' },
+  { prefix: '/licitacoes/aprovacoes', feature: 'crm.projeto_licitacao' },
+  { prefix: '/licitacoes/governanca', feature: 'crm.projeto_licitacao' },
   // CRM dentro de módulos técnicos compartilhados
   { prefix: '/cs', feature: 'crm.sucesso_cliente' },
   { prefix: '/surveys', feature: 'crm.sucesso_cliente' },

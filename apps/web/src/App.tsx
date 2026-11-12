@@ -243,7 +243,7 @@ export function App() {
         <Route path="abm/contas/:id" element={<Gate module="clientes" feature="marketing.abm"><Abm360Page /></Gate>} />
         <Route path="produto" element={<Gate module="inicio" feature="produto.catalogo"><ProductPage /></Gate>} />
         <Route path="projetos/:id" element={<Gate module="projetos"><ProjectDetailPage /></Gate>} />
-        <Route path="licitacoes/projetos/:id/planejamento" element={<Gate module="oportunidades"><BidPlanningPage /></Gate>} />
+        <Route path="licitacoes/projetos/:id/planejamento" element={<Gate module="oportunidades"><BidProjectGate><BidPlanningPage /></BidProjectGate></Gate>} />
         <Route path="reports" element={<Gate module="relatorios" feature="relatorios.comercial"><ReportsPage /></Gate>} />
         <Route path="intelligence" element={<Gate module="inteligencia"><IntelligencePage /></Gate>} />
         <Route path="campaigns" element={<Gate module="campanhas"><CampaignsPage /></Gate>} />
@@ -300,6 +300,18 @@ export function App() {
       </Route>
     </Routes>
     </Suspense>
+  );
+}
+
+/** Projeto de licitação é uma funcionalidade do CRM que a empresa liga ou desliga (Configurações → Permissões → Módulos e liberação). */
+function BidProjectGate({ children }: { children: ReactNode }) {
+  const { feature } = useAuth();
+  if (feature('crm.projeto_licitacao')) return <>{children}</>;
+  return (
+    <section className="card p-5">
+      <h2 className="text-md font-bold text-ink">Projeto de licitação desligado</h2>
+      <p className="mt-1 text-sm text-muted">Esta funcionalidade do CRM não está liberada na empresa. Quem administra liga em Configurações → Permissões → Módulos e liberação, no módulo CRM. Os projetos já criados continuam guardados.</p>
+    </section>
   );
 }
 

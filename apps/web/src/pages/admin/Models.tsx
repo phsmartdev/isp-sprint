@@ -14,6 +14,7 @@ import { AdminOffices } from '../../features/offices/AdminOffices';
 import { BidModelEditor } from '../../features/bids/BidModelEditor';
 import { BidGovernanceAdmin } from '../../features/bids/Governance';
 import { StructuresAdmin } from '../../features/accounts/Structures';
+import { useAuth } from '../../auth/AuthProvider';
 
 const TABS = [
   { key: 'contratos', label: 'Contratos' },
@@ -31,11 +32,13 @@ type Tab = (typeof TABS)[number]['key'];
 export function AdminModels() {
   const [search, setSearch] = useSearchParams();
   const raw = search.get('aba');
-  const tab: Tab = TABS.some((t) => t.key === raw) ? (raw as Tab) : 'contratos';
+  const { feature } = useAuth();
+  const tabs = TABS.filter((t) => t.key !== 'licitacao' || feature('crm.projeto_licitacao'));
+  const tab: Tab = tabs.some((t) => t.key === raw) ? (raw as Tab) : 'contratos';
   return (
     <div className="space-y-4">
       <div><h1 className="text-xl font-bold text-ink">Modelos</h1><p className="text-sm text-muted">Contratos, propostas, ofícios, timbrado das filiais, e-mails, a instrução do negócio e os roteiros de cada tipo de tarefa.</p></div>
-      <Tabs label="Modelos" value={tab} onChange={(k) => setSearch({ aba: k }, { replace: true })} tabs={[...TABS]} />
+      <Tabs label="Modelos" value={tab} onChange={(k) => setSearch({ aba: k }, { replace: true })} tabs={[...tabs]} />
       <div>
         {tab === 'contratos' && <div className="space-y-6"><AdminContractTemplates /><TemplatesManager /></div>}
         {tab === 'propostas' && <AdminProposalTemplates />}
