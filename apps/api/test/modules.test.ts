@@ -176,6 +176,23 @@ describe('Etapa 1: módulos de negócio', () => {
     }
   });
 
+  it('cadastro do contrato no IXC é opção de Contratos: desligado, a aba ERP para e a etapa do processo conclui só com o código', async () => {
+    const c = ((await ctx.db.execute(sql`select id from contracts where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string } | undefined)?.id;
+    ok(await setModule('contratos', { enabled: true, disabledFeatures: ['contratos.cadastro_erp'] }));
+    try {
+      for (const url of [...(c ? [`/contracts/${c}/erp`] : []), '/contracts/erp/summary']) {
+        const r = await carlos.get(url);
+        expect(r.statusCode, url).toBe(403);
+        expect(r.json().detail, url).toMatch(/Cadastro do contrato no IXC.*desligada/);
+      }
+      ok(await carlos.get('/contracts'));
+      if (c) ok(await carlos.get(`/contracts/${c}`));
+    } finally {
+      ok(await setModule('contratos', { enabled: true }));
+    }
+    if (c) ok(await carlos.get(`/contracts/${c}/erp`));
+  });
+
   it('ações sensíveis por perfil: negar exportar ao vendedor bloqueia a planilha e fica na auditoria', async () => {
     ok(await carlos.put('/admin/actions', { profile: 'operacao', action: 'exportar', allowed: false }));
     expect(ok(await carlos.get('/admin/actions')).json().matrix.operacao.exportar).toBe(false);

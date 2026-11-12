@@ -289,6 +289,7 @@ export const UserCreate = z.object({
   teamIds: z.array(uuid).max(20).default([]),
   leadTeamIds: z.array(uuid).max(20).default([]),
   sectors: z.array(z.string().regex(SECTOR_KEY, 'Setor inválido')).max(20).default([]),
+  sectorViewer: z.boolean().default(false),
   isCsm: z.boolean().default(false),
   playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).default([]),
 });
@@ -307,6 +308,7 @@ export const UserUpdate = z.object({
   goalProposals: z.number().int().min(0).max(100_000).optional(),
   goalLeads: z.number().int().min(0).max(100_000).optional(),
   sectors: z.array(z.string().regex(SECTOR_KEY, 'Setor inválido')).max(20).optional(),
+  sectorViewer: z.boolean().optional(),
   isCsm: z.boolean().optional(),
   /** papéis do Playbook Comercial (contratos) que a pessoa ocupa */
   playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).optional(),

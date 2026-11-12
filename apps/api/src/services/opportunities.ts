@@ -273,8 +273,17 @@ export function opportunityQuery(db: DbOrTx) {
 }
 
 /** Nível do módulo + jornadas restritas: quem não é membro só vê as próprias oportunidades nelas. */
+/** Leitura: quem vê só as próprias negociações também vê as dos colegas de time (funis); escrever segue só nas próprias. */
+export const seesTeamReadOnly = (auth: AuthContext) => level(auth, 'oportunidades') === 'proprio' && auth.requestMethod === 'GET' && auth.teamIds.length > 0;
+
+/** Pode alterar esta negociação (no nível "Próprio", só a que é sua). */
+export const canEditOpportunity = (auth: AuthContext, ownerId: string | null) => level(auth, 'oportunidades') !== 'proprio' || ownerId === auth.userId;
+
 export function oppVisibility(auth: AuthContext) {
-  const base = ownerScope(auth, 'oportunidades', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
+  const base = seesTeamReadOnly(auth)
+    ? and(eq(s.opportunities.tenantId, auth.tenantId), isNull(s.opportunities.deletedAt),
+      sql`(${s.opportunities.ownerId} = ${auth.userId} or ${s.opportunities.ownerId} in (select tm.user_id from team_memberships tm where tm.team_id in (${sql.join(auth.teamIds.map((t) => sql`${t}::uuid`), sql`, `)})))`)!
+    : ownerScope(auth, 'oportunidades', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
   if (level(auth, 'oportunidades') === 'total') return base;
   return and(
     base,

@@ -1,0 +1,2 @@
+ALTER TABLE "cost_centers" ADD COLUMN "owner_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "cost_centers" ADD COLUMN "executor_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

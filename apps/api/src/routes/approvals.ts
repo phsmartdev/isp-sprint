@@ -60,7 +60,7 @@ const postSystem = (db: DbOrTx, tenantId: string, oppId: string, body: string, r
 
 /** Usuários ativos com alçada para decidir (menos quem pediu). */
 async function approversFor(db: DbOrTx, tenantId: string, required: ApprovalLevel, exceptId: string) {
-  const rows = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone, sectors: s.users.sectors, role: s.roles.key }).from(s.users).leftJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).leftJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true)));
+  const rows = await db.select({ id: s.users.id, name: s.users.name, email: s.users.email, phone: s.users.phone, sectors: sql<string[]>`case when ${s.users.sectorViewer} then '{}'::text[] else ${s.users.sectors} end`, role: s.roles.key }).from(s.users).leftJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).leftJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true)));
   const byUser = new Map<string, { id: string; name: string; email: string; phone: string | null; sectors: string[]; profiles: string[] }>();
   for (const r of rows) {
     const u = byUser.get(r.id) ?? { id: r.id, name: r.name, email: r.email, phone: r.phone, sectors: r.sectors, profiles: [] };
@@ -363,7 +363,7 @@ export const approvalRoutes = [
       if (body.opportunityId) await loadForAnalysis(app.db, auth, body.opportunityId);
       else await contactInScope(app.db, auth, params.id);
       // responsável: dono da carteira; senão alguém de Inteligência Comercial; senão quem pediu
-      const intel = await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), sql`'inteligencia_comercial' = any(${s.users.sectors})`)).limit(1);
+      const intel = await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), eq(s.users.sectorViewer, false), sql`'inteligencia_comercial' = any(${s.users.sectors})`)).limit(1);
       const ownerId = c.ownerId ?? intel[0]?.id ?? auth.userId;
       const due = new Date(Date.now() + 2 * 86_400_000);
       const [a] = await app.db.insert(s.activities).values({ tenantId: auth.tenantId, type: 'tarefa', title: `Atualizar classificação estratégica: ${c.name}`, notes: `Pedido por ${auth.name} na análise de aprovação.${body.note ? ` ${body.note}` : ''}`, dueAt: due, priority: 'alta', ownerId, contactId: c.id, opportunityId: body.opportunityId ?? null, createdBy: auth.userId }).returning({ id: s.activities.id });

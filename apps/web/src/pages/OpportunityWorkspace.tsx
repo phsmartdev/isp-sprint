@@ -672,7 +672,8 @@ export function OpportunityWorkspacePage() {
   const f = a.fields;
   if (!f) return <div className="card"><LoadingRows rows={8} /></div>;
   const canReopen = can('oportunidades', 'equipe');
-  const editable = !isClosed(opp.stage);
+  const readOnly = opp.canEdit === false;
+  const editable = !isClosed(opp.stage) && !readOnly;
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => a.setFields((x) => (x ? { ...x, [k]: v } : x));
   const running = editable && !!opp.sprintStartedAt && Date.now() - new Date(opp.sprintStartedAt).getTime() < 12 * 3_600_000;
   const plans = (lookups.data?.plans ?? []).filter((p) => p.segment === opp.contactSegment || p.id === f.planId || (opp.contactSegment !== 'residencial' && p.segment !== 'residencial'));
@@ -893,11 +894,12 @@ export function OpportunityWorkspacePage() {
         {editable && opp.paused && <span className="rounded-sm bg-[#FFF6D6] px-2 py-0.5 text-xs font-bold text-[#9A6B00]" title={opp.pauseReason ?? undefined}>{opp.pausedUntil ? `Pausada até ${fmtDate(opp.pausedUntil)}` : 'Pausada'}</span>}
         {isClosed(opp.stage) && <span className="text-sm text-muted">Encerrada em {fmtDate(opp.wonAt ?? opp.lostAt)}{canReopen ? '' : '. Reabrir é com a supervisão.'}</span>}
         {isClosed(opp.stage) && canReopen && <Button variant="primary" icon={<RotateCcw className="h-4 w-4" />} onClick={() => setOppAction('reabrir')}>Reabrir negociação</Button>}
-        {opp.stage !== 'ganha' && <Button variant="ghost" className="text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Excluir negociação</Button>}
+        {opp.stage !== 'ganha' && !readOnly && <Button variant="ghost" className="text-danger" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Excluir negociação</Button>}
       </div>
       {deleting && <DeleteOpportunity id={opp.id} rowVersion={opp.rowVersion} title={opp.contactName} onClose={() => setDeleting(false)} />}
 
-      <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
+      <StageStepper stages={stages} current={opp.stage} daysInStage={opp.daysInStage} times={stageTimes.data?.stages} disabled={readOnly || transition.isPending || (isClosed(opp.stage) && !canReopen)} onPick={requestMove} />
+      {readOnly && <div className="mb-3"><Notice tone="info">Negociação de {opp.ownerName ?? 'um colega do time'}: você acompanha, mas só quem é responsável, a supervisão, a gerência ou a diretoria alteram.</Notice></div>}
 
       <div className="mb-3 ws2:hidden">
         <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'cliente', label: 'Deal e conta' }, { key: 'conversa', label: 'Acompanhamento' }, { key: 'passo', label: unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat}` : 'Viabilidade e chat' }]} />

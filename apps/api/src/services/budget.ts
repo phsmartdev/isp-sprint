@@ -4,7 +4,7 @@ import { accountPath, executionBand, executionPct, monthsOfQuarter, sortAccounts
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { AuthContext } from '../http/context';
-import { forbidden, notFound } from '../http/errors';
+import { forbidden, notFound, unprocessable } from '../http/errors';
 import { level } from './scope';
 
 /** Diretoria/gestão: nível Total no módulo (aprova, vê todos os centros, mantém a estrutura). */
@@ -49,24 +49,58 @@ export async function ensureTeamCostCenters(db: DbOrTx, tenantId: string) {
       let code = base, n = 2;
       while (codes.has(code)) code = `${base}-${n++}`;
       codes.add(code);
-      await db.insert(s.costCenters).values({ tenantId, code, name: t.name, leaderId, memberIds, teamId: t.id, active: true }).onConflictDoNothing();
+      await db.insert(s.costCenters).values({ tenantId, code, name: t.name, leaderId, memberIds, ownerIds: t.managerIds, executorIds: leads, teamId: t.id, active: true }).onConflictDoNothing();
     } else if (cc.name !== t.name || cc.leaderId !== leaderId || cc.active !== t.active || [...cc.memberIds].sort().join() !== memberIds.join()) {
       await db.update(s.costCenters).set({ name: t.name, leaderId, memberIds, active: t.active, updatedAt: new Date() }).where(eq(s.costCenters.id, cc.id));
     }
   }
 }
 
+type CC = typeof s.costCenters.$inferSelect;
+/**
+ * Associação do centro de custo: Dono do orçamento (gestor da área, um ou mais) e Responsável pela execução
+ * (supervisão ou gestão). Sem donos definidos, o líder é o dono; sem execução definida, valem as pessoas indicadas.
+ */
+export function costCenterRole(c: CC, userId: string): 'dono' | 'execucao' | null {
+  const owner = c.ownerIds.length ? c.ownerIds.includes(userId) : c.leaderId === userId;
+  if (owner) return 'dono';
+  return (c.executorIds.length ? c.executorIds.includes(userId) : c.memberIds.includes(userId)) ? 'execucao' : null;
+}
+export type CostCenterNeed = 'ver' | 'planejar' | 'executar';
+const allows = (auth: AuthContext, c: CC, need: CostCenterNeed) => {
+  if (isBudgetAdmin(auth)) return true;
+  const r = costCenterRole(c, auth.userId);
+  return need === 'planejar' ? r === 'dono' : r !== null;
+};
+
+/** Perfis aceitos em cada papel do centro de custo. */
+export const OWNER_PROFILES = ['gerencia', 'diretoria', 'administrador'];
+export const EXECUTOR_PROFILES = ['supervisor', 'gerencia', 'diretoria', 'administrador'];
+/** Confere a associação: dono = gestor da área; execução = supervisão ou gestão. */
+export async function assertCostCenterPeople(db: DbOrTx, tenantId: string, ownerIds: string[] | undefined, executorIds: string[] | undefined) {
+  const ids = [...new Set([...(ownerIds ?? []), ...(executorIds ?? [])])];
+  if (!ids.length) return;
+  const rows = await db.select({ userId: s.userRoles.userId, key: s.roles.key, name: s.users.name }).from(s.userRoles)
+    .innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).innerJoin(s.users, eq(s.users.id, s.userRoles.userId))
+    .where(and(eq(s.users.tenantId, tenantId), inArray(s.userRoles.userId, ids)));
+  const profiles = (u: string) => rows.filter((r) => r.userId === u).map((r) => r.key);
+  const nameOf = (u: string) => rows.find((r) => r.userId === u)?.name ?? 'pessoa';
+  for (const u of ownerIds ?? []) if (!profiles(u).some((p) => OWNER_PROFILES.includes(p))) throw unprocessable(`${nameOf(u)} não é gestor(a): Dono do orçamento precisa ter perfil Gerência ou Diretoria.`, [{ path: 'ownerIds', message: 'Só gestores' }]);
+  for (const u of executorIds ?? []) if (!profiles(u).some((p) => EXECUTOR_PROFILES.includes(p))) throw unprocessable(`${nameOf(u)} não pode ser Responsável pela execução: precisa ter perfil Supervisão ou Gerência.`, [{ path: 'executorIds', message: 'Só supervisão ou gestão' }]);
+}
+
 export async function costCentersOf(db: DbOrTx, auth: AuthContext, includeInactive = false) {
   await ensureTeamCostCenters(db, auth.tenantId);
   const all = await db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code);
   const list = includeInactive ? all : all.filter((c) => c.active);
-  return isBudgetAdmin(auth) ? list : list.filter((c) => c.leaderId === auth.userId || c.memberIds.includes(auth.userId));
+  return isBudgetAdmin(auth) ? list : list.filter((c) => costCenterRole(c, auth.userId) !== null);
 }
 /** Centro de custo que a pessoa pode operar (líder, indicado pelo líder ou Diretoria). */
-export async function loadCostCenter(db: DbOrTx, auth: AuthContext, id: string) {
+export async function loadCostCenter(db: DbOrTx, auth: AuthContext, id: string, need: CostCenterNeed = 'ver') {
   const [c] = await db.select().from(s.costCenters).where(and(eq(s.costCenters.id, id), eq(s.costCenters.tenantId, auth.tenantId))).limit(1);
   if (!c) throw notFound('Centro de custo não encontrado.');
-  if (!isBudgetAdmin(auth) && c.leaderId !== auth.userId && !c.memberIds.includes(auth.userId)) throw forbidden('Você não é responsável por este centro de custo.');
+  if (!allows(auth, c, 'ver')) throw forbidden('Você não é responsável por este centro de custo.');
+  if (!allows(auth, c, need)) throw forbidden(need === 'planejar' ? 'Só o Dono do orçamento deste centro de custo planeja, pede ajustes e remaneja.' : 'Só o Dono do orçamento ou o Responsável pela execução deste centro de custo lançam aqui.');
   return c;
 }
 

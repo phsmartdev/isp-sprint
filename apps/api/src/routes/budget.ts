@@ -15,7 +15,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
-import { accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, logBudget, quarterNumbers, totals } from '../services/budget';
+import { accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, costCenterRole, assertCostCenterPeople, logBudget, quarterNumbers, totals } from '../services/budget';
 import { groupBy } from '../services/group';
 import { detectAttachment } from './sprint';
 
@@ -67,13 +67,15 @@ export const budgetRoutes = [
     handler: async ({ app, auth }) => {
       const accounts = await accountsOf(app.db, auth.tenantId);
       const ccs = await costCentersOf(app.db, auth, true);
-      const users = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name));
+      const users0 = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name));
+      const roleRows = users0.length ? await app.db.select({ userId: s.userRoles.userId, key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(inArray(s.userRoles.userId, users0.map((u) => u.id))) : [];
+      const users = users0.map((u) => ({ ...u, profiles: roleRows.filter((r) => r.userId === u.id).map((r) => r.key) }));
       const suppliers = await app.db.select().from(s.suppliers).where(eq(s.suppliers.tenantId, auth.tenantId)).orderBy(asc(s.suppliers.name));
       const name = new Map(users.map((u) => [u.id, u.name]));
       return {
         admin: isBudgetAdmin(auth),
         accounts,
-        costCenters: ccs.map((c) => ({ ...c, leaderName: c.leaderId ? name.get(c.leaderId) ?? null : null, memberNames: c.memberIds.map((m) => name.get(m) ?? '') })),
+        costCenters: ccs.map((c) => ({ ...c, leaderName: c.leaderId ? name.get(c.leaderId) ?? null : null, memberNames: c.memberIds.map((m) => name.get(m) ?? ''), ownerNames: c.ownerIds.map((m) => name.get(m) ?? ''), executorNames: c.executorIds.map((m) => name.get(m) ?? ''), myRole: isBudgetAdmin(auth) ? 'dono' : costCenterRole(c, auth.userId) })),
         suppliers, users,
       };
     },
@@ -134,10 +136,11 @@ export const budgetRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/budget/cost-centers', summary: 'Cria centro de custo com líder e quem mais pode consumir', tag: 'Orçamento', ...ADMIN,
-    body: z.object({ code: z.string().trim().min(2).max(12).transform((x) => x.toUpperCase()), name: z.string().trim().min(2).max(80), leaderId: uuid.nullable().default(null), memberIds: z.array(uuid).max(30).default([]) }),
+    body: z.object({ code: z.string().trim().min(2).max(12).transform((x) => x.toUpperCase()), name: z.string().trim().min(2).max(80), leaderId: uuid.nullable().default(null), memberIds: z.array(uuid).max(30).default([]), ownerIds: z.array(uuid).max(10).default([]), executorIds: z.array(uuid).max(20).default([]) }),
     handler: async ({ app, auth, body, reply }) => {
       const [dup] = await app.db.select({ id: s.costCenters.id }).from(s.costCenters).where(and(eq(s.costCenters.tenantId, auth.tenantId), eq(s.costCenters.code, body.code))).limit(1);
       if (dup) throw unprocessable('Já existe um centro de custo com este código.', [{ path: 'code', message: 'Código em uso' }]);
+      await assertCostCenterPeople(app.db, auth.tenantId, body.ownerIds, body.executorIds);
       const [c] = await app.db.insert(s.costCenters).values({ tenantId: auth.tenantId, ...body }).returning();
       await logBudget(app.db, auth, c!.id, 'centro', c!.id, 'criado', `Centro de custo ${c!.code} ${c!.name} criado.`);
       reply.code(201);
@@ -146,8 +149,9 @@ export const budgetRoutes = [
   }),
   defineRoute({
     method: 'PATCH', url: '/budget/cost-centers/:id', summary: 'Altera nome, líder, pessoas que consomem ou desativa o centro de custo', tag: 'Orçamento', ...ADMIN, params: IdParams,
-    body: z.object({ name: z.string().trim().min(2).max(80).optional(), leaderId: uuid.nullable().optional(), memberIds: z.array(uuid).max(30).optional(), active: z.boolean().optional() }),
+    body: z.object({ name: z.string().trim().min(2).max(80).optional(), leaderId: uuid.nullable().optional(), memberIds: z.array(uuid).max(30).optional(), ownerIds: z.array(uuid).max(10).optional(), executorIds: z.array(uuid).max(20).optional(), active: z.boolean().optional() }),
     handler: async ({ app, auth, params, body }) => {
+      await assertCostCenterPeople(app.db, auth.tenantId, body.ownerIds, body.executorIds);
       const [c] = await app.db.update(s.costCenters).set({ ...body, updatedAt: new Date() }).where(and(eq(s.costCenters.id, params.id), eq(s.costCenters.tenantId, auth.tenantId))).returning();
       if (!c) throw notFound();
       await logBudget(app.db, auth, c.id, 'centro', c.id, 'alterado', `Centro de custo ${c.code} alterado.`);
@@ -226,8 +230,10 @@ export const budgetRoutes = [
         const rs = desc.flatMap((id) => byAcc.get(id) ?? []);
         return { accountId: a.id, ...totals(rs), byMonth: months.map((m) => ({ month: m, ...totals(rs.filter((r) => r.month === m)) })) };
       }).filter((r) => r.approved || r.pending || r.draft || r.adjusted || r.adjustPending || r.realized);
-      const canEdit = isBudgetAdmin(auth) || cc.leaderId === auth.userId || cc.memberIds.includes(auth.userId);
-      return { costCenter: cc, plan, months, lines, adjustments, expenses, accounts: accRows, total: totals(rows), canEdit, admin: isBudgetAdmin(auth), can: budgetCan(auth), label: quarterLabel(query.year, query.quarter) };
+      const role = costCenterRole(cc, auth.userId);
+      const canEdit = isBudgetAdmin(auth) || role === 'dono';
+      const canExecute = isBudgetAdmin(auth) || role !== null;
+      return { costCenter: cc, plan, months, lines, adjustments, expenses, accounts: accRows, total: totals(rows), canEdit, canExecute, myRole: role, admin: isBudgetAdmin(auth), can: budgetCan(auth), label: quarterLabel(query.year, query.quarter) };
     },
   }),
 
@@ -236,7 +242,7 @@ export const budgetRoutes = [
     method: 'POST', url: '/budget/plan/lines', summary: 'Planeja um item (o quê, como, quando, conta, valor) no trimestre do centro de custo', tag: 'Orçamento', ...M,
     body: LineBody.extend({ costCenterId: uuid }),
     handler: async ({ app, auth, body, req, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
       const plan = await planOf(app.db, auth, cc.id, year, quarter);
       if (plan.status === 'em_aprovacao') throw unprocessable('O planejamento está com a Diretoria. Aguarde a decisão para incluir itens.');
@@ -259,7 +265,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [l] = await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.id, params.id), eq(s.budgetLines.tenantId, auth.tenantId), isNull(s.budgetLines.deletedAt))).limit(1);
       if (!l) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, l.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, l.costCenterId, 'planejar');
       if (l.status !== 'rascunho' && l.status !== 'recusado') throw unprocessable('Item enviado ou aprovado não muda. Depois de aprovado, ajustes vão pelo Budget Guardião.');
       if (body.month && quarterOfMonth(body.month) !== quarterOfMonth(l.month)) throw unprocessable('O mês precisa ser do mesmo trimestre.');
       if (body.accountId) await leafAccount(app.db, auth.tenantId, body.accountId);
@@ -274,7 +280,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, params }) => {
       const [l] = await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.id, params.id), eq(s.budgetLines.tenantId, auth.tenantId), isNull(s.budgetLines.deletedAt))).limit(1);
       if (!l) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, l.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, l.costCenterId, 'planejar');
       if (isBudgetRestricted(auth)) throw forbidden(SUPERVISION);
       if (l.status === 'aprovado' || l.status === 'em_aprovacao') throw unprocessable('Item enviado ou aprovado não sai do planejamento; use o Budget Guardião para reduzir.');
       await app.db.update(s.budgetLines).set({ deletedAt: new Date() }).where(eq(s.budgetLines.id, l.id));
@@ -287,7 +293,7 @@ export const budgetRoutes = [
     method: 'POST', url: '/budget/plan/import-resources', summary: 'Traz para o planejamento os softwares, licenças, contratos e assinaturas ativos do centro (valores recorrentes do trimestre)', tag: 'Orçamento', ...M,
     body: Q.extend({ costCenterId: uuid }),
     handler: async ({ app, auth, body }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       const plan = await planOf(app.db, auth, cc.id, body.year, body.quarter);
       if (plan.status === 'em_aprovacao' || plan.status === 'aprovado') throw unprocessable('Planejamento enviado ou aprovado: inclua pelo Budget Guardião.');
       const months = monthsOfQuarter(body.year, body.quarter);
@@ -312,7 +318,7 @@ export const budgetRoutes = [
     method: 'POST', url: '/budget/plan/submit', summary: 'Envia o planejamento do trimestre: o da liderança vai à Gerência; o da Gerência, à Diretoria', tag: 'Orçamento', ...M,
     body: Q.extend({ costCenterId: uuid, note: z.string().trim().max(1000).nullable().optional() }),
     handler: async ({ app, auth, body, req }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       const plan = await planOf(app.db, auth, cc.id, body.year, body.quarter);
       const r = await app.db.transaction(async (tx) => {
         const stage = budgetRole(auth) === 'lideranca' ? 'gerencia' : 'diretoria';
@@ -365,7 +371,7 @@ export const budgetRoutes = [
     body: z.object({ costCenterId: uuid, accountId: uuid, month, deltaCents: z.number().int().refine((x) => x !== 0, 'Informe o valor do ajuste').refine((x) => Math.abs(x) <= 100_000_000_000), justification: z.string().trim().min(15, 'Justifique o ajuste (mínimo 15 caracteres)').max(2000) }),
     handler: async ({ app, auth, body, req, reply }) => {
       if (budgetRole(auth) !== 'gerencia') throw forbidden('O Budget Guardião é pedido pela Gerência e aprovado pela Diretoria.');
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       await leafAccount(app.db, auth.tenantId, body.accountId);
       const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
       const { rows } = await quarterNumbers(app.db, auth.tenantId, year, quarter, [cc.id]);
@@ -408,7 +414,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, body, req, reply }) => {
       if (budgetRole(auth) === 'lideranca') throw forbidden('Só a Gerência remaneja saldo entre contas do centro de custo.');
       if (body.fromAccountId === body.toAccountId) throw unprocessable('Escolha contas diferentes.');
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       await leafAccount(app.db, auth.tenantId, body.fromAccountId);
       await leafAccount(app.db, auth.tenantId, body.toAccountId);
       const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
@@ -438,7 +444,7 @@ export const budgetRoutes = [
       resourceId: uuid.nullable().optional(), assetId: uuid.nullable().optional(), purchaseId: uuid.nullable().optional(),
     }),
     handler: async ({ app, auth, body, req, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       if (!body.financeCheck) throw unprocessable('Antes de executar, faça a checagem prévia com o Financeiro (política 11.2).', [{ path: 'financeCheck', message: 'Obrigatório' }]);
       await leafAccount(app.db, auth.tenantId, body.accountId);
       if (body.lineId) {
@@ -475,7 +481,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [e] = await app.db.select().from(s.budgetExpenses).where(and(eq(s.budgetExpenses.id, params.id), eq(s.budgetExpenses.tenantId, auth.tenantId))).limit(1);
       if (!e) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, e.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, e.costCenterId, 'executar');
       if (isBudgetRestricted(auth)) throw forbidden(SUPERVISION);
       if (e.status === 'cancelado') throw unprocessable('Gasto já cancelado.');
       await app.db.update(s.budgetExpenses).set({ status: 'cancelado', cancelReason: body.reason, cancelledAt: new Date(), cancelledBy: auth.userId }).where(eq(s.budgetExpenses.id, e.id));
@@ -519,7 +525,7 @@ export const budgetRoutes = [
     method: 'POST', url: '/budget/reviews', summary: 'Registra a justificativa do desvio de uma categoria no mês', tag: 'Orçamento', ...M,
     body: z.object({ costCenterId: uuid, month, accountId: uuid, justification: z.string().trim().min(10).max(2000) }),
     handler: async ({ app, auth, body, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
       const year = Number(body.month.slice(0, 4)), quarter = quarterOfMonth(body.month);
       const { rows } = await quarterNumbers(app.db, auth.tenantId, year, quarter, [cc.id]);
       const all = await accountsOf(app.db, auth.tenantId);

@@ -176,7 +176,7 @@ export const adminRoutes = [
       const users = await app.db
         .select({
           id: s.users.id, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, phone: s.users.phone, active: s.users.active, ipBypass: s.users.ipBypass, lastLoginAt: s.users.lastLoginAt,
-          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, isCsm: s.users.isCsm, playbookRoles: s.users.playbookRoles, createdAt: s.users.createdAt,
+          goalSales: s.users.goalSales, goalProposals: s.users.goalProposals, goalLeads: s.users.goalLeads, sectors: s.users.sectors, sectorViewer: s.users.sectorViewer, isCsm: s.users.isCsm, playbookRoles: s.users.playbookRoles, createdAt: s.users.createdAt,
           hasAvatar: sql<boolean>`exists(select 1 from user_avatars ua where ua.user_id = "users"."id")`,
           profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'administrador' then 0 when 'gerencia' then 1 when 'supervisor' then 2 when 'analista' then 3 else 4 end limit 1)`,
         })
@@ -213,7 +213,7 @@ export const adminRoutes = [
         if (exists) throw unprocessable('E-mail já cadastrado.', [{ path: 'email', message: 'Já existe um usuário com este e-mail' }]);
         await assertSectors(tx, auth.tenantId, body.sectors);
         if (body.profile === 'supervisor' && !body.leadTeamIds.length) throw unprocessable(SUP_NEEDS_TEAM, [{ path: 'leadTeamIds', message: 'Escolha os times que ele supervisiona' }]);
-        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, phone: body.phone ?? null, isCsm: body.isCsm, sectors: body.sectors, playbookRoles: body.playbookRoles, passwordHash: await hashPassword(temp) }).returning();
+        const [u] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email: body.email, jobTitle: body.jobTitle, phone: body.phone ?? null, isCsm: body.isCsm, sectorViewer: body.sectorViewer, sectors: body.sectors, playbookRoles: body.playbookRoles, passwordHash: await hashPassword(temp) }).returning();
         await tx.insert(s.userRoles).values({ userId: u!.id, roleId: roles[body.profile]! });
         await setTeams(tx, auth, u!.id, body.teamIds, body.leadTeamIds);
         await audit(tx, req, { action: 'user.create', entityType: 'user', entityId: u!.id, metadata: { name: body.name, profile: body.profile } });
@@ -248,7 +248,7 @@ export const adminRoutes = [
         await assertSectors(tx, auth.tenantId, body.sectors);
         await tx
           .update(s.users)
-          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, ipBypass: body.ipBypass, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, isCsm: body.isCsm, playbookRoles: body.playbookRoles, updatedAt: new Date() })
+          .set({ name: body.name, jobTitle: body.jobTitle, phone: body.phone, active: body.active, ipBypass: body.ipBypass, goalSales: body.goalSales, goalProposals: body.goalProposals, goalLeads: body.goalLeads, sectors: body.sectors, sectorViewer: body.sectorViewer, isCsm: body.isCsm, playbookRoles: body.playbookRoles, updatedAt: new Date() })
           .where(eq(s.users.id, u.id));
         if (body.active === false) await tx.update(s.sessions).set({ revokedAt: new Date() }).where(eq(s.sessions.userId, u.id));
         if (body.profile) {

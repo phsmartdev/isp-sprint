@@ -38,7 +38,7 @@ export async function csmUsers(db: DbOrTx, tenantId: string): Promise<{ id: stri
        and translate(lower(t.name), 'áàâãéêíóôõúç', 'aaaaeeiooouc') like '%sucesso do cliente%'
      order by u.name`);
   if (byTeam.rows.length) return byTeam.rows.map((r) => ({ id: r.id, name: r.name, source: 'time' as const }));
-  const bySector = await db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), sql`'sucesso_cliente' = any(${s.users.sectors})`)).orderBy(asc(s.users.name));
+  const bySector = await db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), eq(s.users.sectorViewer, false), sql`'sucesso_cliente' = any(${s.users.sectors})`)).orderBy(asc(s.users.name));
   return bySector.map((r) => ({ ...r, source: 'setor' as const }));
 }
 

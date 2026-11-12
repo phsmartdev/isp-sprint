@@ -11,9 +11,9 @@ import { Select } from '../../components/ui/primitives';
 import { PageHeader } from '../../components/layout/PageHeader';
 
 export type Account = { id: string; parentId: string | null; code: string; name: string; nature: 'despesa' | 'receita'; description: string | null; active: boolean; leaf: boolean; level: number; path: string };
-export type CostCenter = { id: string; code: string; name: string; leaderId: string | null; leaderName: string | null; memberIds: string[]; memberNames: string[]; active: boolean };
+export type CostCenter = { id: string; code: string; name: string; leaderId: string | null; leaderName: string | null; ownerIds?: string[]; executorIds?: string[]; ownerNames?: string[]; executorNames?: string[]; myRole?: 'dono' | 'execucao' | null; memberIds: string[]; memberNames: string[]; active: boolean };
 export type Supplier = { id: string; name: string; document: string | null; category: string | null; email: string | null; phone: string | null; notes: string | null; active: boolean };
-export type Structure = { admin: boolean; accounts: Account[]; costCenters: CostCenter[]; suppliers: Supplier[]; users: { id: string; name: string }[] };
+export type Structure = { admin: boolean; accounts: Account[]; costCenters: CostCenter[]; suppliers: Supplier[]; users: { id: string; name: string; profiles?: string[] }[] };
 export type Totals = { approved: number; pending: number; draft: number; adjusted: number; adjustPending: number; realized: number; planned: number; available: number; pct: number | null; over: boolean; band: ExecutionBand | null };
 
 export const useStructure = () => useQuery({ queryKey: ['budget', 'structure'], queryFn: () => api<Structure>('/budget/structure'), staleTime: 30_000 });

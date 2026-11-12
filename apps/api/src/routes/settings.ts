@@ -6,6 +6,7 @@ import { dispatchDomainEvents } from '../services/domainEvents';
 import { syncOpenTickets } from '../services/glpi';
 import { syncTenantMail } from '../services/gmail';
 import { runMeasurementDrafts } from '../services/measurementReports';
+import { runMarketingDueAlerts } from './marketingBoard';
 import { drainAutomationQueue, pollIxcReturns } from '../services/automationQueue';
 import { timingSafeEqual } from 'node:crypto';
 import { runAbmDaily } from '../services/abmFollowup';
@@ -306,6 +307,14 @@ export const settingsRoutes = [
           measurement[t.id] = await runMeasurementDrafts(app.db, t.id, new Intl.DateTimeFormat('en-CA', { timeZone: tz?.tz ?? 'America/Sao_Paulo' }).format(new Date()));
         } catch (e) { measurement[t.id] = { error: (e as Error).message }; }
       }
+      // Quadro do Marketing: aviso de tarefa atrasada ou que vence hoje/amanhã (uma vez por dia)
+      const marketing: Record<string, unknown> = {};
+      for (const t of tenants) {
+        try {
+          const [tz] = await app.db.select({ tz: s.tenants.timezone }).from(s.tenants).where(eq(s.tenants.id, t.id)).limit(1);
+          marketing[t.id] = await runMarketingDueAlerts(app.db, t.id, new Intl.DateTimeFormat('en-CA', { timeZone: tz?.tz ?? 'America/Sao_Paulo' }).format(new Date()));
+        } catch (e) { marketing[t.id] = { error: (e as Error).message }; }
+      }
       // Gestão de Resultados: apuração oficial das metas vencidas e metas mensais recorrentes do mês
       const results: Record<string, unknown> = {};
       for (const t of tenants) {
@@ -339,7 +348,7 @@ export const settingsRoutes = [
         try { automations[t.id] = { ixc: await pollIxcReturns(app.db, t.id), fila: await drainAutomationQueue(app.db, app.config, t.id, 200) }; }
         catch (e) { automations[t.id] = { error: (e as Error).message }; }
       }
-      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement, automations, badges, domainEvents: domainEventsRun };
+      return { ...digests, ...idle, ...contracts, contractDigests, contractNotices, commFlows, customerSuccess: cs, businessEvents: events, results, glpi, measurement, marketing, automations, badges, domainEvents: domainEventsRun };
     },
   }),
 ];

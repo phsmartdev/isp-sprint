@@ -2,6 +2,7 @@
  * Painel da Gestão de Contratos: carteira estratificada, vencimentos, faturamento por tipo no período e visão executiva.
  * A ordem e as seções visíveis vêm de Configurações → Módulos e liberação → Contratos (padrão: faturamento e visão executiva no fim).
  */
+import { useAuth } from '../../auth/AuthProvider';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -264,6 +265,7 @@ function HealthSection({ d, money, filter, setFilter }: { d: Dash; money: Money;
   const h = d.decision.health;
   const total = h.reduce((a, x) => a + x.monthlyCents, 0) || 1;
   const o = d.operations;
+  const erpOn = useAuth().feature('contratos.cadastro_erp');
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
       <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
@@ -289,14 +291,16 @@ function HealthSection({ d, money, filter, setFilter }: { d: Dash; money: Money;
             ))}
           </div>
         </section>
-        <ErpPipeline o={o} />
+        {erpOn && <ErpPipeline o={o} />}
       </div>
       <section className="card flex h-full flex-col p-5" aria-label="Indicadores operacionais">
         <h3 className="mb-2 text-base font-bold text-ink">Indicadores operacionais</h3>
         <dl className="flex flex-1 flex-col justify-around">
           {[
-            ['Contratos com divergência', o.divergence.share == null ? '—' : fmtPct(o.divergence.share), `${o.divergence.n} com Cadastro ERP divergente do IXC`, o.divergence.n > 0],
-            ['Contratos ativos sem Cadastro ERP', fmtInt(o.erp.withoutRecord), 'cadastro no IXC ainda não preparado no sistema', false],
+            ...(erpOn ? [
+              ['Contratos com divergência', o.divergence.share == null ? '—' : fmtPct(o.divergence.share), `${o.divergence.n} com Cadastro ERP divergente do IXC`, o.divergence.n > 0],
+              ['Contratos ativos sem Cadastro ERP', fmtInt(o.erp.withoutRecord), 'cadastro no IXC ainda não preparado no sistema', false],
+            ] as [string, string, string, boolean][] : []),
             ['Pendências com prazo vencido', fmtInt(o.overdueTasks.n), 'tarefas ligadas a contratos', o.overdueTasks.n > 0],
             ['Transferências sem aceite', fmtInt(o.pendingAccept.n), `${o.pendingAccept.returned} devolvida(s) aguardando tratamento`, o.pendingAccept.n > 0],
           ].map(([l, v, hint, warn]) => (
@@ -400,12 +404,13 @@ function Adjustments({ list, money, onOpen }: { list: Decision['adjustmentsDue']
 
 function Owners({ list, money }: { list: Decision['byOwner']; money: Money }) {
   const max = Math.max(1, ...list.map((o) => o.monthlyCents));
+  const erpOn = useAuth().feature('contratos.cadastro_erp');
   return (
     <section className="card h-full p-5" aria-label="Carteira por responsável">
       <h3 className="font-bold text-ink">Carteira por responsável</h3>
       <p className="mb-2 text-xs text-muted">Quanto cada um carrega e onde está o risco.</p>
       <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-sm">
-        <thead className="text-xs text-muted"><tr><th className="py-1.5 pr-2 font-medium">Responsável</th><th className="py-1.5 pr-2 font-medium">MRR (em risco)</th><th className="py-1.5 pr-2 text-right font-medium">Contratos</th><th className="py-1.5 pr-2 text-right font-medium">Pedem ação</th><th className="py-1.5 pr-2 text-right font-medium">Tarefas vencidas</th><th className="py-1.5 text-right font-medium">ERP a concluir</th></tr></thead>
+        <thead className="text-xs text-muted"><tr><th className="py-1.5 pr-2 font-medium">Responsável</th><th className="py-1.5 pr-2 font-medium">MRR (em risco)</th><th className="py-1.5 pr-2 text-right font-medium">Contratos</th><th className="py-1.5 pr-2 text-right font-medium">Pedem ação</th><th className="py-1.5 pr-2 text-right font-medium">Tarefas vencidas</th>{erpOn && <th className="py-1.5 text-right font-medium">ERP a concluir</th>}</tr></thead>
         <tbody>{list.map((o) => (
           <tr key={o.name} className="border-t border-line">
             <td className="py-2 pr-2 font-semibold text-ink">{o.name}</td>
@@ -416,7 +421,7 @@ function Owners({ list, money }: { list: Decision['byOwner']; money: Money }) {
             <td className="num py-2 pr-2 text-right">{o.n}</td>
             <td className={clsx('num py-2 pr-2 text-right', o.pendencias && 'font-semibold text-danger')}>{o.pendencias}</td>
             <td className={clsx('num py-2 pr-2 text-right', o.overdueTasks && 'font-semibold text-danger')}>{o.overdueTasks}</td>
-            <td className="num py-2 text-right">{o.erpPending}</td>
+            {erpOn && <td className="num py-2 text-right">{o.erpPending}</td>}
           </tr>
         ))}</tbody>
       </table></div>

@@ -1044,6 +1044,27 @@
       "when": 1794449825275,
       "tag": "0148_raci_aprovacoes_licitacao",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1794508919988,
+      "tag": "0149_centro_custo_donos",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1794509808981,
+      "tag": "0150_quadro_marketing",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1794510635426,
+      "tag": "0151_setor_visualizador",
+      "breakpoints": true
     }
   ]
 }

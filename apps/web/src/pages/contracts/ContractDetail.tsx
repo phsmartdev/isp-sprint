@@ -176,7 +176,7 @@ export function ContractDetailPage() {
             ...(c.stage !== 'cadastro_validacao' ? [{ key: 'execucao' as Tab, label: 'Execução' }, { key: 'aditivos' as Tab, label: 'Aditivos' }] : []),
             ...(needsZenith(v.serviceType) ? [{ key: 'zenith' as Tab, label: 'Zenith' }] : []),
             { key: 'processos', label: 'Processos', count: openProcs.length },
-            ...(c.stage !== 'cadastro_validacao' ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
+            ...(c.stage !== 'cadastro_validacao' && feature('contratos.cadastro_erp') ? [{ key: 'erp' as Tab, label: 'Cadastro ERP' }] : []),
             { key: 'documentos', label: 'Documentos' },
             { key: 'versoes', label: 'Versões', count: c.versions.length },
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
@@ -229,7 +229,7 @@ export function ContractDetailPage() {
               {!c.processes.length ? <EmptyState title="Nenhum processo" description={c.validatedAt ? 'Renovação, reajuste e encerramento abrem pelos alertas automáticos ou pelo botão Mover no funil.' : 'A implantação abre na validação do cadastro.'} /> : c.processes.map((p) => <ProcessPanel key={p.id} c={c} p={p} onUpload={(category, processId) => setUpload({ category, processId })} />)}
             </div>
           )}
-          {tab === 'erp' && <ErpPanel c={c} />}
+          {tab === 'erp' && feature('contratos.cadastro_erp') && <ErpPanel c={c} />}
           {tab === 'zenith' && <ZenithPanel contractId={c.id} />}
           {tab === 'empenhos' && <CommitmentControl contractId={c.id} />}
           {tab === 'consumo' && <ConsumptionPanel c={c} />}

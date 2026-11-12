@@ -55,6 +55,8 @@ export const users = pgTable(
     goalLeads: integer('goal_leads').notNull().default(0),
     /** Setores (Comercial, Financeiro, Jurídico...): definem quem recebe tarefas e quem conclui cada etapa dos contratos. */
     sectors: text('sectors').array().notNull().default(sql`'{}'::text[]`),
+    /** true = só acompanha os setores (vê), sem atuar na operação: não recebe tarefas nem conclui etapas */
+    sectorViewer: boolean('sector_viewer').notNull().default(false),
     /** CSM (Sucesso do Cliente): recebe carteira e aparece nos filtros de CSM */
     isCsm: boolean('is_csm').notNull().default(false),
     /** Papéis do Playbook Comercial que a pessoa ocupa (GC, SC, ANC, ASC...): parametrizado no cadastro do usuário. */
@@ -5176,6 +5178,10 @@ export const costCenters = pgTable('cost_centers', {
   name: text('name').notNull(),
   leaderId: uuid('leader_id').references(() => users.id),
   memberIds: uuid('member_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** Donos do orçamento (gestores da área, um ou mais): planejam, pedem ajustes e remanejam. */
+  ownerIds: uuid('owner_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** Responsáveis pela execução (supervisão ou gestão): lançam gastos, recursos e compras. */
+  executorIds: uuid('executor_ids').array().notNull().default(sql`'{}'::uuid[]`),
   /** Centro de custo do time (cada time é um centro; nome e responsáveis acompanham o time). */
   teamId: uuid('team_id').references(() => teams.id),
   active: boolean('active').notNull().default(true),
@@ -7092,3 +7098,98 @@ export const officeLetters = pgTable('office_letters', {
   numUq: uniqueIndex('office_letters_number_uq').on(t.tenantId, t.branchId, t.year, t.number),
   oppIdx: index('office_letters_opp_idx').on(t.tenantId, t.opportunityId, t.createdAt),
 }));
+
+// ---------------------------------------------------------------- Marketing: quadro de tarefas (Sprint quinzenal, fura-fila, etiquetas)
+export const mktSprints = pgTable('mkt_sprints', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  startOn: date('start_on', { mode: 'string' }).notNull(),
+  endOn: date('end_on', { mode: 'string' }).notNull(),
+  objective: text('objective'),
+  highlights: text('highlights'),
+  /** planejamento → aberta (escopo congelado) → encerrada */
+  status: text('status').notNull().default('planejamento'),
+  openedAt: ts('opened_at'),
+  openedBy: uuid('opened_by').references(() => users.id),
+  closedAt: ts('closed_at'),
+  closedBy: uuid('closed_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('mkt_sprints_idx').on(t.tenantId, t.startOn) }));
+
+export const mktCards = pgTable('mkt_cards', {
+  id: id(),
+  tenantId: tenantId(),
+  code: integer('code').notNull(),
+  title: text('title').notNull(),
+  briefing: text('briefing'),
+  column: text('column').notNull().default('backlog'),
+  position: integer('position').notNull().default(0),
+  /** sempre um responsável; os demais acompanham como observadores */
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  observerIds: uuid('observer_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  dueOn: date('due_on', { mode: 'string' }),
+  priority: text('priority').notNull().default('media'),
+  verticals: text('verticals').array().notNull().default(sql`'{}'::text[]`),
+  allocation: text('allocation'),
+  requester: text('requester'),
+  sprintId: uuid('sprint_id').references(() => mktSprints.id),
+  /** entrou depois da Sprint aberta: precisa de aprovação da liderança */
+  furaFila: boolean('fura_fila').notNull().default(false),
+  furaFilaStatus: text('fura_fila_status'),
+  furaFilaCriterion: text('fura_fila_criterion'),
+  furaFilaReason: text('fura_fila_reason'),
+  furaFilaDecidedBy: uuid('fura_fila_decided_by').references(() => users.id),
+  furaFilaDecidedAt: ts('fura_fila_decided_at'),
+  /** consumo de orçamento: linha planejada do centro de custo e valor previsto */
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+  budgetLineId: uuid('budget_line_id').references(() => budgetLines.id),
+  budgetCents: integer('budget_cents'),
+  /** brindes previstos para a ação */
+  gifts: jsonb('gifts').$type<{ itemId: string; name: string; qty: number; unitCostCents: number }[]>().notNull().default(sql`'[]'::jsonb`),
+  completedAt: ts('completed_at'),
+  archivedAt: ts('archived_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  rowVersion: integer('row_version').notNull().default(1),
+}, (t) => ({ idx: index('mkt_cards_idx').on(t.tenantId, t.column, t.position), code: uniqueIndex('mkt_cards_code_uq').on(t.tenantId, t.code) }));
+
+export const mktTags = pgTable('mkt_tags', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  color: text('color').notNull().default('#2F5986'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('mkt_tags_uq').on(t.tenantId, t.name) }));
+
+export const mktCardTags = pgTable('mkt_card_tags', {
+  tenantId: tenantId(),
+  cardId: uuid('card_id').notNull().references(() => mktCards.id, { onDelete: 'cascade' }),
+  tagId: uuid('tag_id').notNull().references(() => mktTags.id, { onDelete: 'cascade' }),
+}, (t) => ({ pk: uniqueIndex('mkt_card_tags_pk').on(t.cardId, t.tagId) }));
+
+/** Atividades da ferramenta relacionadas a uma etiqueta ou a uma tarefa do Marketing. */
+export const mktLinks = pgTable('mkt_links', {
+  id: id(),
+  tenantId: tenantId(),
+  tagId: uuid('tag_id').references(() => mktTags.id, { onDelete: 'cascade' }),
+  cardId: uuid('card_id').references(() => mktCards.id, { onDelete: 'cascade' }),
+  entityType: text('entity_type').notNull(),
+  entityId: uuid('entity_id').notNull(),
+  label: text('label').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ ent: index('mkt_links_entity_idx').on(t.tenantId, t.entityType, t.entityId), tagUq: uniqueIndex('mkt_links_tag_uq').on(t.tagId, t.entityType, t.entityId), cardUq: uniqueIndex('mkt_links_card_uq').on(t.cardId, t.entityType, t.entityId) }));
+
+export const mktCardEvents = pgTable('mkt_card_events', {
+  id: id(),
+  tenantId: tenantId(),
+  cardId: uuid('card_id').notNull().references(() => mktCards.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  text: text('text'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('mkt_card_events_idx').on(t.cardId, t.createdAt) }));

@@ -59,6 +59,7 @@ const NAV: NavEntry[] = [
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
     { to: '/leads', label: 'Leads', module: 'leads' },
     { to: '/abm', label: 'ABM', module: 'clientes', feature: 'marketing.abm' },
+    { to: '/marketing/quadro', label: 'Quadro de tarefas', module: 'campanhas', feature: 'marketing.quadro' },
     { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
     { to: '/brindes', label: 'Brindes', module: 'campanhas' },
   ] },

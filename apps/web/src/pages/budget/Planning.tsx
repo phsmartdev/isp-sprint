@@ -17,7 +17,7 @@ type Line = { id: string; accountId: string; what: string; how: string | null; m
 type Adjustment = { id: string; accountId: string; month: string; deltaCents: number; justification: string; pct: number | null; status: 'registrado' | 'pendente' | 'aprovado' | 'recusado'; kind?: 'guardiao' | 'remanejamento'; transferId?: string | null; decisionNote: string | null; createdAt: string };
 type Expense = { id: string; accountId: string; lineId: string | null; occurredOn: string; description: string; amountCents: number; paymentMethod: string | null; docName: string | null; status: 'valido' | 'cancelado'; cancelReason: string | null };
 type AccRow = Totals & { accountId: string; byMonth: (Totals & { month: string })[] };
-type Plan = { costCenter: CostCenter; plan: { id: string; status: PlanStatus; note: string | null }; months: string[]; lines: Line[]; adjustments: Adjustment[]; expenses: Expense[]; accounts: AccRow[]; total: Totals; canEdit: boolean; admin: boolean; can: BudgetCan; label: string };
+type Plan = { canExecute?: boolean; myRole?: 'dono' | 'execucao' | null; costCenter: CostCenter; plan: { id: string; status: PlanStatus; note: string | null }; months: string[]; lines: Line[]; adjustments: Adjustment[]; expenses: Expense[]; accounts: AccRow[]; total: Totals; canEdit: boolean; admin: boolean; can: BudgetCan; label: string };
 type BudgetCan = { role: 'diretoria' | 'gerencia' | 'lideranca'; decideStages: ('gerencia' | 'diretoria')[]; guardian: boolean; decideGuardian: boolean; transfer: boolean };
 const stageOf = (l: Line) => l.approvalStage ?? 'diretoria';
 const STAGE_LABEL = { gerencia: 'Gerência', diretoria: 'Diretoria' } as const;
@@ -133,14 +133,14 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Centro de custo" className="h-11 w-auto" value={cc} onChange={(e) => onCc(e.target.value)}>{ccs.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}</Select>
         <Tag className={PLAN_TONE[d.plan.status]}>{PLAN_STATUS_LABELS[d.plan.status]}</Tag>
-        <span className="text-sm text-muted">Líder: {d.costCenter.leaderId ? st.users.find((u) => u.id === d.costCenter.leaderId)?.name : 'não definido'}</span>
+        <span className="text-sm text-muted">{d.costCenter.ownerIds?.length ? `Dono do orçamento: ${d.costCenter.ownerIds.map((u) => st.users.find((x) => x.id === u)?.name ?? '').join(', ')}` : `Líder: ${d.costCenter.leaderId ? st.users.find((u) => u.id === d.costCenter.leaderId)?.name ?? '' : 'não definido'}`}{d.costCenter.executorIds?.length ? ` · Execução: ${d.costCenter.executorIds.map((u) => st.users.find((x) => x.id === u)?.name ?? '').join(', ')}` : ''}{d.myRole ? ` · você: ${d.myRole === 'dono' ? 'Dono do orçamento' : 'Responsável pela execução'}` : ''}</span>
         <div className="ml-auto flex flex-wrap gap-2">
           {d.canEdit && !locked && <Button variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setLine('new')}>Planejar item</Button>}
           {d.canEdit && !locked && <Button variant="outline" onClick={() => act.mutate({ url: '/budget/plan/import-resources', body: { costCenterId: cc, year, quarter } }, { onSuccess: (r) => toast({ tone: 'success', message: `${(r as { created: number }).created} item(ns) recorrente(s) trazido(s)` }) })}>Trazer licenças e contratos</Button>}
           {d.canEdit && draft.length > 0 && d.plan.status !== 'em_aprovacao' && <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={act.isPending} onClick={() => act.mutate({ url: '/budget/plan/submit', body: { costCenterId: cc, year, quarter } }, { onSuccess: () => toast({ tone: 'success', message: d.can.role === 'lideranca' ? 'Planejamento enviado à Gerência' : 'Planejamento enviado à Diretoria' }) })}>{d.can.role === 'lideranca' ? 'Enviar à Gerência' : 'Enviar à Diretoria'} ({draft.length})</Button>}
           {d.can.transfer && d.total.approved > 0 && <Button variant="outline" icon={<ArrowLeftRight className="h-4 w-4" />} onClick={() => setTransfer(true)}>Remanejar saldo</Button>}
           {d.can.guardian && d.total.approved > 0 && <Button variant="outline" icon={<ShieldAlert className="h-4 w-4" />} onClick={() => setGuardian(true)}>Budget Guardião</Button>}
-          {d.canEdit && d.total.approved > 0 && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setExpense('new')}>Lançar gasto</Button>}
+          {(d.canExecute ?? d.canEdit) && d.total.approved > 0 && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setExpense('new')}>Lançar gasto</Button>}
         </div>
       </div>
 
@@ -214,7 +214,7 @@ function CostCenterPlan({ st, year, quarter, cc, onCc }: { st: Structure; year: 
                   <div className="flex gap-1">
                     {d.canEdit && (l.status === 'rascunho' || l.status === 'recusado') && <Button size="sm" variant="ghost" onClick={() => setLine(l)}>Editar</Button>}
                     {d.canEdit && (l.status === 'rascunho' || l.status === 'recusado') && <Button size="sm" variant="ghost" onClick={() => act.mutate({ url: `/budget/plan/lines/${l.id}`, method: 'DELETE' })}>Retirar</Button>}
-                    {d.canEdit && l.status === 'aprovado' && <Button size="sm" variant="ghost" onClick={() => setExpense(l)}>Lançar gasto</Button>}
+                    {(d.canExecute ?? d.canEdit) && l.status === 'aprovado' && <Button size="sm" variant="ghost" onClick={() => setExpense(l)}>Lançar gasto</Button>}
                   </div>
                 </li>
               );
@@ -263,7 +263,7 @@ function Expenses({ d, accName, onCancel }: { d: Plan; accName: Map<string, Acco
               </div>
               {e.docName && <a className="text-primary" href={`/api/v1/budget/expenses/${e.id}/document`} title={`Comprovante: ${e.docName}`} aria-label={`Baixar comprovante de ${e.description}`}><Download className="h-4 w-4" /></a>}
               <span className="text-sm font-semibold tabular-nums text-ink">{neg(e.amountCents)}</span>
-              {d.canEdit && e.status === 'valido' && <button type="button" className="text-xs font-semibold text-muted hover:text-danger" onClick={() => setCancel(e)}>Cancelar</button>}
+              {(d.canExecute ?? d.canEdit) && e.status === 'valido' && <button type="button" className="text-xs font-semibold text-muted hover:text-danger" onClick={() => setCancel(e)}>Cancelar</button>}
             </li>
           ))}
         </ul>
@@ -472,7 +472,7 @@ function StructureAdmin({ st }: { st: Structure }) {
   const saveAcc = useMutation({ mutationFn: () => api('/budget/accounts', { method: 'POST', body: acc }), onSuccess: () => { setAcc(null); done('Conta criada'); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const toggleAcc = useMutation({ mutationFn: (a: Account) => api(`/budget/accounts/${a.id}`, { method: 'PATCH', body: { active: !a.active } }), onSuccess: () => done('Conta atualizada'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const saveCc = useMutation({
-    mutationFn: () => (cc!.isNew ? api('/budget/cost-centers', { method: 'POST', body: { code: cc!.code, name: cc!.name, leaderId: cc!.leaderId || null, memberIds: cc!.memberIds ?? [] } }) : api(`/budget/cost-centers/${cc!.id}`, { method: 'PATCH', body: { name: cc!.name, leaderId: cc!.leaderId || null, memberIds: cc!.memberIds ?? [], active: cc!.active } })),
+    mutationFn: () => (cc!.isNew ? api('/budget/cost-centers', { method: 'POST', body: { code: cc!.code, name: cc!.name, leaderId: cc!.leaderId || null, memberIds: cc!.memberIds ?? [], ownerIds: cc!.ownerIds ?? [], executorIds: cc!.executorIds ?? [] } }) : api(`/budget/cost-centers/${cc!.id}`, { method: 'PATCH', body: { ownerIds: cc!.ownerIds ?? [], executorIds: cc!.executorIds ?? [], name: cc!.name, leaderId: cc!.leaderId || null, memberIds: cc!.memberIds ?? [], active: cc!.active } })),
     onSuccess: () => { setCc(null); done('Centro de custo salvo'); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   /** Próximo código livre abaixo da conta-mãe (3.2 → 3.2.04). */
@@ -503,13 +503,13 @@ function StructureAdmin({ st }: { st: Structure }) {
       </section>
       <section className="card p-0" aria-label="Centros de custo">
         <header className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div><h2 className="text-md font-bold text-ink">Centros de custo</h2><p className="text-xs text-muted">O líder planeja e consome; você pode indicar outras pessoas.</p></div>
+          <div><h2 className="text-md font-bold text-ink">Centros de custo</h2><p className="text-xs text-muted">Dono do orçamento planeja; Responsável pela execução lança gastos, recursos e compras.</p></div>
           <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setCc({ isNew: true, code: '', name: '', leaderId: null, memberIds: [], active: true })}>Novo centro</Button>
         </header>
         <ul className="divide-y divide-line">
           {st.costCenters.map((c) => (
             <li key={c.id} className={clsx('flex items-center gap-3 px-4 py-2.5', !c.active && 'opacity-50')}>
-              <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{c.code} · {c.name}</p><p className="text-xs text-muted">Líder: {c.leaderName ?? 'não definido'}{c.memberNames.length ? ` · também consomem: ${c.memberNames.join(', ')}` : ''}</p></div>
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{c.code} · {c.name}</p><p className="text-xs text-muted">{c.ownerNames?.length ? `Dono do orçamento: ${c.ownerNames.join(', ')}` : `Líder: ${c.leaderName ?? 'não definido'}`}{c.executorNames?.length ? ` · Execução: ${c.executorNames.join(', ')}` : c.memberNames.length ? ` · também consomem: ${c.memberNames.join(', ')}` : ''}</p></div>
               <Button size="sm" variant="ghost" onClick={() => setCc({ ...c })}>Editar</Button>
             </li>
           ))}
@@ -528,6 +528,8 @@ function StructureAdmin({ st }: { st: Structure }) {
           <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
             <FormField label="Código" htmlFor="cc-c" required><Input id="cc-c" disabled={!cc.isNew} value={cc.code ?? ''} onChange={(e) => setCc({ ...cc, code: e.target.value })} /></FormField>
             <FormField label="Nome" htmlFor="cc-n" required><Input id="cc-n" value={cc.name ?? ''} onChange={(e) => setCc({ ...cc, name: e.target.value })} /></FormField>
+            <PeoplePick label="Dono do orçamento (gestor da área; pode ser mais de um)" hint="Planeja o trimestre, pede ajustes e remaneja. Só perfis Gerência ou Diretoria." users={st.users.filter((u) => u.profiles?.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p)))} value={cc.ownerIds ?? []} onChange={(ownerIds) => setCc({ ...cc, ownerIds })} />
+            <PeoplePick label="Responsável pela execução (supervisão ou gestão)" hint="Lança gastos, recursos e compras do centro. Só perfis Supervisão ou Gerência." users={st.users.filter((u) => u.profiles?.some((p) => ['supervisor', 'gerencia', 'diretoria', 'administrador'].includes(p)))} value={cc.executorIds ?? []} onChange={(executorIds) => setCc({ ...cc, executorIds })} />
             <FormField label="Líder" htmlFor="cc-l" className="sm:col-span-2"><Select id="cc-l" value={cc.leaderId ?? ''} onChange={(e) => setCc({ ...cc, leaderId: e.target.value || null })}><option value="">Sem líder</option>{st.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
             <fieldset className="sm:col-span-2"><legend className="mb-1.5 text-sm font-semibold text-ink">Também podem consumir o orçamento</legend>
               <div className="grid grid-cols-2 gap-1">{st.users.filter((u) => u.id !== cc.leaderId).map((u) => <label key={u.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--primary))]" checked={(cc.memberIds ?? []).includes(u.id)} onChange={(e) => setCc({ ...cc, memberIds: e.target.checked ? [...(cc.memberIds ?? []), u.id] : (cc.memberIds ?? []).filter((x) => x !== u.id) })} />{u.name}</label>)}</div>
@@ -550,5 +552,20 @@ function History() {
         <ol className="divide-y divide-line">{q.data.items.map((e) => <li key={e.id} className="px-4 py-2.5"><p className="text-sm text-ink">{e.summary}</p><p className="text-xs text-muted">{fmtDateTime(e.createdAt)} · {e.actor ?? 'Sistema'}</p></li>)}</ol>
       )}
     </section>
+  );
+}
+
+/** Escolha de várias pessoas (só as elegíveis para o papel). */
+function PeoplePick({ label, hint, users, value, onChange }: { label: string; hint: string; users: { id: string; name: string }[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <fieldset className="sm:col-span-2">
+      <legend className="mb-0.5 text-sm font-semibold text-ink">{label}</legend>
+      <p className="mb-1.5 text-xs text-muted">{hint}</p>
+      {!users.length ? <p className="text-xs text-muted">Nenhuma pessoa com o perfil exigido.</p> : (
+        <div className="grid grid-cols-2 gap-1">{users.map((u) => (
+          <label key={u.id} className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--primary))]" checked={value.includes(u.id)} onChange={(e) => onChange(e.target.checked ? [...value, u.id] : value.filter((x) => x !== u.id))} />{u.name}</label>
+        ))}</div>
+      )}
+    </fieldset>
   );
 }
