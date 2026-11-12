@@ -14,6 +14,7 @@ import { fmtDate, fmtDateTime } from '../../lib/format';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
+import { ProjectGantt } from '../../features/bids/Gantt';
 
 type Row = { id: string; parentId: string | null; title: string; ownerId: string; ownerName: string; startOn: string | null; dueOn: string | null; done: boolean; spec: ProjectTaskSpec | null; milestoneId: string | null; dependsOn: string[]; rowVersion: number };
 type Plan = {
@@ -29,7 +30,7 @@ export function BidPlanningPage() {
   const q = useQuery({ queryKey: key, queryFn: () => api<Plan>(`/projects/${id}/licitacao/plano`) });
   const qc = useQueryClient();
   const toast = useToast();
-  const [view, setView] = useState<View>('tabela');
+  const [view, setView] = useState<View>('cronograma');
   const set = (p: Plan) => qc.setQueryData(key, p);
   const edit = useMutation({
     mutationFn: (b: { ids: string[]; patch: Record<string, unknown>; shiftDays?: number; rowVersions?: Record<string, number> }) => api<Plan>(`/projects/${id}/licitacao/tarefas`, { method: 'PATCH', body: b }),
@@ -58,9 +59,9 @@ export function BidPlanningPage() {
         )}
         <p className="mt-2 text-xs text-muted">Entregável obrigatório precisa de responsável da área, data e critério de aceite. A aprovação do plano pela matriz RACI vem na próxima fase.</p>
       </section>
-      <Tabs<View> label="Visões do planejamento" value={view} onChange={setView} tabs={[{ key: 'tabela', label: 'Tabela' }, { key: 'cronograma', label: 'Cronograma' }, { key: 'dependencias', label: 'Dependências' }]} />
+      <Tabs<View> label="Visões do planejamento" value={view} onChange={setView} tabs={[{ key: 'cronograma', label: 'Cronograma (Gantt)' }, { key: 'tabela', label: 'Tabela' }, { key: 'dependencias', label: 'Dependências' }]} />
       {view === 'tabela' && <PlanTable d={d} edit={edit.mutate} busy={edit.isPending} />}
-      {view === 'cronograma' && <Gantt d={d} />}
+      {view === 'cronograma' && <ProjectGantt phases={d.phases} rows={d.rows} dates={d.officialDates} editable={d.canPlan} onMove={(rid, startOn, dueOn) => { const r = d.rows.find((x) => x.id === rid)!; edit.mutate({ ids: [rid], patch: { startOn, dueOn }, rowVersions: { [rid]: r.rowVersion } }); }} />}
       {view === 'dependencias' && <Deps d={d} onPlan={set} />}
     </div>
   );
@@ -226,40 +227,6 @@ function AddModal({ projectId, target, onClose, onDone }: { projectId: string; t
         <p className="text-xs text-muted">Vale só para este projeto; o modelo não muda.</p>
       </div>
     </Modal>
-  );
-}
-
-/** Cronograma: barras por macrotarefa na régua de dias, com as linhas dos marcos do edital. */
-function Gantt({ d }: { d: Plan }) {
-  const macros = d.rows.filter((r) => !r.parentId && (r.startOn || r.dueOn));
-  const today = new Date().toISOString().slice(0, 10);
-  const marks = OFFICIAL_DATES.map((x) => ({ ...x, date: d.officialDates[x.key]?.date ?? null })).filter((x) => x.date) as { key: string; label: string; date: string }[];
-  const all = [...macros.flatMap((r) => [r.startOn ?? r.dueOn!, r.dueOn ?? r.startOn!]), ...marks.map((m) => m.date)].sort();
-  if (!all.length) return <Notice>Sem datas ainda.</Notice>;
-  const t0 = Date.parse(`${all[0]}T12:00:00Z`), t1 = Date.parse(`${all.at(-1)}T12:00:00Z`) + 86_400_000;
-  const pos = (iso: string) => ((Date.parse(`${iso}T12:00:00Z`) - t0) / (t1 - t0)) * 100;
-  return (
-    <section className="card p-4" aria-label="Cronograma">
-      <div className="mb-2 flex flex-wrap gap-3 text-xs text-muted"><span>{fmtDate(all[0])} → {fmtDate(all.at(-1))}</span>{marks.map((m) => <span key={m.key}><span className="mr-1 inline-block h-3 w-0.5 bg-danger align-middle" />{m.label}: {fmtDate(m.date)}</span>)}</div>
-      <div className="space-y-0.5">{d.phases.map((ph) => (
-        <div key={ph.id}>
-          <p className="mt-2 text-xs font-bold text-ink">{ph.name}</p>
-          {macros.filter((r) => r.milestoneId === ph.id).map((r) => {
-            const a = r.startOn ?? r.dueOn!, b = r.dueOn ?? r.startOn!;
-            const late = !r.done && b < today;
-            return (
-              <div key={r.id} className="grid grid-cols-[14rem_1fr] items-center gap-2 text-xs">
-                <span className="truncate text-ink" title={r.title}>{r.title}</span>
-                <div className="relative h-5 rounded bg-surface-2">
-                  {marks.map((m) => <span key={m.key} className="absolute top-0 h-5 w-px bg-danger/60" style={{ left: `${pos(m.date)}%` }} aria-hidden />)}
-                  <span className={`absolute top-1 h-3 rounded ${r.done ? 'bg-success' : late ? 'bg-danger' : r.spec?.required ? 'bg-primary' : 'bg-primary/50'}`} style={{ left: `${pos(a)}%`, width: `${Math.max(0.8, pos(b) - pos(a) + 100 / ((t1 - t0) / 86_400_000))}%` }} title={`${r.title}: ${fmtDate(a)} a ${fmtDate(b)}`} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ))}</div>
-    </section>
   );
 }
 

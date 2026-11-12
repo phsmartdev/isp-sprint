@@ -3011,6 +3011,9 @@ export const projects = pgTable(
     officialDates: jsonb('official_dates').$type<import('@isp/domain').OfficialDates>().notNull().default({}),
     /** margem de segurança (dias) antes dos marcos oficiais */
     marginDays: integer('margin_days').notNull().default(1),
+    /** licitação: situação do planejamento (em_elaboracao, aguardando, aprovado, alterado, devolvido) e a decisão Go/No-Go */
+    planStatus: text('plan_status').notNull().default('em_elaboracao'),
+    goDecision: text('go_decision'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -3098,6 +3101,54 @@ export const projectTemplates = pgTable(
   },
   (t) => ({ idx: index('project_templates_idx').on(t.tenantId, t.active) }),
 );
+
+/** Licitação: quem responde por cada área (titular, substituto, gestor) — resolve o R e o A pela área. */
+export const bidAreaMembers = pgTable('bid_area_members', {
+  tenantId: tenantId(),
+  area: text('area').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  role: text('role').notNull().default('titular'),
+  createdAt: createdAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.area, t.userId] }), roleCk: check('bid_area_members_role_ck', inList('role', ['titular', 'substituto', 'gestor'])) }));
+
+/** Licitação: quem aprova cada tipo de decisão (Accountable único). Sem regra: o gestor da Diretoria. */
+export const bidApprovalRules = pgTable('bid_approval_rules', {
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  approverId: uuid('approver_id').notNull().references(() => users.id),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.kind] }) }));
+
+/** Licitação: aprovações dentro do processo comercial (plano, Go/No-Go, proposta, alteração crítica, contratação). */
+export const bidApprovals = pgTable('bid_approvals', {
+  id: id(),
+  tenantId: tenantId(),
+  projectId: uuid('project_id').notNull().references(() => projects.id),
+  opportunityId: uuid('opportunity_id').notNull().references(() => opportunities.id),
+  kind: text('kind').notNull(),
+  /** número da submissão daquele tipo no projeto (1, 2, 3…): a versão aprovada fica identificada */
+  version: integer('version').notNull(),
+  status: text('status').notNull().default('aguardando'),
+  title: text('title').notNull(),
+  justification: text('justification'),
+  /** o que foi submetido (plano, valores, recomendação), congelado para conferência */
+  snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull().default({}),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id),
+  approverId: uuid('approver_id').notNull().references(() => users.id),
+  /** Go/No-Go: go, go_condicionado, no_go */
+  decision: text('decision'),
+  decisionNote: text('decision_note'),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  taskId: uuid('task_id'),
+  createdAt: createdAt(),
+}, (t) => ({
+  idx: index('bid_approvals_project_idx').on(t.tenantId, t.projectId, t.createdAt),
+  verUq: uniqueIndex('bid_approvals_version_uq').on(t.projectId, t.kind, t.version),
+  statusCk: check('bid_approvals_status_ck', inList('status', ['em_elaboracao', 'aguardando', 'aprovado', 'devolvido', 'rejeitado', 'cancelado'])),
+  kindCk: check('bid_approvals_kind_ck', inList('kind', ['plano', 'go_no_go', 'proposta', 'alteracao_critica', 'contratacao'])),
+}));
 
 /** Versões do modelo estruturado: rascunho → em aprovação → publicado → arquivado. Publicada não se edita. */
 export const projectTemplateVersions = pgTable(

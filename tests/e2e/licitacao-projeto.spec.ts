@@ -74,6 +74,24 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   await rc.getByRole('button', { name: /^Aplicar em/ }).click();
   await expect(page.getByText('Prazos recalculados')).toBeVisible();
 
+  // Gantt: abre primeiro; arrastar a barra move a macrotarefa
+  const gantt = page.getByRole('region', { name: 'Gantt do projeto' });
+  await expect(gantt).toBeVisible();
+  await gantt.getByRole('button', { name: 'Dia' }).click();
+  const bar = gantt.getByRole('img', { name: /^Proposta comercial:/ });
+  await bar.scrollIntoViewIfNeeded();
+  const before = await bar.getAttribute('aria-label');
+  const bb = (await bar.boundingBox())!;
+  await page.mouse.move(bb.x + 10, bb.y + bb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bb.x + 10 + 34 * 2, bb.y + bb.height / 2, { steps: 6 });
+  const saved = page.waitForResponse((r) => r.url().includes('/licitacao/tarefas') && r.request().method() === 'PATCH');
+  await page.mouse.up();
+  expect((await saved).status()).toBe(200);
+  await expect(bar).not.toHaveAttribute('aria-label', before!);
+  await page.screenshot({ path: 'test-results/licitacao-gantt.png', fullPage: false });
+  await page.getByRole('tab', { name: 'Tabela' }).click();
+
   // em linha: entregável e critério de aceite
   const tabela = page.getByRole('region', { name: 'Tabela do planejamento' });
   await tabela.getByLabel('Entregável: Análise técnica').fill('Parecer técnico');
@@ -89,8 +107,6 @@ test('planejamento: marcos do edital, edição em linha e em lote, cronograma e 
   await expect(tabela.getByLabel('Área: Matriz de requisitos')).toHaveValue('juridico');
   await page.screenshot({ path: 'test-results/licitacao-planejamento.png', fullPage: false });
 
-  await page.getByRole('tab', { name: 'Cronograma' }).click();
-  await expect(page.getByRole('region', { name: 'Cronograma' })).toContainText('Prazo de envio da proposta');
   await page.getByRole('tab', { name: 'Dependências' }).click();
   const deps = page.getByRole('region', { name: 'Dependências' });
   await deps.getByRole('listitem').filter({ hasText: 'Revisão documental' }).getByRole('button', { name: 'Predecessoras' }).click();
