@@ -12,6 +12,7 @@ import { letterheadForBranch } from './contractErp';
 import { letterheadPainter } from './economicsExport';
 import { safeText } from './proposals';
 import { dataUrlImage, pngIntact } from './images';
+import type { OfficeTable } from './officeAdjust';
 
 export const OFFICE_VARS: { key: string; label: string; sample: string }[] = [
   { key: 'oficio.numero', label: 'Número do ofício (gerado ao emitir)', sample: '71/2026' },
@@ -34,6 +35,18 @@ export const OFFICE_VARS: { key: string; label: string; sample: string }[] = [
   { key: 'contrato.processo', label: 'Número do processo', sample: '2022.01.0001' },
   { key: 'contrato.assinatura', label: 'Data de assinatura do contrato', sample: '24 de novembro de 2022' },
   { key: 'contrato.indice', label: 'Índice de reajuste', sample: 'Índice Nacional de Preços ao Consumidor Amplo – IPCA' },
+  { key: 'contrato.clausula_renovacao', label: 'Cláusula de renovação do contrato', sample: 'Cláusula Sexta – O presente contrato poderá ser prorrogado por iguais e sucessivos períodos, até o limite de 120 meses.' },
+  { key: 'contrato.vigencia', label: 'Vigência atual do contrato', sample: '24/11/2025 a 23/11/2026' },
+  { key: 'reajuste.percentual', label: 'Reajuste: percentual (médio ponderado)', sample: '4,68%' },
+  { key: 'reajuste.indice', label: 'Reajuste: índice', sample: 'IPCA' },
+  { key: 'reajuste.data_base', label: 'Reajuste: aniversário da data-base', sample: '24 de novembro de 2026' },
+  { key: 'reajuste.mensal_atual', label: 'Reajuste: valor mensal atual', sample: 'R$ 10.000,00' },
+  { key: 'reajuste.mensal_novo', label: 'Reajuste: valor mensal reajustado', sample: 'R$ 10.468,00' },
+  { key: 'renovacao.inicio', label: 'Renovação: início da nova vigência', sample: '24 de novembro de 2026' },
+  { key: 'renovacao.termino', label: 'Renovação: término da nova vigência', sample: '23 de novembro de 2027' },
+  { key: 'renovacao.prazo', label: 'Renovação: prazo', sample: '12 (doze) meses' },
+  { key: 'tabela.reajuste', label: 'Tabela: reajuste por item (atual × reajustado)', sample: '' },
+  { key: 'tabela.indices', label: 'Tabela: índices de referência (Banco Central)', sample: '' },
   { key: 'negociacao.codigo', label: 'Código da negociação', sample: 'OP-1024' },
   { key: 'negociacao.titulo', label: 'Título da negociação', sample: 'Reajuste DESO' },
 ];
@@ -58,9 +71,9 @@ export const DEFAULT_BLOCKS: OfficeBlock[] = [
 
 /** Troca as {{variáveis}}; o que faltar aparece entre colchetes (fica visível na prévia, ninguém emite sem perceber). */
 export function fillVars(text: string, vars: Record<string, string>) {
-  return text.replace(/\{\{\s*([a-z_.]+)\s*\}\}/g, (_m, k: string) => (k === 'assinatura' ? '{{assinatura}}' : vars[k]?.trim() ? vars[k]! : `[${VAR_LABEL.get(k) ?? k}]`));
+  return text.replace(/\{\{\s*([a-z_.]+)\s*\}\}/g, (_m, k: string) => (k === 'assinatura' || k.startsWith('tabela.') ? `{{${k}}}` : vars[k]?.trim() ? vars[k]! : `[${VAR_LABEL.get(k) ?? k}]`));
 }
-export const usedVars = (blocks: OfficeBlock[]) => [...new Set(blocks.flatMap((b) => [...b.text.matchAll(/\{\{\s*([a-z_.]+)\s*\}\}/g)].map((m) => m[1]!)))].filter((k) => k !== 'assinatura');
+export const usedVars = (blocks: OfficeBlock[]) => [...new Set(blocks.flatMap((b) => [...b.text.matchAll(/\{\{\s*([a-z_.]+)\s*\}\}/g)].map((m) => m[1]!)))].filter((k) => k !== 'assinatura' && !k.startsWith('tabela.'));
 
 type Style = { b: boolean; i: boolean; u: boolean };
 type Seg = { text: string; st: Style };
@@ -97,6 +110,8 @@ export type OfficeRenderInput = {
   blocks: OfficeBlock[]; vars: Record<string, string>;
   letterhead: Awaited<ReturnType<typeof letterheadForBranch>>;
   signature?: { mime: string; data: Buffer } | null;
+  /** tabelas de {{tabela.x}} (reajuste por item, índices de referência) */
+  tables?: Record<string, OfficeTable>;
 };
 
 export async function renderOffice(input: OfficeRenderInput) {
@@ -144,7 +159,16 @@ export async function renderOffice(input: OfficeRenderInput) {
         y -= h;
         continue;
       }
-      const words = parseLine(safeLine(raw, fonts));
+      const tm = /^\{\{tabela\.([a-z_]+)\}\}$/.exec(raw.trim());
+      if (tm) {
+        const tbl = input.tables?.[tm[1]!];
+        if (tbl) {
+          const r = drawTable(tbl, { page, pg, y, left, width, size, fonts, top: H - topMm * MM, bottom: bottomMm * MM });
+          pg = r.pg; y = r.y - b.paraGap * MM; paraStart = true;
+          continue;
+        }
+      }
+      const words = parseLine(safeLine(tm ? `[${VAR_LABEL.get(`tabela.${tm[1]}`) ?? 'Tabela'}: preenchida na emissão]` : raw, fonts));
       const wW = (w: Word) => w.reduce((a, s2) => a + fontOf(fonts, s2.st).widthOfTextAtSize(s2.text, size), 0);
       const space = fonts.r.widthOfTextAtSize(' ', size);
       // quebra de linha gulosa; o recuo vale só para a primeira linha do parágrafo
@@ -193,6 +217,75 @@ export async function renderOffice(input: OfficeRenderInput) {
   return { pdf: Buffer.from(bytes), boxes, pages: pages.length };
 }
 
+/**
+ * Tabela clean para documento corporativo: régua superior fina em azul-escuro, cabeçalho em versalete cinza, linhas
+ * separadas por fio claro, números à direita, total com régua e negrito. Quebra de página entre linhas, repetindo o cabeçalho.
+ */
+function drawTable(t: OfficeTable, o: { page: (n: number) => PDFPage; pg: number; y: number; left: number; width: number; size: number; fonts: Fonts; top: number; bottom: number }) {
+  const fs = Math.max(7, Math.min(9.5, o.size * 0.82));
+  const navy = rgb(0.04, 0.1, 0.31), muted = rgb(0.38, 0.41, 0.48), ink = rgb(0.1, 0.1, 0.12), hair = rgb(0.84, 0.86, 0.9), soft = rgb(0.965, 0.97, 0.98);
+  const sumW = t.columns.reduce((a, c) => a + c.w, 0);
+  const cols = t.columns.map((c) => ({ ...c, px: (c.w / sumW) * o.width }));
+  const pad = 5;
+  let { pg } = o;
+  let y = o.y - o.size * 0.55; // respiro abaixo da linha de texto anterior (descendentes)
+  const fit = (txt: string, f: PDFFont, w: number, size: number) => {
+    // quebra em até 3 linhas na largura da coluna
+    const words = safeText(f, txt).split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let cur = '';
+    for (const w2 of words) { const tryL = cur ? `${cur} ${w2}` : w2; if (f.widthOfTextAtSize(tryL, size) <= w - pad * 2 || !cur) cur = tryL; else { lines.push(cur); cur = w2; } }
+    if (cur) lines.push(cur);
+    return lines.slice(0, 3);
+  };
+  const cellX = (k: number) => o.left + cols.slice(0, k).reduce((a, c) => a + c.px, 0);
+  const lh = fs * 1.3;
+  const header = () => {
+    const hs = fs * 0.86;
+    const hl = cols.map((c) => fit(c.label.toUpperCase(), o.fonts.b, c.px, hs));
+    const h = Math.max(...hl.map((l) => l.length)) * hs * 1.25 + 9;
+    if (y - h - lh * 2 < o.bottom) { pg++; o.page(pg); y = o.top; }
+    const p = o.page(pg);
+    p.drawLine({ start: { x: o.left, y }, end: { x: o.left + o.width, y }, thickness: 1.1, color: navy });
+    const maxL = Math.max(...hl.map((l) => l.length));
+    hl.forEach((ls, k) => ls.forEach((l, li) => {
+      const w = o.fonts.b.widthOfTextAtSize(l, hs);
+      const x = cols[k]!.align === 'right' ? cellX(k) + cols[k]!.px - pad - w : cellX(k) + pad;
+      // cabeçalhos alinhados pela base (o de uma linha fica junto do fio, como os de duas)
+      p.drawText(l, { x, y: y - 5 - hs - (li + maxL - ls.length) * hs * 1.25, size: hs, font: o.fonts.b, color: muted });
+    }));
+    y -= h;
+    p.drawLine({ start: { x: o.left, y }, end: { x: o.left + o.width, y }, thickness: 0.5, color: navy });
+  };
+  header();
+  const row = (cells: string[], bold: boolean, kind: 'row' | 'total', zebra: boolean) => {
+    const f = bold ? o.fonts.b : o.fonts.r;
+    const ls = cells.map((c, k) => fit(c, f, cols[k]!.px, fs));
+    const h = Math.max(1, ...ls.map((l) => l.length)) * lh + 7;
+    if (y - h < o.bottom) { pg++; o.page(pg); y = o.top; header(); }
+    const p = o.page(pg);
+    if (kind === 'total') p.drawLine({ start: { x: o.left, y }, end: { x: o.left + o.width, y }, thickness: 0.8, color: navy });
+    else if (zebra) p.drawRectangle({ x: o.left, y: y - h, width: o.width, height: h, color: soft });
+    ls.forEach((lines, k) => lines.forEach((l, li) => {
+      const w = f.widthOfTextAtSize(l, fs);
+      const x = cols[k]!.align === 'right' ? cellX(k) + cols[k]!.px - pad - w : cellX(k) + pad;
+      p.drawText(l, { x, y: y - 4 - fs - li * lh, size: fs, font: f, color: kind === 'total' ? navy : ink });
+    }));
+    y -= h;
+    if (kind === 'row') p.drawLine({ start: { x: o.left, y }, end: { x: o.left + o.width, y }, thickness: 0.35, color: hair });
+  };
+  t.rows.forEach((r, i) => row(r, !!t.strong?.includes(i), 'row', i % 2 === 1));
+  if (t.total) row(t.total, true, 'total', false);
+  else { const p = o.page(pg); p.drawLine({ start: { x: o.left, y }, end: { x: o.left + o.width, y }, thickness: 0.8, color: navy }); }
+  if (t.note) {
+    const ns = fs * 0.85;
+    const lines = fit(t.note, o.fonts.i, o.width + pad * 2, ns);
+    for (const l of lines) { y -= ns * 1.4; if (y < o.bottom) { pg++; o.page(pg); y = o.top - ns; } o.page(pg).drawText(l, { x: o.left, y, size: ns, font: o.fonts.i, color: muted }); }
+    y -= ns * 0.6;
+  }
+  return { pg, y: y - fs * 0.8 };
+}
+
 /** Caracteres que a Helvetica não escreve viram equivalentes (preservando os marcadores de estilo). */
 function safeLine(line: string, fonts: Fonts) { return safeText(fonts.r, line); }
 
@@ -202,7 +295,7 @@ function safeLine(line: string, fonts: Fonts) { return safeText(fonts.r, line); 
  */
 export async function officeDefaults(db: DbOrTx, tenantId: string, contractId: string, today: string, opts: { recipientPersonId?: string | null; branchId?: string | null } = {}) {
   const [c] = await db.select().from(s.contracts).where(and(eq(s.contracts.tenantId, tenantId), eq(s.contracts.id, contractId))).limit(1);
-  if (!c) return { vars: {} as Record<string, string>, branchId: null as string | null, opportunityId: null as string | null, recipients: [] as { personId: string; name: string; title: string | null; role: string }[], recipientPersonId: null as string | null };
+  if (!c) return { vars: {} as Record<string, string>, branchId: null as string | null, opportunityId: null as string | null, recipients: [] as { personId: string; name: string; email: string | null; title: string | null; role: string }[], recipientPersonId: null as string | null };
   const [o] = c.opportunityId ? await db.select().from(s.opportunities).where(eq(s.opportunities.id, c.opportunityId)).limit(1) : [];
   // filial do contrato; sem ela, a da negociação de origem (ou a escolhida na emissão)
   const branchId = opts.branchId ?? c.branchId ?? o?.branchId ?? null;
@@ -210,7 +303,7 @@ export async function officeDefaults(db: DbOrTx, tenantId: string, contractId: s
   const [branch] = branchId ? await db.select().from(s.salesBranches).where(and(eq(s.salesBranches.tenantId, tenantId), eq(s.salesBranches.id, branchId))).limit(1) : [];
   const [signer] = branchId ? await db.select({ legalName: s.branchSigners.legalName, signerName: s.branchSigners.signerName, signerRole: s.branchSigners.signerRole }).from(s.branchSigners).where(eq(s.branchSigners.branchId, branchId)).limit(1) : [];
   const [ver] = await db.select().from(s.contractVersions).where(eq(s.contractVersions.contractId, c.id)).orderBy(desc(s.contractVersions.version)).limit(1);
-  const links = async (entityType: string, entityId: string) => db.select({ personId: s.people.id, name: s.people.name, title: s.accountStakeholders.title, role: s.stakeholderLinks.role })
+  const links = async (entityType: string, entityId: string) => db.select({ personId: s.people.id, name: s.people.name, email: s.people.email, title: s.accountStakeholders.title, role: s.stakeholderLinks.role })
     .from(s.stakeholderLinks).innerJoin(s.accountStakeholders, eq(s.accountStakeholders.id, s.stakeholderLinks.stakeholderId)).innerJoin(s.people, eq(s.people.id, s.accountStakeholders.personId))
     .where(and(eq(s.stakeholderLinks.tenantId, tenantId), eq(s.stakeholderLinks.entityType, entityType), eq(s.stakeholderLinks.entityId, entityId), isNull(s.stakeholderLinks.removedAt)));
   const all = [...(await links('contrato', c.id)), ...(o ? await links('oportunidade', o.id) : [])];
@@ -235,9 +328,11 @@ export async function officeDefaults(db: DbOrTx, tenantId: string, contractId: s
     'contrato.processo': pt?.processNumber || str(custom.numero_processo),
     'contrato.assinatura': ver?.signedAt ? dateLong(ver.signedAt) : '',
     'contrato.indice': ver?.adjustmentIndex ? (INDEX_LABEL[ver.adjustmentIndex.toUpperCase()] ?? ver.adjustmentIndex) : '',
+    'contrato.clausula_renovacao': c.renewalClause ?? '',
+    'contrato.vigencia': ver?.startAt && ver?.endAt ? `${ver.startAt.split('-').reverse().join('/')} a ${ver.endAt.split('-').reverse().join('/')}` : '',
     'negociacao.codigo': o ? `OP-${o.code}` : '', 'negociacao.titulo': o?.title ?? '',
   };
-  return { vars, branchId, opportunityId: o?.id ?? null, recipients: recipients.map((r) => ({ personId: r.personId, name: r.name, title: r.title, role: r.role })), recipientPersonId: pick?.personId ?? null };
+  return { vars, branchId, opportunityId: o?.id ?? null, recipients: recipients.map((r) => ({ personId: r.personId, name: r.name, email: r.email, title: r.title, role: r.role })), recipientPersonId: pick?.personId ?? null };
 }
 
 /** Timbrado e assinatura da filial (para a prévia e a emissão). */

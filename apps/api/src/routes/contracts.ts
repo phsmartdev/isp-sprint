@@ -75,6 +75,8 @@ const Header = z.object({
   nextAction: optText(300), nextActionAt: optDay,
   /** filial do contrato (emitente dos ofícios, no timbrado dela); sem informar, herda da negociação */
   branchId: uuid.nullable().default(null),
+  /** cláusula de renovação do contrato (vira variável dos ofícios) */
+  renewalClause: optText(4000),
 });
 const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null), contactId: uuid.nullable().default(null), initialBalanceCents: z.number().int().min(0).max(1_000_000_000_000).default(0), version: VersionFields });
 const UpdateBody = Header.partial().extend({ version: VersionFields.partial().optional(), reason: z.string().trim().max(500).optional() });
@@ -276,7 +278,7 @@ export const contractRoutes = [
       if (body.billingType === 'medicao' && !ver.totalCents && body.initialBalanceCents) ver.totalCents = body.initialBalanceCents;
       const c = await app.db.transaction(async (tx) => {
         const [c] = await tx.insert(s.contracts).values({
-          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, branchId, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
+          tenantId: auth.tenantId, contactId: contactId!, customerId, opportunityId: body.opportunityId, arpId: arpFromOpp, branchId, renewalClause: body.renewalClause ?? null, kind: body.kind, billingType: body.billingType, legalRegime: body.kind === 'privado' ? 'privado' : body.legalRegime,
           commercialOwnerId: body.commercialOwnerId, operationalOwnerId: body.operationalOwnerId, csmId: body.csmId, adminOwnerId: body.adminOwnerId, legalLimitAt: body.legalLimitAt ?? null,
           nextAction: body.nextAction ?? 'Validar cadastro', nextActionAt: body.nextActionAt ?? null, createdBy: auth.userId,
         }).returning();
@@ -802,7 +804,7 @@ export const contractRoutes = [
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
-        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt', 'branchId'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
+        for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt', 'branchId', 'renewalClause'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
         if (header.branchId) await assertBranch(tx, auth.tenantId, header.branchId);
         if (header.kind === 'privado') header.legalRegime = 'privado';
         const changedHeader = Object.keys(header).filter((k) => JSON.stringify((header as Record<string, unknown>)[k]) !== JSON.stringify((c as Record<string, unknown>)[k]));
