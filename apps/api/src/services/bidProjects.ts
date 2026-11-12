@@ -115,11 +115,12 @@ export async function bidProjectsOfOpportunity(db: DbOrTx, auth: AuthContext, op
   if (!projects.length) return [];
   const ids = projects.map((x) => x.p.id);
   const today = todayLocal(auth);
-  const [tasks, ms, events] = await Promise.all([
+  const [tasks, ms, events, pend] = await Promise.all([
     db.select({ projectId: s.activities.projectId, parentId: s.activities.parentId, title: s.activities.title, status: s.activities.status, completedAt: s.activities.completedAt, dueOn: sql<string | null>`to_char(${s.activities.dueAt} at time zone ${auth.timezone}, 'YYYY-MM-DD')`, spec: s.activities.spec, milestoneId: s.activities.milestoneId })
       .from(s.activities).where(and(eq(s.activities.tenantId, auth.tenantId), inArray(s.activities.projectId, ids), isNull(s.activities.deletedAt))),
     db.select().from(s.projectMilestones).where(and(inArray(s.projectMilestones.projectId, ids), isNull(s.projectMilestones.deletedAt))).orderBy(asc(s.projectMilestones.position)),
     db.select({ projectId: s.projectEvents.projectId, type: s.projectEvents.type, summary: s.projectEvents.summary, at: s.projectEvents.occurredAt }).from(s.projectEvents).where(inArray(s.projectEvents.projectId, ids)).orderBy(desc(s.projectEvents.occurredAt)).limit(30),
+    db.select({ projectId: s.bidApprovals.projectId, title: s.bidApprovals.title, kind: s.bidApprovals.kind }).from(s.bidApprovals).where(and(inArray(s.bidApprovals.projectId, ids), eq(s.bidApprovals.status, 'aguardando'))),
   ]);
   return projects.map(({ p, owner }) => {
     const tk = tasks.filter((t) => t.projectId === p.id);
@@ -138,7 +139,8 @@ export async function bidProjectsOfOpportunity(db: DbOrTx, auth: AuthContext, op
       pending: macros.filter(open).length,
       late: macros.filter((t) => open(t) && t.dueOn && t.dueOn < today).map((t) => ({ title: t.title, dueOn: t.dueOn, area: (t.spec as ProjectTaskSpec | null)?.area ?? null })).slice(0, 10),
       lateCount: macros.filter((t) => open(t) && t.dueOn && t.dueOn < today).length,
-      areas,
+      areas, planStatus: p.planStatus, goDecision: p.goDecision,
+      pendingApprovals: pend.filter((a) => a.projectId === p.id).map((a) => ({ title: a.title, kind: a.kind })),
       history: events.filter((e) => e.projectId === p.id).slice(0, 8),
     };
   });

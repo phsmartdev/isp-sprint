@@ -46,7 +46,7 @@ de implantação por feature, cada uma testada e publicada só com autorização
 |---|---|---|---|
 | L1 ✅ | Modelo de projeto versionado + modelo padrão do rito (11 etapas) + criação automática idempotente a partir da oportunidade + aba "Projeto de Licitação" | 1 | 1, 7 |
 | L2 ✅ | Planejamento: tabela editável (área, responsável, entregável, aceite, datas, dependência, aprovador, anexos, notificação), marcos do edital e prazos retroativos, edição do projeto sem afetar o modelo | 1–2 | 2, 8 |
-| L3 | Matriz RACI por tarefa e aprovação genérica (plano, Go/No-Go, proposta, exceções, alterações críticas, contratação) | 2 | 3 |
+| L3 ✅ | Matriz RACI por tarefa e aprovação genérica (plano, Go/No-Go, proposta, exceções, alterações críticas, contratação) | 2 | 3 |
 | L4 | Templates de e-mail por área, conferência antes do disparo, edital anexado, fila com tentativas, notificações posteriores | 3 | 4 |
 | L5 | Execução pelas áreas: ciência, evidências, entregáveis com estados e validação | 4 | 5 |
 | L6 | Acompanhamento: painel do analista, alertas de prazo, Gantt, caminho crítico | 4 | 6 |

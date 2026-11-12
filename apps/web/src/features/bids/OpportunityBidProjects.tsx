@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ExternalLink, FolderKanban, Plus } from 'lucide-react';
-import { BID_AREA_LABELS, type BidArea } from '@isp/domain';
+import { BID_AREA_LABELS, BID_PLAN_STATUS_LABELS, GO_LABELS, type BidArea, type BidPlanStatus, type GoDecision } from '@isp/domain';
 import { api } from '../../lib/api';
 import { useLookups } from '../../lib/hooks';
 import { fmtDate, fmtDateTime } from '../../lib/format';
@@ -20,6 +20,7 @@ type BidProject = {
   currentPhase: { name: string; dueOn: string | null; deliverable: string | null } | null; nextMilestone: { name: string; dueOn: string | null } | null;
   pending: number; lateCount: number; late: { title: string; dueOn: string | null; area: string | null }[]; areas: string[];
   history: { type: string; summary: string; at: string }[];
+  planStatus: BidPlanStatus; goDecision: GoDecision | null; pendingApprovals: { title: string; kind: string }[];
 };
 type Resp = { items: BidProject[]; canSeeProjects: boolean };
 const STATUS: Record<string, string> = { planejamento: 'Planejamento', em_andamento: 'Em andamento', pausado: 'Pausado', concluido: 'Concluído', cancelado: 'Arquivado' };
@@ -86,6 +87,8 @@ function ProjectCard({ p, oppId, canOpen }: { p: BidProject; oppId: string; canO
             <Chip tone={p.status === 'cancelado' ? 'neutral' : 'blue'}>{STATUS[p.status] ?? p.status}</Chip>
             <Chip>{p.origin === 'auto' ? 'Criado com a oportunidade' : 'Criado à mão'}</Chip>
             {p.templateVersion && <Chip>Modelo v{p.templateVersion}</Chip>}
+            <Chip tone={p.planStatus === 'aprovado' ? 'green' : p.planStatus === 'aguardando' ? 'orange' : 'neutral'}>Plano: {BID_PLAN_STATUS_LABELS[p.planStatus]}</Chip>
+            {p.goDecision && <Chip tone={p.goDecision === 'no_go' ? 'red' : 'green'}>{GO_LABELS[p.goDecision]}</Chip>}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -104,6 +107,7 @@ function ProjectCard({ p, oppId, canOpen }: { p: BidProject; oppId: string; canO
         <div><dt className="text-xs text-muted">Entregas pendentes</dt><dd className="font-semibold tabular-nums text-ink">{p.pending}</dd></div>
         <div><dt className="text-xs text-muted">Atrasadas</dt><dd className={p.lateCount ? 'font-semibold tabular-nums text-danger' : 'font-semibold tabular-nums text-ink'}>{p.lateCount}</dd></div>
       </dl>
+      {p.pendingApprovals.length > 0 && <p className="mt-3 text-sm text-warning">Aguardando aprovação: {p.pendingApprovals.map((a) => a.title.split(' — ')[0]).join(', ')}</p>}
       {p.areas.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-1.5"><span className="text-xs text-muted">Áreas envolvidas:</span>{p.areas.map((a) => <Chip key={a}>{areaLabel(a)}</Chip>)}</div>}
       {p.late.length > 0 && (
         <div className="mt-3"><h4 className="text-xs font-semibold uppercase tracking-wide text-danger">Atrasadas</h4>

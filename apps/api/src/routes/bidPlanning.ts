@@ -6,7 +6,7 @@
  */
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { BID_AREAS, OFFICIAL_DATES, OFFICIAL_KEYS, OFFICIAL_LABEL, anchoredDates, createsCycle, planIssues, type OfficialDates, type PlanRow, type ProjectTaskSpec } from '@isp/domain';
+import { BID_AREAS, OFFICIAL_DATES, OFFICIAL_KEYS, OFFICIAL_LABEL, anchoredDates, createsCycle, isCriticalChange, planIssues, type OfficialDates, type PlanRow, type ProjectTaskSpec } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -23,18 +23,28 @@ const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 type Proj = Awaited<ReturnType<typeof oppProject>>;
 
 /** Planeja: coordenador, responsável da oportunidade, quem administra Projetos ou a administração. */
-async function canPlan(db: DbOrTx, auth: AuthContext, p: Proj) {
+export async function canPlanProject(db: DbOrTx, auth: AuthContext, p: Proj) {
   if (p.ownerId === auth.userId || auth.access.configuracoes === 'total' || level(auth, 'projetos') === 'total') return true;
   const [o] = await db.select({ ownerId: s.opportunities.ownerId }).from(s.opportunities).where(eq(s.opportunities.id, p.opportunityId!)).limit(1);
   return o?.ownerId === auth.userId;
 }
 async function assertPlan(db: DbOrTx, auth: AuthContext, p: Proj) {
-  if (!(await canPlan(db, auth, p))) throw forbidden('O planejamento é do coordenador do projeto ou do responsável pela oportunidade.');
+  if (!(await canPlanProject(db, auth, p))) throw forbidden('O planejamento é do coordenador do projeto ou do responsável pela oportunidade.');
   if (p.status === 'cancelado' || p.status === 'concluido') throw unprocessable('Projeto encerrado não se replaneja.');
+}
+/** Plano em aprovação não muda no que é crítico; plano aprovado alterado no que é crítico volta para aprovação (alteração crítica). */
+export async function guardCritical(tx: DbOrTx, auth: AuthContext, p: Proj, critical: boolean, what: string) {
+  if (!critical) return;
+  const [cur] = await tx.select({ planStatus: s.projects.planStatus }).from(s.projects).where(eq(s.projects.id, p.id)).for('update');
+  if (cur!.planStatus === 'aguardando') throw unprocessable('O plano está em aprovação: cancele o pedido para alterar datas, responsáveis ou tarefas obrigatórias.');
+  if (cur!.planStatus === 'aprovado') {
+    await tx.update(s.projects).set({ planStatus: 'alterado', updatedAt: new Date() }).where(eq(s.projects.id, p.id));
+    await projectEvent(tx, auth, p.id, 'alteracao_critica', `Plano aprovado alterado (${what}): precisa de aprovação da alteração crítica.`);
+  }
 }
 
 /** Marcos oficiais: sessão e envio da proposta vêm da oportunidade; a validação fica no projeto (perde-se se a data mudar). */
-async function officialOf(db: DbOrTx, p: Proj): Promise<OfficialDates> {
+export async function officialOf(db: DbOrTx, p: Proj): Promise<OfficialDates> {
   const [o] = await db.select({ custom: s.opportunities.custom }).from(s.opportunities).where(eq(s.opportunities.id, p.opportunityId!)).limit(1);
   const custom = (o?.custom ?? {}) as Record<string, unknown>;
   const out: OfficialDates = {};
@@ -48,7 +58,7 @@ async function officialOf(db: DbOrTx, p: Proj): Promise<OfficialDates> {
   return out;
 }
 
-async function planRows(db: DbOrTx, auth: AuthContext, projectId: string) {
+export async function planRows(db: DbOrTx, auth: AuthContext, projectId: string) {
   const rows = await db.select({
     id: s.activities.id, parentId: s.activities.parentId, title: s.activities.title, ownerId: s.activities.ownerId, ownerName: s.users.name, startOn: s.activities.startOn,
     dueOn: sql<string | null>`to_char(${s.activities.dueAt} at time zone ${auth.timezone}, 'YYYY-MM-DD')`, completedAt: s.activities.completedAt, status: s.activities.status,
@@ -71,7 +81,7 @@ async function plan(db: DbOrTx, auth: AuthContext, p: Proj) {
     const a = anchoredDates((r.spec ?? {}) as ProjectTaskSpec, dates, p.marginDays);
     return a && (a.dueOn !== r.dueOn || a.startOn !== r.startOn) ? [{ id: r.id, title: r.title, from: { startOn: r.startOn, dueOn: r.dueOn }, to: a }] : [];
   });
-  return { project: { id: p.id, code: p.code, name: p.name, status: p.status, coordinatorId: p.ownerId, marginDays: p.marginDays, opportunityId: p.opportunityId, templateVersion: p.templateVersion }, canPlan: await canPlan(db, auth, p), officialDates: dates, phases: ms, rows, issues, recalc };
+  return { project: { id: p.id, code: p.code, name: p.name, status: p.status, coordinatorId: p.ownerId, marginDays: p.marginDays, planStatus: p.planStatus, goDecision: p.goDecision, opportunityId: p.opportunityId, templateVersion: p.templateVersion }, canPlan: await canPlanProject(db, auth, p), officialDates: dates, phases: ms, rows, issues, recalc };
 }
 
 const RowPatch = z.object({
@@ -80,6 +90,7 @@ const RowPatch = z.object({
   approverId: z.string().uuid().nullable().optional(), docs: z.string().trim().max(1000).nullable().optional(), notes: z.string().max(4000).nullable().optional(),
   anchor: z.enum(OFFICIAL_KEYS as [string, ...string[]]).nullable().optional(), anchorOffsetDays: z.number().int().min(-365).max(365).optional(), durationDays: z.number().int().min(0).max(365).optional(),
   milestoneId: z.string().uuid().optional(),
+  consulted: z.array(z.string().uuid()).max(20).optional(), informed: z.array(z.string().uuid()).max(30).optional(),
 });
 
 export const bidPlanningRoutes = [
@@ -130,6 +141,7 @@ export const bidPlanningRoutes = [
       const cur = await plan(app.db, auth, p);
       const pick = cur.recalc.filter((r) => body.ids.includes(r.id));
       await app.db.transaction(async (tx) => {
+        await guardCritical(tx, auth, p, pick.length > 0, 'prazos recalculados pelo edital');
         for (const r of pick) await tx.update(s.activities).set({ startOn: r.to.startOn, dueAt: dueAtOf(auth, r.to.dueOn) as unknown as Date, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, r.id));
         if (pick.length) await projectEvent(tx, auth, p.id, 'recalculo', `Prazos recalculados pelo edital em ${pick.length} macrotarefa(s).`, { tasks: pick.map((r) => ({ id: r.id, from: r.from, to: r.to })) });
       });
@@ -144,10 +156,10 @@ export const bidPlanningRoutes = [
       const p = await oppProject(app, auth, params.id);
       await assertPlan(app.db, auth, p);
       const pt = body.patch;
-      if (pt.ownerId || pt.approverId) {
-        const ids = [pt.ownerId, pt.approverId].filter(Boolean) as string[];
+      if (pt.ownerId || pt.approverId || pt.consulted?.length || pt.informed?.length) {
+        const ids = [...new Set([pt.ownerId, pt.approverId, ...(pt.consulted ?? []), ...(pt.informed ?? [])].filter(Boolean) as string[])];
         const us = await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), inArray(s.users.id, ids), eq(s.users.active, true)));
-        if (us.length !== new Set(ids).size) throw unprocessable('Pessoa inválida ou inativa.');
+        if (us.length !== ids.length) throw unprocessable('Pessoa inválida ou inativa.');
       }
       if (pt.milestoneId) {
         const [m] = await app.db.select({ id: s.projectMilestones.id }).from(s.projectMilestones).where(and(eq(s.projectMilestones.projectId, p.id), eq(s.projectMilestones.id, pt.milestoneId))).limit(1);
@@ -156,11 +168,12 @@ export const bidPlanningRoutes = [
       await app.db.transaction(async (tx) => {
         const rows = await tx.select().from(s.activities).where(and(eq(s.activities.projectId, p.id), inArray(s.activities.id, body.ids), isNull(s.activities.deletedAt))).for('update');
         if (rows.length !== new Set(body.ids).size) throw notFound('Tarefa não encontrada neste projeto.');
+        await guardCritical(tx, auth, p, rows.some((r) => isCriticalChange(pt as Record<string, unknown>, !!(r.spec as ProjectTaskSpec | null)?.required, body.shiftDays)), rows.length === 1 ? `"${rows[0]!.title}"` : `${rows.length} tarefas`);
         for (const r of rows) {
           const rv = body.rowVersions?.[r.id];
           if (rv !== undefined && rv !== r.rowVersion) throw conflict(r.rowVersion);
           const spec = { ...((r.spec ?? { phaseKey: '', sourceKey: null, area: 'comercial', required: false, deliverable: null, acceptance: null, instructions: null }) as ProjectTaskSpec) };
-          for (const k of ['area', 'required', 'deliverable', 'acceptance', 'approverId', 'docs', 'anchor', 'anchorOffsetDays', 'durationDays'] as const) if (pt[k] !== undefined) (spec as Record<string, unknown>)[k] = pt[k];
+          for (const k of ['area', 'required', 'deliverable', 'acceptance', 'approverId', 'docs', 'anchor', 'anchorOffsetDays', 'durationDays', 'consulted', 'informed'] as const) if (pt[k] !== undefined) (spec as Record<string, unknown>)[k] = pt[k];
           if (pt.ownerId) spec.assigned = true;
           let startOn = pt.startOn !== undefined ? pt.startOn : r.startOn;
           let dueOn: string | null | undefined = pt.dueOn;
@@ -229,6 +242,7 @@ export const bidPlanningRoutes = [
         if ((t.spec as ProjectTaskSpec | null)?.required) throw unprocessable('Tarefa obrigatória não se exclui. Desmarque "obrigatória" antes, se o edital permitir.');
         const deps = await tx.select({ n: sql<number>`count(*)::int` }).from(s.activityDependencies).where(eq(s.activityDependencies.dependsOnId, t.id));
         if (deps[0]!.n) throw unprocessable('Outras tarefas dependem desta. Retire a dependência antes.');
+        await guardCritical(tx, auth, p, true, `exclusão de "${t.title}"`);
         await tx.update(s.activities).set({ deletedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(and(eq(s.activities.projectId, p.id), sql`(${s.activities.id} = ${t.id} or ${s.activities.parentId} = ${t.id})`));
         await projectEvent(tx, auth, p.id, 'plano', `Excluída a ${t.parentId ? 'tarefa' : 'macrotarefa'} "${t.title}".`, { id: t.id });
       });
@@ -252,6 +266,7 @@ export const bidPlanningRoutes = [
           if (createsCycle(edges, params.taskId, d)) throw unprocessable(`Depender de "${rows.find((r) => r.id === d)?.title}" criaria um ciclo.`);
           edges.push({ from: params.taskId, to: d });
         }
+        await guardCritical(tx, auth, p, true, 'dependências');
         await tx.delete(s.activityDependencies).where(eq(s.activityDependencies.activityId, params.taskId));
         if (body.dependsOn.length) await tx.insert(s.activityDependencies).values(body.dependsOn.map((d) => ({ tenantId: auth.tenantId, activityId: params.taskId, dependsOnId: d, createdBy: auth.userId })));
         const t = rows.find((r) => r.id === params.taskId)!;
