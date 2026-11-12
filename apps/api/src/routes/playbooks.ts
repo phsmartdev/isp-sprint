@@ -17,6 +17,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { canCreate, canEditPb, ensurePlaybookJobs, ensurePlaybookSetup, isDirector, isManager, publishVersion, readerAllows, viewerOf, type PlaybookMeta } from '../services/playbooks';
+import { manualStatus, syncManual } from '../services/systemManual';
 import { leadsOrManages, todayIn, vacationOrg } from '../services/vacations';
 import { detectAttachment } from './sprint';
 import { gamificationSettingsOf } from '../services/gamification';
@@ -342,6 +343,20 @@ export const playbookCentralRoutes = [
         badges: st.badges ?? null,
         yearBands: st.levels,
       };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/playbooks/manual-sistema', summary: 'Manual do sistema: situação de cada capítulo (instalado, atualizado, desatualizado, editado pela empresa, em edição)', ...A,
+    handler: async ({ app, auth }) => ({ items: await manualStatus(app.db, auth.tenantId), canSync: isDirector(auth) || isManager(auth) }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/playbooks/manual-sistema', summary: 'Instala ou atualiza o Manual do sistema (Gerência, Diretoria e Administrador): cria os capítulos que faltam e publica os que mudaram, sem sobrescrever edições da empresa', ...A,
+    handler: async ({ app, auth, req }) => {
+      if (!(isDirector(auth) || isManager(auth))) throw forbidden('Quem instala ou atualiza o Manual do sistema é a Gerência, a Diretoria ou o Administrador.');
+      await ensurePlaybookSetup(app.db, auth.tenantId);
+      const r = await syncManual(app.db, auth.tenantId, auth.userId, auth.timezone ?? 'America/Sao_Paulo');
+      await audit(app.db, req, { action: 'playbook.manual_sync', entityType: 'playbook_category', entityId: r.categoryId, metadata: { created: r.created.length, updated: r.updated.length, skipped: r.skipped.length } });
+      return r;
     },
   }),
   defineRoute({

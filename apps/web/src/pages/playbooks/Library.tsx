@@ -118,6 +118,7 @@ export function PlaybooksPage() {
               <Shelf title="Atualizações" items={d!.forYou.updates} />
               <Shelf title="Continue de onde parou" items={d!.forYou.recent} />
               <Shelf title="Favoritos" items={d!.forYou.favorites} />
+              <ManualBanner onOpen={() => setU({ aba: 'configuracoes' })} />
               <LibraryCategories categories={d!.categories} manage={d!.can.manage} onPick={(id) => setU({ categoria: id })} />
               {!d!.items.length && !d!.forYou.team.length && <EmptyState title="A biblioteca ainda está vazia" description={d!.can.create ? 'Crie o primeiro playbook a partir de um modelo. Ele passa pela Gerência e pela Diretoria antes de ser publicado.' : 'Os playbooks publicados para você aparecem aqui.'} />}
             </div>
@@ -288,6 +289,7 @@ function Settings() {
   const c = cfg ?? { codePattern: d.settings?.codePattern ?? '{CAT}-PB-{NUM}', alertDays: (d.settings?.alertDays ?? [30, 15, 7, 0]).join(', ') };
   return (
     <div className="space-y-8">
+      <ManualPanel />
       <section aria-label="Categorias" className="space-y-2">
         <div className="flex items-center justify-between"><h2 className="font-display text-lg font-bold text-ink">Categorias e alçadas</h2><Button icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ icon: 'book', approval: { gerencia: true, diretoria: true } })}>Nova categoria</Button></div>
         <ul className="divide-y divide-line border border-line bg-surface">{d.categories.map((x) => (
@@ -373,5 +375,71 @@ function CategoryModal({ c, onClose }: { c: Partial<Category>; onClose: () => vo
         <fieldset className="space-y-1 sm:col-span-3"><legend className="mb-1 text-sm font-semibold text-ink">Quem aprova</legend>{box('gerencia', 'Revisão da Gerência')}{box('diretoria', 'Homologação da Diretoria')}{c.id && box('active', 'Ativa')}</fieldset>
       </div>
     </Modal>
+  );
+}
+
+type ManualItem = { slug: string; title: string; playbookId: string | null; code: string | null; version: string | null; state: 'nao_instalado' | 'atualizado' | 'desatualizado' | 'editado_pela_empresa' | 'em_edicao' };
+const MANUAL_STATE: Record<ManualItem['state'], string> = { nao_instalado: 'Não instalado', atualizado: 'Atualizado', desatualizado: 'Há atualização', editado_pela_empresa: 'Editado pela empresa', em_edicao: 'Em edição' };
+const useManual = () => useQuery({ queryKey: ['playbooks', 'manual'], queryFn: () => api<{ items: ManualItem[]; canSync: boolean }>('/playbooks/manual-sistema'), staleTime: 60_000 });
+
+/** Aviso na biblioteca para quem instala: o Manual do sistema ainda não está instalado ou tem atualização. */
+function ManualBanner({ onOpen }: { onOpen: () => void }) {
+  const q = useManual();
+  const d = q.data;
+  if (!d?.canSync) return null;
+  const missing = d.items.filter((i) => i.state === 'nao_instalado').length, outdated = d.items.filter((i) => i.state === 'desatualizado').length;
+  if (!missing && !outdated) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border border-primary/40 bg-primary-soft px-4 py-3">
+      <p className="text-sm text-ink"><BookOpen className="mr-2 inline h-4 w-4 text-primary" aria-hidden />{missing === d.items.length ? 'O Manual do sistema ainda não está instalado nesta empresa.' : `O Manual do sistema tem ${missing + outdated} capítulo(s) para instalar ou atualizar.`}</p>
+      <Button size="sm" variant="outline" onClick={onOpen}>Ver Manual do sistema</Button>
+    </div>
+  );
+}
+
+/** Instalar e atualizar o Manual do sistema (um playbook por capítulo, categoria Manual do sistema). */
+function ManualPanel() {
+  const q = useManual();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const m = useMutation({
+    mutationFn: () => api<{ created: string[]; updated: string[]; unchanged: string[]; skipped: { title: string; reason: string }[] }>('/playbooks/manual-sistema', { method: 'POST' }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['playbooks'] });
+      const parts = [r.created.length ? `${r.created.length} instalado(s)` : '', r.updated.length ? `${r.updated.length} atualizado(s)` : '', r.skipped.length ? `${r.skipped.length} mantido(s) por edição da empresa` : ''].filter(Boolean);
+      toast({ tone: 'success', message: parts.length ? `Manual do sistema: ${parts.join(', ')}` : 'O Manual do sistema já está atualizado' });
+    },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  if (q.isLoading) return <LoadingRows rows={3} />;
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
+  const d = q.data!;
+  const pending = d.items.filter((i) => i.state === 'nao_instalado' || i.state === 'desatualizado').length;
+  const none = d.items.every((i) => i.state === 'nao_instalado');
+  return (
+    <section aria-label="Manual do sistema" className="space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-lg font-bold text-ink">Manual do sistema</h2>
+          <p className="max-w-3xl text-sm text-muted">Um playbook por capítulo: uso de cada módulo, perfis e permissões, integrações, a lista completa da API e os padrões de design. As tabelas de referência são geradas do sistema a cada atualização. Uma versão editada e aprovada pela empresa, ou em edição, nunca é sobrescrita.</p>
+        </div>
+        {d.canSync && <Button variant="primary" icon={<BookOpen className="h-4 w-4" />} loading={m.isPending} disabled={!pending} onClick={() => m.mutate()}>{none ? 'Instalar manual' : pending ? `Atualizar ${pending} capítulo(s)` : 'Manual atualizado'}</Button>}
+      </div>
+      <div className="overflow-x-auto border border-line bg-surface">
+        <table className="w-full text-sm">
+          <thead className="bg-surface-2 text-left text-xs text-muted"><tr><th className="px-3 py-2 font-medium">Capítulo</th><th className="px-3 py-2 font-medium">Código</th><th className="px-3 py-2 font-medium">Versão</th><th className="px-3 py-2 font-medium">Situação</th></tr></thead>
+          <tbody>
+            {d.items.map((i) => (
+              <tr key={i.slug} className="border-t border-line">
+                <td className="px-3 py-2 text-ink">{i.playbookId ? <Link className="text-primary hover:underline" to={`/playbooks/${i.playbookId}`}>{i.title}</Link> : i.title}</td>
+                <td className="px-3 py-2 text-muted">{i.code ?? '—'}</td>
+                <td className="px-3 py-2 text-muted">{i.version ?? '—'}</td>
+                <td className={clsx('px-3 py-2', i.state === 'atualizado' ? 'text-success' : i.state === 'desatualizado' || i.state === 'nao_instalado' ? 'text-warning' : 'text-muted')}>{MANUAL_STATE[i.state]}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
