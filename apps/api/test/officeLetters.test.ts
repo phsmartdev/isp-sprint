@@ -120,7 +120,7 @@ describe('Ofício de reajuste e renovação', () => {
     expect(d.vars['contrato.clausula_renovacao']).toContain('Cláusula Sexta');
     const ann = d.contract.adjust.anniversary;
     const idx = ok(await carlos.get(`/contracts/${cid}/oficios/indices?anniversary=${ann}`)).json().indices;
-    expect(idx.map((r: { index: string }) => r.index)).toEqual(['IPCA', 'INPC', 'IGP-M', 'IGP-DI']);
+    expect(idx.map((r: { index: string }) => r.index)).toEqual(['IPCA']); // só o índice do contrato
     expect(idx[0].pct).toBeCloseTo(6.1678, 3);
     const blocks = [{ id: 'corpo', kind: 'texto', x: 20, y: 40, w: 170, align: 'justify', size: 11, lineGap: 1.4, indent: 0, paraGap: 3, text: 'Reajuste de **{{reajuste.percentual}}** ({{reajuste.mensal_atual}} → {{reajuste.mensal_novo}}).\n{{tabela.reajuste}}\n{{tabela.indices}}\nNova vigência: {{renovacao.inicio}} a {{renovacao.termino}} ({{renovacao.prazo}}). {{contrato.clausula_renovacao}}' }];
     const items = d.contract.items.map((i: object, k: number) => ({ ...i, pct: k === 0 ? 5 : 3 }));

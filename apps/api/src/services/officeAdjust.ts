@@ -33,16 +33,16 @@ export function suggestedRenewal(endAt: string | null, termMonths: number | null
 
 const ym = (iso: string) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 export type IndexRef = { index: string; label: string; from: string; to: string; pct: number | null; note: string | null; source: string };
-const REF_INDICES: { key: string; label: string }[] = [
-  { key: 'IPCA', label: 'IPCA (IBGE)' }, { key: 'INPC', label: 'INPC (IBGE)' }, { key: 'IGP-M', label: 'IGP-M (FGV)' }, { key: 'IGP-DI', label: 'IGP-DI (FGV)' },
-];
-/** Acumulado de 12 meses antes do aniversário nos principais índices, direto do Banco Central (o que não sair fica marcado). */
-export async function indexReferences(anniversary: string): Promise<IndexRef[]> {
-  return Promise.all(REF_INDICES.map(async (i) => {
-    const r = await adjustmentSuggestion(i.key, anniversary, 0);
-    const base = { index: i.key, label: i.label, from: r.window.from, to: r.window.to, source: 'Banco Central do Brasil (SGS)' };
-    return r.ok ? { ...base, pct: r.pct, note: null } : { ...base, pct: null, note: r.reason };
-  }));
+const INDEX_NAMES: Record<string, string> = { IPCA: 'IPCA (IBGE)', INPC: 'INPC (IBGE)', 'IGP-M': 'IGP-M (FGV)', 'IGP-DI': 'IGP-DI (FGV)' };
+/**
+ * Acumulado de 12 meses antes do aniversário, só do índice indicado no contrato, direto do Banco Central.
+ * Índice sem série oficial automática (ex.: IST da Anatel) ou ainda não divulgado volta sem percentual, com o motivo.
+ */
+export async function indexReferences(anniversary: string, contractIndex: string | null): Promise<IndexRef[]> {
+  const r = await adjustmentSuggestion(contractIndex, anniversary, 0);
+  const key = r.ok ? r.index : (r as { index?: string }).index ?? (contractIndex ?? 'Índice não informado');
+  const base = { index: key, label: INDEX_NAMES[key] ?? key, from: r.window.from, to: r.window.to, source: 'Banco Central do Brasil (SGS)' };
+  return [r.ok ? { ...base, pct: r.pct, note: null } : { ...base, pct: null, note: r.reason }];
 }
 
 export type AdjustItemIn = { description: string; qty: number; unitCents: number; pct: number };
@@ -62,7 +62,7 @@ const pctTxt = (v: number) => `${v.toLocaleString('pt-BR', { minimumFractionDigi
 export type OfficeTable = { columns: { label: string; align: 'left' | 'right'; w: number }[]; rows: string[][]; strong?: number[]; total?: string[]; note?: string };
 
 /** Tabelas que o modelo usa com {{tabela.reajuste}} e {{tabela.indices}}. */
-export function officeTables(adj: OfficeAdjustment | null, refs: IndexRef[] | null, contractIndex: string | null): Record<string, OfficeTable> {
+export function officeTables(adj: OfficeAdjustment | null, refs: IndexRef[] | null, _contractIndex?: string | null): Record<string, OfficeTable> {
   const t: Record<string, OfficeTable> = {};
   if (adj) {
     const sumA = adj.items.reduce((a, i) => a + i.qty * i.unitCents, 0), sumB = adj.items.reduce((a, i) => a + i.qty * i.newUnitCents, 0);
@@ -73,13 +73,10 @@ export function officeTables(adj: OfficeAdjustment | null, refs: IndexRef[] | nu
     };
   }
   if (refs?.length) {
-    const ci = (contractIndex ?? '').toUpperCase().replace(/\s+/g, '');
-    const mine = refs.findIndex((r) => ci.includes(r.index.replace('-', '')) || ci.includes(r.index));
     t.indices = {
       columns: [{ label: 'Índice', align: 'left', w: 2.2 }, { label: 'Período (12 meses)', align: 'left', w: 2.4 }, { label: 'Acumulado', align: 'right', w: 1.3 }, { label: 'Fonte', align: 'left', w: 3 }],
-      rows: refs.map((r, k) => [`${r.label}${k === mine ? ' – índice do contrato' : ''}`, `${ym(r.from)} a ${ym(r.to)}`, r.pct === null ? 'não divulgado' : pctTxt(r.pct), r.source]),
-      strong: mine >= 0 ? [mine] : [],
-      note: `Variação acumulada nos 12 meses anteriores ao aniversário da data-base, consultada em ${dateLong(new Date().toISOString().slice(0, 10))}.`,
+      rows: refs.map((r) => [`${r.label}`, `${ym(r.from)} a ${ym(r.to)}`, r.pct === null ? 'não divulgado' : pctTxt(r.pct), r.source]),
+      note: `Índice de reajuste previsto no contrato. Variação acumulada nos 12 meses anteriores ao aniversário da data-base, consultada em ${dateLong(new Date().toISOString().slice(0, 10))}.`,
     };
   }
   return t;

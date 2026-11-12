@@ -44,7 +44,7 @@ const IndexRefs = z.array(z.object({ index: z.string().max(20), label: z.string(
 /** Tabelas de exemplo para a prévia do modelo (na emissão saem do contrato e do Banco Central). */
 const SAMPLE_TABLES = (() => {
   const adj = buildAdjustment({ anniversary: '2026-11-24', index: 'IPCA', items: [{ description: 'Link dedicado 500 Mbps (exemplo)', qty: 2, unitCents: 350_000, pct: 4.68 }, { description: 'Colocation 1U (exemplo)', qty: 1, unitCents: 300_000, pct: 4.68 }] }, 1_000_000);
-  const t = officeTables(adj, [{ index: 'IPCA', label: 'IPCA (IBGE)', from: '2025-10-01', to: '2026-09-01', pct: null, note: null, source: 'Banco Central do Brasil (SGS)' }, { index: 'IGP-M', label: 'IGP-M (FGV)', from: '2025-10-01', to: '2026-09-01', pct: null, note: null, source: 'Banco Central do Brasil (SGS)' }], 'IPCA');
+  const t = officeTables(adj, [{ index: 'IPCA', label: 'IPCA (IBGE)', from: '2025-10-01', to: '2026-09-01', pct: null, note: null, source: 'Banco Central do Brasil (SGS)' }], 'IPCA');
   t.indices!.note = 'Exemplo de formatação: na emissão, os percentuais vêm do Banco Central para o aniversário do contrato.';
   return t;
 })();
@@ -241,11 +241,12 @@ export const officeLetterRoutes = [
     },
   }),
   defineRoute({
-    method: 'GET', url: '/contracts/:id/oficios/indices', summary: 'Acumulado de 12 meses dos principais índices (IPCA, INPC, IGP-M, IGP-DI) antes do aniversário, pelo Banco Central', ...CTR, params: IdParams,
+    method: 'GET', url: '/contracts/:id/oficios/indices', summary: 'Acumulado de 12 meses do índice indicado no contrato antes do aniversário, pelo Banco Central', ...CTR, params: IdParams,
     query: z.object({ anniversary: day }),
     handler: async ({ app, auth, params, query }) => {
-      await loadContract(app.db, auth, params.id);
-      return { indices: await indexReferences(query.anniversary) };
+      const c = await loadContract(app.db, auth, params.id);
+      const cur = await currentVersion(app.db, c);
+      return { indices: await indexReferences(query.anniversary, cur.adjustmentIndex) };
     },
   }),
   defineRoute({
