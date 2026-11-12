@@ -227,6 +227,7 @@ export type ProjectTaskSpec = {
   /** prazo pelo marco oficial (L2) */ anchor?: OfficialDateKey | null; anchorOffsetDays?: number; durationDays?: number;
   /** aprovador (Accountable) e documentos necessários */ approverId?: string | null; docs?: string | null;
   /** a área já indicou o responsável (enquanto não, a tarefa fica com o coordenador) */ assigned?: boolean;
+  /** RACI: R = responsável da tarefa, A = approverId (um só); C = consultados, I = informados */ consulted?: string[]; informed?: string[];
 };
 
 export type OfficialDate = { date: string | null; validated: boolean; source: string | null; validatedBy?: string | null; validatedAt?: string | null };
@@ -273,4 +274,34 @@ export function planIssues(rows: PlanRow[], dates: OfficialDates, coordinatorId:
   }
   // sem repetir o mesmo aviso de data não validada
   return out.filter((x, i) => x.taskId !== null || out.findIndex((y) => y.message === x.message) === i);
+}
+
+// ------------------------------------------------------------------ L3: RACI e aprovações
+export const BID_AREA_ROLES = ['titular', 'substituto', 'gestor'] as const;
+export type BidAreaRole = (typeof BID_AREA_ROLES)[number];
+export const BID_AREA_ROLE_LABELS: Record<BidAreaRole, string> = { titular: 'Titular', substituto: 'Substituto', gestor: 'Gestor' };
+
+export const BID_APPROVAL_KINDS = ['plano', 'go_no_go', 'proposta', 'alteracao_critica', 'contratacao'] as const;
+export type BidApprovalKind = (typeof BID_APPROVAL_KINDS)[number];
+export const BID_APPROVAL_LABELS: Record<BidApprovalKind, string> = {
+  plano: 'Planejamento', go_no_go: 'Participação (Go/No-Go)', proposta: 'Proposta comercial', alteracao_critica: 'Alteração crítica', contratacao: 'Contratação',
+};
+export const BID_APPROVAL_STATUSES = ['em_elaboracao', 'aguardando', 'aprovado', 'devolvido', 'rejeitado', 'cancelado'] as const;
+export type BidApprovalStatus = (typeof BID_APPROVAL_STATUSES)[number];
+export const BID_APPROVAL_STATUS_LABELS: Record<BidApprovalStatus, string> = {
+  em_elaboracao: 'Em elaboração', aguardando: 'Aguardando aprovação', aprovado: 'Aprovado', devolvido: 'Devolvido para ajustes', rejeitado: 'Rejeitado', cancelado: 'Cancelado',
+};
+export const GO_DECISIONS = ['go', 'go_condicionado', 'no_go'] as const;
+export type GoDecision = (typeof GO_DECISIONS)[number];
+export const GO_LABELS: Record<GoDecision, string> = { go: 'Go', go_condicionado: 'Go condicionado', no_go: 'No-Go' };
+
+export const BID_PLAN_STATUSES = ['em_elaboracao', 'aguardando', 'aprovado', 'alterado', 'devolvido'] as const;
+export type BidPlanStatus = (typeof BID_PLAN_STATUSES)[number];
+export const BID_PLAN_STATUS_LABELS: Record<BidPlanStatus, string> = { em_elaboracao: 'Em elaboração', aguardando: 'Aguardando aprovação', aprovado: 'Aprovado', alterado: 'Alterado depois da aprovação', devolvido: 'Devolvido para ajustes' };
+
+/** Mudança crítica em plano aprovado: datas, responsável ou obrigatoriedade de tarefa obrigatória, ou exclusão. */
+export function isCriticalChange(patch: Record<string, unknown>, required: boolean, shiftDays?: number) {
+  if (shiftDays) return required;
+  if (!required) return patch.required === true;
+  return ['startOn', 'dueOn', 'ownerId', 'required', 'anchor', 'anchorOffsetDays', 'approverId'].some((k) => patch[k] !== undefined);
 }

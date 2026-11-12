@@ -90,7 +90,7 @@ function ProjectCard({ p, oppId, canOpen }: { p: BidProject; oppId: string; canO
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <FormField label="Coordenador" htmlFor={`bp-c-${p.id}`}><Select id={`bp-c-${p.id}`} className="h-9" value={p.coordinatorId} disabled={coord.isPending} onChange={(e) => coord.mutate(e.target.value)}>{(lk.data?.users ?? []).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}{!lk.data?.users.some((u) => u.id === p.coordinatorId) && <option value={p.coordinatorId}>{p.coordinator}</option>}</Select></FormField>
-          <Link to={`/licitacoes/projetos/${p.id}/planejamento`} className="inline-flex h-9 items-center gap-1 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover">Planejamento</Link>
+          <Link to={`/licitacoes/projetos/${p.id}/planejamento`} className="inline-flex h-9 items-center gap-1 rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover">Cronograma e planejamento</Link>
           {canOpen && <Link to={`/projetos/${p.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border border-line px-3 text-sm font-semibold text-primary hover:bg-surface-2">Abrir projeto<ExternalLink className="h-3.5 w-3.5" aria-hidden /></Link>}
         </div>
       </header>

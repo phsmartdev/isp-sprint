@@ -1037,6 +1037,13 @@
       "when": 1794447398435,
       "tag": "0147_plano_licitacao",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1794449825275,
+      "tag": "0148_raci_aprovacoes_licitacao",
+      "breakpoints": true
     }
   ]
 }
