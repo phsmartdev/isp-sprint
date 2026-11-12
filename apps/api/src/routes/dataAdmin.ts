@@ -148,6 +148,7 @@ export const dataAdminRoutes = [
           await tx.delete(s.contractVersions).where(sc(s.contractVersions));
           await tx.delete(s.emailOpens).where(inArray(s.emailOpens.emailMessageId, tx.select({ id: s.emailMessages.id }).from(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)))));
           await tx.delete(s.emailMessages).where(and(eq(s.emailMessages.tenantId, t), inArray(s.emailMessages.contractId, ctrs)));
+          await tx.delete(s.officeLetters).where(and(eq(s.officeLetters.tenantId, t), inArray(s.officeLetters.contractId, ctrs)));
           await tx.update(s.activities).set({ contractId: null }).where(sc(s.activities));
           await del('contratos', tx.delete(s.contracts).where(sc(s.contracts)).returning({ id: s.contracts.id }));
         }
@@ -168,10 +169,14 @@ export const dataAdminRoutes = [
           // impedimentos são registro dos rituais: ficam, só perdem o vínculo com o projeto apagado
           await tx.update(s.impediments).set({ projectId: null, milestoneId: null, taskId: null }).where(sc(s.impediments));
           await tx.delete(s.contractNotifications).where(and(eq(s.contractNotifications.tenantId, t), inArray(s.contractNotifications.activityId, acts)));
+          // ofícios emitidos a partir das negociações apagadas
+          await tx.delete(s.officeLetters).where(and(eq(s.officeLetters.tenantId, t), inArray(s.officeLetters.opportunityId, opps)));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(sc(s.activities)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto
           for (const tbl of [s.milestoneHomologations, s.projectRisks]) await tx.delete(tbl).where(sc(tbl));
+          // licitação: aprovações do projeto saem com ele (o registro fica na auditoria)
+          await tx.delete(s.bidApprovals).where(sc(s.bidApprovals));
           for (const tbl of [s.projectEvents, s.projectMilestones, s.projectStages, s.projectMembers]) await tx.delete(tbl).where(sc(tbl));
           counts.projetos = (await tx.delete(s.projects).where(sc(s.projects)).returning({ id: s.projects.id })).length;
           await tx.delete(s.automationRuns).where(sc(s.automationRuns));
