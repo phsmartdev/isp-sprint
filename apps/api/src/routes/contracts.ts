@@ -200,16 +200,35 @@ export const contractRoutes = [
       const [addr] = await app.db.select({ street: s.addresses.street, number: s.addresses.number, district: s.addresses.district, city: s.addresses.city, state: s.addresses.state, postalCode: s.addresses.postalCode }).from(s.addresses).where(eq(s.addresses.contactId, o.contactId)).limit(1);
       const [docs] = await app.db.select({ n: sql<number>`count(*)::int` }).from(s.opportunityAttachments).where(and(eq(s.opportunityAttachments.opportunityId, o.id), isNull(s.opportunityAttachments.deletedAt), sql`${s.opportunityAttachments.kind} <> 'email'`));
       const publico = o.segment === 'governamental';
+      // mais da negociação e da conta: filial, responsáveis do último contrato do cliente, relatório de medição da conta
+      const [oppMore] = await app.db.select({ branchId: s.opportunities.branchId, arpId: s.opportunities.arpId }).from(s.opportunities).where(eq(s.opportunities.id, o.id));
+      const [lastContract] = await app.db.select({ id: s.contracts.id, csmId: s.contracts.csmId, operationalOwnerId: s.contracts.operationalOwnerId, adminOwnerId: s.contracts.adminOwnerId, currentVersion: s.contracts.currentVersion })
+        .from(s.contracts).where(and(eq(s.contracts.tenantId, auth.tenantId), eq(s.contracts.contactId, o.contactId))).orderBy(desc(s.contracts.createdAt)).limit(1);
+      const [lastVersion] = lastContract ? await app.db.select({ reportTerms: s.contractVersions.reportTerms }).from(s.contractVersions)
+        .where(and(eq(s.contractVersions.contractId, lastContract.id), eq(s.contractVersions.version, lastContract.currentVersion))).limit(1) : [];
+      const [measure] = await app.db.select().from(s.measurementReportSettings).where(and(eq(s.measurementReportSettings.tenantId, auth.tenantId), eq(s.measurementReportSettings.contactId, o.contactId))).limit(1);
+      const prevReport = (lastVersion?.reportTerms ?? null) as ReportTerms | null;
+      const reportTerms: ReportTerms | null = measure?.enabled
+        ? { required: true, sector: prevReport?.sector ?? null, validatorId: prevReport?.validatorId ?? null, dueDay: measure.dueDay ?? prevReport?.dueDay ?? null, alertDaysBefore: prevReport?.alertDaysBefore ?? 3 }
+        : null;
+      const extra: string[] = [];
+      if (oppMore?.branchId) extra.push('Filial que vendeu');
+      if (oppMore?.arpId) extra.push('Ata de registro de preços');
+      if (lastContract && (lastContract.csmId || lastContract.operationalOwnerId || lastContract.adminOwnerId)) extra.push('Responsáveis do último contrato do cliente');
+      if (reportTerms) extra.push('Relatório de medição da conta');
+      const serviceType = items.length || plan ? 'telecom' as const : null;
+      if (serviceType) extra.push('Tipo de serviço (telecom)');
       return {
         opportunity: { id: o.id, code: o.code, stage: o.stage, title: o.title, wonAt: o.wonAt, contactId: o.contactId, customerId: o.customerId },
         client: { name: o.contactName, document: o.document, segment: o.segment, email: o.email, phone: o.phone, address: addr ?? null },
         /** o que vem da negociação e o que passa ao cadastrar (contatos e anexos) */
-        imported: [...(items.length ? [`${items.length} produto(s)/serviço(s)`] : []), ...sug.imported],
+        imported: [...(items.length ? [`${items.length} produto(s)/serviço(s)`] : []), ...sug.imported, ...extra],
         carries: { people: people.length, documents: docs?.n ?? 0 },
         existingContractId: existing?.id ?? null,
         won: o.stage === 'ganha',
         suggestion: {
           kind: publico ? 'publico' : 'privado', legalRegime: publico ? 'lei_14133' : 'privado', commercialOwnerId: o.ownerId,
+          branchId: oppMore?.branchId ?? null, csmId: lastContract?.csmId ?? null, operationalOwnerId: lastContract?.operationalOwnerId ?? null, adminOwnerId: lastContract?.adminOwnerId ?? null,
           version: {
             number: '', object: (sug.object ?? (plan ? `Prestação de serviços de ${plan.invoiceServiceName ?? plan.name}` : o.title)).slice(0, 2000), items,
             monthlyCents: contractValuesFromItems(items, null).monthlyCents || (items.length ? 0 : o.valueCents ?? 0),
@@ -219,6 +238,7 @@ export const contractRoutes = [
             deliveryAddresses: sug.deliveryAddresses,
             specialConditions: sug.specialConditions,
             zenith: { ...sug.zenith, holderCompany: branch?.name ?? '' },
+            serviceType, reportTerms,
           },
         },
       };

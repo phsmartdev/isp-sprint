@@ -50,8 +50,14 @@ it('licitação vencida vira contrato com objeto, órgão, processo, itens pelo 
   expect(v.specialConditions).toMatch(/Data da sessão.*03\/11\/2026/);
   expect(v.specialConditions).toContain('Técnica Fictícia');
   expect(pre.carries).toEqual({ people: 2, documents: 1 });
+  // filial, tipo de serviço e (sem contrato anterior nem medição na conta) nada inventado
+  expect(pre.suggestion.branchId).toBe(lk.branches[0].id);
+  expect(v.serviceType).toBe('telecom');
+  expect(v.reportTerms).toBeNull();
+  expect(pre.suggestion.csmId).toBeNull();
+  expect(pre.imported).toEqual(expect.arrayContaining(['Filial que vendeu', 'Tipo de serviço (telecom)']));
 
-  const c = ok(await carlos.post('/contracts', { opportunityId: o.id, kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: lucas.me.user.id, version: { ...v, number: '12/2026', zenith: undefined } }), 201).json();
+  const c = ok(await carlos.post('/contracts', { opportunityId: o.id, kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: lucas.me.user.id, version: { ...v, number: '12/2026', zenith: undefined, serviceType: undefined } }), 201).json();
   const docs = (await ctx.db.execute(sql`select category, summary, size, mime from contract_documents where contract_id = ${c.id}`)).rows;
   expect(docs).toEqual([{ category: 'OUTRO', summary: 'edital', size: Buffer.byteLength('%PDF-1.4\n% edital ficticio\n'), mime: 'application/pdf' }]);
   const people = (await ctx.db.execute(sql`select role from stakeholder_links where entity_type = 'contrato' and entity_id = ${c.id} and removed_at is null order by role`)).rows.map((r) => (r as { role: string }).role);
@@ -59,4 +65,23 @@ it('licitação vencida vira contrato com objeto, órgão, processo, itens pelo 
   const d = ok(await carlos.get(`/contracts/${c.id}`)).json();
   expect(d.current.deliveryAddresses.rows).toHaveLength(2);
   expect(d.current.publicTerms.processNumber).toBe('PROC 77/2026');
+});
+
+it('segundo contrato do cliente: herda os responsáveis do contrato anterior e o relatório de medição da conta', async () => {
+  const lk = ok(await lucas.get('/meta/lookups')).json();
+  const p = lk.pipelines.find((x: { key: string }) => x.key === 'empresarial');
+  const plan = lk.plans[0];
+  const o1 = ok(await lucas.post('/opportunities', { newContact: { name: `Cliente Recorrente Fictício ${Date.now().toString(36)}`, segment: 'empresarial' }, title: 'Link 1', pipelineId: p.id, planId: plan.id, branchId: lk.branches[0].id }), 201).json();
+  ok(await carlos.post(`/opportunities/${o1.id}/transition`, { toStage: 'ganha', confirm: true, rowVersion: (await carlos.get(`/opportunities/${o1.id}`)).json().rowVersion }));
+  const v1 = ok(await lucas.get(`/contracts/prefill?opportunityId=${o1.id}`)).json().suggestion.version;
+  const c1 = ok(await carlos.post('/contracts', { opportunityId: o1.id, kind: 'privado', legalRegime: 'privado', commercialOwnerId: lucas.me.user.id, csmId: carlos.me.user.id, operationalOwnerId: lucas.me.user.id, version: { ...v1, number: 'C-1', zenith: undefined, serviceType: undefined } }), 201).json();
+  expect(c1.id).toBeTruthy();
+  // a conta passa a exigir relatório de medição no dia 5
+  const contactId = o1.contactId ?? (await ctx.db.execute(sql`select contact_id from opportunities where id = ${o1.id}`)).rows[0]!.contact_id;
+  await ctx.db.execute(sql`insert into measurement_report_settings (tenant_id, contact_id, enabled, due_day) select tenant_id, contact_id, true, 5 from opportunities where id = ${o1.id} on conflict (tenant_id, contact_id) do update set enabled = true, due_day = 5`);
+  const o2 = ok(await lucas.post('/opportunities', { contactId, title: 'Link 2', pipelineId: p.id, planId: plan.id, branchId: lk.branches[0].id }), 201).json();
+  const pre = ok(await lucas.get(`/contracts/prefill?opportunityId=${o2.id}`)).json();
+  expect(pre.suggestion).toMatchObject({ csmId: carlos.me.user.id, operationalOwnerId: lucas.me.user.id, branchId: lk.branches[0].id });
+  expect(pre.suggestion.version.reportTerms).toMatchObject({ required: true, dueDay: 5 });
+  expect(pre.imported).toEqual(expect.arrayContaining(['Responsáveis do último contrato do cliente', 'Relatório de medição da conta']));
 });

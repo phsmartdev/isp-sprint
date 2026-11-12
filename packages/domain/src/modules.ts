@@ -130,8 +130,9 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/activities', exact: true, methods: ['GET'], feature: 'crm.atividades' },
   { prefix: '/activities/calendar', feature: 'crm.atividades' },
   { prefix: '/customers', exact: true, methods: ['GET'], feature: 'crm.contas' },
-  // Projetos: o quadro e a criação avulsa; a tarefa em si é compartilhada (processos de contrato, CRM)
-  { prefix: '/tasks', exact: true, feature: 'projetos.tarefas' },
+  // Projetos: só os modelos de tarefa (escrita) e os projetos; a tarefa em si é compartilhada (CRM, contratos, projetos):
+  // criar e listar tarefas não depende do módulo Projetos (tarefa ligada a projeto é checada na própria rota)
+  { prefix: '/task-templates', methods: ['GET'], feature: null },
   { prefix: '/task-templates', feature: 'projetos.tarefas' },
   { prefix: '/projects', feature: 'projetos.projetos' },
   // Contratos

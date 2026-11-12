@@ -7,7 +7,7 @@ import {
   RACI_KEYS, RECURRENCE_FREQS, TASK_MANUAL_STATUSES, slaDueAt, TASK_STATUSES, TASK_STATUS_LABELS, atLeast, bucketOf, checklistProgress, createsCycle, describeRecurrence, validateRecurrence,
   type ChecklistItem, type MyTaskBucket, type TaskStatus,
 } from '@isp/domain';
-import { defineRoute, IdParams } from '../http/route';
+import { assertModuleOpen, defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
@@ -152,6 +152,8 @@ export const taskRoutes = [
       limit: z.coerce.number().int().min(1).max(1000).default(500),
     }),
     handler: async ({ app, auth, query: q }) => {
+      // tarefas de um projeto: exigem o módulo Projetos; as demais (CRM, contratos, avulsas) não
+      if (q.projectId) assertModuleOpen(auth, 'projetos', 'projetos.projetos');
       if (q.view === 'equipe' && !atLeast(level(auth, 'atividades'), 'equipe')) throw forbidden('Seu perfil vê apenas as próprias tarefas.');
       const w: SQL[] = [activityScope(auth), eq(s.activities.type, 'tarefa')];
       w.push(q.parentId ? eq(s.activities.parentId, q.parentId) : isNull(s.activities.parentId));
@@ -226,6 +228,7 @@ export const taskRoutes = [
     module: 'atividades',
     body: TaskCreate,
     handler: async ({ app, auth, body, reply }) => {
+      if (body.projectId) assertModuleOpen(auth, 'projetos', 'projetos.projetos');
       const id = await app.db.transaction(async (tx) => {
         let b = { ...body };
         if (body.templateId) {

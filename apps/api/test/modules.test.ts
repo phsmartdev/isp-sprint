@@ -158,6 +158,24 @@ describe('Etapa 1: módulos de negócio', () => {
     expect(ok(await carlos.get(`/opportunities/${o2.id}/licitacao/projetos`)).json().items).toHaveLength(1);
   });
 
+  it('tarefas do CRM não dependem do módulo Projetos: com Projetos desligado, cria e lista tarefa da oportunidade; tarefa de projeto, não', async () => {
+    const opp = ((await ctx.db.execute(sql`select id from opportunities where tenant_id = ${tenantId} and deleted_at is null order by created_at limit 1`)).rows[0] as { id: string }).id;
+    const proj = ((await ctx.db.execute(sql`select id from projects where tenant_id = ${tenantId} and deleted_at is null limit 1`)).rows[0] as { id: string } | undefined)?.id;
+    ok(await setModule('projetos', { enabled: false }));
+    try {
+      const t = ok(await carlos.post('/tasks', { title: 'Ligar para o cliente (fictício)', opportunityId: opp }), 201).json();
+      expect(ok(await carlos.get(`/tasks?view=todas&opportunityId=${opp}`)).json().items.some((x: { id: string }) => x.id === t.id)).toBe(true);
+      ok(await carlos.post('/tasks', { title: 'Tarefa avulsa (fictícia)' }), 201);
+      ok(await carlos.get('/task-templates'));
+      if (proj) {
+        expect((await carlos.post('/tasks', { title: 'Tarefa de projeto', projectId: proj })).statusCode).toBe(403);
+        expect((await carlos.get(`/tasks?view=todas&projectId=${proj}`)).statusCode).toBe(403);
+      }
+    } finally {
+      ok(await setModule('projetos', { enabled: true }));
+    }
+  });
+
   it('ações sensíveis por perfil: negar exportar ao vendedor bloqueia a planilha e fica na auditoria', async () => {
     ok(await carlos.put('/admin/actions', { profile: 'operacao', action: 'exportar', allowed: false }));
     expect(ok(await carlos.get('/admin/actions')).json().matrix.operacao.exportar).toBe(false);
