@@ -181,3 +181,20 @@ describe('recursos: softwares, contratos, ativos e compras', () => {
     expect(rep.assets.count).toBe(1);
   });
 });
+
+describe('associação do centro de custo: Dono do orçamento e Responsável pela execução', () => {
+  it('dono só gestor (pode ser mais de um); execução só supervisão ou gestão; quem executa não planeja', async () => {
+    const code = `AS${Date.now().toString(36).slice(-6).toUpperCase()}`;
+    expect((await carlos.post('/budget/cost-centers', { code, name: 'Centro associado', ownerIds: [lucas.me.user.id] })).statusCode).toBe(422); // vendedor não é gestor
+    expect((await carlos.post('/budget/cost-centers', { code, name: 'Centro associado', ownerIds: [carlos.me.user.id], executorIds: [lucas.me.user.id] })).statusCode).toBe(422);
+    const cc = ok(await carlos.post('/budget/cost-centers', { code, name: 'Centro associado', ownerIds: [carlos.me.user.id, dir.me.user.id], executorIds: [ana.me.user.id] }), 201).json();
+    const st = ok(await ana.get('/budget/structure')).json();
+    expect(st.costCenters.find((c: { id: string }) => c.id === cc.id)).toMatchObject({ myRole: 'execucao', ownerNames: expect.arrayContaining(['Diretora Fictícia']) });
+    const plan = ok(await ana.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${cc.id}`)).json();
+    expect(plan).toMatchObject({ canEdit: false, canExecute: true, myRole: 'execucao' });
+    const r = await ana.post('/budget/plan/lines', { costCenterId: cc.id, accountId: midia, what: 'Campanha associada', month, amountCents: 10_000, itemType: 'midia' });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().detail).toMatch(/Dono do orçamento/);
+    expect((await lucas.get(`/budget/plan?year=${year}&quarter=${quarter}&costCenterId=${cc.id}`)).statusCode).toBe(403);
+  });
+});

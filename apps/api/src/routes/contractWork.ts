@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   ALERT_LABELS, DOC_TYPES, PROCESS_LABELS, TIMELINE_CATEGORIES, SECTOR_KEY, sectorLabel, timelineCategory, timelineCritical, upcomingOf, SECTORS, SECTOR_LABELS, adjustedCents, documentName, endFromTerm, fillSubject, fillTemplate,
   type AlertKind, type ProcessKind, type StepDef, type Upcoming,
+  featureOn,
 } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -139,7 +140,8 @@ export const contractWorkRoutes = [
           case 'nota': if (!note || note.length < 3) throw bad('Descreva o que foi feito.', 'note'); break;
           case 'erp': {
             // com Cadastro ERP aberto, a etapa só conclui quando ele estiver Conferido no IXC (conclui sozinha nessa hora)
-            const [erp] = await tx.select({ status: s.contractErpRecords.status }).from(s.contractErpRecords).where(eq(s.contractErpRecords.contractId, c.id)).orderBy(desc(s.contractErpRecords.seq)).limit(1);
+            // Cadastro ERP desligado na empresa: a etapa conclui só com o código informado
+            const [erp] = !featureOn('contratos.cadastro_erp', auth.modules, auth.disabledFeatures) ? [] : await tx.select({ status: s.contractErpRecords.status }).from(s.contractErpRecords).where(eq(s.contractErpRecords.contractId, c.id)).orderBy(desc(s.contractErpRecords.seq)).limit(1);
             if (erp && erp.status !== 'conferido_ixc') throw bad('Esta etapa conclui pelo Cadastro ERP do contrato, quando ele estiver Conferido no IXC.');
             if (!val.ref) throw bad('Informe o código/referência no ERP.', 'value.ref');
             state.value = { ref: val.ref };

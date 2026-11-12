@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "sector_viewer" boolean DEFAULT false NOT NULL;

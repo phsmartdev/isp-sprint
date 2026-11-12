@@ -106,7 +106,8 @@ describe('níveis de acesso por perfil (matriz padrão)', () => {
     for (const url of ['/opportunities?status=todas&pageSize=100', '/leads?pageSize=100', '/activities?status=todas&scope=minhas&pageSize=100']) {
       const r = (await lucas.get(url)).json();
       expect(r.items.length).toBeGreaterThan(0);
-      for (const it of r.items) expect(it.ownerId).toBe(lucas.me.user.id);
+      // oportunidades: as do time aparecem só para leitura (canEdit false); as demais listas seguem só as próprias
+      for (const it of r.items) if (!url.startsWith('/opportunities') || it.canEdit !== false) expect(it.ownerId).toBe(lucas.me.user.id);
     }
     const cust = (await lucas.get('/customers?pageSize=100')).json();
     for (const c of cust.items) expect(c.ownerId).toBe(lucas.me.user.id);
@@ -339,7 +340,7 @@ describe('oportunidade: criação, plano, edição concorrente e etapas', () => 
     for (const st of p.stages) {
       expect(st.count).toBe(st.cards.length);
       expect(st.valueCents).toBe(st.cards.reduce((a: number, c: { valueCents: number | null }) => a + (c.valueCents ?? 0), 0));
-      for (const c of st.cards) expect(c.ownerId).toBe(lucas.me.user.id);
+      for (const c of st.cards) if (c.canEdit !== false) expect(c.ownerId).toBe(lucas.me.user.id); // do time: só leitura
     }
   });
 });

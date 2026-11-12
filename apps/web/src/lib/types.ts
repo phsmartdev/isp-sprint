@@ -134,6 +134,8 @@ export type Opportunity = {
   bidMode: 'item' | 'global' | null;
   bidGlobalCents: number | null;
   measurementContractId: string | null;
+  /** false = negociação de colega do time: só leitura */
+  canEdit?: boolean;
   measurementCents: number | null;
   executiveTicket: string | null;
   proposalStatus: ProposalStatus;

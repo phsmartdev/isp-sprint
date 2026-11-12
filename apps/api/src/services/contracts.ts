@@ -54,7 +54,7 @@ export function contractScope(auth: AuthContext): SQL {
   const l = level(auth, 'contratos');
   const base = eq(s.contracts.tenantId, auth.tenantId);
   if (l === 'nenhum') return sql`false`;
-  if (l === 'total' || auth.sectors.some((x) => SUPPORT.includes(x))) return base;
+  if (l === 'total' || auth.viewSectors.some((x) => SUPPORT.includes(x))) return base;
   const ids = l === 'equipe' ? auth.teamMemberIds : [auth.userId];
   return and(base, or(inArray(s.contracts.commercialOwnerId, ids), inArray(s.contracts.operationalOwnerId, ids), inArray(s.contracts.csmId, ids)))!;
 }
@@ -86,7 +86,7 @@ export async function usersBySector(db: DbOrTx, tenantId: string, sectors: reado
   return db
     .select({ id: s.users.id, name: s.users.name, email: s.users.email })
     .from(s.users)
-    .where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), sql`${s.users.sectors} && ${sql.raw(`ARRAY[${sectors.map((x) => `'${x}'`).join(',')}]::text[]`)}`))
+    .where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), eq(s.users.sectorViewer, false), sql`${s.users.sectors} && ${sql.raw(`ARRAY[${sectors.map((x) => `'${x}'`).join(',')}]::text[]`)}`))
     .orderBy(asc(s.users.name));
 }
 export async function userById(db: DbOrTx, tenantId: string, id: string | null) {

@@ -23,7 +23,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { assertPortAvailable, portUsage } from '../services/ports';
-import { assertBranch, bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice } from '../services/opportunities';
+import { assertBranch, bumpVersion, detailsPatch, createOpportunity, loadOpportunity, opportunityDto, opportunityQuery, oppVisibility, planPrice, canEditOpportunity } from '../services/opportunities';
 import { assertAssignableUser, assertTenantRefs, level, ownerScope } from '../services/scope';
 import { audit } from '../services/audit';
 import { pctDelta } from '../services/metrics';
@@ -143,7 +143,7 @@ export const opportunityRoutes = [
         app.db.select({ total: sql<number>`count(*)::int` }).from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).where(cond),
       ]);
       const now = new Date();
-      return { items: rows.map((r) => opportunityDto(r, now)), page: query.page, pageSize: query.pageSize, total };
+      return { items: rows.map((r) => ({ ...opportunityDto(r, now), canEdit: canEditOpportunity(auth, r.ownerId) })), page: query.page, pageSize: query.pageSize, total };
     },
   }),
 
@@ -179,7 +179,7 @@ export const opportunityRoutes = [
       const now = new Date();
       // Sucesso do Cliente trabalha por conta: cada card traz a lista de contratos vigentes da conta
       const ctrs = pipe.key === CS_KEY ? groupBy(await accountContracts(app.db, auth.tenantId, [...new Set(rows.map((r) => r.contactId))]), (c) => c.contactId) : null;
-      const dto = (r: (typeof rows)[number]) => ({ ...opportunityDto(r, now), ...(ctrs ? { accountContracts: (ctrs.get(r.contactId) ?? []).map((c) => ({ id: c.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, stage: c.stage, endAt: c.endAt })) } : {}) });
+      const dto = (r: (typeof rows)[number]) => ({ ...opportunityDto(r, now), canEdit: canEditOpportunity(auth, r.ownerId), ...(ctrs ? { accountContracts: (ctrs.get(r.contactId) ?? []).map((c) => ({ id: c.id, number: c.number, object: c.object, monthlyCents: c.monthlyCents, billingType: c.billingType, kind: c.kind, stage: c.stage, endAt: c.endAt })) } : {}) });
       return {
         pipeline: { id: pipe.id, key: pipe.key, name: pipe.name },
         stages: open.map((st, i) => {
@@ -237,7 +237,7 @@ export const opportunityRoutes = [
     tag: 'Oportunidades',
     module: 'oportunidades',
     params: IdParams,
-    handler: async ({ app, auth, params }) => opportunityDto(await loadOpportunity(app.db, auth, params.id)),
+    handler: async ({ app, auth, params }) => { const r = await loadOpportunity(app.db, auth, params.id); return { ...opportunityDto(r), canEdit: canEditOpportunity(auth, r.ownerId) }; },
   }),
 
   defineRoute({
@@ -278,7 +278,12 @@ export const opportunityRoutes = [
       await app.db.transaction(async (tx) => {
         const cur = await loadOpportunity(tx, auth, params.id);
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
-        if (body.ownerId && body.ownerId !== cur.ownerId) await assertAssignableUser(tx, auth, 'oportunidades', body.ownerId);
+        if (body.ownerId && body.ownerId !== cur.ownerId) {
+          // troca de responsável: só o próprio responsável, a supervisão, a gerência ou a diretoria
+          const lead = auth.profiles.some((p) => ['supervisor', 'gerencia', 'diretoria', 'administrador'].includes(p));
+          if (cur.ownerId !== auth.userId && !lead) throw forbidden('Só o responsável pela negociação, a supervisão, a gerência ou a diretoria trocam o responsável.');
+          await assertAssignableUser(tx, auth, 'oportunidades', body.ownerId);
+        }
         await assertTenantRefs(tx, auth, { sourceId: body.sourceId, campaignId: body.campaignId });
         {
           const branchId = body.branchId === undefined ? cur.branchId : body.branchId;

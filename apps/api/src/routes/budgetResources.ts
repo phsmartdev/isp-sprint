@@ -79,7 +79,7 @@ export const budgetResourceRoutes = [
   defineRoute({
     method: 'POST', url: '/budget/assets', summary: 'Cadastra ferramenta ou equipamento', tag: 'Orçamento', ...M, body: AssetBody,
     handler: async ({ app, auth, body, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       const [a] = await app.db.insert(s.resourceAssets).values({ tenantId: auth.tenantId, ...body, createdBy: auth.userId }).returning();
       await logBudget(app.db, auth, cc.id, 'ativo', a!.id, 'criado', `${cc.code}: ${a!.name}${a!.tag ? ` (${a!.tag})` : ''} cadastrado, ${brl(a!.valueCents)}.`);
       reply.code(201);
@@ -91,8 +91,8 @@ export const budgetResourceRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [cur] = await app.db.select().from(s.resourceAssets).where(and(eq(s.resourceAssets.id, params.id), eq(s.resourceAssets.tenantId, auth.tenantId))).limit(1);
       if (!cur) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, cur.costCenterId);
-      if (body.costCenterId) await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, cur.costCenterId, 'executar');
+      if (body.costCenterId) await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       const [a] = await app.db.update(s.resourceAssets).set({ ...body, updatedAt: new Date() }).where(eq(s.resourceAssets.id, cur.id)).returning();
       const what = [body.status && body.status !== cur.status && `situação ${cur.status} → ${body.status}`, body.holderId !== undefined && body.holderId !== cur.holderId && 'responsável alterado', body.costCenterId && body.costCenterId !== cur.costCenterId && 'centro de custo alterado'].filter(Boolean).join('; ');
       await logBudget(app.db, auth, cc.id, 'ativo', cur.id, 'alterado', `${cc.code}: ${cur.name} — ${what || 'dados alterados'}.`);
@@ -128,7 +128,7 @@ export const budgetResourceRoutes = [
   defineRoute({
     method: 'POST', url: '/budget/resources', summary: 'Cadastra software/licença, contrato de serviço ou assinatura (sem credenciais)', tag: 'Orçamento', ...M, body: ResourceBody,
     handler: async ({ app, auth, body, req, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       noSecrets(body.notes, body.vaultRef, body.object);
       if (body.currency === 'USD' && !body.fxRate) throw unprocessable('Informe a cotação do dólar usada no planejamento.', [{ path: 'fxRate', message: 'Obrigatório em dólar' }]);
       if (body.vaultRegistered && !body.vaultRef) throw unprocessable('Informe a referência do registro no Vault (nome da pasta/entrada, sem a senha).', [{ path: 'vaultRef', message: 'Obrigatório' }]);
@@ -145,7 +145,7 @@ export const budgetResourceRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [cur] = await app.db.select().from(s.resourceContracts).where(and(eq(s.resourceContracts.id, params.id), eq(s.resourceContracts.tenantId, auth.tenantId))).limit(1);
       if (!cur) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, cur.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, cur.costCenterId, 'executar');
       noSecrets(body.notes, body.vaultRef, body.object);
       if (body.status === 'cancelado' && !body.cancelReason) throw unprocessable('Informe o motivo do cancelamento (uso e retorno da solução).', [{ path: 'cancelReason', message: 'Obrigatório' }]);
       const [r] = await app.db.update(s.resourceContracts).set({ ...body, ...(body.status === 'cancelado' ? { cancelledAt: new Date() } : {}), updatedAt: new Date() }).where(eq(s.resourceContracts.id, cur.id)).returning();
@@ -169,7 +169,7 @@ export const budgetResourceRoutes = [
   defineRoute({
     method: 'POST', url: '/budget/purchases', summary: 'Abre pedido de compra (especificação completa)', tag: 'Orçamento', ...M, body: PurchaseBody,
     handler: async ({ app, auth, body, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       const [p] = await app.db.insert(s.purchaseRequests).values({ tenantId: auth.tenantId, ...body, requestedBy: auth.userId }).returning();
       await logBudget(app.db, auth, cc.id, 'compra', p!.id, 'solicitada', `${cc.code}: pedido de compra “${p!.title}” (estimado ${brl(p!.estimatedCents)}).`);
       reply.code(201);
@@ -185,7 +185,7 @@ export const budgetResourceRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [cur] = await app.db.select().from(s.purchaseRequests).where(and(eq(s.purchaseRequests.id, params.id), eq(s.purchaseRequests.tenantId, auth.tenantId))).limit(1);
       if (!cur) throw notFound();
-      const cc = await loadCostCenter(app.db, auth, cur.costCenterId);
+      const cc = await loadCostCenter(app.db, auth, cur.costCenterId, 'executar');
       if ((body.directorSigned !== undefined && body.directorSigned !== cur.directorSigned) && !isBudgetAdmin(auth)) throw unprocessable('Só a Diretoria marca a assinatura. Sem ela, registre a liberação por escrito (e-mail ou WhatsApp).');
       const next = { ...cur, ...body };
       if (body.status && ['comprado', 'recebido'].includes(body.status)) {

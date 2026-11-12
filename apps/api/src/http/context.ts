@@ -27,6 +27,10 @@ export type AuthContext = {
   teamMemberIds: string[];
   /** Setores do usuário (contratos): definem tarefas e quem conclui cada etapa. */
   sectors: Sector[];
+  /** Setores que a pessoa acompanha (inclui os de quem é só visualizador): servem para ver, não para atuar. */
+  viewSectors: Sector[];
+  /** Só visualiza os setores (não atua na operação). */
+  sectorViewer: boolean;
   /** Etapa 1: módulos de negócio ligados para a pessoa (e por quê), funcionalidades desligadas na empresa e ações sensíveis. */
   modules: Record<BusinessModule, boolean>;
   moduleReasons: Record<BusinessModule, ModuleDecision['reason']>;
@@ -36,6 +40,8 @@ export type AuthContext = {
   profileAccess: Record<Module, AccessLevel>;
   /** pode entrar de qualquer IP (exceção ao acesso por IP liberado) */
   ipBypass: boolean;
+  /** método da requisição em curso (leituras podem ver mais que escritas, ex.: negociações do time) */
+  requestMethod?: string;
 };
 
 declare module 'fastify' {
@@ -67,6 +73,7 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
       email: s.users.email,
       jobTitle: s.users.jobTitle,
       sectors: s.users.sectors,
+      sectorViewer: s.users.sectorViewer,
       active: s.users.active,
       ipBypass: s.users.ipBypass,
       timezone: s.tenants.timezone,
@@ -86,12 +93,12 @@ export async function resolveSession(app: FastifyInstance, req: FastifyRequest):
   return buildAuth(app.db, row);
 }
 
-type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; timezone: string; tenantName: string; ipBypass?: boolean };
+type UserBasics = { sessionId: string; userId: string; tenantId: string; name: string; email: string; jobTitle: string | null; sectors: string[] | null; sectorViewer?: boolean | null; timezone: string; tenantName: string; ipBypass?: boolean };
 
 /** Contexto de acesso de qualquer usuário ativo (ex.: conferir se a pessoa mencionada vê a negociação). */
 export async function authForUser(db: DB, tenantId: string, userId: string): Promise<AuthContext | null> {
   const [row] = await db
-    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, active: s.users.active, ipBypass: s.users.ipBypass, timezone: s.tenants.timezone, tenantName: s.tenants.name })
+    .select({ userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors, sectorViewer: s.users.sectorViewer, active: s.users.active, ipBypass: s.users.ipBypass, timezone: s.tenants.timezone, tenantName: s.tenants.name })
     .from(s.users)
     .innerJoin(s.tenants, eq(s.tenants.id, s.users.tenantId))
     .where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId)))
@@ -171,6 +178,9 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     actions,
     teamIds: memberships.map((m) => m.teamId),
     teamMemberIds: [...new Set([row.userId, ...members.map((m) => m.userId)])],
-    sectors: (row.sectors ?? []) as Sector[],
+    // só visualizador: os setores servem para ver (viewSectors), não para atuar (sectors)
+    sectors: (row.sectorViewer ? [] : row.sectors ?? []) as Sector[],
+    viewSectors: (row.sectors ?? []) as Sector[],
+    sectorViewer: !!row.sectorViewer,
   };
 }

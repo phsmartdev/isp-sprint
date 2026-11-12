@@ -65,6 +65,7 @@ const CustomerDetailPage = lazy(() => import('./pages/CustomerDetail').then((m) 
 const ActivitiesPage = lazy(() => import('./pages/Activities').then((m) => ({ default: m.ActivitiesPage })));
 const ProjectsPage = lazy(() => import('./pages/projects/Projects').then((m) => ({ default: m.ProjectsPage })));
 const TasksPage = lazy(() => import('./pages/tasks/Tasks').then((m) => ({ default: m.TasksPage })));
+const MarketingBoardPage = lazy(() => import('./pages/marketing/MarketingBoard').then((m) => ({ default: m.MarketingBoardPage })));
 const BidPlanningPage = lazy(() => import('./pages/bids/BidPlanning').then((m) => ({ default: m.BidPlanningPage })));
 const ProjectDetailPage = lazy(() => import('./pages/projects/ProjectDetail').then((m) => ({ default: m.ProjectDetailPage })));
 const ReportsPage = lazy(() => import('./pages/Reports').then((m) => ({ default: m.ReportsPage })));
@@ -230,6 +231,7 @@ export function App() {
         <Route path="playbooks/:id/versoes" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookVersionsPage /></Suspense>} />
         <Route path="playbooks/:id/aprovar/:versionId" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookApprovePage /></Suspense>} />
         <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
+        <Route path="marketing/quadro" element={<Gate module="campanhas" feature="marketing.quadro"><MarketingBoardPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
         <Route path="meus-pontos" element={<MyPointsPage />} />
