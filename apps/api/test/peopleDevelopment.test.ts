@@ -9,7 +9,8 @@ let carlos: Client, lucas: Client, ana: Client, rafael: Client, mariana: Client,
 let tenantId = '';
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const SBI = { situation: 'Na reunião de pipeline de terça com o cliente Alfa', behavior: 'Você apresentou os números sem consultar a planilha atualizada', impact: 'O cliente questionou a previsão e precisamos refazer a proposta', guidance: 'Revisar os dados antes das reuniões', nextSteps: 'Combinar uma checagem 30 minutos antes' };
-const today = new Date().toISOString().slice(0, 10);
+// "hoje" no fuso do servidor de teste (São Paulo): em UTC já pode ser amanhã, e data futura é recusada
+const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 const sync = () => syncReportingLines(ctx.db, tenantId, { force: true });
 const team = async (name: string) => ((await ctx.db.execute(sql`select id from teams where tenant_id = ${tenantId} and name = ${name}`)).rows[0] as { id: string }).id;
 

@@ -72,3 +72,42 @@ test('modelo de ofício e emissão pelo contrato', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Ofícios emitidos' })).toContainText('Ofício nº 71/');
   psql(`update contracts set branch_id = null where branch_id = '${branch}'`);
 });
+
+test('reajuste por item no ofício: aplicar no período e conferir', async ({ page }) => {
+  test.setTimeout(150_000);
+  const tag = Date.now().toString(36);
+  const tenant = psql(`select tenant_id from users where email = 'carlos@yepnet.test'`);
+  const branch = psql(`insert into sales_branches (tenant_id, name, cnpj, city, state) values ('${tenant}', 'BKT Reajuste ${tag}', '18.929.415/0001-00', 'Aracaju', 'SE') returning id`).split('\n')[0];
+  await page.goto('/login');
+  await page.getByLabel('E-mail').fill('carlos@yepnet.test');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
+  const api = page.request;
+  const tpl = await (await api.post('/api/v1/admin/oficios', { data: { name: `Reajuste por item ${tag}`, description: null, branchIds: [], blocks: [{ id: 'corpo', kind: 'texto', x: 20, y: 40, w: 170, align: 'justify', size: 11, lineGap: 1.4, indent: 0, paraGap: 3, text: 'Reajuste de **{{reajuste.percentual}}**.\n{{tabela.reajuste}}\n{{tabela.indices}}' }] } })).json();
+  expect(tpl.id).toBeTruthy();
+  const contact = psql(`select id from contacts where tenant_id = '${tenant}' order by created_at limit 1`);
+  const me = await (await api.get('/api/v1/me')).json();
+  const start = new Date(Date.now() - 335 * 86_400_000).toISOString().slice(0, 10);
+  const c = await (await api.post('/api/v1/contracts', { data: { contactId: contact, branchId: branch, billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: me.user.id, version: { number: `RJ-${tag}`, object: 'link dedicado', signedAt: start, startAt: start, termMonths: 12, monthlyCents: 1_000_000, adjustmentIndex: 'IPCA', adjustmentBaseDate: start, items: [{ planId: null, description: 'Link 500 Mbps', qty: 2, unitCents: 350_000 }, { planId: null, description: 'Colocation', qty: 1, unitCents: 300_000 }], publicTerms: { agency: 'Órgão E2E', processNumber: '1/2026', modality: 'Pregão', commitmentNote: null, budgetLine: null, extensionMaxMonths: null } } } })).json();
+  expect((await api.post(`/api/v1/contracts/${c.id}/validate`)).ok()).toBe(true);
+
+  await page.goto(`/contracts/${c.id}`);
+  await page.getByRole('button', { name: 'Emitir ofício' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Emitir ofício' });
+  await dlg.getByLabel('Modelo').selectOption({ label: `Reajuste por item ${tag}` });
+  await expect(dlg.getByRole('checkbox', { name: 'Reajuste por item' })).toBeChecked();
+  await dlg.getByLabel('Reajuste (%) de Link 500 Mbps').fill('5');
+  await dlg.getByLabel('Reajuste (%) de Colocation').fill('3');
+  await expect(dlg.getByRole('table', { name: 'Reajuste por item' })).toContainText('R$ 10.440,00');
+  const [popup] = await Promise.all([page.waitForEvent('popup'), dlg.getByRole('button', { name: /^Emitir ofício nº/ }).click()]);
+  await popup.close();
+  const list = page.getByRole('region', { name: 'Ofícios emitidos' });
+  await list.getByRole('button', { name: 'Aplicar reajuste' }).click();
+  await page.getByRole('dialog', { name: 'Aplicar reajuste no contrato' }).getByRole('button', { name: 'Aplicar reajuste' }).click();
+  const chk = page.getByRole('dialog', { name: 'Conferir reajuste aplicado' });
+  await expect(chk).toContainText('Tudo confere com o ofício');
+  await chk.getByRole('button', { name: 'Conferido, está correto' }).click();
+  await expect(list).toContainText('Reajuste aplicado e conferido');
+  psql(`update contracts set branch_id = null where branch_id = '${branch}'`);
+});

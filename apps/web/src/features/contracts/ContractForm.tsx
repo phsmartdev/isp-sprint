@@ -16,7 +16,7 @@ import { dec, type ContractItem, type Guarantee, type PublicTerms, type Version 
 
 type ItemRow = { planId: string; description: string; qty: string; unit: string; kind: ContractItemKind };
 export type FormState = {
-  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string; branchId: string;
+  kind: 'privado' | 'publico'; billingType: BillingType; initialBalance: string; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string; csmId: string; adminOwnerId: string; legalLimitAt: string; nextAction: string; nextActionAt: string; branchId: string; renewalClause: string;
   number: string; object: string; signedAt: string; startAt: string; termMonths: string; endAt: string; activationAt: string; billingStartAt: string; renewalAt: string;
   items: ItemRow[]; monthly: string; total: string; monthlyAuto: boolean; totalAuto: boolean; billingDay: string; billingTerms: string;
   hasReport: boolean; rSector: string; rValidator: string; rDueDay: string; rAlertDays: string;
@@ -28,10 +28,10 @@ export type FormState = {
   serviceType: ContractServiceType | '';
 };
 
-export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null; branchId: string | null }>, v: Partial<Version>): FormState {
+export function formFrom(h: Partial<{ kind: 'privado' | 'publico'; billingType: BillingType; legalRegime: LegalRegime; commercialOwnerId: string; operationalOwnerId: string | null; csmId: string | null; adminOwnerId: string | null; legalLimitAt: string | null; nextAction: string | null; nextActionAt: string | null; branchId: string | null; renewalClause: string | null }>, v: Partial<Version>): FormState {
   const g = v.guarantee, p = v.publicTerms;
   return {
-    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '', branchId: h.branchId ?? '',
+    kind: h.kind ?? 'privado', billingType: h.billingType ?? 'recorrente', initialBalance: '', legalRegime: h.legalRegime ?? 'privado', commercialOwnerId: h.commercialOwnerId ?? '', operationalOwnerId: h.operationalOwnerId ?? '', csmId: h.csmId ?? '', adminOwnerId: h.adminOwnerId ?? '', legalLimitAt: h.legalLimitAt ?? '', nextAction: h.nextAction ?? '', nextActionAt: h.nextActionAt ?? '', branchId: h.branchId ?? '', renewalClause: h.renewalClause ?? '',
     number: v.number ?? '', object: v.object ?? '', signedAt: v.signedAt ?? '', startAt: v.startAt ?? '', termMonths: v.termMonths ? String(v.termMonths) : '', endAt: v.endAt ?? '', activationAt: v.activationAt ?? '', billingStartAt: v.billingStartAt ?? '', renewalAt: v.renewalAt ?? '',
     items: (v.items ?? []).map((i) => ({ planId: i.planId ?? '', description: i.description, qty: String(i.qty), unit: dec(i.unitCents), kind: itemKindOf(i) })),
     monthly: dec(v.monthlyCents ?? null), total: dec(v.totalCents ?? null),
@@ -76,7 +76,7 @@ export function payloadOf(f: FormState) {
   if (initialBalanceCents === null) throw new Error('Saldo inicial inválido. Use o formato 100.000,00.');
   return {
     initialBalanceCents,
-    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, adminOwnerId: f.adminOwnerId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt), branchId: f.branchId || null },
+    header: { kind: f.kind, billingType: f.billingType, legalRegime: f.kind === 'privado' ? 'privado' : f.legalRegime, commercialOwnerId: f.commercialOwnerId, operationalOwnerId: f.operationalOwnerId || null, csmId: f.csmId || null, adminOwnerId: f.adminOwnerId || null, legalLimitAt: nul(f.legalLimitAt), nextAction: nul(f.nextAction), nextActionAt: nul(f.nextActionAt), branchId: f.branchId || null, renewalClause: f.renewalClause.trim() || null },
     version: {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
@@ -294,6 +294,7 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
         <FormField label="Índice" htmlFor="cf-idx"><Input id="cf-idx" value={f.adjustmentIndex} onChange={(e) => onChange({ adjustmentIndex: e.target.value })} placeholder="IPCA, IGP-M, IST..." /></FormField>
         <FormField label="Data-base" htmlFor="cf-base"><Input id="cf-base" type="date" value={f.adjustmentBaseDate} onChange={(e) => onChange({ adjustmentBaseDate: e.target.value })} /></FormField>
         <FormField label="Regra" htmlFor="cf-rule" className="sm:col-span-2 lg:col-span-1"><Input id="cf-rule" value={f.adjustmentRule} onChange={(e) => onChange({ adjustmentRule: e.target.value })} placeholder="Ex.: anual, 12 meses da proposta" /></FormField>
+        <FormField label="Cláusula de renovação" htmlFor="cf-renewal" className="sm:col-span-2 lg:col-span-3" hint="Texto da cláusula do contrato. Vira a variável {{contrato.clausula_renovacao}} dos ofícios"><Textarea id="cf-renewal" rows={3} maxLength={4000} value={f.renewalClause} onChange={(e) => onChange({ renewalClause: e.target.value })} placeholder="Ex.: Cláusula Sexta – O presente contrato poderá ser prorrogado por iguais e sucessivos períodos, até o limite de 120 meses, nos termos do art. 107 da Lei nº 14.133/2021." /></FormField>
       </Fieldset>
 
       <Fieldset title="Responsáveis">

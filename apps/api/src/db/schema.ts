@@ -1362,6 +1362,8 @@ export const contracts = pgTable(
     customerId: uuid('customer_id').references(() => customers.id),
     /** filial do contrato (emitente dos documentos: ofícios no timbrado dela); herda da negociação de origem */
     branchId: uuid('branch_id').references(() => salesBranches.id),
+    /** cláusula de renovação (texto do contrato; vira variável dos ofícios) */
+    renewalClause: text('renewal_clause'),
     opportunityId: uuid('opportunity_id').references(() => opportunities.id),
     /** Contratação decorrente de ata de registro de preços (registro jurídico próprio, vinculado à ARP). */
     arpId: uuid('arp_id'),
@@ -6962,6 +6964,10 @@ export const officeLetterSeq = pgTable('office_letter_seq', {
 }, (t) => ({ pk: primaryKey({ columns: [t.branchId, t.year] }) }));
 
 /** Ofício emitido: número, os valores usados, o texto como saiu (fotografia) e o PDF. Não se altera depois de emitido. */
+/** Passo de aplicação no contrato e a conferência logo depois (quem, quando, resultado). */
+export type OfficeApplyState = { appliedAt?: string; appliedBy?: string; appliedByName?: string; version?: number; checkedAt?: string; checkedBy?: string; checkedByName?: string; checkOk?: boolean; checkNote?: string | null };
+export type OfficeAdjustment = OfficeApplyState & { anniversary: string; index: string | null; pct: number; items: { description: string; qty: number; unitCents: number; pct: number; newUnitCents: number }[]; currentMonthlyCents: number; newMonthlyCents: number };
+export type OfficeRenewal = OfficeApplyState & { fromEndAt: string | null; startAt: string; endAt: string; termMonths: number };
 export const officeLetters = pgTable('office_letters', {
   id: id(),
   tenantId: tenantId(),
@@ -6978,6 +6984,12 @@ export const officeLetters = pgTable('office_letters', {
   blocks: jsonb('blocks').$type<OfficeBlock[]>().notNull().default([]),
   pdf: bytea('pdf').notNull(),
   sizeBytes: integer('size_bytes').notNull(),
+  /** reajuste proposto no ofício (por item) e, depois, a aplicação no contrato e a conferência */
+  adjustment: jsonb('adjustment').$type<OfficeAdjustment | null>(),
+  /** renovação proposta no ofício (nova vigência) e, depois, a aplicação e a conferência */
+  renewal: jsonb('renewal').$type<OfficeRenewal | null>(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  sentTo: text('sent_to'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({

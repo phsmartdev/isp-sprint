@@ -88,3 +88,74 @@ describe('Ofícios', () => {
     expect((await carlos.put(`/admin/oficios/filiais/${branchId}`, { legalName: null, signerName: null, signerRole: null, nextNumber: 72 })).statusCode).toBe(422);
   });
 });
+
+describe('Ofício de reajuste e renovação', () => {
+  const sent: { to: string; subject: string; attachments?: { filename: string }[] }[] = [];
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const shift = (days: number) => iso(new Date(Date.now() + days * 86_400_000));
+  let cid = '';
+  beforeAll(async () => {
+    const { setIndexFetcher } = await import('../src/services/indices');
+    const { setTransportFactory } = await import('../src/services/email');
+    // série simulada do Banco Central: 0,5% ao mês em todos os índices
+    setIndexFetcher(async (_code, from, to) => { const out = []; for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = iso(new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 1))).slice(0, 7)) out.push({ month: m, pct: 0.5 }); return out; });
+    setTransportFactory(() => ({ sendMail: async (m: { to: string; subject: string; attachments?: { filename: string }[] }) => { sent.push(m); return { messageId: `m${sent.length}` }; } }) as never);
+    ok(await carlos.put('/admin/smtp', { host: 'smtp.exemplo.test', port: 587, secure: false, username: 'u', password: 'x', fromName: 'Yepnet', fromEmail: 'vendas@yepnet.test', replyTo: null, enabled: true }));
+    const contactId = ((await ctx.db.execute(sql`select id from contacts where tenant_id = ${tenantId} order by created_at limit 1`)).rows[0] as { id: string }).id;
+    // assinado há 11 meses: aniversário em ~1 mês e término em ~1 mês (dentro dos dois períodos)
+    const start = shift(-335);
+    cid = ok(await carlos.post('/contracts', { contactId, branchId, renewalClause: 'Cláusula Sexta – prorrogável por iguais períodos até 120 meses.', billingType: 'recorrente', kind: 'publico', legalRegime: 'lei_14133', commercialOwnerId: carlos.me.user.id, version: { number: `R-${Date.now()}`, object: 'link dedicado', signedAt: start, startAt: start, termMonths: 12, monthlyCents: 1_000_000, adjustmentIndex: 'IPCA', adjustmentBaseDate: start, items: [{ planId: null, description: 'Link 500 Mbps', qty: 2, unitCents: 350_000 }, { planId: null, description: 'Colocation', qty: 1, unitCents: 300_000 }], publicTerms: { agency: 'Órgão Fictício', processNumber: '1/2026', modality: 'Pregão', commitmentNote: null, budgetLine: null, extensionMaxMonths: null } } }), 201).json().id;
+    ok(await carlos.post(`/contracts/${cid}/validate`));
+  });
+  afterAll(async () => {
+    const { setIndexFetcher } = await import('../src/services/indices');
+    const { setTransportFactory } = await import('../src/services/email');
+    setIndexFetcher(null); setTransportFactory(null);
+    await carlos.put('/admin/smtp', { host: 'smtp.exemplo.test', port: 587, secure: false, username: 'u', fromName: 'Yepnet', fromEmail: 'vendas@yepnet.test', replyTo: null, enabled: false });
+  });
+
+  it('reajuste por item, índices, envio ao cliente, aplicação no período e conferência', async () => {
+    const d = ok(await carlos.get(`/contracts/${cid}/oficios`)).json();
+    expect(d.contract).toMatchObject({ renewalClause: expect.stringContaining('Cláusula Sexta'), adjust: { inPeriod: true }, renew: { inPeriod: true } });
+    expect(d.vars['contrato.clausula_renovacao']).toContain('Cláusula Sexta');
+    const ann = d.contract.adjust.anniversary;
+    const idx = ok(await carlos.get(`/contracts/${cid}/oficios/indices?anniversary=${ann}`)).json().indices;
+    expect(idx.map((r: { index: string }) => r.index)).toEqual(['IPCA', 'INPC', 'IGP-M', 'IGP-DI']);
+    expect(idx[0].pct).toBeCloseTo(6.1678, 3);
+    const blocks = [{ id: 'corpo', kind: 'texto', x: 20, y: 40, w: 170, align: 'justify', size: 11, lineGap: 1.4, indent: 0, paraGap: 3, text: 'Reajuste de **{{reajuste.percentual}}** ({{reajuste.mensal_atual}} → {{reajuste.mensal_novo}}).\n{{tabela.reajuste}}\n{{tabela.indices}}\nNova vigência: {{renovacao.inicio}} a {{renovacao.termino}} ({{renovacao.prazo}}). {{contrato.clausula_renovacao}}' }];
+    const items = d.contract.items.map((i: object, k: number) => ({ ...i, pct: k === 0 ? 5 : 3 }));
+    const renewal = d.contract.renew.suggestion;
+    ok(await carlos.post(`/contracts/${cid}/oficios/previa`, { blocks, vars: d.vars, branchId, adjustment: { anniversary: ann, index: 'IPCA', items }, renewal, indices: idx }));
+    // itens que não batem com o contrato são recusados
+    expect((await carlos.post(`/contracts/${cid}/oficios`, { blocks, vars: d.vars, branchId, adjustment: { anniversary: ann, index: 'IPCA', items: items.slice(0, 1) }, renewal: null, indices: idx })).statusCode).toBe(422);
+    const l = ok(await carlos.post(`/contracts/${cid}/oficios`, { blocks, vars: d.vars, branchId, subject: 'Reajuste e renovação', adjustment: { anniversary: ann, index: 'IPCA', items }, renewal, indices: idx }), 201).json();
+    const row = (await ctx.db.execute(sql`select adjustment, renewal, vars from office_letters where id = ${l.id}`)).rows[0] as { adjustment: { pct: number; newMonthlyCents: number; items: { newUnitCents: number }[] }; renewal: { endAt: string }; vars: Record<string, string> };
+    expect(row.adjustment.items.map((i) => i.newUnitCents)).toEqual([367_500, 309_000]);
+    expect(row.adjustment.newMonthlyCents).toBe(1_044_000);
+    expect(row.adjustment.pct).toBeCloseTo(4.4, 3);
+    expect(row.vars['reajuste.percentual']).toBe('4,40%');
+
+    // envio pelo e-mail da empresa, com o PDF anexo
+    ok(await carlos.post(`/oficios/${l.id}/enviar`, { to: 'gestor@orgao.test', subject: `Ofício nº ${l.label}`, message: 'Segue o ofício.' }));
+    expect(sent.at(-1)).toMatchObject({ to: 'gestor@orgao.test', attachments: [{ filename: `Oficio-${l.label.replace('/', '-')}.pdf` }] });
+
+    // só quem gere contratos aplica; conferir antes de aplicar não vale
+    expect((await lucas.post(`/oficios/${l.id}/aplicar`, { acao: 'reajuste' })).statusCode).toBeGreaterThanOrEqual(403);
+    expect((await carlos.post(`/oficios/${l.id}/conferir`, { acao: 'reajuste', ok: true })).statusCode).toBe(422);
+    ok(await carlos.post(`/oficios/${l.id}/aplicar`, { acao: 'reajuste' }));
+    expect((await carlos.post(`/oficios/${l.id}/aplicar`, { acao: 'reajuste' })).statusCode).toBe(422);
+    const c = ok(await carlos.get(`/contracts/${cid}/oficios`)).json().contract;
+    expect(c.items.map((i: { unitCents: number }) => i.unitCents)).toEqual([367_500, 309_000]);
+    expect(c.monthlyCents).toBe(1_044_000);
+    expect((await carlos.post(`/oficios/${l.id}/conferir`, { acao: 'reajuste', ok: false })).statusCode).toBe(422);
+    ok(await carlos.post(`/oficios/${l.id}/conferir`, { acao: 'reajuste', ok: true }));
+
+    // renovação: nova vigência e conferência com divergência
+    ok(await carlos.post(`/oficios/${l.id}/aplicar`, { acao: 'renovacao' }));
+    const c2 = ok(await carlos.get(`/contracts/${cid}/oficios`)).json().contract;
+    expect([c2.startAt, c2.endAt]).toEqual([renewal.startAt, renewal.endAt]);
+    ok(await carlos.post(`/oficios/${l.id}/conferir`, { acao: 'renovacao', ok: false, note: 'Faltou o termo assinado pelo órgão' }));
+    const st = (await ctx.db.execute(sql`select renewal->>'checkOk' as ok, (select next_action from contracts where id = ${cid}) as na from office_letters where id = ${l.id}`)).rows[0] as { ok: string; na: string };
+    expect(st).toEqual({ ok: 'false', na: `Corrigir divergência da renovação (ofício nº ${l.label})` });
+  });
+});
