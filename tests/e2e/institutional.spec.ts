@@ -26,8 +26,18 @@ test('apresentação institucional: selos em fila, tela limpa e blocos redimensi
   await expect(seals).not.toContainText('Personalização');
   await page.waitForTimeout(300);
   await page.screenshot({ path: 'test-results/institucional-1.png' });
+  // passar o mouse num município: ele sobe, amplia e mostra o nome
+  const map = await deck.locator('[data-block="mapa"]').boundingBox();
+  await page.mouse.move(map!.x + map!.width * 0.5, map!.y + map!.height * 0.5);
+  await expect(deck.locator('.inst-pop')).toHaveCount(1);
+  await expect(page.locator('span.fixed').filter({ hasText: /\w/ })).toHaveCount(1);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'test-results/institucional-hover.png' });
+  await page.mouse.move(5, 5);
+  await expect(deck.locator('.inst-pop')).toHaveCount(0);
   // sai da tela cheia para editar o layout
   await deck.getByRole('button', { name: /sair da tela cheia/i }).click().catch(() => undefined);
+  await page.waitForTimeout(600);
   await deck.getByRole('button', { name: /Editar layout/ }).click();
   const texto = deck.locator('[data-block="texto"]');
   const before = await texto.boundingBox();

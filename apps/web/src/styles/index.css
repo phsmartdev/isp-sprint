@@ -99,3 +99,7 @@
 @keyframes inst-pulse { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
 .inst-pulse { animation: inst-pulse 2.6s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .inst-pulse { animation: none; opacity: 0; } }
+/* Mapa institucional: o município sob o mouse sobe e amplia. */
+@keyframes inst-pop { from { transform: scale(1); } to { transform: scale(1.35); } }
+.inst-pop { animation: inst-pop 220ms ease-out forwards; }
+@media (prefers-reduced-motion: reduce) { .inst-pop { animation: none; transform: scale(1.35); } }
