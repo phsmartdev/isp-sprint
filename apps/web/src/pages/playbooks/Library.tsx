@@ -119,6 +119,10 @@ export function PlaybooksPage() {
               <Shelf title="Continue de onde parou" items={d!.forYou.recent} />
               <Shelf title="Favoritos" items={d!.forYou.favorites} />
               <ManualBanner onOpen={() => setU({ aba: 'configuracoes' })} />
+              <Link to="/playbooks/apresentacao-institucional" className="flex items-center justify-between gap-3 border border-line bg-surface px-4 py-3 hover:border-line-strong">
+                <span><span className="block font-semibold text-ink">Apresentação institucional BKT</span><span className="text-sm text-muted">Em tela cheia, para apresentar a empresa a clientes, parceiros e novos colaboradores.</span></span>
+                <span className="text-sm font-semibold text-primary">Abrir</span>
+              </Link>
               <LibraryCategories categories={d!.categories} manage={d!.can.manage} onPick={(id) => setU({ categoria: id })} />
               {!d!.items.length && !d!.forYou.team.length && <EmptyState title="A biblioteca ainda está vazia" description={d!.can.create ? 'Crie o primeiro playbook a partir de um modelo. Ele passa pela Gerência e pela Diretoria antes de ser publicado.' : 'Os playbooks publicados para você aparecem aqui.'} />}
             </div>

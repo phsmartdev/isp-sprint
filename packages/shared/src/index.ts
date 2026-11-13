@@ -346,7 +346,7 @@ export const PlanUpsert = z.object({
 export const SourceUpsert = z.object({ name: trimmed(60).min(2), active: z.boolean().default(true) });
 export const StageRename = z.object({ name: trimmed(40).min(2) });
 export const BRAND_SLOTS = [
-  'logo_escuro', 'logo_claro', 'favicon', 'login_fundo', 'banner_inicio', 'card_sidebar',
+  'logo_escuro', 'logo_claro', 'favicon', 'login_fundo', 'banner_inicio', 'card_sidebar', 'selos_certificacoes',
   'mascote_leads', 'mascote_oportunidades', 'mascote_clientes', 'mascote_atividades', 'mascote_relatorios', 'mascote_inteligencia', 'mascote_administracao',
 ] as const;
 export type BrandSlot = (typeof BRAND_SLOTS)[number];
