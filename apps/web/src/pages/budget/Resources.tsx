@@ -32,51 +32,6 @@ function useSave(onDone: () => void) {
 
 // ================================================================== ferramentas e equipamentos
 type Asset = { id: string; costCenterId: string; accountId: string | null; name: string; tag: string | null; serial: string | null; category: string; holderId: string | null; holderName: string | null; supplierId: string | null; acquiredOn: string; valueCents: number; usefulLifeMonths: number | null; status: AssetStatus; notes: string | null; bookValueCents: number };
-const ASSET_TONE: Record<AssetStatus, string> = { em_uso: 'bg-success-soft text-[#15803D]', estoque: 'bg-primary-soft text-primary', manutencao: 'bg-warning-soft text-[#C2610C]', baixado: 'bg-surface-2 text-muted' };
-
-export function BudgetAssetsPage() {
-  const st = useStructure();
-  const [f, setF] = useUrlState({ cc: '', s: '' });
-  const q = useQuery({ queryKey: ['budget', 'assets', f.cc], queryFn: () => api<{ items: Asset[] }>(`/budget/assets${qs({ costCenterId: f.cc || undefined })}`) });
-  const [edit, setEdit] = useState<Partial<Asset> | null>(null);
-  const items = (q.data?.items ?? []).filter((a) => !f.s || a.status === f.s);
-  const live = items.filter((a) => a.status !== 'baixado');
-  return (
-    <BudgetShell subtitle="Notebooks, celulares, equipamentos de demonstração e ferramentas do comercial, com responsável e valor." actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!st.data?.costCenters.length} onClick={() => setEdit({ status: 'em_uso', category: 'notebook', acquiredOn: new Date().toISOString().slice(0, 10), usefulLifeMonths: 36, costCenterId: f.cc || st.data?.costCenters[0]?.id })}>Novo equipamento</Button>}>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {st.data && <CcSelect value={f.cc} onChange={(cc) => setF({ cc })} list={st.data.costCenters} />}
-        <Select aria-label="Situação" className="h-11 w-auto" value={f.s} onChange={(e) => setF({ s: e.target.value })}><option value="">Todas as situações</option>{ASSET_STATUS.map((x) => <option key={x} value={x}>{ASSET_STATUS_LABELS[x]}</option>)}</Select>
-      </div>
-      <dl className="mb-4 grid grid-cols-2 gap-px border border-line bg-line lg:grid-cols-4" aria-label="Resumo dos equipamentos">
-        <Stat label="Itens ativos" value={live.length} />
-        <Stat label="Valor de compra" value={fmtBRL(live.reduce((t, a) => t + a.valueCents, 0))} />
-        <Stat label="Valor contábil hoje" value={fmtBRL(live.reduce((t, a) => t + a.bookValueCents, 0))} sub="depreciação linear pela vida útil" />
-        <Stat label="Em manutenção" value={items.filter((a) => a.status === 'manutencao').length} />
-      </dl>
-      <section className="card overflow-x-auto p-0" aria-label="Equipamentos">
-        {q.isLoading || !st.data ? <LoadingRows /> : !items.length ? <EmptyState title="Nenhum equipamento" description="Cadastre o que o comercial usa: quem está com ele, quanto custou e por quanto tempo vale." /> : (
-          <table className="w-full min-w-[900px] text-sm">
-            <thead><tr className="border-b border-line bg-surface-2 text-left text-xs text-muted"><th className="px-4 py-2.5 font-semibold">Equipamento</th><th className="px-3 py-2.5 font-semibold">Centro de custo</th><th className="px-3 py-2.5 font-semibold">Com quem</th><th className="px-3 py-2.5 font-semibold">Compra</th><th className="px-3 py-2.5 text-right font-semibold">Valor</th><th className="px-3 py-2.5 text-right font-semibold">Contábil</th><th className="px-4 py-2.5 font-semibold">Situação</th></tr></thead>
-            <tbody>
-              {items.map((a) => (
-                <tr key={a.id} className="cursor-pointer border-b border-line last:border-0 hover:bg-surface-2" onClick={() => setEdit(a)}>
-                  <td className="px-4 py-2.5"><button type="button" className="text-left font-semibold text-ink hover:text-primary">{a.name}</button><span className="block text-xs text-muted">{ASSET_CATEGORY_LABELS[a.category as keyof typeof ASSET_CATEGORY_LABELS]}{a.tag ? ` · patrimônio ${a.tag}` : ''}</span></td>
-                  <td className="px-3 py-2.5 text-text">{ccName(st.data!, a.costCenterId)}</td>
-                  <td className="px-3 py-2.5 text-text">{a.holderName ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-text">{fmtDate(a.acquiredOn)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtBRL(a.valueCents)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtBRL(a.bookValueCents)}</td>
-                  <td className="px-4 py-2.5"><Tag className={ASSET_TONE[a.status]}>{ASSET_STATUS_LABELS[a.status]}</Tag></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-      {edit && st.data && <AssetModal st={st.data} a={edit} onClose={() => setEdit(null)} />}
-    </BudgetShell>
-  );
-}
 
 function AssetModal({ st, a, onClose }: { st: Structure; a: Partial<Asset>; onClose: () => void }) {
   const [v, setV] = useState({ costCenterId: a.costCenterId ?? '', accountId: a.accountId ?? '', name: a.name ?? '', tag: a.tag ?? '', serial: a.serial ?? '', category: a.category ?? 'outro', holderId: a.holderId ?? '', acquiredOn: a.acquiredOn ?? '', value: money(a.valueCents), life: String(a.usefulLifeMonths ?? ''), status: a.status ?? 'em_uso', notes: a.notes ?? '' });
@@ -102,63 +57,88 @@ function AssetModal({ st, a, onClose }: { st: Structure; a: Partial<Asset>; onCl
   );
 }
 
-// ================================================================== softwares, licenças, contratos e assinaturas
-type Resource = {
-  id: string; kind: ResourceKind; costCenterId: string; accountId: string | null; supplierId: string | null; supplierName: string | null; name: string; object: string | null; seats: number | null; currency: 'BRL' | 'USD'; amountCents: number; fxRate: number | null;
-  period: string; startOn: string; endOn: string | null; renewalOn: string | null; paymentDay: number | null; paymentMethod: string | null; vaultRegistered: boolean; vaultRef: string | null; ownerId: string | null; ownerName: string | null;
-  legalReviewed: boolean; directorSigned: boolean; status: 'ativo' | 'suspenso' | 'cancelado'; reviewOn: string | null; notes: string | null; cancelReason: string | null; monthlyBrlCents: number; pending: string[]; renewsSoon: boolean;
-};
+// ================================================================== recursos numa tela só (ferramentas, softwares, contratos e assinaturas)
+type ItemType = 'equipamento' | 'software' | 'contrato' | 'assinatura';
+const ITEM_TYPE_LABELS: Record<ItemType, string> = { equipamento: 'Ferramenta ou equipamento', software: 'Software ou licença', contrato: 'Contrato de serviço', assinatura: 'Assinatura' };
+const TYPE_FILTERS = [['', 'Todos os tipos'], ['equipamento', 'Ferramentas e equipamentos'], ['software', 'Softwares e licenças'], ['contratos', 'Contratos e assinaturas']] as const;
 
-export function BudgetSoftwarePage() { return <ResourcesPage kind="software" />; }
-export function BudgetContractsPage() { return <ResourcesPage kind="contratos" />; }
-
-function ResourcesPage({ kind }: { kind: 'software' | 'contratos' }) {
+/** Ferramentas, softwares, contratos e assinaturas numa tabela: o tipo é escolhido no lançamento e filtrado na própria tabela. */
+export function BudgetToolsPage() {
   const st = useStructure();
-  const [f, setF] = useUrlState({ cc: '', s: 'ativo' });
-  const q = useQuery({ queryKey: ['budget', 'resources', kind, f.cc], queryFn: () => api<{ items: Resource[] }>(`/budget/resources${qs({ kind, costCenterId: f.cc || undefined })}`) });
-  const [edit, setEdit] = useState<Partial<Resource> | null>(null);
-  const items = (q.data?.items ?? []).filter((r) => !f.s || r.status === f.s);
-  const active = (q.data?.items ?? []).filter((r) => r.status === 'ativo');
-  const soft = kind === 'software';
+  const [f, setF] = useUrlState({ cc: '', tipo: '', s: 'ativo' });
+  const assets = useQuery({ queryKey: ['budget', 'assets', f.cc], queryFn: () => api<{ items: Asset[] }>(`/budget/assets${qs({ costCenterId: f.cc || undefined })}`) });
+  const soft = useQuery({ queryKey: ['budget', 'resources', 'software', f.cc], queryFn: () => api<{ items: Resource[] }>(`/budget/resources${qs({ kind: 'software', costCenterId: f.cc || undefined })}`) });
+  const ctr = useQuery({ queryKey: ['budget', 'resources', 'contratos', f.cc], queryFn: () => api<{ items: Resource[] }>(`/budget/resources${qs({ kind: 'contratos', costCenterId: f.cc || undefined })}`) });
+  const [editA, setEditA] = useState<Partial<Asset> | null>(null);
+  const [editR, setEditR] = useState<Partial<Resource> | null>(null);
+  const [picking, setPicking] = useState(false);
+  type Row = { id: string; type: ItemType; name: string; detail: string; cc: string; monthly: number | null; value: string; when: string; whenSub: string | null; soon: boolean; active: boolean; statusLabel: string; pending: string[]; open: () => void };
+  const rows: Row[] = [
+    ...(assets.data?.items ?? []).map((a): Row => ({ id: a.id, type: 'equipamento', name: a.name, detail: `${ASSET_CATEGORY_LABELS[a.category as keyof typeof ASSET_CATEGORY_LABELS] ?? ''}${a.holderName ? ` · com ${a.holderName}` : ''}${a.tag ? ` · patrimônio ${a.tag}` : ''}`, cc: a.costCenterId, monthly: null, value: fmtBRL(a.valueCents), when: fmtDate(a.acquiredOn), whenSub: 'compra', soon: false, active: a.status !== 'baixado', statusLabel: ASSET_STATUS_LABELS[a.status], pending: [], open: () => setEditA(a) })),
+    ...[...(soft.data?.items ?? []), ...(ctr.data?.items ?? [])].map((r): Row => ({ id: r.id, type: r.kind as ItemType, name: r.name, detail: `${r.kind === 'software' ? `${r.seats ? `${r.seats} usuário(s) · ` : ''}${r.vaultRegistered ? 'no Vault' : 'fora do Vault'}` : ''}${r.supplierName ? `${r.kind === 'software' ? ' · ' : ''}${r.supplierName}` : ''}`, cc: r.costCenterId, monthly: r.monthlyBrlCents, value: moneyHidden() ? MASK : `${r.currency === 'USD' ? 'US$ ' : 'R$ '}${(r.amountCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} · ${RESOURCE_PERIOD_LABELS[r.period as keyof typeof RESOURCE_PERIOD_LABELS]?.toLowerCase() ?? ''}`, when: fmtDate(r.startOn), whenSub: r.renewalOn ? `renova ${fmtDate(r.renewalOn)}` : null, soon: r.renewsSoon, active: r.status === 'ativo', statusLabel: r.status === 'ativo' ? 'Ativo' : r.status === 'suspenso' ? 'Suspenso' : 'Cancelado', pending: r.pending, open: () => setEditR(r) })),
+  ];
+  const byType = rows.filter((r) => !f.tipo || (f.tipo === 'contratos' ? r.type === 'contrato' || r.type === 'assinatura' : r.type === f.tipo));
+  const items = byType.filter((r) => f.s === '' || (f.s === 'ativo' ? r.active : !r.active)).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  const live = byType.filter((r) => r.active);
+  const loading = assets.isLoading || soft.isLoading || ctr.isLoading || !st.data;
+  const start = (t: ItemType) => {
+    setPicking(false);
+    const cc = f.cc || st.data?.costCenters[0]?.id;
+    if (t === 'equipamento') setEditA({ status: 'em_uso', category: 'notebook', acquiredOn: new Date().toISOString().slice(0, 10), usefulLifeMonths: 36, costCenterId: cc });
+    else setEditR({ kind: t, currency: 'BRL', period: 'mensal', startOn: new Date().toISOString().slice(0, 10), costCenterId: cc, status: 'ativo' });
+  };
   return (
-    <BudgetShell
-      subtitle={soft ? 'Licenças recorrentes de cada centro de custo: custo em real ou dólar, assinatura, pagamento e registro no cofre de senhas.' : 'Contratos de serviço e assinaturas com fornecedores e parceiros: valor, vigência, Jurídico e assinatura da Diretoria.'}
-      actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!st.data?.costCenters.length} onClick={() => setEdit({ kind: soft ? 'software' : 'contrato', currency: 'BRL', period: 'mensal', startOn: new Date().toISOString().slice(0, 10), costCenterId: f.cc || st.data?.costCenters[0]?.id, status: 'ativo' })}>{soft ? 'Nova licença' : 'Novo contrato ou assinatura'}</Button>}>
-      <div className="mb-4 flex flex-wrap gap-2">
+    <BudgetShell subtitle="Ferramentas, equipamentos, softwares, contratos e assinaturas do comercial: custo, responsável, renovação e pendências."
+      actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} disabled={!st.data?.costCenters.length} onClick={() => setPicking(true)}>Novo item</Button>}>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Select aria-label="Tipo" className="h-10 w-auto" value={f.tipo} onChange={(e) => setF({ tipo: e.target.value })}>{TYPE_FILTERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
         {st.data && <CcSelect value={f.cc} onChange={(cc) => setF({ cc })} list={st.data.costCenters} />}
-        <Select aria-label="Situação" className="h-11 w-auto" value={f.s} onChange={(e) => setF({ s: e.target.value })}><option value="ativo">Ativos</option><option value="suspenso">Suspensos</option><option value="cancelado">Cancelados</option><option value="">Todos</option></Select>
+        <Select aria-label="Situação" className="h-10 w-auto" value={f.s} onChange={(e) => setF({ s: e.target.value })}><option value="ativo">Em uso / ativos</option><option value="inativo">Baixados, suspensos e cancelados</option><option value="">Todos</option></Select>
+        <p className="ml-auto text-xs text-muted" aria-label="Resumo dos recursos">
+          <b className="text-ink">{live.length}</b> ativos · custo recorrente <b className="text-ink">{fmtBRL(live.reduce((t, r) => t + (r.monthly ?? 0), 0))}</b>/mês · <b className={live.some((r) => r.soon) ? 'text-[#C2610C]' : 'text-ink'}>{live.filter((r) => r.soon).length}</b> renovam em 45 dias · <b className={live.some((r) => r.pending.length) ? 'text-danger' : 'text-ink'}>{live.filter((r) => r.pending.length).length}</b> com pendência
+        </p>
       </div>
-      <dl className="mb-4 grid grid-cols-2 gap-px border border-line bg-line lg:grid-cols-4" aria-label={soft ? 'Resumo das licenças' : 'Resumo dos contratos'}>
-        <Stat label={soft ? 'Licenças ativas' : 'Ativos'} value={active.length} />
-        <Stat label="Custo mensal (R$)" value={fmtBRL(active.reduce((t, r) => t + r.monthlyBrlCents, 0))} sub="dólar pela cotação informada; anual ÷ 12" />
-        <Stat label="Renovam em 45 dias" value={active.filter((r) => r.renewsSoon).length} />
-        <Stat label="Com pendência" value={active.filter((r) => r.pending.length).length} tone={active.some((r) => r.pending.length) ? 'danger' : undefined} sub={soft ? 'Vault, pagamento, cotação ou revisão' : 'Jurídico, Diretoria ou pagamento'} />
-      </dl>
-      {soft && <p className="mb-4 flex items-start gap-2 border border-line bg-surface px-4 py-3 text-sm text-text"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />Usuário e senha ficam só no cofre de senhas corporativo (Vault), como pede a política. Aqui você marca que a licença está registrada lá e informa a referência da entrada.</p>}
-      <section className="card overflow-x-auto p-0" aria-label={soft ? 'Softwares e licenças' : 'Contratos e assinaturas'}>
-        {q.isLoading || !st.data ? <LoadingRows /> : !items.length ? <EmptyState title={soft ? 'Nenhuma licença' : 'Nenhum contrato ou assinatura'} description="Cadastre para acompanhar custo, renovação e trazer o valor recorrente para o planejamento do trimestre." /> : (
+      <section className="card overflow-x-auto p-0" aria-label="Ferramentas, softwares e contratos">
+        {loading ? <LoadingRows /> : !items.length ? <EmptyState title="Nada por aqui" description="Cadastre ferramentas, softwares, contratos e assinaturas para acompanhar custo e renovação e trazer o recorrente para o planejamento." /> : (
           <table className="w-full min-w-[980px] text-sm">
-            <thead><tr className="border-b border-line bg-surface-2 text-left text-xs text-muted"><th className="px-4 py-2.5 font-semibold">{soft ? 'Software' : 'Contrato / assinatura'}</th><th className="px-3 py-2.5 font-semibold">Centro de custo</th><th className="px-3 py-2.5 text-right font-semibold">Valor</th><th className="px-3 py-2.5 text-right font-semibold">Por mês (R$)</th><th className="px-3 py-2.5 font-semibold">Assinatura · renovação</th><th className="px-3 py-2.5 font-semibold">Pagamento</th><th className="px-4 py-2.5 font-semibold">Pendências</th></tr></thead>
+            <thead><tr className="border-b border-line bg-surface-2 text-left text-xs text-muted"><th className="px-4 py-2.5 font-semibold">Item</th><th className="px-3 py-2.5 font-semibold">Tipo</th><th className="px-3 py-2.5 font-semibold">Centro de custo</th><th className="px-3 py-2.5 text-right font-semibold">Valor</th><th className="px-3 py-2.5 text-right font-semibold">Por mês (R$)</th><th className="px-3 py-2.5 font-semibold">Início · renovação</th><th className="px-4 py-2.5 font-semibold">Situação</th></tr></thead>
             <tbody>
               {items.map((r) => (
-                <tr key={r.id} className={clsx('cursor-pointer border-b border-line last:border-0 hover:bg-surface-2', r.status !== 'ativo' && 'opacity-60')} onClick={() => setEdit(r)}>
-                  <td className="px-4 py-2.5"><button type="button" className="text-left font-semibold text-ink hover:text-primary">{r.name}</button><span className="block text-xs text-muted">{soft ? `${r.seats ? `${r.seats} usuário(s) · ` : ''}${r.vaultRegistered ? 'no Vault' : 'fora do Vault'}` : RESOURCE_KIND_LABELS[r.kind]}{r.supplierName ? ` · ${r.supplierName}` : ''}{r.status !== 'ativo' ? ` · ${r.status}` : ''}</span></td>
-                  <td className="px-3 py-2.5 text-text">{ccName(st.data!, r.costCenterId)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{moneyHidden() ? (r.currency === 'USD' ? 'US$ •••••' : MASK) : `${r.currency === 'USD' ? 'US$ ' : 'R$ '}${(r.amountCents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}<span className="block text-xs text-muted">{RESOURCE_PERIOD_LABELS[r.period as keyof typeof RESOURCE_PERIOD_LABELS]}{r.currency === 'USD' && r.fxRate ? ` · US$ 1 = R$ ${r.fxRate.toFixed(2).replace('.', ',')}` : ''}</span></td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtBRL(r.monthlyBrlCents)}</td>
-                  <td className="px-3 py-2.5 text-text">{fmtDate(r.startOn)}{r.renewalOn ? <span className={clsx('block text-xs', r.renewsSoon ? 'font-semibold text-[#C2610C]' : 'text-muted')}>renova {fmtDate(r.renewalOn)}</span> : null}</td>
-                  <td className="px-3 py-2.5 text-text">{r.paymentMethod ? PAYMENT_METHOD_LABELS[r.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] : '—'}{r.paymentDay ? <span className="block text-xs text-muted">dia {r.paymentDay}</span> : null}</td>
-                  <td className="px-4 py-2.5">{r.pending.length ? <span className="text-xs text-[#C2610C]">{r.pending.join(' · ')}</span> : <span className="text-xs text-[#15803D]">Em dia</span>}</td>
+                <tr key={r.id} className={clsx('cursor-pointer border-b border-line last:border-0 hover:bg-surface-2', !r.active && 'opacity-60')} onClick={r.open}>
+                  <td className="px-4 py-2.5"><button type="button" className="text-left font-semibold text-ink hover:text-primary">{r.name}</button>{r.detail && <span className="block text-xs text-muted">{r.detail}</span>}</td>
+                  <td className="px-3 py-2.5 text-text">{ITEM_TYPE_LABELS[r.type]}</td>
+                  <td className="px-3 py-2.5 text-text">{ccName(st.data!, r.cc)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{r.value}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{r.monthly == null ? <span className="text-muted">—</span> : fmtBRL(r.monthly)}</td>
+                  <td className="px-3 py-2.5 text-text">{r.when}{r.whenSub && <span className={clsx('block text-xs', r.soon ? 'font-semibold text-[#C2610C]' : 'text-muted')}>{r.whenSub}</span>}</td>
+                  <td className="px-4 py-2.5 text-xs">{r.statusLabel}{r.pending.length ? <span className="block text-[#C2610C]">{r.pending.join(' · ')}</span> : null}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </section>
-      {edit && st.data && <ResourceModal st={st.data} r={edit} onClose={() => setEdit(null)} />}
+      {(f.tipo === '' || f.tipo === 'software') && <p className="mt-3 flex items-start gap-2 text-xs text-muted"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />Usuário e senha de software ficam só no cofre de senhas corporativo (Vault); aqui você marca que está registrado lá.</p>}
+      <Modal open={picking} onClose={() => setPicking(false)} title="Novo item" size="sm">
+        <FormField label="Tipo do lançamento" htmlFor="ni-t">
+          <Select id="ni-t" defaultValue="" onChange={(e) => e.target.value && start(e.target.value as ItemType)}>
+            <option value="" disabled>Escolha o tipo…</option>
+            {(Object.keys(ITEM_TYPE_LABELS) as ItemType[]).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}
+          </Select>
+        </FormField>
+      </Modal>
+      {editA && st.data && <AssetModal st={st.data} a={editA} onClose={() => setEditA(null)} />}
+      {editR && st.data && <ResourceModal st={st.data} r={editR} onClose={() => setEditR(null)} />}
     </BudgetShell>
   );
 }
+
+// ================================================================== softwares, licenças, contratos e assinaturas
+type Resource = {
+  id: string; kind: ResourceKind; costCenterId: string; accountId: string | null; supplierId: string | null; supplierName: string | null; name: string; object: string | null; seats: number | null; currency: 'BRL' | 'USD'; amountCents: number; fxRate: number | null;
+  period: string; startOn: string; endOn: string | null; renewalOn: string | null; paymentDay: number | null; paymentMethod: string | null; vaultRegistered: boolean; vaultRef: string | null; ownerId: string | null; ownerName: string | null;
+  legalReviewed: boolean; directorSigned: boolean; status: 'ativo' | 'suspenso' | 'cancelado'; reviewOn: string | null; notes: string | null; cancelReason: string | null; monthlyBrlCents: number; pending: string[]; renewsSoon: boolean;
+};
 
 function ResourceModal({ st, r, onClose }: { st: Structure; r: Partial<Resource>; onClose: () => void }) {
   const soft = r.kind === 'software';

@@ -190,7 +190,7 @@ export function Progress({ value, className, color = '#5B9BFF' }: { value: numbe
 }
 
 /** Linhas (várias séries no mesmo eixo), com legenda, tooltip por mês e tabela para leitor de tela. */
-export function LineChart({ categories, series, format, ariaLabel, height = 240, tooltipTitle, onPick }: {
+export function LineChart({ categories, series, format, ariaLabel, height = 240, width = 640, tooltipTitle, onPick }: {
   /** clique num ponto: detalha os registros que compõem aquele valor */
   onPick?: (i: number) => void;
   categories: string[];
@@ -198,10 +198,12 @@ export function LineChart({ categories, series, format, ariaLabel, height = 240,
   format: (v: number) => string;
   ariaLabel: string;
   height?: number;
+  /** largura do desenho: mais largo = gráfico mais baixo e texto menor em telas largas */
+  width?: number;
   tooltipTitle: (i: number) => string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const W = 640, H = height, padL = 84, padR = 16, padT = 16, padB = 28;
+  const W = width, H = height, padL = 84, padR = 16, padT = 16, padB = 28;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const max = niceMax(Math.max(...series.flatMap((s) => s.values), 0));
   const step = categories.length > 1 ? innerW / (categories.length - 1) : 0;
