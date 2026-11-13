@@ -611,7 +611,6 @@ export function AdminSecurity() {
 const ART_SLOTS: { slot: BrandSlot; title: string; where: string; size: string; maxDim: number; aspect: string }[] = [
   { slot: 'login_fundo', title: 'Fundo da tela de login', where: 'Cobre a tela de acesso, atrás das boas-vindas e do quadro de login.', size: 'Recomendado: 1920 × 1080 px, paisagem.', maxDim: 2560, aspect: 'aspect-[16/9]' },
   { slot: 'banner_inicio', title: 'Banner do Início', where: 'O bloco “Nova oportunidade” da tela inicial. O texto fica à esquerda, com um véu escuro por cima da imagem.', size: 'Recomendado: 1600 × 520 px.', maxDim: 2000, aspect: 'aspect-[3/1]' },
-  { slot: 'selos_certificacoes', title: 'Selos e certificações', where: 'A faixa de selos e certificações da apresentação institucional (Central de Playbooks). Use fundo transparente.', size: 'Recomendado: PNG 2400 × 220 px, fundo transparente.', maxDim: 2800, aspect: 'aspect-[11/1]' },
   { slot: 'card_sidebar', title: 'Cartão do menu lateral', where: 'O cartão decorativo no rodapé do menu à esquerda.', size: 'Recomendado: 560 × 240 px.', maxDim: 1200, aspect: 'aspect-[7/3]' },
 ];
 
@@ -675,7 +674,53 @@ export function AdminBranding() {
           })}
         </div>
       )}
+      <InstitutionalSeals />
     </div>
+  );
+}
+
+/** Selos e certificações da apresentação institucional: um arquivo por selo, em fila; a apresentação só mostra. */
+function InstitutionalSeals() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['institucional', 'selos'], queryFn: () => api<{ items: { id: string; name: string; sha256: string }[] }>('/institucional/selos') });
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['institucional', 'selos'] });
+  const add = useMutation({
+    mutationFn: async (file: File) => {
+      if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) throw new Error('Envie PNG, JPG ou WebP.');
+      const small = await compressImage(file, { maxBytes: 2_900_000, maxDim: 1200, keepAlpha: true, format: 'webp' });
+      return api('/institucional/selos', { method: 'POST', body: { name: file.name.replace(/\.\w+$/, '').slice(0, 120), data: await fileToBase64(small) } });
+    },
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Selo adicionado' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const del = useMutation({ mutationFn: (id: string) => api(`/institucional/selos/${id}`, { method: 'DELETE' }), onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Selo removido' }); } });
+  const order = useMutation({ mutationFn: (ids: string[]) => api('/institucional/selos/ordem', { method: 'PUT', body: { ids } }), onSuccess: refresh });
+  const items = q.data?.items ?? [];
+  const move = (i: number, d: -1 | 1) => { const ids = items.map((x) => x.id); const j = i + d; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j]!, ids[i]!]; order.mutate(ids); };
+  return (
+    <section className="card p-5" aria-label="Selos e certificações">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h3 className="font-bold text-ink">Selos e certificações</h3><p className="mt-0.5 text-sm text-muted">Aparecem em fila na apresentação institucional (Central de Playbooks), na ordem abaixo. Um arquivo por selo; PNG com fundo transparente fica melhor.</p></div>
+        <label className={clsx('inline-flex h-9 cursor-pointer items-center gap-2 bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover', add.isPending && 'pointer-events-none opacity-60')}>
+          {add.isPending ? 'Enviando…' : 'Adicionar selo'}
+          <input type="file" multiple accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Adicionar selo ou certificação" onChange={async (e) => { for (const f of Array.from(e.target.files ?? [])) await add.mutateAsync(f).catch(() => undefined); e.target.value = ''; }} />
+        </label>
+      </div>
+      {!items.length ? <p className="mt-4 text-sm text-muted">Nenhum selo enviado. Sem selos, a apresentação não mostra o quadro.</p> : (
+        <ul className="mt-4 flex flex-wrap gap-3">{items.map((x, i) => (
+          <li key={x.id} className="flex w-[180px] flex-col border border-line bg-surface-2/40 p-3">
+            <div className="flex h-[90px] items-center justify-center bg-navy p-2"><img src={`/api/v1/institucional/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}`} alt={x.name} className="max-h-full max-w-full object-contain" /></div>
+            <p className="mt-2 truncate text-xs text-ink" title={x.name}>{x.name}</p>
+            <div className="mt-1 flex gap-1">
+              <Button size="sm" variant="ghost" aria-label={`Mover ${x.name} para a esquerda`} disabled={i === 0} onClick={() => move(i, -1)}>‹</Button>
+              <Button size="sm" variant="ghost" aria-label={`Mover ${x.name} para a direita`} disabled={i === items.length - 1} onClick={() => move(i, 1)}>›</Button>
+              <Button size="sm" variant="ghost" className="ml-auto" aria-label={`Remover ${x.name}`} onClick={() => del.mutate(x.id)}>Remover</Button>
+            </div>
+          </li>
+        ))}</ul>
+      )}
+    </section>
   );
 }
 
