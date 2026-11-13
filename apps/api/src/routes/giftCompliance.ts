@@ -172,10 +172,16 @@ export const giftComplianceRoutes = [
       const rules = await allRules(app.db, auth.tenantId);
       const units = await app.db.select({ id: s.orgUnits.id, name: s.orgUnits.name, kind: s.orgUnits.kind }).from(s.orgUnits).where(eq(s.orgUnits.tenantId, auth.tenantId)).orderBy(asc(s.orgUnits.name));
       const requesters = [...new Map(d.rows.map((r) => [r.requesterId, r.requesterName])).entries()].map(([id, name]) => ({ id, name }));
+      // catálogo para montar a solicitação (quem não tem Marketing também solicita)
+      const [items, kits] = await Promise.all([
+        app.db.select({ id: s.giftItems.id, name: s.giftItems.name, unitCostCents: s.giftItems.unitCostCents, stock: s.giftItems.stock }).from(s.giftItems).where(and(eq(s.giftItems.tenantId, auth.tenantId), eq(s.giftItems.active, true))).orderBy(asc(s.giftItems.name)),
+        app.db.select({ id: s.giftKits.id, name: s.giftKits.name, items: s.giftKits.items }).from(s.giftKits).where(and(eq(s.giftKits.tenantId, auth.tenantId), eq(s.giftKits.active, true))).orderBy(asc(s.giftKits.name)),
+      ]);
+      const catalog = { items, kits: kits.map((k) => ({ id: k.id, name: k.name, costCents: k.items.reduce((t, x) => t + x.qty * (items.find((i) => i.id === x.itemId)?.unitCostCents ?? 0), 0), available: Math.min(...k.items.map((x) => Math.floor((items.find((i) => i.id === x.itemId)?.stock ?? 0) / Math.max(1, x.qty))), 1e9) })) };
       return {
         ...d,
         rows: d.rows.map((r) => ({ id: r.id, code: r.code, kind: r.kind, purpose: r.purpose, description: r.description, plannedOn: r.plannedOn, executedOn: r.executedOn, state: r.state, outcome: r.outcome, exception: r.exception, estimatedCents: r.estimatedCents, approvedCents: r.approvedCents, executedCents: r.executedCents, requesterId: r.requesterId, requesterName: r.requesterName, accounts: r.accounts, institutionalClass: r.institutionalClass, complete: isComplete(r, r.decided, r.docKinds), orgUnitId: r.orgUnitId })),
-        options: { units, requesters },
+        options: { units, requesters }, catalog,
         can: { create: true, decideLevels: levelsOf(auth), configure: canConfigure(auth), report: canReport(auth), seesAll: seesAll(auth) },
         policy: { configured: currentRules(rules, d.today).length > 0, rules: currentRules(rules, d.today).length, segregation: st.segregation, conformingLevel: st.conformingLevel, note: st.policyNote },
       };
