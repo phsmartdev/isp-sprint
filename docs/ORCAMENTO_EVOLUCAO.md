@@ -19,7 +19,14 @@
 - **Projetos e campanhas** mostram o orçamento ligado (planejado, aprovado, comprometido, realizado, pago, saldo).
 - Contratos de recursos já se ligam ao lançamento na execução; metas e planos de ação ficam na Fase 6/14 (Inteligência e Gestão de Resultados).
 
+## Fase 6 — Inteligência de Eficiência Orçamentária (entregue)
+- **Onde:** Inteligência → Eficiência orçamentária (quem tem Recursos e Orçamento e Inteligência nível Equipe ou Total).
+- **Fórmulas** no domínio (`budgetEfficiency.ts`): custo por resultado, resultado por real, variação de eficiência, desvio e desvio %; denominador zero ou sem custo = "—" (nunca zero inventado); índice base 100 para comparar unidades diferentes.
+- **Atribuição explícita:** direta (centro ligado a time → vendas do time; campanha → leads e vendas convertidas deles), influenciada (brindes × vendas da conta em até 180 dias) e correlação (total da empresa). Receita da conta inteira nunca é atribuída a uma campanha.
+- **Análise gerencial:** custo sobe e resultado cai, custo cai e resultado sobe, resultado cresce mais que o custo, custo cresce mais que o resultado, economia com perda de resultado (não é eficiência), orçamento ocioso (<50%), alto investimento e baixo retorno (mediana).
+- **Gráficos:** custos × resultados (R$ ou índice), aprovado × realizado × resultado, custo por venda, tendência de eficiência e eficiência por centro.
+- **Limites honestos:** Sucesso do Cliente (retenção, churn, receita preservada) e Produto (adoção, payback) ainda não têm fonte de resultado confiável no sistema; ficam para quando houver dado (pagamentos do IXC "Aguardando IXC").
+
 ## Próximas fases
-- **6 — Inteligência:** Eficiência Orçamentária em Relatórios e Inteligência (custo por resultado, por área).
 - **7 — Fechamento mensal e e-mail:** estados do fechamento, demonstrativos, relatório HTML por destinatário com permissões.
 - **8 — Homologação** final dos critérios de aceite restantes.

@@ -45,6 +45,7 @@ export * from './timeline';
 export * from './stageFunnel';
 export * from './budget';
 export * from './budgetLedger';
+export * from './budgetEfficiency';
 export * from './ixc';
 export * from './finance';
 export * from './formula';
