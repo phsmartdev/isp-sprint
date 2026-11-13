@@ -87,6 +87,7 @@ const PublicJourneyPage = lazy(() => import('./pages/cs/JourneyTrailTab').then((
 const PublicSurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ default: m.PublicSurveyPage })));
 const SurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ default: m.SurveyPage })));
 const PublicNoticePage = lazy(() => import('./pages/PublicNotice').then((m) => ({ default: m.PublicNoticePage })));
+const TourPage = lazy(() => import('./pages/Tour').then((m) => ({ default: m.TourPage })));
 const KpiBoardPage = lazy(() => import('./pages/KpiBoardPage').then((m) => ({ default: m.KpiBoardPage })));
 
 /** Endereços antigos continuam funcionando (links, favoritos, avisos): vão para a aba certa mantendo os filtros. */
@@ -165,6 +166,7 @@ export function App() {
       <Route path="/r/:token" element={<PublicNoticePage />} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
+      <Route path="/tour" element={<RequireAuth><Suspense fallback={null}><TourPage /></Suspense></RequireAuth>} />
       <Route path="/painel/indicadores" element={<RequireAuth><Gate module="inteligencia"><KpiBoardPage /></Gate></RequireAuth>} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
