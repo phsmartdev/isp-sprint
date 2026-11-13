@@ -24,7 +24,7 @@ import { errMsg } from '../contracts/shared';
 type Finding = { ruleKey: string; version: number; name: string; controlType: ControlType; approverLevel: string; message: string; history: string | null };
 type Evaluation = { outcome: Outcome; level: string | null; findings: Finding[] };
 type Account = { contactId: string; name: string; shareCents: number };
-type Row = { id: string; code: string; kind: ConcessionKind; purpose: ConcessionPurpose; description: string; plannedOn: string; executedOn: string | null; state: ConcessionState; outcome: Outcome; exception: boolean; estimatedCents: number; approvedCents: number | null; executedCents: number | null; requesterId: string; requesterName: string; accounts: Account[]; institutionalClass: string | null; complete: boolean };
+type Row = { id: string; code: string; kind: ConcessionKind; purpose: ConcessionPurpose; description: string; plannedOn: string; executedOn: string | null; state: ConcessionState; outcome: Outcome; exception: boolean; estimatedCents: number; approvedCents: number | null; executedCents: number | null; requesterId: string; requesterName: string; accounts: Account[]; institutionalClass: string | null; complete: boolean; approvalLevel?: string | null; canDecide?: boolean };
 type Kpis = { realizedCents: number; executed: number; accounts: number; exceptions: number; conformityPct: number | null; exceptionPct: number | null; traceabilityPct: number | null; pendencies: number };
 type Data = {
   from: string; to: string; rows: Row[]; kpis: Kpis; pendencies: { requestId: string; code: string; text: string; since: string }[]; totals: { requested: number; approved: number; realized: number };
@@ -102,6 +102,20 @@ export function ComplianceSection() {
         </dl>
       </section>
 
+      {d.rows.some((r) => r.canDecide) && (
+        <section aria-label="Aguardando sua aprovação" className="border border-primary/40 bg-primary-soft/40">
+          <p className="border-b border-primary/20 px-4 py-2 text-sm font-bold text-ink">Aguardando sua aprovação ({d.rows.filter((r) => r.canDecide).length})</p>
+          <ul className="divide-y divide-line">{d.rows.filter((r) => r.canDecide).map((r) => (
+            <li key={r.id}><button type="button" onClick={() => setF({ id: r.id })} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-left text-sm hover:bg-primary-soft/60">
+              <span className="min-w-0 flex-1"><b className="text-ink">{r.code} · {r.description}</b><span className="block text-xs text-muted">{CONCESSION_KIND_LABELS[r.kind]} · {accTxt(r)} · pedido por {r.requesterName}</span></span>
+              <span className="num font-semibold text-ink">{fmtBRL(r.estimatedCents)}</span>
+              <span className={clsx('text-xs font-semibold', OUTCOME_TONE[r.outcome])}>{OUTCOME_LABELS[r.outcome]}</span>
+              <span className="text-sm font-semibold text-primary">Decidir</span>
+            </button></li>
+          ))}</ul>
+        </section>
+      )}
+
       {d.pendencies.length > 0 && (
         <section aria-label="Pendências de controle" className="border-l-4 border-danger bg-danger-soft/40 px-4 py-3">
           <p className="mb-1 flex items-center gap-2 text-sm font-bold text-ink"><AlertTriangle className="h-4 w-4 text-danger" aria-hidden />Pendências de controle</p>
@@ -120,7 +134,7 @@ export function ComplianceSection() {
                 <td className="px-3 py-2.5 text-text">{fmtDate(r.executedOn ?? r.plannedOn)}<span className="block text-xs text-muted">{r.executedOn ? 'executada' : 'prevista'}</span></td>
                 <td className="num px-3 py-2.5 text-right">{fmtBRL(r.estimatedCents)}<span className="block text-xs text-muted">{r.approvedCents == null ? '—' : fmtBRL(r.approvedCents)} · {r.executedCents == null ? '—' : fmtBRL(r.executedCents)}</span></td>
                 <td className={clsx('px-3 py-2.5 text-xs font-semibold', r.exception ? 'text-[#C2610C]' : OUTCOME_TONE[r.outcome])}>{r.exception ? 'Exceção autorizada' : OUTCOME_LABELS[r.outcome]}{r.state === 'executado' && !r.complete && <span className="block font-normal text-danger">registro incompleto</span>}</td>
-                <td className="px-4 py-2.5"><Tag className={STATE_TONE[r.state]}>{CONCESSION_STATE_LABELS[r.state]}</Tag></td>
+                <td className="px-4 py-2.5"><Tag className={STATE_TONE[r.state]}>{CONCESSION_STATE_LABELS[r.state]}</Tag>{r.state === 'solicitado' && r.approvalLevel && <span className="mt-0.5 block text-xs text-muted">aguarda {APPROVER_LEVEL_LABELS[r.approvalLevel as 'gerencia']}</span>}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -286,7 +300,8 @@ function RequestDrawer({ id, catalog, units, onClose }: { id: string; catalog: C
           {r.state === 'solicitado' && (
             <section aria-label="Decisão" className="border border-line p-3">
               <p className="mb-2 text-xs font-semibold text-muted">Decisão</p>
-              {!d.can.decide.length ? <p className="text-muted">{d.can.decideReason ?? 'Aguardando a alçada competente.'}</p> : (
+              {d.level && <p className="mb-2 text-sm text-ink">Aprovação: <b>{APPROVER_LEVEL_LABELS[d.level as 'gerencia']}</b> <span className="text-muted">(nível acima de quem solicitou{d.evaluation.level === 'diretoria' ? ' e exigência das diretrizes' : ''})</span></p>}
+              {!d.can.decide.length ? <p className="text-muted">{d.can.decideReason?.startsWith('Só a Gestão') ? `Enviada para a ${APPROVER_LEVEL_LABELS[(d.level ?? 'gerencia') as 'gerencia']}. Você acompanha por aqui.` : d.can.decideReason ?? 'Aguardando a alçada competente.'}</p> : (
                 <div className="grid gap-2">
                   <div className="flex flex-wrap gap-1.5">{d.can.decide.map((x) => <button key={x} type="button" aria-pressed={dec.decision === x} onClick={() => setDec({ ...dec, decision: x })} className={clsx('border px-3 py-1.5 text-sm font-semibold', dec.decision === x ? 'border-primary bg-primary text-white' : 'border-line text-ink hover:border-line-strong')}>{CONCESSION_DECISION_LABELS[x]}</button>)}</div>
                   {dec.decision && <Textarea aria-label="Fundamentação da decisão" rows={2} value={dec.reason} onChange={(e) => setDec({ ...dec, reason: e.target.value })} placeholder={dec.decision === 'aprovar_excecao' ? 'Fundamentação expressa (obrigatória, vale só para esta solicitação)' : 'Fundamentação'} />}

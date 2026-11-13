@@ -22,7 +22,13 @@ export type Req = typeof s.giftRequests.$inferSelect;
 
 /** Vê tudo: Administração, Diretoria, Financeiro e quem tem Marketing total. Gestão: o próprio e o time que lidera. Demais: só as próprias. */
 export const seesAll = (auth: AuthContext) => auth.profiles.includes('administrador') || auth.profiles.includes('diretoria') || isFinance(auth) || auth.access.campanhas === 'total';
-export const canSeeRequest = (auth: AuthContext, requesterId: string) => seesAll(auth) || requesterId === auth.userId || (auth.profiles.includes('gerencia') && auth.teamMemberIds.includes(requesterId));
+/** Quem decide (Gestão comercial ou Diretoria, cargo liderança) vê as solicitações para poder decidir a sua alçada. */
+export const canSeeRequest = (auth: AuthContext, requesterId: string) => seesAll(auth) || requesterId === auth.userId || decidesStages(auth).length > 0 || (auth.profiles.includes('gerencia') && auth.teamMemberIds.includes(requesterId));
+
+/** Perfis de quem solicitou (para a alçada do nível acima). */
+export async function profilesOf(db: DbOrTx, userId: string) {
+  return (await db.select({ key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(eq(s.userRoles.userId, userId))).map((r) => r.key);
+}
 export const levelsOf = (auth: AuthContext): ApproverLevel[] => decidesStages(auth);
 /** Configura diretrizes: administrador autorizado. */
 export const canConfigure = (auth: AuthContext) => auth.access.configuracoes === 'total';

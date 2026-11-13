@@ -7494,6 +7494,8 @@ export const giftRequests = pgTable('gift_requests', {
   state: text('state').notNull().default('solicitado'),
   evaluation: jsonb('evaluation').$type<Record<string, unknown>>().notNull(),
   outcome: text('outcome').notNull(),
+  /** alçada que decide: a maior entre a das diretrizes e o nível acima de quem solicitou (guardada na solicitação) */
+  approvalLevel: text('approval_level'),
   approvedCents: integer('approved_cents'),
   exception: boolean('exception').notNull().default(false),
   reservedAt: ts('reserved_at'),

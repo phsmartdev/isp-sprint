@@ -111,11 +111,26 @@ describe('compliance de concessões', () => {
     for (const c of [carlos, dir]) expect((await c.post(`/brindes/compliance/solicitacoes/${r.id}/decidir`, { decision: 'aprovar_excecao', reason: 'Tentativa de afastar restrição obrigatória', rowVersion: r.rowVersion })).statusCode).toBe(403);
     ok(await dir.post(`/brindes/compliance/solicitacoes/${r.id}/decidir`, { decision: 'ajustes', reason: 'Sem tratamento formal compatível', rowVersion: r.rowVersion }));
     const own = ok(await carlos.post('/brindes/compliance/solicitacoes', { ...base(), accounts: [{ contactId: accA }] }), 201).json();
+    // pedido da Gestão comercial sobe para a Diretoria (nível acima de quem pediu)
+    expect(own.approvalLevel).toBe('diretoria');
     const det = await req(carlos, own.id);
+    expect(det.level).toBe('diretoria');
     expect(det.can.decide).toEqual([]);
-    expect(det.can.decideReason).toMatch(/Segregação/);
+    expect(det.can.decideReason).toMatch(/Diretoria/);
     expect((await carlos.post(`/brindes/compliance/solicitacoes/${own.id}/decidir`, { decision: 'aprovar', rowVersion: own.rowVersion })).statusCode).toBe(403);
+    // fica pendente na tela da Diretoria, habilitado só para ela
+    const pend = ok(await dir.get('/brindes/compliance')).json().rows.find((x: { id: string }) => x.id === own.id);
+    expect(pend).toMatchObject({ state: 'solicitado', approvalLevel: 'diretoria', canDecide: true });
+    expect(ok(await carlos.get('/brindes/compliance')).json().rows.find((x: { id: string }) => x.id === own.id).canDecide).toBe(false);
     ok(await dir.post(`/brindes/compliance/solicitacoes/${own.id}/decidir`, { decision: 'aprovar', rowVersion: own.rowVersion }));
+    // pedido da operação: Gestão comercial decide e vê pendente mesmo sem ser do time de quem pediu
+    const op = ok(await lucas.post('/brindes/compliance/solicitacoes', { ...base(), accounts: [{ contactId: accA }] }), 201).json();
+    expect(op.approvalLevel).toBe('gerencia');
+    expect(ok(await carlos.get('/brindes/compliance')).json().rows.find((x: { id: string }) => x.id === op.id).canDecide).toBe(true);
+    // a própria Diretoria pedindo: outra pessoa da Diretoria decide
+    const dOwn = ok(await dir.post('/brindes/compliance/solicitacoes', { ...base(), accounts: [] , institutionalClass: 'Evento setorial fictício' }), 201).json();
+    expect(dOwn.approvalLevel).toBe('diretoria');
+    expect((await dir.post(`/brindes/compliance/solicitacoes/${dOwn.id}/decidir`, { decision: 'aprovar', rowVersion: dOwn.rowVersion })).statusCode).toBe(403);
   });
 
   it('diretrizes versionadas: só administrador configura; decisão guarda a versão da época', async () => {

@@ -237,11 +237,25 @@ export type ConcessionDecision = (typeof CONCESSION_DECISIONS)[number];
 export const CONCESSION_DECISION_LABELS: Record<ConcessionDecision, string> = { aprovar: 'Aprovar', aprovar_excecao: 'Aprovar excepcionalmente', ajustes: 'Solicitar ajustes', rejeitar: 'Rejeitar' };
 
 /** Quais decisões cabem a quem tem estas alçadas, dada a avaliação. */
-export function allowedDecisions(ev: Pick<Evaluation, 'outcome' | 'level'>, myLevels: ApproverLevel[], conformingLevel: ApproverLevel | null): { decisions: ConcessionDecision[]; reason: string | null } {
-  const need = ev.outcome === 'conforme' ? conformingLevel : ev.level;
+/**
+ * Alçada mínima pela hierarquia de quem solicita: a decisão é sempre do nível acima.
+ * Operação, Supervisão e Marketing → Gestão comercial; Gestão comercial ou Diretoria → Diretoria (outra pessoa, pela segregação).
+ */
+export function requesterFloor(profiles: string[]): ApproverLevel {
+  return profiles.includes('gerencia') || profiles.includes('diretoria') ? 'diretoria' : 'gerencia';
+}
+/** Alçada efetiva: a maior entre a exigida pelas diretrizes (ou a das conformes) e o nível acima de quem solicitou. */
+export function effectiveLevel(ev: Pick<Evaluation, 'outcome' | 'level'>, conformingLevel: ApproverLevel, floor: ApproverLevel): ApproverLevel | null {
+  if (ev.outcome === 'impedido') return floor;
+  const base = ev.outcome === 'conforme' ? conformingLevel : ev.level ?? conformingLevel;
+  return base === 'diretoria' || floor === 'diretoria' ? 'diretoria' : 'gerencia';
+}
+
+/** Quais decisões cabem a quem tem estas alçadas, dada a avaliação e a alçada efetiva. */
+export function allowedDecisions(ev: Pick<Evaluation, 'outcome' | 'level'>, myLevels: ApproverLevel[], need: ApproverLevel | null): { decisions: ConcessionDecision[]; reason: string | null } {
   const canLevel = need === null || myLevels.includes(need) || (need === 'gerencia' && myLevels.includes('diretoria'));
   if (!myLevels.length) return { decisions: [], reason: 'Só a Gestão comercial e a Diretoria (cargo liderança) decidem.' };
-  if (!canLevel) return { decisions: [], reason: `Esta solicitação precisa da alçada ${APPROVER_LEVEL_LABELS[need!]}.` };
+  if (!canLevel) return { decisions: [], reason: `Aguardando a alçada ${APPROVER_LEVEL_LABELS[need!]}.` };
   if (ev.outcome === 'impedido') return { decisions: ['ajustes', 'rejeitar'], reason: 'Restrição obrigatória: não pode ser aprovada por autorização gerencial.' };
   if (ev.outcome === 'excecao') return { decisions: ['aprovar_excecao', 'ajustes', 'rejeitar'], reason: null };
   return { decisions: ['aprovar', 'ajustes', 'rejeitar'], reason: null };

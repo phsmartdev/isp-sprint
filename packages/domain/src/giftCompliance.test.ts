@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedDecisions, complianceKpis, currentRules, evaluateConcession, splitEvenly, type ComplianceRule, type RequestForEval } from './giftCompliance';
+import { allowedDecisions, complianceKpis, effectiveLevel, requesterFloor, currentRules, evaluateConcession, splitEvenly, type ComplianceRule, type RequestForEval } from './giftCompliance';
 
 const rule = (p: Partial<ComplianceRule>): ComplianceRule => ({
   id: p.id ?? `r-${p.key ?? 'x'}-${p.version ?? 1}`, key: 'x', version: 1, name: 'Regra fictícia', description: null, param: 'valor_por_concessao', controlType: 'orientativa', approverLevel: 'gerencia',
@@ -67,10 +67,23 @@ describe('compliance de concessões', () => {
   });
 
   it('alçada: gerência não decide o que exige Diretoria; exceção só com aprovação excepcional', () => {
-    expect(allowedDecisions({ outcome: 'excecao', level: 'diretoria' }, ['gerencia'], 'gerencia').decisions).toEqual([]);
+    expect(allowedDecisions({ outcome: 'excecao', level: 'diretoria' }, ['gerencia'], 'diretoria').decisions).toEqual([]);
     expect(allowedDecisions({ outcome: 'excecao', level: 'gerencia' }, ['gerencia'], 'gerencia').decisions).toEqual(['aprovar_excecao', 'ajustes', 'rejeitar']);
     expect(allowedDecisions({ outcome: 'conforme', level: null }, ['diretoria'], 'gerencia').decisions[0]).toBe('aprovar');
     expect(allowedDecisions({ outcome: 'conforme', level: null }, [], 'gerencia').decisions).toEqual([]);
+  });
+
+  it('alçada efetiva: sempre o nível acima de quem solicitou', () => {
+    expect(requesterFloor(['operacao'])).toBe('gerencia');
+    expect(requesterFloor(['supervisao', 'marketing'])).toBe('gerencia');
+    expect(requesterFloor(['gerencia'])).toBe('diretoria');
+    expect(requesterFloor(['diretoria'])).toBe('diretoria');
+    // conforme pedido por gerente: sobe para a Diretoria
+    expect(effectiveLevel({ outcome: 'conforme', level: null }, 'gerencia', 'diretoria')).toBe('diretoria');
+    // pedido da operação: Gestão comercial, salvo se a diretriz exigir Diretoria
+    expect(effectiveLevel({ outcome: 'conforme', level: null }, 'gerencia', 'gerencia')).toBe('gerencia');
+    expect(effectiveLevel({ outcome: 'autorizacao', level: 'diretoria' }, 'gerencia', 'gerencia')).toBe('diretoria');
+    expect(effectiveLevel({ outcome: 'impedido', level: null }, 'gerencia', 'gerencia')).toBe('gerencia');
   });
 
   it('política: valor por kit da categoria, matriz por classificação e situações de atenção', () => {

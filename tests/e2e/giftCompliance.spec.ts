@@ -48,11 +48,16 @@ test('compliance de brindes: solicitar, avaliar, decidir, executar e prestar con
   await form.getByRole('button', { name: 'Enviar para avaliação' }).click();
   const drawer = page.getByRole('dialog', { name: /GC-\d{4}-\d{4} · Kit de fim de ano fictício/ });
   await expect(drawer).toContainText('Solicitado');
-  await expect(drawer).toContainText('Só a Gestão comercial e a Diretoria');
+  await expect(drawer).toContainText('Enviada para a Gestão comercial');
   const url = page.url();
 
   // gestão decide (quem solicitou não decide)
   await login(page, 'carlos@yepnet.test');
+  await page.goto('/brindes?t=compliance');
+  const pend = page.getByRole('region', { name: 'Aguardando sua aprovação' });
+  await expect(pend).toContainText('Kit de fim de ano fictício');
+  await expect(pend).toContainText('pedido por Lucas Lima');
+  await page.screenshot({ path: 'test-results/compliance-aguardando.png' });
   await page.goto(url.replace(/^https?:\/\/[^/]+/, ''));
   const d2 = page.getByRole('dialog', { name: /GC-\d{4}-\d{4}/ });
   await d2.getByRole('button', { name: 'Aprovar', exact: true }).click();
