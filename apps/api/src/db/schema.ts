@@ -7413,3 +7413,179 @@ export const mktCardEvents = pgTable('mkt_card_events', {
   actorId: uuid('actor_id').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ idx: index('mkt_card_events_idx').on(t.cardId, t.createdAt) }));
+
+// ---------------------------------------------------------------- Compliance de brindes, apoios e patrocínios
+/** Diretrizes versionadas: editar cria nova versão (as anteriores ficam, as decisões apontam para a versão usada). */
+export const giftComplianceRules = pgTable('gift_compliance_rules', {
+  id: id(),
+  tenantId: tenantId(),
+  ruleKey: text('rule_key').notNull(),
+  version: integer('version').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  param: text('param').notNull(),
+  controlType: text('control_type').notNull(),
+  approverLevel: text('approver_level').notNull().default('gerencia'),
+  limitValue: integer('limit_value'),
+  windowDays: integer('window_days'),
+  allowedKitIds: uuid('allowed_kit_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  allowedItemIds: uuid('allowed_item_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  kinds: text('kinds').array().notNull().default(sql`'{}'::text[]`),
+  natures: text('natures').array().notNull().default(sql`'{}'::text[]`),
+  segments: text('segments').array().notNull().default(sql`'{}'::text[]`),
+  purposes: text('purposes').array().notNull().default(sql`'{}'::text[]`),
+  kitCategories: text('kit_categories').array().notNull().default(sql`'{}'::text[]`),
+  validFrom: date('valid_from', { mode: 'string' }).notNull(),
+  validTo: date('valid_to', { mode: 'string' }),
+  active: boolean('active').notNull().default(true),
+  changeNote: text('change_note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('gift_compliance_rules_uq').on(t.tenantId, t.ruleKey, t.version),
+  paramCk: check('gift_compliance_rules_param_ck', inList('param', ['valor_por_kit', 'matriz_stakeholder', 'situacao_atencao', 'valor_por_concessao', 'valor_acumulado_conta', 'valor_periodo', 'quantidade_itens', 'composicao_kit', 'frequencia_conta', 'orcamento_disponivel', 'condicao'])),
+  ctrlCk: check('gift_compliance_rules_ctrl_ck', inList('control_type', ['orientativa', 'autorizacao', 'restricao'])),
+  levelCk: check('gift_compliance_rules_level_ck', inList('approver_level', ['gerencia', 'diretoria'])),
+}));
+
+/** Ajustes do compliance por empresa: segregação de funções, alçada das conformes e canais de aviso. */
+export const giftComplianceSettings = pgTable('gift_compliance_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  segregation: boolean('segregation').notNull().default(true),
+  conformingLevel: text('conforming_level').notNull().default('gerencia'),
+  channels: jsonb('channels').$type<Record<string, { email?: boolean; whatsapp?: boolean }>>().notNull().default(sql`'{}'::jsonb`),
+  policyNote: text('policy_note'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ levelCk: check('gift_compliance_settings_level_ck', inList('conforming_level', ['gerencia', 'diretoria'])) }));
+
+/** Solicitação de concessão (brinde, kit, material, apoio, patrocínio): planejada, avaliada, autorizada, executada. Nada é apagado. */
+export const giftRequests = pgTable('gift_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  requesterId: uuid('requester_id').notNull().references(() => users.id),
+  orgUnitId: uuid('org_unit_id').references(() => orgUnits.id),
+  kind: text('kind').notNull(),
+  purpose: text('purpose').notNull().default('relacionamento'),
+  /** sem conta: ação institucional classificada e justificada */
+  institutionalClass: text('institutional_class'),
+  campaignId: uuid('campaign_id').references(() => campaigns.id),
+  opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+  eventName: text('event_name'),
+  description: text('description').notNull(),
+  justification: text('justification').notNull(),
+  plannedOn: date('planned_on', { mode: 'string' }).notNull(),
+  kitId: uuid('kit_id').references(() => giftKits.id),
+  kits: integer('kits').notNull().default(0),
+  items: jsonb('items').$type<{ itemId: string; qty: number }[]>().notNull().default(sql`'[]'::jsonb`),
+  /** categoria do kit pela política (A, B, C, D) */
+  kitCategory: text('kit_category'),
+  /** destinatários com a classificação e o cargo da época (o registro não muda se o stakeholder mudar depois) */
+  recipients: jsonb('recipients').$type<{ stakeholderId: string; contactId: string; name: string; title: string | null; powerClass: string }[]>().notNull().default(sql`'[]'::jsonb`),
+  /** entrega coletiva (evento, treinamento…): controle consolidado pelo grupo */
+  collective: boolean('collective').notNull().default(false),
+  audience: text('audience'),
+  /** situações de atenção declaradas por quem solicita */
+  attention: text('attention').array().notNull().default(sql`'{}'::text[]`),
+  estimatedCents: integer('estimated_cents').notNull(),
+  costCenterId: uuid('cost_center_id').references(() => costCenters.id),
+  budgetLineId: uuid('budget_line_id').references(() => budgetLines.id),
+  state: text('state').notNull().default('solicitado'),
+  evaluation: jsonb('evaluation').$type<Record<string, unknown>>().notNull(),
+  outcome: text('outcome').notNull(),
+  approvedCents: integer('approved_cents'),
+  exception: boolean('exception').notNull().default(false),
+  reservedAt: ts('reserved_at'),
+  executedOn: date('executed_on', { mode: 'string' }),
+  executedCents: integer('executed_cents'),
+  executorId: uuid('executor_id').references(() => users.id),
+  deliveryId: uuid('delivery_id').references(() => giftDeliveries.id),
+  cancelReason: text('cancel_reason'),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  codeUq: uniqueIndex('gift_requests_code_uq').on(t.tenantId, t.code),
+  deliveryUq: uniqueIndex('gift_requests_delivery_uq').on(t.deliveryId),
+  idx: index('gift_requests_idx').on(t.tenantId, t.state, t.plannedOn),
+  kindCk: check('gift_requests_kind_ck', inList('kind', ['brinde', 'kit', 'material', 'apoio_evento', 'patrocinio_financeiro', 'patrocinio_produto', 'outro'])),
+  purposeCk: check('gift_requests_purpose_ck', inList('purpose', ['relacionamento', 'abm', 'oportunidade', 'campanha', 'evento', 'institucional'])),
+  stateCk: check('gift_requests_state_ck', inList('state', ['solicitado', 'ajustes', 'aprovado', 'reservado', 'executado', 'rejeitado', 'cancelado'])),
+  outcomeCk: check('gift_requests_outcome_ck', inList('outcome', ['conforme', 'autorizacao', 'excecao', 'impedido'])),
+  valueCk: check('gift_requests_value_ck', sql`${t.estimatedCents} >= 0`),
+  catCk: check('gift_requests_cat_ck', sql`${t.kitCategory} is null or ${t.kitCategory} in ('A', 'B', 'C', 'D')`),
+}));
+
+/** Contas beneficiadas e o rateio (a soma das partes é o valor da concessão: o total entra uma vez no consolidado). */
+export const giftRequestAccounts = pgTable('gift_request_accounts', {
+  id: id(),
+  requestId: uuid('request_id').notNull().references(() => giftRequests.id),
+  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  shareCents: integer('share_cents').notNull(),
+}, (t) => ({ uq: uniqueIndex('gift_request_accounts_uq').on(t.requestId, t.contactId), contactIdx: index('gift_request_accounts_contact_idx').on(t.contactId), shareCk: check('gift_request_accounts_share_ck', sql`${t.shareCents} >= 0`) }));
+
+/** Decisões (append-only): quem, com qual perfil e alçada, a diretriz e o parâmetro excedido, fundamentação e condições. */
+export const giftRequestDecisions = pgTable('gift_request_decisions', {
+  id: id(),
+  tenantId: tenantId(),
+  requestId: uuid('request_id').notNull().references(() => giftRequests.id),
+  decision: text('decision').notNull(),
+  deciderId: uuid('decider_id').notNull().references(() => users.id),
+  profile: text('profile').notNull(),
+  level: text('level').notNull(),
+  outcome: text('outcome').notNull(),
+  findings: jsonb('findings').$type<unknown[]>().notNull(),
+  requesterJustification: text('requester_justification').notNull(),
+  reason: text('reason'),
+  conditions: text('conditions'),
+  amountCents: integer('amount_cents').notNull(),
+  requestVersion: integer('request_version').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('gift_request_decisions_idx').on(t.requestId, t.createdAt), decisionCk: check('gift_request_decisions_ck', inList('decision', ['aprovar', 'aprovar_excecao', 'ajustes', 'rejeitar'])) }));
+
+/** Histórico da solicitação (append-only): criação, alterações, avaliações, reserva, execução, cancelamento, estorno. */
+export const giftRequestEvents = pgTable('gift_request_events', {
+  id: id(),
+  tenantId: tenantId(),
+  requestId: uuid('request_id').notNull().references(() => giftRequests.id),
+  type: text('type').notNull(),
+  text: text('text').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('gift_request_events_idx').on(t.requestId, t.createdAt) }));
+
+/** Evidências e comprovantes da concessão (nunca apagados: só retirados de uso). */
+export const giftRequestDocuments = pgTable('gift_request_documents', {
+  id: id(),
+  tenantId: tenantId(),
+  requestId: uuid('request_id').notNull().references(() => giftRequests.id),
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  data: bytea('data').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('gift_request_documents_idx').on(t.requestId), kindCk: check('gift_request_documents_kind_ck', inList('kind', ['evidencia', 'comprovante', 'autorizacao', 'entrega', 'outro'])) }));
+
+/** Prestações de contas emitidas: o PDF e as referências ficam guardados (o documento apresentado não muda depois). */
+export const giftComplianceReports = pgTable('gift_compliance_reports', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  version: integer('version').notNull(),
+  periodFrom: date('period_from', { mode: 'string' }).notNull(),
+  periodTo: date('period_to', { mode: 'string' }).notNull(),
+  filters: jsonb('filters').$type<Record<string, unknown>>().notNull(),
+  analysis: text('analysis'),
+  conclusion: text('conclusion'),
+  refs: jsonb('refs').$type<{ id: string; code: string; rowVersion: number }[]>().notNull(),
+  totals: jsonb('totals').$type<Record<string, unknown>>().notNull(),
+  letterhead: boolean('letterhead').notNull().default(false),
+  pdf: bytea('pdf').notNull(),
+  sha256: text('sha256').notNull(),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ codeUq: uniqueIndex('gift_compliance_reports_code_uq').on(t.tenantId, t.code) }));

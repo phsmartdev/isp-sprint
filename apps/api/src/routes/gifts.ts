@@ -15,6 +15,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { assertAccount } from './stakeholders';
+import { accountConcessionList } from './giftCompliance';
 
 const READ = { tag: 'Marketing', module: 'campanhas' as const };
 const WRITE = { ...READ, min: 'equipe' as const };
@@ -274,7 +275,21 @@ export const giftRoutes = [
     method: 'GET', url: '/accounts/:id/brindes', summary: 'Brindes da conta: total gasto, por kit, por item, por stakeholder e os envios', tag: 'Marketing', module: 'clientes', params: IdParams,
     handler: async ({ app, auth, params }) => {
       await assertAccount(app.db, auth, params.id);
-      return accountGifts(app.db, auth.tenantId, params.id);
+      const g = await accountGifts(app.db, auth.tenantId, params.id);
+      // concessões do compliance (brindes, apoios e patrocínios) registradas na conta, com rateio
+      const list = await accountConcessionList(app.db, auth.tenantId, params.id);
+      const done = list.filter((c) => c.state === 'executado');
+      const year = todayIn(auth.timezone).slice(0, 4);
+      return {
+        ...g,
+        concessions: list,
+        concessionSummary: {
+          executed: done.length, investedCents: done.reduce((t, c) => t + c.shareCents, 0),
+          yearExecuted: done.filter((c) => c.on.startsWith(year)).length, yearInvestedCents: done.filter((c) => c.on.startsWith(year)).reduce((t, c) => t + c.shareCents, 0),
+          exceptions: done.filter((c) => c.exception).length, lastOn: done.map((c) => c.on).sort().at(-1) ?? null,
+          byGroup: { brindes: done.filter((c) => ['brinde', 'kit', 'material'].includes(c.kind)).length, apoios: done.filter((c) => c.kind === 'apoio_evento').length, patrocinios: done.filter((c) => c.kind.startsWith('patrocinio')).length, outros: done.filter((c) => c.kind === 'outro').length },
+        },
+      };
     },
   }),
   defineRoute({
