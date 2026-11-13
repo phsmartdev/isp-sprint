@@ -27,6 +27,7 @@ import { budgetCentralRoutes } from './routes/budgetCentral';
 import { budgetEfficiencyRoutes } from './routes/budgetEfficiency';
 import { budgetClosingRoutes } from './routes/budgetClosing';
 import { budgetRevisionRoutes } from './routes/budgetRevisions';
+import { giftComplianceRoutes } from './routes/giftCompliance';
 import { csContractRoutes } from './routes/csContracts';
 import { budgetResourceRoutes } from './routes/budgetResources';
 import { insightsRoutes } from './routes/insights';
@@ -239,6 +240,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...budgetEfficiencyRoutes,
     ...budgetClosingRoutes,
     ...budgetRevisionRoutes,
+    ...giftComplianceRoutes,
     ...csContractRoutes,
     ...budgetResourceRoutes,
     ...insightsRoutes,

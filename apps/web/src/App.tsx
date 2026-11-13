@@ -230,7 +230,7 @@ export function App() {
         <Route path="playbooks/:id/editar" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookEditorPage /></Suspense>} />
         <Route path="playbooks/:id/versoes" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookVersionsPage /></Suspense>} />
         <Route path="playbooks/:id/aprovar/:versionId" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookApprovePage /></Suspense>} />
-        <Route path="brindes" element={<Gate module="campanhas"><GiftsPage /></Gate>} />
+        <Route path="brindes" element={<GiftsPage />} />
         <Route path="marketing/quadro" element={<Gate module="campanhas" feature="marketing.quadro"><MarketingBoardPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />

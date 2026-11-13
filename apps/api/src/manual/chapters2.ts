@@ -89,6 +89,19 @@ Funcionalidade **Quadro de tarefas do Marketing**. Segue os ritos de Sprint quin
 # Brindes
 @ /brindes Abrir Brindes
 Itens com estoque, custo médio e fornecedor; kits com categoria e custo; entradas e ajustes; **envio** de kit ou itens para a conta e os stakeholders (baixa o estoque; cancelar devolve); consumo por item, kit, categoria e conta.
+
+## Compliance de brindes, apoios e patrocínios
+@ /brindes?t=compliance Abrir o Compliance
+Uma tela só em Brindes → Compliance (a Operação Comercial chega por Comercial → Solicitar brindes e apoios).
+1) Solicite :: Tipo (brinde, kit, material, apoio a evento, patrocínio financeiro ou com produtos), finalidade, contas beneficiadas (com rateio, sem dupla contagem) ou ação institucional classificada, destinatários (stakeholders com a classificação IA/INA/NIA/NINA) ou entrega coletiva, categoria do kit (A–D), valor, data e justificativa.
+2) Avaliação automática :: As diretrizes vigentes são conferidas na hora (valor por kit da categoria, matriz da classificação, agente público, situações de atenção, limites que a empresa cadastrar) com o histórico da conta. O sistema identifica e informa; a autoridade competente decide.
+3) Decisão :: Aprovar, aprovar excepcionalmente (com fundamentação expressa), pedir ajustes ou rejeitar, pela alçada; quem solicitou não decide. Restrição obrigatória não é aprovável. Mudança de valor, contas, finalidade ou itens depois da aprovação volta para autorização.
+4) Execução :: Reservar compromete o estoque sem baixar; confirmar a execução baixa uma única vez e registra na conta. Cancelar depois estorna. Anexe o comprovante: sem ele, a concessão vira pendência de controle.
+5) Prestação de Contas :: A Gestão Comercial gera o PDF institucional (A4, timbrado da filial) para o CIEI com sumário, controles, concessões, exceções, pendências e conclusão. O arquivo emitido fica guardado com versão.
+
+:::importante Diretrizes
+As diretrizes são versionadas (Diretrizes → Nova versão); decisões guardam a versão da época. "Carregar diretrizes da política" cadastra as regras das Diretrizes de Relacionamento Institucional (categorias A a D por kit, matriz por classificação, agente público e situações de atenção). A política não define frequência: cadastre o limite quando ele existir.
+:::
 `,
 };
 
