@@ -31,7 +31,11 @@ beforeAll(async () => {
   other = ok(await carlos.post('/budget/cost-centers', { code: `OX${stamp.slice(-4)}`, name: 'Outro Centro' }), 201).json().id;
   ok(await carlos.patch(`/budget/cost-centers/${cc}`, { managerId: gestor.me.user.id }));
 });
-afterAll(async () => ctx.close());
+afterAll(async () => {
+  // o setor Financeiro é compartilhado com outros testes (avisos de contratos): tira o usuário de teste dele
+  await carlos.patch(`/admin/users/${fin.me.user.id}`, { sectors: [] });
+  await ctx.close();
+});
 
 describe('planejamento, aprovação e governança', () => {
   it('responsável planeja por quantidade no próprio centro; não planeja em centro alheio; operação sem acesso', async () => {

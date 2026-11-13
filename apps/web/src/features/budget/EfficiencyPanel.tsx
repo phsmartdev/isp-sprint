@@ -3,7 +3,9 @@
  * Cada bloco diz a fonte e o tipo de atribuição (direta, influenciada ou correlação). Redução de gasto sozinha não é eficiência.
  */
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { useToast } from '../../components/ui/overlay';
 import clsx from 'clsx';
 import { ATTRIBUTION_LABELS, EFFICIENCY_SITUATION_INFO, indexBase100, type Attribution, type EfficiencySituation } from '@isp/domain';
 import { api, qs } from '../../lib/api';
@@ -19,7 +21,7 @@ type Data = {
   centers: Center[];
   campaigns: { id: string; name: string; cost: number; leads: number; qualifiedLeads: number; opportunities: number; wins: number; revenue: number; costPerLead: number | null; costPerQualifiedLead: number | null; costPerOpportunity: number | null; revenuePerReal: number | null }[];
   relationship: { accounts: number; invested: number; influencedRevenue: number; influencedWins: number; investmentPerAccount: number | null };
-  alerts: { costCenterId: string; code: string; situation: EfficiencySituation; label: string; hint: string }[];
+  alerts: { costCenterId: string; code: string; teamId: string | null; cost: number; result: number | null; situation: EfficiencySituation; label: string; hint: string }[];
   sources: Record<string, string>;
 };
 const pct = (v: number | null) => (v === null ? '—' : `${v > 0 ? '+' : ''}${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
@@ -33,6 +35,13 @@ export function EfficiencyPanel() {
   const [index, setIndex] = useState(false);
   const q = useQuery({ queryKey: ['intelligence', 'budget-efficiency', f], queryFn: () => api<Data>(`/intelligence/budget-efficiency${qs({ from: f.from, to: f.to, costCenterId: f.costCenterId || undefined })}`) });
   const cats = q.data?.series.map((p) => mShort(p.month)) ?? [];
+  const nav = useNavigate();
+  const toast = useToast();
+  const openPlan = useMutation({
+    mutationFn: (a: Data['alerts'][number]) => api<{ id: string }>('/interventions', { method: 'POST', body: { title: `Eficiência orçamentária ${a.code}: ${a.label}`, reason: `${a.label} em ${f.from} a ${f.to}. Custo realizado ${fmtBRL(a.cost)}${a.result !== null ? `, resultado ${fmtBRL(a.result)}` : ''}. ${a.hint}`, teamId: a.teamId } }),
+    onSuccess: (r) => nav(`/times/intervencoes/${r.id}/analise`),
+    onError: (e) => toast({ tone: 'error', message: (e as { detail?: string }).detail ?? 'Não foi possível abrir o plano de ação.' }),
+  });
   return (
     <div className="space-y-5">
       <section className="card flex flex-wrap items-end gap-3 p-4" aria-label="Período da eficiência">
@@ -61,7 +70,8 @@ export function EfficiencyPanel() {
             {d.alerts.length > 0 && (
               <section className="card p-4" aria-label="Análise gerencial">
                 <h2 className="mb-2 font-display text-base font-bold text-ink">Análise gerencial</h2>
-                <ul className="space-y-1.5 text-sm">{d.alerts.map((a, i) => <li key={i}><Chip tone="orange">{a.code}</Chip> <b className="text-ink">{a.label}.</b> <span className="text-text">{a.hint}</span></li>)}</ul>
+                <ul className="space-y-1.5 text-sm">{d.alerts.map((a, i) => <li key={i} className="flex flex-wrap items-center gap-2"><Chip tone="orange">{a.code}</Chip> <b className="text-ink">{a.label}.</b> <span className="text-text">{a.hint}</span><button type="button" className="font-semibold text-primary hover:underline" onClick={() => openPlan.mutate(a)}>Abrir plano de ação</button></li>)}</ul>
+                <p className="mt-2 text-xs text-muted">O plano de ação abre na Gestão de Times com o roteiro de análise (5 Porquês, Ishikawa, Pareto) e as ações 5W2H, ligado ao time do centro.</p>
               </section>
             )}
             <div className="grid gap-5 xl:grid-cols-2">

@@ -34,5 +34,27 @@
 - **Avisos no sino (sem duplicar):** nova solicitação, recomendação da Gerência, questionamento, resposta, aprovado/rejeitado/revisão, Budget Guardião pedido e decidido, limite de alerta e de bloqueio do centro, pagamento a vencer e vencido (rotina diária), pagamento registrado, fechamento aguardando validação e disponível, relatório enviado.
 - **Política do orçamento** (Diretoria): % de alerta e bloqueio, reserva do Guardião (global, por centro, híbrida), relatório automático e aprovação antes do envio.
 
-## Próximas fases
-- **8 — Homologação** final dos critérios de aceite restantes.
+## Fase 8 — Revisões, projeção, plano de ação e homologação (entregue)
+- **Revisões e remanejamentos** (Planejamento orçamentário → Revisões e projeção; migração 0156): versão numerada no ano, justificativa, valores antes e depois, centros e contas afetados, aprovação. Remanejamento move só saldo livre e soma zero; entre centros só a Diretoria; aumento de aprovado só a Diretoria; quem pede não decide; decisão confere de novo o saldo com as linhas travadas. O primeiro aprovado de cada lançamento fica preservado.
+- **Projeção até o fim do exercício:** realizado nos meses passados; à frente, o maior entre aprovado, contratado e realizado, mais contratos e assinaturas ativos ainda sem lançamento; compromissos a vencer, recorrentes, risco de excedente e cenário de ±30% nos meses à frente. Projeção ≠ obrigação ≠ despesa.
+- **Plano de ação a partir do indicador:** na Eficiência orçamentária, cada alerta abre uma intervenção na Gestão de Times (5 Porquês, Ishikawa, Pareto, 5W2H) ligada ao time do centro.
+
+## Homologação — critérios de aceite
+| # | Critério | Onde está provado |
+| 1–2 | Responsável planeja no próprio centro | `budgetCentral.test` |
+| 3–6 | Questionar quantidade e valor, responder, alvo e limite, tudo no mesmo lançamento | `budgetCentral.test` |
+| 7–9 | Bloqueio acima do autorizado, Guardião com autorização, sem consumo duplicado (pedidos simultâneos) | `budgetCentral.test` |
+| 10–13 | Fornecedor e documentos, pagamentos parciais, atraso, juros e multa, estorno, indicadores atualizados | `budgetCentral.test`, `budgetLedger.test` |
+| 14–15 | Brindes atualizam a demanda; compra e estoque sem despesa duplicada | `budgetGifts.test` |
+| 16–18 | Evolução, custo × performance, período e competência | `budgetCentral.test`, `budgetEfficiency.test`, `budgetEfficiency` (domínio) |
+| 19–20 | Fechamento consolida; e-mail respeita escopo | `budgetClosing.test` |
+| 21–23 | Diretoria vê tudo, gestor só os atribuídos, responsável não vê centro alheio | `budgetCentral.test` |
+| 24–25 | Revisões preservam o original; tudo auditado | `budgetRevisions.test` |
+| 26 | Módulos existentes continuam funcionando | suíte inteira da API (475) e domínio (432) |
+| extra | Alterações simultâneas (409), pagamento duplicado, estorno, remanejamento concorrente, reabertura | `budgetCentral.test`, `budgetRevisions.test`, `budgetClosing.test` |
+
+## Pendências conhecidas
+- **Política:** a Diretoria precisa preencher % de alerta e bloqueio e a reserva do Guardião (o sistema não presume valores).
+- **Contas a pagar integradas:** não há integração financeira de pagamentos; registro manual pelo setor Financeiro, com identificador externo e idempotência prontos.
+- **Sucesso do Cliente e Produto na eficiência:** sem fonte de resultado confiável (retenção, churn, payback) até haver dados de pagamento do IXC.
+- **Preferência de aviso por e-mail:** os avisos do orçamento vão para o sino; por e-mail, só o relatório mensal.

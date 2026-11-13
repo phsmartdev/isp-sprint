@@ -5287,6 +5287,23 @@ export const budgetLines = pgTable('budget_lines', {
   limitCk: check('budget_lines_limit_ck', sql`limit_cents is null or approved_cents is null or limit_cents <= approved_cents`),
 }));
 
+/** Revisão ou remanejamento do orçamento aprovado: versão numerada no ano, valores antes e depois, aprovação. O original nunca é apagado. */
+export const budgetRevisions = pgTable('budget_revisions', {
+  id: id(),
+  tenantId: tenantId(),
+  year: integer('year').notNull(),
+  version: integer('version').notNull(),
+  kind: text('kind').notNull(),
+  status: text('status').notNull().default('pendente'),
+  justification: text('justification').notNull(),
+  items: jsonb('items').$type<{ lineId: string; code: string | null; costCenterId: string; accountId: string; beforeCents: number; afterCents: number }[]>().notNull(),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionNote: text('decision_note'),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('budget_revisions_uq').on(t.tenantId, t.year, t.version), kindCk: check('budget_revisions_kind_ck', inList('kind', ['revisao', 'remanejamento'])), statusCk: check('budget_revisions_status_ck', inList('status', ['pendente', 'aprovado', 'recusado'])) }));
+
 /** Fechamento orçamentário por competência (mês): estados com governança e fotografia dos números ao fechar. */
 export const budgetClosings = pgTable('budget_closings', {
   id: id(),
