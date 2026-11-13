@@ -45,6 +45,7 @@ Muitas tentativas erradas bloqueiam o login por alguns minutos. Se a empresa lig
 - **Sino:** avisos (tarefas vencidas, menções, aprovações, impedimentos escalados).
 - **Tema:** claro, escuro ou o do sistema, no menu do usuário.
 - **Meu perfil:** nome, cargo, foto, senha e assinatura de e-mail.
+- **Tour RevOps:** no fim do menu lateral; apresentação em tela cheia da jornada do cliente e de cada módulo, para apresentar à diretoria ou a quem chega (setas para navegar, F para tela cheia, I para o índice, Esc para sair).
 
 @ / Abrir o Início
 @ /settings/profile Abrir Meu perfil
