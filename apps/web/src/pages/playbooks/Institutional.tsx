@@ -3,8 +3,9 @@
  * Slide 1: logo, presença em Sergipe (mapa em pontos com Porto da Folha em destaque) e os selos e certificações,
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
  * Slide 2: o mesmo prédio com rede tradicional × rede POL, em transição animada (features/playbooks/polScene).
+ * Slide 3: RIMA, Aracaju em 3D com rede fragmentada × rede integrada, NOC da BKT e simulação de falha (features/playbooks/RimaSlide).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
@@ -15,6 +16,9 @@ import { api } from '../../lib/api';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
 import { buildPolScene, POL_CALLOUT_X } from '../../features/playbooks/polScene';
+
+/** Slide 3 (RIMA): mapa de Aracaju com ~800 KB de geometria, carregado só quando o slide abre. */
+const RimaSlide = lazy(() => import('../../features/playbooks/RimaSlide'));
 
 const HOME = 'Porto da Folha';
 const CITY_ORDER = ['Aracaju', 'Nossa Senhora do Socorro', 'Laranjeiras', 'Estância', 'Porto da Folha'];
@@ -273,7 +277,7 @@ function SlidePol() {
   );
 }
 
-const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }, { key: 'pol', title: 'Rede tradicional × Rede POL' }];
+const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }, { key: 'pol', title: 'Rede tradicional × Rede POL' }, { key: 'rima', title: 'RIMA · Rede Integrada Municipal de Aracaju' }];
 
 export function InstitutionalPresentation() {
   const nav = useNavigate();
@@ -311,7 +315,7 @@ export function InstitutionalPresentation() {
   const textScale = (d: number) => setDraft({ ...current, blocks: { ...current.blocks, texto: { ...current.blocks.texto, scale: Math.max(0.6, Math.min(1.6, Math.round(((current.blocks.texto.scale ?? 1) + d) * 100) / 100)) } } });
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
-      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}{slide === 'pol' && <SlidePol />}</Stage></div>
+      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}{slide === 'pol' && <SlidePol />}{slide === 'rima' && <Suspense fallback={<div className="h-full bg-[#050A11]" />}><RimaSlide /></Suspense>}</Stage></div>
       <nav aria-label="Controles da apresentação" className="flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
         <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>
         <p className="text-sm text-white/60"><span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
