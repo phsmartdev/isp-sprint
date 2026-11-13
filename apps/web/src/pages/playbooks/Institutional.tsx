@@ -16,52 +16,63 @@ const HOME = 'Porto da Folha';
 const CITY_ORDER = ['Aracaju', 'Nossa Senhora do Socorro', 'Laranjeiras', 'Estância', 'Porto da Folha'];
 
 /**
- * Mapa de Sergipe em perspectiva (quase 3D): o estado é uma placa com espessura, coberta pela malha de pontos,
- * inclinada como uma mesa; os marcadores ficam em pé, com o nome no alto. Porto da Folha em destaque.
+ * Mapa de Sergipe em perspectiva, em linguagem de rede: placa escura com espessura, os 75 municípios em traço fino,
+ * a rede de presença em linhas com brilho e pulsos de dados saindo de Aracaju; Porto da Folha em destaque.
+ * Uma única animação (os pulsos), desligada para quem prefere menos movimento.
  */
-const TILT = 'rotateX(50deg) rotateZ(-12deg)';
-const UNTILT = 'rotateZ(12deg) rotateX(-50deg)';
-const STEM: Record<string, number> = { Aracaju: 120, 'Nossa Senhora do Socorro': 70, Laranjeiras: 170, 'Estância': 70, 'Porto da Folha': 110 };
-/** lado do nome em relação à haste: as três cidades da Grande Aracaju ficam afastadas para os lados */
-const SIDE: Record<string, 'esq' | 'dir' | 'centro'> = { Aracaju: 'dir', 'Nossa Senhora do Socorro': 'esq', Laranjeiras: 'esq', 'Estância': 'centro', 'Porto da Folha': 'centro' };
+const TILT = 'rotateX(52deg) rotateZ(-10deg)';
+const UNTILT = 'rotateZ(10deg) rotateX(-52deg)';
+const CALLOUT: Record<string, { h: number; side: 'esq' | 'dir' }> = {
+  Aracaju: { h: 64, side: 'dir' }, 'Nossa Senhora do Socorro': { h: 40, side: 'esq' }, Laranjeiras: { h: 92, side: 'esq' }, 'Estância': { h: 46, side: 'dir' }, 'Porto da Folha': { h: 78, side: 'dir' },
+};
 function SergipeMap({ className }: { className?: string }) {
-  const W = 900, k = W / SE_VIEW.w, H = SE_VIEW.h * k;
-  const plate = (fill: string, stroke?: string) => (
-    <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0" aria-hidden><path d={SE_OUTLINE} fill={fill} stroke={stroke ?? 'none'} strokeWidth="3" strokeLinejoin="round" /></svg>
+  const W = 720, k = W / SE_VIEW.w, H = SE_VIEW.h * k;
+  const hub = SE_MUNICIPIOS.findIndex((m) => m.name === 'Aracaju');
+  const plate = (fill: string, stroke = 'none', sw = 2) => (
+    <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0" aria-hidden><path d={SE_OUTLINE} fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" /></svg>
   );
   return (
-    <div className={className} style={{ perspective: '1600px' }} role="img" aria-label={`Mapa de Sergipe com os 75 municípios ligados em rede; ${CITY_ORDER.join(', ')} identificados e ${HOME} em destaque`}>
+    <div className={className} style={{ perspective: '1800px' }} role="img" aria-label={`Mapa de Sergipe com os 75 municípios ligados em rede; ${CITY_ORDER.join(', ')} identificados e ${HOME} em destaque`}>
       <div className="absolute left-1/2 top-1/2" style={{ width: W, height: H, marginLeft: -W / 2, marginTop: -H / 2, transform: TILT, transformStyle: 'preserve-3d' }}>
-        {/* espessura da placa: camadas mais escuras abaixo do topo */}
-        {Array.from({ length: 16 }, (_, n) => (
-          <div key={n} className="absolute inset-0" style={{ transform: `translateZ(${-(n + 1) * 3}px)` }}>{plate(n === 15 ? '#06101A' : '#1B3E63', n === 15 ? undefined : '#2A5683')}</div>
-        ))}
-        {/* topo: preenchimento, contorno e pontos */}
-        <div className="absolute inset-0" style={{ transform: 'translateZ(0)' }}>
-          {plate('#1A3858', '#7FB0E0')}
-          <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0" aria-hidden>
-            <defs><radialGradient id="se-home"><stop offset="0" stopColor="#9CC4EA" stopOpacity="0.7" /><stop offset="1" stopColor="#9CC4EA" stopOpacity="0" /></radialGradient></defs>
-            {/* divisão territorial: os 75 municípios */}
-            <defs><linearGradient id="se-fill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3A6FA6" /><stop offset="1" stopColor="#24507F" /></linearGradient></defs>
-            {SE_MUNICIPIOS.map((m, n) => <path key={m.name} d={m.d} fill="url(#se-fill)" fillOpacity={0.78 + ((n * 37) % 23) / 100} stroke="#9CC4EA" strokeOpacity="0.55" strokeWidth="1.4" strokeLinejoin="round" />)}
-            {/* rede ligando os pontos de presença */}
-            {SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#D6E9FB" strokeOpacity="0.7" strokeWidth="2.4" />; })}
-            {SE_MUNICIPIOS.map((m) => {
-              const named = CITY_ORDER.includes(m.name), home = m.name === HOME;
-              return home
-                ? <g key={m.name}><circle cx={m.x} cy={m.y} r="140" fill="url(#se-home)" /><circle cx={m.x} cy={m.y} r="46" fill="none" stroke="#FFFFFF" strokeOpacity="0.75" strokeWidth="4" /><circle cx={m.x} cy={m.y} r="15" fill="#FFFFFF" /></g>
-                : <g key={m.name}><circle cx={m.x} cy={m.y} r={named ? 11 : 7} fill={named ? '#FFFFFF' : '#CFE3F7'} /><circle cx={m.x} cy={m.y} r={named ? 20 : 13} fill="none" stroke="#9CC4EA" strokeOpacity="0.35" strokeWidth="2" /></g>;
+        {/* sombra no chão e espessura da placa */}
+        <div className="absolute inset-0" style={{ transform: 'translateZ(-70px)', filter: 'blur(28px)', opacity: 0.55 }}>{plate('#000000')}</div>
+        {Array.from({ length: 12 }, (_, n) => <div key={n} className="absolute inset-0" style={{ transform: `translateZ(${-(n + 1) * 2.5}px)` }}>{plate(n === 11 ? '#050B12' : '#0C1B2B', n === 11 ? 'none' : '#16314C', 2)}</div>)}
+        <div className="absolute inset-0">
+          <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0 overflow-visible" aria-hidden>
+            <defs>
+              <linearGradient id="se-top" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0" stopColor="#14314F" /><stop offset="1" stopColor="#0B1D30" /></linearGradient>
+              <filter id="se-glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5" /></filter>
+              <radialGradient id="se-halo"><stop offset="0" stopColor="#4FBBFF" stopOpacity="0.45" /><stop offset="1" stopColor="#4FBBFF" stopOpacity="0" /></radialGradient>
+            </defs>
+            <path d={SE_OUTLINE} fill="url(#se-top)" />
+            {/* divisão territorial */}
+            {SE_MUNICIPIOS.map((m) => <path key={m.name} d={m.d} fill="none" stroke="#3B6E9E" strokeOpacity="0.55" strokeWidth="1.1" strokeLinejoin="round" />)}
+            {/* borda do estado com brilho */}
+            <path d={SE_OUTLINE} fill="none" stroke="#4FBBFF" strokeOpacity="0.55" strokeWidth="7" filter="url(#se-glow)" />
+            <path d={SE_OUTLINE} fill="none" stroke="#8FD6FF" strokeWidth="2" strokeLinejoin="round" />
+            {/* rede: brilho largo + traço fino + pulsos */}
+            <g filter="url(#se-glow)">{SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`g${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#4FBBFF" strokeOpacity="0.35" strokeWidth="5" />; })}</g>
+            {SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`l${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#9BDCFF" strokeOpacity="0.75" strokeWidth="1.4" />; })}
+            {SE_LINKS.map(([a, b], n) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return n % 3 ? null : <line key={`p${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="5 95" pathLength={100} className="inst-pulse" style={{ animationDelay: `${(n * 137) % 2400}ms` }} />; })}
+            {/* pontos de presença */}
+            {SE_MUNICIPIOS.map((m, i) => {
+              const home = m.name === HOME, named = CITY_ORDER.includes(m.name);
+              if (home) return <g key={m.name}><circle cx={m.x} cy={m.y} r="110" fill="url(#se-halo)" /><circle cx={m.x} cy={m.y} r="34" fill="none" stroke="#8FD6FF" strokeWidth="2" /><circle cx={m.x} cy={m.y} r="56" fill="none" stroke="#8FD6FF" strokeOpacity="0.35" strokeWidth="1.5" /><circle cx={m.x} cy={m.y} r="10" fill="#FFFFFF" /></g>;
+              if (i === hub) return <g key={m.name}><circle cx={m.x} cy={m.y} r="70" fill="url(#se-halo)" /><circle cx={m.x} cy={m.y} r="22" fill="none" stroke="#8FD6FF" strokeWidth="1.8" /><circle cx={m.x} cy={m.y} r="8" fill="#FFFFFF" /></g>;
+              return <g key={m.name}><circle cx={m.x} cy={m.y} r={named ? 9 : 6} fill="#4FBBFF" fillOpacity="0.35" filter="url(#se-glow)" /><circle cx={m.x} cy={m.y} r={named ? 5.5 : 3.6} fill={named ? '#FFFFFF' : '#CDEEFF'} /></g>;
             })}
           </svg>
         </div>
-        {/* marcadores em pé */}
+        {/* identificação das cidades: haste fina e nome em pé */}
         {SE_MUNICIPIOS.filter((m) => CITY_ORDER.includes(m.name)).map((c) => {
-          const home = c.name === HOME;
+          const home = c.name === HOME, cfg = CALLOUT[c.name]!;
           return (
-            <div key={c.name} className="absolute" style={{ left: c.x * k, top: c.y * k, transform: `translateZ(1px) ${UNTILT}`, transformOrigin: '0 0', transformStyle: 'preserve-3d' }}>
-              <div className={clsx('absolute bottom-0 flex flex-col', SIDE[c.name] === 'dir' ? 'left-0 items-start' : SIDE[c.name] === 'esq' ? 'right-0 items-end' : 'left-0 -translate-x-1/2 items-center')}>
-                <span className={home ? 'whitespace-nowrap bg-white px-4 py-2 font-display text-[26px] font-bold text-navy shadow-[0_10px_30px_rgba(0,0,0,0.45)]' : 'whitespace-nowrap border border-white/25 bg-[#0E1A27]/85 px-3 py-1.5 text-[18px] font-semibold text-white'}>{c.name}</span>
-                <span className={home ? 'w-[3px] bg-white' : 'w-[2px] bg-[#9CC4EA]/80'} style={{ height: STEM[c.name] ?? 80 }} />
+            <div key={c.name} className="absolute" style={{ left: c.x * k, top: c.y * k, transform: `translateZ(1px) ${UNTILT}`, transformOrigin: '0 0' }}>
+              <div className={clsx('absolute bottom-0 flex items-end', cfg.side === 'dir' ? 'left-0' : 'right-0 flex-row-reverse')}>
+                <span className="w-px bg-gradient-to-t from-[#8FD6FF] to-[#8FD6FF]/30" style={{ height: cfg.h }} />
+                <span className={clsx('whitespace-nowrap border-[#8FD6FF]/40 bg-[#0B121A]/75 px-2.5 py-1 backdrop-blur-sm', cfg.side === 'esq' ? 'border-r text-right' : 'border-l')} style={{ marginBottom: cfg.h - 26 }}>
+                  <span className={clsx('block font-semibold leading-tight', home ? 'text-[22px] text-white' : 'text-[15px] text-white/90')}>{c.name}</span>
+                </span>
               </div>
             </div>
           );
@@ -73,16 +84,17 @@ function SergipeMap({ className }: { className?: string }) {
 
 function SlidePresence({ canConfigure }: { canConfigure: boolean }) {
   return (
-    <div className="relative h-full overflow-hidden bg-[#141C25] text-white">
-      <div aria-hidden className="absolute inset-0 bg-[radial-gradient(ellipse_at_70%_40%,rgba(47,89,134,0.45),transparent_62%)]" />
-      <SergipeMap className="absolute -right-[200px] -top-[40px] h-[1000px] w-[1160px]" />
+    <div className="relative h-full overflow-hidden bg-[#0B121A] text-white">
+      <div aria-hidden className="absolute inset-0 bg-[radial-gradient(ellipse_at_72%_48%,rgba(47,89,134,0.42),transparent_60%)]" />
+      <div aria-hidden className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(143,214,255,1)_1px,transparent_1px),linear-gradient(90deg,rgba(143,214,255,1)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(ellipse_at_70%_50%,black,transparent_70%)]" />
+      <SergipeMap className="absolute right-[10px] top-[30px] h-[820px] w-[860px]" />
       <div className="relative flex h-full flex-col px-[90px] pb-[56px] pt-[64px]">
         <img src="/brand/bkt-logo-white.png" alt="BKT" className="h-[52px] w-fit" draggable={false} />
         <div className="mt-[44px] max-w-[760px]">
           <h1 className="mt-2 font-display text-[52px] font-extrabold leading-[1.06]">Tecnologia que nasceu em Sergipe<span className="block text-[#9CC4EA]">e cresce com ele.</span></h1>
           <p className="mt-5 max-w-[640px] text-[22px] leading-[1.5] text-white/80">Conectividade, computação em nuvem, soluções de energia e infraestrutura para cidades inteligentes, em todo o estado de Sergipe.</p>
         </div>
-        <section aria-label="Selos e certificações" className="mt-auto max-w-[760px] border border-white/12 bg-white/[0.04] px-8 py-5">
+        <section aria-label="Selos e certificações" className="mt-auto max-w-[760px] border border-white/10 bg-white/[0.03] px-8 py-5">
           <p className="text-[15px] font-semibold text-[#9CC4EA]">Selos e certificações</p>
           <div className="mt-3 h-[92px]">
             <BrandArt slot="selos_certificacoes" className="h-full w-full object-contain object-left" fallback={
