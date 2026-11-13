@@ -55,10 +55,8 @@ const OpportunitiesPage = lazy(() => import('./pages/Opportunities').then((m) =>
 const NewOpportunityPage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.NewOpportunityPage })));
 const OpportunityWorkspacePage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.OpportunityWorkspacePage })));
 const BudgetPlanningPage = lazy(() => import('./pages/budget/Planning').then((m) => ({ default: m.BudgetPlanningPage })));
-const BudgetAssetsPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetAssetsPage })));
-const BudgetContractsPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetContractsPage })));
 const BudgetPurchasesPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetPurchasesPage })));
-const BudgetSoftwarePage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetSoftwarePage })));
+const BudgetToolsPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetToolsPage })));
 const BudgetIndicatorsPage = lazy(() => import('./pages/budget/Indicators').then((m) => ({ default: m.BudgetIndicatorsPage })));
 const CustomersPage = lazy(() => import('./pages/Customers').then((m) => ({ default: m.CustomersPage })));
 const CustomerDetailPage = lazy(() => import('./pages/CustomerDetail').then((m) => ({ default: m.CustomerDetailPage })));
@@ -252,9 +250,10 @@ export function App() {
         <Route path="campaigns/:id" element={<Gate module="campanhas"><CampaignDetailPage /></Gate>} />
         <Route path="contracts" element={<Gate module="contratos"><ContractsPage /></Gate>} />
         <Route path="orcamento" element={<Gate module="orcamento" feature="orcamento.planejamento"><BudgetPlanningPage /></Gate>} />
-        <Route path="orcamento/ferramentas" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetAssetsPage /></Gate>} />
-        <Route path="orcamento/softwares" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetSoftwarePage /></Gate>} />
-        <Route path="orcamento/contratos" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetContractsPage /></Gate>} />
+        <Route path="orcamento/recursos" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetToolsPage /></Gate>} />
+        <Route path="orcamento/ferramentas" element={<Navigate replace to="/orcamento/recursos?tipo=equipamento" />} />
+        <Route path="orcamento/softwares" element={<Navigate replace to="/orcamento/recursos?tipo=software" />} />
+        <Route path="orcamento/contratos" element={<Navigate replace to="/orcamento/recursos?tipo=contratos" />} />
         <Route path="orcamento/compras" element={<Gate module="orcamento" feature="orcamento.recursos"><BudgetPurchasesPage /></Gate>} />
         <Route path="orcamento/indicadores" element={<Gate module="orcamento" feature="orcamento.planejamento"><BudgetIndicatorsPage /></Gate>} />
         <Route path="contracts/new" element={<Gate module="contratos"><NewContractPage /></Gate>} />

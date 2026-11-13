@@ -221,8 +221,9 @@ Comprometido, realizado e pago são estágios da mesma despesa e não se somam. 
 - **Eficiência:** em Inteligência → Eficiência orçamentária, custo × resultado com a fonte de cada número.
 
 # Recursos
-- **Ferramentas e equipamentos:** responsável, situação (em uso, estoque, manutenção, baixado) e valor contábil com depreciação linear.
-- **Softwares e licenças / Contratos e assinaturas:** custo mensal, cotação, forma de pagamento, revisão — **sem credenciais** (use o cofre da empresa).
+- **Ferramentas, softwares e contratos** (uma tela só; o tipo é escolhido em **Novo item** e filtrado na tabela):
+- **Ferramenta ou equipamento:** responsável, situação (em uso, estoque, manutenção, baixado) e valor contábil com depreciação linear.
+- **Software ou licença, contrato de serviço, assinatura:** custo mensal, cotação, forma de pagamento, revisão — **sem credenciais** (use o cofre da empresa).
 - **Compras e fornecedores:** pedido com especificação completa e o que a política exige (Financeiro, cotação, Jurídico, Diretoria), cotações e fornecedor escolhido.
 - **Custos e indicadores:** orçado × realizado por centro, categoria e mês; recorrentes, ativos e Guardião.
 `,

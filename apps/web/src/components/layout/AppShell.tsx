@@ -76,9 +76,7 @@ const NAV: NavEntry[] = [
   ] },
   { key: 'orcamento', label: 'Recursos e Orçamento', icon: <Wallet className={ICON} />, children: [
     { to: '/orcamento', label: 'Planejamento orçamentário', module: 'orcamento', feature: 'orcamento.planejamento' },
-    { to: '/orcamento/ferramentas', label: 'Ferramentas e equipamentos', module: 'orcamento', feature: 'orcamento.recursos' },
-    { to: '/orcamento/softwares', label: 'Softwares e licenças', module: 'orcamento', feature: 'orcamento.recursos' },
-    { to: '/orcamento/contratos', label: 'Contratos e assinaturas', module: 'orcamento', feature: 'orcamento.recursos' },
+    { to: '/orcamento/recursos', label: 'Ferramentas, softwares e contratos', module: 'orcamento', feature: 'orcamento.recursos' },
     { to: '/orcamento/compras', label: 'Compras e fornecedores', module: 'orcamento', feature: 'orcamento.recursos' },
     { to: '/orcamento/indicadores', label: 'Custos e indicadores', module: 'orcamento', feature: 'orcamento.planejamento' },
   ] },

@@ -76,9 +76,7 @@ export function AccountSelect({ value, onChange, accounts, id, required }: { val
 
 const NAV = [
   { to: '/orcamento', label: 'Planejamento orçamentário', end: true },
-  { to: '/orcamento/ferramentas', label: 'Ferramentas e equipamentos' },
-  { to: '/orcamento/softwares', label: 'Softwares e licenças' },
-  { to: '/orcamento/contratos', label: 'Contratos e assinaturas' },
+  { to: '/orcamento/recursos', label: 'Ferramentas, softwares e contratos' },
   { to: '/orcamento/compras', label: 'Compras e fornecedores' },
   { to: '/orcamento/indicadores', label: 'Custos e indicadores' },
 ];

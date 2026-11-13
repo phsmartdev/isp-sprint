@@ -112,8 +112,10 @@ test('Recursos e Orçamento: estrutura, líder planeja, Gerência aprova e envia
   await expect(board.getByRole('region', { name: 'Budget Guardião' })).toContainText('Aprovado');
 
   // licença em dólar sem senha, com referência do Vault
-  await ana.goto('/orcamento/softwares');
-  await ana.getByRole('button', { name: 'Nova licença' }).click();
+  await ana.goto('/orcamento/softwares'); // endereço antigo leva à tela única, filtrada no tipo
+  await expect(ana.getByLabel('Tipo', { exact: true })).toHaveValue('software');
+  await ana.getByRole('button', { name: 'Novo item' }).click();
+  await ana.getByRole('dialog', { name: 'Novo item' }).getByLabel('Tipo do lançamento').selectOption('software');
   dlg = ana.getByRole('dialog', { name: 'Nova licença' });
   await dlg.getByLabel('Software').fill('Ferramenta fictícia de automação');
   await dlg.getByLabel('Moeda').selectOption('USD');
@@ -123,7 +125,7 @@ test('Recursos e Orçamento: estrutura, líder planeja, Gerência aprova e envia
   await dlg.getByLabel('Referência no Vault').fill('Marketing / Automação');
   await dlg.getByLabel('Forma de pagamento').selectOption('cartao_corporativo');
   await dlg.getByRole('button', { name: 'Salvar' }).click();
-  await expect(ana.getByRole('region', { name: 'Softwares e licenças' })).toContainText('R$ 550,00');
+  await expect(ana.getByRole('region', { name: 'Ferramentas, softwares e contratos' })).toContainText('R$ 550,00');
 
   // relatório dos setores
   await dir.goto('/orcamento/indicadores');

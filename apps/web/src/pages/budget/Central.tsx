@@ -7,7 +7,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { AlertTriangle, ChevronDown, ChevronRight, Columns3, Download, FileUp, Plus, Search, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Columns3, Download, FileUp, Plus, Search, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import {
   APPROVAL_STATES, APPROVAL_STATE_LABELS, BUDGET_DECISIONS, BUDGET_DECISION_LABELS, BUDGET_PRIORITIES, BUDGET_UNITS, BUDGET_UNIT_LABELS, EXECUTION_STATES, EXECUTION_STATE_LABELS, EXPENSE_TYPES, EXPENSE_TYPE_LABELS,
   PAYMENT_FLAG_LABELS, PAYMENT_METHODS, PAYMENT_METHOD_LABELS, QUESTION_KINDS, QUESTION_KIND_LABELS, type ApprovalState, type BudgetDecision, type ExecutionState, type PaymentFlag,
@@ -72,12 +72,35 @@ export function BudgetCentral({ st, year }: { st: Structure; year: number }) {
   const [cols, setColsState] = useState<ColKey[]>(loadCols);
   const setCols = (c: ColKey[]) => { setColsState(c); try { localStorage.setItem('orc-central-cols', JSON.stringify(c)); } catch { /* sem armazenamento */ } };
   const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, ...patch }));
+  const extraOn = [f.projectId, f.campaignId, f.supplierId, f.approval, f.execution, f.financial].filter(Boolean).length;
+  const [more, setMore] = useState(extraOn > 0);
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
+      <section aria-label="Filtros" className="border border-line bg-surface px-4 py-3">
+        <div className="grid items-end gap-3 sm:grid-cols-3 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto]">
+          <FormField label="De" htmlFor="bc-from"><Select id="bc-from" value={f.from} onChange={(e) => set({ from: e.target.value })}>{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</Select></FormField>
+          <FormField label="Até" htmlFor="bc-to"><Select id="bc-to" value={f.to} onChange={(e) => set({ to: e.target.value })}>{months.filter((m) => m >= f.from).map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</Select></FormField>
+          <FormField label="Centro de custos" htmlFor="bc-cc"><Select id="bc-cc" value={f.costCenterId} onChange={(e) => set({ costCenterId: e.target.value })}><option value="">Todos que vejo</option>{d.options.costCenters.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}</Select></FormField>
+          <FormField label="Conta" htmlFor="bc-acc"><Select id="bc-acc" value={f.accountId} onChange={(e) => set({ accountId: e.target.value })}><option value="">Todas</option>{d.accounts.map((a) => <option key={a.id} value={a.id}>{' '.repeat((a.level - 1) * 2)}{a.code} {a.name}</option>)}</Select></FormField>
+          <FormField label="Responsável" htmlFor="bc-own"><Select id="bc-own" value={f.ownerId} onChange={(e) => set({ ownerId: e.target.value })}><option value="">Todos</option>{d.options.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+          <FormField label="Buscar" htmlFor="bc-q"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" aria-hidden /><Input id="bc-q" className="pl-9" placeholder="Código ou descrição" value={f.q} onChange={(e) => set({ q: e.target.value })} /></div></FormField>
+          <Button variant="ghost" icon={<SlidersHorizontal className="h-4 w-4" />} aria-expanded={more} onClick={() => setMore(!more)}>{more ? 'Menos filtros' : `Mais filtros${extraOn ? ` (${extraOn})` : ''}`}</Button>
+        </div>
+        {more && (
+          <div className="mt-3 grid gap-3 border-t border-line pt-3 sm:grid-cols-3 lg:grid-cols-6">
+            <FormField label="Projeto" htmlFor="bc-prj"><Select id="bc-prj" value={f.projectId} onChange={(e) => set({ projectId: e.target.value })}><option value="">Todos</option>{d.options.projects.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+            <FormField label="Campanha" htmlFor="bc-cmp"><Select id="bc-cmp" value={f.campaignId} onChange={(e) => set({ campaignId: e.target.value })}><option value="">Todas</option>{d.options.campaigns.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+            <FormField label="Fornecedor" htmlFor="bc-sup"><Select id="bc-sup" value={f.supplierId} onChange={(e) => set({ supplierId: e.target.value })}><option value="">Todos</option>{d.options.suppliers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+            <FormField label="Aprovação" htmlFor="bc-ap"><Select id="bc-ap" value={f.approval} onChange={(e) => set({ approval: e.target.value })}><option value="">Todas</option>{APPROVAL_STATES.map((s) => <option key={s} value={s}>{APPROVAL_STATE_LABELS[s]}</option>)}</Select></FormField>
+            <FormField label="Execução" htmlFor="bc-ex"><Select id="bc-ex" value={f.execution} onChange={(e) => set({ execution: e.target.value })}><option value="">Todas</option>{EXECUTION_STATES.map((s) => <option key={s} value={s}>{EXECUTION_STATE_LABELS[s]}</option>)}</Select></FormField>
+            <FormField label="Financeiro" htmlFor="bc-fi"><Select id="bc-fi" value={f.financial} onChange={(e) => set({ financial: e.target.value })}><option value="">Todas</option>{(['sem_titulo', 'a_vencer', 'vencido', 'parcial', 'pago', 'conciliado'] as PaymentFlag[]).map((s) => <option key={s} value={s}>{PAYMENT_FLAG_LABELS[s]}</option>)}</Select></FormField>
+          </div>
+        )}
+      </section>
       <KpiStrip k={d.kpis} />
       {d.centers.some((c) => c.alert) && (
         <div className="flex flex-wrap gap-2" aria-label="Alertas dos centros de custo">
@@ -89,22 +112,8 @@ export function BudgetCentral({ st, year }: { st: Structure; year: number }) {
           ))}
         </div>
       )}
-      <section aria-label="Filtros" className="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-6">
-        <FormField label="De" htmlFor="bc-from"><Select id="bc-from" value={f.from} onChange={(e) => set({ from: e.target.value })}>{months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</Select></FormField>
-        <FormField label="Até" htmlFor="bc-to"><Select id="bc-to" value={f.to} onChange={(e) => set({ to: e.target.value })}>{months.filter((m) => m >= f.from).map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}</Select></FormField>
-        <FormField label="Centro de custos" htmlFor="bc-cc"><Select id="bc-cc" value={f.costCenterId} onChange={(e) => set({ costCenterId: e.target.value })}><option value="">Todos que vejo</option>{d.options.costCenters.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}</Select></FormField>
-        <FormField label="Conta" htmlFor="bc-acc"><Select id="bc-acc" value={f.accountId} onChange={(e) => set({ accountId: e.target.value })}><option value="">Todas</option>{d.accounts.map((a) => <option key={a.id} value={a.id}>{' '.repeat((a.level - 1) * 2)}{a.code} {a.name}</option>)}</Select></FormField>
-        <FormField label="Responsável" htmlFor="bc-own"><Select id="bc-own" value={f.ownerId} onChange={(e) => set({ ownerId: e.target.value })}><option value="">Todos</option>{d.options.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
-        <FormField label="Buscar" htmlFor="bc-q"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" aria-hidden /><Input id="bc-q" className="pl-9" placeholder="Código ou descrição" value={f.q} onChange={(e) => set({ q: e.target.value })} /></div></FormField>
-        <FormField label="Projeto" htmlFor="bc-prj"><Select id="bc-prj" value={f.projectId} onChange={(e) => set({ projectId: e.target.value })}><option value="">Todos</option>{d.options.projects.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
-        <FormField label="Campanha" htmlFor="bc-cmp"><Select id="bc-cmp" value={f.campaignId} onChange={(e) => set({ campaignId: e.target.value })}><option value="">Todas</option>{d.options.campaigns.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
-        <FormField label="Fornecedor" htmlFor="bc-sup"><Select id="bc-sup" value={f.supplierId} onChange={(e) => set({ supplierId: e.target.value })}><option value="">Todos</option>{d.options.suppliers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
-        <FormField label="Aprovação" htmlFor="bc-ap"><Select id="bc-ap" value={f.approval} onChange={(e) => set({ approval: e.target.value })}><option value="">Todas</option>{APPROVAL_STATES.map((s) => <option key={s} value={s}>{APPROVAL_STATE_LABELS[s]}</option>)}</Select></FormField>
-        <FormField label="Execução" htmlFor="bc-ex"><Select id="bc-ex" value={f.execution} onChange={(e) => set({ execution: e.target.value })}><option value="">Todas</option>{EXECUTION_STATES.map((s) => <option key={s} value={s}>{EXECUTION_STATE_LABELS[s]}</option>)}</Select></FormField>
-        <FormField label="Financeiro" htmlFor="bc-fi"><Select id="bc-fi" value={f.financial} onChange={(e) => set({ financial: e.target.value })}><option value="">Todas</option>{(['sem_titulo', 'a_vencer', 'vencido', 'parcial', 'pago', 'conciliado'] as PaymentFlag[]).map((s) => <option key={s} value={s}>{PAYMENT_FLAG_LABELS[s]}</option>)}</Select></FormField>
-      </section>
-      <Evolution series={d.series} onPick={(m) => set({ from: m, to: m })} />
       <BudgetTable d={d} st={st} cols={cols} setCols={setCols} selected={selected} setSelected={setSelected} onOpen={(id, tab) => setOpen({ id, tab })} onCreate={() => setCreating(true)} onBatch={() => setBatch(true)} />
+      <Evolution series={d.series} onPick={(m) => set({ from: m, to: m })} />
       {open && <LinePanel id={open.id} tab={open.tab} onTab={(tab) => setOpen({ ...open, tab })} onClose={() => setOpen(null)} st={st} options={d.options} />}
       {creating && <NewLine st={st} d={d} year={year} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setOpen({ id, tab: 'planejamento' }); }} />}
       {batch && <BatchDecision rows={d.rows.filter((r) => selected.includes(r.id))} onClose={() => setBatch(false)} onDone={() => { setBatch(false); setSelected([]); }} />}
@@ -112,31 +121,45 @@ export function BudgetCentral({ st, year }: { st: Structure; year: number }) {
   );
 }
 
+/** Indicadores em duas camadas: os seis que movem a decisão em destaque discreto; o resto numa linha de apoio. */
 function KpiStrip({ k }: { k: Kpis }) {
-  const items: { label: string; v: number | null; hint: string; tone?: 'danger' | 'warning' | 'success' }[] = [
-    { label: 'Orçamento original', v: k.original, hint: 'Primeira aprovação de cada lançamento' },
-    { label: 'Orçamento revisado', v: k.revised, hint: 'Aprovado vigente + Budget Guardião' },
+  type K = { label: string; v: number | null; hint: string; tone?: 'danger' | 'warning' };
+  const main: K[] = [
     { label: 'Aprovado', v: k.approved, hint: 'Limite autorizado dos lançamentos' },
-    { label: 'Solicitado', v: k.requested, hint: 'Pedido em lançamentos enviados' },
-    { label: 'Reservado', v: k.reserved, hint: 'Aprovado ainda sem obrigação' },
     { label: 'Comprometido', v: k.committed, hint: 'Obrigações assumidas' },
     { label: 'Realizado', v: k.realized, hint: 'Despesa reconhecida (competência)' },
     { label: 'Pago', v: k.paid, hint: 'Confirmado pelo Financeiro' },
     { label: 'Saldo disponível', v: k.available, hint: 'Autorizado − consumo − reservas', tone: k.available < 0 ? 'danger' : undefined },
+    { label: 'Projeção de encerramento', v: k.projection, hint: 'Consumido + aprovado em aberto', tone: k.projection > k.revised ? 'danger' : undefined },
+  ];
+  const rest: K[] = [
+    { label: 'Original', v: k.original, hint: 'Primeira aprovação de cada lançamento' },
+    { label: 'Revisado', v: k.revised, hint: 'Aprovado vigente + Budget Guardião' },
+    { label: 'Solicitado', v: k.requested, hint: 'Pedido em lançamentos enviados' },
+    { label: 'Reservado', v: k.reserved, hint: 'Aprovado ainda sem obrigação' },
     { label: 'Aguardando aprovação', v: k.awaiting, hint: 'Lançamentos e Guardião pendentes', tone: k.awaiting ? 'warning' : undefined },
     { label: 'Excedente autorizado', v: k.excessAuthorized, hint: 'Budget Guardião no centro' },
     { label: 'Saldo do Guardião', v: k.guardianBalance, hint: k.guardianBalance === null ? 'Reserva não configurada' : 'Reserva extraordinária livre' },
-    { label: 'Projeção de encerramento', v: k.projection, hint: 'Consumido + aprovado em aberto', tone: k.projection > k.revised ? 'danger' : undefined },
   ];
+  const tone = (t?: K['tone']) => (t === 'danger' ? 'text-danger' : t === 'warning' ? 'text-[#C2610C]' : 'text-ink');
   return (
-    <section aria-label="Indicadores do orçamento" className="grid grid-cols-2 gap-px border border-line bg-line sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-7">
-      {items.map((i) => (
-        <div key={i.label} className="bg-surface px-3.5 py-3" title={i.hint}>
-          <p className="text-xs text-muted">{i.label}</p>
-          <p className={clsx('num mt-1 text-lg font-bold', i.tone === 'danger' ? 'text-danger' : i.tone === 'warning' ? 'text-[#C2610C]' : 'text-ink')}>{i.v === null ? '—' : fmtBRL(i.v)}</p>
-          <p className="mt-0.5 text-2xs text-faint">{i.hint}</p>
-        </div>
-      ))}
+    <section aria-label="Indicadores do orçamento" className="border border-line bg-surface">
+      <dl className="grid grid-cols-2 divide-line sm:grid-cols-3 lg:grid-cols-6 lg:divide-x">
+        {main.map((i) => (
+          <div key={i.label} className="px-4 py-2.5" title={i.hint}>
+            <dt className="text-2xs font-semibold text-muted">{i.label}</dt>
+            <dd className={clsx('num text-base font-bold leading-tight', tone(i.tone))}>{i.v === null ? '—' : fmtBRL(i.v)}</dd>
+          </div>
+        ))}
+      </dl>
+      <dl className="flex flex-wrap gap-x-5 gap-y-1 border-t border-line bg-surface-2/50 px-4 py-2 text-xs">
+        {rest.map((i) => (
+          <div key={i.label} className="flex items-baseline gap-1.5" title={i.hint}>
+            <dt className="text-muted">{i.label}</dt>
+            <dd className={clsx('num font-semibold', tone(i.tone))}>{i.v === null ? '—' : fmtBRL(i.v)}</dd>
+          </div>
+        ))}
+      </dl>
     </section>
   );
 }
@@ -166,31 +189,31 @@ function Evolution({ series, onPick }: { series: SeriesPoint[]; onPick: (month: 
   const last = realized.length - 1, prev = realized[last - 1] ?? 0, cur = realized[last] ?? 0;
   const total = realized.reduce((t, x) => t + x, 0);
   return (
-    <section aria-label="Evolução orçamentária" className="card p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-display text-base font-bold text-ink">Evolução orçamentária</h2>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select aria-label="Periodicidade" className="w-36" value={period} onChange={(e) => setPeriod(e.target.value as keyof typeof PERIODS)}>{Object.keys(PERIODS).map((p) => <option key={p} value={p}>{p[0]!.toUpperCase() + p.slice(1)}</option>)}</Select>
-          <label className="flex items-center gap-1.5 text-sm text-text"><input type="checkbox" checked={acc} onChange={(e) => setAcc(e.target.checked)} /> Acumulado</label>
+    <section aria-label="Evolução orçamentária" className="border border-line bg-surface px-4 py-3">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 className="font-display text-sm font-bold text-ink">Evolução orçamentária</h2>
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Séries">
+          {SERIES.map((s) => (
+            <button key={s.key} type="button" aria-pressed={on.includes(s.key)} onClick={() => setOn(on.includes(s.key) ? on.filter((x) => x !== s.key) : [...on, s.key])}
+              className={clsx('inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-semibold', on.includes(s.key) ? 'text-ink' : 'text-faint line-through')}>
+              <span className="h-2 w-2" style={{ background: s.color }} />{s.label}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <Select aria-label="Periodicidade" className="h-8 w-32 text-xs" value={period} onChange={(e) => setPeriod(e.target.value as keyof typeof PERIODS)}>{Object.keys(PERIODS).map((p) => <option key={p} value={p}>{p[0]!.toUpperCase() + p.slice(1)}</option>)}</Select>
+          <label className="flex items-center gap-1.5 text-xs text-text"><input type="checkbox" checked={acc} onChange={(e) => setAcc(e.target.checked)} /> Acumulado</label>
         </div>
       </div>
-      <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Séries">
-        {SERIES.map((s) => (
-          <button key={s.key} type="button" aria-pressed={on.includes(s.key)} onClick={() => setOn(on.includes(s.key) ? on.filter((x) => x !== s.key) : [...on, s.key])}
-            className={clsx('inline-flex items-center gap-1.5 border px-2.5 py-1 text-xs font-semibold', on.includes(s.key) ? 'border-line-strong bg-surface text-ink' : 'border-line bg-surface-2 text-faint line-through')}>
-            <span className="h-2.5 w-2.5" style={{ background: s.color }} />{s.label}
-          </button>
-        ))}
-      </div>
-      {series.every((p) => !p.approved && !p.committed && !p.realized && !p.paid && !p.projection && !p.original) ? <p className="py-10 text-center text-sm text-muted">Ainda não há valores aprovados, comprometidos, realizados ou pagos neste período.</p> : <LineChart categories={buckets.map((b) => b.label)} series={SERIES.filter((s) => on.includes(s.key)).map((s) => ({ key: s.key, label: s.label, color: s.color, dashed: 'dashed' in s ? s.dashed : undefined, values: values(s.key) }))}
-        format={(v) => fmtBRL(Math.round(v))} ariaLabel="Evolução do orçamento por período" tooltipTitle={(i) => buckets[i]!.label} onPick={n === 1 ? (i) => onPick(buckets[i]!.months[0]!) : undefined} height={230} />}
-      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
+      {series.every((p) => !p.approved && !p.committed && !p.realized && !p.paid && !p.projection && !p.original) ? <p className="py-6 text-center text-sm text-muted">Ainda não há valores aprovados, comprometidos, realizados ou pagos neste período.</p> : <LineChart categories={buckets.map((b) => b.label)} series={SERIES.filter((s) => on.includes(s.key)).map((s) => ({ key: s.key, label: s.label, color: s.color, dashed: 'dashed' in s ? s.dashed : undefined, values: values(s.key) }))}
+        format={(v) => fmtBRL(Math.round(v))} ariaLabel="Evolução do orçamento por período" tooltipTitle={(i) => buckets[i]!.label} onPick={n === 1 ? (i) => onPick(buckets[i]!.months[0]!) : undefined} height={170} width={1280} />}
+      <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs [&>div]:flex [&>div]:items-baseline [&>div]:gap-1.5">
         <div><dt className="text-xs text-muted">Variação do último período</dt><dd className="num font-semibold text-ink">{fmtBRL(cur - prev)} {prev ? `(${(((cur - prev) / prev) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%)` : ''}</dd></div>
         <div><dt className="text-xs text-muted">Média do realizado por período</dt><dd className="num font-semibold text-ink">{fmtBRL(Math.round(total / Math.max(1, realized.filter((x) => x).length)))}</dd></div>
         <div><dt className="text-xs text-muted">Desvio (realizado − aprovado)</dt><dd className="num font-semibold text-ink">{fmtBRL(total - approved.reduce((t, x) => t + x, 0))}</dd></div>
         <div><dt className="text-xs text-muted">Tendência</dt><dd className="font-semibold text-ink">{cur > prev ? 'Aumento de custo' : cur < prev ? 'Redução de custo (confira se não é só adiamento de pagamento)' : 'Estável'}</dd></div>
       </dl>
-      {n === 1 && <p className="mt-2 text-xs text-faint">Clique num mês para ver na tabela os lançamentos que formam aquele valor.</p>}
+      {n === 1 && <p className="mt-1 text-2xs text-faint">Clique num mês para filtrar a tabela acima.</p>}
     </section>
   );
 }
