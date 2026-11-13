@@ -17,7 +17,19 @@ export const isBudgetAdmin = (auth: AuthContext) => level(auth, 'orcamento') ===
 export type BudgetRole = 'diretoria' | 'gerencia' | 'lideranca';
 export const budgetRole = (auth: AuthContext): BudgetRole => (auth.profiles.some((p) => p === 'diretoria' || p === 'administrador') ? 'diretoria' : auth.profiles.includes('gerencia') ? 'gerencia' : 'lideranca');
 /** Etapas de aprovação que a pessoa decide. */
-export const decidesStages = (auth: AuthContext): ('gerencia' | 'diretoria')[] => ({ diretoria: ['gerencia', 'diretoria'] as ('gerencia' | 'diretoria')[], gerencia: ['gerencia'] as ('gerencia' | 'diretoria')[], lideranca: [] as ('gerencia' | 'diretoria')[] })[budgetRole(auth)];
+/**
+ * Quem decide o orçamento: Diretoria (aprovação final; também decide a etapa da Gerência) e Gerência.
+ * Administrador configura, mas não recebe poder de aprovação financeira só por ser administrador (prompt master, 4.1),
+ * e quem não tem cargo Liderança / gestor no setor não aprova.
+ */
+export const decidesStages = (auth: AuthContext & { sectorRole?: string | null }): ('gerencia' | 'diretoria')[] => {
+  if (auth.sectorRole && auth.sectorRole !== 'lideranca') return [];
+  if (auth.profiles.includes('diretoria')) return ['gerencia', 'diretoria'];
+  if (auth.profiles.includes('gerencia')) return ['gerencia'];
+  return [];
+};
+/** Financeiro: quem está no setor Financeiro (e não é só observador) valida documentos, registra pagamentos e concilia. */
+export const isFinance = (auth: AuthContext) => auth.sectors.includes('financeiro');
 export const budgetCan = (auth: AuthContext) => {
   const r = budgetRole(auth);
   return { role: r, decideStages: decidesStages(auth), guardian: r === 'gerencia', decideGuardian: r === 'diretoria', transfer: r !== 'lideranca' };
@@ -125,10 +137,10 @@ export async function quarterNumbers(db: DbOrTx, tenantId: string, year: number,
   if (!ccIds.length) return { rows: [] as Row[], months: monthsOfQuarter(year, quarter) };
   const months = monthsOfQuarter(year, quarter);
   const from = `${months[0]}-01`, until = quarter === 4 ? `${year + 1}-01-01` : `${year}-${String(quarter * 3 + 1).padStart(2, '0')}-01`;
-  const lines = await db.select({ cc: s.budgetLines.costCenterId, account: s.budgetLines.accountId, month: s.budgetLines.month, amount: s.budgetLines.amountCents, status: s.budgetLines.status })
+  const lines = await db.select({ cc: s.budgetLines.costCenterId, account: s.budgetLines.accountId, month: s.budgetLines.month, amount: sql<number>`case when ${s.budgetLines.status} = 'aprovado' then coalesce(${s.budgetLines.approvedCents}, ${s.budgetLines.amountCents}) else ${s.budgetLines.amountCents} end`.mapWith(Number), status: s.budgetLines.status })
     .from(s.budgetLines).where(and(eq(s.budgetLines.tenantId, tenantId), inArray(s.budgetLines.costCenterId, ccIds), inArray(s.budgetLines.month, months), isNull(s.budgetLines.deletedAt)));
   const adj = await db.select({ cc: s.budgetAdjustments.costCenterId, account: s.budgetAdjustments.accountId, month: s.budgetAdjustments.month, delta: s.budgetAdjustments.deltaCents, status: s.budgetAdjustments.status })
-    .from(s.budgetAdjustments).where(and(eq(s.budgetAdjustments.tenantId, tenantId), inArray(s.budgetAdjustments.costCenterId, ccIds), eq(s.budgetAdjustments.year, year), eq(s.budgetAdjustments.quarter, quarter)));
+    .from(s.budgetAdjustments).where(and(eq(s.budgetAdjustments.tenantId, tenantId), inArray(s.budgetAdjustments.costCenterId, ccIds), eq(s.budgetAdjustments.year, year), eq(s.budgetAdjustments.quarter, quarter), sql`${s.budgetAdjustments.kind} <> 'excedente'`));
   const exp = await db.select({ cc: s.budgetExpenses.costCenterId, account: s.budgetExpenses.accountId, month: sql<string>`to_char(${s.budgetExpenses.occurredOn}, 'YYYY-MM')`, amount: s.budgetExpenses.amountCents })
     .from(s.budgetExpenses).where(and(eq(s.budgetExpenses.tenantId, tenantId), inArray(s.budgetExpenses.costCenterId, ccIds), eq(s.budgetExpenses.status, 'valido'), sql`${s.budgetExpenses.occurredOn} >= ${from} and ${s.budgetExpenses.occurredOn} < ${until}`));
   const key = (cc: string, a: string, m: string) => `${cc}|${a}|${m}`;
@@ -167,3 +179,10 @@ export async function availableFor(db: DbOrTx, tenantId: string, ccId: string, a
 }
 
 export const natureOf = (a: { nature: string }) => a.nature as AccountNature;
+
+/** Próximo código de lançamento da empresa no ano (ORC-2026-0001). Chame dentro de uma transação. */
+export async function nextLineCode(db: DbOrTx, tenantId: string, year: number) {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`budget-code:${tenantId}`}))`);
+  const r = await db.execute<{ n: number }>(sql`select coalesce(max(substring(code from '[0-9]+$')::int), 0) + 1 as n from budget_lines where tenant_id = ${tenantId} and code like ${`ORC-${year}-%`}`);
+  return `ORC-${year}-${String(r.rows[0]!.n).padStart(4, '0')}`;
+}
