@@ -2,17 +2,19 @@
  * Central de Playbooks → Apresentação institucional da BKT (tela cheia, 16:9, setas para navegar).
  * Slide 1: logo, presença em Sergipe (mapa em pontos com Porto da Folha em destaque) e os selos e certificações,
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
+ * Slide 2: Rede POL, prédio de vidro à noite com a rede óptica passiva animada (features/playbooks/polScene).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Move, X } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Maximize2, Minimize2, Move, Server, TrendingUp, X, Zap } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
+import { buildPolScene, POL_CALLOUT_X } from '../../features/playbooks/polScene';
 
 const HOME = 'Porto da Folha';
 const CITY_ORDER = ['Aracaju', 'Nossa Senhora do Socorro', 'Laranjeiras', 'Estância', 'Porto da Folha'];
@@ -165,7 +167,44 @@ function SlidePresence({ layout, edit, setLayout }: { layout: Layout; edit: bool
   );
 }
 
-const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }];
+const POL_CARDS = [
+  { icon: Server, title: 'Menos ativos', text: 'Só a OLT é ativa' },
+  { icon: Zap, title: 'Zero energia', text: 'Andares sem elétrica de rede' },
+  { icon: ArrowRight, title: 'Longo alcance', text: 'Até 20 km de fibra' },
+  { icon: TrendingUp, title: 'Escalável', text: 'Upgrade só nas pontas' },
+];
+
+/** Slide 2: o conceito de rede POL num prédio. A cena (SVG) vem pronta de buildPolScene; a animação recomeça a cada entrada no slide. */
+function SlidePol() {
+  const scene = useMemo(buildPolScene, []);
+  return (
+    <div className="relative h-full overflow-hidden bg-[#070D15] text-white">
+      <svg viewBox="0 0 1600 900" width={1600} height={900} className="absolute inset-0" role="img" aria-label="Prédio de vidro à noite: a fibra chega à OLT no térreo, sobe pela prumada e, em cada andar, um splitter óptico passivo leva a luz até as ONTs nas salas" dangerouslySetInnerHTML={{ __html: scene.svg }} />
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(6,11,18,0.92)_0%,rgba(6,11,18,0.75)_38%,rgba(6,11,18,0)_62%)]" />
+      {scene.callouts.map((c) => (
+        <div key={c.title} className="pol-in absolute w-[200px] rounded-[14px] border border-[#8FD6FF]/30 bg-[#09101A]/75 px-[18px] py-3.5 shadow-[0_0_0_5px_rgba(143,214,255,0.05)] backdrop-blur-md" style={{ left: POL_CALLOUT_X, top: c.top, animationDelay: `${c.delay}s` }}>
+          <p className="text-[15px] font-semibold">{c.title}</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-white/70">{c.text}</p>
+        </div>
+      ))}
+      <img src="/brand/bkt-logo-white.png" alt="BKT" className="absolute left-[90px] top-16 h-14 w-[230px] object-contain object-left" draggable={false} />
+      <p className="absolute left-[90px] top-[196px] inline-flex items-center gap-2.5 rounded-full border border-[#8FD6FF]/25 bg-white/[0.03] px-4 py-2 text-[14px] font-semibold tracking-[0.16em] text-white/85"><span className="h-[7px] w-[7px] rounded-full bg-[#4FBBFF] shadow-[0_0_10px_#4FBBFF]" />REDE ÓPTICA PASSIVA · POL</p>
+      <h1 className="absolute left-[90px] top-[250px] w-[760px] font-display text-[50px] font-extrabold leading-[1.12]">Uma fibra.<span className="block text-[#9CC4EA]">O prédio inteiro conectado.</span></h1>
+      <p className="absolute left-[90px] top-[470px] w-[600px] text-[21px] leading-[1.5] text-white/80">A POL leva a fibra óptica da sala técnica até cada ponto de uso por divisores passivos. Sem switches nem racks ativos nos andares: menos equipamentos, menos energia e mais desempenho.</p>
+      <ul className="absolute left-[90px] top-[650px] grid h-[104px] w-[780px] grid-cols-4 rounded-[18px] border border-white/10 bg-[#0A121C]/55 backdrop-blur-md">
+        {POL_CARDS.map(({ icon: Icon, title, text }, n) => (
+          <li key={title} className={clsx('flex gap-3 px-4 py-[22px]', n > 0 && 'border-l border-white/[0.08]')}>
+            <span className="grid h-[38px] w-[38px] flex-none place-items-center rounded-full border border-[#8FD6FF]/35 bg-[#4FBBFF]/[0.08]"><Icon className="h-[18px] w-[18px] text-[#8FD6FF]" aria-hidden /></span>
+            <span><span className="block text-[16px] font-semibold">{title}</span><span className="mt-1 block text-[13px] leading-snug text-white/60">{text}</span></span>
+          </li>
+        ))}
+      </ul>
+      <p className="absolute bottom-9 left-[90px] text-[12px] font-semibold tracking-[0.2em] text-white/70">CONECTIVIDADE ÓPTICA PARA EDIFÍCIOS</p>
+    </div>
+  );
+}
+
+const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }, { key: 'pol', title: 'Rede POL' }];
 
 export function InstitutionalPresentation() {
   const nav = useNavigate();
@@ -191,7 +230,7 @@ export function InstitutionalPresentation() {
   const toast = useToast();
   const qc = useQueryClient();
   const slide = SLIDES[i]!.key;
-  const saved = useQuery({ queryKey: ['institucional', 'layout', slide], queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>(`/institucional/layout/${slide}`) });
+  const saved = useQuery({ queryKey: ['institucional', 'layout', slide], queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>(`/institucional/layout/${slide}`), enabled: slide === 'presenca' });
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<Layout | null>(null);
   const current: Layout = draft ?? { blocks: { ...DEFAULT_LAYOUT.blocks, ...(saved.data?.layout?.blocks ?? {}) }, texts: { ...DEFAULT_LAYOUT.texts, ...(saved.data?.layout?.texts ?? {}) } };
@@ -203,12 +242,12 @@ export function InstitutionalPresentation() {
   const textScale = (d: number) => setDraft({ ...current, blocks: { ...current.blocks, texto: { ...current.blocks.texto, scale: Math.max(0.6, Math.min(1.6, Math.round(((current.blocks.texto.scale ?? 1) + d) * 100) / 100)) } } });
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
-      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}</Stage></div>
+      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}{slide === 'pol' && <SlidePol />}</Stage></div>
       <nav aria-label="Controles da apresentação" className="flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
         <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>
         <p className="text-sm text-white/60"><span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
         <div className="flex gap-1">
-          {saved.data?.canManage && !full && (edit ? <>
+          {slide === 'presenca' && saved.data?.canManage && !full && (edit ? <>
             <button type="button" className={btn} onClick={() => textScale(-0.05)} aria-label="Diminuir o texto">A−</button>
             <button type="button" className={btn} onClick={() => textScale(0.05)} aria-label="Aumentar o texto">A+</button>
             <button type="button" className={btn} onClick={() => save.mutate(null)}>Restaurar padrão</button>

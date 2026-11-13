@@ -103,3 +103,21 @@
 @keyframes inst-pop { from { transform: scale(1); } to { transform: scale(1.35); } }
 .inst-pop { animation: inst-pop 220ms ease-out forwards; }
 @media (prefers-reduced-motion: reduce) { .inst-pop { animation: none; transform: scale(1.35); } }
+
+/* Apresentação institucional, slide "Rede POL": entrada da cena, fibra sendo desenhada, andares acendendo e pulsos em loop. */
+@keyframes pol-in { to { opacity: 1; } }
+.pol-in { opacity: 0; animation: pol-in 1.2s ease-out forwards; }
+@keyframes pol-draw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.pol-draw { stroke-dasharray: 100; stroke-dashoffset: 100; animation: pol-draw var(--d, 1s) cubic-bezier(.4,0,.2,1) forwards; }
+@keyframes pol-run { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.pol-run { opacity: 0; animation: pol-run var(--t) linear infinite, pol-in .4s forwards; }
+@keyframes pol-ping { 0% { opacity: 0; transform: scale(.4); } 12% { opacity: 1; } 45%, 100% { opacity: 0; transform: scale(2.6); } }
+.pol-ping { transform-box: fill-box; transform-origin: center; opacity: 0; animation: pol-ping var(--t) ease-out infinite; }
+@keyframes pol-on { 0% { opacity: var(--o0); } 30% { opacity: 1; } 100% { opacity: var(--o1); } }
+.pol-on { opacity: var(--o0); animation: pol-on 1.4s ease-out forwards; }
+@keyframes pol-blink { 0%, 86%, 100% { opacity: .15; } 90% { opacity: 1; } }
+.pol-blink { animation: pol-blink 2.4s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pol-draw { animation: none; stroke-dashoffset: 0; } .pol-run, .pol-ping { animation: none; opacity: 0; }
+  .pol-on { animation: none; opacity: var(--o1); } .pol-in { animation: none; opacity: 1; } .pol-blink { animation: none; }
+}
