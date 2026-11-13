@@ -4,7 +4,11 @@
  */
 import { and, asc, desc, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { deliveryNeeds, giftConsolidated, kitCost, kitsAvailable, stockShortages, weightedCost } from '@isp/domain';
+import { ceilingOf, deliveryNeeds, executionCheck, giftConsolidated, isApproved, kitCost, kitsAvailable, milliToQty, stockShortages, totalCents, weightedCost, type ApprovalState, type ExecutionState } from '@isp/domain';
+import { forbidden } from '../http/errors';
+import { brl } from '../services/email';
+import { todayIn } from '../services/vacations';
+import { createLines, figuresFor, loadLine, logLine, visibleCostCenters } from './budgetCentral';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -153,28 +157,48 @@ export const giftRoutes = [
 
   // ------------------------------------------------------------------ envios
   defineRoute({
+    method: 'GET', url: '/brindes/destinos', summary: 'Destinos possíveis de um envio: campanhas e, com a conta escolhida, as oportunidades dela', ...READ,
+    query: z.object({ contactId: z.string().uuid().optional() }),
+    handler: async ({ app, auth, query }) => {
+      const campaigns = await app.db.select({ id: s.campaigns.id, name: s.campaigns.name }).from(s.campaigns).where(and(eq(s.campaigns.tenantId, auth.tenantId), eq(s.campaigns.active, true))).orderBy(asc(s.campaigns.name));
+      if (query.contactId) await assertAccount(app.db, auth, query.contactId);
+      const opportunities = query.contactId ? await app.db.select({ id: s.opportunities.id, title: s.opportunities.title }).from(s.opportunities).where(and(eq(s.opportunities.tenantId, auth.tenantId), eq(s.opportunities.contactId, query.contactId), isNull(s.opportunities.deletedAt))).orderBy(desc(s.opportunities.createdAt)).limit(50) : [];
+      return { campaigns, opportunities };
+    },
+  }),
+  defineRoute({
     method: 'GET', url: '/brindes/envios', summary: 'Envios no período (todas as contas visíveis em Marketing)', ...READ,
     query: z.object({ from: isoDate.optional(), to: isoDate.optional() }),
     handler: async ({ app, auth, query }) => {
       const conds = [eq(s.giftDeliveries.tenantId, auth.tenantId)];
       if (query.from) conds.push(gte(s.giftDeliveries.occurredOn, query.from));
       if (query.to) conds.push(lte(s.giftDeliveries.occurredOn, query.to));
-      const rows = await app.db.select({ d: s.giftDeliveries, account: s.contacts.name, by: s.users.name }).from(s.giftDeliveries).innerJoin(s.contacts, eq(s.contacts.id, s.giftDeliveries.contactId)).leftJoin(s.users, eq(s.users.id, s.giftDeliveries.createdBy)).where(and(...conds)).orderBy(desc(s.giftDeliveries.occurredOn), desc(s.giftDeliveries.createdAt)).limit(500);
-      return { items: rows.map(({ d, account, by }) => ({ id: d.id, contactId: d.contactId, account, occurredOn: d.occurredOn, kitName: d.kitName, categoryName: d.categoryName, kits: d.kits, items: d.items, totalCents: d.totalCents, recipients: d.stakeholderIds.length, by, cancelled: !!d.cancelledAt, cancelReason: d.cancelReason })) };
+      const rows = await app.db.select({ d: s.giftDeliveries, account: s.contacts.name, by: s.users.name, campaign: s.campaigns.name }).from(s.giftDeliveries).leftJoin(s.contacts, eq(s.contacts.id, s.giftDeliveries.contactId)).leftJoin(s.campaigns, eq(s.campaigns.id, s.giftDeliveries.campaignId)).leftJoin(s.users, eq(s.users.id, s.giftDeliveries.createdBy)).where(and(...conds)).orderBy(desc(s.giftDeliveries.occurredOn), desc(s.giftDeliveries.createdAt)).limit(500);
+      return { items: rows.map(({ d, account, by, campaign }) => ({ id: d.id, contactId: d.contactId, account, purpose: d.purpose, campaign, eventName: d.eventName, opportunityId: d.opportunityId, occurredOn: d.occurredOn, kitName: d.kitName, categoryName: d.categoryName, kits: d.kits, items: d.items, totalCents: d.totalCents, recipients: d.stakeholderIds.length, by, cancelled: !!d.cancelledAt, cancelReason: d.cancelReason })) };
     },
   }),
   defineRoute({
     method: 'POST', url: '/brindes/envios', summary: 'Registra envio de kit (e/ou itens avulsos) para a conta e os stakeholders que receberam; baixa o estoque', ...WRITE,
     body: z.object({
-      contactId: z.string().uuid(), kitId: z.string().uuid().nullable().optional(), kits: z.number().int().min(0).max(10_000).default(1),
+      contactId: z.string().uuid().nullable().optional(), kitId: z.string().uuid().nullable().optional(), kits: z.number().int().min(0).max(10_000).default(1),
+      purpose: z.enum(['relacionamento', 'abm', 'oportunidade', 'campanha', 'evento', 'institucional']).default('relacionamento'),
+      opportunityId: z.string().uuid().nullable().optional(), campaignId: z.string().uuid().nullable().optional(), eventName: z.string().trim().max(120).nullable().optional(),
       extra: z.array(Line).max(50).default([]), stakeholderIds: z.array(z.string().uuid()).max(200).default([]),
       occurredOn: isoDate.optional(), note: z.string().trim().max(500).nullable().optional(),
     }),
     handler: async ({ app, auth, body, reply }) => {
-      await assertAccount(app.db, auth, body.contactId);
+      const needsAccount = !['campanha', 'evento', 'institucional'].includes(body.purpose);
+      if (needsAccount && !body.contactId) throw unprocessable('Escolha a conta que recebeu.', [{ path: 'contactId', message: 'Obrigatório' }]);
+      if (body.contactId) await assertAccount(app.db, auth, body.contactId);
+      if (body.purpose === 'oportunidade' && !body.opportunityId) throw unprocessable('Escolha a oportunidade.', [{ path: 'opportunityId', message: 'Obrigatório' }]);
+      if (body.purpose === 'campanha' && !body.campaignId) throw unprocessable('Escolha a campanha.', [{ path: 'campaignId', message: 'Obrigatório' }]);
+      if (body.purpose === 'evento' && !body.eventName) throw unprocessable('Informe o evento.', [{ path: 'eventName', message: 'Obrigatório' }]);
+      if (body.opportunityId) { const [o] = await app.db.select({ id: s.opportunities.id, contactId: s.opportunities.contactId }).from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId))); if (!o || (body.contactId && o.contactId !== body.contactId)) throw unprocessable('Oportunidade não encontrada para esta conta.'); }
+      if (body.campaignId) { const [c] = await app.db.select({ id: s.campaigns.id }).from(s.campaigns).where(and(eq(s.campaigns.id, body.campaignId), eq(s.campaigns.tenantId, auth.tenantId))); if (!c) throw unprocessable('Campanha não encontrada.'); }
       if (!body.kitId && !body.extra.length) throw unprocessable('Escolha um kit ou itens avulsos.');
       if (body.kitId && body.kits < 1) throw unprocessable('Informe quantos kits.');
       if (body.stakeholderIds.length) {
+        if (!body.contactId) throw unprocessable('Stakeholders só com a conta escolhida.');
         const ok = await app.db.select({ id: s.accountStakeholders.id }).from(s.accountStakeholders).where(and(inArray(s.accountStakeholders.id, body.stakeholderIds), eq(s.accountStakeholders.contactId, body.contactId)));
         if (ok.length !== new Set(body.stakeholderIds).size) throw unprocessable('Escolha stakeholders desta conta.');
       }
@@ -190,7 +214,7 @@ export const giftRoutes = [
         if (short.length) throw unprocessable(`Estoque insuficiente: ${short.map((x) => `${x.name} (precisa ${x.need}, tem ${x.stock})`).join('; ')}.`);
         const lines = needs.map((n) => { const i = items.find((x) => x.id === n.itemId)!; return { itemId: i.id, name: i.name, qty: n.qty, unitCostCents: i.unitCostCents }; });
         const total = lines.reduce((t, l) => t + l.qty * l.unitCostCents, 0);
-        const [row] = await tx.insert(s.giftDeliveries).values({ tenantId: auth.tenantId, contactId: body.contactId, kitId: kit?.id ?? null, kitName: kit?.name ?? null, categoryName: cat?.name ?? null, kits: kit ? body.kits : 0, items: lines, totalCents: total, stakeholderIds: [...new Set(body.stakeholderIds)], occurredOn: body.occurredOn ?? today(), note: body.note ?? null, createdBy: auth.userId }).returning();
+        const [row] = await tx.insert(s.giftDeliveries).values({ tenantId: auth.tenantId, contactId: body.contactId ?? null, purpose: body.purpose, opportunityId: body.opportunityId ?? null, campaignId: body.campaignId ?? null, eventName: body.eventName ?? null, kitId: kit?.id ?? null, kitName: kit?.name ?? null, categoryName: cat?.name ?? null, kits: kit ? body.kits : 0, items: lines, totalCents: total, stakeholderIds: [...new Set(body.stakeholderIds)], occurredOn: body.occurredOn ?? today(), note: body.note ?? null, createdBy: auth.userId }).returning();
         for (const l of lines) {
           await tx.insert(s.giftMovements).values({ tenantId: auth.tenantId, itemId: l.itemId, kind: 'saida', qty: -l.qty, unitCostCents: l.unitCostCents, deliveryId: row!.id, actorId: auth.userId });
           await tx.update(s.giftItems).set({ stock: sql`${s.giftItems.stock} - ${l.qty}`, updatedAt: new Date() }).where(eq(s.giftItems.id, l.itemId));
@@ -208,7 +232,7 @@ export const giftRoutes = [
       await lock(tx, auth.tenantId);
       const [d] = await tx.select().from(s.giftDeliveries).where(and(eq(s.giftDeliveries.id, params.id), eq(s.giftDeliveries.tenantId, auth.tenantId), isNull(s.giftDeliveries.cancelledAt)));
       if (!d) throw notFound('Envio não encontrado ou já cancelado.');
-      await assertAccount(tx, auth, d.contactId);
+      if (d.contactId) await assertAccount(tx, auth, d.contactId);
       for (const l of d.items) {
         await tx.insert(s.giftMovements).values({ tenantId: auth.tenantId, itemId: l.itemId, kind: 'devolucao', qty: l.qty, unitCostCents: l.unitCostCents, deliveryId: d.id, note: body.reason, actorId: auth.userId });
         await tx.update(s.giftItems).set({ stock: sql`${s.giftItems.stock} + ${l.qty}`, updatedAt: new Date() }).where(eq(s.giftItems.id, l.itemId));
@@ -224,11 +248,16 @@ export const giftRoutes = [
     query: z.object({ from: isoDate, to: isoDate }),
     handler: async ({ app, auth, query }) => {
       const t = auth.tenantId;
-      const dels = await app.db.select({ d: s.giftDeliveries, account: s.contacts.name }).from(s.giftDeliveries).innerJoin(s.contacts, eq(s.contacts.id, s.giftDeliveries.contactId))
+      const dels = await app.db.select({ d: s.giftDeliveries, account: s.contacts.name, campaign: s.campaigns.name }).from(s.giftDeliveries).leftJoin(s.contacts, eq(s.contacts.id, s.giftDeliveries.contactId)).leftJoin(s.campaigns, eq(s.campaigns.id, s.giftDeliveries.campaignId))
         .where(and(eq(s.giftDeliveries.tenantId, t), isNull(s.giftDeliveries.cancelledAt), gte(s.giftDeliveries.occurredOn, query.from), lte(s.giftDeliveries.occurredOn, query.to)));
       const c = giftConsolidated(dels.map(({ d }) => ({ ...d, cancelled: false })));
       const acc = new Map<string, { contactId: string; name: string; deliveries: number; kits: number; totalCents: number }>();
-      for (const { d, account } of dels) { const a = acc.get(d.contactId) ?? { contactId: d.contactId, name: account, deliveries: 0, kits: 0, totalCents: 0 }; a.deliveries += 1; a.kits += d.kits; a.totalCents += d.totalCents; acc.set(d.contactId, a); }
+      for (const { d, account } of dels) { if (!d.contactId) continue; const a = acc.get(d.contactId) ?? { contactId: d.contactId, name: account ?? 'Conta', deliveries: 0, kits: 0, totalCents: 0 }; a.deliveries += 1; a.kits += d.kits; a.totalCents += d.totalCents; acc.set(d.contactId, a); }
+      // investimento em relacionamento por campanha e por ação (a distribuição não é despesa nova: é custo do estoque já comprado)
+      const camp = new Map<string, { campaignId: string; name: string; deliveries: number; totalCents: number }>();
+      for (const { d, campaign } of dels) { if (!d.campaignId) continue; const a = camp.get(d.campaignId) ?? { campaignId: d.campaignId, name: campaign ?? 'Campanha', deliveries: 0, totalCents: 0 }; a.deliveries += 1; a.totalCents += d.totalCents; camp.set(d.campaignId, a); }
+      const PURPOSE: Record<string, string> = { relacionamento: 'Relacionamento com clientes', abm: 'Contas ABM', oportunidade: 'Oportunidades', campanha: 'Campanhas', evento: 'Eventos', institucional: 'Ações institucionais' };
+      const byPurpose = Object.entries(PURPOSE).map(([key, label]) => { const xs = dels.filter((x) => x.d.purpose === key); return { key, label, deliveries: xs.length, totalCents: xs.reduce((t, x) => t + x.d.totalCents, 0) }; }).filter((x) => x.deliveries);
       const buys = await app.db.select({ supplierId: s.giftMovements.supplierId, name: s.suppliers.name, qty: sql<number>`sum(${s.giftMovements.qty})::int`, cents: sql<number>`sum(${s.giftMovements.qty} * ${s.giftMovements.unitCostCents})::bigint` })
         .from(s.giftMovements).leftJoin(s.suppliers, eq(s.suppliers.id, s.giftMovements.supplierId))
         .where(and(eq(s.giftMovements.tenantId, t), eq(s.giftMovements.kind, 'entrada'), sql`${s.giftMovements.createdAt}::date between ${query.from} and ${query.to}`)).groupBy(s.giftMovements.supplierId, s.suppliers.name);
@@ -236,6 +265,7 @@ export const giftRoutes = [
         totalCents: c.totalCents, kits: c.kits, deliveries: c.deliveries, accounts: acc.size,
         byItem: c.byItem, byKit: c.byKit, byCategory: c.byCategory,
         byAccount: [...acc.values()].sort((a, b) => b.totalCents - a.totalCents),
+        byCampaign: [...camp.values()].sort((a, b) => b.totalCents - a.totalCents), byPurpose,
         purchases: buys.map((b) => ({ supplierId: b.supplierId, name: b.name ?? 'Sem fornecedor', qty: b.qty, totalCents: Number(b.cents) })).sort((a, b) => b.totalCents - a.totalCents),
       };
     },
@@ -257,5 +287,87 @@ export const giftRoutes = [
       const mine = all.deliveries.filter((d) => d.stakeholderIds.includes(params.id));
       return { deliveries: mine, totalKits: mine.filter((d) => !d.cancelled).reduce((t, d) => t + d.kits, 0) };
     },
+  }),
+
+  // ------------------------------------------------------------------ planejamento de brindes = lançamento do orçamento (um controle só)
+  defineRoute({
+    method: 'GET', url: '/brindes/planos', summary: 'Planejamento de brindes do ano: cada plano é um lançamento do orçamento (planejado, aprovado, comprado, recebido) com o estoque e o distribuído do item', ...READ,
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100) }),
+    handler: async ({ app, auth, query }) => {
+      const ccs = await visibleCostCenters(app.db, auth);
+      const ids = ccs.map((c) => c.id);
+      const lines = ids.length ? await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.tenantId, auth.tenantId), inArray(s.budgetLines.costCenterId, ids), isNull(s.budgetLines.deletedAt), sql`${s.budgetLines.giftItemId} is not null`, sql`${s.budgetLines.month} like ${`${query.year}-%`}`)).orderBy(asc(s.budgetLines.month), asc(s.budgetLines.code)) : [];
+      const figs = await figuresFor(app.db, auth.tenantId, lines, todayIn(auth.timezone ?? 'America/Sao_Paulo'));
+      const items = await itemsOf(app.db, auth.tenantId);
+      const lineIds = lines.map((l) => l.id);
+      const received = lineIds.length ? await app.db.select({ lineId: s.giftMovements.lineId, qty: sql<number>`sum(${s.giftMovements.qty})::int` }).from(s.giftMovements).where(and(inArray(s.giftMovements.lineId, lineIds), eq(s.giftMovements.kind, 'entrada'))).groupBy(s.giftMovements.lineId) : [];
+      const dist = await app.db.select({ itemId: s.giftMovements.itemId, qty: sql<number>`(-sum(${s.giftMovements.qty}))::int` }).from(s.giftMovements).where(and(eq(s.giftMovements.tenantId, auth.tenantId), inArray(s.giftMovements.kind, ['saida', 'devolucao']), sql`extract(year from ${s.giftMovements.createdAt}) = ${query.year}`)).groupBy(s.giftMovements.itemId);
+      const ccOf = new Map(ccs.map((c) => [c.id, c]));
+      return {
+        plans: figs.map(({ l, f }) => {
+          const it = items.find((i) => i.id === l.giftItemId);
+          const contractedUnit = l.contractedCents && l.contractedQtyMilli ? Math.round((l.contractedCents * 1000) / l.contractedQtyMilli) : null;
+          return {
+            lineId: l.id, code: l.code, itemId: l.giftItemId, itemName: it?.name ?? l.what, what: l.what, month: l.month, costCenter: ccOf.get(l.costCenterId) ? { id: l.costCenterId, code: ccOf.get(l.costCenterId)!.code } : null,
+            campaignId: l.campaignId, projectId: l.projectId, destination: l.giftDestination, approvalState: l.approvalState, executionState: l.executionState,
+            plannedQty: milliToQty(l.qtyMilli), unitCents: l.unitCents, approvedQty: l.approvedQtyMilli ? milliToQty(l.approvedQtyMilli) : null, purchasedQty: l.contractedQtyMilli ? milliToQty(l.contractedQtyMilli) : null, contractedUnitCents: contractedUnit,
+            receivedQty: received.find((r) => r.lineId === l.id)?.qty ?? 0, stock: it?.stock ?? 0, distributedQtyYear: dist.find((d) => d.itemId === l.giftItemId)?.qty ?? 0, supplierId: l.supplierId,
+            figures: f, restricted: f.approved > 0 && f.approved < f.planned, limitCents: l.limitCents,
+          };
+        }),
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/brindes/planos', summary: 'Planeja brinde: cria (ou repete por meses) o lançamento no orçamento do centro de custo; o valor aparece no orçamento para aprovação', ...WRITE,
+    body: z.object({ itemId: z.string().uuid(), costCenterId: z.string().uuid(), accountId: z.string().uuid(), qty: z.number().int().min(1).max(1_000_000), unitCostCents: z.number().int().min(1), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), campaignId: z.string().uuid().nullable().optional(), projectId: z.string().uuid().nullable().optional(), destination: z.string().trim().max(120).nullable().optional(), justification: z.string().trim().max(2000).nullable().optional(), recurrenceMonths: z.number().int().min(1).max(12).default(1) }),
+    handler: async ({ app, auth, body, reply }) => {
+      const [it] = await app.db.select().from(s.giftItems).where(and(eq(s.giftItems.id, body.itemId), eq(s.giftItems.tenantId, auth.tenantId)));
+      if (!it) throw notFound('Item não encontrado.');
+      const created = await createLines(app.db, auth, { costCenterId: body.costCenterId, accountId: body.accountId, what: `Brinde: ${it.name}`, justification: body.justification ?? null, objective: body.destination ?? null, qty: body.qty * 1000 as unknown as string & number, unit: 'un', unitCents: body.unitCostCents, month: body.month, priority: 'media', expenseType: 'pontual', recurrenceMonths: body.recurrenceMonths, campaignId: body.campaignId ?? null, projectId: body.projectId ?? null, supplierId: it.supplierId, giftItemId: it.id, giftDestination: body.destination ?? null } as never);
+      reply.code(201);
+      return { items: created.map((l) => ({ id: l.id, code: l.code, amountCents: l.amountCents })) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/brindes/planos/:id/compra', summary: 'Registra a compra do brinde planejado (quantidade, preço do fornecedor, pedido): abaixo do aprovado registra a economia; acima exige nova autorização (Budget Guardião)', ...WRITE, params: IdParams,
+    body: z.object({ qty: z.number().int().min(1).max(1_000_000), unitCostCents: z.number().int().min(1), supplierId: z.string().uuid().nullable().optional(), poNumber: z.string().trim().max(60).nullable().optional(), contractedOn: isoDate.optional() }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      const { l, access } = await loadLine(tx, auth, params.id, true);
+      if (!l.giftItemId) throw unprocessable('Este lançamento não é de brinde.');
+      if (!access.execute) throw forbidden('Só o Dono do orçamento ou o Responsável pela execução registram a compra.');
+      if (!isApproved(l.approvalState as ApprovalState)) throw unprocessable('A compra só depois da aprovação do orçamento.');
+      if (body.supplierId) await sameTenant(tx, auth, { supplierId: body.supplierId });
+      const contracted = totalCents(body.qty * 1000, body.unitCostCents);
+      const chk = executionCheck(l as { approvedCents: number | null; limitCents: number | null; approvalState: ApprovalState }, contracted);
+      if (!chk.ok) throw unprocessable(`A compra (${brl(contracted)}) passa do autorizado (${brl(ceilingOf(l))}) em ${brl(chk.overCents)}. Peça nova autorização pelo Budget Guardião.`, [{ path: 'unitCostCents', message: 'guardiao' }]);
+      await tx.update(s.budgetLines).set({ contractedCents: contracted, contractedQtyMilli: body.qty * 1000, supplierId: body.supplierId ?? l.supplierId, poNumber: body.poNumber ?? l.poNumber, contractedOn: body.contractedOn ?? today(), executionState: l.executionState === 'nao_iniciada' ? 'comprometido' : l.executionState, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+      const economy = (l.approvedCents ?? 0) - contracted;
+      await logLine(tx, auth, l, 'execucao', `compra do brinde: ${body.qty} × ${brl(body.unitCostCents)} = ${brl(contracted)}${economy > 0 ? ` (economia de ${brl(economy)} sobre o aprovado)` : ''}.`, { contractedCents: contracted, economyCents: Math.max(0, economy) });
+      return { contractedCents: contracted, economyCents: Math.max(0, economy) };
+    }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/brindes/planos/:id/recebimento', summary: 'Recebe a compra do brinde no estoque (entrada ligada ao lançamento; não gera despesa nova: a despesa é a do lançamento)', ...WRITE, params: IdParams,
+    body: z.object({ qty: z.number().int().min(1).max(1_000_000), note: z.string().trim().max(300).nullable().optional() }),
+    handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
+      await lock(tx, auth.tenantId);
+      const { l, access } = await loadLine(tx, auth, params.id, true);
+      if (!l.giftItemId) throw unprocessable('Este lançamento não é de brinde.');
+      if (!access.execute) throw forbidden('Só o Dono do orçamento ou o Responsável pela execução recebem a compra.');
+      if (!l.contractedQtyMilli || !l.contractedCents) throw unprocessable('Registre a compra antes de receber.');
+      const [{ got }] = await tx.select({ got: sql<number>`coalesce(sum(${s.giftMovements.qty}), 0)::int` }).from(s.giftMovements).where(and(eq(s.giftMovements.lineId, l.id), eq(s.giftMovements.kind, 'entrada'))) as [{ got: number }];
+      const bought = l.contractedQtyMilli / 1000;
+      if (got + body.qty > bought) throw unprocessable(`Recebimento acima do comprado (comprado ${bought}, já recebido ${got}).`);
+      const unit = Math.round(l.contractedCents / bought);
+      const [i] = await tx.select().from(s.giftItems).where(eq(s.giftItems.id, l.giftItemId));
+      await tx.insert(s.giftMovements).values({ tenantId: auth.tenantId, itemId: i!.id, kind: 'entrada', qty: body.qty, unitCostCents: unit, supplierId: l.supplierId, lineId: l.id, note: body.note ?? `Recebimento de ${l.code}`, actorId: auth.userId });
+      await tx.update(s.giftItems).set({ stock: i!.stock + body.qty, unitCostCents: weightedCost(i!.stock, i!.unitCostCents, body.qty, unit), updatedAt: new Date() }).where(eq(s.giftItems.id, i!.id));
+      const total = got + body.qty;
+      const state: ExecutionState = total >= bought ? 'executado' : 'executado_parcial';
+      await tx.update(s.budgetLines).set({ deliveredQtyMilli: total * 1000, deliveredOn: today(), executionState: state, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+      await logLine(tx, auth, l, 'execucao', `recebidas ${body.qty} unidade(s) no estoque (total ${total} de ${bought}).`, { receivedQty: body.qty });
+      return { receivedQty: total, stock: i!.stock + body.qty, executionState: state };
+    }),
   }),
 ];
