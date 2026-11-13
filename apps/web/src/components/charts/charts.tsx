@@ -190,7 +190,9 @@ export function Progress({ value, className, color = '#5B9BFF' }: { value: numbe
 }
 
 /** Linhas (várias séries no mesmo eixo), com legenda, tooltip por mês e tabela para leitor de tela. */
-export function LineChart({ categories, series, format, ariaLabel, height = 240, tooltipTitle }: {
+export function LineChart({ categories, series, format, ariaLabel, height = 240, tooltipTitle, onPick }: {
+  /** clique num ponto: detalha os registros que compõem aquele valor */
+  onPick?: (i: number) => void;
   categories: string[];
   series: (Series & { dashed?: boolean })[];
   format: (v: number) => string;
@@ -216,7 +218,7 @@ export function LineChart({ categories, series, format, ariaLabel, height = 240,
           </g>
         ))}
         {categories.map((c, i) => (
-          <g key={c} onMouseEnter={() => setHover(i)}>
+          <g key={c} onMouseEnter={() => setHover(i)} onClick={onPick ? () => onPick(i) : undefined} style={onPick ? { cursor: 'pointer' } : undefined}>
             <rect x={x(i) - Math.max(step, 8) / 2} y={padT} width={Math.max(step, 8)} height={innerH} fill="transparent" />
             {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="#5C6A8A">{c}</text>}
           </g>

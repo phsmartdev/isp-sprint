@@ -15,7 +15,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
-import { accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, costCenterRole, assertCostCenterPeople, logBudget, quarterNumbers, totals } from '../services/budget';
+import { nextLineCode, accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, costCenterRole, assertCostCenterPeople, logBudget, quarterNumbers, totals } from '../services/budget';
 import { groupBy } from '../services/group';
 import { detectAttachment } from './sprint';
 
@@ -136,7 +136,7 @@ export const budgetRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/budget/cost-centers', summary: 'Cria centro de custo com líder e quem mais pode consumir', tag: 'Orçamento', ...ADMIN,
-    body: z.object({ code: z.string().trim().min(2).max(12).transform((x) => x.toUpperCase()), name: z.string().trim().min(2).max(80), leaderId: uuid.nullable().default(null), memberIds: z.array(uuid).max(30).default([]), ownerIds: z.array(uuid).max(10).default([]), executorIds: z.array(uuid).max(20).default([]) }),
+    body: z.object({ code: z.string().trim().min(2).max(12).transform((x) => x.toUpperCase()), name: z.string().trim().min(2).max(80), leaderId: uuid.nullable().default(null), memberIds: z.array(uuid).max(30).default([]), ownerIds: z.array(uuid).max(10).default([]), executorIds: z.array(uuid).max(20).default([]), managerId: uuid.nullable().optional(), directorId: uuid.nullable().optional() }),
     handler: async ({ app, auth, body, reply }) => {
       const [dup] = await app.db.select({ id: s.costCenters.id }).from(s.costCenters).where(and(eq(s.costCenters.tenantId, auth.tenantId), eq(s.costCenters.code, body.code))).limit(1);
       if (dup) throw unprocessable('Já existe um centro de custo com este código.', [{ path: 'code', message: 'Código em uso' }]);
@@ -148,8 +148,8 @@ export const budgetRoutes = [
     },
   }),
   defineRoute({
-    method: 'PATCH', url: '/budget/cost-centers/:id', summary: 'Altera nome, líder, pessoas que consomem ou desativa o centro de custo', tag: 'Orçamento', ...ADMIN, params: IdParams,
-    body: z.object({ name: z.string().trim().min(2).max(80).optional(), leaderId: uuid.nullable().optional(), memberIds: z.array(uuid).max(30).optional(), ownerIds: z.array(uuid).max(10).optional(), executorIds: z.array(uuid).max(20).optional(), active: z.boolean().optional() }),
+    method: 'PATCH', url: '/budget/cost-centers/:id', summary: 'Altera nome, líder, donos, execução, gestor superior, diretoria responsável ou desativa o centro de custo', tag: 'Orçamento', ...ADMIN, params: IdParams,
+    body: z.object({ name: z.string().trim().min(2).max(80).optional(), leaderId: uuid.nullable().optional(), memberIds: z.array(uuid).max(30).optional(), ownerIds: z.array(uuid).max(10).optional(), executorIds: z.array(uuid).max(20).optional(), managerId: uuid.nullable().optional(), directorId: uuid.nullable().optional(), active: z.boolean().optional() }),
     handler: async ({ app, auth, params, body }) => {
       await assertCostCenterPeople(app.db, auth.tenantId, body.ownerIds, body.executorIds);
       const [c] = await app.db.update(s.costCenters).set({ ...body, updatedAt: new Date() }).where(and(eq(s.costCenters.id, params.id), eq(s.costCenters.tenantId, auth.tenantId))).returning();
@@ -251,7 +251,7 @@ export const budgetRoutes = [
       const others = await app.db.select({ what: s.budgetLines.what, accountId: s.budgetLines.accountId }).from(s.budgetLines).where(and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt)));
       const clash = sameItemConflict(body.what, categoryOf(body.accountId, all), others.map((o) => ({ what: o.what, categoryId: categoryOf(o.accountId, all) })));
       if (clash) throw unprocessable('Este item já está planejado em outra categoria neste trimestre (política 3.3). Use a mesma categoria.', [{ path: 'what', message: 'Item em outra categoria' }]);
-      const [l] = await app.db.insert(s.budgetLines).values({ tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: body.accountId, what: body.what, how: body.how ?? null, month: body.month, amountCents: body.amountCents, itemType: body.itemType, supplierId: body.supplierId ?? null, createdBy: auth.userId }).returning();
+      const [l] = await app.db.transaction(async (tx) => tx.insert(s.budgetLines).values({ tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: body.accountId, what: body.what, how: body.how ?? null, month: body.month, amountCents: body.amountCents, unitCents: body.amountCents, itemType: body.itemType, supplierId: body.supplierId ?? null, createdBy: auth.userId, ownerId: auth.userId, code: await nextLineCode(tx, auth.tenantId, year) }).returning());
       if (plan.status === 'devolvido') await syncPlanStatus(app.db, plan.id);
       await logBudget(app.db, auth, cc.id, 'item', l!.id, 'planejado', `${cc.code}: planejado “${l!.what}” em ${l!.month} (−${brl(l!.amountCents)}).`);
       await audit(app.db, req, { action: 'budget.line.create', entityType: 'budget_line', entityId: l!.id });
@@ -270,7 +270,7 @@ export const budgetRoutes = [
       if (body.month && quarterOfMonth(body.month) !== quarterOfMonth(l.month)) throw unprocessable('O mês precisa ser do mesmo trimestre.');
       if (body.accountId) await leafAccount(app.db, auth.tenantId, body.accountId);
       if (isBudgetRestricted(auth) && body.amountCents !== undefined && body.amountCents !== l.amountCents) throw forbidden(SUPERVISION);
-      const [n] = await app.db.update(s.budgetLines).set({ ...body, status: 'rascunho', updatedAt: new Date() }).where(eq(s.budgetLines.id, l.id)).returning();
+      const [n] = await app.db.update(s.budgetLines).set({ ...body, ...(body.amountCents !== undefined ? { unitCents: Math.round(body.amountCents * 1000 / l.qtyMilli) } : {}), status: 'rascunho', approvalState: 'rascunho', updatedAt: new Date(), rowVersion: sql`${s.budgetLines.rowVersion} + 1` }).where(eq(s.budgetLines.id, l.id)).returning();
       await logBudget(app.db, auth, cc.id, 'item', l.id, 'alterado', `${cc.code}: item “${n!.what}” alterado (−${brl(n!.amountCents)} em ${n!.month}).`);
       return n;
     },
@@ -306,7 +306,7 @@ export const budgetRoutes = [
         if (!acc) { skipped++; continue; }
         for (const m of resourceMonths({ amountCents: r.amountCents, currency: r.currency as 'BRL' | 'USD', fxRate: r.fxRate, period: r.period as 'mensal', startOn: r.startOn, endOn: r.endOn }, months)) {
           if (!m.cents || existing.some((e) => e.resourceId === r.id && e.month === m.month)) continue;
-          await app.db.insert(s.budgetLines).values({ tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: acc.id, what: r.name, how: `${r.kind === 'software' ? 'Licença' : r.kind === 'assinatura' ? 'Assinatura' : 'Contrato'} recorrente${r.currency === 'USD' ? ` (US$ pela cotação ${r.fxRate})` : ''}`, month: m.month, amountCents: m.cents, itemType: r.kind === 'software' ? 'software' : 'servico', supplierId: r.supplierId, resourceId: r.id, createdBy: auth.userId });
+          await app.db.transaction(async (tx) => tx.insert(s.budgetLines).values({ code: await nextLineCode(tx, auth.tenantId, body.year), unitCents: m.cents, ownerId: auth.userId, expenseType: 'recorrente', tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: acc.id, what: r.name, how: `${r.kind === 'software' ? 'Licença' : r.kind === 'assinatura' ? 'Assinatura' : 'Contrato'} recorrente${r.currency === 'USD' ? ` (US$ pela cotação ${r.fxRate})` : ''}`, month: m.month, amountCents: m.cents, itemType: r.kind === 'software' ? 'software' : 'servico', supplierId: r.supplierId, resourceId: r.id, createdBy: auth.userId }));
           created++;
         }
       }
@@ -322,7 +322,7 @@ export const budgetRoutes = [
       const plan = await planOf(app.db, auth, cc.id, body.year, body.quarter);
       const r = await app.db.transaction(async (tx) => {
         const stage = budgetRole(auth) === 'lideranca' ? 'gerencia' : 'diretoria';
-        const upd = await tx.update(s.budgetLines).set({ status: 'em_aprovacao', approvalStage: stage, updatedAt: new Date() }).where(and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), inArray(s.budgetLines.status, ['rascunho', 'recusado']))).returning({ amount: s.budgetLines.amountCents });
+        const upd = await tx.update(s.budgetLines).set({ status: 'em_aprovacao', approvalState: 'enviado', approvalStage: stage, updatedAt: new Date(), rowVersion: sql`${s.budgetLines.rowVersion} + 1` }).where(and(eq(s.budgetLines.planId, plan.id), isNull(s.budgetLines.deletedAt), inArray(s.budgetLines.status, ['rascunho', 'recusado']))).returning({ amount: s.budgetLines.amountCents });
         if (!upd.length) throw unprocessable('Não há itens novos para enviar.');
         await tx.update(s.budgetPlans).set({ status: 'em_aprovacao', note: body.note ?? plan.note, submittedAt: new Date(), submittedBy: auth.userId, updatedAt: new Date(), rowVersion: sql`${s.budgetPlans.rowVersion} + 1` }).where(eq(s.budgetPlans.id, plan.id));
         const total = upd.reduce((t, x) => t + x.amount, 0);
@@ -350,7 +350,9 @@ export const budgetRoutes = [
         // a Gerência aprova o que a liderança lançou e envia à Diretoria; a Diretoria dá a aprovação final
         const forward = body.decision === 'aprovar' && role === 'gerencia';
         const status = forward ? 'em_aprovacao' : body.decision === 'aprovar' ? 'aprovado' : body.decision === 'recusar' ? 'recusado' : 'rascunho';
-        const upd = await tx.update(s.budgetLines).set({ status, approvalStage: forward ? 'diretoria' : null, decisionNote: body.note ?? null, decidedBy: auth.userId, decidedAt: new Date(), updatedAt: new Date() }).where(target!).returning({ amount: s.budgetLines.amountCents, what: s.budgetLines.what });
+        const approvalState = forward ? 'em_analise' : status === 'aprovado' ? 'aprovado' : status === 'recusado' ? 'rejeitado' : 'em_revisao';
+        const approvedFields = status === 'aprovado' ? { approvedCents: sql`${s.budgetLines.amountCents}`, firstApprovedCents: sql`coalesce(${s.budgetLines.firstApprovedCents}, ${s.budgetLines.amountCents})`, approvedQtyMilli: sql`${s.budgetLines.qtyMilli}` } : {};
+        const upd = await tx.update(s.budgetLines).set({ status, approvalState, ...approvedFields, approvalStage: forward ? 'diretoria' : null, decisionNote: body.note ?? null, decidedBy: auth.userId, decidedAt: new Date(), updatedAt: new Date(), rowVersion: sql`${s.budgetLines.rowVersion} + 1` }).where(target!).returning({ amount: s.budgetLines.amountCents, what: s.budgetLines.what });
         if (!upd.length) throw unprocessable('Nenhum item aguardando decisão.');
         if (body.decision === 'devolver') await tx.update(s.budgetPlans).set({ status: 'devolvido', decidedAt: new Date(), decidedBy: auth.userId, updatedAt: new Date() }).where(eq(s.budgetPlans.id, plan.id));
         else await tx.update(s.budgetPlans).set({ decidedAt: new Date(), decidedBy: auth.userId }).where(eq(s.budgetPlans.id, plan.id));

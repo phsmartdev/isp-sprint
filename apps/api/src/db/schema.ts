@@ -5186,6 +5186,13 @@ export const costCenters = pgTable('cost_centers', {
   executorIds: uuid('executor_ids').array().notNull().default(sql`'{}'::uuid[]`),
   /** Centro de custo do time (cada time é um centro; nome e responsáveis acompanham o time). */
   teamId: uuid('team_id').references(() => teams.id),
+  /** gestor superior e diretoria responsável (visão consolidada e alçada) */
+  managerId: uuid('manager_id').references(() => users.id),
+  directorId: uuid('director_id').references(() => users.id),
+  /** limites próprios do centro (sem valor = política da empresa) e reserva do Budget Guardião */
+  alertPct: integer('alert_pct'),
+  blockPct: integer('block_pct'),
+  guardianReserveCents: bigint('guardian_reserve_cents', { mode: 'number' }),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -5230,10 +5237,145 @@ export const budgetLines = pgTable('budget_lines', {
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
   createdBy: uuid('created_by').references(() => users.id),
+  // --- lançamento completo (um registro do planejamento ao pagamento; prompt master do Orçamento)
+  code: text('code'),
+  ownerId: uuid('owner_id').references(() => users.id),
+  justification: text('justification'),
+  objective: text('objective'),
+  projectId: uuid('project_id'),
+  campaignId: uuid('campaign_id'),
+  giftItemId: uuid('gift_item_id'),
+  qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull().default(1000),
+  unit: text('unit').notNull().default('un'),
+  unitCents: bigint('unit_cents', { mode: 'number' }),
+  priority: text('priority').notNull().default('media'),
+  expenseType: text('expense_type').notNull().default('pontual'),
+  recurrenceGroupId: uuid('recurrence_group_id'),
+  plannedOn: date('planned_on', { mode: 'string' }),
+  /** detalhamento da aprovação (o status acima é o resumo usado pelo planejamento trimestral) */
+  approvalState: text('approval_state').notNull().default('rascunho'),
+  firstApprovedCents: bigint('first_approved_cents', { mode: 'number' }),
+  approvedCents: bigint('approved_cents', { mode: 'number' }),
+  approvedQtyMilli: bigint('approved_qty_milli', { mode: 'number' }),
+  targetUnitCents: bigint('target_unit_cents', { mode: 'number' }),
+  limitCents: bigint('limit_cents', { mode: 'number' }),
+  conditions: text('conditions'),
+  /** execução */
+  executionState: text('execution_state').notNull().default('nao_iniciada'),
+  quoteCents: bigint('quote_cents', { mode: 'number' }),
+  negotiatedCents: bigint('negotiated_cents', { mode: 'number' }),
+  contractedCents: bigint('contracted_cents', { mode: 'number' }),
+  contractedQtyMilli: bigint('contracted_qty_milli', { mode: 'number' }),
+  contractedOn: date('contracted_on', { mode: 'string' }),
+  poNumber: text('po_number'),
+  deliveredQtyMilli: bigint('delivered_qty_milli', { mode: 'number' }),
+  deliveredOn: date('delivered_on', { mode: 'string' }),
+  rowVersion: integer('row_version').notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   deletedAt: ts('deleted_at'),
-}, (t) => ({ idx: index('budget_lines_idx').on(t.tenantId, t.costCenterId, t.month), statusCk: check('budget_lines_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'])), amountCk: check('budget_lines_amount_ck', sql`amount_cents > 0`) }));
+}, (t) => ({
+  idx: index('budget_lines_idx').on(t.tenantId, t.costCenterId, t.month),
+  codeUq: uniqueIndex('budget_lines_code_uq').on(t.tenantId, t.code),
+  statusCk: check('budget_lines_status_ck', inList('status', ['rascunho', 'em_aprovacao', 'aprovado', 'recusado'])),
+  amountCk: check('budget_lines_amount_ck', sql`amount_cents > 0`),
+  approvalCk: check('budget_lines_approval_ck', inList('approval_state', ['rascunho', 'planejado', 'enviado', 'em_analise', 'questionado', 'em_revisao', 'aprovado', 'aprovado_ressalvas', 'rejeitado'])),
+  execCk: check('budget_lines_exec_ck', inList('execution_state', ['nao_iniciada', 'comprometido', 'em_execucao', 'executado_parcial', 'executado', 'encerrado'])),
+  qtyCk: check('budget_lines_qty_ck', sql`qty_milli > 0`),
+  limitCk: check('budget_lines_limit_ck', sql`limit_cents is null or approved_cents is null or limit_cents <= approved_cents`),
+}));
+
+/** Questionamento de quem aprova sobre um lançamento (ou consolidado por centro), com resposta do responsável. */
+export const budgetQuestions = pgTable('budget_questions', {
+  id: id(),
+  tenantId: tenantId(),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  lineId: uuid('line_id').references(() => budgetLines.id),
+  kind: text('kind').notNull(),
+  message: text('message').notNull(),
+  /** obrigatório: o lançamento não pode ser aprovado (nem em lote) enquanto estiver aberto */
+  blocking: boolean('blocking').notNull().default(true),
+  askedBy: uuid('asked_by').notNull().references(() => users.id),
+  toUserId: uuid('to_user_id').references(() => users.id),
+  status: text('status').notNull().default('aberto'),
+  answer: text('answer'),
+  answeredBy: uuid('answered_by').references(() => users.id),
+  answeredAt: ts('answered_at'),
+  resolvedBy: uuid('resolved_by').references(() => users.id),
+  resolvedAt: ts('resolved_at'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_questions_idx').on(t.tenantId, t.lineId), statusCk: check('budget_questions_status_ck', inList('status', ['aberto', 'respondido', 'resolvido'])), kindCk: check('budget_questions_kind_ck', inList('kind', ['valor_unitario', 'quantidade', 'necessidade', 'documentos', 'outro'])) }));
+
+/** Título a pagar (parcela) de um lançamento. external_id evita título duplicado (integração ou reenvio). */
+export const budgetPayables = pgTable('budget_payables', {
+  id: id(),
+  tenantId: tenantId(),
+  lineId: uuid('line_id').notNull().references(() => budgetLines.id),
+  costCenterId: uuid('cost_center_id').notNull().references(() => costCenters.id),
+  supplierId: uuid('supplier_id').references(() => suppliers.id),
+  invoiceNumber: text('invoice_number'),
+  installment: integer('installment').notNull().default(1),
+  installments: integer('installments').notNull().default(1),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  competence: text('competence').notNull(),
+  dueOn: date('due_on', { mode: 'string' }).notNull(),
+  plannedPayOn: date('planned_pay_on', { mode: 'string' }),
+  externalId: text('external_id'),
+  status: text('status').notNull().default('aberto'),
+  cancelReason: text('cancel_reason'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_payables_idx').on(t.tenantId, t.lineId), extUq: uniqueIndex('budget_payables_ext_uq').on(t.tenantId, t.externalId), statusCk: check('budget_payables_status_ck', inList('status', ['aberto', 'cancelado'])), amountCk: check('budget_payables_amount_ck', sql`amount_cents > 0`) }));
+
+/** Pagamento (ou estorno) confirmado pelo Financeiro. Só inclusão: estorno é um novo registro que aponta para o pagamento. */
+export const budgetPayments = pgTable('budget_payments', {
+  id: id(),
+  tenantId: tenantId(),
+  payableId: uuid('payable_id').notNull().references(() => budgetPayables.id),
+  lineId: uuid('line_id').notNull().references(() => budgetLines.id),
+  kind: text('kind').notNull().default('pagamento'),
+  reversesId: uuid('reverses_id'),
+  paidOn: date('paid_on', { mode: 'string' }).notNull(),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+  interestCents: bigint('interest_cents', { mode: 'number' }).notNull().default(0),
+  fineCents: bigint('fine_cents', { mode: 'number' }).notNull().default(0),
+  discountCents: bigint('discount_cents', { mode: 'number' }).notNull().default(0),
+  method: text('method'),
+  reason: text('reason'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  proofId: uuid('proof_id'),
+  reconciledAt: ts('reconciled_at'),
+  reconciledBy: uuid('reconciled_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_payments_idx').on(t.tenantId, t.lineId), idemUq: uniqueIndex('budget_payments_idem_uq').on(t.tenantId, t.idempotencyKey), revUq: uniqueIndex('budget_payments_rev_uq').on(t.reversesId), kindCk: check('budget_payments_kind_ck', inList('kind', ['pagamento', 'estorno'])), amountCk: check('budget_payments_amount_ck', sql`amount_cents >= 0 and interest_cents >= 0 and fine_cents >= 0 and discount_cents >= 0`) }));
+
+/** Documentos do lançamento: anexos do pedido, cotações, notas fiscais, comprovantes de entrega e de pagamento. */
+export const budgetDocuments = pgTable('budget_documents', {
+  id: id(),
+  tenantId: tenantId(),
+  lineId: uuid('line_id').notNull().references(() => budgetLines.id),
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  mime: text('mime').notNull(),
+  size: integer('size').notNull(),
+  data: bytea('data').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  deletedAt: ts('deleted_at'),
+}, (t) => ({ idx: index('budget_documents_idx').on(t.tenantId, t.lineId), kindCk: check('budget_documents_kind_ck', inList('kind', ['anexo', 'cotacao', 'pedido', 'nota_fiscal', 'entrega', 'comprovante', 'outro'])) }));
+
+/** Política do orçamento (uma por empresa, versionada no histórico): alerta, bloqueio e reserva do Budget Guardião. */
+export const budgetPolicies = pgTable('budget_policies', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  alertPct: integer('alert_pct'),
+  blockPct: integer('block_pct'),
+  reserveMode: text('reserve_mode').notNull().default('nenhuma'),
+  globalReserveCents: bigint('global_reserve_cents', { mode: 'number' }),
+  version: integer('version').notNull().default(1),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, () => ({ modeCk: check('budget_policies_mode_ck', inList('reserve_mode', ['nenhuma', 'global', 'centro', 'hibrida'])) }));
 
 /** Budget Guardião: ajuste dentro do trimestre (até 15% com justificativa; acima, Diretoria). A decisão fica também no histórico (budget_events). */
 export const budgetAdjustments = pgTable('budget_adjustments', {
@@ -5252,6 +5394,9 @@ export const budgetAdjustments = pgTable('budget_adjustments', {
   kind: text('kind').notNull().default('guardiao'),
   /** remanejamento: liga a saída e a entrada */
   transferId: uuid('transfer_id'),
+  /** excedente pedido por um lançamento (Budget Guardião) */
+  lineId: uuid('line_id'),
+  fromReserve: text('from_reserve'),
   requestedBy: uuid('requested_by').references(() => users.id),
   decidedBy: uuid('decided_by').references(() => users.id),
   decidedAt: ts('decided_at'),
@@ -5310,9 +5455,11 @@ export const budgetEvents = pgTable('budget_events', {
   entityId: uuid('entity_id'),
   action: text('action').notNull(),
   summary: text('summary').notNull(),
+  /** campo, antes, depois e justificativa (auditoria do lançamento) */
+  data: jsonb('data'),
   actorId: uuid('actor_id').references(() => users.id),
   createdAt: createdAt(),
-}, (t) => ({ idx: index('budget_events_idx').on(t.tenantId, t.createdAt) }));
+}, (t) => ({ idx: index('budget_events_idx').on(t.tenantId, t.createdAt), entIdx: index('budget_events_ent_idx').on(t.entity, t.entityId) }));
 
 export const suppliers = pgTable('suppliers', {
   id: id(),

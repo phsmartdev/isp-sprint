@@ -15,8 +15,10 @@ it('fluxo completo do quadro', async () => {
   await ctx.db.execute(sql`delete from mkt_sprints where tenant_id = ${tid}`);
   await ctx.db.execute(sql`delete from mkt_tags where tenant_id = ${tid}`);
   const me = carlos.me.user.id, other = ana.me.user.id;
-  const today = new Date().toISOString().slice(0, 10);
-  const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+  // datas no fuso da empresa (o servidor usa America/Sao_Paulo; em UTC o dia vira às 21h)
+  const spDate = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+  const today = spDate(new Date());
+  const day = (n: number) => spDate(new Date(Date.parse(`${today}T12:00:00Z`) + n * 86_400_000));
 
   // Sprint em planejamento e tarefas com um responsável e observadores
   const sp = ok(await carlos.post('/marketing/quadro/sprints', { startOn: today, objective: 'Campanha de fim de ano (fictícia)' }), 201).json();
