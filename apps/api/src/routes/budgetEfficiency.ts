@@ -79,7 +79,7 @@ export const budgetEfficiencyRoutes = [
         const cost = sum(cur.cost, (x) => x.cc === c.id), costPrev = sum(prev.cost, (x) => x.cc === c.id), appr = sum(cur.approved, (x) => x.cc === c.id);
         const direct = !!c.teamId;
         const res = direct ? sum(cur.sales, (x) => x.team === c.teamId) : null, resPrev = direct ? sum(prev.sales, (x) => x.team === c.teamId) : null, w = direct ? count(cur.sales, (x) => x.team === c.teamId) : null;
-        return { id: c.id, code: c.code, name: c.name, cost, approved: appr, executionPct: appr ? Math.round((cost / appr) * 1000) / 10 : null, result: res, wins: w, efficiency: ratio(res, cost), costPerSale: costPer(cost, w), attribution: direct ? 'direta' : 'sem_resultado_proprio', situations: diagnose({ cost, result: res, approved: appr }, { cost: costPrev, result: resPrev }) as EfficiencySituation[] };
+        return { id: c.id, code: c.code, name: c.name, teamId: c.teamId, cost, approved: appr, executionPct: appr ? Math.round((cost / appr) * 1000) / 10 : null, result: res, wins: w, efficiency: ratio(res, cost), costPerSale: costPer(cost, w), attribution: direct ? 'direta' : 'sem_resultado_proprio', situations: diagnose({ cost, result: res, approved: appr }, { cost: costPrev, result: resPrev }) as EfficiencySituation[] };
       });
       for (const r of lowReturn(centers)) r.situations.push('alto_investimento_baixo_retorno');
       // campanhas (atribuição direta: lançamentos ligados × leads da campanha e vendas convertidas deles)
@@ -105,7 +105,7 @@ export const budgetEfficiencyRoutes = [
         from d`);
       const r0 = rel.rows[0]!;
       const relationship = { accounts: r0.accounts, invested: Number(r0.invested), influencedRevenue: Number(r0.revenue), influencedWins: r0.wins, investmentPerAccount: ratio(Number(r0.invested), r0.accounts), attribution: 'influenciada' };
-      const alerts = centers.flatMap((c) => c.situations.filter((x) => EFFICIENCY_SITUATION_INFO[x].tone === 'atencao').map((x) => ({ costCenterId: c.id, code: c.code, situation: x, ...EFFICIENCY_SITUATION_INFO[x] })));
+      const alerts = centers.flatMap((c) => c.situations.filter((x) => EFFICIENCY_SITUATION_INFO[x].tone === 'atencao').map((x) => ({ costCenterId: c.id, code: c.code, teamId: c.teamId, cost: c.cost, result: c.result, situation: x, ...EFFICIENCY_SITUATION_INFO[x] })));
       return {
         period: { ...query, previous: prevW }, totals, series, centers, campaigns, relationship, alerts,
         sources: {
