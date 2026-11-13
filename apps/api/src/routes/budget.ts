@@ -17,6 +17,7 @@ import { audit } from '../services/audit';
 import { brl } from '../services/email';
 import { nextLineCode, accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, costCenterRole, assertCostCenterPeople, logBudget, quarterNumbers, totals } from '../services/budget';
 import { groupBy } from '../services/group';
+import { assertOpenPeriod } from '../services/budgetClosing';
 import { detectAttachment } from './sprint';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD');
@@ -448,6 +449,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, body, req, reply }) => {
       const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'executar');
       if (!body.financeCheck) throw unprocessable('Antes de executar, faça a checagem prévia com o Financeiro (política 11.2).', [{ path: 'financeCheck', message: 'Obrigatório' }]);
+      await assertOpenPeriod(app.db, auth.tenantId, body.occurredOn.slice(0, 7));
       await leafAccount(app.db, auth.tenantId, body.accountId);
       if (body.lineId) {
         const [l] = await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.id, body.lineId), eq(s.budgetLines.costCenterId, cc.id), isNull(s.budgetLines.deletedAt))).limit(1);

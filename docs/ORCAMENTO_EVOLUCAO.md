@@ -27,6 +27,12 @@
 - **Gráficos:** custos × resultados (R$ ou índice), aprovado × realizado × resultado, custo por venda, tendência de eficiência e eficiência por centro.
 - **Limites honestos:** Sucesso do Cliente (retenção, churn, receita preservada) e Produto (adoção, payback) ainda não têm fonte de resultado confiável no sistema; ficam para quando houver dado (pagamentos do IXC "Aguardando IXC").
 
+## Fase 7 — Fechamento mensal, relatório por e-mail e avisos (entregue)
+- **Fechamento por competência** (Planejamento orçamentário → Fechamento mensal): aberto → em conferência → aguardando validação → fechado; reabertura excepcional só pela Diretoria com justificativa. Quem envia para validação não valida. Ao fechar, a fotografia (por centro e consolidado: original, revisado, aprovado, comprometido, realizado, pago, saldo, desvio, excedentes, Guardião consumido, vencidos, pagos com atraso, juros e multas, economia, resultado e eficiência) fica gravada (migração 0155).
+- **Período travado:** com a competência fechada, nada retroativo entra (planejamento da competência, despesa, pagamento ou estorno com data no mês, gasto avulso).
+- **Relatório por e-mail:** um por destinatário com o escopo dele (responsável, gestor, Diretoria consolidada, Financeiro), HTML em tabelas com CSS inline (Gmail e Outlook), gráfico de barras em tabela, valores e datas em pt-BR, link para o sistema (pede login). Pré-visualização, aprovação antes do envio (configurável), envio manual ou automático pela rotina diária, reenvio, tentativas e histórico; falha de SMTP fica registrada.
+- **Avisos no sino (sem duplicar):** nova solicitação, recomendação da Gerência, questionamento, resposta, aprovado/rejeitado/revisão, Budget Guardião pedido e decidido, limite de alerta e de bloqueio do centro, pagamento a vencer e vencido (rotina diária), pagamento registrado, fechamento aguardando validação e disponível, relatório enviado.
+- **Política do orçamento** (Diretoria): % de alerta e bloqueio, reserva do Guardião (global, por centro, híbrida), relatório automático e aprovação antes do envio.
+
 ## Próximas fases
-- **7 — Fechamento mensal e e-mail:** estados do fechamento, demonstrativos, relatório HTML por destinatário com permissões.
 - **8 — Homologação** final dos critérios de aceite restantes.

@@ -25,6 +25,7 @@ import { brl } from '../services/email';
 import { accountsOf, costCenterRole, costCentersOf, decidesStages, isBudgetAdmin, isFinance, loadCostCenter, logBudget, nextLineCode } from '../services/budget';
 import { groupBy } from '../services/group';
 import { todayIn } from '../services/vacations';
+import { assertOpenPeriod, checkCostCenterLimit, deciders, notifyBudget } from '../services/budgetClosing';
 import { detectAttachment } from './sprint';
 
 const M = { module: 'orcamento' as const, tag: 'Orçamento' };
@@ -145,6 +146,7 @@ export async function createLines(db: DbOrTx, auth: AuthContext, body: NewLineIn
         const out: Line[] = [];
         for (let i = 0; i < body.recurrenceMonths; i++) {
           const mm = Number(body.month.slice(5)) - 1 + i, m = `${Number(body.month.slice(0, 4)) + Math.floor(mm / 12)}-${String((mm % 12) + 1).padStart(2, '0')}`;
+          await assertOpenPeriod(tx, auth.tenantId, m);
           const plan = await planFor(tx, auth, cc.id, m);
           const [l] = await tx.insert(s.budgetLines).values({
             tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: body.accountId, what: body.what, how: body.how ?? null, justification: body.justification ?? null, objective: body.objective ?? null,
@@ -311,6 +313,8 @@ export const budgetCentralRoutes = [
       return app.db.transaction(async (tx) => {
         const { l, access } = await loadLine(tx, auth, params.id, true);
         if (!access.plan) throw forbidden('Só o Dono do orçamento deste centro de custo muda o planejamento.');
+        await assertOpenPeriod(tx, auth.tenantId, l.month);
+        if (body.month) await assertOpenPeriod(tx, auth.tenantId, body.month);
         if (!EDITABLE_STATES.includes(l.approvalState as ApprovalState)) throw unprocessable(`Lançamento ${APPROVAL_STATE_LABELS[l.approvalState as ApprovalState].toLowerCase()} não muda o planejamento. Depois de aprovado, valor adicional vai pelo Budget Guardião.`);
         if (body.rowVersion !== l.rowVersion) throw conflict(l.rowVersion);
         if (body.month && quarterOfMonth(body.month) !== quarterOfMonth(l.month) || body.month && body.month.slice(0, 4) !== l.month.slice(0, 4)) throw unprocessable('A competência precisa ser do mesmo trimestre.');
@@ -337,6 +341,7 @@ export const budgetCentralRoutes = [
       await tx.update(s.budgetLines).set({ approvalState: 'enviado', status: 'em_aprovacao', approvalStage: stage, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
       await syncPlan(tx, l.planId);
       await logLine(tx, auth, l, 'enviado', `enviado à ${stage === 'gerencia' ? 'Gerência' : 'Diretoria'} (${brl(l.amountCents)})${body.note ? `: ${body.note}` : ''}.`, { requested: l.amountCents });
+      await notifyBudget(tx, auth.tenantId, await deciders(tx, auth.tenantId, stage), { event: 'aprovacao_pedida', title: `Nova solicitação de orçamento: ${l.code} ${l.what} (${brl(l.amountCents)})`, link: '/orcamento?t=central', key: `pedido:${l.id}:${l.rowVersion}`, actorId: auth.userId });
       return { ok: true, stage };
     }),
   }),
@@ -354,6 +359,7 @@ export const budgetCentralRoutes = [
           const [q] = await tx.insert(s.budgetQuestions).values({ tenantId: auth.tenantId, costCenterId: l.costCenterId, lineId: l.id, kind: body.kind, message: body.message, blocking: body.blocking, askedBy: auth.userId, toUserId: body.toUserId ?? l.ownerId ?? l.createdBy }).returning();
           if (DECIDABLE_STATES.includes(l.approvalState as ApprovalState) && body.blocking) await tx.update(s.budgetLines).set({ approvalState: 'questionado', updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
           await logLine(tx, auth, l, 'questionado', `questionamento (${QUESTION_KIND_LABELS[body.kind]}): ${body.message}`, { questionId: q!.id, kind: body.kind });
+          await notifyBudget(tx, auth.tenantId, [q!.toUserId], { event: 'questionado', title: `Questionamento no orçamento: ${l.code} ${l.what}`, body: body.message, link: '/orcamento?t=central', key: `pergunta:${q!.id}`, actorId: auth.userId });
           return q!;
         }
         if (!body.costCenterId) throw unprocessable('Informe o lançamento ou o centro de custo.');
@@ -380,6 +386,7 @@ export const budgetCentralRoutes = [
         const [{ open }] = await tx.select({ open: sql<number>`count(*)::int` }).from(s.budgetQuestions).where(and(eq(s.budgetQuestions.lineId, l.id), eq(s.budgetQuestions.status, 'aberto'), eq(s.budgetQuestions.blocking, true))) as [{ open: number }];
         if (!open && l.approvalState === 'questionado') await tx.update(s.budgetLines).set({ approvalState: 'em_analise', updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
         await logLine(tx, auth, l, 'respondido', `resposta ao questionamento: ${body.answer}`, { questionId: q.id });
+        await notifyBudget(tx, auth.tenantId, [q.askedBy], { event: 'respondido', title: `Resposta recebida: ${l.code} ${l.what}`, body: body.answer, link: '/orcamento?t=central', key: `resposta:${q.id}`, actorId: auth.userId });
       } else {
         const cc = await loadCostCenter(tx, auth, q.costCenterId);
         if (!(costCenterRole(cc, auth.userId) === 'dono' || q.toUserId === auth.userId || isBudgetAdmin(auth))) throw forbidden('Quem responde é o Dono do orçamento do centro.');
@@ -423,6 +430,7 @@ export const budgetCentralRoutes = [
           const forward = l.approvalStage === 'gerencia' && !auth.profiles.includes('diretoria') && (it.decision === 'aprovar' || it.decision === 'aprovar_parcial' || it.decision === 'aprovar_condicoes');
           if (forward) {
             await tx.update(s.budgetLines).set({ approvalState: 'em_analise', approvalStage: 'diretoria', decisionNote: it.note ?? null, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+            await notifyBudget(tx, auth.tenantId, await deciders(tx, auth.tenantId, 'diretoria'), { event: 'aprovacao_pedida', title: `Orçamento recomendado pela Gerência: ${l.code} ${l.what}`, link: '/orcamento?t=central', key: `pedido:${l.id}:${l.rowVersion}`, actorId: auth.userId });
             await logLine(tx, auth, l, 'aprovado_gerencia', `Gerência recomendou aprovar e enviou à Diretoria${it.note ? `: ${it.note}` : ''}.`, { decision: it.decision, recommendation: { approvedCents: it.approvedCents ?? null, limitCents: it.limitCents ?? null, targetUnitCents: it.targetUnitCents ?? null, conditions: it.conditions ?? null } });
             return { state: 'em_analise' };
           }
@@ -435,6 +443,7 @@ export const budgetCentralRoutes = [
           }).where(eq(s.budgetLines.id, l.id));
           await syncPlan(tx, l.planId);
           const what = out.approvedCents !== null ? `${BUDGET_DECISION_LABELS[it.decision]}: ${brl(out.approvedCents)} de ${brl(l.amountCents)}${out.limitCents ? `, limite ${brl(out.limitCents)}` : ''}${out.targetUnitCents ? `, alvo ${brl(out.targetUnitCents)}/un.` : ''}` : BUDGET_DECISION_LABELS[it.decision];
+          await notifyBudget(tx, auth.tenantId, [l.ownerId, l.createdBy], { event: out.state === 'rejeitado' ? 'reprovado' : out.state === 'em_revisao' ? 'revisao' : 'aprovado', title: `${out.state === 'rejeitado' ? 'Orçamento rejeitado' : out.state === 'em_revisao' ? 'Revisão pedida' : 'Orçamento aprovado'}: ${l.code} ${l.what}`, link: '/orcamento?t=central', key: `decisao:${l.id}:${l.rowVersion}`, actorId: auth.userId });
           await logLine(tx, auth, l, it.decision, `${what}${it.conditions ? `. Condições: ${it.conditions}` : ''}${it.note ? `. ${it.note}` : ''}.`, { decision: it.decision, before: { state: l.approvalState, approvedCents: l.approvedCents }, after: { state: out.state, approvedCents: out.approvedCents, limitCents: out.limitCents, targetUnitCents: out.targetUnitCents } });
           return { state: out.state };
         });
@@ -471,6 +480,7 @@ export const budgetCentralRoutes = [
       const changes = diff(l as unknown as Record<string, unknown>, next);
       if (!changes.length) return { ok: true };
       await tx.update(s.budgetLines).set({ ...Object.fromEntries(Object.entries(next).filter(([, v]) => v !== undefined)), updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+      if (body.contractedCents !== undefined) await checkCostCenterLimit(tx, auth.tenantId, l.costCenterId, Number(l.month.slice(0, 4)), auth.userId);
       await logLine(tx, auth, l, state === 'encerrado' && l.executionState !== 'encerrado' ? 'encerrado' : 'execucao', `execução atualizada (${changes.map((c) => c.field).join(', ')}).`, { changes, reason: body.reason ?? null });
       return { ok: true, executionState: state };
     }),
@@ -482,6 +492,7 @@ export const budgetCentralRoutes = [
       const r = await app.db.transaction(async (tx) => {
         const { l, access } = await loadLine(tx, auth, params.id, true);
         if (!access.execute) throw forbidden('Só o Dono do orçamento ou o Responsável pela execução reconhecem a despesa.');
+        await assertOpenPeriod(tx, auth.tenantId, body.occurredOn.slice(0, 7));
         const dup = await tx.select({ id: s.budgetEvents.id }).from(s.budgetEvents).where(and(eq(s.budgetEvents.entity, 'item'), eq(s.budgetEvents.entityId, l.id), sql`${s.budgetEvents.data}->>'idempotencyKey' = ${body.idempotencyKey}`)).limit(1);
         if (dup.length) return { duplicate: true };
         const [{ realized }] = await tx.select({ realized: sql<number>`coalesce(sum(${s.budgetExpenses.amountCents}), 0)::bigint` }).from(s.budgetExpenses).where(and(eq(s.budgetExpenses.lineId, l.id), eq(s.budgetExpenses.status, 'valido'))) as [{ realized: number }];
@@ -491,6 +502,7 @@ export const budgetCentralRoutes = [
         const [e] = await tx.insert(s.budgetExpenses).values({ tenantId: auth.tenantId, costCenterId: l.costCenterId, accountId: l.accountId, lineId: l.id, occurredOn: body.occurredOn, description: body.invoiceNumber ? `${body.description} (NF ${body.invoiceNumber})` : body.description, amountCents: body.amountCents, supplierId: l.supplierId, financeCheck: true, docName: doc?.name ?? null, docMime: doc?.mime ?? null, docSize: doc?.size ?? null, docData: doc?.data ?? null, createdBy: auth.userId }).returning({ id: s.budgetExpenses.id });
         const state = l.executionState === 'nao_iniciada' || l.executionState === 'comprometido' ? 'em_execucao' : l.executionState;
         await tx.update(s.budgetLines).set({ executionState: state, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+        await checkCostCenterLimit(tx, auth.tenantId, l.costCenterId, Number(l.month.slice(0, 4)), auth.userId);
         await logLine(tx, auth, l, 'realizado', `despesa reconhecida de ${brl(body.amountCents)} em ${body.occurredOn}${body.invoiceNumber ? ` (NF ${body.invoiceNumber})` : ''}.`, { expenseId: e!.id, amountCents: body.amountCents, idempotencyKey: body.idempotencyKey });
         return { id: e!.id };
       });
@@ -509,6 +521,7 @@ export const budgetCentralRoutes = [
         if (!access.plan) throw forbidden('Quem pede o Budget Guardião é o Dono do orçamento do centro.');
         if (!isApproved(l.approvalState as ApprovalState)) throw unprocessable('O Budget Guardião vale para lançamentos aprovados.');
         const [a] = await tx.insert(s.budgetAdjustments).values({ tenantId: auth.tenantId, costCenterId: l.costCenterId, year: Number(l.month.slice(0, 4)), quarter: quarterOfMonth(l.month), accountId: l.accountId, month: l.month, deltaCents: body.deltaCents, justification: body.justification, status: 'pendente', kind: 'excedente', lineId: l.id, requestedBy: auth.userId }).returning();
+        await notifyBudget(tx, auth.tenantId, await deciders(tx, auth.tenantId, 'diretoria'), { event: 'guardiao_pedido', title: `Budget Guardião pedido: ${l.code} +${brl(body.deltaCents)}`, body: body.justification, link: '/orcamento?t=central', key: `guardiao:${l.id}:${l.rowVersion}:${body.deltaCents}`, actorId: auth.userId });
         await logLine(tx, auth, l, 'guardiao_pedido', `Budget Guardião pedido: +${brl(body.deltaCents)}. ${body.justification}`, { adjustmentId: a!.id, deltaCents: body.deltaCents });
         return a!;
       });
@@ -532,6 +545,7 @@ export const budgetCentralRoutes = [
         const { l } = await loadLine(tx, auth, a.lineId!, true);
         if (body.decision === 'recusar') {
           await tx.update(s.budgetAdjustments).set({ status: 'recusado', decidedBy: auth.userId, decidedAt: new Date(), decisionNote: body.note ?? null }).where(eq(s.budgetAdjustments.id, a.id));
+          await notifyBudget(tx, auth.tenantId, [a.requestedBy], { event: 'guardiao_recusado', title: `Budget Guardião recusado: ${l.code}`, body: body.note ?? null, link: '/orcamento?t=central', key: `guardiao-dec:${a.id}`, actorId: auth.userId });
           await logLine(tx, auth, l, 'guardiao_recusado', `Budget Guardião recusado: ${body.note}`, { adjustmentId: a.id });
           return { status: 'recusado' };
         }
@@ -550,6 +564,7 @@ export const budgetCentralRoutes = [
         }
         await tx.update(s.budgetAdjustments).set({ status: 'aprovado', deltaCents: value, fromReserve: from, decidedBy: auth.userId, decidedAt: new Date(), decisionNote: body.note ?? null }).where(eq(s.budgetAdjustments.id, a.id));
         await tx.update(s.budgetLines).set({ approvedCents: (l.approvedCents ?? 0) + value, limitCents: l.limitCents !== null ? l.limitCents + value : null, updatedAt: new Date(), rowVersion: l.rowVersion + 1 }).where(eq(s.budgetLines.id, l.id));
+        await notifyBudget(tx, auth.tenantId, [a.requestedBy, l.ownerId], { event: 'guardiao_aprovado', title: `Budget Guardião aprovado: ${l.code} +${brl(value)}`, link: '/orcamento?t=central', key: `guardiao-dec:${a.id}`, actorId: auth.userId });
         await logLine(tx, auth, l, 'guardiao_aprovado', `Budget Guardião aprovado: +${brl(value)}${from ? ` (reserva ${from === 'centro' ? 'do centro' : 'global'})` : ''}${body.note ? `. ${body.note}` : ''}.`, { adjustmentId: a.id, before: { approvedCents: l.approvedCents, limitCents: l.limitCents }, after: { approvedCents: (l.approvedCents ?? 0) + value } });
         return { status: 'aprovado', approvedCents: value, fromReserve: from };
       });
@@ -587,6 +602,7 @@ export const budgetCentralRoutes = [
       if (!isFinance(auth)) throw forbidden('Pagamentos são registrados pelo setor Financeiro.');
       if (body.amountCents + body.discountCents <= 0) throw unprocessable('Informe o valor pago.');
       const r = await app.db.transaction(async (tx) => {
+        await assertOpenPeriod(tx, auth.tenantId, body.paidOn.slice(0, 7));
         // trava o título primeiro: dois envios iguais ao mesmo tempo esperam um pelo outro e o segundo vira "já registrado"
         const [p] = await tx.select().from(s.budgetPayables).where(and(eq(s.budgetPayables.id, params.id), eq(s.budgetPayables.tenantId, auth.tenantId))).for('update').limit(1);
         if (!p) throw notFound();
@@ -604,6 +620,7 @@ export const budgetCentralRoutes = [
           proofId = doc!.id;
         }
         const [pay] = await tx.insert(s.budgetPayments).values({ tenantId: auth.tenantId, payableId: p.id, lineId: l.id, paidOn: body.paidOn, amountCents: body.amountCents, interestCents: body.interestCents, fineCents: body.fineCents, discountCents: body.discountCents, method: body.method ?? null, idempotencyKey: body.idempotencyKey, proofId, createdBy: auth.userId }).returning();
+        await notifyBudget(tx, auth.tenantId, [l.ownerId], { event: 'pagamento_realizado', title: `Pagamento registrado: ${l.code} ${l.what} (${brl(body.amountCents)})`, link: '/orcamento?t=central', key: `pago:${body.idempotencyKey}`, actorId: auth.userId });
         await logLine(tx, auth, l, 'pagamento', `pagamento de ${brl(body.amountCents)} (parcela ${p.installment}/${p.installments}) em ${body.paidOn}${body.interestCents + body.fineCents ? `, juros/multa ${brl(body.interestCents + body.fineCents)}` : ''}${body.discountCents ? `, desconto ${brl(body.discountCents)}` : ''}.`, { paymentId: pay!.id, payableId: p.id });
         return { payment: pay };
       });
@@ -620,6 +637,7 @@ export const budgetCentralRoutes = [
         const [p] = await tx.select().from(s.budgetPayments).where(and(eq(s.budgetPayments.id, params.id), eq(s.budgetPayments.tenantId, auth.tenantId))).for('update').limit(1);
         if (!p) throw notFound();
         if (p.kind !== 'pagamento') throw unprocessable('Só pagamentos podem ser estornados.');
+        await assertOpenPeriod(tx, auth.tenantId, body.paidOn.slice(0, 7));
         const [already] = await tx.select({ id: s.budgetPayments.id }).from(s.budgetPayments).where(eq(s.budgetPayments.reversesId, p.id)).limit(1);
         if (already) throw unprocessable('Este pagamento já foi estornado.');
         const { l } = await loadLine(tx, auth, p.lineId);
@@ -671,14 +689,14 @@ export const budgetCentralRoutes = [
   // ------------------------------------------------------------------ política
   defineRoute({
     method: 'PUT', url: '/budget/policy', summary: 'Política do orçamento: % de alerta e de bloqueio e a reserva do Budget Guardião (global, por centro ou híbrida). Sem valor, nada é presumido', ...M, min: 'total',
-    body: z.object({ alertPct: z.number().int().min(1).max(500).nullable(), blockPct: z.number().int().min(1).max(500).nullable(), reserveMode: z.enum(['nenhuma', 'global', 'centro', 'hibrida']), globalReserveCents: cents0.nullable(), centers: z.array(z.object({ id: uuid, alertPct: z.number().int().min(1).max(500).nullable(), blockPct: z.number().int().min(1).max(500).nullable(), guardianReserveCents: cents0.nullable() })).max(200).default([]) }),
+    body: z.object({ reportAutoSend: z.boolean().default(false), reportRequireApproval: z.boolean().default(true), alertPct: z.number().int().min(1).max(500).nullable(), blockPct: z.number().int().min(1).max(500).nullable(), reserveMode: z.enum(['nenhuma', 'global', 'centro', 'hibrida']), globalReserveCents: cents0.nullable(), centers: z.array(z.object({ id: uuid, alertPct: z.number().int().min(1).max(500).nullable(), blockPct: z.number().int().min(1).max(500).nullable(), guardianReserveCents: cents0.nullable() })).max(200).default([]) }),
     handler: async ({ app, auth, body }) => {
       if (!auth.profiles.includes('diretoria') && !auth.profiles.includes('administrador')) throw forbidden('A política do orçamento é definida pela Diretoria (ou configurada pelo Administrador).');
       if (body.alertPct !== null && body.blockPct !== null && body.alertPct > body.blockPct) throw unprocessable('O alerta precisa vir antes do bloqueio.');
       return app.db.transaction(async (tx) => {
         const cur = await policyOf(tx, auth.tenantId);
-        await tx.insert(s.budgetPolicies).values({ tenantId: auth.tenantId, alertPct: body.alertPct, blockPct: body.blockPct, reserveMode: body.reserveMode, globalReserveCents: body.globalReserveCents, version: 1, updatedBy: auth.userId })
-          .onConflictDoUpdate({ target: s.budgetPolicies.tenantId, set: { alertPct: body.alertPct, blockPct: body.blockPct, reserveMode: body.reserveMode, globalReserveCents: body.globalReserveCents, version: sql`${s.budgetPolicies.version} + 1`, updatedBy: auth.userId, updatedAt: new Date() } });
+        await tx.insert(s.budgetPolicies).values({ tenantId: auth.tenantId, reportAutoSend: body.reportAutoSend, reportRequireApproval: body.reportRequireApproval, alertPct: body.alertPct, blockPct: body.blockPct, reserveMode: body.reserveMode, globalReserveCents: body.globalReserveCents, version: 1, updatedBy: auth.userId })
+          .onConflictDoUpdate({ target: s.budgetPolicies.tenantId, set: { reportAutoSend: body.reportAutoSend, reportRequireApproval: body.reportRequireApproval, alertPct: body.alertPct, blockPct: body.blockPct, reserveMode: body.reserveMode, globalReserveCents: body.globalReserveCents, version: sql`${s.budgetPolicies.version} + 1`, updatedBy: auth.userId, updatedAt: new Date() } });
         for (const c of body.centers) await tx.update(s.costCenters).set({ alertPct: c.alertPct, blockPct: c.blockPct, guardianReserveCents: c.guardianReserveCents, updatedAt: new Date() }).where(and(eq(s.costCenters.id, c.id), eq(s.costCenters.tenantId, auth.tenantId)));
         await tx.insert(s.budgetEvents).values({ tenantId: auth.tenantId, entity: 'politica', action: 'alterada', summary: `Política do orçamento alterada (versão ${cur.version + 1}).`, data: { before: { alertPct: cur.alertPct, blockPct: cur.blockPct, reserveMode: cur.reserveMode, globalReserveCents: cur.globalReserveCents }, after: body }, actorId: auth.userId });
         return { ok: true, version: cur.version + 1 };

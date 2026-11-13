@@ -25,6 +25,7 @@ import { stageFunnelRoutes } from './routes/stageFunnel';
 import { budgetRoutes } from './routes/budget';
 import { budgetCentralRoutes } from './routes/budgetCentral';
 import { budgetEfficiencyRoutes } from './routes/budgetEfficiency';
+import { budgetClosingRoutes } from './routes/budgetClosing';
 import { csContractRoutes } from './routes/csContracts';
 import { budgetResourceRoutes } from './routes/budgetResources';
 import { insightsRoutes } from './routes/insights';
@@ -235,6 +236,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...budgetRoutes,
     ...budgetCentralRoutes,
     ...budgetEfficiencyRoutes,
+    ...budgetClosingRoutes,
     ...csContractRoutes,
     ...budgetResourceRoutes,
     ...insightsRoutes,
