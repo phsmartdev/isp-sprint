@@ -4,6 +4,7 @@
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
  */
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -29,6 +30,9 @@ const CALLOUT: Record<string, { h: number; side: 'esq' | 'dir' }> = {
 function SergipeMap({ className }: { className?: string }) {
   const W = 720, k = W / SE_VIEW.w, H = SE_VIEW.h * k;
   const hub = SE_MUNICIPIOS.findIndex((m) => m.name === 'Aracaju');
+  const [hover, setHover] = useState<number | null>(null);
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
+  const hm = hover === null ? null : SE_MUNICIPIOS[hover]!;
   const plate = (fill: string, stroke = 'none', sw = 2) => (
     <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0" aria-hidden><path d={SE_OUTLINE} fill={fill} stroke={stroke} strokeWidth={sw} strokeLinejoin="round" /></svg>
   );
@@ -36,8 +40,8 @@ function SergipeMap({ className }: { className?: string }) {
     <div className={className} style={{ perspective: '1800px' }} role="img" aria-label={`Mapa de Sergipe com os 75 municípios ligados em rede; ${CITY_ORDER.join(', ')} identificados e ${HOME} em destaque`}>
       <div className="absolute left-1/2 top-1/2" style={{ width: W, height: H, marginLeft: -W / 2, marginTop: -H / 2, transform: TILT, transformStyle: 'preserve-3d' }}>
         {/* sombra no chão e espessura da placa */}
-        <div className="absolute inset-0" style={{ transform: 'translateZ(-70px)', filter: 'blur(28px)', opacity: 0.55 }}>{plate('#000000')}</div>
-        {Array.from({ length: 12 }, (_, n) => <div key={n} className="absolute inset-0" style={{ transform: `translateZ(${-(n + 1) * 2.5}px)` }}>{plate(n === 11 ? '#050B12' : '#0C1B2B', n === 11 ? 'none' : '#16314C', 2)}</div>)}
+        <div className="pointer-events-none absolute inset-0" style={{ transform: 'translateZ(-70px)', filter: 'blur(28px)', opacity: 0.55 }}>{plate('#000000')}</div>
+        {Array.from({ length: 12 }, (_, n) => <div key={n} className="pointer-events-none absolute inset-0" style={{ transform: `translateZ(${-(n + 1) * 2.5}px)` }}>{plate(n === 11 ? '#050B12' : '#0C1B2B', n === 11 ? 'none' : '#16314C', 2)}</div>)}
         <div className="absolute inset-0">
           <svg viewBox={`0 0 ${SE_VIEW.w} ${SE_VIEW.h}`} width={W} height={H} className="absolute inset-0 overflow-visible" aria-hidden>
             <defs>
@@ -52,24 +56,35 @@ function SergipeMap({ className }: { className?: string }) {
             <path d={SE_OUTLINE} fill="none" stroke="#4FBBFF" strokeOpacity="0.55" strokeWidth="7" filter="url(#se-glow)" />
             <path d={SE_OUTLINE} fill="none" stroke="#8FD6FF" strokeWidth="2" strokeLinejoin="round" />
             {/* rede: brilho largo + traço fino + pulsos */}
-            <g filter="url(#se-glow)">{SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`g${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#4FBBFF" strokeOpacity="0.35" strokeWidth="5" />; })}</g>
-            {SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`l${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#9BDCFF" strokeOpacity="0.75" strokeWidth="1.4" />; })}
-            {SE_LINKS.map(([a, b], n) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return n % 3 ? null : <line key={`p${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="5 95" pathLength={100} className="inst-pulse" style={{ animationDelay: `${(n * 137) % 2400}ms` }} />; })}
+            <g filter="url(#se-glow)" pointerEvents="none">{SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`g${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#4FBBFF" strokeOpacity="0.35" strokeWidth="5" />; })}</g>
+            <g pointerEvents="none">{SE_LINKS.map(([a, b]) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return <line key={`l${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#9BDCFF" strokeOpacity="0.75" strokeWidth="1.4" />; })}</g>
+            <g pointerEvents="none">{SE_LINKS.map(([a, b], n) => { const p = SE_MUNICIPIOS[a]!, q = SE_MUNICIPIOS[b]!; return n % 3 ? null : <line key={`p${a}-${b}`} x1={p.x} y1={p.y} x2={q.x} y2={q.y} stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="5 95" pathLength={100} className="inst-pulse" style={{ animationDelay: `${(n * 137) % 2400}ms` }} />; })}</g>
             {/* pontos de presença */}
-            {SE_MUNICIPIOS.map((m, i) => {
+            <g pointerEvents="none">{SE_MUNICIPIOS.map((m, i) => {
               const home = m.name === HOME, named = CITY_ORDER.includes(m.name);
               if (home) return <g key={m.name}><circle cx={m.x} cy={m.y} r="110" fill="url(#se-halo)" /><circle cx={m.x} cy={m.y} r="34" fill="none" stroke="#8FD6FF" strokeWidth="2" /><circle cx={m.x} cy={m.y} r="56" fill="none" stroke="#8FD6FF" strokeOpacity="0.35" strokeWidth="1.5" /><circle cx={m.x} cy={m.y} r="10" fill="#FFFFFF" /></g>;
               if (i === hub) return <g key={m.name}><circle cx={m.x} cy={m.y} r="70" fill="url(#se-halo)" /><circle cx={m.x} cy={m.y} r="22" fill="none" stroke="#8FD6FF" strokeWidth="1.8" /><circle cx={m.x} cy={m.y} r="8" fill="#FFFFFF" /></g>;
               return <g key={m.name}><circle cx={m.x} cy={m.y} r={named ? 9 : 6} fill="#4FBBFF" fillOpacity="0.35" filter="url(#se-glow)" /><circle cx={m.x} cy={m.y} r={named ? 5.5 : 3.6} fill={named ? '#FFFFFF' : '#CDEEFF'} /></g>;
-            })}
+            })}</g>
+            {/* município sob o mouse: sombra, amplia e acende */}
+            {hm && (
+              <g key={hm.name} className="inst-pop" pointerEvents="none" style={{ transformBox: 'fill-box', transformOrigin: 'center' }}>
+                <path d={hm.d} fill="#000" fillOpacity="0.45" transform="translate(12 18)" filter="url(#se-glow)" />
+                <path d={hm.d} fill="#2A6FB0" stroke="#4FBBFF" strokeWidth="12" strokeOpacity="0.35" filter="url(#se-glow)" />
+                <path d={hm.d} fill="#2F7BC4" fillOpacity="0.95" stroke="#CFF0FF" strokeWidth="2.5" strokeLinejoin="round" />
+                <circle cx={hm.x} cy={hm.y} r="7" fill="#FFFFFF" />
+              </g>
+            )}
+            {/* área de cada município para o passar do mouse */}
+            {SE_MUNICIPIOS.map((m, i) => <path key={`h${m.name}`} d={m.d} fill="transparent" pointerEvents="all" className="cursor-pointer" onPointerEnter={(e) => { const r = e.currentTarget.getBoundingClientRect(); setTip({ x: r.left + r.width / 2, y: r.top }); setHover(i); }} onPointerLeave={() => { setHover((h) => (h === i ? null : h)); }}><title>{m.name}</title></path>)}
           </svg>
         </div>
         {/* identificação das cidades: haste fina e nome em pé */}
         {SE_MUNICIPIOS.filter((m) => CITY_ORDER.includes(m.name)).map((c) => {
           const home = c.name === HOME, cfg = CALLOUT[c.name]!;
           return (
-            <div key={c.name} className="absolute" style={{ left: c.x * k, top: c.y * k, transform: `translateZ(1px) ${UNTILT}`, transformOrigin: '0 0' }}>
-              <div className={clsx('absolute bottom-0 flex items-end', cfg.side === 'dir' ? 'left-0' : 'right-0 flex-row-reverse')}>
+            <div key={c.name} className={clsx('pointer-events-none absolute', hm?.name === c.name && 'invisible')} style={{ left: c.x * k, top: c.y * k, transform: `translateZ(1px) ${UNTILT}`, transformOrigin: '0 0' }}>
+              <div className={clsx('absolute bottom-0 flex items-end transition-opacity duration-200', cfg.side === 'dir' ? 'left-0' : 'right-0 flex-row-reverse', hm && hm.name !== c.name && 'opacity-30')}>
                 <span className="w-px bg-gradient-to-t from-[#8FD6FF] to-[#8FD6FF]/30" style={{ height: cfg.h }} />
                 <span className={clsx('whitespace-nowrap border-[#8FD6FF]/40 bg-[#0B121A]/75 px-2.5 py-1 backdrop-blur-sm', cfg.side === 'esq' ? 'border-r text-right' : 'border-l')} style={{ marginBottom: cfg.h - 26 }}>
                   <span className={clsx('block font-semibold leading-tight', home ? 'text-[22px] text-white' : 'text-[15px] text-white/90')}>{c.name}</span>
@@ -79,6 +94,7 @@ function SergipeMap({ className }: { className?: string }) {
           );
         })}
       </div>
+      {hm && tip && createPortal(<span className="pointer-events-none fixed z-[95] -translate-x-1/2 -translate-y-full whitespace-nowrap border border-[#8FD6FF]/60 bg-[#0B121A]/95 px-3 py-1.5 text-[15px] font-semibold text-white shadow-[0_8px_24px_rgba(0,0,0,0.5)]" style={{ left: tip.x, top: tip.y - 6 }}>{hm.name}</span>, document.fullscreenElement ?? document.body)}
     </div>
   );
 }
