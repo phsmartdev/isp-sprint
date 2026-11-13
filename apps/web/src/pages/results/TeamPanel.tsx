@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { ArrowUpRight, ChevronRight, Gauge, Palmtree, Siren } from 'lucide-react';
 import { api } from '../../lib/api';
-import { fmtDate, fmtPct } from '../../lib/format';
+import { fmtDate, fmtPct, teamLabel } from '../../lib/format';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { EmptyState, ErrorState, LoadingRows } from '../../components/ui/primitives';
 import { DISPERSION_LABEL, useGamification, type DispersionTone } from '../../features/gamification/Gamification';
@@ -123,12 +123,15 @@ export function TeamPanelPage() {
   const firstLevel = [...topUnits, ...loose];
   const company = emptyAgg();
   for (const x of goals) if (x.scope === 'empresa') company.goals[x.progress.color] += 1;
-  const root: Node = { id: 'geral', kind: 'geral', name: 'Geral', average: p.overall ?? null, agg: sumAgg(firstLevel.map((c) => c.agg), company), dispersion: null, children: firstLevel };
+  const allGoals: Record<Color, number> = { verde: 0, amarelo: 0, vermelho: 0, sem_dado: 0 };
+  for (const x of goals) allGoals[x.progress.color] += 1;
+  // no Geral, todas as metas visíveis (as mesmas do resumo), inclusive as de times excluídos ou pessoas fora de time
+  const rootAgg = sumAgg(firstLevel.map((c) => c.agg), company);
+  rootAgg.goals = { ...allGoals };
+  const root: Node = { id: 'geral', kind: 'geral', name: 'Geral', average: p.overall ?? null, agg: rootAgg, dispersion: null, children: firstLevel };
   const cards = teamNodes;
   const opened = open ?? new Set(['geral', ...topUnits.map((u) => u.id)]);
   const toggle = (id: string) => { const n = new Set(opened); if (n.has(id)) n.delete(id); else n.add(id); setOpen(n); };
-  const allGoals: Record<Color, number> = { verde: 0, amarelo: 0, vermelho: 0, sem_dado: 0 };
-  for (const x of goals) allGoals[x.progress.color] += 1;
   const avg = cards.length ? p.overall ?? null : null;
   const vacCount = root.agg!.vacations.length;
   const monthName = new Date(`${p.month}-15T12:00:00Z`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -140,7 +143,7 @@ export function TeamPanelPage() {
       <section aria-label="Resumo" className="mb-6 grid grid-cols-2 border border-line bg-surface lg:grid-cols-4">
         {[
           { label: 'Performance média', value: avg == null ? (p.me?.score != null ? fmtPct(p.me.score) : '—') : fmtPct(avg), hint: avg == null && p.me ? 'a sua, no mês' : `${cards.length} time${cards.length === 1 ? '' : 's'}`, tone: toneOf(avg ?? p.me?.score, p.bands) },
-          { label: 'Metas no alvo', value: `${allGoals.verde}/${goals.length}`, hint: allGoals.vermelho ? `${allGoals.vermelho} abaixo do esperado` : 'nenhuma abaixo', tone: (allGoals.vermelho ? 'vermelho' : allGoals.amarelo ? 'amarelo' : goals.length ? 'verde' : 'sem_dados') as Tone },
+          { label: 'Metas no alvo', value: `${allGoals.verde}/${goals.length}`, hint: !goals.length ? 'nenhuma meta no mês' : allGoals.vermelho ? `${allGoals.vermelho} abaixo do esperado` : allGoals.amarelo ? `${allGoals.amarelo} em atenção` : allGoals.sem_dado ? `${allGoals.sem_dado} ainda sem dado` : 'todas no alvo', tone: (allGoals.vermelho ? 'vermelho' : allGoals.amarelo ? 'amarelo' : goals.length && allGoals.verde === goals.length ? 'verde' : 'sem_dados') as Tone },
           { label: 'Intervenções abertas', value: String(iv.data?.counts.abertas ?? 0), hint: iv.data?.counts.atrasadas ? `${iv.data.counts.atrasadas} com prazo vencido` : 'nenhuma atrasada', tone: (iv.data?.counts.atrasadas ? 'vermelho' : 'sem_dados') as Tone },
           { label: 'Férias em 30 dias', value: String(vacCount), hint: vacCount ? 'reveja rotinas e tarefas' : 'ninguém sai', tone: 'sem_dados' as Tone },
         ].map((k, i) => (
@@ -155,7 +158,7 @@ export function TeamPanelPage() {
       {ivs.some((i) => i.overdue) && (
         <section aria-label="Precisa de atenção" className="mb-6 border-l-4 border-danger bg-danger-soft/40 px-5 py-3">
           <p className="mb-1 flex items-center gap-2 text-sm font-bold text-ink"><Siren className="h-4 w-4 text-danger" aria-hidden />Precisa de atenção</p>
-          <ul className="space-y-0.5 text-sm">{ivs.filter((i) => i.overdue).slice(0, 4).map((i) => <li key={i.id}><Link className="hover:underline" to={`/times/acompanhamento?aba=intervencoes&id=${i.id}`}>{i.goalTitle}</Link><span className="text-muted"> · {i.teamName ?? 'sem time'} · prazo {fmtDate(i.dueOn)}</span></li>)}</ul>
+          <ul className="space-y-0.5 text-sm">{ivs.filter((i) => i.overdue).slice(0, 4).map((i) => <li key={i.id}><Link className="hover:underline" to={`/times/acompanhamento?aba=intervencoes&id=${i.id}`}>{i.goalTitle}</Link><span className="text-muted"> · {teamLabel(i.teamName) ?? 'sem time'} · prazo {fmtDate(i.dueOn)}</span></li>)}</ul>
         </section>
       )}
 
