@@ -2,17 +2,19 @@
  * Central de Playbooks → Apresentação institucional da BKT (tela cheia, 16:9, setas para navegar).
  * Slide 1: logo, presença em Sergipe (mapa em pontos com Porto da Folha em destaque) e os selos e certificações,
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
+ * Slide 2: o mesmo prédio com rede tradicional × rede POL, em transição animada (features/playbooks/polScene).
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Move, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Feather, Gauge, Hourglass, Maximize2, Minimize2, Move, Server, ShieldCheck, X, Zap } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
+import { buildPolScene, POL_CALLOUT_X } from '../../features/playbooks/polScene';
 
 const HOME = 'Porto da Folha';
 const CITY_ORDER = ['Aracaju', 'Nossa Senhora do Socorro', 'Laranjeiras', 'Estância', 'Porto da Folha'];
@@ -165,7 +167,113 @@ function SlidePresence({ layout, edit, setLayout }: { layout: Layout; edit: bool
   );
 }
 
-const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }];
+type NetMode = 'trad' | 'pol';
+/** Seis benefícios. Os números são contagens da própria ilustração (11 andares, 33 pontos); nada de percentuais inventados. */
+const BENEFITS: { icon: typeof Server; title: string; trad: string; pol: string; num?: { trad: number; pol: number }; detail: string }[] = [
+  { icon: Feather, title: 'Cabos mais leves', num: { trad: 11, pol: 1 }, trad: 'cabos de cobre na prumada', pol: 'cabo de fibra na prumada', detail: 'A fibra é fina e leve e substitui feixes de cobre na prumada e em trechos horizontais. Quanto o peso total cai depende do projeto.' },
+  { icon: Server, title: 'Menos ativos', num: { trad: 11, pol: 0 }, trad: 'switches nos andares', pol: 'switches nos andares', detail: 'Uma OLT central substitui os switches intermediários. As ONTs nos pontos de uso continuam sendo equipamentos ativos.' },
+  { icon: Zap, title: 'Menos energia', num: { trad: 11, pol: 0 }, trad: 'pontos de energia nos andares', pol: 'pontos de energia nos andares', detail: 'Os splitters são passivos e não usam eletricidade. A OLT e as ONTs continuam consumindo; a economia real depende do projeto.' },
+  { icon: Hourglass, title: 'Mais longevidade', trad: 'Novas velocidades podem exigir novo cabo', pol: 'Upgrade trocando só as pontas', detail: 'A fibra monomodo instalada atende as próximas gerações de PON. Os eletrônicos (OLT e ONTs) evoluem; o cabo permanece.' },
+  { icon: Gauge, title: 'Mais banda', trad: 'Cobre: até 100 m por lance', pol: 'GPON 2,5 → XGS-PON 10 Gbit/s', detail: 'A mesma fibra evolui de GPON para XGS-PON. A banda é compartilhada pelos pontos de cada splitter e depende do dimensionamento.' },
+  { icon: ShieldCheck, title: 'Mais segurança', trad: 'Cobre sujeito a interferência', pol: 'Fibra imune a interferência', detail: 'A fibra não sofre interferência eletromagnética nem emite sinal. A segurança dos dados também depende de criptografia, autenticação, segmentação e configuração.' },
+];
+const MSG: Record<NetMode, string> = {
+  trad: 'Uma infraestrutura com múltiplos equipamentos, cabeamento metálico e pontos de distribuição.',
+  pol: 'Menos infraestrutura ativa. Mais eficiência, capacidade de evolução e longevidade.',
+};
+const HOLD: Record<NetMode, number> = { trad: 6000, pol: 8000 }, MORPH = 3000, IDLE = 15000;
+
+/** Número que conta até o alvo (depois do atraso, para acompanhar a transição da cena). */
+function CountTo({ value, delay }: { value: number; delay: number }) {
+  const [shown, setShown] = useState(value);
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setShown(value); return; }
+    let raf = 0; const from = shown, t0 = performance.now() + delay;
+    const step = (t: number) => { const k = Math.min(1, Math.max(0, (t - t0) / 900)); setShown(Math.round(from + (value - from) * (1 - (1 - k) ** 3))); if (k < 1) raf = requestAnimationFrame(step); };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return <>{shown}</>;
+}
+
+/**
+ * Slide 2: o mesmo prédio com a rede tradicional ou a POL. Sozinho, alterna em loop (tradicional 6 s → transição 3 s →
+ * POL 8 s → transição 3 s); um clique nos botões fixa a rede escolhida e, após 15 s sem interação, o ciclo segue de onde está.
+ */
+function SlidePol() {
+  const scene = useMemo(buildPolScene, []);
+  const [mode, setMode] = useState<NetMode>('trad');
+  const [touch, setTouch] = useState(0);   // > 0: o usuário interagiu há menos de 15 s
+  const [open, setOpen] = useState<number | null>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (touch) { const t = setTimeout(() => { setTouch(0); setMode((m) => (m === 'trad' ? 'pol' : 'trad')); }, IDLE); return () => clearTimeout(t); }
+    const t = setTimeout(() => { moved.current = true; setMode((m) => (m === 'trad' ? 'pol' : 'trad')); }, HOLD[mode] + (moved.current ? MORPH : 0));
+    return () => clearTimeout(t);
+  }, [mode, touch]);
+  const poke = () => { moved.current = true; setTouch((n) => n + 1); };
+  const pick = (m: NetMode) => { setMode(m); poke(); };
+  const pol = mode === 'pol';
+  return (
+    <div data-mode={mode} className="relative h-full overflow-hidden bg-[#070D15] text-white">
+      <svg viewBox="0 0 1600 900" width={1600} height={900} className="absolute inset-0" role="img" aria-label={pol ? 'Prédio com rede POL: OLT no térreo, uma fibra na prumada, splitter passivo em cada andar e ONT nos pontos de uso' : 'Prédio com rede tradicional: rack central no térreo, prumada de cobre, rack com switch e energia em cada andar e um cabo de cobre por ponto'} dangerouslySetInnerHTML={{ __html: scene.svg }} />
+      <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(6,11,18,0.92)_0%,rgba(6,11,18,0.78)_40%,rgba(6,11,18,0)_62%)]" />
+      {scene.callouts.map((c) => (
+        <div key={c.mode + c.title} aria-hidden={c.mode !== mode} className="absolute w-[200px] rounded-[14px] border border-[#8FD6FF]/30 bg-[#09101A]/75 px-[18px] py-3.5 shadow-[0_0_0_5px_rgba(143,214,255,0.05)] backdrop-blur-md transition-opacity duration-700 motion-reduce:transition-none" style={{ left: POL_CALLOUT_X, top: c.top, opacity: c.mode === mode ? 1 : 0, transitionDelay: c.mode === mode ? '2.4s' : '0s' }}>
+          <p className="text-[15px] font-semibold">{c.title}</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-white/70">{c.text}</p>
+        </div>
+      ))}
+      {/* seletor de arquitetura */}
+      <div role="group" aria-label="Arquitetura de rede" className="absolute right-10 top-10 flex rounded-full border border-white/15 bg-[#09101A]/70 p-1 backdrop-blur-md">
+        {(['trad', 'pol'] as const).map((m) => (
+          <button key={m} type="button" aria-pressed={mode === m} onClick={() => pick(m)} className={clsx('flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-semibold tracking-[0.14em] transition-colors duration-500', mode === m ? (m === 'pol' ? 'bg-[#4FBBFF]/20 text-white shadow-[inset_0_0_0_1px_rgba(143,214,255,0.6),0_0_18px_rgba(79,187,255,0.35)]' : 'bg-[#FF8A3D]/20 text-white shadow-[inset_0_0_0_1px_rgba(255,138,61,0.6),0_0_18px_rgba(255,138,61,0.3)]') : 'text-white/55 hover:text-white')}>
+            <span className={clsx('h-2 w-2 rounded-full', m === 'pol' ? 'bg-[#4FBBFF]' : 'bg-[#FF8A3D]')} />{m === 'pol' ? 'REDE POL' : 'REDE TRADICIONAL'}
+          </button>
+        ))}
+      </div>
+      <img src="/brand/bkt-logo-white.png" alt="BKT" className="absolute left-[90px] top-14 h-12 w-[200px] object-contain object-left" draggable={false} />
+      <h1 className="absolute left-[90px] top-[150px] w-[780px] font-display text-[44px] font-extrabold leading-[1.12]">O mesmo edifício.<span className="block text-[#9CC4EA]">Uma nova forma de conectar.</span></h1>
+      <div className="absolute left-[90px] top-[318px] h-[84px] w-[640px]" aria-live="polite">
+        {(['trad', 'pol'] as const).map((m) => (
+          <p key={m} aria-hidden={m !== mode} className="absolute inset-0 flex gap-3 text-[20px] leading-[1.45] text-white/85 transition-opacity duration-700 motion-reduce:transition-none" style={{ opacity: m === mode ? 1 : 0, transitionDelay: m === mode ? '1.2s' : '0s' }}>
+            <span className={clsx('mt-[11px] h-2.5 w-2.5 flex-none rounded-full', m === 'pol' ? 'bg-[#4FBBFF] shadow-[0_0_10px_#4FBBFF]' : 'bg-[#FF8A3D] shadow-[0_0_10px_#FF8A3D]')} />{MSG[m]}
+          </p>
+        ))}
+      </div>
+      {/* legenda de cores */}
+      <p className="absolute left-[90px] top-[418px] flex gap-6 text-[13px] text-white/60">
+        <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#8FD6FF]" />Fibra óptica</span>
+        <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#FF8A3D]" />Cabo de cobre</span>
+        <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#FFD24A]" />Energia elétrica</span>
+      </p>
+      <ul className="absolute left-[90px] top-[462px] grid w-[790px] grid-cols-3 gap-2.5" aria-label="Vantagens da rede POL">
+        {BENEFITS.map(({ icon: Icon, title, num, trad, pol: polText, detail }, n) => (
+          <li key={title} className="relative">
+            <button type="button" aria-expanded={open === n} onClick={() => { setOpen(open === n ? null : n); poke(); }} onPointerEnter={() => setOpen(n)} onPointerLeave={() => setOpen((o) => (o === n ? null : o))}
+              className={clsx('flex h-[112px] w-full gap-3 rounded-2xl border px-4 py-3.5 text-left backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-700 motion-reduce:transition-none', pol ? 'border-[#8FD6FF]/45 bg-[#0E2236]/70 shadow-[0_0_24px_-6px_rgba(79,187,255,0.45)]' : 'border-white/10 bg-[#0A121C]/60')}
+              style={{ transitionDelay: pol ? `${2.4 + n * 0.12}s` : '0s' }}>
+              <span className={clsx('grid h-[38px] w-[38px] flex-none place-items-center rounded-full border transition-colors duration-700', pol ? 'border-[#8FD6FF]/60 bg-[#4FBBFF]/15' : 'border-white/15 bg-white/[0.04]')}><Icon className={clsx('h-[18px] w-[18px] transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-white/60')} aria-hidden /></span>
+              <span className="min-w-0">
+                <span className="block text-[16px] font-semibold">{title}</span>
+                {num ? (
+                  <span className="mt-1 flex items-baseline gap-2"><span className={clsx('num text-[30px] font-bold leading-none tabular-nums transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-[#FFB27A]')}><CountTo value={num[mode]} delay={pol ? 2400 : 1200} /></span><span className="text-[12.5px] leading-tight text-white/65">{pol ? polText : trad}{pol && <span className="text-white/40"> · antes {num.trad}</span>}</span></span>
+                ) : (
+                  <span className={clsx('mt-1.5 block text-[14px] leading-snug transition-colors duration-700', pol ? 'text-[#BFE8FF]' : 'text-white/60')}>{pol ? polText : trad}</span>
+                )}
+              </span>
+            </button>
+            {open === n && <p role="tooltip" className="absolute bottom-[calc(100%+8px)] left-0 z-10 w-[300px] rounded-xl border border-[#8FD6FF]/40 bg-[#09101A]/95 px-4 py-3 text-[13.5px] leading-snug text-white/85 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">{detail}</p>}
+          </li>
+        ))}
+      </ul>
+      <p className="absolute left-[90px] top-[812px] text-[12px] text-white/40">Contagens desta ilustração: 11 andares e 33 pontos atendidos nas duas redes. Resultados reais dependem do projeto.</p>
+    </div>
+  );
+}
+
+const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }, { key: 'pol', title: 'Rede tradicional × Rede POL' }];
 
 export function InstitutionalPresentation() {
   const nav = useNavigate();
@@ -191,7 +299,7 @@ export function InstitutionalPresentation() {
   const toast = useToast();
   const qc = useQueryClient();
   const slide = SLIDES[i]!.key;
-  const saved = useQuery({ queryKey: ['institucional', 'layout', slide], queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>(`/institucional/layout/${slide}`) });
+  const saved = useQuery({ queryKey: ['institucional', 'layout', slide], queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>(`/institucional/layout/${slide}`), enabled: slide === 'presenca' });
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<Layout | null>(null);
   const current: Layout = draft ?? { blocks: { ...DEFAULT_LAYOUT.blocks, ...(saved.data?.layout?.blocks ?? {}) }, texts: { ...DEFAULT_LAYOUT.texts, ...(saved.data?.layout?.texts ?? {}) } };
@@ -203,12 +311,12 @@ export function InstitutionalPresentation() {
   const textScale = (d: number) => setDraft({ ...current, blocks: { ...current.blocks, texto: { ...current.blocks.texto, scale: Math.max(0.6, Math.min(1.6, Math.round(((current.blocks.texto.scale ?? 1) + d) * 100) / 100)) } } });
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
-      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}</Stage></div>
+      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}{slide === 'pol' && <SlidePol />}</Stage></div>
       <nav aria-label="Controles da apresentação" className="flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
         <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>
         <p className="text-sm text-white/60"><span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
         <div className="flex gap-1">
-          {saved.data?.canManage && !full && (edit ? <>
+          {slide === 'presenca' && saved.data?.canManage && !full && (edit ? <>
             <button type="button" className={btn} onClick={() => textScale(-0.05)} aria-label="Diminuir o texto">A−</button>
             <button type="button" className={btn} onClick={() => textScale(0.05)} aria-label="Aumentar o texto">A+</button>
             <button type="button" className={btn} onClick={() => save.mutate(null)}>Restaurar padrão</button>
