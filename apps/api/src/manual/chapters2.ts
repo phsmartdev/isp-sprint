@@ -178,7 +178,7 @@ O **painel das frentes** mostra, por frente de uma iniciativa, o progresso real,
 
 export const CH_ORCAMENTO: ManualChapter = {
   slug: 'orcamento', type: 'procedimento', title: 'Recursos e Orçamento',
-  description: 'Plano de contas e centros de custo, planejamento trimestral com aprovação em duas alçadas, Budget Guardião, gastos com comprovante, revisão mensal, ferramentas, softwares, contratos e compras.',
+  description: 'Central do orçamento (ciclo completo do lançamento), plano de contas e centros, aprovação com valor-alvo e limite, Budget Guardião, financeiro, fechamento mensal, revisões, projeção, recursos e compras.',
   keywords: ['orçamento', 'centro de custo', 'budget guardião', 'gasto', 'compras', 'fornecedores', 'softwares', 'equipamentos'],
   src: `
 @ /orcamento Abrir Planejamento orçamentário
@@ -199,6 +199,26 @@ Tudo é ligado pelo **centro de custo**; cada time tem o seu.
 :::atencao Budget Guardião
 Acima do saldo, só com **Budget Guardião**: a Gerência pede ajuste no total do centro com justificativa e a Diretoria decide. Remanejar saldo entre contas do mesmo centro é da Gerência e não muda o total.
 :::
+
+# Central do orçamento
+@ /orcamento?t=central Abrir a Central do orçamento
+Uma tela para o ciclo inteiro de cada despesa: indicadores (original, revisado, aprovado, solicitado, reservado, comprometido, realizado, pago, saldo, aguardando aprovação, excedente, saldo do Guardião e projeção), filtros, evolução em linhas (clique no mês filtra a tabela), tabela em DRE e o painel lateral do lançamento.
+1) Planejar :: Novo lançamento com quantidade × valor unitário, competência, responsável, projeto, campanha e justificativa; recorrente cria um por mês.
+2) Enviar :: Vai à Gerência (se a liderança enviou) ou à Diretoria.
+3) Questionar e responder :: Quem aprova pergunta sobre valor, quantidade, necessidade ou documentos; questionamento obrigatório trava a aprovação até a resposta.
+4) Decidir :: Aprovar integral, parcial ou com condições (valor-alvo por unidade e valor-limite total), rejeitar ou pedir revisão; em lote, cada item com a sua decisão.
+5) Executar :: Fornecedor, cotação, negociado, contratado (vira comprometido), pedido, entrega e despesa reconhecida; acima do autorizado, só com o Budget Guardião.
+6) Pagar :: O Financeiro lança títulos e parcelas e registra pagamentos parciais, juros, multa, desconto, estorno e conciliação.
+:::importante Regras
+Comprometido, realizado e pago são estágios da mesma despesa e não se somam. Quem pede não decide. O Administrador configura, mas não aprova só por ser administrador.
+:::
+
+# Fechamento, revisões e projeção
+- **Fechamento mensal:** aberto → em conferência → aguardando validação → fechado (Diretoria, quem enviou não valida). Fechado trava alterações retroativas; reabrir só com justificativa. O relatório por e-mail vai a cada destinatário só com os centros dele, com aprovação antes do envio.
+- **Revisões e remanejamentos:** versão numerada no ano; remanejamento move só saldo livre e soma zero; entre centros e aumento de aprovado, só a Diretoria.
+- **Projeção:** até o fim do ano, com compromissos a vencer, recorrentes, contratos ainda sem lançamento, risco de excedente e cenário.
+- **Brindes:** planejar o brinde cria o lançamento; compra e recebimento usam o mesmo lançamento (sem despesa duplicada).
+- **Eficiência:** em Inteligência → Eficiência orçamentária, custo × resultado com a fonte de cada número.
 
 # Recursos
 - **Ferramentas e equipamentos:** responsável, situação (em uso, estoque, manutenção, baixado) e valor contábil com depreciação linear.
