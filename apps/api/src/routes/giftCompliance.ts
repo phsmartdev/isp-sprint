@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  allowedDecisions, ATTENTION_SITUATIONS, complianceKpis, currentRules, KIT_CATEGORIES, CONCESSION_DECISIONS, CONCESSION_KINDS, CONCESSION_PURPOSES, CONCESSION_STATES, CONTROL_TYPES, deliveryNeeds, RULE_PARAMS, splitEvenly, stockShortages,
+  allowedDecisions, ATTENTION_SITUATIONS, effectiveLevel, requesterFloor, complianceKpis, currentRules, KIT_CATEGORIES, CONCESSION_DECISIONS, CONCESSION_KINDS, CONCESSION_PURPOSES, CONCESSION_STATES, CONTROL_TYPES, deliveryNeeds, RULE_PARAMS, splitEvenly, stockShortages,
   type ApproverLevel, type ConcessionKind, type ConcessionPurpose, type Evaluation,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -19,7 +19,7 @@ import { audit } from '../services/audit';
 import { todayIn } from '../services/vacations';
 import { assertAccount } from './stakeholders';
 import {
-  accountConcessions, allRules, budgetAvailable, recipientsOf, detectedAttention, canConfigure, canReport, canSeeRequest, COMPLIANCE_EVENTS, decidersFor, evaluate, isComplete, levelsOf, notifyCompliance, pendenciesOf, seesAll, settingsOf,
+  accountConcessions, allRules, budgetAvailable, recipientsOf, detectedAttention, canConfigure, canReport, canSeeRequest, COMPLIANCE_EVENTS, profilesOf, decidersFor, evaluate, isComplete, levelsOf, notifyCompliance, pendenciesOf, seesAll, settingsOf,
   type EvalInput, type Req,
 } from '../services/giftCompliance';
 import { buildComplianceReport } from '../services/giftComplianceReport';
@@ -114,11 +114,13 @@ const logEv = (db: DbOrTx, auth: AuthContext, r: Pick<Req, 'id'>, type: string, 
   db.insert(s.giftRequestEvents).values({ tenantId: auth.tenantId, requestId: r.id, type, text, data: data ?? null, actorId: auth.userId });
 
 /** Quem precisa decidir: a alçada da avaliação (ou a das conformes). */
-const neededLevel = (ev: Pick<Evaluation, 'outcome' | 'level'>, conforming: ApproverLevel): ApproverLevel | null => (ev.outcome === 'impedido' ? null : ev.outcome === 'conforme' ? conforming : ev.level);
+/** Alçada que decide a solicitação: a guardada nela; nas antigas (sem o campo), a das diretrizes. */
+const neededLevel = (ev: Pick<Evaluation, 'outcome' | 'level'>, conforming: ApproverLevel, stored?: string | null): ApproverLevel | null =>
+  (stored as ApproverLevel | null) ?? (ev.outcome === 'impedido' ? null : ev.outcome === 'conforme' ? conforming : ev.level);
 
 async function notifyNew(db: DbOrTx, config: Parameters<typeof notifyCompliance>[1], auth: AuthContext, r: Req, ev: Evaluation, conforming: ApproverLevel, cycle: number) {
-  const level = neededLevel(ev, conforming);
-  const who = await decidersFor(db, auth.tenantId, level ?? 'gerencia');
+  const level = neededLevel(ev, conforming, r.approvalLevel);
+  const who = (await decidersFor(db, auth.tenantId, level ?? 'gerencia')).filter((id) => id !== r.requesterId);
   const out = ev.outcome !== 'conforme';
   await notifyCompliance(db, config, auth.tenantId, who, { event: out ? 'fora_parametros' : 'aguardando', title: `${out ? 'Fora dos parâmetros' : 'Aguardando autorização'}: ${r.code} ${r.description.slice(0, 80)}`, body: ev.findings.map((f) => f.name).join(' · ') || null, requestId: r.id, key: `novo:${r.id}:${cycle}`, actorId: auth.userId });
 }
@@ -180,7 +182,9 @@ export const giftComplianceRoutes = [
       const catalog = { items, kits: kits.map((k) => ({ id: k.id, name: k.name, costCents: k.items.reduce((t, x) => t + x.qty * (items.find((i) => i.id === x.itemId)?.unitCostCents ?? 0), 0), available: Math.min(...k.items.map((x) => Math.floor((items.find((i) => i.id === x.itemId)?.stock ?? 0) / Math.max(1, x.qty))), 1e9) })) };
       return {
         ...d,
-        rows: d.rows.map((r) => ({ id: r.id, code: r.code, kind: r.kind, purpose: r.purpose, description: r.description, plannedOn: r.plannedOn, executedOn: r.executedOn, state: r.state, outcome: r.outcome, exception: r.exception, estimatedCents: r.estimatedCents, approvedCents: r.approvedCents, executedCents: r.executedCents, requesterId: r.requesterId, requesterName: r.requesterName, accounts: r.accounts, institutionalClass: r.institutionalClass, complete: isComplete(r, r.decided, r.docKinds), orgUnitId: r.orgUnitId })),
+        rows: d.rows.map((r) => ({ id: r.id, code: r.code, kind: r.kind, purpose: r.purpose, description: r.description, plannedOn: r.plannedOn, executedOn: r.executedOn, state: r.state, outcome: r.outcome, exception: r.exception, estimatedCents: r.estimatedCents, approvedCents: r.approvedCents, executedCents: r.executedCents, requesterId: r.requesterId, requesterName: r.requesterName, accounts: r.accounts, institutionalClass: r.institutionalClass, complete: isComplete(r, r.decided, r.docKinds), orgUnitId: r.orgUnitId,
+          approvalLevel: neededLevel(r.evaluation as unknown as Evaluation, st.conformingLevel, r.approvalLevel),
+          canDecide: r.state === 'solicitado' && !(st.segregation && r.requesterId === auth.userId) && allowedDecisions(r.evaluation as unknown as Evaluation, levelsOf(auth), neededLevel(r.evaluation as unknown as Evaluation, st.conformingLevel, r.approvalLevel)).decisions.length > 0 })),
         options: { units, requesters }, catalog,
         can: { create: true, decideLevels: levelsOf(auth), configure: canConfigure(auth), report: canReport(auth), seesAll: seesAll(auth) },
         policy: { configured: currentRules(rules, d.today).length > 0, rules: currentRules(rules, d.today).length, segregation: st.segregation, conformingLevel: st.conformingLevel, note: st.policyNote },
@@ -201,7 +205,7 @@ export const giftComplianceRoutes = [
       const st = await settingsOf(app.db, auth.tenantId);
       const names = accs.length ? await app.db.select({ id: s.contacts.id, name: s.contacts.name, nature: s.contacts.nature }).from(s.contacts).where(inArray(s.contacts.id, accs.map((a) => a.contactId))) : [];
       const hist = await accountConcessions(app.db, auth.tenantId, accs.map((a) => a.contactId));
-      return { evaluation: ev, level: neededLevel(ev, st.conformingLevel), accounts: accs.map((a) => ({ ...a, name: names.find((n) => n.id === a.contactId)?.name ?? '', nature: names.find((n) => n.id === a.contactId)?.nature ?? null, history: hist.find((h) => h.contactId === a.contactId) })), budget: await budgetAvailable(app.db, auth.tenantId, b.budgetLineId ?? null, today) };
+      return { evaluation: ev, level: effectiveLevel(ev, st.conformingLevel, requesterFloor(auth.profiles)), accounts: accs.map((a) => ({ ...a, name: names.find((n) => n.id === a.contactId)?.name ?? '', nature: names.find((n) => n.id === a.contactId)?.nature ?? null, history: hist.find((h) => h.contactId === a.contactId) })), budget: await budgetAvailable(app.db, auth.tenantId, b.budgetLineId ?? null, today) };
     },
   }),
 
@@ -222,7 +226,7 @@ export const giftComplianceRoutes = [
           campaignId: body.campaignId ?? null, opportunityId: body.opportunityId ?? null, eventName: body.eventName ?? null, description: body.description, justification: body.justification, plannedOn: body.plannedOn,
           kitId: body.kitId ?? null, kits: body.kitId ? body.kits : 0, items: body.items, estimatedCents: body.estimatedCents, costCenterId: body.costCenterId ?? null, budgetLineId: body.budgetLineId ?? null,
           kitCategory: body.kitCategory ?? null, recipients: rec, collective: body.collective, audience: body.audience ?? null, attention: body.attention,
-          evaluation: ev as unknown as Record<string, unknown>, outcome: ev.outcome,
+          evaluation: ev as unknown as Record<string, unknown>, outcome: ev.outcome, approvalLevel: effectiveLevel(ev, st.conformingLevel, requesterFloor(auth.profiles)),
         }).returning();
         if (accs.length) await tx.insert(s.giftRequestAccounts).values(accs.map((a) => ({ requestId: row!.id, contactId: a.contactId, shareCents: a.shareCents })));
         await logEv(tx, auth, row!, 'criada', `Solicitação registrada (${(body.estimatedCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}).`, { accounts: accs });
@@ -260,14 +264,14 @@ export const giftComplianceRoutes = [
       const stock = needs.map((n) => { const it = items.find((i) => i.id === n.itemId); const reserved = reservedQty.get(n.itemId) ?? 0; return { itemId: n.itemId, name: it?.name ?? 'Item', need: n.qty, stock: it?.stock ?? 0, reservedByOthers: reserved, available: (it?.stock ?? 0) - reserved, unitCostCents: it?.unitCostCents ?? 0 }; });
       const ev = r.evaluation as unknown as Evaluation;
       const myLevels = levelsOf(auth);
-      const allowed = ['solicitado'].includes(r.state) ? allowedDecisions(ev, myLevels, st.conformingLevel) : { decisions: [], reason: null };
+      const allowed = ['solicitado'].includes(r.state) ? allowedDecisions(ev, myLevels, neededLevel(ev, st.conformingLevel, r.approvalLevel)) : { decisions: [], reason: null };
       const segregated = st.segregation && r.requesterId === auth.userId && allowed.decisions.length > 0;
       const hist = await accountConcessions(app.db, auth.tenantId, accs.map((a) => a.a.contactId));
       const name = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
       return {
         request: { ...r, requesterName: name(r.requesterId), executorName: name(r.executorId), kitName: kit[0]?.name ?? null },
         accounts: accs.map((a) => ({ contactId: a.a.contactId, name: a.name, nature: a.nature, shareCents: a.a.shareCents, history: hist.find((h) => h.contactId === a.a.contactId) })),
-        evaluation: ev, level: neededLevel(ev, st.conformingLevel),
+        evaluation: ev, level: neededLevel(ev, st.conformingLevel, r.approvalLevel),
         decisions: decisions.map((d) => ({ ...d.d, deciderName: d.name })),
         events: events.map((e) => ({ ...e.e, actorName: e.name })),
         documents: docs, stock, budget: await budgetAvailable(app.db, auth.tenantId, r.budgetLineId, today),
@@ -308,7 +312,7 @@ export const giftComplianceRoutes = [
           costCenterId: body.costCenterId ?? null, budgetLineId: body.budgetLineId ?? null,
           kitCategory: body.kitCategory ?? null, recipients: rec, collective: body.collective, audience: body.audience ?? null, attention: body.attention,
           // aprovada sem mudança material mantém a avaliação da época da decisão
-          ...(afterApproval && !material ? {} : { evaluation: ev as unknown as Record<string, unknown>, outcome: ev.outcome }),
+          ...(afterApproval && !material ? {} : { evaluation: ev as unknown as Record<string, unknown>, outcome: ev.outcome, approvalLevel: effectiveLevel(ev, st.conformingLevel, requesterFloor(await profilesOf(tx, r.requesterId))) }),
           ...(backToApproval ? { state: 'solicitado', approvedCents: null, exception: false, reservedAt: null } : {}),
           rowVersion: r.rowVersion + 1, updatedAt: new Date(),
         }).where(eq(s.giftRequests.id, r.id)).returning();
@@ -335,7 +339,7 @@ export const giftComplianceRoutes = [
         if (r.state !== 'solicitado') throw unprocessable('Só solicitação aguardando autorização recebe decisão.');
         const ev = r.evaluation as unknown as Evaluation;
         const levels = levelsOf(auth);
-        const allowed = allowedDecisions(ev, levels, st.conformingLevel);
+        const allowed = allowedDecisions(ev, levels, neededLevel(ev, st.conformingLevel, r.approvalLevel));
         if (!allowed.decisions.includes(body.decision)) throw forbidden(allowed.reason ?? 'Esta decisão não cabe à sua alçada.');
         if (st.segregation && r.requesterId === auth.userId) throw forbidden('Segregação de funções: quem solicitou não decide a própria solicitação.');
         if (body.decision === 'aprovar_excecao' && (body.reason ?? '').length < 15) throw unprocessable('Aprovação excepcional exige fundamentação expressa (mínimo 15 caracteres).', [{ path: 'reason', message: 'Obrigatório' }]);
@@ -343,7 +347,7 @@ export const giftComplianceRoutes = [
         const approved = body.decision === 'aprovar' || body.decision === 'aprovar_excecao';
         const amount = approved ? body.approvedCents ?? r.estimatedCents : r.estimatedCents;
         if (approved && amount > r.estimatedCents) throw unprocessable('O valor aprovado não pode passar do solicitado; altere a solicitação para nova avaliação.');
-        const level = neededLevel(ev, st.conformingLevel) ?? 'gerencia';
+        const level = neededLevel(ev, st.conformingLevel, r.approvalLevel) ?? 'gerencia';
         const profile = auth.profiles.includes('diretoria') ? 'diretoria' : auth.profiles.includes('gerencia') ? 'gerencia' : auth.profiles[0] ?? '';
         await tx.insert(s.giftRequestDecisions).values({ tenantId: auth.tenantId, requestId: r.id, decision: body.decision, deciderId: auth.userId, profile, level: levels.includes('diretoria') ? 'diretoria' : 'gerencia', outcome: ev.outcome, findings: ev.findings, requesterJustification: r.justification, reason: body.reason ?? null, conditions: body.conditions ?? null, amountCents: amount, requestVersion: r.rowVersion });
         const state = approved ? 'aprovado' : body.decision === 'ajustes' ? 'ajustes' : 'rejeitado';
