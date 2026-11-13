@@ -102,3 +102,6 @@ export function fmtDayHeading(v: Date) {
 
 /** Data local (AAAA-MM-DD) no fuso da empresa. */
 export const localDayKey = (v: string | Date) => dayKey(d(v));
+
+/** Time excluído fica no banco como "Nome (excluído AAAA-MM-DD hh:mm)"; na tela, "Nome (time excluído)". */
+export const teamLabel = (n: string | null | undefined): string | null => (n ? n.replace(/\s*\(excluído [^)]*\)\s*$/, ' (time excluído)') : null);

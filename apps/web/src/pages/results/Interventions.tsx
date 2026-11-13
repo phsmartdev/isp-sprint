@@ -9,7 +9,7 @@ import {
   toCents, type InterventionKind, type InterventionStatus, type InterventionTrigger, type TrafficColor,
 } from '@isp/domain';
 import { api, qs } from '../../lib/api';
-import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
+import { fmtBRL, fmtDate, fmtDateTime, teamLabel } from '../../lib/format';
 import { NewProjectDialog } from '../../features/projects/shared';
 import { useLookups, useUrlState } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea, type Tone } from '../../components/ui/primitives';
@@ -72,7 +72,7 @@ export function InterventionsPage() {
                     <td className="px-3 py-2.5"><button type="button" className="text-left font-semibold text-primary hover:underline" onClick={() => setU({ id: i.id }, { resetPage: false })}>{i.goalTitle}</button><span className="block text-xs text-muted">{INTERVENTION_KIND_LABELS[i.kind]}</span></td>
                     <td className="px-3 py-2.5"><Chip tone={i.trigger === 'manual' ? 'blue' : i.trigger === 'primeiro_amarelo' ? 'orange' : 'red'}>{INTERVENTION_TRIGGER_LABELS[i.trigger]}</Chip></td>
                     <td className="num px-3 py-2.5">{i.competencias.length ? i.competencias.map(comp).join(', ') : '—'}</td>
-                    <td className="px-3 py-2.5">{i.subjectName ?? i.teamName ?? i.unitName ?? 'Empresa'}</td>
+                    <td className="px-3 py-2.5">{i.subjectName ?? teamLabel(i.teamName) ?? i.unitName ?? 'Empresa'}</td>
                     <td className="px-3 py-2.5">{i.ownerName}{i.escalatedTo && <span className="block text-xs font-semibold text-danger">escalonada para {i.escalatedTo}</span>}</td>
                     <td className={clsx('num px-3 py-2.5', i.overdue && 'font-semibold text-danger')}>{fmtDate(i.dueOn)}{i.overdue && <span className="block text-xs">vencido</span>}</td>
                     <td className="px-3 py-2.5"><Chip tone={STATUS_TONE[i.status]}>{INTERVENTION_STATUS_LABELS[i.status]}</Chip></td>
