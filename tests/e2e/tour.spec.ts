@@ -10,11 +10,15 @@ test('tour revops: abre pelo menu, navega pelos slides e fecha', async ({ page }
   await expect(page).not.toHaveURL(/\/login/);
   await page.getByRole('link', { name: 'Tour RevOps' }).click();
   const tour = page.getByRole('region', { name: 'Tour RevOps' });
-  await expect(tour).toContainText('A receita da empresa');
+  await expect(tour).toContainText('A gestão comercial da BKT, centralizada');
   await page.waitForTimeout(450);
   await page.screenshot({ path: 'test-results/tour-01-capa.png' });
   await tour.getByRole('button', { name: 'Começar a apresentação' }).click();
-  await expect(tour).toContainText('Oito paradas');
+  await expect(tour).toContainText('Revenue Operations');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-01b-revops.png' });
+  await page.keyboard.press('ArrowRight');
+  await expect(tour).toContainText('A receita em oito paradas');
   await page.waitForTimeout(450);
   await page.screenshot({ path: 'test-results/tour-02-jornada.png' });
   await tour.getByRole('button', { name: 'Ir para Contrato' }).click();
@@ -26,7 +30,7 @@ test('tour revops: abre pelo menu, navega pelos slides e fecha', async ({ page }
   await page.keyboard.press('i');
   const idx = page.getByRole('dialog', { name: 'Índice dos slides' });
   await idx.getByRole('button', { name: /A camada de gestão/ }).click();
-  await expect(tour).toContainText('O que sustenta a jornada inteira');
+  await expect(tour).toContainText('A gestão comercial que comanda a jornada');
   await page.waitForTimeout(450);
   await page.screenshot({ path: 'test-results/tour-camada.png' });
   await page.keyboard.press('End');

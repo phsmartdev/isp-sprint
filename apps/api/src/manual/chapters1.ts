@@ -11,7 +11,7 @@ O Manual do RevOps é um conjunto de playbooks da categoria **Manual do sistema*
 :::
 
 # O que é o RevOps
-O RevOps (ISP Sprint) é a plataforma de receita da empresa: reúne num lugar só o funil comercial, as propostas e aprovações, os contratos e a sua execução, o pós-venda (Sucesso do Cliente), o marketing, a gestão do time, os projetos, o orçamento, a comunidade interna e esta wiki de playbooks.
+O RevOps (Revenue Operations) é a central de gestão comercial da empresa, e não só uma ferramenta de vendas: reúne num lugar só, sob a mesma gestão, com os mesmos dados e as mesmas regras, o funil comercial, as propostas e aprovações, os contratos e a sua execução, o pós-venda (Sucesso do Cliente), o marketing, a gestão do time, os projetos, o orçamento, a comunidade interna e esta wiki de playbooks.
 
 Tudo funciona sobre o mesmo cadastro de contas e pessoas: a oportunidade vira contrato, o contrato abre a jornada do cliente, e cada ação gera eventos que alimentam metas, indicadores e a gamificação.
 
