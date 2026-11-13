@@ -85,7 +85,6 @@ function Cover({ onStart }: { onStart: () => void }) {
 function Journey({ go }: { go: (i: number) => void }) {
   return (
     <div className="relative flex h-full flex-col px-[100px] py-[80px]">
-      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">A jornada do cliente</p>
       <h2 className="mt-3 max-w-[1200px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">Oito paradas, um registro contínuo.</h2>
       <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Cada parada tem um módulo responsável. O que acontece numa vira histórico na seguinte: o lead vira oportunidade, a oportunidade vira contrato, o contrato abre a implantação e o sucesso do cliente prepara a renovação.</p>
@@ -111,7 +110,6 @@ function Grid({ items, cols = 3, size = 'md' }: { items: { t: string; d: string 
 function Foundation() {
   return (
     <div className="relative flex h-full flex-col px-[100px] py-[80px]">
-      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">Os fundamentos</p>
       <h2 className="mt-3 font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que vale em todos os módulos.</h2>
       <div className="mt-auto"><Grid items={FOUNDATION} size="lg" /></div>
@@ -123,7 +121,6 @@ function Layer({ go }: { go: (i: number) => void }) {
   const cross = MODULES.filter((x) => !x.stations.length);
   return (
     <div className="relative flex h-full flex-col bg-[#F3F6F9] px-[100px] py-[80px]">
-      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">A camada de gestão</p>
       <h2 className="mt-3 max-w-[1250px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que sustenta a jornada inteira.</h2>
       <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Estes módulos não ficam numa parada: medem, financiam, ensinam e conectam as pessoas que fazem a jornada acontecer.</p>
