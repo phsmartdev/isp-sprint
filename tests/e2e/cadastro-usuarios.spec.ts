@@ -47,4 +47,27 @@ test('perfis, setores, CSM e times no cadastro de usuários', async ({ page }) =
   await page.getByRole('dialog', { name: `Excluir o time Time E2E ${st}?` }).getByRole('button', { name: 'Excluir time' }).click();
   await expect(page.getByText('Time excluído')).toBeVisible();
   await expect(page.getByRole('listitem').filter({ hasText: `Time E2E ${st}` })).toHaveCount(0);
+
+  // excluir levando as metas em aberto para outro time; e transferir depois de um time já excluído
+  const def = { name: `Tarefas E2E ${st}`, category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' }, target: 4 };
+  const ind = (await (await page.request.post('/api/v1/performance/indicators', { data: { def } })).json()).id;
+  const mkTeam = async (name: string) => (await (await page.request.post('/api/v1/admin/teams', { data: { name } })).json()).id as string;
+  const gov = await mkTeam(`Governo E2E ${st}`), neg = await mkTeam(`Negócios E2E ${st}`), old = await mkTeam(`Antigo E2E ${st}`);
+  for (const teamId of [gov, old]) expect((await page.request.post('/api/v1/performance/goals', { data: { title: `Vendas E2E ${st}`, scope: 'equipe', teamId, indicatorId: ind, periodType: 'mes', target: 10 } })).status()).toBe(201);
+  expect((await page.request.delete(`/api/v1/admin/teams/${old}`)).status()).toBe(200);
+  await page.reload();
+  await page.getByRole('listitem').filter({ hasText: `Governo E2E ${st}` }).getByRole('button', { name: 'Excluir' }).click();
+  const dlg = page.getByRole('dialog', { name: `Excluir o time Governo E2E ${st}?` });
+  await expect(dlg).toContainText('1 meta(s)');
+  await dlg.getByLabel('Levar o que está em aberto para').selectOption({ label: `Negócios E2E ${st}` });
+  await dlg.getByRole('button', { name: 'Excluir time' }).click();
+  await expect(page.getByText(/Time excluído; transferido: 1 meta/)).toBeVisible();
+  const pend = page.getByRole('region', { name: 'Times excluídos com pendências' });
+  await expect(pend).toContainText(`Antigo E2E ${st}`);
+  await pend.getByLabel(`Levar o que está em aberto de Antigo E2E ${st} para`).selectOption({ label: `Negócios E2E ${st}` });
+  await page.screenshot({ path: 'test-results/time-transferencia.png', fullPage: true });
+  await pend.getByRole('button', { name: 'Transferir' }).click();
+  await expect(page.getByText(/Transferido: 1 meta/)).toBeVisible();
+  const w = await (await page.request.get(`/api/v1/admin/teams/${neg}/open-work`)).json();
+  expect(w.goals).toBe(2);
 });

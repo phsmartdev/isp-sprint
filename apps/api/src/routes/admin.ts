@@ -1,4 +1,5 @@
 import { ensureTeamCostCenters } from '../services/budget';
+import { openTeamWork, transferTeamWork, workTotal } from '../services/teamTransfer';
 import { assertSectors } from './contractSectors';
 import { partnerCostsFromProducts, type PlanProduct } from '@isp/domain';
 import { randomBytes } from 'node:crypto';
@@ -22,6 +23,13 @@ import { clientIp, forgetIpPolicy, ipPolicyOf } from '../services/ipAccess';
 import { ipAllowed, validateIpPolicy } from '@isp/domain';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
+
+/** Time que pode receber trabalho: da empresa e não excluído. */
+async function liveTeam(db: DbOrTx, tenantId: string, id: string) {
+  const [t] = await db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(and(eq(s.teams.id, id), eq(s.teams.tenantId, tenantId), isNull(s.teams.deletedAt))).limit(1);
+  if (!t) throw unprocessable('O time de destino não existe ou foi excluído.', [{ path: 'transferTo', message: 'Time inválido' }]);
+  return t;
+}
 const SlotParams = z.object({ slot: z.enum(BRAND_SLOTS) });
 const startedAt = Date.now();
 
@@ -343,16 +351,70 @@ export const adminRoutes = [
     tag: 'Administração',
     ...ADMIN,
     params: IdParams,
-    handler: async ({ app, auth, params, req }) => app.db.transaction(async (tx) => {
+    query: z.object({ transferTo: z.string().uuid().optional() }),
+    handler: async ({ app, auth, params, query, req }) => app.db.transaction(async (tx) => {
       const [t] = await tx.select().from(s.teams).where(and(eq(s.teams.id, params.id), eq(s.teams.tenantId, auth.tenantId), isNull(s.teams.deletedAt))).limit(1);
       if (!t) throw notFound('Time não encontrado.');
+      let moved = null;
+      if (query.transferTo) {
+        const to = await liveTeam(tx, auth.tenantId, query.transferTo);
+        if (to.id === t.id) throw unprocessable('Escolha outro time para receber o que está em aberto.');
+        moved = await transferTeamWork(tx, auth.tenantId, t.id, to.id);
+        await audit(tx, req, { action: 'team.transfer', entityType: 'team', entityId: t.id, metadata: { to: to.id, toName: to.name, ...moved } });
+      }
       const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
       // o nome fica livre para um time novo; o antigo guarda a marca da exclusão
       await tx.update(s.teams).set({ active: false, deletedAt: new Date(), name: `${t.name} (excluído ${stamp})`.slice(0, 120), managerIds: [] }).where(eq(s.teams.id, t.id));
       await tx.delete(s.teamMemberships).where(eq(s.teamMemberships.teamId, t.id));
       await audit(tx, req, { action: 'team.delete', entityType: 'team', entityId: t.id, metadata: { name: t.name } });
       await ensureTeamCostCenters(tx, auth.tenantId);
-      return { ok: true };
+      return { ok: true, moved };
+    }),
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/admin/teams/:id/open-work',
+    summary: 'O que está em aberto num time (metas, objetivos, intervenções, rituais e projetos), para decidir a transferência',
+    tag: 'Administração',
+    ...ADMIN,
+    params: IdParams,
+    handler: async ({ app, auth, params }) => openTeamWork(app.db, auth.tenantId, params.id),
+  }),
+
+  defineRoute({
+    method: 'GET',
+    url: '/admin/teams/deleted-with-work',
+    summary: 'Times excluídos que ainda têm metas, intervenções, rituais, objetivos ou projetos em aberto',
+    tag: 'Administração',
+    ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const gone = await app.db.select({ id: s.teams.id, name: s.teams.name, deletedAt: s.teams.deletedAt }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), sql`${s.teams.deletedAt} is not null`)).orderBy(desc(s.teams.deletedAt));
+      const out = [];
+      for (const t of gone) {
+        const work = await openTeamWork(app.db, auth.tenantId, t.id);
+        if (workTotal(work)) out.push({ id: t.id, name: t.name.replace(/\s*\(excluído [^)]*\)\s*$/, ''), deletedAt: t.deletedAt, work });
+      }
+      return { items: out };
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/admin/teams/:id/transfer',
+    summary: 'Leva o que está em aberto de um time (inclusive excluído) para outro time ativo; o histórico fica onde está',
+    tag: 'Administração',
+    ...ADMIN,
+    params: IdParams,
+    body: z.object({ toTeamId: z.string().uuid() }),
+    handler: async ({ app, auth, params, body, req }) => app.db.transaction(async (tx) => {
+      const [from] = await tx.select().from(s.teams).where(and(eq(s.teams.id, params.id), eq(s.teams.tenantId, auth.tenantId))).limit(1);
+      if (!from) throw notFound('Time não encontrado.');
+      const to = await liveTeam(tx, auth.tenantId, body.toTeamId);
+      if (to.id === from.id) throw unprocessable('Escolha outro time para receber o que está em aberto.');
+      const moved = await transferTeamWork(tx, auth.tenantId, from.id, to.id);
+      await audit(tx, req, { action: 'team.transfer', entityType: 'team', entityId: from.id, metadata: { to: to.id, toName: to.name, ...moved } });
+      return { moved };
     }),
   }),
 

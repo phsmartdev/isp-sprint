@@ -29,6 +29,35 @@ describe('cadastro: perfis, times, setores e CSM', () => {
     ok(await carlos.post('/admin/teams', { name: `Time Temporário ${stamp}` }), 201);
   });
 
+  it('excluir time leva metas em aberto para outro; time já excluído também transfere depois', async () => {
+    const def = { name: `Tarefas ${stamp}`, category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' }, target: 4 };
+    const ind = ok(await carlos.post('/performance/indicators', { def }), 201).json().id;
+    const gov = ok(await carlos.post('/admin/teams', { name: `Governo ${stamp}` }), 201).json();
+    const neg = ok(await carlos.post('/admin/teams', { name: `Negócios ${stamp}` }), 201).json();
+    const goal = (teamId: string) => carlos.post('/performance/goals', { title: `Vendas do time ${stamp}`, scope: 'equipe', teamId, indicatorId: ind, periodType: 'mes', target: 10 });
+    const g1 = ok(await goal(gov.id), 201).json().id;
+    expect(ok(await carlos.get(`/admin/teams/${gov.id}/open-work`)).json().goals).toBe(1);
+    // destino inválido: o próprio time
+    expect((await carlos.del(`/admin/teams/${gov.id}?transferTo=${gov.id}`)).statusCode).toBe(422);
+    const r = ok(await carlos.del(`/admin/teams/${gov.id}?transferTo=${neg.id}`)).json();
+    expect(r.moved.goals).toBe(1);
+    expect(ok(await carlos.get(`/admin/teams/${neg.id}/open-work`)).json().goals).toBe(1);
+    const goals = ok(await carlos.get('/performance/goals')).json();
+    expect((goals.items ?? goals).find((x: { id: string }) => x.id === g1).teamId).toBe(neg.id);
+    // excluído sem transferir: aparece na lista de pendências e transfere depois
+    const old = ok(await carlos.post('/admin/teams', { name: `Antigo ${stamp}` }), 201).json();
+    ok(await goal(old.id), 201);
+    ok(await carlos.del(`/admin/teams/${old.id}`));
+    const pend = ok(await carlos.get('/admin/teams/deleted-with-work')).json().items;
+    const it0 = pend.find((x: { id: string }) => x.id === old.id);
+    expect(it0.name).toBe(`Antigo ${stamp}`);
+    expect(it0.work.goals).toBe(1);
+    expect((await carlos.post(`/admin/teams/${old.id}/transfer`, { toTeamId: gov.id })).statusCode).toBe(422); // destino excluído
+    expect(ok(await carlos.post(`/admin/teams/${old.id}/transfer`, { toTeamId: neg.id })).json().moved.goals).toBe(1);
+    expect(ok(await carlos.get('/admin/teams/deleted-with-work')).json().items.some((x: { id: string }) => x.id === old.id)).toBe(false);
+    ok(await carlos.del(`/admin/teams/${neg.id}`));
+  });
+
   it('setores: cria, renomeia, usa no cadastro e exclui; setor com etapas não exclui', async () => {
     const c = ok(await carlos.post('/contract-sectors', { label: `Compras ${stamp}` }), 201).json();
     ok(await carlos.patch(`/contract-sectors/${c.key}`, { label: `Suprimentos ${stamp}` }));
