@@ -13,15 +13,17 @@ import { PageHeader } from '../components/layout/PageHeader';
 import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
 import { errMsg } from '../features/contracts/shared';
+import { GiftPlanning } from '../features/budget/GiftPlanning';
 
 type Item = { id: string; name: string; supplierId: string | null; supplierName: string | null; unitCostCents: number; stock: number; minStock: number; active: boolean; low: boolean };
 type Kit = { id: string; name: string; categoryId: string | null; categoryName: string | null; active: boolean; items: { itemId: string; name: string; qty: number; unitCostCents: number; totalCents: number }[]; costCents: number; available: number };
 type Supplier = { id: string; name: string; phone: string | null; email: string | null; active: boolean; purchasedQty: number; purchasedCents: number; lastPurchaseAt: string | null; items: string[] };
 type Data = { items: Item[]; kits: Kit[]; categories: { id: string; name: string; active: boolean }[]; suppliers: Supplier[] };
-type Delivery = { id: string; contactId: string; account: string; occurredOn: string; kitName: string | null; categoryName: string | null; kits: number; items: { name: string; qty: number }[]; totalCents: number; recipients: number; by: string | null; cancelled: boolean; cancelReason: string | null };
+type Delivery = { id: string; contactId: string | null; account: string | null; purpose: string; campaign: string | null; eventName: string | null; occurredOn: string; kitName: string | null; categoryName: string | null; kits: number; items: { name: string; qty: number }[]; totalCents: number; recipients: number; by: string | null; cancelled: boolean; cancelReason: string | null };
 type Row = { key: string; name: string; qty: number; totalCents: number; deliveries: number };
-type Consumo = { totalCents: number; kits: number; deliveries: number; accounts: number; byItem: Row[]; byKit: Row[]; byCategory: Row[]; byAccount: { contactId: string; name: string; deliveries: number; kits: number; totalCents: number }[]; purchases: { supplierId: string | null; name: string; qty: number; totalCents: number }[] };
-type Tab = 'estoque' | 'kits' | 'envios' | 'consumo' | 'fornecedores';
+type Consumo = { totalCents: number; kits: number; deliveries: number; accounts: number; byItem: Row[]; byKit: Row[]; byCategory: Row[]; byAccount: { contactId: string; name: string; deliveries: number; kits: number; totalCents: number }[]; byCampaign?: { campaignId: string; name: string; deliveries: number; totalCents: number }[]; byPurpose?: { key: string; label: string; deliveries: number; totalCents: number }[]; purchases: { supplierId: string | null; name: string; qty: number; totalCents: number }[] };
+type Tab = 'planejamento' | 'estoque' | 'kits' | 'envios' | 'consumo' | 'fornecedores';
+const PURPOSES = [['relacionamento', 'Relacionamento com a conta'], ['abm', 'Conta ABM'], ['oportunidade', 'Oportunidade'], ['campanha', 'Campanha'], ['evento', 'Evento'], ['institucional', 'Ação institucional']] as const;
 
 const toCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100) || 0;
 const money = (c: number) => (c / 100).toFixed(2).replace('.', ',');
@@ -49,7 +51,7 @@ export function GiftsPage() {
     <div className="w-full">
       <PageHeader icon={<Gift />} title="Brindes" subtitle="Estoque, kits, envios para as contas e quanto foi gasto com cada uma." />
       <Tabs<Tab> label="Brindes" className="mb-5" value={tab} onChange={(t) => setF({ t })} tabs={[
-        { key: 'estoque', label: 'Estoque', count: low || undefined }, { key: 'kits', label: 'Kits' }, { key: 'envios', label: 'Envios' }, { key: 'consumo', label: 'Consumo' }, { key: 'fornecedores', label: 'Fornecedores' },
+        { key: 'planejamento', label: 'Planejamento e orçamento' }, { key: 'estoque', label: 'Estoque', count: low || undefined }, { key: 'kits', label: 'Kits' }, { key: 'envios', label: 'Envios' }, { key: 'consumo', label: 'Consumo' }, { key: 'fornecedores', label: 'Fornecedores' },
       ]} />
       {(tab === 'envios' || tab === 'consumo') && (
         <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -59,6 +61,7 @@ export function GiftsPage() {
       )}
       {q.isLoading ? <div className="card"><LoadingRows /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
         <>
+          {tab === 'planejamento' && <GiftPlanning items={q.data!.items} suppliers={q.data!.suppliers} />}
           {tab === 'estoque' && <Stock d={q.data!} />}
           {tab === 'kits' && <Kits d={q.data!} />}
           {tab === 'envios' && <Deliveries d={q.data!} from={from} to={to} />}
@@ -248,7 +251,7 @@ function Deliveries({ d, from, to }: { d: Data; from: string; to: string }) {
           <tbody>{q.data.items.map((x) => (
             <tr key={x.id} className={`border-t border-line ${x.cancelled ? 'opacity-50' : ''}`}>
               <td className={`${TD} num`}>{fmtDate(x.occurredOn)}</td>
-              <td className={TD}><Link className="font-semibold text-ink hover:underline" to={`/customers/${x.contactId}?t=brindes`}>{x.account}</Link></td>
+              <td className={TD}>{x.contactId ? <Link className="font-semibold text-ink hover:underline" to={`/customers/${x.contactId}?t=brindes`}>{x.account}</Link> : <span className="text-ink">{x.campaign ?? x.eventName ?? 'Ação institucional'}</span>}<span className="block text-xs text-muted">{PURPOSES.find((p) => p[0] === x.purpose)?.[1]}{x.campaign && x.contactId ? ` · ${x.campaign}` : ''}{x.eventName && x.contactId ? ` · ${x.eventName}` : ''}</span></td>
               <td className={TD}>{x.kitName ? `${x.kits}× ${x.kitName}` : 'Itens avulsos'}{x.categoryName && <span className="block text-xs text-muted">{x.categoryName}</span>}</td>
               <td className={TD}>{x.items.map((i) => `${i.qty}× ${i.name}`).join(', ')}</td>
               <td className={`${TD} num font-semibold text-ink`}>{fmtBRL(x.totalCents)}</td>
@@ -277,7 +280,9 @@ function CancelModal({ x, onClose }: { x: Delivery; onClose: () => void }) {
 export function SendModal({ d, onClose, account }: { d: Data; onClose: () => void; account?: { id: string; name: string } }) {
   const [term, setTerm] = useState('');
   const [acc, setAcc] = useState(account ?? null);
-  const [v, setV] = useState({ kitId: '', kits: '1', extra: [] as { itemId: string; qty: number }[], stakeholderIds: [] as string[], occurredOn: new Date().toISOString().slice(0, 10), note: '' });
+  const [v, setV] = useState({ purpose: 'relacionamento', campaignId: '', opportunityId: '', eventName: '', kitId: '', kits: '1', extra: [] as { itemId: string; qty: number }[], stakeholderIds: [] as string[], occurredOn: new Date().toISOString().slice(0, 10), note: '' });
+  const dest = useQuery({ queryKey: ['brindes', 'destinos', acc?.id], queryFn: () => api<{ campaigns: { id: string; name: string }[]; opportunities: { id: string; title: string }[] }>(`/brindes/destinos${qs({ contactId: acc?.id })}`) });
+  const accountOptional = ['campanha', 'evento', 'institucional'].includes(v.purpose);
   const found = useQuery({ queryKey: ['contacts-search', term], enabled: !acc && term.trim().length >= 2, queryFn: () => api<{ items: { id: string; name: string }[] }>(`/contacts?q=${encodeURIComponent(term)}`) });
   const people = useQuery({ queryKey: ['stakeholders', 'account', acc?.id], enabled: !!acc, queryFn: () => api<{ items: { id: string; name: string; title: string | null }[] }>(`/accounts/${acc!.id}/stakeholders`) });
   const save = useSave(onClose, 'Envio registrado');
@@ -285,11 +290,15 @@ export function SendModal({ d, onClose, account }: { d: Data; onClose: () => voi
   const kits = Number(v.kits || 0);
   const extra = v.extra.filter((l) => l.itemId && l.qty > 0);
   const total = (kit ? kit.costCents * kits : 0) + extra.reduce((t, l) => t + l.qty * (d.items.find((i) => i.id === l.itemId)?.unitCostCents ?? 0), 0);
-  const ok = acc && ((kit && kits > 0) || extra.length);
+  const ok = (acc || accountOptional) && ((kit && kits > 0) || extra.length) && (v.purpose !== 'campanha' || v.campaignId) && (v.purpose !== 'oportunidade' || v.opportunityId) && (v.purpose !== 'evento' || v.eventName.trim());
   return (
-    <Modal open onClose={onClose} size="lg" title="Registrar envio de brindes" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate({ url: '/brindes/envios', body: { contactId: acc!.id, kitId: v.kitId || null, kits: kit ? kits : 0, extra, stakeholderIds: v.stakeholderIds, occurredOn: v.occurredOn, note: v.note || null } })}>Registrar envio</Button></>}>
+    <Modal open onClose={onClose} size="lg" title="Registrar envio de brindes" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate({ url: '/brindes/envios', body: { contactId: acc?.id ?? null, purpose: v.purpose, campaignId: v.campaignId || null, opportunityId: v.opportunityId || null, eventName: v.eventName || null, kitId: v.kitId || null, kits: kit ? kits : 0, extra, stakeholderIds: v.stakeholderIds, occurredOn: v.occurredOn, note: v.note || null } })}>Registrar envio</Button></>}>
       <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Conta" htmlFor="gs-a" required className="sm:col-span-2">
+        <FormField label="Destinação" htmlFor="gs-p"><Select id="gs-p" value={v.purpose} onChange={(e) => setV({ ...v, purpose: e.target.value })}>{PURPOSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></FormField>
+        {v.purpose === 'campanha' || v.campaignId ? <FormField label="Campanha" htmlFor="gs-c" required={v.purpose === 'campanha'}><Select id="gs-c" value={v.campaignId} onChange={(e) => setV({ ...v, campaignId: e.target.value })}><option value="">Escolha</option>{dest.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></FormField>
+          : v.purpose === 'evento' ? <FormField label="Evento" htmlFor="gs-e" required><Input id="gs-e" value={v.eventName} onChange={(e) => setV({ ...v, eventName: e.target.value })} /></FormField>
+          : v.purpose === 'oportunidade' ? <FormField label="Oportunidade" htmlFor="gs-o" required><Select id="gs-o" value={v.opportunityId} onChange={(e) => setV({ ...v, opportunityId: e.target.value })}><option value="">{acc ? 'Escolha' : 'Escolha a conta primeiro'}</option>{dest.data?.opportunities.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</Select></FormField> : <div />}
+        <FormField label={accountOptional ? 'Conta (opcional)' : 'Conta'} htmlFor="gs-a" required={!accountOptional} className="sm:col-span-2">
           {acc ? <div className="flex items-center gap-3"><b className="text-ink">{acc.name}</b>{!account && <button className="text-sm font-semibold text-primary hover:underline" onClick={() => { setAcc(null); setV({ ...v, stakeholderIds: [] }); }}>Trocar</button>}</div> : (
             <div>
               <Input id="gs-a" value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Digite o nome da conta" />
@@ -341,6 +350,13 @@ function Consumption({ from, to }: { from: string; to: string }) {
       <ul className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[['Gasto com brindes', fmtBRL(c.totalCents)], ['Kits enviados', String(c.kits)], ['Envios', String(c.deliveries)], ['Contas', String(c.accounts)]].map(([l, v]) => <li key={l} className="card p-4"><p className="text-sm text-muted">{l}</p><p className="num mt-1 text-xl font-bold text-ink">{v}</p></li>)}
       </ul>
+      {(c.byPurpose?.length || c.byCampaign?.length) ? (
+        <section className="card grid gap-5 p-5 md:grid-cols-2" aria-label="Investimento em relacionamento">
+          <div><h3 className="mb-2 font-bold text-ink">Investimento por ação</h3><ul className="divide-y divide-line text-sm">{c.byPurpose?.map((x) => <li key={x.key} className="flex justify-between py-1.5"><span>{x.label} <span className="text-muted">({x.deliveries})</span></span><b className="num">{fmtBRL(x.totalCents)}</b></li>)}</ul></div>
+          <div><h3 className="mb-2 font-bold text-ink">Investimento por campanha</h3>{c.byCampaign?.length ? <ul className="divide-y divide-line text-sm">{c.byCampaign.map((x) => <li key={x.campaignId} className="flex justify-between py-1.5"><span>{x.name} <span className="text-muted">({x.deliveries})</span></span><b className="num">{fmtBRL(x.totalCents)}</b></li>)}</ul> : <p className="text-sm text-muted">Nenhum envio ligado a campanha.</p>}</div>
+          <p className="text-xs text-muted md:col-span-2">Valores pelo custo do estoque já comprado: distribuir não é despesa nova. A despesa da compra está no orçamento.</p>
+        </section>
+      ) : null}
       <section className="card overflow-x-auto p-5">
         <h3 className="mb-2 font-bold text-ink">Por conta</h3>
         {!c.byAccount.length ? <p className="text-sm text-muted">Nada no período.</p> : (

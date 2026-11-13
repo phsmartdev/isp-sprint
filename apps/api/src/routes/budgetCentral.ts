@@ -41,18 +41,18 @@ type CC = typeof s.costCenters.$inferSelect;
 
 // ------------------------------------------------------------------ acesso
 /** O que a pessoa faz num centro de custo (o backend decide; a tela só reflete). */
-function ccAccess(auth: AuthContext, c: CC) {
+export function ccAccess(auth: AuthContext, c: CC) {
   const role = costCenterRole(c, auth.userId);
   const oversees = c.managerId === auth.userId || c.directorId === auth.userId;
   const admin = isBudgetAdmin(auth);
   return { see: admin || role !== null || oversees || isFinance(auth), plan: admin || role === 'dono', execute: admin || role !== null, oversees };
 }
-async function visibleCostCenters(db: DbOrTx, auth: AuthContext) {
+export async function visibleCostCenters(db: DbOrTx, auth: AuthContext) {
   await costCentersOf(db, auth); // garante os centros dos times
   const all = await db.select().from(s.costCenters).where(and(eq(s.costCenters.tenantId, auth.tenantId), eq(s.costCenters.active, true))).orderBy(s.costCenters.code);
   return all.filter((c) => ccAccess(auth, c).see);
 }
-async function loadLine(db: DbOrTx, auth: AuthContext, id: string, lock = false) {
+export async function loadLine(db: DbOrTx, auth: AuthContext, id: string, lock = false) {
   const q = db.select().from(s.budgetLines).where(and(eq(s.budgetLines.id, id), eq(s.budgetLines.tenantId, auth.tenantId), isNull(s.budgetLines.deletedAt))).limit(1);
   const [l] = lock ? await q.for('update') : await q;
   if (!l) throw notFound('Lançamento não encontrado.');
@@ -66,7 +66,7 @@ const canDecide = (auth: AuthContext, l: Line) => {
   return st.includes((l.approvalStage ?? 'diretoria') as 'gerencia' | 'diretoria') && l.createdBy !== auth.userId && l.ownerId !== auth.userId;
 };
 
-async function logLine(db: DbOrTx, auth: AuthContext, l: Pick<Line, 'id' | 'costCenterId' | 'code'>, action: string, summary: string, data?: Record<string, unknown>) {
+export async function logLine(db: DbOrTx, auth: AuthContext, l: Pick<Line, 'id' | 'costCenterId' | 'code'>, action: string, summary: string, data?: Record<string, unknown>) {
   await db.insert(s.budgetEvents).values({ tenantId: auth.tenantId, costCenterId: l.costCenterId, entity: 'item', entityId: l.id, action, summary: `${l.code ?? 'Lançamento'}: ${summary}`, data: data ?? null, actorId: auth.userId });
 }
 /** Diferenças campo a campo (valor anterior e novo) para a auditoria. */
@@ -98,7 +98,7 @@ async function readDoc(d: z.infer<typeof Doc>) {
 }
 
 // ------------------------------------------------------------------ números (compartilhados pela central e pelo painel)
-async function figuresFor(db: DbOrTx, tenantId: string, lines: Line[], today: string) {
+export async function figuresFor(db: DbOrTx, tenantId: string, lines: Line[], today: string) {
   const ids = lines.map((l) => l.id);
   const [exps, pays, pbls, qs] = ids.length ? await Promise.all([
     db.select({ lineId: s.budgetExpenses.lineId, amountCents: s.budgetExpenses.amountCents, status: s.budgetExpenses.status, occurredOn: s.budgetExpenses.occurredOn }).from(s.budgetExpenses).where(and(eq(s.budgetExpenses.tenantId, tenantId), inArray(s.budgetExpenses.lineId, ids))),
@@ -130,7 +130,55 @@ const PlanningBody = z.object({
   priority: z.enum(BUDGET_PRIORITIES).default('media'), expenseType: z.enum(EXPENSE_TYPES).default('pontual'),
 });
 
+
+export type NewLineInput = z.infer<typeof PlanningBody> & { costCenterId: string; recurrenceMonths: number; giftItemId?: string | null; giftDestination?: string | null };
+/** Cria um ou mais lançamentos (recorrente = um por mês) no centro de custo, com código único e histórico. */
+export async function createLines(db: DbOrTx, auth: AuthContext, body: NewLineInput) {
+      const cc = await loadCostCenter(db, auth, body.costCenterId, 'planejar');
+      const accounts = await accountsOf(db, auth.tenantId);
+      const acc = accounts.find((a) => a.id === body.accountId);
+      if (!acc?.leaf || !acc.active) throw unprocessable('Escolha uma subconta ativa (conta analítica).', [{ path: 'accountId', message: 'Conta inválida' }]);
+      const amount = totalCents(body.qty as unknown as number, body.unitCents);
+      if (amount <= 0) throw unprocessable('O total do lançamento precisa ser maior que zero.');
+      const group = body.recurrenceMonths > 1 ? crypto.randomUUID() : null;
+      const created = await (db as typeof db & { transaction: <T>(f: (tx: DbOrTx) => Promise<T>) => Promise<T> }).transaction(async (tx) => {
+        const out: Line[] = [];
+        for (let i = 0; i < body.recurrenceMonths; i++) {
+          const mm = Number(body.month.slice(5)) - 1 + i, m = `${Number(body.month.slice(0, 4)) + Math.floor(mm / 12)}-${String((mm % 12) + 1).padStart(2, '0')}`;
+          const plan = await planFor(tx, auth, cc.id, m);
+          const [l] = await tx.insert(s.budgetLines).values({
+            tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: body.accountId, what: body.what, how: body.how ?? null, justification: body.justification ?? null, objective: body.objective ?? null,
+            ownerId: body.ownerId ?? auth.userId, projectId: body.projectId ?? null, campaignId: body.campaignId ?? null, supplierId: body.supplierId ?? null,
+            qtyMilli: body.qty as unknown as number, unit: body.unit, unitCents: body.unitCents, amountCents: amount, month: m, plannedOn: i === 0 ? body.plannedOn ?? null : null,
+            priority: body.priority, expenseType: body.recurrenceMonths > 1 ? 'recorrente' : body.expenseType, giftItemId: body.giftItemId ?? null, giftDestination: body.giftDestination ?? null, recurrenceGroupId: group, approvalState: 'planejado', status: 'rascunho',
+            createdBy: auth.userId, code: await nextLineCode(tx, auth.tenantId, Number(m.slice(0, 4))),
+          }).returning();
+          await logLine(tx, auth, l!, 'criado', `planejado “${l!.what}” (${milliToQty(l!.qtyMilli)} × ${brl(body.unitCents)} = ${brl(amount)}) em ${m}.`, { planned: amount });
+          await syncPlan(tx, plan.id);
+          out.push(l!);
+        }
+        return out;
+      });
+  return created;
+}
+
 export const budgetCentralRoutes = [
+  defineRoute({
+    method: 'GET', url: '/budget/linked', summary: 'Orçamento ligado a um projeto ou campanha: lançamentos dos centros que a pessoa vê, com planejado, aprovado, comprometido, realizado e pago', ...M,
+    query: z.object({ projectId: uuid.optional(), campaignId: uuid.optional() }).refine((q) => !!q.projectId !== !!q.campaignId, 'Informe o projeto ou a campanha'),
+    handler: async ({ app, auth, query }) => {
+      const ccs = await visibleCostCenters(app.db, auth);
+      const ids = ccs.map((c) => c.id);
+      const lines = ids.length ? await app.db.select().from(s.budgetLines).where(and(eq(s.budgetLines.tenantId, auth.tenantId), inArray(s.budgetLines.costCenterId, ids), isNull(s.budgetLines.deletedAt), query.projectId ? eq(s.budgetLines.projectId, query.projectId) : eq(s.budgetLines.campaignId, query.campaignId!))).orderBy(asc(s.budgetLines.month)) : [];
+      const rows = await figuresFor(app.db, auth.tenantId, lines, todayIn(auth.timezone ?? 'America/Sao_Paulo'));
+      const sum = (k: 'planned' | 'approved' | 'committed' | 'realized' | 'paid' | 'balance') => rows.reduce((t, r) => t + r.f[k], 0);
+      const ccOf = new Map(ccs.map((c) => [c.id, c.code]));
+      return {
+        totals: { planned: sum('planned'), approved: sum('approved'), committed: sum('committed'), realized: sum('realized'), paid: sum('paid'), balance: sum('balance') },
+        rows: rows.map((r) => ({ id: r.l.id, code: r.l.code, what: r.l.what, month: r.l.month, costCenter: ccOf.get(r.l.costCenterId), approvalState: r.l.approvalState, financial: r.financial, ...r.f })),
+      };
+    },
+  }),
   // ------------------------------------------------------------------ tela principal
   defineRoute({
     method: 'GET', url: '/budget/central', summary: 'Central do orçamento: indicadores do período e dos filtros, lançamentos com planejado, aprovado, comprometido, realizado, pago, saldo e desvio, centros com alerta e evolução mensal', ...M, query: Filters,
@@ -250,31 +298,7 @@ export const budgetCentralRoutes = [
     method: 'POST', url: '/budget/central/lines', summary: 'Cria lançamento (unitário, por quantidade ou recorrente por N meses) no centro de custo, com código único', ...M,
     body: PlanningBody.extend({ costCenterId: uuid, recurrenceMonths: z.number().int().min(1).max(24).default(1) }),
     handler: async ({ app, auth, body, req, reply }) => {
-      const cc = await loadCostCenter(app.db, auth, body.costCenterId, 'planejar');
-      const accounts = await accountsOf(app.db, auth.tenantId);
-      const acc = accounts.find((a) => a.id === body.accountId);
-      if (!acc?.leaf || !acc.active) throw unprocessable('Escolha uma subconta ativa (conta analítica).', [{ path: 'accountId', message: 'Conta inválida' }]);
-      const amount = totalCents(body.qty as unknown as number, body.unitCents);
-      if (amount <= 0) throw unprocessable('O total do lançamento precisa ser maior que zero.');
-      const group = body.recurrenceMonths > 1 ? crypto.randomUUID() : null;
-      const created = await app.db.transaction(async (tx) => {
-        const out: Line[] = [];
-        for (let i = 0; i < body.recurrenceMonths; i++) {
-          const mm = Number(body.month.slice(5)) - 1 + i, m = `${Number(body.month.slice(0, 4)) + Math.floor(mm / 12)}-${String((mm % 12) + 1).padStart(2, '0')}`;
-          const plan = await planFor(tx, auth, cc.id, m);
-          const [l] = await tx.insert(s.budgetLines).values({
-            tenantId: auth.tenantId, planId: plan.id, costCenterId: cc.id, accountId: body.accountId, what: body.what, how: body.how ?? null, justification: body.justification ?? null, objective: body.objective ?? null,
-            ownerId: body.ownerId ?? auth.userId, projectId: body.projectId ?? null, campaignId: body.campaignId ?? null, supplierId: body.supplierId ?? null,
-            qtyMilli: body.qty as unknown as number, unit: body.unit, unitCents: body.unitCents, amountCents: amount, month: m, plannedOn: i === 0 ? body.plannedOn ?? null : null,
-            priority: body.priority, expenseType: body.recurrenceMonths > 1 ? 'recorrente' : body.expenseType, recurrenceGroupId: group, approvalState: 'planejado', status: 'rascunho',
-            createdBy: auth.userId, code: await nextLineCode(tx, auth.tenantId, Number(m.slice(0, 4))),
-          }).returning();
-          await logLine(tx, auth, l!, 'criado', `planejado “${l!.what}” (${milliToQty(l!.qtyMilli)} × ${brl(body.unitCents)} = ${brl(amount)}) em ${m}.`, { planned: amount });
-          await syncPlan(tx, plan.id);
-          out.push(l!);
-        }
-        return out;
-      });
+      const created = await createLines(app.db, auth, body);
       await audit(app.db, req, { action: 'budget.line.create', entityType: 'budget_line', entityId: created[0]!.id, metadata: { count: created.length } });
       reply.code(201);
       return { items: created.map((l) => ({ id: l.id, code: l.code, month: l.month, amountCents: l.amountCents })) };

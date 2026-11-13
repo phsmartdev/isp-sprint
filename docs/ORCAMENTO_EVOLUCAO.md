@@ -13,8 +13,13 @@
 - **Execução e financeiro:** fornecedor, cotação, negociado, contratado (vira comprometido), pedido de compra, entrega, despesa reconhecida, documentos; títulos e parcelas (Financeiro), pagamentos parciais, juros, multa, desconto, estorno e conciliação, idempotentes.
 - **Tela única:** Recursos e Orçamento → Planejamento orçamentário → **Central do orçamento** (indicadores, filtros, evolução em linhas com clique no mês, tabela em DRE com colunas escolhidas e exportação, painel lateral com 6 seções, aprovação em lote).
 
+## Fase 5 — Integrações (entregue)
+- **Brindes = lançamento do orçamento** (sem controle paralelo): planejar o brinde cria o lançamento (`gift_item_id`, destinação) no centro de custo; a aprovação parcial aparece como restrição no planejamento; a compra registra o comprometido e a economia, e acima do autorizado pede o Budget Guardião; o recebimento entra no estoque ligado ao lançamento (`gift_movements.line_id`) e não gera despesa nova (migração 0154).
+- **Distribuição com destinação:** relacionamento, conta ABM, oportunidade, campanha, evento ou ação institucional (conta opcional nos três últimos); investimento em relacionamento por ação e por campanha no Consumo.
+- **Projetos e campanhas** mostram o orçamento ligado (planejado, aprovado, comprometido, realizado, pago, saldo).
+- Contratos de recursos já se ligam ao lançamento na execução; metas e planos de ação ficam na Fase 6/14 (Inteligência e Gestão de Resultados).
+
 ## Próximas fases
-- **5 — Integrações:** brindes ↔ demanda orçamentária (sem duplicar despesa), projetos, contratos, metas.
 - **6 — Inteligência:** Eficiência Orçamentária em Relatórios e Inteligência (custo por resultado, por área).
 - **7 — Fechamento mensal e e-mail:** estados do fechamento, demonstrativos, relatório HTML por destinatário com permissões.
 - **8 — Homologação** final dos critérios de aceite restantes.

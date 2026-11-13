@@ -5245,6 +5245,8 @@ export const budgetLines = pgTable('budget_lines', {
   projectId: uuid('project_id'),
   campaignId: uuid('campaign_id'),
   giftItemId: uuid('gift_item_id'),
+  /** destinação prevista do brinde (clientes, contas ABM, oportunidades, campanha, evento, ação institucional) */
+  giftDestination: text('gift_destination'),
   qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull().default(1000),
   unit: text('unit').notNull().default('un'),
   unitCents: bigint('unit_cents', { mode: 'number' }),
@@ -5847,7 +5849,12 @@ export const giftKits = pgTable('gift_kits', {
 export const giftDeliveries = pgTable('gift_deliveries', {
   id: id(),
   tenantId: tenantId(),
-  contactId: uuid('contact_id').notNull().references(() => contacts.id),
+  contactId: uuid('contact_id').references(() => contacts.id),
+  /** para que foi: relacionamento com a conta, ABM, oportunidade, campanha, evento ou ação institucional */
+  purpose: text('purpose').notNull().default('relacionamento'),
+  opportunityId: uuid('opportunity_id').references(() => opportunities.id),
+  campaignId: uuid('campaign_id').references(() => campaigns.id),
+  eventName: text('event_name'),
   kitId: uuid('kit_id').references(() => giftKits.id),
   kitName: text('kit_name'),
   categoryName: text('category_name'),
@@ -5862,7 +5869,7 @@ export const giftDeliveries = pgTable('gift_deliveries', {
   cancelledAt: ts('cancelled_at'),
   cancelledBy: uuid('cancelled_by').references(() => users.id),
   cancelReason: text('cancel_reason'),
-}, (t) => ({ idx: index('gift_deliveries_idx').on(t.tenantId, t.contactId, t.occurredOn) }));
+}, (t) => ({ idx: index('gift_deliveries_idx').on(t.tenantId, t.contactId, t.occurredOn), purposeCk: check('gift_deliveries_purpose_ck', inList('purpose', ['relacionamento', 'abm', 'oportunidade', 'campanha', 'evento', 'institucional'])), targetCk: check('gift_deliveries_target_ck', sql`contact_id is not null or purpose in ('campanha', 'evento', 'institucional')`) }));
 
 /** Movimentos de estoque (append-only): entrada (compra, com fornecedor e custo), saída (envio), devolução (envio cancelado) e ajuste. */
 export const giftMovements = pgTable('gift_movements', {
@@ -5874,6 +5881,8 @@ export const giftMovements = pgTable('gift_movements', {
   unitCostCents: integer('unit_cost_cents').notNull(),
   supplierId: uuid('supplier_id').references(() => suppliers.id),
   deliveryId: uuid('delivery_id').references(() => giftDeliveries.id),
+  /** recebimento de uma compra planejada no orçamento (não gera despesa nova: a despesa é a do lançamento) */
+  lineId: uuid('line_id').references(() => budgetLines.id),
   note: text('note'),
   actorId: uuid('actor_id').references(() => users.id),
   createdAt: createdAt(),

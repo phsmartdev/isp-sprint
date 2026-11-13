@@ -1,4 +1,5 @@
 /** Projeto: quadro, lista, calendário, linha do tempo, marcos, equipe e histórico. */
+import { LinkedBudget } from '../../features/budget/LinkedBudget';
 import { useMemo, useRef, useState, type DragEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -20,7 +21,7 @@ import { TaskDrawer } from '../../features/tasks/TaskDrawer';
 import { HomologationDialog, RisksAndImpediments } from '../../features/projects/governance';
 import { HealthChip, LinkChips, PRIORITY_LABELS, ProgressBar, STATUS_TONE, type Milestone, type ProjectDetail, type Stage, type Task } from '../../features/projects/shared';
 
-type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'riscos' | 'equipe' | 'documentos' | 'historico';
+type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'riscos' | 'equipe' | 'documentos' | 'orcamento' | 'historico';
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 const PRIO_TONE = { baixa: 'neutral', media: 'sky', alta: 'red' } as const;
 
@@ -85,7 +86,7 @@ export function ProjectDetailPage() {
 
       <Tabs label="Visões do projeto" value={u.t as TabKey} onChange={(t) => setU({ t }, { resetPage: false })} tabs={[
         { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' }, { key: 'responsavel', label: 'Por responsável' },
-        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'riscos', label: 'Riscos e impedimentos' }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'historico', label: 'Histórico' },
+        { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'riscos', label: 'Riscos e impedimentos' }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'orcamento', label: 'Orçamento' }, { key: 'historico', label: 'Histórico' },
       ]} />
 
       {['quadro', 'lista', 'calendario', 'linha', 'responsavel'].includes(u.t) && p.can.work && (
@@ -94,6 +95,7 @@ export function ProjectDetailPage() {
           <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setTask('new')}>Nova tarefa</Button>
         </div>
       )}
+      {u.t === 'orcamento' && <LinkedBudget projectId={p.id} />}
       {u.t === 'quadro' && <Board p={p} onOpen={openTask} />}
       {u.t === 'lista' && <TaskList p={p} onOpen={openTask} />}
       {u.t === 'calendario' && <Calendar p={p} onOpen={openTask} />}

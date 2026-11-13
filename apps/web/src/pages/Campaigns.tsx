@@ -1,4 +1,5 @@
 /** Campanhas: concepção, vigência, orçamento, gastos e resultado (leads, vendas e ROI). */
+import { LinkedBudget } from '../features/budget/LinkedBudget';
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -240,6 +241,7 @@ export function CampaignDetailPage() {
         </section>
       )}
 
+      {tab === 'gastos' && <div className="mb-4"><LinkedBudget campaignId={c.id} /></div>}
       {tab === 'gastos' && (
         <section className="card overflow-hidden">
           <div className="px-5 pb-3 pt-4"><h2 className="text-md font-bold text-ink">Gastos realizados</h2><p className="text-sm text-muted">Orçamento: {fmtBRL(c.budgetCents)} · Gasto: {fmtBRL(m.spentCents)} · Saldo: {c.budgetCents != null ? fmtBRL(c.budgetCents - m.spentCents) : '—'}</p></div>
