@@ -15,7 +15,7 @@ const firstModuleOf = (k: StationKey) => SLIDES.findIndex((s) => s.kind === 'mod
 const titleOf = (s: Slide) => (s.kind === 'module' ? s.title : { cover: 'Abertura', revops: 'O que é RevOps', journey: 'A jornada do cliente', foundation: 'Os fundamentos', layer: 'A camada de gestão', start: 'Por onde começar' }[s.kind]);
 
 /** Palco escalado: mantém a proporção 16:9 e o texto do mesmo tamanho relativo em qualquer tela. */
-function Stage({ children }: { children: ReactNode }) {
+export function Stage({ children }: { children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const [k, setK] = useState(1);
   useLayoutEffect(() => {

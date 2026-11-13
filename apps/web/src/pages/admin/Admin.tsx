@@ -611,6 +611,7 @@ export function AdminSecurity() {
 const ART_SLOTS: { slot: BrandSlot; title: string; where: string; size: string; maxDim: number; aspect: string }[] = [
   { slot: 'login_fundo', title: 'Fundo da tela de login', where: 'Cobre a tela de acesso, atrás das boas-vindas e do quadro de login.', size: 'Recomendado: 1920 × 1080 px, paisagem.', maxDim: 2560, aspect: 'aspect-[16/9]' },
   { slot: 'banner_inicio', title: 'Banner do Início', where: 'O bloco “Nova oportunidade” da tela inicial. O texto fica à esquerda, com um véu escuro por cima da imagem.', size: 'Recomendado: 1600 × 520 px.', maxDim: 2000, aspect: 'aspect-[3/1]' },
+  { slot: 'selos_certificacoes', title: 'Selos e certificações', where: 'A faixa de selos e certificações da apresentação institucional (Central de Playbooks). Use fundo transparente.', size: 'Recomendado: PNG 2400 × 220 px, fundo transparente.', maxDim: 2800, aspect: 'aspect-[11/1]' },
   { slot: 'card_sidebar', title: 'Cartão do menu lateral', where: 'O cartão decorativo no rodapé do menu à esquerda.', size: 'Recomendado: 560 × 240 px.', maxDim: 1200, aspect: 'aspect-[7/3]' },
 ];
 
