@@ -183,16 +183,53 @@ async function fileToBase64(file: File) {
 const IMG_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
 type Team = { id: string; name: string; active?: boolean };
+type TeamWork = { goals: number; objectives: number; interventions: number; rituals: number; projects: number };
+const workText = (w: TeamWork) => [[w.goals, 'meta(s)'], [w.interventions, 'intervenção(ões)'], [w.objectives, 'objetivo(s)'], [w.rituals, 'ritual(is)'], [w.projects, 'projeto(s)']].filter(([n]) => (n as number) > 0).map(([n, l]) => `${n} ${l}`).join(', ');
+const workTotal = (w: TeamWork) => w.goals + w.objectives + w.interventions + w.rituals + w.projects;
+
+/** Times já excluídos que ainda têm metas, intervenções etc. em aberto: leva tudo para um time ativo. */
+function DeletedTeamsWithWork({ teams }: { teams: Team[] }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const q = useQuery({ queryKey: ['admin', 'teams', 'deleted-with-work'], queryFn: () => api<{ items: { id: string; name: string; deletedAt: string; work: TeamWork }[] }>('/admin/teams/deleted-with-work') });
+  const [dest, setDest] = useState<Record<string, string>>({});
+  const tr = useMutation({
+    mutationFn: (v: { from: string; to: string }) => api<{ moved: TeamWork }>(`/admin/teams/${v.from}/transfer`, { method: 'POST', body: { toTeamId: v.to } }),
+    onSuccess: (r) => { qc.invalidateQueries(); toast({ tone: 'success', message: `Transferido: ${workText(r.moved) || 'nada em aberto'}` }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const live = teams.filter((t) => t.active !== false);
+  if (!q.data?.items.length) return null;
+  return (
+    <section aria-label="Times excluídos com pendências" className="mb-3 border-l-4 border-warning bg-warning-soft/40 px-4 py-3">
+      <p className="mb-2 text-sm font-bold text-ink">Times excluídos com coisas em aberto</p>
+      <ul className="space-y-2 text-sm">
+        {q.data.items.map((t) => (
+          <li key={t.id} className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1"><b>{t.name}</b> <span className="text-muted">· excluído em {fmtDateTime(t.deletedAt)} · {workText(t.work)}</span></span>
+            <Select aria-label={`Levar o que está em aberto de ${t.name} para`} className="max-w-[200px]" value={dest[t.id] ?? ''} onChange={(e) => setDest({ ...dest, [t.id]: e.target.value })}>
+              <option value="">Levar para…</option>
+              {live.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </Select>
+            <Button size="sm" variant="primary" disabled={!dest[t.id]} loading={tr.isPending && tr.variables?.from === t.id} onClick={() => tr.mutate({ from: t.id, to: dest[t.id]! })}>Transferir</Button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 /** Time na lista: renomear, ativar ou inativar (inativo sai das escolhas; os membros continuam vinculados). */
-function TeamRow({ t, members }: { t: Team; members: number }) {
+function TeamRow({ t, members, others }: { t: Team; members: number; others: Team[] }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [name, setName] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [transferTo, setTransferTo] = useState('');
+  const work = useQuery({ queryKey: ['admin', 'teams', t.id, 'open-work'], queryFn: () => api<TeamWork>(`/admin/teams/${t.id}/open-work`), enabled: deleting });
   const del = useMutation({
-    mutationFn: () => api(`/admin/teams/${t.id}`, { method: 'DELETE' }),
-    onSuccess: () => { setDeleting(false); qc.invalidateQueries(); toast({ tone: 'success', message: 'Time excluído' }); },
+    mutationFn: () => api<{ moved: TeamWork | null }>(`/admin/teams/${t.id}${qs({ transferTo: transferTo || undefined })}`, { method: 'DELETE' }),
+    onSuccess: (r) => { setDeleting(false); qc.invalidateQueries(); toast({ tone: 'success', message: r.moved && workTotal(r.moved) ? `Time excluído; transferido: ${workText(r.moved)}` : 'Time excluído' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const m = useMutation({
@@ -222,6 +259,17 @@ function TeamRow({ t, members }: { t: Team; members: number }) {
       <Modal open={deleting} onClose={() => setDeleting(false)} title={`Excluir o time ${t.name}?`}
         footer={<><Button onClick={() => setDeleting(false)}>Cancelar</Button><Button variant="danger" loading={del.isPending} onClick={() => del.mutate()}>Excluir time</Button></>}>
         <p className="text-sm text-ink">O time sai de todas as escolhas, telas e do orçamento (o centro de custo do time fica inativo). {members ? `${members} pessoa(s) deixam de fazer parte dele.` : ''} O que já foi registrado com este time continua no histórico.</p>
+        {work.data && workTotal(work.data) > 0 && (
+          <div className="mt-4 space-y-2">
+            <p className="text-sm text-ink">Em aberto neste time: <b>{workText(work.data)}</b>. Se o trabalho continua em outro time, leve para lá; senão, fica no time excluído.</p>
+            <FormField label="Levar o que está em aberto para" htmlFor={`tr-${t.id}`}>
+              <Select id={`tr-${t.id}`} value={transferTo} onChange={(e) => setTransferTo(e.target.value)}>
+                <option value="">Não transferir</option>
+                {others.filter((x) => x.id !== t.id && x.active !== false).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </Select>
+            </FormField>
+          </div>
+        )}
       </Modal>
     </li>
   );
@@ -414,7 +462,8 @@ export function AdminUsers() {
       </section>
       <section className="card p-5">
         <h2 className="mb-2 text-md font-bold text-ink">Times</h2>
-        <ul className="mb-3 divide-y divide-line rounded-md border border-line">{teams.map((t) => <TeamRow key={t.id} t={t} members={users.filter((u) => u.teamIds.includes(t.id)).length} />)}</ul>
+        <DeletedTeamsWithWork teams={teams} />
+        <ul className="mb-3 divide-y divide-line rounded-md border border-line">{teams.map((t) => <TeamRow key={t.id} t={t} others={teams} members={users.filter((u) => u.teamIds.includes(t.id)).length} />)}</ul>
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (newTeam.trim().length >= 2) team.mutate(); }}>
           <Input aria-label="Nome do novo time" className="max-w-xs" value={newTeam} onChange={(e) => setNewTeam(e.target.value)} placeholder="Nome do novo time" />
           <Button type="submit" icon={<Plus className="h-4 w-4" />} loading={team.isPending}>Criar time</Button>
