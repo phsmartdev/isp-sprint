@@ -3,11 +3,15 @@
  * Slide 1: logo, presença em Sergipe (mapa em pontos com Porto da Folha em destaque) e os selos e certificações,
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
  */
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { ChevronLeft, ChevronRight, ImagePlus, X } from 'lucide-react';
-import { BrandArt } from '../../components/brand';
+import { ChevronLeft, ChevronRight, ImagePlus, Maximize2, Minimize2, Trash2, Upload, X } from 'lucide-react';
+import { BrandArt, useBrand } from '../../components/brand';
+import { api } from '../../lib/api';
+import { compressImage, fileToBase64 } from '../../lib/files';
+import { useToast } from '../../components/ui/overlay';
 import { useAuth } from '../../auth/AuthProvider';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
@@ -100,7 +104,7 @@ function SlidePresence({ canConfigure }: { canConfigure: boolean }) {
             <BrandArt slot="selos_certificacoes" className="h-full w-full object-contain object-left" fallback={
               <div className="flex h-full items-center gap-4 border border-dashed border-white/25 px-6 text-white/60">
                 <ImagePlus className="h-8 w-8 shrink-0" aria-hidden />
-                <p className="text-[18px] leading-snug">Espaço para a imagem dos selos e certificações.{canConfigure ? ' Envie em Configuração → Personalização → Selos e certificações.' : ' A administração envia a imagem em Personalização.'}</p>
+                <p className="text-[18px] leading-snug">Espaço para a imagem dos selos e certificações.{canConfigure ? ' Use o botão “Enviar selos” na barra de baixo (PNG com fundo transparente).' : ' A administração envia a imagem.'}</p>
               </div>
             } />
           </div>
@@ -112,6 +116,36 @@ function SlidePresence({ canConfigure }: { canConfigure: boolean }) {
 
 const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }];
 
+/** Envio da imagem dos selos e certificações direto da apresentação (o mesmo espaço da Personalização). */
+function SealsUpload({ cls }: { cls: string }) {
+  const { bump } = useBrand();
+  const qc = useQueryClient();
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['lookups'] }); bump(); };
+  const toast = useToast();
+  const input = useRef<HTMLInputElement>(null);
+  const up = useMutation({
+    mutationFn: async (file: File) => {
+      if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) throw new Error('Envie PNG, JPG ou WebP.');
+      const small = await compressImage(file, { maxBytes: 2_900_000, maxDim: 2800, keepAlpha: true, format: 'webp' });
+      if (small.size > 3 * 1024 * 1024) throw new Error('A imagem passa de 3 MB mesmo reduzida.');
+      return api('/admin/branding/selos_certificacoes', { method: 'PUT', body: { data: await fileToBase64(small) } });
+    },
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Selos e certificações atualizados' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const del = useMutation({
+    mutationFn: () => api('/admin/branding/selos_certificacoes', { method: 'DELETE' }),
+    onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Imagem dos selos removida' }); },
+  });
+  return (
+    <>
+      <button type="button" className={cls} disabled={up.isPending} onClick={() => input.current?.click()}><Upload className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">{up.isPending ? 'Enviando…' : 'Enviar selos'}</span></button>
+      <button type="button" className={cls} onClick={() => del.mutate()} aria-label="Remover a imagem dos selos"><Trash2 className="h-4 w-4" aria-hidden /></button>
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Imagem dos selos e certificações" onChange={(e) => { const f = e.target.files?.[0]; if (f) up.mutate(f); e.target.value = ''; }} />
+    </>
+  );
+}
+
 export function InstitutionalPresentation() {
   const nav = useNavigate();
   const { can } = useAuth();
@@ -119,24 +153,27 @@ export function InstitutionalPresentation() {
   const i = Math.min(SLIDES.length - 1, Math.max(0, Number(sp.get('s') ?? 1) - 1 || 0));
   const go = useCallback((n: number) => setSp({ s: String(Math.min(SLIDES.length, Math.max(1, n + 1))) }, { replace: true }), [setSp]);
   const close = useCallback(() => { if (document.fullscreenElement) void document.exitFullscreen(); nav('/playbooks'); }, [nav]);
+  const [full, setFull] = useState(!!document.fullscreenElement);
+  const toggleFull = useCallback(() => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => undefined); }, []);
+  useEffect(() => { const f = () => setFull(!!document.fullscreenElement); document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); go(i + 1); }
       else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); go(i - 1); }
-      else if (e.key === 'f' || e.key === 'F') { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.(); }
+      else if (e.key === 'f' || e.key === 'F') toggleFull();
       else if (e.key === 'Escape' && !document.fullscreenElement) close();
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [i, go, close]);
+  }, [i, go, close, toggleFull]);
   const btn = 'flex h-10 items-center gap-2 px-3 text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-30';
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
-      <div className="flex min-h-0 flex-1 flex-col px-3 py-3 sm:px-6 sm:py-5"><Stage>{SLIDES[i]!.key === 'presenca' && <SlidePresence canConfigure={can('configuracoes', 'total')} />}</Stage></div>
+      <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>{SLIDES[i]!.key === 'presenca' && <SlidePresence canConfigure={can('configuracoes', 'total')} />}</Stage></div>
       <nav aria-label="Controles da apresentação" className="flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
         <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>
         <p className="text-sm text-white/60"><span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
-        <div className="flex gap-1"><button type="button" className={btn} onClick={() => go(i - 1)} disabled={i === 0} aria-label="Slide anterior"><ChevronLeft className="h-5 w-5" /></button><button type="button" className={btn} onClick={() => go(i + 1)} disabled={i === SLIDES.length - 1} aria-label="Próximo slide"><ChevronRight className="h-5 w-5" /></button></div>
+        <div className="flex gap-1">{can('configuracoes', 'total') && <SealsUpload cls={btn} />}<button type="button" className={btn} onClick={toggleFull} aria-label={full ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}>{full ? <Minimize2 className="h-4 w-4" aria-hidden /> : <Maximize2 className="h-4 w-4" aria-hidden />}<span className="hidden sm:inline">{full ? 'Sair da tela cheia' : 'Tela cheia'}</span></button><button type="button" className={btn} onClick={() => go(i - 1)} disabled={i === 0} aria-label="Slide anterior"><ChevronLeft className="h-5 w-5" /></button><button type="button" className={btn} onClick={() => go(i + 1)} disabled={i === SLIDES.length - 1} aria-label="Próximo slide"><ChevronRight className="h-5 w-5" /></button></div>
       </nav>
     </div>
   );
