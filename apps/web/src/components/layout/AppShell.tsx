@@ -5,7 +5,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
-  BarChart3, Bell, UsersRound, HandHelping, Eye, EyeOff, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen } from 'lucide-react';
+  BarChart3, Bell, UsersRound, HandHelping, Eye, EyeOff, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen, Presentation } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
 import { MentionsMenu } from '../../features/MentionsMenu';
@@ -216,6 +216,12 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           })}
         </ul>
       </nav>
+      <div className="px-3 pb-2 pt-1">
+        <Link to="/tour" onClick={onNavigate} className={clsx(NAV_ITEM, 'border border-white/15 text-white/85 hover:border-white/30 hover:bg-white/[0.06] hover:text-white')}>
+          <Presentation className={ICON} aria-hidden />
+          <span className="min-w-0 flex-1">Tour RevOps</span>
+        </Link>
+      </div>
       <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[110px] shrink-0 [@media(max-height:1000px)]:hidden' : 'h-[120px] shrink-0 [@media(max-height:900px)]:hidden')} aria-hidden>
         <BrandArt slot="card_sidebar" className="absolute inset-0 h-full w-full" fallback={<>
           <Hexagons className="absolute inset-0 h-full w-full" />

@@ -1,0 +1,42 @@
+import { expect, test } from '@playwright/test';
+
+/** Tour RevOps: item no menu, apresentação em tela cheia navegável por teclado e índice. */
+test('tour revops: abre pelo menu, navega pelos slides e fecha', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/login');
+  await page.getByLabel('E-mail').fill('carlos@yepnet.test');
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page).not.toHaveURL(/\/login/);
+  await page.getByRole('link', { name: 'Tour RevOps' }).click();
+  const tour = page.getByRole('region', { name: 'Tour RevOps' });
+  await expect(tour).toContainText('A receita da empresa');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-01-capa.png' });
+  await tour.getByRole('button', { name: 'Começar a apresentação' }).click();
+  await expect(tour).toContainText('Oito paradas');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-02-jornada.png' });
+  await tour.getByRole('button', { name: 'Ir para Contrato' }).click();
+  await expect(tour).toContainText('Gestão de Contratos');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-modulo.png' });
+  await page.keyboard.press('ArrowRight');
+  await expect(page).toHaveURL(/s=\d+/);
+  await page.keyboard.press('i');
+  const idx = page.getByRole('dialog', { name: 'Índice dos slides' });
+  await idx.getByRole('button', { name: /A camada de gestão/ }).click();
+  await expect(tour).toContainText('O que sustenta a jornada inteira');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-camada.png' });
+  await page.keyboard.press('End');
+  await expect(tour).toContainText('Cada perfil tem um primeiro passo');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-fim.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: 'test-results/tour-390.png' });
+  await page.keyboard.press('Escape');
+  await expect(tour).toHaveCount(0);
+});
