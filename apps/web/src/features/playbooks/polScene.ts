@@ -1,12 +1,14 @@
 /**
- * Slide "Rede POL" da apresentação institucional: prédio de vidro à noite, em perspectiva de 2 pontos
- * (verticais retas, como foto de arquitetura), com a rede óptica passiva desenhada em "raio-x".
- * Entrada: a fibra chega da rua à OLT no térreo, sobe pela prumada e, em cada andar, o splitter se abre até as
- * ONTs e as janelas daquele andar acendem. Depois os pulsos de luz ficam em loop.
- * Gera o SVG como texto (palco de 1600 × 900); as animações são as classes pol-* de styles/index.css.
+ * Slide "Rede POL" da apresentação institucional: o MESMO prédio de vidro à noite (perspectiva de 2 pontos, verticais
+ * retas como foto de arquitetura) com duas camadas de infraestrutura sobre ele:
+ *  - L-trad: LAN tradicional (rack central, prumada de cobre, rack com switch e energia em cada andar, um cabo por ponto);
+ *  - L-pol: rede óptica passiva (OLT, prumada de fibra, splitter passivo por andar, ONT nos mesmos pontos).
+ * A troca entre as duas é feita só por CSS, pelo atributo data-mode ("trad" | "pol") num ancestral: cada elemento tem
+ * --in (atraso ao entrar) e --out (atraso ao sair), e assim a transição de ~3 s roda nos dois sentidos sem trocar de cena.
+ * Gera o SVG como texto (palco de 1600 × 900); classes em styles/index.css (pol-* da cena, nx-* da transição).
  */
 
-export type PolCallout = { x: number; y: number; top: number; title: string; text: string; delay: number };
+export type PolCallout = { mode: NetMode; top: number; title: string; text: string };
 
 const TH = (32 * Math.PI) / 180, CO = Math.cos(TH), SI = Math.sin(TH);
 const DIST = 95, CAMH = 7, F = 1100, CX0 = 1115, HZ = 612;
@@ -20,9 +22,8 @@ const pth = (pts: V3[]) => 'M' + pts.map((p) => P(...p).map(f1).join(' ')).join(
 const W = 30, D = 18, X0 = -W / 2, X1 = W / 2, Y0 = -D / 2, Y1 = D / 2;
 const LOBBY = 5.2, FL = 3.5, NF = 11, H = LOBBY + NF * FL;
 const zf = (k: number) => (k === 0 ? 0 : LOBBY + (k - 1) * FL);
-const INTRO = 1.4, RISE = 2.6, T = 3.4;
-const arrive = (k: number) => INTRO + 0.9 + RISE * (zf(k) / zf(NF));
-const START = INTRO + 0.9 + RISE + 0.6; // os pulsos em loop começam depois da entrada
+const T = 3.4, TC = 4.4;          // período dos pulsos de luz (fibra) e de dados no cobre
+export type NetMode = 'trad' | 'pol';
 
 export const POL_CALLOUT_X = 1360;
 
@@ -85,8 +86,7 @@ export function buildPolScene(): { svg: string; callouts: PolCallout[] } {
           const lit = r < 0.5, warm = rnd() < 0.6, o = lit ? (0.3 + rnd() * 0.55) * fc.k : 0.04;
           row += `<polygon points="${q([[...p0, zz(z0)], [...p1, zz(z0)], [...p1, zz(z1)], [...p0, zz(z1)]])}" fill="url(#pol-${warm ? 'warm' : 'cool'})" opacity="${o.toFixed(2)}"/>`;
         }
-        // o andar acende quando a fibra chega a ele
-        g += mirror ? `<g opacity=".7">${row}</g>` : `<g class="pol-on" style="--o0:.12;--o1:1;animation-delay:${arrive(k).toFixed(2)}s">${row}</g>`;
+        g += mirror ? `<g opacity=".7">${row}</g>` : row;
         g += `<polygon points="${q([[...A, zz(zf(k))], [...B, zz(zf(k))], [...B, zz(zf(k) + 0.95)], [...A, zz(zf(k) + 0.95)]])}" fill="#0A131E"/>`;
         if (!mirror) g += `<path d="${pth([[...A, zf(k) + 0.95], [...B, zf(k) + 0.95]])}" stroke="#6E93B5" stroke-opacity=".35" stroke-width=".8" fill="none"/>`;
       }
@@ -106,50 +106,115 @@ export function buildPolScene(): { svg: string; callouts: PolCallout[] } {
   const m0 = P(X0 + 4, Y0 + 4, H + 1.6), m1 = P(X0 + 4, Y0 + 4, H + 8);
   s += `<path d="M${f1(m0[0])} ${f1(m0[1])} L${f1(m1[0])} ${f1(m1[1])}" stroke="#5E7A96" stroke-width="1.4"/><circle cx="${f1(m1[0])}" cy="${f1(m1[1])}" r="2.6" fill="#FF4D4D" class="pol-blink" filter="url(#pol-bloom)"/>`;
 
-  /* rede POL em "raio-x": backbone → OLT → prumada → splitter por andar → ONTs junto às fachadas */
-  const RX = X0 + 5, RY = Y0 + 4;
-  const ONTS: [number, number][] = [[X0 + 14, Y0 + 0.8], [X1 - 4, Y0 + 0.8], [X0 + 0.8, Y1 - 4]];
+
+  /* ================= infraestrutura (camadas sobre o mesmo prédio) ================= */
+  const RX = X0 + 5, RY = Y0 + 4;                        // prumada no núcleo, perto da quina
+  const PTS: [number, number][] = [[X0 + 14, Y0 + 0.8], [X1 - 4, Y0 + 0.8], [X0 + 0.8, Y1 - 4]]; // pontos atendidos por andar
   const OLT: V3 = [RX, RY, 0.6];
-  const line = (d: string, w: number, c: string, o: number, extra = '') => `<path d="${d}" fill="none" stroke="${c}" stroke-width="${w}" stroke-opacity="${o}" stroke-linecap="round" stroke-linejoin="round" ${extra}/>`;
-  const drawn = (d: string, w: number, c: string, o: number, delay: number, dur: number) => line(d, w, c, o, `pathLength="100" class="pol-draw" style="--d:${dur}s;animation-delay:${delay.toFixed(2)}s"`);
-  const pulse = (d: string, len: number, dash: string, w: number, phase: number) => `<path d="${d}" pathLength="${len}" stroke="#fff" stroke-width="${w}" stroke-linecap="round" fill="none" stroke-dasharray="${dash}" class="pol-run" style="--t:${T}s;animation-delay:${(START + phase).toFixed(2)}s,${START}s"/>`;
-  const ping = (p: [number, number], r: number, c: string, delay: number) => `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="${r}" fill="none" stroke="${c}" stroke-width="1.1" class="pol-ping" style="--t:${T}s;animation-delay:${delay.toFixed(2)}s"/>`;
-  let glow = '', net = '', pulses = '', nodes = '';
-  const backbone = pth([[X0 - 10, Y0 - 10, 0.05], [RX, Y0 - 10, 0.05], [RX, RY, 0.05], OLT]);
-  const riser = pth([OLT, [RX, RY, zf(NF) + 1]]);
-  glow += drawn(backbone, 6, '#4FBBFF', 0.5, INTRO - 0.4, 1.3) + drawn(riser, 8, '#4FBBFF', 0.55, INTRO + 0.9, RISE);
-  net += drawn(backbone, 1.8, '#CFF0FF', 1, INTRO - 0.4, 1.3) + drawn(riser, 2.2, '#EAF8FF', 1, INTRO + 0.9, RISE);
-  pulses += pulse(backbone, 100, '5 95', 2.6, 0);
-  for (const o of [0, 1, 2]) pulses += pulse(riser, 100, '3 97', 3, (-o * T) / 3);
-  for (let k = 1; k <= NF; k++) {
-    const z = zf(k) + 0.25, t0 = arrive(k), tf = (zf(k) / zf(NF)) * T;
-    for (const [xo, yo] of ONTS) {
-      const br = pth(xo < RX + 1 ? [[RX, RY, z], [RX, yo, z], [xo, yo, z]] : [[RX, RY, z], [xo, RY, z], [xo, yo, z]]);
-      glow += drawn(br, 4, '#4FBBFF', 0.28, t0, 0.9);
-      net += drawn(br, 1, '#BFE8FF', 0.6, t0, 0.9);
-      for (const o of [0, 1, 2]) pulses += pulse(br, 200, '7 193', 2, tf - (o * T) / 3);
-      const p = P(xo, yo, z);
-      nodes += `<g class="pol-in" style="animation-delay:${(t0 + 0.8).toFixed(2)}s"><circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="9" fill="url(#pol-halo)"/><circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="2.6" fill="#fff"/></g>`;
-      for (const o of [0, 1, 2]) nodes += ping(p, 4, '#8FD6FF', START + tf + T / 2 - (o * T) / 3);
+  const zn = (k: number) => zf(k) + 0.25;               // altura das bandejas no andar k
+  const tm = (inn: number, out: number, dur?: number) => `--in:${inn.toFixed(2)}s;--out:${out.toFixed(2)}s${dur ? `;--dur:${dur}s` : ''}`;
+  const route = (k: number, xo: number, yo: number, d = 0): V3[] => {
+    const z = zn(k);
+    return xo < RX + 1 ? [[RX + d, RY, z], [RX + d, yo + d, z], [xo, yo + d, z]] : [[RX, RY + d, z], [xo + d, RY + d, z], [xo + d, yo, z]];
+  };
+  // traço que "se desenha" ao entrar e se recolhe ao sair (stroke-dashoffset)
+  const seg = (d: string, w: number, c: string, o: number, inn: number, out: number, dur = 0.7) =>
+    `<path d="${d}" pathLength="100" class="nx nx-line" style="${tm(inn, out, dur)}" fill="none" stroke="${c}" stroke-width="${w}" stroke-opacity="${o}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const run = (d: string, len: number, dash: string, w: number, c: string, per: number, phase: number) =>
+    `<path d="${d}" pathLength="${len}" stroke="${c}" stroke-width="${w}" stroke-linecap="round" fill="none" stroke-dasharray="${dash}" class="pol-run" style="--t:${per}s;animation-delay:${phase.toFixed(2)}s"/>`;
+  const ping = (p: [number, number], r: number, c: string, per: number, delay: number) => `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="${r}" fill="none" stroke="${c}" stroke-width="1.1" class="pol-ping" style="--t:${per}s;animation-delay:${delay.toFixed(2)}s"/>`;
+  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number) =>
+    `<polygon points="${q([[x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]])}" fill="#141A22" stroke="#7D8794" stroke-width=".8"/>` +
+    `<polygon points="${q([[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]])}" fill="#1E2630" stroke="#A3ADB9" stroke-width=".8"/>`;
+  const leds = (x0: number, x1: number, y: number, z0: number, z1: number, rows: number) => {
+    let g = '';
+    for (let r = 0; r < rows; r++) for (let n = 0; n < 4; n++) {
+      const p = P(x0 + ((n + 0.6) * (x1 - x0)) / 4.4, y, z1 - ((r + 0.7) * (z1 - z0)) / (rows + 0.4));
+      g += `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="1" fill="#7CFFB2" class="pol-blink" style="animation-delay:${((r * 4 + n) * 0.37) % 2.4}s"/>`;
     }
-    const sp = P(RX, RY, z);
-    nodes += `<g class="pol-in" style="animation-delay:${t0.toFixed(2)}s"><circle cx="${f1(sp[0])}" cy="${f1(sp[1])}" r="13" fill="url(#pol-halo)"/><rect x="${f1(sp[0] - 3.6)}" y="${f1(sp[1] - 3.6)}" width="7.2" height="7.2" transform="rotate(45 ${f1(sp[0])} ${f1(sp[1])})" fill="#0B121A" stroke="#EAF8FF" stroke-width="1.4"/></g>`;
-    for (const o of [0, 1, 2]) nodes += ping(sp, 5, '#EAF8FF', START + tf - (o * T) / 3);
+    return g;
+  };
+  const bolt = (p: [number, number]) => `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="6.5" fill="#2A2006" stroke="#FFD24A" stroke-width="1.1"/><path d="M${f1(p[0] + 0.8)} ${f1(p[1] - 4)} L${f1(p[0] - 2.2)} ${f1(p[1] + 0.6)} L${f1(p[0] + 0.2)} ${f1(p[1] + 0.6)} L${f1(p[0] - 0.8)} ${f1(p[1] + 4)} L${f1(p[0] + 2.2)} ${f1(p[1] - 0.6)} L${f1(p[0] - 0.2)} ${f1(p[1] - 0.6)} Z" fill="#FFD24A"/>`;
+
+  /* comum às duas redes: a fibra da operadora chega da rua à sala técnica */
+  const backbone = pth([[X0 - 10, Y0 - 10, 0.05], [RX, Y0 - 10, 0.05], [RX, RY, 0.05], OLT]);
+  s += `<g class="pol-in" style="animation-delay:.4s;mix-blend-mode:screen"><path d="${backbone}" fill="none" stroke="#4FBBFF" stroke-width="6" stroke-opacity=".45" filter="url(#pol-glow)"/><path d="${backbone}" fill="none" stroke="#CFF0FF" stroke-width="1.8" stroke-linejoin="round"/>${run(backbone, 100, '5 95', 2.6, '#fff', T, 0)}</g>`;
+
+  /* ---------- camada REDE TRADICIONAL (cobre + switches de andar + energia) ---------- */
+  const CU = '#FF8A3D', CUG = '#C8571B', PW = '#FFD24A';
+  let tg = '', tl = '', tp = '', tn = '';
+  const coreTop = 2.3, riserTop = zf(NF) + 1.2;
+  for (const dx of [-0.36, -0.12, 0.12, 0.36]) {
+    const r = pth([[RX + dx, RY, coreTop], [RX + dx, RY, riserTop]]);
+    tl += seg(r, 1.3, CU, 0.95, 1.2, 1.0, 0.8);
+    if (dx === -0.12) tp += run(r, 100, '3 97', 2.6, '#FFE0C2', TC, 0);
+  }
+  tg += seg(pth([[RX, RY, coreTop], [RX, RY, riserTop]]), 9, CUG, 0.5, 1.2, 1.0, 0.8);
+  for (let k = 1; k <= NF; k++) {
+    const z = zf(k), up = (NF - k) * 0.04;
+    // cabeamento horizontal: um cabo por ponto (feixe de 3 por rota)
+    for (const [xo, yo] of PTS) {
+      tg += seg(pth(route(k, xo, yo)), 6, CUG, 0.35, 1.6 + k * 0.06, 0.1 + up, 0.6);
+      for (const d of [-0.32, 0, 0.32]) tl += seg(pth(route(k, xo, yo, d)), 0.9, CU, 0.85, 1.6 + k * 0.06, 0.1 + up, 0.6);
+      tp += run(pth(route(k, xo, yo)), 200, '7 193', 1.8, '#FFE0C2', TC, (k * 0.37) % TC);
+      const e = P(xo, yo, zn(k));
+      tn += `<g class="nx nx-pop" style="${tm(2.0 + k * 0.06, 0.05 + up)}"><rect x="${f1(e[0] - 3)}" y="${f1(e[1] - 3)}" width="6" height="6" fill="#2A1406" stroke="${CU}" stroke-width="1.3"/></g>`;
+    }
+    // rack com switch de acesso no andar (ativo) + cabo de energia até a tomada
+    const rx0 = RX - 0.5, rx1 = RX + 0.5, ry0 = RY - 0.4, ry1 = RY + 0.4, rz0 = z + 0.12, rz1 = z + 1.75;
+    const cord = pth([[rx0, RY, z + 0.5], [rx0 - 2.2, RY, z + 0.5], [rx0 - 2.2, RY, z + 0.15]]);
+    tl += seg(cord, 1.4, PW, 0.95, 1.7 + k * 0.06, 0.3 + up, 0.5);
+    tp += run(cord, 100, '8 92', 2.2, '#FFF4C2', 1.6, -(k * 0.29) % 1.6);
+    const out = P(rx0 - 2.2, RY, z + 0.15);
+    tn += `<g class="nx nx-pop" style="${tm(1.4 + k * 0.06, 0.6 + up)}">${box(rx0, rx1, ry0, ry1, rz0, rz1)}${leds(rx0, rx1, ry0, rz0, rz1, 3)}${bolt(P(rx1 + 0.2, ry0, rz1 + 0.6))}<rect x="${f1(out[0] - 2.5)}" y="${f1(out[1] - 2.5)}" width="5" height="5" fill="${PW}"/></g>`;
+    // pontos que pedem manutenção/substituição (ventilação, fonte, troca de switch)
+    if (k === 3 || k === 7 || k === 10) { const c = P(RX, ry0, (rz0 + rz1) / 2); tn += `<g class="nx nx-fade" style="${tm(2.6, 0)}">${ping(c, 9, '#FFB020', 2.8, k * 0.4)}${ping(c, 9, '#FFB020', 2.8, k * 0.4 + 1.4)}</g>`; }
+  }
+  // rack central (core) na sala técnica
+  tn += `<g class="nx nx-pop" style="${tm(1.2, 1.0)}">${box(RX - 1.1, RX + 1.1, RY - 0.6, RY + 0.6, 0.1, coreTop)}${leds(RX - 1.1, RX + 1.1, RY - 0.6, 0.1, coreTop, 5)}${bolt(P(RX + 1.3, RY - 0.6, coreTop + 0.6))}</g>`;
+  s += `<g class="L-trad pol-in" style="animation-delay:.6s"><g style="mix-blend-mode:screen"><g filter="url(#pol-glow)">${tg}</g>${tl}<g class="nx nx-fade" style="${tm(2.6, 0)}">${tp}</g></g>${tn}</g>`;
+
+  /* ---------- camada REDE POL (fibra + splitters passivos + ONTs nos mesmos pontos) ---------- */
+  let pg = '', pl = '', pp = '', pn = '';
+  const riser = pth([OLT, [RX, RY, zf(NF) + 1]]);
+  pg += seg(riser, 8, '#4FBBFF', 0.55, 1.2, 0.9, 0.8);
+  pl += seg(riser, 2.2, '#EAF8FF', 1, 1.2, 0.9, 0.8);
+  for (const o of [0, 1, 2]) pp += run(riser, 100, '3 97', 3, '#fff', T, (-o * T) / 3);
+  for (let k = 1; k <= NF; k++) {
+    const tf = (zf(k) / zf(NF)) * T, up = (NF - k) * 0.04;
+    for (const [xo, yo] of PTS) {
+      const br = pth(route(k, xo, yo));
+      pg += seg(br, 4, '#4FBBFF', 0.28, 1.6 + k * 0.06, 0.2 + up, 0.6);
+      pl += seg(br, 1, '#BFE8FF', 0.6, 1.6 + k * 0.06, 0.2 + up, 0.6);
+      for (const o of [0, 1, 2]) pp += run(br, 200, '7 193', 2, '#fff', T, tf - (o * T) / 3);
+      const p = P(xo, yo, zn(k));
+      pn += `<g class="nx nx-pop" style="${tm(2.0 + k * 0.06, 0.1 + up)}"><circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="9" fill="url(#pol-halo)"/><circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="2.6" fill="#fff"/>${[0, 1, 2].map((o) => ping(p, 4, '#8FD6FF', T, tf + T / 2 - (o * T) / 3)).join('')}</g>`;
+    }
+    const sp = P(RX, RY, zn(k));
+    pn += `<g class="nx nx-pop" style="${tm(1.9 + k * 0.06, 0.1 + up)}"><circle cx="${f1(sp[0])}" cy="${f1(sp[1])}" r="13" fill="url(#pol-halo)"/><rect x="${f1(sp[0] - 3.6)}" y="${f1(sp[1] - 3.6)}" width="7.2" height="7.2" transform="rotate(45 ${f1(sp[0])} ${f1(sp[1])})" fill="#0B121A" stroke="#EAF8FF" stroke-width="1.4"/>${[0, 1, 2].map((o) => ping(sp, 5, '#EAF8FF', T, tf - (o * T) / 3)).join('')}</g>`;
   }
   const op = P(...OLT);
-  nodes += `<g class="pol-in" style="animation-delay:${INTRO + 0.6}s"><circle cx="${f1(op[0])}" cy="${f1(op[1])}" r="30" fill="url(#pol-halo)"/><rect x="${f1(op[0] - 9)}" y="${f1(op[1] - 6)}" width="18" height="12" rx="2" fill="#0B1A2A" stroke="#EAF8FF" stroke-width="1.4"/>${[0, 1, 2, 3].map((n) => `<circle cx="${f1(op[0] - 5 + n * 3.4)}" cy="${f1(op[1] + 2)}" r="1.1" fill="#7CFFB2" class="pol-blink" style="animation-delay:${n * 0.3}s"/>`).join('')}</g>`;
-  s += `<g style="mix-blend-mode:screen"><g filter="url(#pol-glow)">${glow}</g>${net}${pulses}</g>${nodes}`;
+  pn += `<g class="nx nx-pop" style="${tm(1.2, 0.9)}"><circle cx="${f1(op[0])}" cy="${f1(op[1])}" r="30" fill="url(#pol-halo)"/><rect x="${f1(op[0] - 9)}" y="${f1(op[1] - 6)}" width="18" height="12" rx="2" fill="#0B1A2A" stroke="#EAF8FF" stroke-width="1.4"/>${[0, 1, 2, 3].map((n) => `<circle cx="${f1(op[0] - 5 + n * 3.4)}" cy="${f1(op[1] + 2)}" r="1.1" fill="#7CFFB2" class="pol-blink" style="animation-delay:${n * 0.3}s"/>`).join('')}</g>`;
+  s += `<g class="L-pol pol-in" style="animation-delay:.6s"><g style="mix-blend-mode:screen"><g filter="url(#pol-glow)">${pg}</g>${pl}<g class="nx nx-fade" style="${tm(2.6, 0)}">${pp}</g></g>${pn}</g>`;
 
-  /* legendas: haste do elemento até o cartão à direita */
-  const ont = P(...ONTS[1]!, zf(NF) + 0.25), split = P(RX, RY, zf(6) + 0.25);
+  /* legendas: haste do elemento até o cartão à direita (uma trinca por rede) */
+  const top = P(...PTS[1]!, zn(NF)), mid = P(RX, RY, zn(6)), rackMid = P(RX - 0.5, RY - 0.4, zf(6) + 1);
   const callouts: PolCallout[] = [
-    { x: ont[0], y: ont[1], top: 120, title: 'ONT no ponto de uso', text: 'Dados, voz, Wi-Fi e CFTV em cada sala.', delay: arrive(NF) + 1 },
-    { x: split[0], y: split[1], top: 400, title: 'Splitter óptico', text: 'Divide a luz para o andar, sem energia elétrica.', delay: arrive(6) + 0.6 },
-    { x: op[0], y: op[1], top: 690, title: 'OLT · sala técnica', text: 'O único equipamento ativo da rede, no térreo.', delay: INTRO + 0.8 },
+    { mode: 'trad', top: 120, title: 'Ponto de rede (RJ45)', text: 'Um cabo de cobre por ponto, até 100 m do switch.' },
+    { mode: 'trad', top: 400, title: 'Switch de andar', text: 'Ativo em rack, com energia, ventilação e manutenção.' },
+    { mode: 'trad', top: 690, title: 'Rack central', text: 'Núcleo da rede na sala técnica, no térreo.' },
+    { mode: 'pol', top: 120, title: 'ONT no ponto de uso', text: 'Dados, voz, Wi-Fi e CFTV em cada sala.' },
+    { mode: 'pol', top: 400, title: 'Splitter óptico', text: 'Divide a luz para o andar, sem energia elétrica.' },
+    { mode: 'pol', top: 690, title: 'OLT · sala técnica', text: 'O único equipamento ativo da distribuição, no térreo.' },
   ];
-  for (const c of callouts) {
-    const ly = c.top + 34;
-    s += `<g class="pol-in" style="animation-delay:${c.delay.toFixed(2)}s"><path d="M${f1(c.x)} ${f1(c.y)} L${f1(c.x + 20)} ${ly} L${POL_CALLOUT_X} ${ly}" fill="none" stroke="#8FD6FF" stroke-opacity=".6" stroke-width="1"/><circle cx="${f1(c.x)}" cy="${f1(c.y)}" r="7" fill="none" stroke="#8FD6FF" stroke-opacity=".6"/></g>`;
+  const anchors: Record<NetMode, [number, number][]> = { trad: [top, rackMid, P(RX - 1.1, RY - 0.6, 1.2)], pol: [top, mid, op] };
+  for (const mode of ['trad', 'pol'] as const) {
+    let g = '';
+    anchors[mode].forEach((a, n) => {
+      const ly = [120, 400, 690][n]! + 34;
+      g += `<path d="M${f1(a[0])} ${f1(a[1])} L${f1(a[0] + 20)} ${ly} L${POL_CALLOUT_X} ${ly}" fill="none" stroke="#8FD6FF" stroke-opacity=".6" stroke-width="1"/><circle cx="${f1(a[0])}" cy="${f1(a[1])}" r="7" fill="none" stroke="#8FD6FF" stroke-opacity=".6"/>`;
+    });
+    s += `<g class="L-${mode}"><g class="nx nx-fade" style="${tm(2.4, 0)}">${g}</g></g>`;
   }
   return { svg: s, callouts };
 }
