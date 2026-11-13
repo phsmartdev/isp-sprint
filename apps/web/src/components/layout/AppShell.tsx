@@ -225,7 +225,6 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[110px] shrink-0 [@media(max-height:1000px)]:hidden' : 'h-[120px] shrink-0 [@media(max-height:900px)]:hidden')} aria-hidden>
         <BrandArt slot="card_sidebar" className="absolute inset-0 h-full w-full" fallback={<>
           <BrandSymbol variant="negativo" className="absolute -bottom-8 -right-8 h-[150px] w-[150px] opacity-[0.16]" />
-          <BrandSymbol variant="negativo" className="absolute bottom-4 left-5 h-12 w-12" />
         </>} />
       </div>
     </div>
