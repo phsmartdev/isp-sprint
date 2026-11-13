@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight, LayoutGrid, Maximize2, Minimize2, X } from 'lucide-react';
-import { Hexagons } from '../components/brand';
+import { BrandSymbol } from '../components/brand';
 import { FOUNDATION, MODULES, SLIDES, START_BY_PROFILE, STATIONS, type ModuleSlide, type Slide, type StationKey } from '../features/tour/content';
 
 const W = 1600, H = 900;
@@ -62,7 +62,7 @@ function JourneyLine({ on = [], big = false, onPick }: { on?: StationKey[]; big?
 function Cover({ onStart }: { onStart: () => void }) {
   return (
     <div className="relative h-full bg-navy text-white">
-      <Hexagons className="absolute -right-24 -top-10 h-[980px] w-[980px] opacity-90" />
+      <BrandSymbol variant="negativo" className="absolute -right-[150px] top-1/2 h-[1000px] w-[1000px] -translate-y-1/2 opacity-[0.13]" />
       <div className="relative flex h-full flex-col justify-between px-[110px] py-[90px]">
         <div className="flex items-center gap-5">
           <img src="/brand/bkt-logo-white.png" alt="BKT" className="h-[46px] w-auto" draggable={false} />
@@ -84,7 +84,8 @@ function Cover({ onStart }: { onStart: () => void }) {
 
 function Journey({ go }: { go: (i: number) => void }) {
   return (
-    <div className="flex h-full flex-col px-[100px] py-[80px]">
+    <div className="relative flex h-full flex-col px-[100px] py-[80px]">
+      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">A jornada do cliente</p>
       <h2 className="mt-3 max-w-[1200px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">Oito paradas, um registro contínuo.</h2>
       <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Cada parada tem um módulo responsável. O que acontece numa vira histórico na seguinte: o lead vira oportunidade, a oportunidade vira contrato, o contrato abre a implantação e o sucesso do cliente prepara a renovação.</p>
@@ -109,7 +110,8 @@ function Grid({ items, cols = 3, size = 'md' }: { items: { t: string; d: string 
 
 function Foundation() {
   return (
-    <div className="flex h-full flex-col px-[100px] py-[80px]">
+    <div className="relative flex h-full flex-col px-[100px] py-[80px]">
+      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">Os fundamentos</p>
       <h2 className="mt-3 font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que vale em todos os módulos.</h2>
       <div className="mt-auto"><Grid items={FOUNDATION} size="lg" /></div>
@@ -120,7 +122,8 @@ function Foundation() {
 function Layer({ go }: { go: (i: number) => void }) {
   const cross = MODULES.filter((x) => !x.stations.length);
   return (
-    <div className="flex h-full flex-col bg-[#F3F6F9] px-[100px] py-[80px]">
+    <div className="relative flex h-full flex-col bg-[#F3F6F9] px-[100px] py-[80px]">
+      <BrandSymbol className="absolute right-[100px] top-[80px] h-[64px] w-[64px]" />
       <p className="text-[22px] font-semibold text-primary">A camada de gestão</p>
       <h2 className="mt-3 max-w-[1250px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que sustenta a jornada inteira.</h2>
       <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Estes módulos não ficam numa parada: medem, financiam, ensinam e conectam as pessoas que fazem a jornada acontecer.</p>
@@ -144,7 +147,7 @@ function Module({ s, n }: { s: ModuleSlide; n: number }) {
   return (
     <div className="grid h-full grid-cols-[560px_1fr]">
       <aside className="relative flex flex-col overflow-hidden bg-navy px-[64px] py-[70px] text-white">
-        <Hexagons className="absolute -bottom-40 -left-32 h-[560px] w-[560px] opacity-60" />
+        <BrandSymbol variant="negativo" className="absolute -bottom-[150px] -right-[150px] h-[460px] w-[460px] opacity-[0.10]" />
         <div className="relative">
           <p className="text-[19px] font-medium text-[#9CC4EA]">{s.area}</p>
           <h2 className="mt-4 font-display text-[54px] font-extrabold leading-[1.04]">{s.title}</h2>
@@ -179,7 +182,7 @@ function Start({ onClose }: { onClose: () => void }) {
         </table>
       </section>
       <aside className="relative flex flex-col justify-end overflow-hidden bg-navy px-[64px] py-[80px] text-white">
-        <Hexagons className="absolute -right-32 -top-24 h-[620px] w-[620px]" />
+        <BrandSymbol variant="negativo" className="absolute -right-[170px] -top-[120px] h-[620px] w-[620px] opacity-[0.14]" />
         <p className="relative text-[24px] leading-[1.5] text-white/85">O detalhe de cada tela, cada regra e cada integração está no Manual do sistema, na Central de Playbooks.</p>
         <div className="relative mt-10 flex flex-col gap-4">
           <Link to="/playbooks" className="bg-white px-8 py-4 text-center text-[21px] font-bold text-navy hover:bg-[#E8EEF5]">Abrir o Manual do sistema</Link>

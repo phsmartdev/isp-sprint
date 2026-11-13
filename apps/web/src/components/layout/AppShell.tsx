@@ -16,7 +16,7 @@ import { useHotkey } from '../../lib/hooks';
 import { useTheme, type ThemeChoice } from '../../lib/theme';
 import { Avatar, LoadingRows } from '../ui/primitives';
 import { Modal } from '../ui/overlay';
-import { BrandArt, Hexagons, Logo } from '../brand';
+import { BrandArt, BrandSymbol, Logo } from '../brand';
 import { GlobalSearch } from './GlobalSearch';
 import { AppErrorBoundary } from '../AppErrorBoundary';
 import { HeaderSelo } from '../../features/gamification/Gamification';
@@ -224,8 +224,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
       <div className={clsx('relative mx-4 mb-4 overflow-hidden rounded-lg bg-gradient-to-br from-navy-2 to-primary', inSettings ? 'h-[110px] shrink-0 [@media(max-height:1000px)]:hidden' : 'h-[120px] shrink-0 [@media(max-height:900px)]:hidden')} aria-hidden>
         <BrandArt slot="card_sidebar" className="absolute inset-0 h-full w-full" fallback={<>
-          <Hexagons className="absolute inset-0 h-full w-full" />
-          <img src="/brand/bkt-symbol-white.png" alt="" className="absolute bottom-4 left-5 h-10 w-auto opacity-90" draggable={false} />
+          <BrandSymbol variant="negativo" className="absolute -bottom-8 -right-8 h-[150px] w-[150px] opacity-[0.16]" />
+          <BrandSymbol variant="negativo" className="absolute bottom-4 left-5 h-12 w-12" />
         </>} />
       </div>
     </div>
