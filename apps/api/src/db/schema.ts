@@ -5287,6 +5287,48 @@ export const budgetLines = pgTable('budget_lines', {
   limitCk: check('budget_lines_limit_ck', sql`limit_cents is null or approved_cents is null or limit_cents <= approved_cents`),
 }));
 
+/** Fechamento orçamentário por competência (mês): estados com governança e fotografia dos números ao fechar. */
+export const budgetClosings = pgTable('budget_closings', {
+  id: id(),
+  tenantId: tenantId(),
+  month: text('month').notNull(),
+  status: text('status').notNull().default('aberto'),
+  snapshot: jsonb('snapshot'),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  submittedAt: ts('submitted_at'),
+  closedBy: uuid('closed_by').references(() => users.id),
+  closedAt: ts('closed_at'),
+  reopenedBy: uuid('reopened_by').references(() => users.id),
+  reopenedAt: ts('reopened_at'),
+  reopenReason: text('reopen_reason'),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ uq: uniqueIndex('budget_closings_uq').on(t.tenantId, t.month), statusCk: check('budget_closings_status_ck', inList('status', ['aberto', 'em_conferencia', 'aguardando_validacao', 'fechado', 'reaberto'])) }));
+
+/** Relatório mensal por e-mail: um disparo por destinatário, com o conteúdo que ele pode ver, aprovação, tentativas e histórico. */
+export const budgetReportDispatches = pgTable('budget_report_dispatches', {
+  id: id(),
+  tenantId: tenantId(),
+  closingId: uuid('closing_id').notNull().references(() => budgetClosings.id),
+  month: text('month').notNull(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  email: text('email').notNull(),
+  role: text('role').notNull(),
+  costCenterIds: uuid('cost_center_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  subject: text('subject').notNull(),
+  html: text('html').notNull(),
+  status: text('status').notNull().default('aguardando_aprovacao'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  sentAt: ts('sent_at'),
+  emailMessageId: uuid('email_message_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('budget_report_dispatches_idx').on(t.tenantId, t.month), uq: uniqueIndex('budget_report_dispatches_uq').on(t.closingId, t.userId, t.createdAt), statusCk: check('budget_report_dispatches_status_ck', inList('status', ['aguardando_aprovacao', 'aprovado', 'enviado', 'falhou', 'cancelado'])), roleCk: check('budget_report_dispatches_role_ck', inList('role', ['responsavel', 'gestor', 'diretoria', 'financeiro'])) }));
+
 /** Questionamento de quem aprova sobre um lançamento (ou consolidado por centro), com resposta do responsável. */
 export const budgetQuestions = pgTable('budget_questions', {
   id: id(),
@@ -5375,6 +5417,9 @@ export const budgetPolicies = pgTable('budget_policies', {
   reserveMode: text('reserve_mode').notNull().default('nenhuma'),
   globalReserveCents: bigint('global_reserve_cents', { mode: 'number' }),
   version: integer('version').notNull().default(1),
+  /** relatório mensal por e-mail: enviar sozinho ao fechar e se precisa de aprovação antes */
+  reportAutoSend: boolean('report_auto_send').notNull().default(false),
+  reportRequireApproval: boolean('report_require_approval').notNull().default(true),
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 }, () => ({ modeCk: check('budget_policies_mode_ck', inList('reserve_mode', ['nenhuma', 'global', 'centro', 'hibrida'])) }));

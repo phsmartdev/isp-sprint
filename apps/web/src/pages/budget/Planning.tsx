@@ -12,6 +12,7 @@ import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, 
 import { Modal, useToast } from '../../components/ui/overlay';
 import { BudgetLaunches } from './Launches';
 import { BudgetCentral } from './Central';
+import { ClosingPanel } from '../../features/budget/ClosingPanel';
 import { AccountSelect, BandChip, BudgetShell, ExecBar, QuarterPicker, Stat, errMsg, neg, useStructure, type Account, type CostCenter, type Structure, type Totals } from '../../features/budget/shared';
 
 type Line = { id: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; status: LineStatus; approvalStage?: 'gerencia' | 'diretoria' | null; decisionNote: string | null; supplierId: string | null; resourceId: string | null };
@@ -39,7 +40,7 @@ export function BudgetPlanningPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const setup = useMutation({ mutationFn: () => api('/budget/setup', { method: 'POST' }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Estrutura criada' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  const tabs = [{ key: 'central', label: 'Central do orçamento' }, { key: 'lancamentos', label: 'Lançamentos do trimestre' }, { key: 'visao', label: 'Visão por centro' }, { key: 'centro', label: 'Centro de custo' }, ...(st.data?.admin ? [{ key: 'estrutura', label: 'Plano de contas e centros' }] : []), { key: 'historico', label: 'Histórico' }];
+  const tabs = [{ key: 'central', label: 'Central do orçamento' }, { key: 'fechamento', label: 'Fechamento mensal' }, { key: 'lancamentos', label: 'Lançamentos do trimestre' }, { key: 'visao', label: 'Visão por centro' }, { key: 'centro', label: 'Centro de custo' }, ...(st.data?.admin ? [{ key: 'estrutura', label: 'Plano de contas e centros' }] : []), { key: 'historico', label: 'Histórico' }];
   return (
     <BudgetShell subtitle="Custos e investimentos do trimestre: lance, acompanhe e dê baixa em cada item." actions={<QuarterPicker year={year} quarter={quarter} onChange={(y, q) => setF({ y: String(y), q: String(q) })} />}>
       {st.isLoading ? <div className="card"><LoadingRows /></div> : st.isError ? <ErrorState error={st.error} onRetry={() => st.refetch()} /> : !st.data!.accounts.length || !st.data!.costCenters.length ? (
@@ -52,6 +53,7 @@ export function BudgetPlanningPage() {
         <>
           <Tabs label="Planejamento" className="mb-5" value={f.t} onChange={(t) => setF({ t })} tabs={tabs} />
           {f.t === 'central' && <BudgetCentral st={st.data!} year={year} />}
+          {f.t === 'fechamento' && <ClosingPanel year={year} />}
           {f.t === 'lancamentos' && <BudgetLaunches st={st.data!} year={year} quarter={quarter} />}
           {f.t === 'visao' && <Overview year={year} quarter={quarter} onOpen={(cc) => setF({ cc, t: 'centro' })} />}
           {f.t === 'centro' && <CostCenterPlan st={st.data!} year={year} quarter={quarter} cc={f.cc || st.data!.costCenters.find((c) => c.active)?.id || ''} onCc={(cc) => setF({ cc })} />}
