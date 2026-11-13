@@ -7,12 +7,12 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight, LayoutGrid, Maximize2, Minimize2, X } from 'lucide-react';
 import { BrandSymbol } from '../components/brand';
-import { FOUNDATION, MODULES, SLIDES, START_BY_PROFILE, STATIONS, type ModuleSlide, type Slide, type StationKey } from '../features/tour/content';
+import { FOUNDATION, MODULES, REVOPS_PILLARS, SLIDES, START_BY_PROFILE, STATIONS, type ModuleSlide, type Slide, type StationKey } from '../features/tour/content';
 
 const W = 1600, H = 900;
 const total = SLIDES.length;
 const firstModuleOf = (k: StationKey) => SLIDES.findIndex((s) => s.kind === 'module' && s.stations.includes(k));
-const titleOf = (s: Slide) => (s.kind === 'module' ? s.title : { cover: 'Abertura', journey: 'A jornada do cliente', foundation: 'Os fundamentos', layer: 'A camada de gestão', start: 'Por onde começar' }[s.kind]);
+const titleOf = (s: Slide) => (s.kind === 'module' ? s.title : { cover: 'Abertura', revops: 'O que é RevOps', journey: 'A jornada do cliente', foundation: 'Os fundamentos', layer: 'A camada de gestão', start: 'Por onde começar' }[s.kind]);
 
 /** Palco escalado: mantém a proporção 16:9 e o texto do mesmo tamanho relativo em qualquer tela. */
 function Stage({ children }: { children: ReactNode }) {
@@ -69,9 +69,9 @@ function Cover({ onStart }: { onStart: () => void }) {
           <span className="border-l border-white/30 pl-5 font-display text-[26px] font-semibold text-white/75">RevOps</span>
         </div>
         <div>
-          <p className="mb-6 text-[26px] font-medium text-[#9CC4EA]">Tour RevOps</p>
-          <h1 className="max-w-[1050px] font-display text-[92px] font-extrabold leading-[0.98] tracking-[-0.01em]">A receita da empresa, do primeiro contato à renovação.</h1>
-          <p className="mt-8 max-w-[860px] text-[26px] leading-[1.45] text-white/80">Funil, contratos, pós-venda, marketing, times, orçamento e conhecimento sobre o mesmo cadastro de contas e pessoas.</p>
+          <p className="mb-6 text-[26px] font-medium text-[#9CC4EA]">Tour RevOps · Revenue Operations</p>
+          <h1 className="max-w-[1100px] font-display text-[92px] font-extrabold leading-[0.98] tracking-[-0.01em]">A gestão comercial da BKT, centralizada.</h1>
+          <p className="mt-8 max-w-[900px] text-[26px] leading-[1.45] text-white/80">Marketing, vendas, licitações, contratos, pós-venda, times, orçamento e conhecimento sob a mesma gestão e com os mesmos dados, do primeiro contato à renovação.</p>
         </div>
         <div className="flex items-end justify-between">
           <button type="button" onClick={onStart} className="bg-white px-9 py-4 text-[22px] font-bold text-navy hover:bg-[#E8EEF5] focus-visible:outline focus-visible:outline-4 focus-visible:outline-[#9CC4EA]">Começar a apresentação</button>
@@ -82,12 +82,38 @@ function Cover({ onStart }: { onStart: () => void }) {
   );
 }
 
+function RevOps() {
+  return (
+    <div className="grid h-full grid-cols-[600px_1fr]">
+      <aside className="relative flex flex-col justify-between overflow-hidden bg-navy px-[70px] py-[80px] text-white">
+        <BrandSymbol variant="negativo" className="absolute -bottom-[170px] -left-[170px] h-[520px] w-[520px] opacity-[0.10]" />
+        <div className="relative">
+          <p className="text-[22px] font-medium text-[#9CC4EA]">O que é RevOps</p>
+          <h2 className="mt-4 font-display text-[64px] font-extrabold leading-[1.02]">Revenue Operations</h2>
+          <p className="mt-8 text-[25px] leading-[1.5] text-white/85">Toda a operação de receita comandada por uma gestão comercial só: processo, dados e regras iguais para todas as áreas que vendem, entregam e renovam.</p>
+        </div>
+        <p className="relative border-l-[3px] border-[#9CC4EA] pl-5 text-[24px] font-semibold leading-[1.4]">Não é um CRM de vendas da porta para dentro. É a central de gestão comercial da empresa.</p>
+      </aside>
+      <section className="flex flex-col justify-center px-[70px] py-[80px]">
+        <dl className="divide-y divide-[#DCE2E8] border-y border-[#DCE2E8]">
+          {REVOPS_PILLARS.map((p) => (
+            <div key={p.t} className="grid grid-cols-[320px_1fr] gap-8 py-8">
+              <dt className="font-display text-[30px] font-bold leading-tight text-navy">{p.t}</dt>
+              <dd className="text-[21px] leading-[1.5] text-[#4A5560]">{p.d}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </div>
+  );
+}
+
 function Journey({ go }: { go: (i: number) => void }) {
   return (
     <div className="relative flex h-full flex-col px-[100px] py-[80px]">
       <p className="text-[22px] font-semibold text-primary">A jornada do cliente</p>
-      <h2 className="mt-3 max-w-[1200px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">Oito paradas, um registro contínuo.</h2>
-      <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Cada parada tem um módulo responsável. O que acontece numa vira histórico na seguinte: o lead vira oportunidade, a oportunidade vira contrato, o contrato abre a implantação e o sucesso do cliente prepara a renovação.</p>
+      <h2 className="mt-3 max-w-[1250px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">A receita em oito paradas, sob uma gestão só.</h2>
+      <p className="mt-6 max-w-[1150px] text-[24px] leading-[1.5] text-[#4A5560]">Cada parada tem um módulo responsável e a mesma gestão comercial acompanhando tudo. O que acontece numa vira histórico na seguinte: o lead vira oportunidade, a oportunidade vira contrato, o contrato abre a implantação e o sucesso do cliente prepara a renovação.</p>
       <div className="mt-auto pb-10"><JourneyLine big onPick={(k) => { const i = firstModuleOf(k); if (i >= 0) go(i); }} /></div>
       <p className="text-[17px] text-[#7D8791]">Clique numa parada para ir direto ao módulo.</p>
     </div>
@@ -111,7 +137,7 @@ function Foundation() {
   return (
     <div className="relative flex h-full flex-col px-[100px] py-[80px]">
       <p className="text-[22px] font-semibold text-primary">Os fundamentos</p>
-      <h2 className="mt-3 font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que vale em todos os módulos.</h2>
+      <h2 className="mt-3 font-display text-[60px] font-extrabold leading-[1.05] text-navy">As regras de gestão que valem em tudo.</h2>
       <div className="mt-auto"><Grid items={FOUNDATION} size="lg" /></div>
     </div>
   );
@@ -122,8 +148,8 @@ function Layer({ go }: { go: (i: number) => void }) {
   return (
     <div className="relative flex h-full flex-col bg-[#F3F6F9] px-[100px] py-[80px]">
       <p className="text-[22px] font-semibold text-primary">A camada de gestão</p>
-      <h2 className="mt-3 max-w-[1250px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">O que sustenta a jornada inteira.</h2>
-      <p className="mt-6 max-w-[1100px] text-[24px] leading-[1.5] text-[#4A5560]">Estes módulos não ficam numa parada: medem, financiam, ensinam e conectam as pessoas que fazem a jornada acontecer.</p>
+      <h2 className="mt-3 max-w-[1250px] font-display text-[60px] font-extrabold leading-[1.05] text-navy">A gestão comercial que comanda a jornada.</h2>
+      <p className="mt-6 max-w-[1150px] text-[24px] leading-[1.5] text-[#4A5560]">Estes módulos não ficam numa parada: é deles que a liderança mede, financia, orienta e governa a operação inteira. É o que faz do RevOps uma central de gestão, e não só uma ferramenta de vendas.</p>
       <div className="mt-auto opacity-70"><JourneyLine /></div>
       <ul className="mt-8 grid grid-cols-7 gap-px bg-[#C9D3DD]">
         {cross.map((x) => (
@@ -180,7 +206,8 @@ function Start({ onClose }: { onClose: () => void }) {
       </section>
       <aside className="relative flex flex-col justify-end overflow-hidden bg-navy px-[64px] py-[80px] text-white">
         <BrandSymbol variant="negativo" className="absolute -right-[170px] -top-[120px] h-[620px] w-[620px] opacity-[0.14]" />
-        <p className="relative text-[24px] leading-[1.5] text-white/85">O detalhe de cada tela, cada regra e cada integração está no Manual do sistema, na Central de Playbooks.</p>
+        <p className="relative font-display text-[34px] font-bold leading-[1.2]">Uma gestão comercial, um lugar só.</p>
+        <p className="relative mt-5 text-[22px] leading-[1.5] text-white/80">O detalhe de cada tela, cada regra e cada integração está no Manual do sistema, na Central de Playbooks.</p>
         <div className="relative mt-10 flex flex-col gap-4">
           <Link to="/playbooks" className="bg-white px-8 py-4 text-center text-[21px] font-bold text-navy hover:bg-[#E8EEF5]">Abrir o Manual do sistema</Link>
           <button type="button" onClick={onClose} className="border border-white/40 px-8 py-4 text-[21px] font-semibold text-white hover:bg-white/10">Voltar ao sistema</button>
@@ -216,7 +243,7 @@ export function TourPage() {
     return () => window.removeEventListener('keydown', k);
   }, [i, go, close, toggleFull, index]);
   const s = SLIDES[i]!;
-  const body = s.kind === 'cover' ? <Cover onStart={() => go(1)} /> : s.kind === 'journey' ? <Journey go={go} /> : s.kind === 'foundation' ? <Foundation /> : s.kind === 'layer' ? <Layer go={go} /> : s.kind === 'start' ? <Start onClose={close} /> : <Module s={s} n={i} />;
+  const body = s.kind === 'cover' ? <Cover onStart={() => go(1)} /> : s.kind === 'revops' ? <RevOps /> : s.kind === 'journey' ? <Journey go={go} /> : s.kind === 'foundation' ? <Foundation /> : s.kind === 'layer' ? <Layer go={go} /> : s.kind === 'start' ? <Start onClose={close} /> : <Module s={s} n={i} />;
   const btn = 'flex h-10 items-center gap-2 px-3 text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-30';
   return (
     <div ref={root} className="fixed inset-0 z-[70] flex flex-col bg-[#1E2328]" role="region" aria-label="Tour RevOps" aria-roledescription="apresentação">

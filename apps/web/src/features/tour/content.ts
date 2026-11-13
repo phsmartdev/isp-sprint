@@ -35,6 +35,7 @@ export type ModuleSlide = {
 };
 export type Slide =
   | { kind: 'cover'; key: string }
+  | { kind: 'revops'; key: string }
   | { kind: 'journey'; key: string }
   | { kind: 'foundation'; key: string }
   | { kind: 'layer'; key: string }
@@ -250,12 +251,21 @@ export const MODULES: ModuleSlide[] = [
 
 export const SLIDES: Slide[] = [
   { kind: 'cover', key: 'capa' },
+  { kind: 'revops', key: 'revops' },
   { kind: 'journey', key: 'jornada' },
   { kind: 'foundation', key: 'fundamentos' },
   ...MODULES.filter((x) => x.stations.length),
   { kind: 'layer', key: 'camada' },
   ...MODULES.filter((x) => !x.stations.length),
   { kind: 'start', key: 'comecar' },
+];
+
+/** O que é RevOps: a gestão comercial centralizada (não um CRM de vendas). */
+export const REVOPS_PILLARS: Highlight[] = [
+  { t: 'Uma jornada de receita', d: 'Marketing, vendas, licitações, contratos e pós-venda no mesmo fluxo, do primeiro contato à renovação, sem passagem de bastão por planilha ou e-mail.' },
+  { t: 'Uma base de dados', d: 'Contas, pessoas, contratos e eventos no mesmo cadastro: cada reunião usa o mesmo número.' },
+  { t: 'Uma governança', d: 'As mesmas regras de alçada, aprovação e histórico em descontos, viabilidade, orçamento, metas, playbooks e brindes.' },
+  { t: 'Uma gestão do time', d: 'Metas, rituais, intervenções e orçamento comandados no mesmo lugar em que o trabalho acontece.' },
 ];
 
 export const FOUNDATION: Highlight[] = [
