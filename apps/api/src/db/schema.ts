@@ -7589,3 +7589,27 @@ export const giftComplianceReports = pgTable('gift_compliance_reports', {
   createdBy: uuid('created_by').notNull().references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ codeUq: uniqueIndex('gift_compliance_reports_code_uq').on(t.tenantId, t.code) }));
+
+// ---------------------------------------------------------------- Apresentação institucional
+/** Selos e certificações da apresentação institucional: um arquivo por selo, em fila na ordem definida. */
+export const institutionalSeals = pgTable('institutional_seals', {
+  id: id(),
+  tenantId: tenantId(),
+  name: text('name').notNull(),
+  position: integer('position').notNull().default(0),
+  mime: text('mime').notNull(),
+  data: bytea('data').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  sha256: text('sha256').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('institutional_seals_idx').on(t.tenantId, t.position) }));
+
+/** Layout de cada slide da apresentação institucional (posição e tamanho dos blocos e os textos), por empresa. */
+export const institutionalLayouts = pgTable('institutional_layouts', {
+  tenantId: tenantId(),
+  slide: text('slide').notNull(),
+  layout: jsonb('layout').$type<Record<string, unknown>>().notNull(),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.slide] }) }));
