@@ -40,6 +40,7 @@ const NAV: NavEntry[] = [
     { to: '/customers', label: 'Contas', module: 'clientes', feature: 'crm.contas' },
     { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
     { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades' },
+    { to: '/brindes?t=compliance', label: 'Solicitar brindes e apoios', module: 'oportunidades' },
   ] },
   { key: 'contratos', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, children: [
     { to: '/contracts?t=painel', label: 'Painel', module: 'contratos', contractTab: 'painel' },

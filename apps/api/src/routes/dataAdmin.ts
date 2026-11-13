@@ -112,6 +112,9 @@ export const dataAdminRoutes = [
           await tx.update(s.mailThreads).set({ contactId: null, opportunityId: null, contractId: null, linkSource: null }).where(sc(s.mailThreads));
           // brindes enviados às contas: o estoque baixado continua no histórico de movimentos (só perde o vínculo com o envio)
           await tx.update(s.giftMovements).set({ deliveryId: null }).where(sc(s.giftMovements));
+          // concessões do compliance ficam (são o registro da prestação de contas): só perdem o vínculo com envios, oportunidades e contas apagadas
+          await tx.update(s.giftRequests).set({ deliveryId: null, opportunityId: null }).where(eq(s.giftRequests.tenantId, t));
+          await tx.delete(s.giftRequestAccounts).where(and(inArray(s.giftRequestAccounts.requestId, tx.select({ id: s.giftRequests.id }).from(s.giftRequests).where(eq(s.giftRequests.tenantId, t))), out(s.giftRequestAccounts.contactId, keepContacts)));
           await tx.delete(s.giftDeliveries).where(sc(s.giftDeliveries));
           // ABM (depende de contatos)
           for (const tbl of [s.accountOccurrences, s.abmSignalEvents, s.abmSignals, s.abmCadenceTasks, s.abmCadences, s.surveyUpdates, s.surveyResponses, s.surveyInvites, s.abmPlayRunSteps, s.abmPlayRuns, s.stakeholderLinks, s.stakeholderRelations, s.accountRelations, s.structureMembers, s.structureContracts, s.influenceChangeRequests, s.stakeholderInfluenceHistory, s.stakeholderInfluence, s.stakeholderEvents, s.accountStakeholders, s.people, s.abmEvents, s.abmObjectives, s.abmAccounts, s.accountOrgUnits]) await tx.delete(tbl).where(sc(tbl));

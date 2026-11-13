@@ -14,6 +14,8 @@ import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, 
 import { Modal, useToast } from '../components/ui/overlay';
 import { errMsg } from '../features/contracts/shared';
 import { GiftPlanning } from '../features/budget/GiftPlanning';
+import { ComplianceSection } from '../features/gifts/Compliance';
+import { useAuth } from '../auth/AuthProvider';
 
 type Item = { id: string; name: string; supplierId: string | null; supplierName: string | null; unitCostCents: number; stock: number; minStock: number; active: boolean; low: boolean };
 type Kit = { id: string; name: string; categoryId: string | null; categoryName: string | null; active: boolean; items: { itemId: string; name: string; qty: number; unitCostCents: number; totalCents: number }[]; costCents: number; available: number };
@@ -22,7 +24,7 @@ type Data = { items: Item[]; kits: Kit[]; categories: { id: string; name: string
 type Delivery = { id: string; contactId: string | null; account: string | null; purpose: string; campaign: string | null; eventName: string | null; occurredOn: string; kitName: string | null; categoryName: string | null; kits: number; items: { name: string; qty: number }[]; totalCents: number; recipients: number; by: string | null; cancelled: boolean; cancelReason: string | null };
 type Row = { key: string; name: string; qty: number; totalCents: number; deliveries: number };
 type Consumo = { totalCents: number; kits: number; deliveries: number; accounts: number; byItem: Row[]; byKit: Row[]; byCategory: Row[]; byAccount: { contactId: string; name: string; deliveries: number; kits: number; totalCents: number }[]; byCampaign?: { campaignId: string; name: string; deliveries: number; totalCents: number }[]; byPurpose?: { key: string; label: string; deliveries: number; totalCents: number }[]; purchases: { supplierId: string | null; name: string; qty: number; totalCents: number }[] };
-type Tab = 'planejamento' | 'estoque' | 'kits' | 'envios' | 'consumo' | 'fornecedores';
+type Tab = 'planejamento' | 'estoque' | 'kits' | 'envios' | 'consumo' | 'fornecedores' | 'compliance';
 const PURPOSES = [['relacionamento', 'Relacionamento com a conta'], ['abm', 'Conta ABM'], ['oportunidade', 'Oportunidade'], ['campanha', 'Campanha'], ['evento', 'Evento'], ['institucional', 'Ação institucional']] as const;
 
 const toCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100) || 0;
@@ -41,18 +43,30 @@ function useSave(onDone?: () => void, msg = 'Salvo') {
   });
 }
 
+const TABS = (low: number): { key: Tab; label: string; count?: number }[] => [
+  { key: 'planejamento', label: 'Planejamento e orçamento' }, { key: 'estoque', label: 'Estoque', count: low || undefined }, { key: 'kits', label: 'Kits' }, { key: 'envios', label: 'Envios' }, { key: 'consumo', label: 'Consumo' }, { key: 'fornecedores', label: 'Fornecedores' }, { key: 'compliance', label: 'Compliance' },
+];
+
 export function GiftsPage() {
-  const [f, setF] = useUrlState({ t: 'estoque', from: '', to: '' });
-  const tab = f.t as Tab;
+  const { can } = useAuth();
+  // quem não tem Marketing (ex.: Operação Comercial) só solicita e acompanha as próprias concessões
+  const marketing = can('campanhas');
+  const [f, setF] = useUrlState({ t: marketing ? 'estoque' : 'compliance', from: '', to: '' });
+  const tab = (marketing ? f.t : 'compliance') as Tab;
   const from = f.from || monthStart(), to = f.to || new Date().toISOString().slice(0, 10);
-  const q = useQuery({ queryKey: ['brindes'], queryFn: () => api<Data>('/brindes') });
+  const q = useQuery({ queryKey: ['brindes'], enabled: marketing, queryFn: () => api<Data>('/brindes') });
+  if (!marketing || tab === 'compliance') return (
+    <div className="w-full">
+      <PageHeader icon={<Gift />} title="Brindes" subtitle={marketing ? 'Estoque, kits, envios para as contas e quanto foi gasto com cada uma.' : 'Solicitações de brindes, kits, apoios e patrocínios: avaliação das diretrizes, autorização e execução.'} />
+      {marketing && <Tabs<Tab> label="Brindes" className="mb-5" value={tab} onChange={(t) => setF({ t })} tabs={TABS(0)} />}
+      <ComplianceSection />
+    </div>
+  );
   const low = q.data?.items.filter((i) => i.low).length ?? 0;
   return (
     <div className="w-full">
       <PageHeader icon={<Gift />} title="Brindes" subtitle="Estoque, kits, envios para as contas e quanto foi gasto com cada uma." />
-      <Tabs<Tab> label="Brindes" className="mb-5" value={tab} onChange={(t) => setF({ t })} tabs={[
-        { key: 'planejamento', label: 'Planejamento e orçamento' }, { key: 'estoque', label: 'Estoque', count: low || undefined }, { key: 'kits', label: 'Kits' }, { key: 'envios', label: 'Envios' }, { key: 'consumo', label: 'Consumo' }, { key: 'fornecedores', label: 'Fornecedores' },
-      ]} />
+      <Tabs<Tab> label="Brindes" className="mb-5" value={tab} onChange={(t) => setF({ t })} tabs={TABS(low)} />
       {(tab === 'envios' || tab === 'consumo') && (
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <FormField label="De" htmlFor="gf-from"><Input id="gf-from" type="date" value={from} onChange={(e) => setF({ from: e.target.value })} /></FormField>
