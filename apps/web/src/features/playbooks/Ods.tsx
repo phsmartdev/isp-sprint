@@ -7,18 +7,6 @@ import clsx from 'clsx';
 
 export type OdsItem = { n: number; title: string; text: string };
 
-export const ODS_POL: OdsItem[] = [
-  { n: 7, title: 'Energia limpa e acessível', text: 'Splitters passivos dispensam energia elétrica na distribuição, o que pode reduzir o consumo da rede.' },
-  { n: 9, title: 'Indústria, inovação e infraestrutura', text: 'Fibra óptica até o ponto de uso: uma infraestrutura preparada para evoluir sem recabear.' },
-  { n: 12, title: 'Consumo e produção responsáveis', text: 'Menos equipamentos ativos e menos cobre instalado significam menos material a produzir, manter e descartar.' },
-];
-export const ODS_RIMA: OdsItem[] = [
-  { n: 9, title: 'Indústria, inovação e infraestrutura', text: 'Um backbone óptico metropolitano como base para os serviços digitais da cidade.' },
-  { n: 11, title: 'Cidades e comunidades sustentáveis', text: 'Mobilidade, segurança e serviços urbanos conectados ajudam a planejar e cuidar melhor da cidade.' },
-  { n: 16, title: 'Paz, justiça e instituições eficazes', text: 'Órgãos públicos integrados e monitorados favorecem uma gestão mais ágil e transparente.' },
-  { n: 17, title: 'Parcerias e meios de implementação', text: 'Infraestrutura construída em parceria entre o poder público e quem opera a rede.' },
-];
-
 /** Visão institucional da BKT (slide "A BKT em Sergipe"): os mesmos ODS das soluções, em frases gerais. */
 export const ODS_BKT: OdsItem[] = [
   { n: 7, title: 'Energia limpa e acessível', text: 'Redes ópticas passivas reduzem a necessidade de energia na distribuição.' },
