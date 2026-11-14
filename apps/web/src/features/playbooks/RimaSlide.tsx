@@ -294,7 +294,8 @@ export default function RimaSlide() {
           <rect x={NOC_B[0] - 122} y={NOC_B[1] - 24} width="244" height="48" rx="10" fill={fail ? '#2A0707' : '#0B1420'} stroke={fail ? FAILC : stage >= 1 ? '#8FD6FF' : '#3B4B5E'} strokeWidth="1.6" className={clsx('transition-[stroke,fill] duration-700', fail && 'rm-blink')} />
           <image href="/brand/bkt-symbol-white.png" x={NOC_B[0] - 113} y={NOC_B[1] - 15} width="30" height="30" preserveAspectRatio="xMidYMid meet" opacity={stage >= 1 ? 1 : 0.5} />
           <text x={NOC_B[0] - 75} y={NOC_B[1] - 2} fontSize="15" fontWeight="800" fill="#fff" className="font-display" letterSpacing="1">BKT</text>
-          <text x={NOC_B[0] - 75} y={NOC_B[1] + 13} fontSize="9.5" fontWeight="600" fill={fail ? '#FF8A8A' : '#9CC4EA'} letterSpacing="1.2">{fail ? 'ALERTA · ROMPIMENTO DETECTADO' : 'CENTRO DE GERENCIAMENTO'}</text>
+          {/* largura fixa: a fonte do sistema varia, o texto não pode sair do selo */}
+          <text x={NOC_B[0] - 75} y={NOC_B[1] + 13} fontSize="9.5" fontWeight="600" fill={fail ? '#FF8A8A' : '#9CC4EA'} textLength={fail ? 164 : 172} lengthAdjust="spacingAndGlyphs">{fail ? 'ALERTA · ROMPIMENTO' : 'CENTRO DE GERENCIAMENTO'}</text>
         </g>
       </svg>
 
