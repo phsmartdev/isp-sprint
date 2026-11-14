@@ -7615,3 +7615,17 @@ export const institutionalLayouts = pgTable('institutional_layouts', {
   updatedBy: uuid('updated_by').references(() => users.id),
   updatedAt: updatedAt(),
 }, (t) => ({ pk: primaryKey({ columns: [t.tenantId, t.slide] }) }));
+
+/** Link público da apresentação institucional: quem tem o link vê a apresentação sem login. Só o hash do token é guardado. */
+export const institutionalShareLinks = pgTable('institutional_share_links', {
+  id: id(),
+  tenantId: tenantId(),
+  tokenHash: text('token_hash').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  revokedAt: ts('revoked_at'),
+  revokedBy: uuid('revoked_by').references(() => users.id),
+  accessCount: integer('access_count').notNull().default(0),
+  lastAccessAt: ts('last_access_at'),
+}, (t) => ({ tok: uniqueIndex('institutional_share_links_token_idx').on(t.tokenHash), ten: index('institutional_share_links_tenant_idx').on(t.tenantId) }));
+

@@ -1,11 +1,29 @@
-/** Apresentação institucional (Central de Playbooks): selos e certificações em fila, um arquivo por selo. */
-import { and, asc, eq, sql } from 'drizzle-orm';
+/**
+ * Apresentação institucional (Central de Playbooks): selos e certificações em fila, um arquivo por selo,
+ * layout por empresa e o LINK PÚBLICO (só leitura, sem login; um link ativo por empresa, revogável).
+ */
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { defineRoute, IdParams } from '../http/route';
-import { forbidden, notFound } from '../http/errors';
+import { AppError, forbidden, notFound } from '../http/errors';
+import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { decodeImage } from '../services/images';
+import { hashToken, newShareToken } from '../services/cs';
+
+const PUBLIC_SLIDES = ['presenca'];   // layouts lidos pela apresentação pública
+const Token = z.object({ token: z.string().min(20).max(100) });
+async function activeLink(db: DbOrTx, tenantId: string) {
+  const [l] = await db.select().from(s.institutionalShareLinks).where(and(eq(s.institutionalShareLinks.tenantId, tenantId), isNull(s.institutionalShareLinks.revokedAt))).orderBy(desc(s.institutionalShareLinks.createdAt)).limit(1);
+  return l ?? null;
+}
+async function openPublic(db: DbOrTx, token: string) {
+  const [l] = await db.select().from(s.institutionalShareLinks).where(eq(s.institutionalShareLinks.tokenHash, hashToken(token))).limit(1);
+  if (!l || l.revokedAt) throw new AppError(404, 'Link indisponível', 'Este link da apresentação foi desativado. Peça um novo link à BKT.');
+  return l;
+}
+const linkView = (l: typeof s.institutionalShareLinks.$inferSelect | null) => (l ? { createdAt: l.createdAt, accessCount: l.accessCount, lastAccessAt: l.lastAccessAt } : null);
 
 const T = { tag: 'Playbooks', anyAuthenticated: true as const };
 
@@ -76,6 +94,60 @@ export const institutionalRoutes = [
       await app.db.delete(s.institutionalSeals).where(and(eq(s.institutionalSeals.id, params.id), eq(s.institutionalSeals.tenantId, auth.tenantId)));
       await audit(app.db, req, { action: 'institutional_seal.delete', entityType: 'institutional_seal', entityId: params.id });
       return reply.code(204).send();
+    },
+  }),
+
+  // ------------------------------------------------------------ link público (administração)
+  defineRoute({
+    method: 'GET', url: '/institucional/compartilhamento', summary: 'Situação do link público da apresentação', ...T,
+    handler: async ({ app, auth }) => ({ link: linkView(await activeLink(app.db, auth.tenantId)), canManage: auth.access.configuracoes === 'total' }),
+  }),
+  defineRoute({
+    method: 'POST', url: '/institucional/compartilhamento', summary: 'Gera um novo link público (o anterior deixa de funcionar); o token só aparece nesta resposta', ...T,
+    handler: async ({ app, auth, req, reply }) => {
+      if (auth.access.configuracoes !== 'total') throw forbidden('Só a administração gera o link público.');
+      const t = newShareToken();
+      const row = await app.db.transaction(async (tx) => {
+        await tx.update(s.institutionalShareLinks).set({ revokedAt: new Date(), revokedBy: auth.userId }).where(and(eq(s.institutionalShareLinks.tenantId, auth.tenantId), isNull(s.institutionalShareLinks.revokedAt)));
+        const [r] = await tx.insert(s.institutionalShareLinks).values({ tenantId: auth.tenantId, tokenHash: t.hash, createdBy: auth.userId }).returning();
+        return r!;
+      });
+      await audit(app.db, req, { action: 'institutional_share.create', entityType: 'institutional_share_link', entityId: row.id });
+      reply.code(201);
+      return { token: t.token, link: linkView(row) };
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/institucional/compartilhamento', summary: 'Desativa o link público', ...T,
+    handler: async ({ app, auth, req, reply }) => {
+      if (auth.access.configuracoes !== 'total') throw forbidden('Só a administração desativa o link público.');
+      await app.db.update(s.institutionalShareLinks).set({ revokedAt: new Date(), revokedBy: auth.userId }).where(and(eq(s.institutionalShareLinks.tenantId, auth.tenantId), isNull(s.institutionalShareLinks.revokedAt)));
+      await audit(app.db, req, { action: 'institutional_share.revoke', entityType: 'institutional_share_link', entityId: auth.tenantId });
+      return reply.code(204).send();
+    },
+  }),
+  // ------------------------------------------------------------ acesso público (sem login, só leitura)
+  defineRoute({
+    method: 'GET', url: '/public/apresentacao/:token', summary: 'Apresentação institucional pelo link público: layout e selos', tag: 'Playbooks', public: true,
+    params: Token,
+    rateLimit: (c) => ({ max: c.loginRateLimitPerMinute * 6, timeWindow: '1 minute' }),
+    handler: async ({ app, params }) => {
+      const l = await openPublic(app.db, params.token);
+      await app.db.update(s.institutionalShareLinks).set({ accessCount: sql`${s.institutionalShareLinks.accessCount} + 1`, lastAccessAt: new Date() }).where(eq(s.institutionalShareLinks.id, l.id));
+      const layouts = await app.db.select({ slide: s.institutionalLayouts.slide, layout: s.institutionalLayouts.layout }).from(s.institutionalLayouts).where(eq(s.institutionalLayouts.tenantId, l.tenantId));
+      const seals = await app.db.select({ id: s.institutionalSeals.id, name: s.institutionalSeals.name, sha256: s.institutionalSeals.sha256 }).from(s.institutionalSeals).where(eq(s.institutionalSeals.tenantId, l.tenantId)).orderBy(asc(s.institutionalSeals.position), asc(s.institutionalSeals.createdAt));
+      return { layouts: Object.fromEntries(layouts.filter((x) => PUBLIC_SLIDES.includes(x.slide)).map((x) => [x.slide, x.layout])), seals };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/public/apresentacao/:token/selos/:id/imagem', summary: 'Imagem de um selo pelo link público', tag: 'Playbooks', public: true,
+    params: Token.extend({ id: z.string().uuid() }),
+    rateLimit: (c) => ({ max: c.loginRateLimitPerMinute * 20, timeWindow: '1 minute' }),
+    handler: async ({ app, params, reply }) => {
+      const l = await openPublic(app.db, params.token);
+      const [a] = await app.db.select().from(s.institutionalSeals).where(and(eq(s.institutionalSeals.id, params.id), eq(s.institutionalSeals.tenantId, l.tenantId))).limit(1);
+      if (!a) throw notFound('Selo não encontrado.');
+      return reply.header('content-type', a.mime).header('cache-control', 'private, max-age=300').header('etag', `"${a.sha256}"`).header('content-security-policy', "default-src 'none'").send(a.data);
     },
   }),
 ];

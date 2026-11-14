@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { SettingsLayout } from './features/settings/SettingsLayout';
 import { lazy, Suspense, type ReactNode } from 'react';
 import type { FeatureKey, Module } from '@isp/domain';
@@ -88,6 +88,8 @@ const PublicSurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ 
 const SurveyPage = lazy(() => import('./pages/cs/Surveys').then((m) => ({ default: m.SurveyPage })));
 const PublicNoticePage = lazy(() => import('./pages/PublicNotice').then((m) => ({ default: m.PublicNoticePage })));
 const InstitutionalPresentation = lazy(() => import('./pages/playbooks/Institutional').then((m) => ({ default: m.InstitutionalPresentation })));
+/** link público da apresentação institucional (/a/:token): sem login, só leitura */
+const PublicPresentation = lazy(() => import('./pages/playbooks/Institutional').then((m) => ({ default: function PublicPresentation() { const { token } = useParams(); return <m.InstitutionalPresentation publicToken={token} />; } })));
 const TourPage = lazy(() => import('./pages/Tour').then((m) => ({ default: m.TourPage })));
 const KpiBoardPage = lazy(() => import('./pages/KpiBoardPage').then((m) => ({ default: m.KpiBoardPage })));
 
@@ -165,6 +167,7 @@ export function App() {
       <Route path="/j/:token" element={<PublicJourneyPage />} />
       <Route path="/p/:token" element={<PublicSurveyPage />} />
       <Route path="/r/:token" element={<PublicNoticePage />} />
+      <Route path="/a/:token" element={<Suspense fallback={null}><PublicPresentation /></Suspense>} />
       <Route path="/kickoff/:id/pdf" element={<Gate module="clientes"><KickoffPrintPage /></Gate>} />
       <Route path="/redefinir-senha" element={<ResetPasswordPage />} />
       <Route path="/playbooks/apresentacao-institucional" element={<RequireAuth><Suspense fallback={null}><InstitutionalPresentation /></Suspense></RequireAuth>} />
