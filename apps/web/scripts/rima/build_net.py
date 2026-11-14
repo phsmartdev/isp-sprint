@@ -91,7 +91,7 @@ guard = pick(lambda t, n: t.get('amenity') == 'police' and 'Guarda Municipal' in
 add('seg', guard, 'Guarda Municipal · central de monitoramento', True)
 cams = pick(lambda t, n: t.get('man_made') == 'surveillance')
 add('seg', [{**c, 'name': 'Câmera de videomonitoramento'} for c in spread(cams, 14)], 'Câmera')
-smtt = pick(lambda t, n: 'SMTT' in n)
+smtt = pick(lambda t, n: 'Superintendência Municipal de Transportes' in n)
 add('mob', smtt, 'Central de mobilidade (SMTT)', True)
 sig = pick(lambda t, n: t.get('highway') == 'traffic_signals')
 add('mob', [{**s, 'name': 'Semáforo'} for s in spread(sig, 18)], 'Semáforo')
@@ -109,31 +109,34 @@ parks.sort(key=lambda p: -p['area'])
 add('urb', spread(parks[:40], 8), 'Praça · Wi-Fi público e sensores')
 print({c: sum(1 for p in pts if p['cat'] == c) for c in ['adm', 'edu', 'sau', 'seg', 'mob', 'urb']})
 
-# ---------------- POPs (conceituais, em equipamentos públicos reais) ----------------
-POPDEF = [('Norte', (-37.066, -10.886)), ('Centro', (-37.053, -10.913)), ('Treze de Julho', (-37.053, -10.935)),
-          ('Atalaia', (-37.044, -10.982)), ('Sul', (-37.067, -10.962)), ('Oeste', (-37.088, -10.930)), ('Santa Maria', (-37.095, -10.990))]
-cand = [p for p in pts if p['kind'] in ('Escola municipal', 'Unidade de saúde', 'Órgão municipal', 'Secretaria Municipal de Educação')]
+# ---------------- POPs reais da RIMA (endereços informados pela BK Telecom, posições do OSM) ----------------
+POPDEF = [('POP SMTT', 'Sede da SMTT · R. Roberto Fonseca, 200 · Inácio Barbosa', (-37.071135, -10.9514195)),
+          ('POP SEPLOG', 'Prefeitura de Aracaju (SEPLOG) · R. Frei Luiz Canolo de Noronha, 42 · Ponto Novo', (-37.0776269, -10.9283175)),
+          ('POP UPA Sul', 'Hospital Municipal Des. Fernando Franco · Av. Dr. Tarcísio Daniel dos Santos, 1 · Farolândia', (-37.0744772, -10.9749578)),
+          ('POP UPA Norte', 'Hospital Nestor Piva · Av. Maranhão, s/n · 18 do Forte', (-37.0672697, -10.904883))]
 pops = []
-for nm, (lon, lat) in POPDEF:
-    x, y = xy(lon, lat)
-    c = min(cand, key=lambda p: math.dist((p['x'], p['y']), (x, y)))
-    pops.append({'name': 'POP ' + nm, 'site': c['name'], 'x': c['x'], 'y': c['y']})
-RING = [0, 1, 2, 3, 4, 5]   # anel; Santa Maria (6) em ramal único a partir do Sul (4)
+for nm, site, (lon, lat) in POPDEF:
+    x, y = xy(lon, lat); pops.append({'name': nm, 'site': site, 'x': x, 'y': y})
+RING = [3, 1, 0, 2]   # Norte → SEPLOG → SMTT → UPA Sul → (volta pelo leste) → Norte
+BKT = xy(-37.060375, -10.928156)   # sede BK Telecom · R. Pedro Paes Mendonça (Suíssa)
 for p in pops: p['node'] = nearest(p['x'], p['y'], True)
 
 # anel pelas avenidas (penaliza arestas já usadas para formar rotas distintas)
 used = set()
 def w_bb(u, v, L, m):
     f = 1 if m else 4
-    return L * f * (8 if (min(u, v), max(u, v)) in used else 1)
+    return L * f * (30 if (min(u, v), max(u, v)) in used else 1)
 ring = []
+# o retorno UPA Sul → UPA Norte passa pelo corredor leste (Av. Beira Mar / Treze de Julho), fechando o anel
+WAY = {(2, 3): [nearest(*xy(-37.0465, -10.9400), True)]}
 for a, b in zip(RING, RING[1:] + RING[:1]):
-    dist, par, _ = dijkstra([pops[a]['node']], w_bb)
-    path = trace(par, pops[b]['node'])
+    stops = [pops[a]['node'], *WAY.get((a, b), []), pops[b]['node']]
+    path = []
+    for u0, v0 in zip(stops, stops[1:]):
+        dist, par, _ = dijkstra([u0], w_bb)
+        seg_ = trace(par, v0); path += seg_ if not path else seg_[1:]
     for u, v in zip(path, path[1:]): used.add((min(u, v), max(u, v)))
     ring.append({'a': a, 'b': b, 'nodes': path})
-dist, par, _ = dijkstra([pops[4]['node']], w_bb)
-spur = {'a': 4, 'b': 6, 'nodes': trace(par, pops[6]['node'])}
 
 # acesso: cada ponto ao POP mais próximo pela malha viária
 src = [p['node'] for p in pops]
@@ -163,6 +166,7 @@ keep = []
 for s in sorted(splitters, key=lambda s: -s['n']):
     if all(math.dist(coords[s['node']], coords[k['node']]) > 450 for k in keep): keep.append(s)
 splitters = keep
+for s_ in splitters: s_['units'] = [k for k, p in enumerate(pts) if not p['ded'] and s_['node'] in p['path']]
 
 # ---------------- saída em tela ----------------
 def scr(nodes_, tol=0.7):
@@ -174,19 +178,26 @@ def plen(P): return sum(math.dist(a, b) for a, b in zip(P, P[1:]))
 out = {'pops': [], 'ring': [], 'points': [], 'splitters': []}
 for p in pops:
     sx, sy = G.S(p['x'], p['y']); out['pops'].append({'name': p['name'], 'site': p['site'], 'x': round(sx, 1), 'y': round(sy, 1)})
-for r in ring + [spur]:
+for r in ring:
     P = scr(r['nodes']); m = LineString(P).interpolate(0.5, normalized=True)
-    out['ring'].append({'a': r['a'], 'b': r['b'], 'd': dstr(P), 'len': round(plen(P)), 'spur': r is spur, 'mx': round(m.x, 1), 'my': round(m.y, 1)})
+    out['ring'].append({'a': r['a'], 'b': r['b'], 'd': dstr(P), 'len': round(plen(P)), 'spur': False, 'mx': round(m.x, 1), 'my': round(m.y, 1)})
 for p in pts:
     P = scr(p['path'][::-1] if False else p['path'])   # do POP até a unidade
     sx, sy = G.S(p['x'], p['y'])
     if math.dist(P[-1], (sx, sy)) > 0.5: P.append((sx, sy))
     h = int(hashlib.md5(p['name'].encode()).hexdigest(), 16)
     out['points'].append({'name': p['name'], 'cat': p['cat'], 'kind': p['kind'], 'ded': p['ded'], 'pop': p['pop'], 'x': round(sx, 1), 'y': round(sy, 1),
-                          'd': dstr(P), 'len': round(plen(P)), 'prov': h % 4, 'osm': p['osm']})
+                          'd': dstr(P), 'len': round(plen(P)), 'prov': h % 4, 'osm': p['osm'],
+                          'atPop': min(math.dist((p['x'], p['y']), (q['x'], q['y'])) for q in pops) < 60})
 for s in splitters:
     if not TILE.buffer(-150).contains(Point(*coords[s['node']])): continue
     sx, sy = G.S(*coords[s['node']]); out['splitters'].append({'pop': s['pop'], 'x': round(sx, 1), 'y': round(sy, 1)})
+inside = [s_ for s_ in splitters if TILE.buffer(-150).contains(Point(*coords[s_['node']])) and 4 <= len(s_['units']) <= 8]
+cut = sorted(inside, key=lambda s_: len(s_['units']))[len(inside) // 2]
+cs = G.S(*coords[cut['node']])
+out['cut'] = {'x': round(cs[0], 1), 'y': round(cs[1], 1), 'pop': cut['pop'], 'units': cut['units'],
+              'd': [dstr(scr(pts[k]['path'][pts[k]['path'].index(cut['node']):]) + [G.S(pts[k]['x'], pts[k]['y'])]) for k in cut['units']]}
+bs = G.S(*BKT); out['bkt'] = [round(bs[0], 1), round(bs[1], 1)]
 out['proj'] = {'phi': 62, 'sq': G.SQ, 'sc': G.SC, 'ox': G.OX, 'oy': G.OY, 'lat0': LAT0, 'kx': KX, 'ky': KY}
 json.dump(out, open('net.json', 'w'), ensure_ascii=False)
 print('pops', [(p['name'], p['site']) for p in out['pops']])
