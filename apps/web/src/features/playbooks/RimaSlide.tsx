@@ -10,6 +10,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Activity, Cctv, Expand, Gauge, GraduationCap, HeartPulse, Landmark, Lightbulb, Network, RotateCcw, Route, ShieldCheck, TrafficCone, Unplug, X } from 'lucide-react';
+import { ODS_RIMA, OdsBar } from './Ods';
 import { RIMA_BKT, RIMA_BLDS, RIMA_CITY_LABEL, RIMA_CUT, RIMA_GEO, RIMA_LABELS, RIMA_POINTS, RIMA_POPS, RIMA_PROJ, RIMA_RING, RIMA_SPLITTERS, RIMA_TILE, type RimaCat, type RimaPoint } from './aracajuRima';
 
 /**
@@ -80,22 +81,23 @@ const run = (d: string, len: number, dash: string, w: number, c: string, per: nu
 );
 
 /** cenário permanente: chapa, água, mangues, ruas, ponte, prédios e nomes (memorizado; nunca muda) */
-const Base = memo(function Base() {
+/** Cenário permanente de Aracaju. uid prefixa os ids SVG: a abertura e o encerramento reutilizam o mesmo mapa. */
+export const RimaBase = memo(function RimaBase({ uid = 'rm', labels = true }: { uid?: string; labels?: boolean }) {
   const tp = RIMA_TILE.map((p) => p.join(',')).join(' ');
   return (
     <g>
       <defs>
-        <clipPath id="rm-clip"><polygon points={tp} /></clipPath>
-        <linearGradient id="rm-sea" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#0A1D30" /><stop offset="1" stopColor="#051020" /></linearGradient>
-        <linearGradient id="rm-wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#24476B" /><stop offset="1" stopColor="#0F2236" /></linearGradient>
-        <radialGradient id="rm-halo"><stop offset="0" stopColor="#4FBBFF" stopOpacity=".55" /><stop offset="1" stopColor="#4FBBFF" stopOpacity="0" /></radialGradient>
-        <filter id="rm-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.6" /></filter>
-        <filter id="rm-soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="14" /></filter>
+        <clipPath id={`${uid}-clip`}><polygon points={tp} /></clipPath>
+        <linearGradient id={`${uid}-sea`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#0A1D30" /><stop offset="1" stopColor="#051020" /></linearGradient>
+        <linearGradient id={`${uid}-wall`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#24476B" /><stop offset="1" stopColor="#0F2236" /></linearGradient>
+        <radialGradient id={`${uid}-halo`}><stop offset="0" stopColor="#4FBBFF" stopOpacity=".55" /><stop offset="1" stopColor="#4FBBFF" stopOpacity="0" /></radialGradient>
+        <filter id={`${uid}-glow`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.6" /></filter>
+        <filter id={`${uid}-soft`} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="14" /></filter>
       </defs>
-      <polygon points={RIMA_TILE.map(([x, y]) => `${x},${y + 30}`).join(' ')} fill="#000" opacity=".6" filter="url(#rm-soft)" />
+      <polygon points={RIMA_TILE.map(([x, y]) => `${x},${y + 30}`).join(' ')} fill="#000" opacity=".6" filter={`url(#${uid}-soft)`} />
       {RIMA_TILE.map((p, i) => { const q = RIMA_TILE[(i + 1) % RIMA_TILE.length]!; return <polygon key={i} points={`${p[0]},${p[1]} ${q[0]},${q[1]} ${q[0]},${q[1] + 20} ${p[0]},${p[1] + 20}`} fill="#081422" stroke="#1F4060" strokeWidth=".8" />; })}
-      <polygon points={tp} fill="url(#rm-sea)" />
-      <g clipPath="url(#rm-clip)">
+      <polygon points={tp} fill={`url(#${uid}-sea)`} />
+      <g clipPath={`url(#${uid}-clip)`}>
         <path d={RIMA_GEO.neigh} fill="#0B1826" />
         <path d={RIMA_GEO.aju} fill="#0F2438" />
         <path d={RIMA_GEO.wet} fill="#0D2A2E" opacity=".75" />
@@ -106,10 +108,10 @@ const Base = memo(function Base() {
         <path d={RIMA_GEO.major} fill="none" stroke="#6FA8D8" strokeOpacity=".5" strokeWidth=".9" />
         <path d={RIMA_GEO.aju} fill="none" stroke="#8FD6FF" strokeOpacity=".4" strokeWidth="1.1" />
         <path d={RIMA_GEO.bridge} fill="none" stroke="#CFF0FF" strokeWidth="2.2" />
-        {RIMA_BLDS.map(([w, top], i) => <g key={i}><path d={w} fill="url(#rm-wall)" /><path d={top} fill="#3A6A96" stroke="#8FD6FF" strokeOpacity=".3" strokeWidth=".4" /></g>)}
+        {RIMA_BLDS.map(([w, top], i) => <g key={i}><path d={w} fill={`url(#${uid}-wall)`} /><path d={top} fill="#3A6A96" stroke="#8FD6FF" strokeOpacity=".3" strokeWidth=".4" /></g>)}
       </g>
-      {RIMA_LABELS.map((l) => <text key={l.t} x={l.x} y={l.y} fill="#9CC4EA" fillOpacity=".75" fontSize={l.t === 'Oceano Atlântico' ? 13 : 11.5} fontStyle={l.t.startsWith('Rio') || l.t.startsWith('Oceano') ? 'italic' : undefined} textAnchor="middle" style={{ paintOrder: 'stroke' }} stroke="#06101A" strokeWidth="3">{l.t}</text>)}
-      <text x={RIMA_CITY_LABEL[0]} y={RIMA_CITY_LABEL[1]} fill="#fff" fillOpacity=".9" fontSize="30" fontWeight="800" letterSpacing="10" textAnchor="middle" className="font-display" style={{ paintOrder: 'stroke' }} stroke="#06101A" strokeWidth="5">ARACAJU</text>
+      {labels && RIMA_LABELS.map((l) => <text key={l.t} x={l.x} y={l.y} fill="#9CC4EA" fillOpacity=".75" fontSize={l.t === 'Oceano Atlântico' ? 13 : 11.5} fontStyle={l.t.startsWith('Rio') || l.t.startsWith('Oceano') ? 'italic' : undefined} textAnchor="middle" style={{ paintOrder: 'stroke' }} stroke="#06101A" strokeWidth="3">{l.t}</text>)}
+      {labels && <text x={RIMA_CITY_LABEL[0]} y={RIMA_CITY_LABEL[1]} fill="#fff" fillOpacity=".9" fontSize="30" fontWeight="800" letterSpacing="10" textAnchor="middle" className="font-display" style={{ paintOrder: 'stroke' }} stroke="#06101A" strokeWidth="5">ARACAJU</text>}
     </g>
   );
 });
@@ -166,7 +168,7 @@ export default function RimaSlide() {
     <div className="relative h-full overflow-hidden bg-[#050A11] text-white" data-rima-stage={stage}>
       <div aria-hidden className="absolute inset-0 bg-[radial-gradient(ellipse_at_68%_48%,rgba(47,89,134,0.35),transparent_62%)]" />
       <svg viewBox="0 0 1600 900" width={1600} height={900} className="absolute inset-0" role="img" aria-label={`Mapa isométrico de Aracaju. ${cap[0]}: ${cap[1]}`}>
-        <Base />
+        <RimaBase />
 
         {/* REDE FRAGMENTADA: cada unidade com um enlace próprio (provedores/ambientes diferentes) */}
         <g className={clsx('rm-fade', stage !== 0 && 'off')} style={{ transitionDelay: stage === 0 ? `${flow === 'jump' ? 1.2 : 2.6}s` : '0s' }}>
@@ -302,8 +304,8 @@ export default function RimaSlide() {
       {/* ---------- interface ---------- */}
       <img src="/brand/bkt-logo-white.png" alt="BK Telecom" className="absolute left-[60px] top-9 h-10 w-[170px] object-contain object-left" draggable={false} />
       <p className="absolute left-[60px] top-[94px] text-[12px] font-semibold tracking-[0.2em] text-[#8FD6FF]">RIMA · REDE INTEGRADA MUNICIPAL DE ARACAJU</p>
-      <h1 className="absolute left-[60px] top-[120px] w-[430px] font-display text-[27px] font-extrabold leading-[1.16]">RIMA — <span className="text-[#9CC4EA]">a infraestrutura que conecta uma cidade inteira.</span></h1>
-      <p className="absolute left-[60px] top-[250px] w-[420px] text-[14.5px] leading-[1.45] text-white/70">Uma rede óptica metropolitana para integrar serviços públicos, ampliar a capacidade de gestão e preparar Aracaju para o futuro.</p>
+      <h1 className="absolute left-[60px] top-[120px] w-[430px] font-display text-[26px] font-extrabold leading-[1.18]">Uma cidade conectada <span className="text-[#9CC4EA]">é uma cidade com mais possibilidades.</span></h1>
+      <p className="absolute left-[60px] top-[250px] w-[420px] text-[14.5px] leading-[1.45] text-white/70">Quando conectamos serviços, aproximamos pessoas. E quando integramos uma cidade, ajudamos a construir um futuro melhor para todos.</p>
 
       {/* etapa atual */}
       <div className="absolute left-[60px] top-[340px] w-[420px]" aria-live="polite">
@@ -337,6 +339,9 @@ export default function RimaSlide() {
         <li className="flex items-center gap-2"><span className="h-[3px] w-6 bg-[#FF4D4D]" />Falha</li>
       </ul>
       <p className="absolute left-[60px] top-[722px] w-[420px] text-[10.5px] leading-snug text-white/35">Simulação conceitual. POPs e sede da BKT nos endereços reais; unidades públicas nas posições do OpenStreetMap; rotas, splitters e aplicações são ilustrativos. Mapa © colaboradores do OpenStreetMap.</p>
+
+      {/* ODS ligados à rede integrada (discretos, surgem com a RIMA) */}
+      <OdsBar items={ODS_RIMA} show={stage >= 1} delay={stage === 4 ? 0.6 : 2} size={42} drop="down" className="left-[560px] top-[16px]" onTouch={poke} />
 
       {/* modos e falha */}
       <div className="absolute right-[248px] top-7 flex border border-white/15 bg-[#09101A]/80 p-1 backdrop-blur-md" role="group" aria-label="Modo de visualização">
