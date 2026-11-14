@@ -82,6 +82,11 @@ docs/             AUDIT_LEGACY_v1.5, DECISIONS (ADRs), PROGRESS (estado e backlo
 - Dinheiro em centavos; datas em UTC no banco, exibidas no fuso da empresa.
 - Seed fictícia: telefones com DDD 00, e-mails `.test`, clientes marcados `seed_ficticio`.
 
+## Apresentação institucional
+
+Em Central de Playbooks → Apresentação institucional (6 cenas, modo automático). A administração gera um link público
+pelo botão **Link público** (`/a/:token`, sem login e só leitura); gerar um novo desativa o anterior.
+
 ## Não usar em produção ainda
 
 Faltam MFA para administradores, backups testados, observabilidade completa, revisão de LGPD por categoria de dado e hardening de implantação (Fase 7). Veja a seção de limitações em `docs/PROGRESS.md`.
