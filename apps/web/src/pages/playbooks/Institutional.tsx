@@ -13,7 +13,7 @@ import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { ChevronLeft, ChevronRight, Feather, Gauge, Hourglass, Maximize2, Minimize2, Move, Pause, Play, Server, ShieldCheck, X, Zap } from 'lucide-react';
-import { ODS_POL, OdsBar } from '../../features/playbooks/Ods';
+import { ODS_BKT, ODS_POL, OdsBar } from '../../features/playbooks/Ods';
 import { api } from '../../lib/api';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
@@ -115,7 +115,7 @@ type Rect = { x: number; y: number; w: number; h: number; scale?: number };
 type Layout = { blocks: Record<'logo' | 'texto' | 'mapa' | 'selos', Rect>; texts: { title: string; accent: string; body: string } };
 /** Posição padrão dos blocos no palco de 1600 × 900. */
 export const DEFAULT_LAYOUT: Layout = {
-  blocks: { logo: { x: 90, y: 64, w: 230, h: 56 }, texto: { x: 90, y: 160, w: 760, h: 300, scale: 1 }, mapa: { x: 730, y: 30, w: 860, h: 820 }, selos: { x: 90, y: 790, w: 760, h: 64 } },
+  blocks: { logo: { x: 90, y: 64, w: 230, h: 56 }, texto: { x: 90, y: 160, w: 760, h: 300, scale: 1 }, mapa: { x: 730, y: 30, w: 860, h: 820 }, selos: { x: 90, y: 772, w: 900, h: 82 } },
   texts: { title: 'Tecnologia que nasceu em Sergipe', accent: 'e cresce com ele.', body: 'Conectividade, computação em nuvem, soluções de energia e infraestrutura para cidades inteligentes, em todo o estado de Sergipe.' },
 };
 const LABELS: Record<keyof Layout['blocks'], string> = { logo: 'Logo', texto: 'Texto', mapa: 'Mapa', selos: 'Selos e certificações' };
@@ -164,12 +164,14 @@ function SlidePresence({ layout, edit, setLayout }: { layout: Layout; edit: bool
           <p {...txt('body')} className={clsx('mt-[0.9em] leading-[1.5] text-white/80', edit && 'cursor-text outline-none focus:bg-white/5')} style={{ fontSize: '22em' }}>{t.body}</p>
         </div>
       </Block>
+      {/* rodapé à direita: ODS pequenos (os selos e certificações ficam à esquerda, maiores) */}
+      <OdsBar items={ODS_BKT} show size={34} align="right" className="bottom-[46px] right-[60px]" />
       {(seals.length > 0 || edit) && (
         <Block id="selos" r={b.selos} edit={edit} onChange={set('selos')}>
           {/* rodapé discreto: rótulo pequeno e selos baixos, sem quadro */}
           <section aria-label="Selos e certificações" className="flex h-full items-center gap-5 border-t border-white/10 pt-3">
             <p className="flex-none text-[10.5px] font-semibold uppercase leading-[1.5] tracking-[0.18em] text-white/40">Selos e<br />certificações</p>
-            {seals.length ? <ul className="flex h-full min-w-0 flex-1 items-center gap-5">{seals.map((x) => <li key={x.id} className="flex h-full flex-none items-center"><img src={`/api/v1/institucional/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}`} alt={x.name} title={x.name} className="h-[44px] w-auto max-w-[120px] object-contain opacity-75 transition-opacity hover:opacity-100" draggable={false} /></li>)}</ul>
+            {seals.length ? <ul className="flex h-full min-w-0 flex-1 items-center gap-5">{seals.map((x) => <li key={x.id} className="flex h-full flex-none items-center"><img src={`/api/v1/institucional/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}`} alt={x.name} title={x.name} className="h-[60px] w-auto max-w-[150px] object-contain opacity-85 transition-opacity hover:opacity-100" draggable={false} /></li>)}</ul>
               : <p className="text-[12px] text-white/40">Sem selos enviados (Configuração → Personalização). Na apresentação, o rodapé só aparece quando houver selos.</p>}
           </section>
         </Block>

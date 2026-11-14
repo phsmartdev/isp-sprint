@@ -19,6 +19,16 @@ export const ODS_RIMA: OdsItem[] = [
   { n: 17, title: 'Parcerias e meios de implementação', text: 'Infraestrutura construída em parceria entre o poder público e quem opera a rede.' },
 ];
 
+/** Visão institucional da BKT (slide "A BKT em Sergipe"): os mesmos ODS das soluções, em frases gerais. */
+export const ODS_BKT: OdsItem[] = [
+  { n: 7, title: 'Energia limpa e acessível', text: 'Redes ópticas passivas reduzem a necessidade de energia na distribuição.' },
+  { n: 9, title: 'Indústria, inovação e infraestrutura', text: 'Infraestrutura de fibra óptica para Sergipe evoluir.' },
+  { n: 11, title: 'Cidades e comunidades sustentáveis', text: 'Conectividade para cidades mais bem planejadas e cuidadas.' },
+  { n: 12, title: 'Consumo e produção responsáveis', text: 'Menos equipamentos e materiais para fazer mais.' },
+  { n: 16, title: 'Paz, justiça e instituições eficazes', text: 'Instituições públicas integradas e mais ágeis.' },
+  { n: 17, title: 'Parcerias e meios de implementação', text: 'Parcerias entre o poder público e quem opera a rede.' },
+];
+
 /** Fileira discreta de ícones; o painel explicativo abre ao passar o mouse ou clicar. */
 export function OdsBar({ items, show, delay = 0, size = 52, drop = 'up', align = 'left', className, onTouch }: { items: OdsItem[]; show: boolean; delay?: number; size?: number; drop?: 'up' | 'down'; align?: 'left' | 'right'; className?: string; onTouch?: () => void }) {
   const [open, setOpen] = useState<number | null>(null);
