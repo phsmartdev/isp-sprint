@@ -147,35 +147,3 @@
   .rm-line, .rm-fade, .rm-pop { transition: none !important; }
   .rm-flow, .rm-blink, .rm-beacon, .rm-alarm { animation: none; }
 }
-
-/* Apresentação institucional: linguagem cinematográfica (abertura, encerramento, impacto humano, transições). */
-@keyframes cine-push { from { transform: translate(40px, 20px) scale(1); } to { transform: translate(-170px, 0) scale(1.24); } }
-.cine-push { animation: cine-push 18s cubic-bezier(.25,.1,.25,1) forwards; }
-@keyframes cine-pull { from { transform: translate(-200px, -60px) scale(1.45); } to { transform: translate(-260px, 120px) scale(.95); } }
-.cine-pull { animation: cine-pull 7.5s cubic-bezier(.3,.1,.2,1) forwards; }
-@keyframes cine-reveal { from { opacity: 0; filter: brightness(.3) blur(3px); } to { opacity: 1; filter: none; } }
-.cine-reveal { animation: cine-reveal 2.4s ease-out both; }
-@keyframes cine-dim { to { opacity: .5; } }
-.cine-dim { animation: cine-dim 2s ease 4.6s forwards; }
-@keyframes cine-rise { from { opacity: 0; transform: translateY(14px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
-.cine-rise { animation: cine-rise 1.3s cubic-bezier(.2,.7,.2,1) both; }
-@keyframes cine-dot { from { opacity: 0; transform: scale(.2); } to { opacity: 1; transform: none; } }
-.cine-dot { transform-box: fill-box; transform-origin: center; animation: cine-dot .9s cubic-bezier(.3,1.4,.5,1) both; }
-@keyframes cine-draw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
-.cine-draw { stroke-dasharray: 100; animation: cine-draw 1.6s cubic-bezier(.4,0,.2,1) both; }
-@keyframes cine-float { 0% { transform: translateY(0); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translateY(-160px); opacity: 0; } }
-.cine-float { animation: cine-float 14s linear infinite; }
-@keyframes cine-sweep { from { opacity: 0; -webkit-mask-position: 120% 0; mask-position: 120% 0; } 20% { opacity: 1; } to { opacity: 1; -webkit-mask-position: 0 0; mask-position: 0 0; } }
-.cine-sweep { -webkit-mask-image: linear-gradient(100deg, #000 40%, rgba(0,0,0,.35) 50%, transparent 60%); mask-image: linear-gradient(100deg, #000 40%, rgba(0,0,0,.35) 50%, transparent 60%); -webkit-mask-size: 300% 100%; mask-size: 300% 100%; animation: cine-sweep 2.2s cubic-bezier(.4,0,.2,1) both; }
-@keyframes cine-walk { from { transform: translate(0, 0); } to { transform: translate(var(--wx, 120px), var(--wy, 0px)); } }
-.cine-walk { animation: cine-walk var(--dur, 9s) linear infinite alternate; }
-@keyframes cine-ecg { from { stroke-dashoffset: 200; } to { stroke-dashoffset: 0; } }
-.cine-ecg { stroke-dasharray: 60 140; animation: cine-ecg 2.2s linear infinite; }
-@keyframes cine-glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-.cine-glow { animation: cine-glow 3.2s ease-in-out infinite; }
-/* acabamento de filme sobre todas as cenas: vinheta e grão sutil */
-.cine-grain { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: .045; mix-blend-mode: overlay; }
-@media (prefers-reduced-motion: reduce) {
-  .cine-push, .cine-pull, .cine-reveal, .cine-dim, .cine-rise, .cine-dot, .cine-draw, .cine-sweep { animation-duration: .01s !important; animation-delay: 0s !important; }
-  .cine-float, .cine-walk, .cine-ecg, .cine-glow { animation: none; }
-}

@@ -3,7 +3,6 @@
  * Slide 1: logo, presença em Sergipe (mapa em pontos com Porto da Folha em destaque) e os selos e certificações,
  * que entram como imagem em Configuração → Personalização (espaço "Selos e certificações").
  * Slide 2: o mesmo prédio com rede tradicional × rede POL, em transição animada (features/playbooks/polScene).
- * Cenas novas: abertura e encerramento sobre o mapa de Aracaju (features/playbooks/CityScenes) e impacto humano (SceneImpact).
  * Slide 3: RIMA, Aracaju em 3D com rede fragmentada × rede integrada, NOC da BKT e simulação de falha (features/playbooks/RimaSlide).
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,8 +11,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { Check, ChevronLeft, ChevronRight, Copy, Feather, Link2, Gauge, Hourglass, Maximize2, Minimize2, Move, Pause, Play, Server, ShieldCheck, X, Zap } from 'lucide-react';
-import { ODS_BKT, ODS_POL, OdsBar } from '../../features/playbooks/Ods';
+import { Check, ChevronLeft, ChevronRight, Copy, Feather, Link2, Gauge, Hourglass, Maximize2, Minimize2, Move, Server, ShieldCheck, X, Zap } from 'lucide-react';
+import { ODS_BKT, OdsBar } from '../../features/playbooks/Ods';
 import { api } from '../../lib/api';
 import { Stage } from '../Tour';
 import { SE_LINKS, SE_MUNICIPIOS, SE_OUTLINE, SE_VIEW } from '../../features/playbooks/sergipeMap';
@@ -21,10 +20,6 @@ import { buildPolScene, POL_CALLOUT_X } from '../../features/playbooks/polScene'
 
 /** Slide 3 (RIMA): mapa de Aracaju com ~800 KB de geometria, carregado só quando o slide abre. */
 const RimaSlide = lazy(() => import('../../features/playbooks/RimaSlide'));
-/** Abertura e encerramento reutilizam o mapa de Aracaju da RIMA (mesmo pacote carregado sob demanda). */
-const SceneOpening = lazy(() => import('../../features/playbooks/CityScenes').then((m) => ({ default: m.SceneOpening })));
-const SceneClosing = lazy(() => import('../../features/playbooks/CityScenes').then((m) => ({ default: m.SceneClosing })));
-const SceneImpact = lazy(() => import('../../features/playbooks/SceneImpact'));
 
 const HOME = 'Porto da Folha';
 const CITY_ORDER = ['Aracaju', 'Nossa Senhora do Socorro', 'Laranjeiras', 'Estância', 'Porto da Folha'];
@@ -247,9 +242,8 @@ function SlidePol() {
         ))}
       </div>
       <img src="/brand/bkt-logo-white.png" alt="BKT" className="absolute left-[90px] top-14 h-12 w-[200px] object-contain object-left" draggable={false} />
-      <h1 className="absolute left-[90px] top-[146px] w-[780px] font-display text-[44px] font-extrabold leading-[1.12]">Menos recursos.<span className="block text-[#9CC4EA]">Mais possibilidades.</span></h1>
-      <p className="absolute left-[90px] top-[262px] w-[620px] text-[18px] leading-[1.45] text-white/70">Inovar também é fazer mais com menos, pensando na eficiência de hoje e nos recursos de amanhã.</p>
-      <div className="absolute left-[90px] top-[340px] h-[84px] w-[640px]" aria-live="polite">
+      <h1 className="absolute left-[90px] top-[150px] w-[780px] font-display text-[44px] font-extrabold leading-[1.12]">O mesmo edifício.<span className="block text-[#9CC4EA]">Uma nova forma de conectar.</span></h1>
+      <div className="absolute left-[90px] top-[318px] h-[84px] w-[640px]" aria-live="polite">
         {(['trad', 'pol'] as const).map((m) => (
           <p key={m} aria-hidden={m !== mode} className="absolute inset-0 flex gap-3 text-[20px] leading-[1.45] text-white/85 transition-opacity duration-700 motion-reduce:transition-none" style={{ opacity: m === mode ? 1 : 0, transitionDelay: m === mode ? '1.2s' : '0s' }}>
             <span className={clsx('mt-[11px] h-2.5 w-2.5 flex-none rounded-full', m === 'pol' ? 'bg-[#4FBBFF] shadow-[0_0_10px_#4FBBFF]' : 'bg-[#FF8A3D] shadow-[0_0_10px_#FF8A3D]')} />{MSG[m]}
@@ -257,12 +251,12 @@ function SlidePol() {
         ))}
       </div>
       {/* legenda de cores */}
-      <p className="absolute left-[90px] top-[434px] flex gap-6 text-[13px] text-white/60">
+      <p className="absolute left-[90px] top-[418px] flex gap-6 text-[13px] text-white/60">
         <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#8FD6FF]" />Fibra óptica</span>
         <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#FF8A3D]" />Cabo de cobre</span>
         <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#FFD24A]" />Energia elétrica</span>
       </p>
-      <ul className="absolute left-[90px] top-[472px] grid w-[790px] grid-cols-3 gap-2.5" aria-label="Vantagens da rede POL">
+      <ul className="absolute left-[90px] top-[462px] grid w-[790px] grid-cols-3 gap-2.5" aria-label="Vantagens da rede POL">
         {BENEFITS.map(({ icon: Icon, title, num, trad, pol: polText, detail }, n) => (
           <li key={title} className="relative">
             <button type="button" aria-expanded={open === n} onClick={() => { setOpen(open === n ? null : n); poke(); }} onPointerEnter={() => setOpen(n)} onPointerLeave={() => setOpen((o) => (o === n ? null : o))}
@@ -282,27 +276,12 @@ function SlidePol() {
           </li>
         ))}
       </ul>
-      {/* ODS: surgem discretamente depois da transformação para a POL */}
-      <OdsBar items={ODS_POL} show={pol} delay={3.2} size={52} align="right" className="right-[40px] top-[800px]" onTouch={poke} />
       <p className="absolute left-[90px] top-[812px] text-[12px] text-white/40">Contagens desta ilustração: 11 andares e 33 pontos atendidos nas duas redes. Resultados reais dependem do projeto.</p>
     </div>
   );
 }
 
-/**
- * Roteiro: abertura → BKT em Sergipe → Rede POL → RIMA → impacto humano → encerramento (≈ 2 min 30 s no automático).
- * dur: segundos de cada cena no modo automático (cobre um ciclo completo das demonstrações POL e RIMA).
- */
-const SLIDES = [
-  { key: 'abertura', title: 'O futuro não se espera. Se constrói.', dur: 16 },
-  { key: 'presenca', title: 'A BKT em Sergipe', dur: 14 },
-  { key: 'pol', title: 'Rede POL · Menos recursos. Mais possibilidades.', dur: 24 },
-  { key: 'rima', title: 'RIMA · Rede Integrada Municipal de Aracaju', dur: 40 },
-  { key: 'impacto', title: 'O impacto humano', dur: 31 },
-  { key: 'encerramento', title: 'O que nos move', dur: 18 },
-] as const;
-type SlideKey = (typeof SLIDES)[number]['key'];
-const IDLE_MS = 15000;
+const SLIDES = [{ key: 'presenca', title: 'A BKT em Sergipe' }, { key: 'pol', title: 'Rede tradicional × Rede POL' }, { key: 'rima', title: 'RIMA · Rede Integrada Municipal de Aracaju' }];
 
 /** Link público (administração): gerar, copiar e desativar. O link completo só aparece logo após gerar. */
 function ShareControl({ btn }: { btn: string }) {
@@ -359,22 +338,6 @@ export function InstitutionalPresentation({ publicToken }: { publicToken?: strin
   const [sp, setSp] = useSearchParams();
   const i = Math.min(SLIDES.length - 1, Math.max(0, Number(sp.get('s') ?? 1) - 1 || 0));
   const go = useCallback((n: number) => setSp({ s: String(Math.min(SLIDES.length, Math.max(1, n + 1))) }, { replace: true }), [setSp]);
-  // modo automático: avança as cenas sozinho; qualquer interação suspende por 15 s (sem reiniciar a cena)
-  const [auto, setAuto] = useState(true);
-  const [prog, setProg] = useState(0);
-  const [held, setHeld] = useState(false);
-  const elapsed = useRef(0), last = useRef(0);
-  const touch = useCallback(() => { last.current = Date.now(); setHeld(true); }, []);
-  // cenas já visitadas ficam montadas (escondidas): o estado de POL e RIMA se mantém ao navegar
-  const [seen, setSeen] = useState<Set<SlideKey>>(() => new Set([SLIDES[i]!.key]));
-  const wraps = useRef<Partial<Record<SlideKey, HTMLDivElement | null>>>({});
-  useEffect(() => {
-    const k = SLIDES[i]!.key;
-    setSeen((v) => (v.has(k) ? v : new Set(v).add(k)));
-    elapsed.current = 0; setProg(0);
-    const el = wraps.current[k];
-    if (el && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) el.animate([{ opacity: 0, filter: 'blur(10px) brightness(.4)', transform: 'scale(1.035)' }, { opacity: 1, filter: 'none', transform: 'none' }], { duration: 1200, easing: 'cubic-bezier(.2,.7,.2,1)' });
-  }, [i]);
   const close = useCallback(() => { if (isPublic) return; if (document.fullscreenElement) void document.exitFullscreen(); nav('/playbooks'); }, [nav, isPublic]);
   const [full, setFull] = useState(!!document.fullscreenElement);
   const toggleFull = useCallback(() => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => undefined); }, []);
@@ -382,14 +345,14 @@ export function InstitutionalPresentation({ publicToken }: { publicToken?: strin
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.isContentEditable) return;
-      if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); touch(); go(i + 1); }
-      else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); touch(); go(i - 1); }
+      if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); go(i + 1); }
+      else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); go(i - 1); }
       else if (e.key === 'f' || e.key === 'F') toggleFull();
       else if (e.key === 'Escape' && !document.fullscreenElement) close();
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [i, go, close, toggleFull, touch]);
+  }, [i, go, close, toggleFull]);
   const btn = 'flex h-10 items-center gap-2 px-3 text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white disabled:opacity-30';
   const toast = useToast();
   const qc = useQueryClient();
@@ -410,19 +373,6 @@ export function InstitutionalPresentation({ publicToken }: { publicToken?: strin
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['institucional', 'layout', 'presenca'] }); setEdit(false); setDraft(null); toast({ tone: 'success', message: 'Layout salvo' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
-  useEffect(() => {
-    if (!auto || edit) return;
-    const id = setInterval(() => {
-      const idle = Date.now() - last.current >= IDLE_MS;
-      setHeld(!idle);
-      if (!idle) return;
-      elapsed.current += 250;
-      const d = SLIDES[i]!.dur * 1000;
-      setProg(Math.min(1, elapsed.current / d));
-      if (elapsed.current >= d) go((i + 1) % SLIDES.length);
-    }, 250);
-    return () => clearInterval(id);
-  }, [auto, edit, i, go]);
   const textScale = (d: number) => setDraft({ ...current, blocks: { ...current.blocks, texto: { ...current.blocks.texto, scale: Math.max(0.6, Math.min(1.6, Math.round(((current.blocks.texto.scale ?? 1) + d) * 100) / 100)) } } });
   if (isPublic && pub.isError) return (
     <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-[#04080E] px-6 text-center text-white">
@@ -434,31 +384,15 @@ export function InstitutionalPresentation({ publicToken }: { publicToken?: strin
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
       <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>
-        <div className="relative h-full w-full bg-[#04080E]" onPointerDownCapture={touch}>
-          {SLIDES.map(({ key }) => seen.has(key) && (
-            <div key={key} ref={(el) => { wraps.current[key] = el; }} className={clsx('absolute inset-0', key !== slide && 'hidden')} aria-hidden={key !== slide}>
-              <Suspense fallback={<div className="h-full bg-[#04080E]" />}>
-                {key === 'abertura' && <SceneOpening />}
-                {key === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} seals={seals} sealSrc={sealSrc} />}
-                {key === 'pol' && <SlidePol />}
-                {key === 'rima' && <RimaSlide />}
-                {key === 'impacto' && <SceneImpact active={key === slide} />}
-                {key === 'encerramento' && <SceneClosing />}
-              </Suspense>
-            </div>
-          ))}
-          {/* acabamento de filme: vinheta e grão sutil */}
-          <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_62%,rgba(0,0,0,0.42))]" />
-          <div aria-hidden className="cine-grain pointer-events-none absolute inset-0" />
+        <div className="relative h-full w-full bg-[#04080E]">
+          {slide === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} seals={seals} sealSrc={sealSrc} />}
+          {slide === 'pol' && <SlidePol />}
+          {slide === 'rima' && <Suspense fallback={<div className="h-full bg-[#050A11]" />}><RimaSlide /></Suspense>}
         </div>
       </Stage></div>
       <nav aria-label="Controles da apresentação" className="relative flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
-        <span aria-hidden className="absolute left-0 top-[-1px] h-px bg-[#8FD6FF] transition-[width] duration-200 ease-linear" style={{ width: `${auto ? prog * 100 : 0}%` }} />
         {isPublic ? <img src="/brand/bkt-logo-white.png" alt="BKT" className="h-6 w-[100px] object-contain object-left opacity-80" /> : <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>}
-        <div className="flex min-w-0 items-center gap-3">
-          <button type="button" className={btn} onClick={() => { setAuto(!auto); last.current = 0; }} aria-pressed={auto} aria-label={auto ? 'Pausar o modo automático' : 'Retomar o modo automático'}>{auto ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}<span className="hidden md:inline">{auto ? (held ? 'Automático · pausado pela interação' : 'Automático') : 'Manual'}</span></button>
-          <p className="truncate text-sm text-white/60">Cena <span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
-        </div>
+        <p className="text-sm text-white/60"><span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
         <div className="flex gap-1">
           {!isPublic && savedPriv.data?.canManage && !full && <ShareControl btn={btn} />}
           {slide === 'presenca' && saved.data?.canManage && !full && (edit ? <>
@@ -468,7 +402,7 @@ export function InstitutionalPresentation({ publicToken }: { publicToken?: strin
             <button type="button" className={btn} onClick={() => { setEdit(false); setDraft(null); }}>Cancelar</button>
             <button type="button" className={clsx(btn, 'bg-white/10 text-white')} onClick={() => save.mutate(current)}>Salvar layout</button>
           </> : <button type="button" className={btn} onClick={() => { setDraft(current); setEdit(true); }}><Move className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">Editar layout</span></button>)}
-          <button type="button" className={btn} onClick={toggleFull} aria-label={full ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}>{full ? <Minimize2 className="h-4 w-4" aria-hidden /> : <Maximize2 className="h-4 w-4" aria-hidden />}<span className="hidden sm:inline">{full ? 'Sair da tela cheia' : 'Tela cheia'}</span></button><button type="button" className={btn} onClick={() => { touch(); go(i - 1); }} disabled={i === 0} aria-label="Cena anterior"><ChevronLeft className="h-5 w-5" /></button><button type="button" className={btn} onClick={() => { touch(); go(i + 1); }} disabled={i === SLIDES.length - 1} aria-label="Próxima cena"><ChevronRight className="h-5 w-5" /></button></div>
+          <button type="button" className={btn} onClick={toggleFull} aria-label={full ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}>{full ? <Minimize2 className="h-4 w-4" aria-hidden /> : <Maximize2 className="h-4 w-4" aria-hidden />}<span className="hidden sm:inline">{full ? 'Sair da tela cheia' : 'Tela cheia'}</span></button><button type="button" className={btn} onClick={() => go(i - 1)} disabled={i === 0} aria-label="Slide anterior"><ChevronLeft className="h-5 w-5" /></button><button type="button" className={btn} onClick={() => go(i + 1)} disabled={i === SLIDES.length - 1} aria-label="Próximo slide"><ChevronRight className="h-5 w-5" /></button></div>
       </nav>
     </div>
   );
