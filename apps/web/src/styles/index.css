@@ -152,9 +152,9 @@
 }
 
 /* Sucesso do Cliente · Jornada 3D (protótipo): controles e animações discretas da cena. */
-.j3-btn { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(255,255,255,.15); background: rgba(9,16,26,.8); padding: .35rem .6rem; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: rgba(255,255,255,.85); border-radius: .375rem; backdrop-filter: blur(6px); }
-.j3-btn:hover:not(:disabled) { background: rgba(96,211,255,.12); color: #fff; }
-.j3-btn:disabled { cursor: default; }
+.j3-btn { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgb(var(--line)); background: #fff; padding: .35rem .65rem; font-size: 12.5px; font-weight: 500; color: rgb(var(--ink)); }
+.j3-btn:hover:not(:disabled) { background: rgb(var(--surface-2)); }
+.j3-btn:disabled { cursor: default; opacity: .45; }
 @keyframes j3-breathe { 0%, 100% { opacity: .35; } 50% { opacity: .85; } }
 .j3-breathe { animation: j3-breathe 3.2s ease-in-out infinite; }
 @keyframes j3-ping { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
