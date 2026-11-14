@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { api, ApiError } from '../lib/api';
 import type { Me } from '../lib/types';
 import { Button, FormField, Input } from '../components/ui/primitives';
+import { RevopsScene } from '../features/login/RevopsScene';
 
 const GOOGLE_ERRORS: Record<string, string> = {
   google_desligado: 'O login com Google ainda não foi configurado. Entre com e-mail e senha.',
@@ -58,6 +59,9 @@ function HexRing({ className }: { className?: string }) {
  */
 export function AuthFrame({ children }: { children: ReactNode }) {
   const [bg, setBg] = useState<'loading' | 'ok' | 'none'>('loading');
+  // Personalização → arte padrão do login: hexágono (padrão) ou RevOps animado no lugar das boas-vindas
+  const style = useQuery({ queryKey: ['public', 'login-estilo'], queryFn: () => api<{ style: 'hexagono' | 'revops' }>('/public/login-estilo'), staleTime: 5 * 60_000, retry: false });
+  const revops = style.data?.style === 'revops';
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#1B2026] text-white">
       <div className="pointer-events-none absolute inset-0" aria-hidden>
@@ -67,13 +71,21 @@ export function AuthFrame({ children }: { children: ReactNode }) {
       </div>
       <div className={bg === 'ok' ? 'hidden' : 'pointer-events-none absolute inset-0'} aria-hidden>
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_45%,rgba(47,89,134,0.55),transparent_60%)]" />
-        <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />
+        {!revops && <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />}
       </div>
       <div className="relative flex min-h-screen w-full flex-col items-center justify-center gap-8 px-4 py-10 lg:flex-row lg:justify-between lg:gap-12 lg:pl-[6vw] lg:pr-[7vw]">
-        <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
-          <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
-          <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
-        </section>
+        {revops ? (
+          <section className="w-full max-w-md text-center lg:max-w-none lg:flex-1">
+            <RevopsScene className="mx-auto hidden h-auto max-h-[92vh] w-full max-w-[860px] lg:block" />
+            {/* telas pequenas: só a frase */}
+            <div className="lg:hidden"><h2 className="font-display text-3xl font-light tracking-wide">Uma <span className="font-semibold">única experiência</span></h2><p className="mt-3 text-base text-white/70">Marketing, Vendas e Sucesso do Cliente girando em torno do mesmo cliente.</p></div>
+          </section>
+        ) : (
+          <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
+            <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
+            <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
+          </section>
+        )}
         <div className="w-full max-w-[420px] shrink-0">
           <div className="rounded-xl bg-surface p-7 text-text shadow-overlay ring-1 ring-black/5 sm:p-10">
             <div className="mb-6 flex items-center justify-center gap-3">

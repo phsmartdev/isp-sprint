@@ -31,6 +31,7 @@ async function liveTeam(db: DbOrTx, tenantId: string, id: string) {
   return t;
 }
 const SlotParams = z.object({ slot: z.enum(BRAND_SLOTS) });
+const LOGIN_STYLES = ['hexagono', 'revops'] as const;
 const startedAt = Date.now();
 
 async function roleMap(db: DbOrTx, tenantId: string) {
@@ -610,7 +611,21 @@ export const adminRoutes = [
         .from(s.brandAssets)
         .leftJoin(s.users, eq(s.users.id, s.brandAssets.updatedBy))
         .where(eq(s.brandAssets.tenantId, auth.tenantId));
-      return { slots: BRAND_SLOTS.map((slot) => ({ slot, ...(rows.find((r) => r.slot === slot) ?? {}), hasImage: rows.some((r) => r.slot === slot) })) };
+      const [tn] = await app.db.select({ loginStyle: s.tenants.loginStyle }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId)).limit(1);
+      return { slots: BRAND_SLOTS.map((slot) => ({ slot, ...(rows.find((r) => r.slot === slot) ?? {}), hasImage: rows.some((r) => r.slot === slot) })), loginStyle: tn?.loginStyle ?? 'hexagono' };
+    },
+  }),
+  defineRoute({
+    method: 'PUT',
+    url: '/admin/branding/estilo-login',
+    summary: 'Escolhe a arte padrão da tela de login: hexágono ou RevOps animado',
+    tag: 'Administração',
+    ...ADMIN,
+    body: z.object({ style: z.enum(LOGIN_STYLES) }),
+    handler: async ({ app, auth, body, req }) => {
+      await app.db.update(s.tenants).set({ loginStyle: body.style, updatedAt: new Date() }).where(eq(s.tenants.id, auth.tenantId));
+      await audit(app.db, req, { action: 'branding.login_style', entityType: 'tenant', entityId: auth.tenantId, metadata: { style: body.style } });
+      return { ok: true, loginStyle: body.style };
     },
   }),
   defineRoute({
@@ -710,6 +725,19 @@ export const adminRoutes = [
         .header('etag', `"${a.sha256}"`)
         .header('content-security-policy', "default-src 'none'")
         .send(a.data);
+    },
+  }),
+  defineRoute({
+    method: 'GET',
+    url: '/public/login-estilo',
+    summary: 'Arte padrão da tela de login da empresa principal (hexágono ou RevOps animado)',
+    tag: 'Personalização',
+    public: true,
+    handler: async ({ app, reply }) => {
+      const slug = process.env.PRIMARY_TENANT_SLUG ?? 'yepnet';
+      const [t] = await app.db.select({ loginStyle: s.tenants.loginStyle }).from(s.tenants).orderBy(sql`(${s.tenants.slug} = ${slug}) desc`, asc(s.tenants.createdAt)).limit(1);
+      reply.header('cache-control', 'public, no-cache');
+      return { style: t?.loginStyle ?? 'hexagono' };
     },
   }),
   defineRoute({
