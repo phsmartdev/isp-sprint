@@ -190,7 +190,8 @@ export const adminRoutes = [
           profile: sql<string | null>`(select r.key from user_roles ur join roles r on r.id = ur.role_id where ur.user_id = "users"."id" order by case r.key when 'administrador' then 0 when 'gerencia' then 1 when 'supervisor' then 2 when 'analista' then 3 else 4 end limit 1)`,
         })
         .from(s.users)
-        .where(eq(s.users.tenantId, auth.tenantId))
+        // usuários de webservice ficam em Configurações → Webservice (API)
+        .where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.service, false)))
         .orderBy(asc(s.users.name));
       const memberships = users.length
         ? await app.db.select().from(s.teamMemberships).where(inArray(s.teamMemberships.userId, users.map((u) => u.id)))

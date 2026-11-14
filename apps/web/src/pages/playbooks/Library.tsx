@@ -117,6 +117,10 @@ export function PlaybooksPage() {
                 <span><span className="block font-semibold text-ink">Apresentação institucional BKT</span><span className="text-sm text-muted">Em tela cheia, para apresentar a empresa a clientes, parceiros e novos colaboradores.</span></span>
                 <span className="text-sm font-semibold text-primary">Abrir</span>
               </Link>
+              <Link to="/playbooks/api" className="flex items-center justify-between gap-3 border border-line bg-surface px-4 py-3 hover:border-line-strong">
+                <span><span className="block font-semibold text-ink">API de integração</span><span className="text-sm text-muted">Guia para desenvolvedores de outros sistemas inserirem e coletarem dados no ISP Sprint.</span></span>
+                <span className="text-sm font-semibold text-primary">Abrir</span>
+              </Link>
               <Shelf title="Ciência pendente" hint="leia e confirme" items={d!.forYou.ackPending} />
               <Shelf title="Para você" hint="do seu time e do seu centro de custo" items={d!.forYou.team} />
               <Shelf title="Atualizações" items={d!.forYou.updates} />

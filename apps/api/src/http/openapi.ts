@@ -23,7 +23,7 @@ export function buildOpenApi(routes: RouteDef[]) {
       summary: r.summary,
       tags: [r.tag],
       parameters,
-      security: r.public ? [] : [{ session: [] }],
+      security: r.public ? [] : [{ session: [] }, { webservice: [] }],
       'x-access': r.module ? `${r.module}:${r.min ?? 'proprio'}` : r.anyAuthenticated ? '(autenticado)' : 'público',
       responses: {
         '200': { description: 'OK' },
@@ -43,7 +43,7 @@ export function buildOpenApi(routes: RouteDef[]) {
     openapi: '3.1.0',
     info: { title: 'RevOps API', version: '1.0.0-fase1', description: 'API interna do CRM RevOps. Erros em application/problem+json com requestId.' },
     servers: [{ url: '/' }],
-    components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'isp_session' } } },
+    components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'isp_session' }, webservice: { type: 'http', scheme: 'bearer', description: 'Token do usuário de webservice (isk_…), gerado em Configurações → Webservice (API).' } } },
     paths,
   };
 }
