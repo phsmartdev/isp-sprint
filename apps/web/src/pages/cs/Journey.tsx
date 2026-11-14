@@ -1,5 +1,5 @@
 /** Jornada do cliente (linha do tempo visual) e apresentação de kickoff (editor, versões, tela cheia, PDF e link). */
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -13,6 +13,9 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { errMsg } from '../../features/contracts/shared';
 import { Presenter, SlideView, type Slide } from '../../features/cs/shared';
 import { LinksTab, TrailTab } from './JourneyTrailTab';
+
+/** Jornada em montanha (para apresentar ao cliente): só consulta, carregada sob demanda; a visualização tradicional continua igual. */
+const JourneyViewAccount = lazy(() => import('../../features/cs/journeyView').then((m) => ({ default: m.JourneyViewAccount })));
 
 type Milestone = { id: string; phase: JourneyPhase; key: string; title: string; plannedAt: string | null; doneAt: string | null; ownerId: string | null; ownerName: string | null; notes: string | null; activityId: string | null };
 type Data = {
@@ -233,6 +236,7 @@ export function JourneyPage() {
   const q = useQuery({ queryKey: ['cs-journey', id], queryFn: () => api<Data>(`/cs/journeys/${id}`) });
   const [tab, setTab] = useState<'trilha' | 'jornada' | 'kickoff' | 'links'>('trilha');
   const [ko, setKo] = useState(false);
+  const [view, setView] = useState<'tradicional' | 'montanha'>(() => (new URLSearchParams(window.location.search).get('v') === 'montanha' ? 'montanha' : 'tradicional'));
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['cs-journey', id] }); void qc.invalidateQueries({ queryKey: ['cs-trail', id] }); };
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
@@ -243,8 +247,13 @@ export function JourneyPage() {
       <PageHeader icon={<RouteIcon className="h-9 w-9" strokeWidth={2.2} />} title={`Jornada · ${d.client.name}`} subtitle={`${d.journey.templateName} · ${d.journey.isNewCustomer ? 'cliente novo' : 'cliente da base'} · início ${fmtDate(d.journey.startedAt)}${d.contract ? ` · contrato ${d.contract.number}` : ''}${d.csmName ? ` · CSM ${d.csmName}` : ''}`}
         actions={d.canEdit && !d.journey.kickoffAt ? <Button variant="primary" icon={<CalendarCheck className="h-5 w-5" />} onClick={() => setKo(true)}>Registrar kickoff</Button> : d.journey.kickoffAt ? <span className="text-sm text-muted">Kickoff em {fmtDateTime(d.journey.kickoffAt)}</span> : undefined} />
       {d.contract && <p className="mb-4 text-sm text-muted">Contrato: <Link className="font-semibold text-primary hover:underline" to={`/contracts/${d.contract.id}`}>{d.contract.number}</Link>{d.contract.endAt ? ` · vigência até ${fmtDate(d.contract.endAt)} (os marcos de renovação usam esta data)` : ''}</p>}
+      <div className="mb-4 inline-flex rounded-md border border-line bg-white p-0.5" role="group" aria-label="Visualização">
+        {([['tradicional', 'Visualização tradicional'], ['montanha', 'Jornada do cliente']] as const).map(([k, label]) => <button key={k} type="button" aria-pressed={view === k} onClick={() => setView(k)} className={clsx('px-3 py-1.5 text-sm font-semibold', view === k ? 'bg-primary text-white' : 'text-muted hover:text-ink')}>{label}</button>)}
+      </div>
+      {view === 'montanha' ? <Suspense fallback={<div className="card"><LoadingRows /></div>}><JourneyViewAccount contactId={d.journey.contactId} /></Suspense> : <>
       <Tabs label="Jornada" className="mb-5" value={tab} onChange={setTab} tabs={[{ key: 'trilha', label: 'Trilha' }, { key: 'jornada', label: 'Linha do tempo' }, { key: 'kickoff', label: 'Apresentação de kickoff' }, { key: 'links', label: 'Links externos' }]} />
       {tab === 'trilha' ? <TrailTab journeyId={d.journey.id} subtitle={`${d.journey.templateName}${d.contract ? ` · contrato ${d.contract.number}` : ''}`} /> : tab === 'jornada' ? <Timeline d={d} onChanged={refresh} /> : tab === 'kickoff' ? <Editor d={d} onChanged={refresh} /> : <LinksTab journeyId={d.journey.id} />}
+      </>}
       <KickoffDialog d={d} open={ko} onClose={() => setKo(false)} onDone={refresh} />
     </div>
   );

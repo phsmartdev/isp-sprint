@@ -81,6 +81,7 @@ const TeamTrackingPage = lazy(() => import('./pages/results/TeamHubs').then((m) 
 const GiftsPage = lazy(() => import('./pages/Gifts').then((m) => ({ default: m.GiftsPage })));
 const SupportPage = lazy(() => import('./features/support/Support').then((m) => ({ default: m.SupportPage })));
 const JourneyPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.JourneyPage })));
+const JourneyViewDemoPage = lazy(() => import('./features/cs/journeyView').then((m) => ({ default: m.JourneyViewDemoPage })));
 const KickoffPrintPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.KickoffPrintPage })));
 const PublicKickoffPage = lazy(() => import('./pages/cs/Journey').then((m) => ({ default: m.PublicKickoffPage })));
 const PublicJourneyPage = lazy(() => import('./pages/cs/JourneyTrailTab').then((m) => ({ default: m.PublicJourneyPage })));
@@ -216,6 +217,7 @@ export function App() {
         <Route path="customers/:id" element={<Gate module="clientes"><CustomerDetailPage /></Gate>} />
         <Route path="sucesso" element={<Gate module="clientes" feature="crm.sucesso_cliente"><CustomerSuccessPage /></Gate>} />
         <Route path="sucesso/jornadas/:id" element={<Gate module="clientes" feature="crm.sucesso_cliente"><JourneyPage /></Gate>} />
+        <Route path="sucesso/jornada/teste" element={<Gate module="clientes" feature="crm.sucesso_cliente"><JourneyViewDemoPage /></Gate>} />
         <Route path="sucesso/pesquisas/:id" element={<Gate module="clientes" feature="crm.sucesso_cliente"><SurveyPage /></Gate>} />
         <Route path="activities" element={<Gate module="atividades" feature="crm.atividades"><ActivitiesPage /></Gate>} />
         <Route path="tarefas" element={<Gate module="atividades" feature="projetos.tarefas"><TasksPage /></Gate>} />

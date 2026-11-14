@@ -150,3 +150,12 @@
   .rm-line, .rm-fade, .rm-pop { transition: none !important; }
   .rm-flow, .rm-blink, .rm-beacon, .rm-alarm { animation: none; }
 }
+
+/* Sucesso do Cliente · jornada em montanha: a trilha percorrida se desenha e as etapas aparecem em sequência. */
+@keyframes mt-draw { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.mt-draw { stroke-dasharray: 100; animation: mt-draw 1.8s cubic-bezier(.4,0,.2,1) both; }
+@keyframes mt-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.mt-pop { animation: mt-pop .6s ease-out both; }
+@keyframes mt-pulse { 0%, 100% { opacity: .2; } 50% { opacity: .5; } }
+.mt-pulse { animation: mt-pulse 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .mt-draw, .mt-pop, .mt-pulse { animation: none; } }
