@@ -9,4 +9,4 @@ Gera `src/features/playbooks/aracajuRima.ts` a partir do OpenStreetMap (© colab
 2. `pip install shapely numpy` e, nesta pasta: `python3 export_ts.py` (roda `build_geo` e lê `net.json`;
    rode antes `python3 build_net.py`).
 
-A topologia (POPs, anel, acesso, splitters) é conceitual: calculada pelo caminho mais curto nas vias reais.
+Os 4 POPs (SMTT, SEPLOG, UPA Sul, UPA Norte) e a sede da BKT usam os endereços reais (em `build_net.py`). As rotas (anel, acesso, splitters) são conceituais: caminho mais curto nas vias reais.

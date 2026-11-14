@@ -139,9 +139,11 @@
 .rm-flow { animation: rm-flow 1.1s linear infinite; }
 @keyframes rm-blink { 50% { opacity: .25; } }
 .rm-blink { animation: rm-blink .9s steps(2) infinite; }
+@keyframes rm-alarm { to { stroke-dashoffset: -28; } }
+.rm-alarm { animation: rm-alarm .45s linear infinite; }
 @keyframes rm-beacon { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(2.2); opacity: 0; } }
 .rm-beacon { transform-box: fill-box; transform-origin: center; animation: rm-beacon 2.2s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .rm-line, .rm-fade, .rm-pop { transition: none !important; }
-  .rm-flow, .rm-blink, .rm-beacon { animation: none; }
+  .rm-flow, .rm-blink, .rm-beacon, .rm-alarm { animation: none; }
 }

@@ -13,7 +13,7 @@ out=f'''/**
  * GERADO a partir do OpenStreetMap (© colaboradores do OpenStreetMap, licença ODbL): limite municipal, rios, mangues,
  * praças, ruas e avenidas, ponte Construtor João Alves e prédios com 6+ pavimentos (altura exagerada para leitura).
  * As unidades públicas (escolas e unidades de saúde municipais, órgãos, Guarda Municipal, SMTT, EMSURB, câmeras,
- * semáforos e praças) estão nas posições do OSM. A TOPOLOGIA é conceitual: POPs em equipamentos públicos, anel
+ * semáforos e praças) estão nas posições do OSM. Os 4 POPs (SMTT, SEPLOG, UPA Sul e UPA Norte) e a sede da BKT estão nos endereços informados. As ROTAS são conceituais: anel
  * calculado pelo caminho mais curto nas avenidas, acesso pelas ruas até o POP mais próximo e splitters nas bifurcações.
  * Não representa infraestrutura instalada.
  */
@@ -26,11 +26,15 @@ export const RIMA_BLDS: [string, string, number][] = {J(g['blds'])};
 export const RIMA_LABELS: {{ t: string; x: number; y: number }}[] = {J(labels)};
 export const RIMA_CITY_LABEL: [number, number] = {J(aju)};
 export type RimaCat = 'adm' | 'edu' | 'sau' | 'seg' | 'mob' | 'urb';
-export type RimaPoint = {{ name: string; cat: RimaCat; kind: string; ded: boolean; pop: number; x: number; y: number; d: string; len: number; prov: number; osm: string }};
+export type RimaPoint = {{ name: string; cat: RimaCat; kind: string; ded: boolean; pop: number; x: number; y: number; d: string; len: number; prov: number; osm: string; atPop: boolean }};
 export const RIMA_POPS: {{ name: string; site: string; x: number; y: number }}[] = {J(n['pops'])};
 /** trechos do backbone: anel (a → b) e o ramal sem redundância (spur) */
 export const RIMA_RING: {{ a: number; b: number; d: string; len: number; spur: boolean; mx: number; my: number }}[] = {J(n['ring'])};
 export const RIMA_POINTS: RimaPoint[] = {J(n['points'])};
+/** sede da BK Telecom (NOC) · R. Pedro Paes Mendonça, Suíssa */
+export const RIMA_BKT: [number, number] = {J(n['bkt'])};
+/** rompimento sem redundância: fibra de distribuição antes de um splitter (unidades afetadas e trechos a jusante) */
+export const RIMA_CUT: {{ x: number; y: number; pop: number; units: number[]; d: string[] }} = {J(n['cut'])};
 export const RIMA_SPLITTERS: {{ pop: number; x: number; y: number }}[] = {J(n['splitters'])};
 '''
 open(__import__('os').path.join(__import__('os').path.dirname(__file__), '../../src/features/playbooks/aracajuRima.ts'),'w').write(out)

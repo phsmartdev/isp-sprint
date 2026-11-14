@@ -10,21 +10,20 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Activity, Cctv, Expand, Gauge, GraduationCap, HeartPulse, Landmark, Lightbulb, Network, RotateCcw, Route, ShieldCheck, TrafficCone, Unplug, X } from 'lucide-react';
-import { RIMA_BLDS, RIMA_CITY_LABEL, RIMA_GEO, RIMA_LABELS, RIMA_POINTS, RIMA_POPS, RIMA_PROJ, RIMA_RING, RIMA_SPLITTERS, RIMA_TILE, type RimaCat, type RimaPoint } from './aracajuRima';
+import { RIMA_BKT, RIMA_BLDS, RIMA_CITY_LABEL, RIMA_CUT, RIMA_GEO, RIMA_LABELS, RIMA_POINTS, RIMA_POPS, RIMA_PROJ, RIMA_RING, RIMA_SPLITTERS, RIMA_TILE, type RimaCat, type RimaPoint } from './aracajuRima';
 
 /**
  * Parâmetros do projeto. Enquanto forem null, o painel mostra "a definir" (nada de números inventados).
- * BKT_HQ: coordenadas da sede da BK Telecom (preencher com o endereço oficial); null = marcador do NOC fora do mapa.
+ * A sede da BKT (NOC) e os 4 POPs estão nos endereços reais (aracajuRima.ts).
  */
-export const RIMA_PARAMS: { BKT_HQ: { lat: number; lon: number } | null; capacidadeAgregada: string | null; utilizacaoBanda: string | null; capacidadePop: string | null } = {
-  BKT_HQ: null,
-  capacidadeAgregada: null,
+export const RIMA_PARAMS: { capacidadeAgregada: string | null; utilizacaoBanda: string | null; capacidadePop: string | null } = {
+  capacidadeAgregada: '10 Gbit/s',
   utilizacaoBanda: null,
-  capacidadePop: null,
+  capacidadePop: '10 Gbit/s',
 };
 
 type Stage = 0 | 1 | 2 | 3 | 4;
-type Fail = null | 'ring' | 'spur';
+type Fail = null | 'ring' | 'access';
 const CATS: { k: RimaCat; label: string; color: string; icon: typeof Landmark; stage: 2 | 3 }[] = [
   { k: 'adm', label: 'Administração', color: '#6FA8FF', icon: Landmark, stage: 2 },
   { k: 'seg', label: 'Segurança', color: '#FFD84B', icon: Cctv, stage: 3 },
@@ -36,8 +35,10 @@ const CATS: { k: RimaCat; label: string; color: string; icon: typeof Landmark; s
 const CAT = Object.fromEntries(CATS.map((c) => [c.k, c])) as Record<RimaCat, (typeof CATS)[number]>;
 const PROV = ['#7E8796', '#A9846A', '#7489AE', '#977CAF'];
 const FIBER = '#8FD6FF', TELE = '#E879F9', FAILC = '#FF4D4D', REROUTE = '#5BFFA8';
-const FAIL_SEG = RIMA_RING.findIndex((r) => !r.spur && r.a === 1);     // trecho Centro → Treze de Julho
-const SPUR = RIMA_RING.findIndex((r) => r.spur), SPUR_POP = RIMA_RING[SPUR]!.b;
+const FAIL_SEG = Math.max(0, RIMA_RING.findIndex((r) => r.a === 1));   // trecho POP SEPLOG → POP SMTT
+const CUT_SET = new Set(RIMA_CUT.units.map((i) => RIMA_POINTS[i]!));     // unidades depois da fibra rompida
+const CUT_POP = RIMA_CUT.pop;
+const NOC_G = RIMA_BKT, NOC_T: [number, number] = [RIMA_BKT[0], RIMA_BKT[1] - 30], NOC_B: [number, number] = [968, 262];
 const BIG = (p: RimaPoint) => !['Câmera', 'Semáforo'].includes(p.kind);
 
 const HOLD: Record<Stage, number> = { 0: 6000, 1: 6000, 2: 8000, 3: 7000, 4: 7000 };
@@ -58,19 +59,10 @@ const BENEFITS = [
   { icon: Gauge, t: 'Eficiência operacional', d: 'Otimização de custos e da gestão.' },
 ];
 
-/** sede da BKT: projeta lat/lon para a tela; sem endereço, o NOC fica acima do mapa */
-function nocXY(): [number, number] {
-  const h = RIMA_PARAMS.BKT_HQ;
-  if (!h) return [700, 200];
-  const P = RIMA_PROJ, f = (P.phi * Math.PI) / 180;
-  const x = (h.lon + 37.06) * P.kx, y = -(h.lat - P.lat0) * P.ky;
-  return [P.ox + (Math.cos(f) * x - Math.sin(f) * y) * P.sc, P.oy + (Math.sin(f) * x + Math.cos(f) * y) * P.sq * P.sc];
-}
-
 /** tempos de cada elemento: ds (passo a passo), dj (salto direto para a RIMA), out (volta à fragmentada) */
 const T = (() => {
-  const ring = RIMA_RING.map((r, i) => (r.spur ? { ds: 3.0, dj: 1.6, out: 1.8 } : { ds: 0.5 + i * 0.45, dj: 0.3 + i * 0.2, out: 2.6 - i * 0.12 }));
-  const pops = RIMA_POPS.map((_, i) => ({ ds: 3.2 + i * 0.25, dj: 1.4 + i * 0.12, out: 2.8 }));
+  const ring = RIMA_RING.map((_, i) => ({ ds: 0.6 + i * 0.6, dj: 0.3 + i * 0.25, out: 2.6 - i * 0.15 }));
+  const pops = RIMA_POPS.map((_, i) => ({ ds: 3.2 + i * 0.35, dj: 1.4 + i * 0.15, out: 2.8 }));
   const rank: Record<number, number> = {};
   for (const st of [2, 3]) {
     const ids = RIMA_POINTS.map((p, i) => [p, i] as const).filter(([p]) => CAT[p.cat].stage === st).sort((x, y) => x[0].len - y[0].len);
@@ -131,7 +123,6 @@ export default function RimaSlide() {
   const [fail, setFail] = useState<Fail>(null);
   const [failMenu, setFailMenu] = useState(false);
   const looped = useRef(false);
-  const noc = useMemo(nocXY, []);
 
   // loop automático e retomada após 15 s sem interação
   useEffect(() => {
@@ -143,11 +134,12 @@ export default function RimaSlide() {
     return () => clearTimeout(t);
   }, [stage, touch]);
   const poke = () => setTouch((n) => n + 1);
+  useEffect(() => { if (!fail) return; const t = setTimeout(() => setSel({ t: 'noc' }), 1600); return () => clearTimeout(t); }, [fail]);
   const go = (s: Stage) => { setFlow('jump'); setStage(s); if (s === 0) { setFail(null); } poke(); };
 
   const on = (s: number) => stage >= s && stage > 0;
   const delay = (show: boolean, t: { ds: number; dj: number; out: number }) => ({ transitionDelay: `${show ? (flow === 'jump' ? t.dj : t.ds) : stage === 0 ? t.out : 0}s` });
-  const down = (p: RimaPoint) => fail === 'spur' && p.pop === SPUR_POP;
+  const down = (p: RimaPoint) => fail === 'access' && CUT_SET.has(p);
   const connected = (p: RimaPoint) => on(CAT[p.cat].stage);
   const focus = (p: RimaPoint, i: number) => (cat ? p.cat === cat : true) && (sel?.t === 'pop' ? p.pop === sel.i : true) && (sel?.t === 'unit' ? sel.i === i : true);
   const dimmed = !!cat || sel?.t === 'pop' || sel?.t === 'unit';
@@ -159,10 +151,12 @@ export default function RimaSlide() {
   const monitored = units.length + links;
   const incidents = unitsDown + (fail ? 1 : 0);
   const active = monitored - incidents;
-  const popsOn = stage >= 1 ? RIMA_POPS.length - (fail === 'spur' ? 1 : 0) : 0;
+  const popsOn = stage >= 1 ? RIMA_POPS.length : 0;
 
   const pick = (s: typeof sel) => { setSel(s); poke(); };
-  const startFail = (f: Exclude<Fail, null>) => { setFailMenu(false); setFlow('jump'); setStage(4); setFail(f); setSel({ t: 'noc' }); poke(); };
+  const arc = (p: { x: number; y: number }) => `M${p.x} ${p.y - 18} Q${(p.x + NOC_T[0]) / 2} ${Math.min(p.y, NOC_T[1]) - 110} ${NOC_T[0]} ${NOC_T[1]}`;
+  const alarmPops = fail === 'ring' ? [RIMA_RING[FAIL_SEG]!.a, RIMA_RING[FAIL_SEG]!.b] : fail === 'access' ? [CUT_POP] : [];
+  const startFail = (f: Exclude<Fail, null>) => { setFailMenu(false); setSel(null); setFlow(stage === 4 ? 'step' : 'jump'); setStage(4); setFail(f); poke(); };
 
   const cap = CAPTION[stage];
   const selUnit = sel?.t === 'unit' ? RIMA_POINTS[sel.i]! : null;
@@ -202,12 +196,12 @@ export default function RimaSlide() {
         {/* backbone: anel metropolitano + ramal */}
         <g style={{ mixBlendMode: 'screen' }}>
           {RIMA_RING.map((r, i) => {
-            const show = on(1), broken = (fail === 'ring' && i === FAIL_SEG) || (fail === 'spur' && r.spur), alt = fail === 'ring' && !r.spur && i !== FAIL_SEG;
+            const show = on(1), broken = fail === 'ring' && i === FAIL_SEG, alt = fail === 'ring' && i !== FAIL_SEG;
             const c = broken ? FAILC : alt ? REROUTE : '#7DF9FF';
             return (
               <g key={i}>
                 <path d={r.d} pathLength={100} className={clsx('rm-line', !show && 'off')} style={{ ...delay(show, T.ring[i]!), ['--dur' as string]: '1.1s' }} fill="none" stroke={c} strokeWidth="9" strokeOpacity=".35" filter="url(#rm-glow)" />
-                <path d={r.d} pathLength={100} className={clsx('rm-line', !show && 'off', broken && 'rm-blink')} style={{ ...delay(show, T.ring[i]!), ['--dur' as string]: '1.1s' }} fill="none" stroke={broken ? FAILC : '#E6FBFF'} strokeWidth={r.spur ? 2.4 : 3.2} strokeLinecap="round" strokeLinejoin="round" />
+                <path d={r.d} pathLength={100} className={clsx('rm-line', !show && 'off', broken && 'rm-blink')} style={{ ...delay(show, T.ring[i]!), ['--dur' as string]: '1.1s' }} fill="none" stroke={broken ? FAILC : '#E6FBFF'} strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" />
               </g>
             );
           })}
@@ -216,7 +210,7 @@ export default function RimaSlide() {
         {/* pulsos de dados (fibra) */}
         <g className={clsx('rm-fade', !on(1) && 'off')} style={{ transitionDelay: on(1) ? `${flow === 'jump' ? 2.2 : 4.6}s` : '0s', mixBlendMode: 'screen' }}>
           {RIMA_RING.map((r, i) => {
-            if ((fail === 'ring' && i === FAIL_SEG) || (fail === 'spur' && r.spur)) return null;
+            if (fail === 'ring' && i === FAIL_SEG) return null;
             return [0, 1, 2].map((o) => run(r.d, 100, '2 98', 3, fail === 'ring' ? REROUTE : '#fff', 3.2, -o * 1.07 - i * 0.3, `r${i}${o}`));
           })}
         </g>
@@ -235,12 +229,14 @@ export default function RimaSlide() {
 
         {/* telemetria: POPs → NOC da BKT (plano de gerenciamento, separado dos dados) */}
         <g className={clsx('rm-fade', !on(3) && 'off')} style={{ transitionDelay: on(3) ? `${flow === 'jump' ? 4.6 : 4.2}s` : '0s' }}>
-          {RIMA_POPS.map((p, i) => {
-            const mx = (p.x + noc[0]) / 2, my = Math.min(p.y, noc[1]) - 70;
-            const dn = fail === 'spur' && i === SPUR_POP;
-            return <path key={i} d={`M${p.x} ${p.y - 18} Q${mx} ${my} ${noc[0]} ${noc[1] + 26}`} fill="none" stroke={dn ? FAILC : TELE} strokeOpacity={dn ? 0.8 : 0.55} strokeWidth="1.2" strokeDasharray="1.5 6" strokeLinecap="round" className="rm-flow" />;
-          })}
+          {RIMA_POPS.map((p, i) => <path key={i} d={arc(p)} fill="none" stroke={TELE} strokeOpacity=".8" strokeWidth="1.5" strokeDasharray="1.5 6" strokeLinecap="round" className="rm-flow" />)}
         </g>
+
+        {/* alerta de rompimento chegando ao NOC da BKT */}
+        {fail && alarmPops.map((i) => <g key={`al${i}`} className="pointer-events-none">
+          <path d={arc(RIMA_POPS[i]!)} fill="none" stroke={FAILC} strokeOpacity=".35" strokeWidth="5" filter="url(#rm-glow)" />
+          <path d={arc(RIMA_POPS[i]!)} fill="none" stroke="#FF8A8A" strokeWidth="2" strokeDasharray="5 9" strokeLinecap="round" className="rm-alarm" />
+        </g>)}
 
         {/* unidades públicas */}
         {RIMA_POINTS.map((p, i) => {
@@ -248,7 +244,7 @@ export default function RimaSlide() {
           const col = dn ? FAILC : show ? c.color : '#5E6B7A';
           const h = big ? 12 : 0;
           return (
-            <g key={i} opacity={!dimmed || f ? 1 : 0.22} className="cursor-pointer transition-opacity duration-500" onClick={() => pick({ t: 'unit', i })}>
+            p.atPop && stage >= 1 ? null : <g key={i} opacity={!dimmed || f ? 1 : 0.22} className="cursor-pointer transition-opacity duration-500" onClick={() => pick({ t: 'unit', i })}>
               <title>{`${p.name} · ${p.kind}`}</title>
               {big && <line x1={p.x} y1={p.y} x2={p.x} y2={p.y - h} stroke={col} strokeOpacity=".7" strokeWidth="1" />}
               <circle cx={p.x} cy={p.y - h} r={big ? 9 : 6} fill={col} fillOpacity={show ? 0.22 : 0} className="transition-[fill-opacity] duration-700" style={{ transitionDelay: show ? `${(flow === 'jump' ? T.pts[i]!.dj : T.pts[i]!.ds) + 0.8}s` : '0s' }} />
@@ -262,7 +258,7 @@ export default function RimaSlide() {
 
         {/* POPs */}
         {RIMA_POPS.map((p, i) => {
-          const show = on(1), dn = fail === 'spur' && i === SPUR_POP, s = selPop === i;
+          const show = on(1), dn = false, s = selPop === i;
           return (
             <g key={i} className={clsx('rm-pop cursor-pointer', !show && 'off')} style={{ transitionDelay: show ? `${flow === 'jump' ? T.pops[i]!.dj : T.pops[i]!.ds}s` : `${stage === 0 ? T.pops[i]!.out : 0}s` }} onClick={() => pick({ t: 'pop', i })} opacity={dimmed && !s && !(sel?.t === 'unit' && RIMA_POINTS[sel.i]!.pop === i) ? 0.45 : 1}>
               <title>{`${p.name} · ${p.site}`}</title>
@@ -276,8 +272,10 @@ export default function RimaSlide() {
           );
         })}
 
+        {/* rompimento na fibra de distribuição: trechos a jusante em vermelho */}
+        {fail === 'access' && <g className="pointer-events-none">{RIMA_CUT.d.map((d, k) => <path key={k} d={d} fill="none" stroke={FAILC} strokeWidth="1.8" className="rm-blink" />)}</g>}
         {/* rompimento: marcador no ponto da falha */}
-        {fail && (() => { const r = RIMA_RING[fail === 'ring' ? FAIL_SEG : SPUR]!; return (
+        {fail && (() => { const r = fail === 'ring' ? { mx: RIMA_RING[FAIL_SEG]!.mx, my: RIMA_RING[FAIL_SEG]!.my } : { mx: RIMA_CUT.x, my: RIMA_CUT.y }; return (
           <g className="pointer-events-none">
             <circle cx={r.mx} cy={r.my} r="16" fill={FAILC} fillOpacity=".25" className="rm-beacon" />
             <circle cx={r.mx} cy={r.my} r="9" fill="#2A0707" stroke={FAILC} strokeWidth="1.8" />
@@ -285,17 +283,18 @@ export default function RimaSlide() {
           </g>
         ); })()}
 
-        {/* BKT · centro de gerenciamento (NOC) */}
+        {/* BKT · centro de gerenciamento (NOC) na sede: R. Pedro Paes Mendonça, Suíssa */}
         <g className="cursor-pointer" onClick={() => pick(sel?.t === 'noc' ? null : { t: 'noc' })}>
-          <title>BKT · Centro de Operações de Rede</title>
-          <circle cx={noc[0]} cy={noc[1] + 26} r="40" fill="url(#rm-halo)" opacity={stage >= 1 ? 1 : 0.25} className="transition-opacity duration-1000" />
-          {stage >= 1 && <circle cx={noc[0]} cy={noc[1] + 26} r="14" fill="none" stroke={TELE} strokeWidth="1.2" className="rm-beacon" />}
-          <rect x={noc[0] - 92} y={noc[1] - 22} width="184" height="44" rx="10" fill="#0B1420" stroke={stage >= 1 ? '#8FD6FF' : '#3B4B5E'} strokeWidth="1.4" className="transition-[stroke] duration-1000" />
-          <image href="/brand/bkt-symbol-white.png" x={noc[0] - 84} y={noc[1] - 15} width="30" height="30" preserveAspectRatio="xMidYMid meet" opacity={stage >= 1 ? 1 : 0.5} />
-          <text x={noc[0] - 46} y={noc[1] - 2} fontSize="15" fontWeight="800" fill="#fff" className="font-display" letterSpacing="1">BKT</text>
-          <text x={noc[0] - 46} y={noc[1] + 13} fontSize="9.5" fontWeight="600" fill="#9CC4EA" letterSpacing="1.2">CENTRO DE GERENCIAMENTO</text>
-          <line x1={noc[0]} y1={noc[1] + 22} x2={noc[0]} y2={noc[1] + 26} stroke="#8FD6FF" />
-          {!RIMA_PARAMS.BKT_HQ && <text x={noc[0]} y={noc[1] + 42} fontSize="9.5" fill="#fff" fillOpacity=".45" textAnchor="middle">sede: endereço a definir</text>}
+          <title>BKT · Centro de Operações de Rede · R. Pedro Paes Mendonça, Suíssa</title>
+          <circle cx={NOC_G[0]} cy={NOC_G[1]} r="34" fill="url(#rm-halo)" opacity={stage >= 1 ? 1 : 0.3} className="transition-opacity duration-1000" />
+          {stage >= 1 && <circle cx={NOC_G[0]} cy={NOC_G[1]} r="12" fill="none" stroke={fail ? FAILC : TELE} strokeWidth="1.4" className="rm-beacon" />}
+          <path d={`M${NOC_T[0]} ${NOC_T[1]} L${NOC_B[0] + 80} ${NOC_B[1] + 24} L${NOC_B[0]} ${NOC_B[1] + 24}`} fill="none" stroke={fail ? FAILC : '#8FD6FF'} strokeOpacity=".7" strokeWidth="1" />
+          <rect x={NOC_G[0] - 3.5} y={NOC_T[1]} width="7" height={NOC_G[1] - NOC_T[1]} fill="#0B1420" stroke={fail ? FAILC : '#8FD6FF'} strokeWidth="1.2" />
+          <circle cx={NOC_T[0]} cy={NOC_T[1]} r="5" fill={fail ? FAILC : stage >= 1 ? '#fff' : '#5E6B7A'} className={fail ? 'rm-blink' : undefined} />
+          <rect x={NOC_B[0] - 122} y={NOC_B[1] - 24} width="244" height="48" rx="10" fill={fail ? '#2A0707' : '#0B1420'} stroke={fail ? FAILC : stage >= 1 ? '#8FD6FF' : '#3B4B5E'} strokeWidth="1.6" className={clsx('transition-[stroke,fill] duration-700', fail && 'rm-blink')} />
+          <image href="/brand/bkt-symbol-white.png" x={NOC_B[0] - 113} y={NOC_B[1] - 15} width="30" height="30" preserveAspectRatio="xMidYMid meet" opacity={stage >= 1 ? 1 : 0.5} />
+          <text x={NOC_B[0] - 75} y={NOC_B[1] - 2} fontSize="15" fontWeight="800" fill="#fff" className="font-display" letterSpacing="1">BKT</text>
+          <text x={NOC_B[0] - 75} y={NOC_B[1] + 13} fontSize="9.5" fontWeight="600" fill={fail ? '#FF8A8A' : '#9CC4EA'} letterSpacing="1.2">{fail ? 'ALERTA · ROMPIMENTO DETECTADO' : 'CENTRO DE GERENCIAMENTO'}</text>
         </g>
       </svg>
 
@@ -336,7 +335,7 @@ export default function RimaSlide() {
         <li className="flex items-center gap-2"><svg width="24" height="6" aria-hidden><line x1="0" y1="3" x2="24" y2="3" stroke="#A9846A" strokeWidth="1.2" strokeDasharray="2 2.5" /></svg>Conexão independente</li>
         <li className="flex items-center gap-2"><span className="h-[3px] w-6 bg-[#FF4D4D]" />Falha</li>
       </ul>
-      <p className="absolute left-[60px] top-[722px] w-[420px] text-[10.5px] leading-snug text-white/35">Simulação conceitual. Unidades públicas nas posições do OpenStreetMap; POPs, rotas e aplicações são ilustrativos e não representam infraestrutura instalada. Mapa © colaboradores do OpenStreetMap.</p>
+      <p className="absolute left-[60px] top-[722px] w-[420px] text-[10.5px] leading-snug text-white/35">Simulação conceitual. POPs e sede da BKT nos endereços reais; unidades públicas nas posições do OpenStreetMap; rotas, splitters e aplicações são ilustrativos. Mapa © colaboradores do OpenStreetMap.</p>
 
       {/* modos e falha */}
       <div className="absolute right-[248px] top-7 flex border border-white/15 bg-[#09101A]/80 p-1 backdrop-blur-md" role="group" aria-label="Modo de visualização">
@@ -353,8 +352,8 @@ export default function RimaSlide() {
         )}
         {failMenu && !fail && (
           <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-[280px] border border-white/15 bg-[#09101A]/95 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">
-            <button type="button" onClick={() => startFail('ring')} className="block w-full px-3 py-2 text-left hover:bg-white/5"><span className="block text-[13px] font-semibold">No anel do backbone</span><span className="block text-[11.5px] text-white/55">Com redundância: o tráfego segue pelo outro lado do anel.</span></button>
-            <button type="button" onClick={() => startFail('spur')} className="block w-full px-3 py-2 text-left hover:bg-white/5"><span className="block text-[13px] font-semibold">No ramal de Santa Maria</span><span className="block text-[11.5px] text-white/55">Sem redundância: os circuitos do POP ficam indisponíveis.</span></button>
+            <button type="button" onClick={() => startFail('ring')} className="block w-full px-3 py-2 text-left hover:bg-white/5"><span className="block text-[13px] font-semibold">No anel, entre {RIMA_POPS[RIMA_RING[FAIL_SEG]!.a]!.name} e {RIMA_POPS[RIMA_RING[FAIL_SEG]!.b]!.name}</span><span className="block text-[11.5px] text-white/55">Com redundância: o tráfego segue pelo outro lado do anel.</span></button>
+            <button type="button" onClick={() => startFail('access')} className="block w-full px-3 py-2 text-left hover:bg-white/5"><span className="block text-[13px] font-semibold">Na fibra de distribuição ({RIMA_POPS[CUT_POP]!.name})</span><span className="block text-[11.5px] text-white/55">Sem redundância: as unidades depois do ponto rompido ficam indisponíveis até o reparo.</span></button>
           </div>
         )}
       </div>
@@ -362,8 +361,8 @@ export default function RimaSlide() {
       {/* aviso de falha */}
       {fail && (
         <div className={clsx('absolute left-1/2 top-[92px] flex -translate-x-[10%] items-center gap-3 border px-4 py-2 text-[13px] backdrop-blur-md', fail === 'ring' ? 'border-[#5BFFA8]/50 bg-[#06261A]/80 text-[#CFFFE4]' : 'border-[#FF4D4D]/60 bg-[#2A0707]/80 text-[#FFD0D0]')} role="status">
-          {fail === 'ring' ? <><Route className="h-4 w-4 text-[#5BFFA8]" aria-hidden />Rompimento entre {RIMA_POPS[RIMA_RING[FAIL_SEG]!.a]!.name} e {RIMA_POPS[RIMA_RING[FAIL_SEG]!.b]!.name}: tráfego redirecionado pelo anel, serviços preservados.</>
-            : <><Unplug className="h-4 w-4 text-[#FF4D4D]" aria-hidden />Rompimento no ramal de {RIMA_POPS[SPUR_POP]!.name}: sem rota redundante, {unitsDown} circuitos indisponíveis.</>}
+          {fail === 'ring' ? <><Route className="h-4 w-4 flex-none text-[#5BFFA8]" aria-hidden /><span><b>BKT alertada.</b> Rompimento entre {RIMA_POPS[RIMA_RING[FAIL_SEG]!.a]!.name} e {RIMA_POPS[RIMA_RING[FAIL_SEG]!.b]!.name}: tráfego redirecionado pelo anel, serviços preservados.</span></>
+            : <><Unplug className="h-4 w-4 flex-none text-[#FF4D4D]" aria-hidden /><span><b>BKT alertada.</b> Rompimento na fibra de distribuição do {RIMA_POPS[CUT_POP]!.name}: sem rota redundante, {unitsDown} unidades indisponíveis.</span></>}
         </div>
       )}
 
@@ -383,7 +382,7 @@ export default function RimaSlide() {
                   </dl>
                   <p className="mt-2 text-[10px] text-white/40">Valores desta simulação; capacidade e utilização vêm do projeto.</p>
                   <ul className="mt-2 max-h-[118px] overflow-y-auto pr-1 text-[12px]" aria-label="Circuitos">
-                    {fail && <li className="flex items-center gap-2 py-1 text-[#FF8A8A]"><span className="h-2 w-2 flex-none rounded-full bg-[#FF4D4D]" />Backbone {fail === 'ring' ? `${RIMA_POPS[RIMA_RING[FAIL_SEG]!.a]!.name} ↔ ${RIMA_POPS[RIMA_RING[FAIL_SEG]!.b]!.name}` : `ramal ${RIMA_POPS[SPUR_POP]!.name}`} · rompido</li>}
+                    {fail && <li className="flex items-center gap-2 py-1 font-semibold text-[#FF8A8A]"><span className="h-2 w-2 flex-none rounded-full bg-[#FF4D4D] rm-blink" />ALERTA · {fail === 'ring' ? `backbone ${RIMA_POPS[RIMA_RING[FAIL_SEG]!.a]!.name} ↔ ${RIMA_POPS[RIMA_RING[FAIL_SEG]!.b]!.name} rompido · rota redundante ativa` : `fibra de distribuição do ${RIMA_POPS[CUT_POP]!.name} rompida · ${unitsDown} unidades`}</li>}
                     {RIMA_POINTS.map((p, i) => connected(p) && (
                       <li key={i}><button type="button" onClick={() => pick({ t: 'unit', i })} className="flex w-full items-center gap-2 py-1 text-left text-white/75 hover:text-white"><span className="h-2 w-2 flex-none rounded-full" style={{ background: down(p) ? FAILC : '#5BFFA8' }} /><span className="truncate">{p.name}</span><span className="ml-auto flex-none text-white/40">{RIMA_POPS[p.pop]!.name.replace('POP ', '')}</span></button></li>
                     ))}
@@ -392,12 +391,12 @@ export default function RimaSlide() {
               )}
             </div>
           )}
-          {sel.t === 'pop' && (() => { const p = RIMA_POPS[sel.i]!, mine = RIMA_POINTS.filter((x) => x.pop === sel.i), dn = fail === 'spur' && sel.i === SPUR_POP; return (
+          {sel.t === 'pop' && (() => { const p = RIMA_POPS[sel.i]!, mine = RIMA_POINTS.filter((x) => x.pop === sel.i), dn = false; return (
             <div className="p-4">
               <p className="text-[11px] font-semibold tracking-[0.18em] text-[#7DF9FF]">PONTO DE PRESENÇA</p>
               <p className="mt-1 text-[18px] font-bold">{p.name}</p>
-              <p className="text-[12px] text-white/55">Instalado (ilustração) em: {p.site}</p>
-              <p className={clsx('mt-2 text-[13px] font-semibold', !on(1) ? 'text-white/50' : dn ? 'text-[#FF6B6B]' : 'text-[#5BFFA8]')}>{!on(1) ? 'Fora da rede fragmentada' : dn ? 'Isolado: ramal rompido' : sel.i === SPUR_POP ? 'Operacional · ramal sem redundância' : 'Operacional · no anel (duas rotas)'}</p>
+              <p className="text-[12px] text-white/55">{p.site}</p>
+              <p className={clsx('mt-2 text-[13px] font-semibold', !on(1) ? 'text-white/50' : dn ? 'text-[#FF6B6B]' : 'text-[#5BFFA8]')}>{!on(1) ? 'Fora da rede fragmentada' : dn ? 'Isolado' : 'Operacional · no anel (duas rotas)'}</p>
               <ul className="mt-2 grid grid-cols-2 gap-1 text-[12px] text-white/75">{CATS.map((c) => { const n = mine.filter((x) => x.cat === c.k).length; return n ? <li key={c.k} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: c.color }} />{c.label}: {n}</li> : null; })}</ul>
               <p className="mt-2 text-[12px] text-white/55">Capacidade de transporte: {RIMA_PARAMS.capacidadePop ?? 'a definir no projeto'}</p>
             </div>
@@ -407,7 +406,7 @@ export default function RimaSlide() {
               <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.18em]" style={{ color: c.color }}><c.icon className="h-3.5 w-3.5" aria-hidden />{c.label.toUpperCase()}</p>
               <p className="mt-1 pr-6 text-[16px] font-bold leading-snug">{selUnit.name}</p>
               <p className="text-[12px] text-white/55">{selUnit.kind}</p>
-              <p className={clsx('mt-2 text-[13px] font-semibold', dn ? 'text-[#FF6B6B]' : ok ? 'text-[#5BFFA8]' : 'text-[#C9B39E]')}>{dn ? 'Indisponível: ramal do POP rompido' : ok ? `Conectada ao ${RIMA_POPS[selUnit.pop]!.name}${selUnit.ded ? ' · circuito dedicado' : ' · acesso PON'}` : 'Conexão independente (cenário fragmentado)'}</p>
+              <p className={clsx('mt-2 text-[13px] font-semibold', dn ? 'text-[#FF6B6B]' : ok ? 'text-[#5BFFA8]' : 'text-[#C9B39E]')}>{dn ? 'Indisponível: fibra de distribuição rompida (BKT alertada)' : ok ? `Conectada ao ${RIMA_POPS[selUnit.pop]!.name}${selUnit.ded ? ' · circuito dedicado' : ' · acesso PON'}` : 'Conexão independente (cenário fragmentado)'}</p>
               <p className="mt-2 text-[11px] text-white/40">Aplicação demonstrativa · posição: OpenStreetMap ({selUnit.osm})</p>
             </div>
           ); })()}
