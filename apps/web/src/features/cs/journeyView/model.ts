@@ -1,5 +1,5 @@
 /**
- * Jornada Viva do Cliente (3D): modelo da visualização e ADAPTADOR dos dados reais do CRM.
+ * Jornada do cliente (visualização em montanha): modelo e ADAPTADOR dos dados reais do CRM.
  * Regras: nada é inventado. Etapa = etapa registrada do card da conta no funil Sucesso do Cliente; saúde = Health Score já
  * calculado (mesmas faixas do HealthBadge: ≥ 75 saudável, ≥ 50 atenção, abaixo risco); risco = alertas e ocorrências abertos.
  * Sem dado → null, e a interface mostra "Dado não disponível". A visualização é só de consulta.
