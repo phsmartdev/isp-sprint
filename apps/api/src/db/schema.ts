@@ -27,6 +27,8 @@ export const tenants = pgTable('tenants', {
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
   timezone: text('timezone').notNull().default('America/Sao_Paulo'),
+  /** arte padrão do login (sem imagem enviada): 'hexagono' ou 'revops' (animação) */
+  loginStyle: text('login_style').notNull().default('hexagono'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
