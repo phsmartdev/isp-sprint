@@ -270,7 +270,7 @@ export function CustomerSuccessPage() {
   const tab = (tabs.some((t) => t.key === f.t) ? f.t : 'carteira') as Tab;
   return (
     <div className="w-full">
-      <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} />
+      <PageHeader icon={<HeartHandshake className="h-9 w-9" strokeWidth={2.2} />} title="Sucesso do Cliente" subtitle={`Carteira, prioridades e cobertura${me ? ` · ${me.user.name}` : ''}`} actions={<Link to="/sucesso/jornada-3d/teste" className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-bold tracking-wide text-ink hover:bg-surface-2">TESTAR JORNADA 3D</Link>} />
       <div className="mb-4 flex flex-wrap items-end gap-3">
         {manage && <FormField label="CSM" htmlFor="cs-f-csm"><Select id="cs-f-csm" value={f.csm} onChange={(e) => setF({ csm: e.target.value })}><option value="">Todos</option>{csms.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
         <FormField label="Tier" htmlFor="cs-f-tier"><Select id="cs-f-tier" value={f.tier} onChange={(e) => setF({ tier: e.target.value })}><option value="">Todos</option>{(['small', 'middle', 'large'] as Tier[]).map((t) => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}</Select></FormField>

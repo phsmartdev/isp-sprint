@@ -336,6 +336,43 @@ export const csRoutes = [
   }),
 
   defineRoute({
+    method: 'GET', url: '/cs/accounts/:contactId/jornada-3d', summary: 'Jornada 3D (somente leitura): etapa da conta no funil Sucesso do Cliente, histórico de etapas, marcos e oportunidades da conta', tag: 'Sucesso do Cliente', module: 'clientes', params: ContactParams,
+    handler: async ({ app, auth, params }) => {
+      await account(app.db, auth, params.contactId);
+      const t = auth.tenantId, c = params.contactId;
+      // card da conta no funil Sucesso do Cliente (aberto; senão o mais recente) e as etapas do funil
+      const [pipe] = await app.db.select({ id: s.pipelines.id }).from(s.pipelines).where(and(eq(s.pipelines.tenantId, t), eq(s.pipelines.key, 'sucesso_cliente'))).limit(1);
+      const stages = pipe ? await app.db.select({ key: s.pipelineStages.key, name: s.pipelineStages.name, position: s.pipelineStages.position, kind: s.pipelineStages.kind }).from(s.pipelineStages).where(eq(s.pipelineStages.pipelineId, pipe.id)).orderBy(asc(s.pipelineStages.position)) : [];
+      const cards = pipe ? await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, stage: s.opportunities.stage, stageChangedAt: s.opportunities.stageChangedAt, createdAt: s.opportunities.createdAt, ownerName: s.users.name })
+        .from(s.opportunities).leftJoin(s.users, eq(s.users.id, s.opportunities.ownerId))
+        .where(and(eq(s.opportunities.tenantId, t), eq(s.opportunities.pipelineId, pipe.id), eq(s.opportunities.contactId, c), isNull(s.opportunities.deletedAt))).orderBy(desc(s.opportunities.createdAt)).limit(5) : [];
+      const card = cards.find((x) => !['ganha', 'perdida'].includes(x.stage)) ?? cards[0] ?? null;
+      const events = card ? await app.db.select({ type: s.opportunityEvents.type, from: s.opportunityEvents.fromValue, to: s.opportunityEvents.toValue, reason: s.opportunityEvents.reason, at: s.opportunityEvents.occurredAt, actor: s.users.name })
+        .from(s.opportunityEvents).leftJoin(s.users, eq(s.users.id, s.opportunityEvents.actorId))
+        .where(and(eq(s.opportunityEvents.tenantId, t), eq(s.opportunityEvents.opportunityId, card.id), inArray(s.opportunityEvents.type, ['created', 'stage_changed']))).orderBy(asc(s.opportunityEvents.occurredAt)).limit(200) : [];
+      // marcos de todas as jornadas da conta (visão consolidada; cada marco indica o contrato)
+      const journeys = await app.db.select({ id: s.csJourneys.id, contractId: s.csJourneys.contractId, templateName: s.csJourneys.templateName, status: s.csJourneys.status, startedAt: s.csJourneys.startedAt, number: s.contractVersions.number, endAt: s.contractVersions.endAt })
+        .from(s.csJourneys).leftJoin(s.contracts, eq(s.contracts.id, s.csJourneys.contractId)).leftJoin(s.contractVersions, and(eq(s.contractVersions.contractId, s.contracts.id), eq(s.contractVersions.version, s.contracts.currentVersion)))
+        .where(and(eq(s.csJourneys.tenantId, t), eq(s.csJourneys.contactId, c))).orderBy(asc(s.csJourneys.startedAt));
+      const milestones = journeys.length ? await app.db.select({ id: s.csMilestones.id, journeyId: s.csMilestones.journeyId, phase: s.csMilestones.phase, key: s.csMilestones.key, title: s.csMilestones.title, plannedAt: s.csMilestones.plannedAt, doneAt: s.csMilestones.doneAt, notes: s.csMilestones.notes, ownerName: s.users.name })
+        .from(s.csMilestones).leftJoin(s.users, eq(s.users.id, s.csMilestones.ownerId)).where(inArray(s.csMilestones.journeyId, journeys.map((j) => j.id))).orderBy(asc(s.csMilestones.position)) : [];
+      // oportunidades fora do funil de CS (expansão): etapa com nome e se é a primeira do funil
+      const opps = await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, stage: s.opportunities.stage, valueCents: s.opportunities.valueCents, wonAt: s.opportunities.wonAt, createdAt: s.opportunities.createdAt, pipelineId: s.opportunities.pipelineId })
+        .from(s.opportunities).innerJoin(s.pipelines, eq(s.pipelines.id, s.opportunities.pipelineId))
+        .where(and(eq(s.opportunities.tenantId, t), eq(s.opportunities.contactId, c), isNull(s.opportunities.deletedAt), sql`${s.pipelines.key} <> 'sucesso_cliente'`)).orderBy(desc(s.opportunities.createdAt)).limit(30);
+      const oppStages = opps.length ? await app.db.select({ pipelineId: s.pipelineStages.pipelineId, key: s.pipelineStages.key, name: s.pipelineStages.name, position: s.pipelineStages.position }).from(s.pipelineStages).where(inArray(s.pipelineStages.pipelineId, [...new Set(opps.map((o) => o.pipelineId))])) : [];
+      const firstPos = new Map<string, number>();
+      for (const st of oppStages) firstPos.set(st.pipelineId, Math.min(firstPos.get(st.pipelineId) ?? Infinity, st.position));
+      return {
+        stages, card: card ? { ...card, stageName: stages.find((x) => x.key === card.stage)?.name ?? card.stage } : null,
+        stageEvents: events.map((e) => ({ ...e, fromName: stages.find((x) => x.key === e.from)?.name ?? e.from, toName: stages.find((x) => x.key === e.to)?.name ?? e.to })),
+        journeys, milestones,
+        opportunities: opps.map((o) => { const st = oppStages.find((x) => x.pipelineId === o.pipelineId && x.key === o.stage); return { ...o, stageName: st?.name ?? o.stage, firstStage: !!st && st.position === firstPos.get(o.pipelineId) }; }),
+      };
+    },
+  }),
+
+  defineRoute({
     method: 'PATCH', url: '/cs/accounts/:contactId', summary: 'Define CSM e risco de cancelamento da conta', tag: 'Sucesso do Cliente', module: 'clientes', params: ContactParams,
     body: z.object({ csmId: z.string().uuid().nullable().optional(), churnRisk: z.enum(['baixo', 'medio', 'alto']).nullable().optional(), justification: z.string().trim().max(500).optional() }),
     handler: async ({ app, auth, params, body }) => {

@@ -150,3 +150,15 @@
   .rm-line, .rm-fade, .rm-pop { transition: none !important; }
   .rm-flow, .rm-blink, .rm-beacon, .rm-alarm { animation: none; }
 }
+
+/* Sucesso do Cliente · Jornada 3D (protótipo): controles e animações discretas da cena. */
+.j3-btn { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid rgba(255,255,255,.15); background: rgba(9,16,26,.8); padding: .35rem .6rem; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: rgba(255,255,255,.85); border-radius: .375rem; backdrop-filter: blur(6px); }
+.j3-btn:hover:not(:disabled) { background: rgba(96,211,255,.12); color: #fff; }
+.j3-btn:disabled { cursor: default; }
+@keyframes j3-breathe { 0%, 100% { opacity: .35; } 50% { opacity: .85; } }
+.j3-breathe { animation: j3-breathe 3.2s ease-in-out infinite; }
+@keyframes j3-ping { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
+.j3-ping { transform-box: fill-box; transform-origin: center; animation: j3-ping 2s ease-out infinite; }
+@keyframes j3-flow { to { stroke-dashoffset: -100; } }
+.j3-flow { animation: j3-flow 6s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .j3-breathe, .j3-ping, .j3-flow { animation: none; } }
