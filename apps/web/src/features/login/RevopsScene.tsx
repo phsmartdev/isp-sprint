@@ -8,6 +8,9 @@ const W = (a: number) => `rgba(255,255,255,${a})`;
 const hex = (r: number, x: number, y: number) => Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 3) * i - Math.PI / 2; return `${(x + r * Math.cos(a)).toFixed(1)},${(y + r * Math.sin(a)).toFixed(1)}`; }).join(' ');
 const pol = (deg: number, r = R): [number, number] => [cx + r * Math.cos((deg * Math.PI) / 180), cy + r * Math.sin((deg * Math.PI) / 180)];
 const C = 2 * Math.PI * R;
+/** fontes da marca: Orbitron nos títulos, Work Sans nos textos */
+const DISPLAY = 'Orbitron, "Work Sans", system-ui, sans-serif';
+const SANS = '"Work Sans", system-ui, sans-serif';
 
 const ICON = {
   mkt: <path d="M-9 -3 L4 -9 L4 9 L-9 3 Z M-9 -3 L-9 3 M-6 3 L-4 10" />,
@@ -24,7 +27,7 @@ const ty = cy + R + 150;
 
 export function RevopsScene({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 920 860" role="img" aria-label="Uma única experiência: Marketing, Vendas e Sucesso do Cliente em torno do cliente">
+    <svg className={className} viewBox="0 0 920 860" role="img" fontFamily={SANS} aria-label="Uma única experiência: do primeiro contato à renovação, cada passo pensado para o cliente">
       <style>{`
         .ro-spin { animation: ro-spin 90s linear infinite; transform-origin: ${cx}px ${cy}px; }
         .ro-spin-r { animation: ro-spin 140s linear infinite reverse; transform-origin: ${cx}px ${cy}px; }
@@ -90,7 +93,7 @@ export function RevopsScene({ className }: { className?: string }) {
       <g transform={`translate(${cx} ${cy - 22})`} fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="0" cy="-6" r="6" /><path d="M-12 13 C-12 4 -6 1 0 1 C6 1 12 4 12 13" />
       </g>
-      <text x={cx} y={cy + 24} textAnchor="middle" fontSize="21" fontWeight="600" fill="#fff" letterSpacing=".5">Cliente</text>
+      <text x={cx} y={cy + 24} textAnchor="middle" fontFamily={DISPLAY} fontSize="18" fontWeight="700" fill="#fff" letterSpacing="1">Cliente</text>
       <text x={cx} y={cy + 44} textAnchor="middle" fontSize="10.5" fill={W(0.55)} letterSpacing="2.4">NO CENTRO</text>
 
       {/* frentes */}
@@ -104,16 +107,16 @@ export function RevopsScene({ className }: { className?: string }) {
             <polygon points={hex(34, x, y)} fill="none" stroke="url(#ro-edge)" strokeWidth="1.2" />
             <g transform={`translate(${x} ${y})`} fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{ICON[n.i]}</g>
             <text x={lx} y={ly} textAnchor="middle" fontSize="10.5" fill={B} letterSpacing="2.4">{n.k}</text>
-            <text x={lx} y={ly + 22} textAnchor="middle" fontSize="18" fontWeight="600" fill="#fff">{n.t}</text>
-            <text x={lx} y={ly + 42} textAnchor="middle" fontSize="13.5" fontWeight="300" fill={W(0.62)}>{n.s}</text>
+            <text x={lx} y={ly + 22} textAnchor="middle" fontFamily={DISPLAY} fontSize="15" fontWeight="700" fill="#fff" letterSpacing=".6">{n.t}</text>
+            <text x={lx} y={ly + 42} textAnchor="middle" fontSize="13.5" fill={W(0.62)}>{n.s}</text>
           </g>
         );
       })}
 
       {/* assinatura */}
       <line x1={cx - 18} y1={ty - 44} x2={cx + 18} y2={ty - 44} stroke={B} />
-      <text x={cx} y={ty} textAnchor="middle" fontSize="32" fontWeight="300" fill="#fff">Uma <tspan fontWeight="600">única experiência</tspan></text>
-      <text x={cx} y={ty + 32} textAnchor="middle" fontSize="15" fontWeight="300" fill={W(0.6)}>Marketing, Vendas e Sucesso do Cliente girando em torno do mesmo cliente.</text>
+      <text x={cx} y={ty} textAnchor="middle" fontFamily={DISPLAY} fontSize="30" fontWeight="700" fill="#fff" letterSpacing="1.5"><tspan fill={W(0.7)}>Uma </tspan>única experiência</text>
+      <text x={cx} y={ty + 34} textAnchor="middle" fontSize="16" fill={W(0.62)}>Do primeiro contato à renovação, cada passo pensado para o cliente.</text>
     </svg>
   );
 }

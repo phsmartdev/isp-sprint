@@ -78,7 +78,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
           <section className="w-full max-w-md text-center lg:max-w-none lg:flex-1">
             <RevopsScene className="mx-auto hidden h-auto max-h-[92vh] w-full max-w-[860px] lg:block" />
             {/* telas pequenas: só a frase */}
-            <div className="lg:hidden"><h2 className="font-display text-3xl font-light tracking-wide">Uma <span className="font-semibold">única experiência</span></h2><p className="mt-3 text-base text-white/70">Marketing, Vendas e Sucesso do Cliente girando em torno do mesmo cliente.</p></div>
+            <div className="lg:hidden"><h2 className="font-display text-2xl font-bold tracking-wide"><span className="text-white/70">Uma </span>única experiência</h2><p className="mt-3 text-base text-white/70">Do primeiro contato à renovação, cada passo pensado para o cliente.</p></div>
           </section>
         ) : (
           <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
