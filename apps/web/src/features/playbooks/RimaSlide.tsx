@@ -17,9 +17,9 @@ import { RIMA_BKT, RIMA_BLDS, RIMA_CITY_LABEL, RIMA_CUT, RIMA_GEO, RIMA_LABELS, 
  * A sede da BKT (NOC) e os 4 POPs estão nos endereços reais (aracajuRima.ts).
  */
 export const RIMA_PARAMS: { capacidadeAgregada: string | null; utilizacaoBanda: string | null; capacidadePop: string | null } = {
-  capacidadeAgregada: null,
+  capacidadeAgregada: '10 Gbit/s',
   utilizacaoBanda: null,
-  capacidadePop: null,
+  capacidadePop: '10 Gbit/s',
 };
 
 type Stage = 0 | 1 | 2 | 3 | 4;
