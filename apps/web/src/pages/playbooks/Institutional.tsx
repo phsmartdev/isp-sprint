@@ -266,7 +266,7 @@ function SlidePol() {
               <span className="min-w-0">
                 <span className="block text-[16px] font-semibold">{title}</span>
                 {num ? (
-                  <span className="mt-1 flex items-baseline gap-2"><span className={clsx('num text-[30px] font-bold leading-none tabular-nums transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-[#FFB27A]')}><CountTo value={num[mode]} delay={pol ? 2400 : 1200} /></span><span className="text-[12.5px] leading-tight text-white/65">{pol ? polText : trad}{pol && <span className="text-white/40"> · antes {num.trad}</span>}</span></span>
+                  <span className="mt-1 flex items-baseline gap-2"><span className={clsx('num text-[30px] font-bold leading-none tabular-nums transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-[#FFB27A]')}><CountTo value={num[mode]} delay={pol ? 2400 : 300} /></span><span className="text-[12.5px] leading-tight text-white/65">{pol ? polText : trad}{pol && <span className="text-white/40"> · antes {num.trad}</span>}</span></span>
                 ) : (
                   <span className={clsx('mt-1.5 block text-[14px] leading-snug transition-colors duration-700', pol ? 'text-[#BFE8FF]' : 'text-white/60')}>{pol ? polText : trad}</span>
                 )}
