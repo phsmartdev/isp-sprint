@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../../components/ui/overlay';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { ChevronLeft, ChevronRight, Feather, Gauge, Hourglass, Maximize2, Minimize2, Move, Pause, Play, Server, ShieldCheck, X, Zap } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Copy, Feather, Link2, Gauge, Hourglass, Maximize2, Minimize2, Move, Pause, Play, Server, ShieldCheck, X, Zap } from 'lucide-react';
 import { ODS_BKT, ODS_POL, OdsBar } from '../../features/playbooks/Ods';
 import { api } from '../../lib/api';
 import { Stage } from '../Tour';
@@ -145,8 +145,8 @@ function Block({ id, r, edit, onChange, children }: { id: keyof Layout['blocks']
   );
 }
 
-function SlidePresence({ layout, edit, setLayout }: { layout: Layout; edit: boolean; setLayout: (l: Layout) => void }) {
-  const seals = useQuery({ queryKey: ['institucional', 'selos'], queryFn: () => api<{ items: { id: string; name: string; sha256: string }[] }>('/institucional/selos') }).data?.items ?? [];
+type Seal = { id: string; name: string; sha256: string };
+function SlidePresence({ layout, edit, setLayout, seals, sealSrc }: { layout: Layout; edit: boolean; setLayout: (l: Layout) => void; seals: Seal[]; sealSrc: (x: Seal) => string }) {
   const b = layout.blocks, t = layout.texts, sc = b.texto.scale ?? 1;
   const set = (id: keyof Layout['blocks']) => (r: Rect) => setLayout({ ...layout, blocks: { ...b, [id]: r } });
   const txt = (k: keyof Layout['texts']) => ({ contentEditable: edit, suppressContentEditableWarning: true, onBlur: (e: React.FocusEvent<HTMLElement>) => setLayout({ ...layout, texts: { ...t, [k]: e.currentTarget.innerText.trim() } }), className: clsx(edit && 'cursor-text outline-none focus:bg-white/5') });
@@ -171,7 +171,7 @@ function SlidePresence({ layout, edit, setLayout }: { layout: Layout; edit: bool
           {/* rodapé discreto: rótulo pequeno e selos baixos, sem quadro */}
           <section aria-label="Selos e certificações" className="flex h-full items-center gap-5 border-t border-white/10 pt-3">
             <p className="flex-none text-[10.5px] font-semibold uppercase leading-[1.5] tracking-[0.18em] text-white/40">Selos e<br />certificações</p>
-            {seals.length ? <ul className="flex h-full min-w-0 flex-1 items-center gap-5">{seals.map((x) => <li key={x.id} className="flex h-full flex-none items-center"><img src={`/api/v1/institucional/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}`} alt={x.name} title={x.name} className="h-[60px] w-auto max-w-[150px] object-contain opacity-85 transition-opacity hover:opacity-100" draggable={false} /></li>)}</ul>
+            {seals.length ? <ul className="flex h-full min-w-0 flex-1 items-center gap-5">{seals.map((x) => <li key={x.id} className="flex h-full flex-none items-center"><img src={sealSrc(x)} alt={x.name} title={x.name} className="h-[60px] w-auto max-w-[150px] object-contain opacity-85 transition-opacity hover:opacity-100" draggable={false} /></li>)}</ul>
               : <p className="text-[12px] text-white/40">Sem selos enviados (Configuração → Personalização). Na apresentação, o rodapé só aparece quando houver selos.</p>}
           </section>
         </Block>
@@ -304,7 +304,57 @@ const SLIDES = [
 type SlideKey = (typeof SLIDES)[number]['key'];
 const IDLE_MS = 15000;
 
-export function InstitutionalPresentation() {
+/** Link público (administração): gerar, copiar e desativar. O link completo só aparece logo após gerar. */
+function ShareControl({ btn }: { btn: string }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const st = useQuery({ queryKey: ['institucional', 'compartilhamento'], enabled: open, queryFn: () => api<{ link: { createdAt: string; accessCount: number; lastAccessAt: string | null } | null }>('/institucional/compartilhamento') });
+  const gen = useMutation({
+    mutationFn: () => api<{ token: string }>('/institucional/compartilhamento', { method: 'POST', body: {} }),
+    onSuccess: (r) => { setUrl(`${window.location.origin}/a/${r.token}`); setCopied(false); void qc.invalidateQueries({ queryKey: ['institucional', 'compartilhamento'] }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const off = useMutation({
+    mutationFn: () => api('/institucional/compartilhamento', { method: 'DELETE' }),
+    onSuccess: () => { setUrl(null); void qc.invalidateQueries({ queryKey: ['institucional', 'compartilhamento'] }); toast({ tone: 'success', message: 'Link público desativado' }); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const copy = async () => { if (!url) return; try { await navigator.clipboard.writeText(url); setCopied(true); } catch { setCopied(false); } };
+  const l = st.data?.link;
+  const fmt = (d: string) => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return (
+    <div className="relative">
+      <button type="button" className={btn} aria-expanded={open} onClick={() => setOpen(!open)}><Link2 className="h-4 w-4" aria-hidden /><span className="hidden sm:inline">Link público</span></button>
+      {open && (
+        <div className="absolute bottom-[calc(100%+10px)] right-0 z-[80] w-[380px] border border-white/15 bg-[#0B121A] p-4 text-left text-white shadow-[0_18px_40px_rgba(0,0,0,0.55)]" role="dialog" aria-label="Link público da apresentação">
+          <p className="text-sm font-semibold">Link público da apresentação</p>
+          <p className="mt-1 text-[12.5px] leading-snug text-white/60">Quem tiver o link vê a apresentação inteira, sem login e só para leitura. Gerar um novo link desativa o anterior.</p>
+          {url && (
+            <div className="mt-3">
+              <div className="flex gap-1.5"><input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 border border-white/15 bg-black/30 px-2 py-1.5 text-[12px] text-white" aria-label="Link público" /><button type="button" onClick={() => void copy()} className="flex items-center gap-1.5 bg-[#4FBBFF]/20 px-3 text-[12px] font-semibold text-white hover:bg-[#4FBBFF]/30">{copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}{copied ? 'Copiado' : 'Copiar'}</button></div>
+              <p className="mt-1.5 text-[11.5px] text-[#FFD24A]/80">Copie agora: por segurança, o link completo não é exibido de novo.</p>
+            </div>
+          )}
+          <p className="mt-3 text-[12.5px] text-white/70">{st.isLoading ? 'Carregando…' : l ? <>Ativo desde {fmt(l.createdAt)} · {l.accessCount} acesso{l.accessCount === 1 ? '' : 's'}{l.lastAccessAt ? ` · último em ${fmt(l.lastAccessAt)}` : ''}</> : 'Nenhum link ativo.'}</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" disabled={gen.isPending} onClick={() => gen.mutate()} className="bg-white/10 px-3 py-2 text-[12.5px] font-semibold hover:bg-white/15 disabled:opacity-50">{l ? 'Gerar novo link' : 'Gerar link'}</button>
+            {l && <button type="button" disabled={off.isPending} onClick={() => off.mutate()} className="px-3 py-2 text-[12.5px] font-semibold text-[#FF8A8A] hover:bg-[#FF4D4D]/10 disabled:opacity-50">Desativar</button>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Apresentação em tela cheia. Com publicToken, é o LINK PÚBLICO: só leitura, sem login, sem editar nem compartilhar;
+ * layout e selos vêm de /public/apresentacao/:token.
+ */
+export function InstitutionalPresentation({ publicToken }: { publicToken?: string } = {}) {
+  const isPublic = !!publicToken;
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
   const i = Math.min(SLIDES.length - 1, Math.max(0, Number(sp.get('s') ?? 1) - 1 || 0));
@@ -325,7 +375,7 @@ export function InstitutionalPresentation() {
     const el = wraps.current[k];
     if (el && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) el.animate([{ opacity: 0, filter: 'blur(10px) brightness(.4)', transform: 'scale(1.035)' }, { opacity: 1, filter: 'none', transform: 'none' }], { duration: 1200, easing: 'cubic-bezier(.2,.7,.2,1)' });
   }, [i]);
-  const close = useCallback(() => { if (document.fullscreenElement) void document.exitFullscreen(); nav('/playbooks'); }, [nav]);
+  const close = useCallback(() => { if (isPublic) return; if (document.fullscreenElement) void document.exitFullscreen(); nav('/playbooks'); }, [nav, isPublic]);
   const [full, setFull] = useState(!!document.fullscreenElement);
   const toggleFull = useCallback(() => { if (document.fullscreenElement) void document.exitFullscreen(); else void document.documentElement.requestFullscreen?.().catch(() => undefined); }, []);
   useEffect(() => { const f = () => setFull(!!document.fullscreenElement); document.addEventListener('fullscreenchange', f); return () => document.removeEventListener('fullscreenchange', f); }, []);
@@ -344,7 +394,12 @@ export function InstitutionalPresentation() {
   const toast = useToast();
   const qc = useQueryClient();
   const slide = SLIDES[i]!.key;
-  const saved = useQuery({ queryKey: ['institucional', 'layout', 'presenca'], queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>('/institucional/layout/presenca') });
+  const pub = useQuery({ queryKey: ['institucional', 'publico', publicToken], enabled: isPublic, retry: false, queryFn: () => api<{ layouts: Record<string, Partial<Layout>>; seals: Seal[] }>(`/public/apresentacao/${encodeURIComponent(publicToken!)}`) });
+  const savedPriv = useQuery({ queryKey: ['institucional', 'layout', 'presenca'], enabled: !isPublic, queryFn: () => api<{ layout: Partial<Layout> | null; canManage: boolean }>('/institucional/layout/presenca') });
+  const saved = isPublic ? { data: pub.data ? { layout: pub.data.layouts.presenca ?? null, canManage: false } : undefined } : savedPriv;
+  const sealsPriv = useQuery({ queryKey: ['institucional', 'selos'], enabled: !isPublic, queryFn: () => api<{ items: Seal[] }>('/institucional/selos') }).data?.items;
+  const seals = (isPublic ? pub.data?.seals : sealsPriv) ?? [];
+  const sealSrc = (x: Seal) => (isPublic ? `/api/v1/public/apresentacao/${encodeURIComponent(publicToken!)}/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}` : `/api/v1/institucional/selos/${x.id}/imagem?v=${x.sha256.slice(0, 12)}`);
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<Layout | null>(null);
   const savedBlocks = saved.data?.layout?.blocks;
@@ -369,6 +424,13 @@ export function InstitutionalPresentation() {
     return () => clearInterval(id);
   }, [auto, edit, i, go]);
   const textScale = (d: number) => setDraft({ ...current, blocks: { ...current.blocks, texto: { ...current.blocks.texto, scale: Math.max(0.6, Math.min(1.6, Math.round(((current.blocks.texto.scale ?? 1) + d) * 100) / 100)) } } });
+  if (isPublic && pub.isError) return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-[#04080E] px-6 text-center text-white">
+      <img src="/brand/bkt-logo-white.png" alt="BKT" className="h-10 w-[170px] object-contain" />
+      <p className="text-lg font-semibold">Este link da apresentação não está mais disponível.</p>
+      <p className="max-w-md text-sm text-white/60">Ele pode ter sido desativado ou substituído por um novo. Peça o link atualizado à BKT.</p>
+    </div>
+  );
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-[#0E141B]" role="region" aria-label="Apresentação institucional" aria-roledescription="apresentação">
       <div className={clsx('flex min-h-0 flex-1 flex-col', !full && 'px-3 py-3 sm:px-6 sm:py-5')}><Stage>
@@ -377,7 +439,7 @@ export function InstitutionalPresentation() {
             <div key={key} ref={(el) => { wraps.current[key] = el; }} className={clsx('absolute inset-0', key !== slide && 'hidden')} aria-hidden={key !== slide}>
               <Suspense fallback={<div className="h-full bg-[#04080E]" />}>
                 {key === 'abertura' && <SceneOpening />}
-                {key === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} />}
+                {key === 'presenca' && <SlidePresence layout={current} edit={edit} setLayout={setDraft} seals={seals} sealSrc={sealSrc} />}
                 {key === 'pol' && <SlidePol />}
                 {key === 'rima' && <RimaSlide />}
                 {key === 'impacto' && <SceneImpact active={key === slide} />}
@@ -392,12 +454,13 @@ export function InstitutionalPresentation() {
       </Stage></div>
       <nav aria-label="Controles da apresentação" className="relative flex items-center justify-between border-t border-white/10 px-3 py-2 sm:px-6">
         <span aria-hidden className="absolute left-0 top-[-1px] h-px bg-[#8FD6FF] transition-[width] duration-200 ease-linear" style={{ width: `${auto ? prog * 100 : 0}%` }} />
-        <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>
+        {isPublic ? <img src="/brand/bkt-logo-white.png" alt="BKT" className="h-6 w-[100px] object-contain object-left opacity-80" /> : <button type="button" className={btn} onClick={close}><X className="h-4 w-4" aria-hidden />Fechar</button>}
         <div className="flex min-w-0 items-center gap-3">
           <button type="button" className={btn} onClick={() => { setAuto(!auto); last.current = 0; }} aria-pressed={auto} aria-label={auto ? 'Pausar o modo automático' : 'Retomar o modo automático'}>{auto ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}<span className="hidden md:inline">{auto ? (held ? 'Automático · pausado pela interação' : 'Automático') : 'Manual'}</span></button>
           <p className="truncate text-sm text-white/60">Cena <span className="num text-white">{i + 1}</span> / {SLIDES.length} · {SLIDES[i]!.title}</p>
         </div>
         <div className="flex gap-1">
+          {!isPublic && savedPriv.data?.canManage && !full && <ShareControl btn={btn} />}
           {slide === 'presenca' && saved.data?.canManage && !full && (edit ? <>
             <button type="button" className={btn} onClick={() => textScale(-0.05)} aria-label="Diminuir o texto">A−</button>
             <button type="button" className={btn} onClick={() => textScale(0.05)} aria-label="Aumentar o texto">A+</button>
