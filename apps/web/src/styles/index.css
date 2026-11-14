@@ -114,6 +114,9 @@
 .pol-ping { transform-box: fill-box; transform-origin: center; opacity: 0; animation: pol-ping var(--t) ease-out infinite; }
 @keyframes pol-blink { 0%, 86%, 100% { opacity: .15; } 90% { opacity: 1; } }
 .pol-blink { animation: pol-blink 2.4s infinite; }
+/* brilho pulsante (energia e calor dos equipamentos ativos da rede tradicional) */
+@keyframes pol-lit { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.pol-lit { animation: pol-lit var(--t, 2s) ease-in-out infinite; }
 .nx { transition-duration: var(--dur, .7s); transition-timing-function: cubic-bezier(.4,0,.2,1); }
 .nx-line { stroke-dasharray: 100; stroke-dashoffset: 0; transition-property: stroke-dashoffset; }
 .nx-fade { transition-property: opacity; }
@@ -124,7 +127,7 @@
 [data-mode="pol"] .L-pol .nx, [data-mode="trad"] .L-trad .nx { transition-delay: var(--in); }
 [data-mode="trad"] .L-pol .nx, [data-mode="pol"] .L-trad .nx { transition-delay: var(--out); }
 @media (prefers-reduced-motion: reduce) {
-  .pol-run, .pol-ping { animation: none; opacity: 0; } .pol-in { animation: none; opacity: 1; } .pol-blink { animation: none; }
+  .pol-run, .pol-ping { animation: none; opacity: 0; } .pol-in { animation: none; opacity: 1; } .pol-blink, .pol-lit { animation: none; }
   .nx { transition-duration: .01s !important; transition-delay: 0s !important; }
 }
 

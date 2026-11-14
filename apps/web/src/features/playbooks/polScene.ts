@@ -134,7 +134,15 @@ export function buildPolScene(): { svg: string; callouts: PolCallout[] } {
     }
     return g;
   };
-  const bolt = (p: [number, number]) => `<circle cx="${f1(p[0])}" cy="${f1(p[1])}" r="6.5" fill="#2A2006" stroke="#FFD24A" stroke-width="1.1"/><path d="M${f1(p[0] + 0.8)} ${f1(p[1] - 4)} L${f1(p[0] - 2.2)} ${f1(p[1] + 0.6)} L${f1(p[0] + 0.2)} ${f1(p[1] + 0.6)} L${f1(p[0] - 0.8)} ${f1(p[1] + 4)} L${f1(p[0] + 2.2)} ${f1(p[1] - 0.6)} L${f1(p[0] - 0.2)} ${f1(p[1] - 0.6)} Z" fill="#FFD24A"/>`;
+  /** ponto de energia: k = tamanho (a rede tradicional usa raios grandes, com brilho; a POL só um pequeno, na OLT) */
+  const bolt = (p: [number, number], k = 1, glow = false) => {
+    const [x, y] = p, v = (n: number) => f1(n * k);
+    return (glow ? `<circle cx="${f1(x)}" cy="${f1(y)}" r="${v(14)}" fill="#FFD24A" fill-opacity=".28" filter="url(#pol-glow)" class="pol-lit" style="--t:1.8s"/>` : '')
+      + `<circle cx="${f1(x)}" cy="${f1(y)}" r="${v(6.5)}" fill="#2A2006" stroke="#FFD24A" stroke-width="${v(1.1)}"/>`
+      + `<path d="M${f1(x + 0.8 * k)} ${f1(y - 4 * k)} L${f1(x - 2.2 * k)} ${f1(y + 0.6 * k)} L${f1(x + 0.2 * k)} ${f1(y + 0.6 * k)} L${f1(x - 0.8 * k)} ${f1(y + 4 * k)} L${f1(x + 2.2 * k)} ${f1(y - 0.6 * k)} L${f1(x - 0.2 * k)} ${f1(y - 0.6 * k)} Z" fill="#FFD24A"/>`;
+  };
+  /** calor dissipado pelos equipamentos ativos (switches e fontes aquecem; o rack precisa de ventilação) */
+  const heat = (p: [number, number], r: number) => `<ellipse cx="${f1(p[0])}" cy="${f1(p[1])}" rx="${r}" ry="${f1(r * 0.75)}" fill="#FF5A2A" fill-opacity=".22" filter="url(#pol-glow)" class="pol-lit" style="--t:3.2s"/>`;
 
   /* comum às duas redes: a fibra da operadora chega da rua à sala técnica */
   const backbone = pth([[X0 - 10, Y0 - 10, 0.05], [RX, Y0 - 10, 0.05], [RX, RY, 0.05], OLT]);
@@ -144,34 +152,35 @@ export function buildPolScene(): { svg: string; callouts: PolCallout[] } {
   const CU = '#FF8A3D', CUG = '#C8571B', PW = '#FFD24A';
   let tg = '', tl = '', tp = '', tn = '';
   const coreTop = 2.3, riserTop = zf(NF) + 1.2;
-  for (const dx of [-0.36, -0.12, 0.12, 0.36]) {
+  for (const dx of [-0.5, -0.3, -0.1, 0.1, 0.3, 0.5]) {
     const r = pth([[RX + dx, RY, coreTop], [RX + dx, RY, riserTop]]);
-    tl += seg(r, 1.3, CU, 0.95, 1.2, 1.0, 0.8);
-    if (dx === -0.12) tp += run(r, 100, '3 97', 2.6, '#FFE0C2', TC, 0);
+    tl += seg(r, 1.4, CU, 0.95, 1.2, 1.0, 0.8);
+    if (dx === -0.1) tp += run(r, 100, '3 97', 2.6, '#FFE0C2', TC, 0);
   }
-  tg += seg(pth([[RX, RY, coreTop], [RX, RY, riserTop]]), 9, CUG, 0.5, 1.2, 1.0, 0.8);
+  tg += seg(pth([[RX, RY, coreTop], [RX, RY, riserTop]]), 13, CUG, 0.55, 1.2, 1.0, 0.8);
   for (let k = 1; k <= NF; k++) {
     const z = zf(k), up = (NF - k) * 0.04;
     // cabeamento horizontal: um cabo por ponto (feixe de 3 por rota)
     for (const [xo, yo] of PTS) {
-      tg += seg(pth(route(k, xo, yo)), 6, CUG, 0.35, 1.6 + k * 0.06, 0.1 + up, 0.6);
-      for (const d of [-0.32, 0, 0.32]) tl += seg(pth(route(k, xo, yo, d)), 0.9, CU, 0.85, 1.6 + k * 0.06, 0.1 + up, 0.6);
+      tg += seg(pth(route(k, xo, yo)), 8, CUG, 0.45, 1.6 + k * 0.06, 0.1 + up, 0.6);
+      for (const d of [-0.32, 0, 0.32]) tl += seg(pth(route(k, xo, yo, d)), 1.15, CU, 0.9, 1.6 + k * 0.06, 0.1 + up, 0.6);
       tp += run(pth(route(k, xo, yo)), 200, '7 193', 1.8, '#FFE0C2', TC, (k * 0.37) % TC);
       const e = P(xo, yo, zn(k));
       tn += `<g class="nx nx-pop" style="${tm(2.0 + k * 0.06, 0.05 + up)}"><rect x="${f1(e[0] - 3)}" y="${f1(e[1] - 3)}" width="6" height="6" fill="#2A1406" stroke="${CU}" stroke-width="1.3"/></g>`;
     }
     // rack com switch de acesso no andar (ativo) + cabo de energia até a tomada
-    const rx0 = RX - 0.5, rx1 = RX + 0.5, ry0 = RY - 0.4, ry1 = RY + 0.4, rz0 = z + 0.12, rz1 = z + 1.75;
+    const rx0 = RX - 0.65, rx1 = RX + 0.65, ry0 = RY - 0.45, ry1 = RY + 0.45, rz0 = z + 0.1, rz1 = z + 2.05;
     const cord = pth([[rx0, RY, z + 0.5], [rx0 - 2.2, RY, z + 0.5], [rx0 - 2.2, RY, z + 0.15]]);
-    tl += seg(cord, 1.4, PW, 0.95, 1.7 + k * 0.06, 0.3 + up, 0.5);
-    tp += run(cord, 100, '8 92', 2.2, '#FFF4C2', 1.6, -(k * 0.29) % 1.6);
+    tg += seg(cord, 6, PW, 0.35, 1.7 + k * 0.06, 0.3 + up, 0.5);
+    tl += seg(cord, 2.2, PW, 1, 1.7 + k * 0.06, 0.3 + up, 0.5);
+    tp += run(cord, 100, '10 90', 3, '#FFF4C2', 1.4, -(k * 0.29) % 1.4);
     const out = P(rx0 - 2.2, RY, z + 0.15);
-    tn += `<g class="nx nx-pop" style="${tm(1.4 + k * 0.06, 0.6 + up)}">${box(rx0, rx1, ry0, ry1, rz0, rz1)}${leds(rx0, rx1, ry0, rz0, rz1, 3)}${bolt(P(rx1 + 0.2, ry0, rz1 + 0.6))}<rect x="${f1(out[0] - 2.5)}" y="${f1(out[1] - 2.5)}" width="5" height="5" fill="${PW}"/></g>`;
+    tn += `<g class="nx nx-pop" style="${tm(1.4 + k * 0.06, 0.6 + up)}">${heat(P(RX, ry0, (rz0 + rz1) / 2), 26)}${box(rx0, rx1, ry0, ry1, rz0, rz1)}${leds(rx0, rx1, ry0, rz0, rz1, 4)}${bolt(P(rx1 + 0.35, ry0, rz1 + 0.75), 1.75, true)}<rect x="${f1(out[0] - 4)}" y="${f1(out[1] - 4)}" width="8" height="8" fill="${PW}" stroke="#2A2006" stroke-width="1"/></g>`;
     // pontos que pedem manutenção/substituição (ventilação, fonte, troca de switch)
     if (k === 3 || k === 7 || k === 10) { const c = P(RX, ry0, (rz0 + rz1) / 2); tn += `<g class="nx nx-fade" style="${tm(2.6, 0)}">${ping(c, 9, '#FFB020', 2.8, k * 0.4)}${ping(c, 9, '#FFB020', 2.8, k * 0.4 + 1.4)}</g>`; }
   }
   // rack central (core) na sala técnica
-  tn += `<g class="nx nx-pop" style="${tm(1.2, 1.0)}">${box(RX - 1.1, RX + 1.1, RY - 0.6, RY + 0.6, 0.1, coreTop)}${leds(RX - 1.1, RX + 1.1, RY - 0.6, 0.1, coreTop, 5)}${bolt(P(RX + 1.3, RY - 0.6, coreTop + 0.6))}</g>`;
+  tn += `<g class="nx nx-pop" style="${tm(1.2, 1.0)}">${heat(P(RX, RY - 0.6, coreTop / 2), 40)}${box(RX - 1.1, RX + 1.1, RY - 0.6, RY + 0.6, 0.1, coreTop)}${leds(RX - 1.1, RX + 1.1, RY - 0.6, 0.1, coreTop, 5)}${bolt(P(RX + 1.4, RY - 0.6, coreTop + 0.8), 2.1, true)}</g>`;
   s += `<g class="L-trad pol-in" style="animation-delay:.6s"><g style="mix-blend-mode:screen"><g filter="url(#pol-glow)">${tg}</g>${tl}<g class="nx nx-fade" style="${tm(2.6, 0)}">${tp}</g></g>${tn}</g>`;
 
   /* ---------- camada REDE POL (fibra + splitters passivos + ONTs nos mesmos pontos) ---------- */
@@ -194,7 +203,7 @@ export function buildPolScene(): { svg: string; callouts: PolCallout[] } {
     pn += `<g class="nx nx-pop" style="${tm(1.9 + k * 0.06, 0.1 + up)}"><circle cx="${f1(sp[0])}" cy="${f1(sp[1])}" r="13" fill="url(#pol-halo)"/><rect x="${f1(sp[0] - 3.6)}" y="${f1(sp[1] - 3.6)}" width="7.2" height="7.2" transform="rotate(45 ${f1(sp[0])} ${f1(sp[1])})" fill="#0B121A" stroke="#EAF8FF" stroke-width="1.4"/>${[0, 1, 2].map((o) => ping(sp, 5, '#EAF8FF', T, tf - (o * T) / 3)).join('')}</g>`;
   }
   const op = P(...OLT);
-  pn += `<g class="nx nx-pop" style="${tm(1.2, 0.9)}"><circle cx="${f1(op[0])}" cy="${f1(op[1])}" r="30" fill="url(#pol-halo)"/><rect x="${f1(op[0] - 9)}" y="${f1(op[1] - 6)}" width="18" height="12" rx="2" fill="#0B1A2A" stroke="#EAF8FF" stroke-width="1.4"/>${[0, 1, 2, 3].map((n) => `<circle cx="${f1(op[0] - 5 + n * 3.4)}" cy="${f1(op[1] + 2)}" r="1.1" fill="#7CFFB2" class="pol-blink" style="animation-delay:${n * 0.3}s"/>`).join('')}</g>`;
+  pn += `<g class="nx nx-pop" style="${tm(1.2, 0.9)}"><circle cx="${f1(op[0])}" cy="${f1(op[1])}" r="30" fill="url(#pol-halo)"/><rect x="${f1(op[0] - 9)}" y="${f1(op[1] - 6)}" width="18" height="12" rx="2" fill="#0B1A2A" stroke="#EAF8FF" stroke-width="1.4"/>${bolt([op[0] + 16, op[1] - 12], 0.8)}${[0, 1, 2, 3].map((n) => `<circle cx="${f1(op[0] - 5 + n * 3.4)}" cy="${f1(op[1] + 2)}" r="1.1" fill="#7CFFB2" class="pol-blink" style="animation-delay:${n * 0.3}s"/>`).join('')}</g>`;
   s += `<g class="L-pol pol-in" style="animation-delay:.6s"><g style="mix-blend-mode:screen"><g filter="url(#pol-glow)">${pg}</g>${pl}<g class="nx nx-fade" style="${tm(2.6, 0)}">${pp}</g></g>${pn}</g>`;
 
   /* legendas: haste do elemento até o cartão à direita (uma trinca por rede) */

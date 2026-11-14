@@ -177,13 +177,14 @@ function SlidePresence({ layout, edit, setLayout, seals, sealSrc }: { layout: La
 
 type NetMode = 'trad' | 'pol';
 /** Seis benefícios. Os números são contagens da própria ilustração (11 andares, 33 pontos); nada de percentuais inventados. */
-const BENEFITS: { icon: typeof Server; title: string; trad: string; pol: string; num?: { trad: number; pol: number }; detail: string }[] = [
-  { icon: Feather, title: 'Cabos mais leves', num: { trad: 11, pol: 1 }, trad: 'cabos de cobre na prumada', pol: 'cabo de fibra na prumada', detail: 'A fibra é fina e leve e substitui feixes de cobre na prumada e em trechos horizontais. Quanto o peso total cai depende do projeto.' },
-  { icon: Server, title: 'Menos ativos', num: { trad: 11, pol: 0 }, trad: 'switches nos andares', pol: 'switches nos andares', detail: 'Uma OLT central substitui os switches intermediários. As ONTs nos pontos de uso continuam sendo equipamentos ativos.' },
-  { icon: Zap, title: 'Menos energia', num: { trad: 11, pol: 0 }, trad: 'pontos de energia nos andares', pol: 'pontos de energia nos andares', detail: 'Os splitters são passivos e não usam eletricidade. A OLT e as ONTs continuam consumindo; a economia real depende do projeto.' },
-  { icon: Hourglass, title: 'Mais longevidade', trad: 'Novas velocidades podem exigir novo cabo', pol: 'Upgrade trocando só as pontas', detail: 'A fibra monomodo instalada atende as próximas gerações de PON. Os eletrônicos (OLT e ONTs) evoluem; o cabo permanece.' },
-  { icon: Gauge, title: 'Mais banda', trad: 'Cobre: até 100 m por lance', pol: 'GPON 2,5 → XGS-PON 10 Gbit/s', detail: 'A mesma fibra evolui de GPON para XGS-PON. A banda é compartilhada pelos pontos de cada splitter e depende do dimensionamento.' },
-  { icon: ShieldCheck, title: 'Mais segurança', trad: 'Cobre sujeito a interferência', pol: 'Fibra imune a interferência', detail: 'A fibra não sofre interferência eletromagnética nem emite sinal. A segurança dos dados também depende de criptografia, autenticação, segmentação e configuração.' },
+/** title/detail descrevem a POL; titleTrad/detailTrad, a rede tradicional (o cartão troca junto com a rede). */
+const BENEFITS: { icon: typeof Server; title: string; titleTrad: string; trad: string; pol: string; num?: { trad: number; pol: number }; detail: string; detailTrad: string }[] = [
+  { icon: Feather, title: 'Cabos mais leves', titleTrad: 'Feixes de cobre', detailTrad: 'Cada switch de andar recebe cabos de cobre que sobem pelo prédio, e cada ponto de uso tem o seu próprio cabo até o switch.', num: { trad: 11, pol: 1 }, trad: 'cabos de cobre subindo o prédio', pol: 'cabo de fibra subindo o prédio', detail: 'A fibra é fina e leve e substitui os feixes de cobre que sobem pelo prédio e correm pelos andares. Quanto o peso total cai depende do projeto.' },
+  { icon: Server, title: 'Menos ativos', titleTrad: 'Muitos ativos', detailTrad: 'Cada andar tem um switch em rack, que precisa de energia, ventilação e manutenção.', num: { trad: 11, pol: 0 }, trad: 'switches nos andares', pol: 'switches nos andares', detail: 'Uma OLT central substitui os switches intermediários. As ONTs nos pontos de uso continuam sendo equipamentos ativos.' },
+  { icon: Zap, title: 'Menos energia', titleTrad: 'Energia por andar', detailTrad: 'Os switches de andar ficam ligados o tempo todo, consomem energia e dissipam calor.', num: { trad: 11, pol: 0 }, trad: 'pontos de energia nos andares', pol: 'pontos de energia nos andares', detail: 'Os splitters são passivos e não usam eletricidade. A OLT e as ONTs continuam consumindo; a economia real depende do projeto.' },
+  { icon: Hourglass, title: 'Mais longevidade', titleTrad: 'Recabeamento', detailTrad: 'Cada categoria de cabo de cobre tem um limite de velocidade; ir além pode exigir trocar o cabeamento.', trad: 'Novas velocidades podem exigir novo cabo', pol: 'Upgrade trocando só as pontas', detail: 'A fibra monomodo instalada atende as próximas gerações de PON. Os eletrônicos (OLT e ONTs) evoluem; o cabo permanece.' },
+  { icon: Gauge, title: 'Mais banda', titleTrad: 'Alcance limitado', detailTrad: 'Um lance de cobre vai até 100 m entre o switch e o ponto de uso; por isso o switch precisa ficar perto, em cada andar.', trad: 'Cobre: até 100 m por lance', pol: 'GPON 2,5 → XGS-PON 10 Gbit/s', detail: 'A mesma fibra evolui de GPON para XGS-PON. A banda é compartilhada pelos pontos de cada splitter e depende do dimensionamento.' },
+  { icon: ShieldCheck, title: 'Mais segurança', titleTrad: 'Interferência', detailTrad: 'O cobre conduz eletricidade e pode sofrer interferência eletromagnética de cabos de energia e motores.', trad: 'Cobre sujeito a interferência', pol: 'Fibra imune a interferência', detail: 'A fibra não sofre interferência eletromagnética nem emite sinal. A segurança dos dados também depende de criptografia, autenticação, segmentação e configuração.' },
 ];
 const MSG: Record<NetMode, string> = {
   trad: 'Uma infraestrutura com múltiplos equipamentos, cabeamento metálico e pontos de distribuição.',
@@ -225,7 +226,7 @@ function SlidePol() {
   const pol = mode === 'pol';
   return (
     <div data-mode={mode} className="relative h-full overflow-hidden bg-[#070D15] text-white">
-      <svg viewBox="0 0 1600 900" width={1600} height={900} className="absolute inset-0" role="img" aria-label={pol ? 'Prédio com rede POL: OLT no térreo, uma fibra na prumada, splitter passivo em cada andar e ONT nos pontos de uso' : 'Prédio com rede tradicional: rack central no térreo, prumada de cobre, rack com switch e energia em cada andar e um cabo de cobre por ponto'} dangerouslySetInnerHTML={{ __html: scene.svg }} />
+      <svg viewBox="0 0 1600 900" width={1600} height={900} className="absolute inset-0" role="img" aria-label={pol ? 'Prédio com rede POL: OLT no térreo, uma fibra subindo o prédio, splitter passivo em cada andar e ONT nos pontos de uso' : 'Prédio com rede tradicional: rack central no térreo, cabos de cobre subindo o prédio, rack com switch e energia em cada andar e um cabo de cobre por ponto'} dangerouslySetInnerHTML={{ __html: scene.svg }} />
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(6,11,18,0.92)_0%,rgba(6,11,18,0.78)_40%,rgba(6,11,18,0)_62%)]" />
       {scene.callouts.map((c) => (
         <div key={c.mode + c.title} aria-hidden={c.mode !== mode} className="absolute w-[200px] rounded-[14px] border border-[#8FD6FF]/30 bg-[#09101A]/75 px-[18px] py-3.5 shadow-[0_0_0_5px_rgba(143,214,255,0.05)] backdrop-blur-md transition-opacity duration-700 motion-reduce:transition-none" style={{ left: POL_CALLOUT_X, top: c.top, opacity: c.mode === mode ? 1 : 0, transitionDelay: c.mode === mode ? '2.4s' : '0s' }}>
@@ -257,22 +258,22 @@ function SlidePol() {
         <span className="flex items-center gap-2"><span className="h-0.5 w-6 bg-[#FFD24A]" />Energia elétrica</span>
       </p>
       <ul className="absolute left-[90px] top-[462px] grid w-[790px] grid-cols-3 gap-2.5" aria-label="Vantagens da rede POL">
-        {BENEFITS.map(({ icon: Icon, title, num, trad, pol: polText, detail }, n) => (
+        {BENEFITS.map(({ icon: Icon, title, titleTrad, num, trad, pol: polText, detail, detailTrad }, n) => (
           <li key={title} className="relative">
             <button type="button" aria-expanded={open === n} onClick={() => { setOpen(open === n ? null : n); poke(); }} onPointerEnter={() => setOpen(n)} onPointerLeave={() => setOpen((o) => (o === n ? null : o))}
               className={clsx('flex h-[112px] w-full gap-3 rounded-2xl border px-4 py-3.5 text-left backdrop-blur-md transition-[border-color,background-color,box-shadow] duration-700 motion-reduce:transition-none', pol ? 'border-[#8FD6FF]/45 bg-[#0E2236]/70 shadow-[0_0_24px_-6px_rgba(79,187,255,0.45)]' : 'border-white/10 bg-[#0A121C]/60')}
               style={{ transitionDelay: pol ? `${2.4 + n * 0.12}s` : '0s' }}>
               <span className={clsx('grid h-[38px] w-[38px] flex-none place-items-center rounded-full border transition-colors duration-700', pol ? 'border-[#8FD6FF]/60 bg-[#4FBBFF]/15' : 'border-white/15 bg-white/[0.04]')}><Icon className={clsx('h-[18px] w-[18px] transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-white/60')} aria-hidden /></span>
               <span className="min-w-0">
-                <span className="block text-[16px] font-semibold">{title}</span>
+                <span className="block text-[16px] font-semibold">{pol ? title : titleTrad}</span>
                 {num ? (
-                  <span className="mt-1 flex items-baseline gap-2"><span className={clsx('num text-[30px] font-bold leading-none tabular-nums transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-[#FFB27A]')}><CountTo value={num[mode]} delay={pol ? 2400 : 1200} /></span><span className="text-[12.5px] leading-tight text-white/65">{pol ? polText : trad}{pol && <span className="text-white/40"> · antes {num.trad}</span>}</span></span>
+                  <span className="mt-1 flex items-baseline gap-2"><span className={clsx('num text-[30px] font-bold leading-none tabular-nums transition-colors duration-700', pol ? 'text-[#8FD6FF]' : 'text-[#FFB27A]')}><CountTo value={num[mode]} delay={pol ? 2400 : 300} /></span><span className="text-[12.5px] leading-tight text-white/65">{pol ? polText : trad}{pol && <span className="text-white/40"> · antes {num.trad}</span>}</span></span>
                 ) : (
                   <span className={clsx('mt-1.5 block text-[14px] leading-snug transition-colors duration-700', pol ? 'text-[#BFE8FF]' : 'text-white/60')}>{pol ? polText : trad}</span>
                 )}
               </span>
             </button>
-            {open === n && <p role="tooltip" className="absolute bottom-[calc(100%+8px)] left-0 z-10 w-[300px] rounded-xl border border-[#8FD6FF]/40 bg-[#09101A]/95 px-4 py-3 text-[13.5px] leading-snug text-white/85 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">{detail}</p>}
+            {open === n && <p role="tooltip" className="absolute bottom-[calc(100%+8px)] left-0 z-10 w-[300px] rounded-xl border border-[#8FD6FF]/40 bg-[#09101A]/95 px-4 py-3 text-[13.5px] leading-snug text-white/85 shadow-[0_12px_32px_rgba(0,0,0,0.5)]">{pol ? detail : detailTrad}</p>}
           </li>
         ))}
       </ul>
