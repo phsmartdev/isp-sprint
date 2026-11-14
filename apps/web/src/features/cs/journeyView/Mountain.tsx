@@ -11,7 +11,10 @@ import { MACRO, MICRO, type JModel } from './model';
 
 const C = { ink: '#2D3339', muted: '#6B7682', blue: '#2F5986', sky0: '#F4F7FB', sky1: '#E3EBF4', m1: '#C9D6E4', m2: '#9DB3CB', m3: '#6F8DAE', m4: '#3E5F84', ok: '#2E8B57' };
 /** posição de cada etapa na trilha (palco 1600 × 900) e o lado da etiqueta */
-const PT = [{ x: 300, y: 760, l: true }, { x: 470, y: 690, l: false }, { x: 640, y: 640, l: true }, { x: 770, y: 560, l: false }, { x: 900, y: 470, l: true }, { x: 1020, y: 360, l: false }, { x: 1110, y: 235, l: true }];
+const PT = [{ x: 330, y: 800, l: true }, { x: 520, y: 715, l: false }, { x: 650, y: 620, l: true }, { x: 800, y: 545, l: false }, { x: 905, y: 445, l: true }, { x: 1020, y: 340, l: false }, { x: 1110, y: 235, l: true }];
+/** o que acontece em cada etapa, em palavras para o cliente */
+const SAY = ['Entendemos a sua necessidade', 'Definimos prazos e responsáveis', 'Implantamos o serviço', 'Validamos a primeira experiência', 'Acompanhamos o uso no dia a dia', 'Medimos os resultados juntos', 'Planejamos os próximos passos'];
+const short = (iso: string) => iso.split('-').reverse().join('/');
 const curve = (pts: { x: number; y: number }[]) => {
   let d = `M${pts[0]!.x} ${pts[0]!.y}`;
   for (let i = 1; i < pts.length; i++) { const a = pts[i - 1]!, b = pts[i]!, mx = (a.x + b.x) / 2; d += ` C${mx} ${a.y + (i % 2 ? 20 : -10)} ${mx} ${b.y + (i % 2 ? 20 : -10)} ${b.x} ${b.y}`; }
@@ -54,7 +57,12 @@ export function JourneyMountain({ model }: { model: JModel }) {
           <path d="M1110 130 L1150 142 L1110 154Z" fill="#F5B400" />
           {PT.map((p, i) => {
             const st = cur === null ? 'next' : i < cur ? 'done' : i === cur ? 'cur' : 'next';
-            const label = `${i + 1}. ${MICRO[i]!.name}`, fs = st === 'cur' ? 17 : 15, w = label.length * fs * 0.56 + 28, h = st === 'cur' ? 56 : 34;
+            const label = `${i + 1}. ${MICRO[i]!.name}`, fs = st === 'cur' ? 17 : 15;
+            const ms = model.milestones.filter((m) => m.micro === i), msDone = ms.filter((m) => m.doneAt).length;
+            const since = i === cur ? model.stage.enteredAt : null;
+            const mw = ms.length === 1 ? 'marco' : 'marcos';
+            const meta = st === 'done' ? `Concluída${ms.length ? ` · ${msDone} de ${ms.length} ${mw}` : ''}` : st === 'cur' ? `Estamos aqui${since ? ` · desde ${short(since)}` : ''}${ms.length ? ` · ${msDone} de ${ms.length} ${mw}` : ''}` : 'Próxima etapa';
+            const w = Math.max(label.length * fs * 0.56, SAY[i]!.length * 13 * 0.53, meta.length * 12.5 * 0.53) + 30, h = st === 'cur' ? 82 : 72;
             const bx = p.l ? p.x - 30 - w : p.x + 30, by = p.y - h / 2;
             const delay = cur === null ? 0 : (i / Math.max(1, cur)) * 1.6;
             return (
@@ -64,8 +72,10 @@ export function JourneyMountain({ model }: { model: JModel }) {
                 {st === 'next' && <circle cx={p.x} cy={p.y} r="10" fill="#fff" stroke={C.m3} strokeWidth="3" />}
                 <rect x={bx + 2} y={by + 3} width={w} height={h} fill="#0B1A2A" opacity=".18" />
                 <rect x={bx} y={by} width={w} height={h} fill={st === 'cur' ? C.blue : '#fff'} stroke={sel === i ? C.ink : 'none'} strokeWidth="2" />
-                <text x={bx + 14} y={by + (st === 'cur' ? 24 : 22)} fontSize={fs} fontWeight={st === 'next' ? 500 : 600} fill={st === 'cur' ? '#fff' : st === 'next' ? C.muted : C.ink}>{label}</text>
-                {st === 'cur' && <text x={bx + 14} y={by + 45} fontSize="13" fill="#CFE0F2">Estamos aqui</text>}
+                <rect x={bx} y={by} width="4" height={h} fill={st === 'done' ? C.ok : st === 'cur' ? '#9CC4EA' : C.m1} />
+                <text x={bx + 16} y={by + (st === 'cur' ? 26 : 23)} fontSize={fs} fontWeight={st === 'next' ? 500 : 600} fill={st === 'cur' ? '#fff' : st === 'next' ? C.muted : C.ink}>{label}</text>
+                <text x={bx + 16} y={by + (st === 'cur' ? 47 : 42)} fontSize="13" fill={st === 'cur' ? '#DCE8F4' : C.muted}>{SAY[i]}</text>
+                <text x={bx + 16} y={by + (st === 'cur' ? 68 : 61)} fontSize="12.5" fontWeight="600" fill={st === 'cur' ? '#FFE29A' : st === 'done' ? C.ok : C.m3}>{meta}</text>
               </g>
             );
           })}
