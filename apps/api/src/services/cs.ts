@@ -13,6 +13,7 @@ import {
 import type { Config } from '../config';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { ipcDepth, ipcFollowers, ipcLinks } from './ipcInheritance';
 import { sendEmail } from './email';
 import { publicLink } from './alerts';
 
@@ -59,7 +60,12 @@ export type Snapshot = {
   contracts: { id: string; number: string; billingType: string; kind: string; stage: string; acvCents: number; startAt: string | null; endAt: string | null; consumption: null | { credited: number; consumed: number; share: number | null; elapsedShare: number | null; exhaustAt: string | null; lastConsumptionAt: string | null } }[];
   relationshipMonths: number | null;
   classKey: string | null;
-  ipc: { total: number | null; partial: number; pending: string[]; levels: IpcInput; auto: string[]; assessedAt: string | null; reviewDue: boolean };
+  ipc: {
+    total: number | null; partial: number; pending: string[]; levels: IpcInput; auto: string[]; assessedAt: string | null; reviewDue: boolean;
+    /** a conta assume o IPC de outra (relação ou estrutura): o score é o da principal; `own` guarda o IPC próprio */
+    inherited?: { fromId: string; fromName: string; via: 'conta' | 'estrutura'; structureName: string | null; rootId: string; rootName: string } | null;
+    own?: { total: number | null; partial: number } | null;
+  };
   satisfaction: { last: number | null; previous: number | null; lastAt: string | null; kind: string | null };
   financial: { available: false; reason: string };
   occurrences: number; highOccurrences: number;
@@ -90,8 +96,20 @@ export async function accountIds(db: DbOrTx, tenantId: string) {
 /** Calcula e grava a fotografia das contas (em lote). Mudanças de Tier, saúde e criticidade vão para o histórico. */
 export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: string[]) {
   const { config: cfg, version } = await csConfigOf(db, tenantId);
-  const ids = only?.length ? only : await accountIds(db, tenantId);
+  // IPC herdado: a principal (e a cadeia acima dela) entra no cálculo e vem antes de quem a segue;
+  // recalcular uma principal recalcula também quem segue o IPC dela
+  const ipcLk = await ipcLinks(db, tenantId);
+  const base = only?.length ? only : await accountIds(db, tenantId);
+  const idSet = new Set(base);
+  for (const id of [...idSet]) {
+    let c = ipcLk.get(id)?.principalId; const seen = new Set<string>();
+    while (c && !seen.has(c)) { seen.add(c); idSet.add(c); c = ipcLk.get(c)?.principalId; }
+    if (only?.length) for (const f of ipcFollowers(ipcLk, id)) idSet.add(f);
+  }
+  if (!only?.length) for (const l of ipcLk.values()) idSet.add(l.principalId);
+  const ids = [...idSet].sort((a, b) => ipcDepth(ipcLk, a) - ipcDepth(ipcLk, b));
   if (!ids.length) return 0;
+  const ipcDone = new Map<string, Snapshot['ipc']>();
   const today = todayIso();
   const contacts = await db.select({ id: s.contacts.id, name: s.contacts.name, document: s.contacts.document, segment: s.contacts.segment }).from(s.contacts).where(eq(s.contacts.tenantId, tenantId));
   const contactById = new Map(contacts.map((c) => [c.id, c]));
@@ -161,8 +179,20 @@ export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: str
     const auto: string[] = [];
     if (tier) { levels.tamanho = tierToIpc(tier); auto.push('tamanho'); }
     if (months !== null) { levels.tempo = monthsToIpc(months); auto.push('tempo'); }
-    const ipc = ipcScore(levels, cfg);
+    const ownIpc = ipcScore(levels, cfg);
     const assessedAt = ipcRow ? dayOf(new Date(ipcRow.created_at)) : null;
+    let ipcView: Snapshot['ipc'] = { total: ownIpc.total, partial: ownIpc.partial, pending: ownIpc.pending, levels, auto, assessedAt, reviewDue: !assessedAt || daysBetween(assessedAt, today) > cfg.ipcRevisionDays, inherited: null, own: null };
+    const link = ipcLk.get(cid);
+    const principalIpc = link ? ipcDone.get(link.principalId) : undefined;
+    if (link && principalIpc) {
+      const rootId = principalIpc.inherited?.rootId ?? link.principalId;
+      ipcView = {
+        ...principalIpc, reviewDue: false, own: { total: ownIpc.total, partial: ownIpc.partial },
+        inherited: { fromId: link.principalId, fromName: contactById.get(link.principalId)?.name ?? 'Conta principal', via: link.via, structureName: link.structureName ?? null, rootId, rootName: contactById.get(rootId)?.name ?? 'Conta principal' },
+      };
+    }
+    ipcDone.set(cid, ipcView);
+    const ipc = ipcView;
 
     const sv = surveys.filter((x) => x.contactId === cid);
     const norm = (x: (typeof sv)[number]) => (x.scale <= 5 ? Math.round(((x.score - 1) / Math.max(1, x.scale - 1)) * 100) : Math.round((x.score / x.scale) * 100));
@@ -205,7 +235,7 @@ export async function recomputeAccounts(db: DbOrTx, tenantId: string, only?: str
     const snap: Snapshot = {
       computedAt: new Date().toISOString(), ruleVersion: version,
       acvCents: acv, groupAcvCents: groupAcv, acvParts: groupCalc.parts, acvExcluded: groupCalc.excluded, groupContacts: group.size, tier, contracts: contractsView, relationshipMonths: months, classKey: classOf.get(cid) ?? null,
-      ipc: { total: ipc.total, partial: ipc.partial, pending: ipc.pending, levels, auto, assessedAt, reviewDue: !assessedAt || daysBetween(assessedAt, today) > cfg.ipcRevisionDays },
+      ipc: ipcView,
       satisfaction: { last: satLast, previous: satPrev, lastAt: sv[0]?.respondedAt ?? null, kind: sv[0]?.kind ?? null },
       financial: { available: false, reason: 'Aguardando integração de faturas do IXC/ERP' },
       occurrences: occ.length, highOccurrences: occ.filter((o) => o.severity === 'alta').length,

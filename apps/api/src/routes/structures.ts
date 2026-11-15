@@ -16,6 +16,8 @@ import { atLeast } from '@isp/domain';
 import { level, ownerScope } from '../services/scope';
 import { contractScope, loadContract } from '../services/contracts';
 import { assertAccount } from './stakeholders';
+import { ipcFollowError, structureGestor } from '../services/ipcInheritance';
+import { recomputeAccounts } from '../services/cs';
 
 const visibleContact = (auth: AuthContext) => ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt });
 const canManage = (auth: AuthContext) => atLeast(level(auth, 'configuracoes'), 'total') || atLeast(level(auth, 'clientes'), 'total');
@@ -26,6 +28,16 @@ const Body = z.object({
   name: z.string().trim().min(2).max(160), kind: z.enum(STRUCTURE_KINDS).default('programa'),
   description: z.string().trim().max(2000).nullable().default(null), ownerId: z.string().uuid().nullable().default(null),
 });
+
+/** Conta gestora ativa da estrutura (o IPC da estrutura é o dela). */
+async function gestorOf(db: DbOrTx, structureId: string) {
+  const rows = await db.select({ contactId: s.structureMembers.contactId, role: s.structureMembers.role, createdAt: s.structureMembers.createdAt }).from(s.structureMembers).where(and(eq(s.structureMembers.structureId, structureId), eq(s.structureMembers.active, true), eq(s.structureMembers.role, 'gestor')));
+  return structureGestor(rows);
+}
+/** Contas da estrutura que seguem o IPC dela. */
+async function ipcMembers(db: DbOrTx, structureId: string) {
+  return (await db.select({ contactId: s.structureMembers.contactId }).from(s.structureMembers).where(and(eq(s.structureMembers.structureId, structureId), eq(s.structureMembers.active, true), eq(s.structureMembers.inheritsIpc, true)))).map((r) => r.contactId);
+}
 
 async function loadStructure(db: DbOrTx, auth: AuthContext, id: string) {
   const [st] = await db.select().from(s.accountStructures).where(and(eq(s.accountStructures.id, id), eq(s.accountStructures.tenantId, auth.tenantId))).limit(1);
@@ -38,7 +50,7 @@ const nameTaken = async (db: DbOrTx, tenantId: string, name: string, exceptId?: 
 /** Contas e contratos vinculados (contas fora da carteira aparecem sem nome; contratos só para quem vê contratos). */
 async function structureDetail(db: DbOrTx, auth: AuthContext, ids: string[]) {
   if (!ids.length) return { members: [], contracts: [] };
-  const members = await db.select({ id: s.structureMembers.id, structureId: s.structureMembers.structureId, contactId: s.structureMembers.contactId, role: s.structureMembers.role, notes: s.structureMembers.notes, createdAt: s.structureMembers.createdAt })
+  const members = await db.select({ id: s.structureMembers.id, structureId: s.structureMembers.structureId, contactId: s.structureMembers.contactId, role: s.structureMembers.role, notes: s.structureMembers.notes, inheritsIpc: s.structureMembers.inheritsIpc, createdAt: s.structureMembers.createdAt })
     .from(s.structureMembers).where(and(inArray(s.structureMembers.structureId, ids), eq(s.structureMembers.active, true)));
   const cids = [...new Set(members.map((m) => m.contactId))];
   const vis = cids.length ? await db.select({ id: s.contacts.id, name: s.contacts.name, segment: s.contacts.segment, city: s.contacts.city, abmId: s.abmAccounts.id }).from(s.contacts)
@@ -120,15 +132,28 @@ export const structureRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/structures/:id/members', summary: 'Vincula uma conta à estrutura, com o papel dela (órgão gestor, participante, executor…)', tag: 'Clientes', module: 'clientes', params: IdParams,
-    body: z.object({ contactId: z.string().uuid(), role: z.enum(STRUCTURE_ROLES).default('participante'), notes: z.string().trim().max(500).nullable().optional() }),
+    body: z.object({
+      contactId: z.string().uuid(), role: z.enum(STRUCTURE_ROLES).default('participante'), notes: z.string().trim().max(500).nullable().optional(),
+      /** a conta assume o IPC da estrutura (o da conta gestora) em vez de ter o próprio */
+      inheritsIpc: z.boolean().default(false),
+    }),
     handler: async ({ app, auth, params, body, req, reply }) => {
       const st = await loadStructure(app.db, auth, params.id);
       if (!st.active) throw unprocessable('Estrutura desativada: reative antes de vincular.');
       await assertAccount(app.db, auth, body.contactId);
       const [dup] = await app.db.select({ id: s.structureMembers.id }).from(s.structureMembers).where(and(eq(s.structureMembers.structureId, st.id), eq(s.structureMembers.contactId, body.contactId), eq(s.structureMembers.active, true))).limit(1);
       if (dup) throw unprocessable('Esta conta já está nesta estrutura.');
-      const [r] = await app.db.insert(s.structureMembers).values({ tenantId: auth.tenantId, structureId: st.id, contactId: body.contactId, role: body.role, notes: body.notes ?? null, createdBy: auth.userId }).returning({ id: s.structureMembers.id });
-      await audit(app.db, req, { action: 'structure.member', entityType: 'structure', entityId: st.id, metadata: { contactId: body.contactId, role: body.role } });
+      if (body.inheritsIpc) {
+        if (body.role === 'gestor') throw unprocessable('A conta gestora é a referência do IPC da estrutura: ela mantém o próprio IPC.');
+        const gestor = await gestorOf(app.db, st.id);
+        if (!gestor) throw unprocessable('A estrutura ainda não tem conta gestora (órgão gestor / coordenação). Vincule a gestora antes, ou registre com IPC individualizado.');
+        const err = await ipcFollowError(app.db, auth.tenantId, body.contactId, gestor);
+        if (err) throw unprocessable(err);
+      }
+      const [r] = await app.db.insert(s.structureMembers).values({ tenantId: auth.tenantId, structureId: st.id, contactId: body.contactId, role: body.role, notes: body.notes ?? null, inheritsIpc: body.inheritsIpc, createdBy: auth.userId }).returning({ id: s.structureMembers.id });
+      await audit(app.db, req, { action: 'structure.member', entityType: 'structure', entityId: st.id, metadata: { contactId: body.contactId, role: body.role, inheritsIpc: body.inheritsIpc } });
+      // a conta passa a ter o IPC da estrutura na hora (ou, se for a nova gestora, quem segue a estrutura recalcula)
+      if (body.inheritsIpc || body.role === 'gestor') await recomputeAccounts(app.db, auth.tenantId, [body.contactId, ...(await ipcMembers(app.db, st.id))]);
       reply.code(201);
       return { id: r!.id };
     },
@@ -142,6 +167,8 @@ export const structureRoutes = [
       await assertAccount(app.db, auth, m.contactId);
       await app.db.update(s.structureMembers).set({ active: false, removedBy: auth.userId, removedAt: new Date(), removedReason: body.reason }).where(eq(s.structureMembers.id, m.id));
       await audit(app.db, req, { action: 'structure.member_remove', entityType: 'structure', entityId: m.structureId, metadata: { contactId: m.contactId, reason: body.reason } });
+      // quem seguia o IPC volta ao próprio; saiu a gestora → quem segue a estrutura recalcula
+      if (m.inheritsIpc || m.role === 'gestor') await recomputeAccounts(app.db, auth.tenantId, [m.contactId, ...(await ipcMembers(app.db, m.structureId))]);
       return { ok: true };
     },
   }),
@@ -189,7 +216,11 @@ export const structureRoutes = [
           me: d.members.find((m) => m.structureId === x.id && m.contactId === params.id) ?? null,
           members: d.members.filter((m) => m.structureId === x.id), contracts: d.contracts.filter((c) => c.structureId === x.id),
         })),
-        available: all.filter((x) => x.active && !ids.includes(x.id)).map((x) => ({ id: x.id, name: x.name, kindLabel: STRUCTURE_KIND_LABELS[x.kind as keyof typeof STRUCTURE_KIND_LABELS] ?? x.kind })),
+        available: await Promise.all(all.filter((x) => x.active && !ids.includes(x.id)).map(async (x) => {
+          const g = await gestorOf(app.db, x.id);
+          const [gn] = g ? await app.db.select({ name: s.contacts.name }).from(s.contacts).where(and(eq(s.contacts.id, g), visibleContact(auth))).limit(1) : [];
+          return { id: x.id, name: x.name, kindLabel: STRUCTURE_KIND_LABELS[x.kind as keyof typeof STRUCTURE_KIND_LABELS] ?? x.kind, gestor: g ? { contactId: g, name: gn?.name ?? 'Conta gestora (fora da sua carteira)' } : null };
+        })),
       };
     },
   }),

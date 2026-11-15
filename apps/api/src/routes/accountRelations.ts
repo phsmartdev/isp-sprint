@@ -14,12 +14,14 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { ownerScope } from '../services/scope';
 import { assertAccount } from './stakeholders';
+import { ipcFollowError } from '../services/ipcInheritance';
+import { recomputeAccounts } from '../services/cs';
 
 const visible = (auth: AuthContext) => ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt });
 
-async function activeRels(db: DbOrTx, tenantId: string): Promise<(AccountRel & { notes: string | null; createdBy: string | null; createdAt: Date })[]> {
+async function activeRels(db: DbOrTx, tenantId: string): Promise<(AccountRel & { notes: string | null; createdBy: string | null; createdAt: Date; ipcFollowerId: string | null })[]> {
   const rows = await db.select().from(s.accountRelations).where(and(eq(s.accountRelations.tenantId, tenantId), eq(s.accountRelations.active, true)));
-  return rows.map((r) => ({ id: r.id, fromId: r.fromContactId, toId: r.toContactId, kind: r.kind as AccountRelationKind, notes: r.notes, createdBy: r.createdBy, createdAt: r.createdAt }));
+  return rows.map((r) => ({ id: r.id, fromId: r.fromContactId, toId: r.toContactId, kind: r.kind as AccountRelationKind, notes: r.notes, createdBy: r.createdBy, createdAt: r.createdAt, ipcFollowerId: r.ipcFollowerId }));
 }
 
 /** Nomes das contas (só as visíveis para quem consulta) e o id ABM, quando a conta está no programa. */
@@ -70,7 +72,9 @@ export const accountRelationRoutes = [
       const node = (id: string) => { const i = info.get(id); return { contactId: id, name: i?.name ?? 'Conta fora da sua carteira', visible: !!i, segment: i?.segment ?? null, city: i?.city ?? null, abmId: i?.abmId ?? null }; };
       const direct = compRels.filter((r) => r.fromId === params.id || r.toId === params.id).map((r) => {
         const out = r.fromId === params.id;
-        return { id: r.id, kind: r.kind, direction: out ? 'saida' : 'entrada', label: ACCOUNT_RELATION_LABELS[r.kind][out ? 'out' : 'in'], group: ACCOUNT_RELATION_LABELS[r.kind].group, other: node(out ? r.toId : r.fromId), notes: r.notes, createdByName: users.find((u) => u.id === r.createdBy)?.name ?? null, createdAt: r.createdAt };
+        return { id: r.id, kind: r.kind, direction: out ? 'saida' : 'entrada', label: ACCOUNT_RELATION_LABELS[r.kind][out ? 'out' : 'in'], group: ACCOUNT_RELATION_LABELS[r.kind].group, other: node(out ? r.toId : r.fromId), notes: r.notes,
+          /** IPC: 'esta' = esta conta assume o IPC da outra; 'outra' = a outra assume o desta; null = individualizado */
+          ipcFollower: r.ipcFollowerId === params.id ? 'esta' : r.ipcFollowerId ? 'outra' : null, createdByName: users.find((u) => u.id === r.createdBy)?.name ?? null, createdAt: r.createdAt };
       });
       const related = new Set([params.id, ...direct.map((d) => d.other.contactId)]);
       return {
@@ -84,19 +88,33 @@ export const accountRelationRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/accounts/:id/account-relations', summary: 'Registra a relação desta conta com outra (direção: esta conta → outra; "inverter" grava ao contrário)', tag: 'Clientes', module: 'clientes', params: IdParams,
-    body: z.object({ otherContactId: z.string().uuid(), kind: z.enum(ACCOUNT_RELATION_KINDS), inverse: z.boolean().default(false), notes: z.string().trim().max(1000).nullable().optional() }),
-    handler: async ({ app, auth, params, body, req, reply }) => app.db.transaction(async (tx) => {
-      await assertAccount(tx, auth, params.id);
-      await assertAccount(tx, auth, body.otherContactId);
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`account-relations:${auth.tenantId}`}))`);
-      const fromId = body.inverse ? body.otherContactId : params.id, toId = body.inverse ? params.id : body.otherContactId;
-      const err = accountRelationError({ fromId, toId, kind: body.kind }, await activeRels(tx, auth.tenantId));
-      if (err) throw unprocessable(err);
-      const [r] = await tx.insert(s.accountRelations).values({ tenantId: auth.tenantId, fromContactId: fromId, toContactId: toId, kind: body.kind, notes: body.notes ?? null, createdBy: auth.userId }).returning({ id: s.accountRelations.id });
-      await audit(tx, req, { action: 'account.relation', entityType: 'contact', entityId: params.id, metadata: { relationId: r!.id, fromId, toId, kind: body.kind } });
-      reply.code(201);
-      return { id: r!.id };
+    body: z.object({
+      otherContactId: z.string().uuid(), kind: z.enum(ACCOUNT_RELATION_KINDS), inverse: z.boolean().default(false), notes: z.string().trim().max(1000).nullable().optional(),
+      /** IPC com a relação: 'esta' assume o IPC da outra (principal), 'outra' assume o desta; null = cada uma com o seu */
+      ipcFollower: z.enum(['esta', 'outra']).nullable().default(null),
     }),
+    handler: async ({ app, auth, params, body, req, reply }) => {
+      const follower = body.ipcFollower === 'esta' ? params.id : body.ipcFollower === 'outra' ? body.otherContactId : null;
+      const out = await app.db.transaction(async (tx) => {
+        await assertAccount(tx, auth, params.id);
+        await assertAccount(tx, auth, body.otherContactId);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`account-relations:${auth.tenantId}`}))`);
+        const fromId = body.inverse ? body.otherContactId : params.id, toId = body.inverse ? params.id : body.otherContactId;
+        const err = accountRelationError({ fromId, toId, kind: body.kind }, await activeRels(tx, auth.tenantId));
+        if (err) throw unprocessable(err);
+        if (follower) {
+          const ipcErr = await ipcFollowError(tx, auth.tenantId, follower, follower === params.id ? body.otherContactId : params.id);
+          if (ipcErr) throw unprocessable(ipcErr);
+        }
+        const [r] = await tx.insert(s.accountRelations).values({ tenantId: auth.tenantId, fromContactId: fromId, toContactId: toId, kind: body.kind, notes: body.notes ?? null, ipcFollowerId: follower, createdBy: auth.userId }).returning({ id: s.accountRelations.id });
+        await audit(tx, req, { action: 'account.relation', entityType: 'contact', entityId: params.id, metadata: { relationId: r!.id, fromId, toId, kind: body.kind, ipcFollowerId: follower } });
+        return { id: r!.id };
+      });
+      // assumiu o IPC: a conta passa a ter o score da principal na hora
+      if (follower) await recomputeAccounts(app.db, auth.tenantId, [follower]);
+      reply.code(201);
+      return out;
+    },
   }),
   defineRoute({
     method: 'POST', url: '/account-relations/:id/remove', summary: 'Remove a relação entre contas (fica no histórico, com o motivo)', tag: 'Clientes', module: 'clientes', params: IdParams,
@@ -107,6 +125,8 @@ export const accountRelationRoutes = [
       await assertAccount(app.db, auth, r.fromContactId);
       await app.db.update(s.accountRelations).set({ active: false, removedBy: auth.userId, removedAt: new Date(), removedReason: body.reason }).where(eq(s.accountRelations.id, r.id));
       await audit(app.db, req, { action: 'account.relation_remove', entityType: 'contact', entityId: r.fromContactId, metadata: { relationId: r.id, reason: body.reason } });
+      // quem seguia o IPC da outra conta volta ao IPC próprio
+      if (r.ipcFollowerId) await recomputeAccounts(app.db, auth.tenantId, [r.ipcFollowerId]);
       return { ok: true };
     },
   }),

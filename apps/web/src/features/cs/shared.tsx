@@ -15,7 +15,9 @@ export type Snapshot = {
   acvParts?: { recorrente: number; medicao: number; frequente: number; semContrato: number }; acvExcluded?: { count: number; cents: number };
   contracts: { id: string; number: string; billingType: string; kind: string; stage: string; acvCents: number; startAt: string | null; endAt: string | null; consumption: null | { credited: number; consumed: number; share: number | null; elapsedShare: number | null; exhaustAt: string | null; lastConsumptionAt: string | null } }[];
   relationshipMonths: number | null; classKey: string | null;
-  ipc: { total: number | null; partial: number; pending: string[]; levels: Record<string, 'baixo' | 'medio' | 'alto' | null>; auto: string[]; assessedAt: string | null; reviewDue: boolean };
+  ipc: { total: number | null; partial: number; pending: string[]; levels: Record<string, 'baixo' | 'medio' | 'alto' | null>; auto: string[]; assessedAt: string | null; reviewDue: boolean;
+    inherited?: { fromId: string; fromName: string; via: 'conta' | 'estrutura'; structureName: string | null; rootId: string; rootName: string } | null;
+    own?: { total: number | null; partial: number } | null };
   satisfaction: { last: number | null; previous: number | null; lastAt: string | null; kind: string | null };
   financial: { available: false; reason: string };
   occurrences: number; highOccurrences: number; deliveries: { due: number; late: number }; churnRisk: 'baixo' | 'medio' | 'alto' | null;
@@ -189,3 +191,9 @@ export function PrintDeck({ slides, client, ctx }: { slides: Slide[]; client?: s
 /** CSMs: membros do time Sucesso do Cliente (sem esse time, quem tem o setor no cadastro). */
 export const useCsms = () => useQuery({ queryKey: ['cs-csms'], staleTime: 60_000, queryFn: () => api<{ items: { id: string; name: string; source: 'time' | 'setor' }[] }>('/cs/csms') }).data?.items ?? [];
 export const csmsOf = <U extends { sectors?: string[] }>(users: U[] | undefined) => (users ?? []).filter((u) => u.sectors?.includes('sucesso_cliente'));
+
+/** Texto curto de quem é a referência do IPC herdado. */
+export function ipcInheritedText(i: NonNullable<Snapshot['ipc']['inherited']>) {
+  const src = i.via === 'estrutura' && i.structureName ? `da estrutura ${i.structureName} (conta gestora: ${i.fromName})` : `de ${i.fromName}`;
+  return `Assume o IPC ${src}${i.rootId !== i.fromId ? `, que segue o de ${i.rootName}` : ''}.`;
+}

@@ -417,6 +417,7 @@ export const csRoutes = [
       requireEdit(x);
       const { config: cfg, version } = await csConfigOf(app.db, auth.tenantId);
       const sn = await snapshotOf(app.db, auth.tenantId, params.contactId, true);
+      if (sn?.ipc.inherited) throw unprocessable(`Esta conta assume o IPC de ${sn.ipc.inherited.via === 'estrutura' && sn.ipc.inherited.structureName ? `${sn.ipc.inherited.structureName} (estrutura)` : sn.ipc.inherited.fromName}. Avalie o IPC na conta principal (${sn.ipc.inherited.rootName}), ou desfaça a relação para individualizar.`);
       const levels = Object.fromEntries(Object.entries(body.levels).filter(([, v]) => v)) as Record<string, string>;
       // critérios objetivos com dado confiável não são sobrescritos pela avaliação manual
       for (const k of sn?.ipc.auto ?? []) delete levels[k];

@@ -4082,6 +4082,8 @@ export const structureMembers = pgTable('structure_members', {
   contactId: uuid('contact_id').notNull().references(() => contacts.id),
   role: text('role').notNull().default('participante'),
   notes: text('notes'),
+  /** a conta assume o IPC da estrutura (o da conta gestora); false = IPC próprio */
+  inheritsIpc: boolean('inherits_ipc').notNull().default(false),
   active: boolean('active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
@@ -4123,6 +4125,8 @@ export const accountRelations = pgTable(
     toContactId: uuid('to_contact_id').notNull().references(() => contacts.id),
     kind: text('kind').notNull(),
     notes: text('notes'),
+    /** conta (uma das duas) que assume o IPC da outra (principal); null = cada uma com o próprio IPC */
+    ipcFollowerId: uuid('ipc_follower_id').references(() => contacts.id),
     active: boolean('active').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),

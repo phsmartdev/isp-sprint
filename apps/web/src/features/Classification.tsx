@@ -17,7 +17,7 @@ import { useToast } from '../components/ui/overlay';
 import { errMsg } from './contracts/shared';
 import type { Classification } from './approval/types';
 import { IpcDialog } from './cs/Account360';
-import type { Snapshot } from './cs/shared';
+import { ipcInheritedText, type Snapshot } from './cs/shared';
 
 type R = { current: Classification | null; history: Classification[]; options: Record<string, string[]> };
 const IPC_HINT: Record<IpcCriterion, string> = {
@@ -91,12 +91,13 @@ export function ClassificationSection({ contactId }: { contactId: string }) {
         <div className="rounded-md border border-line p-4">
           <div className="mb-2 flex items-center justify-between gap-2">
             <p className="text-sm font-semibold text-ink">Score IPC do cliente</p>
-            {cs.data?.canEdit && sn && <Button size="sm" onClick={() => setIpcOpen(true)}>Avaliar IPC</Button>}
+            {cs.data?.canEdit && sn && !sn.ipc.inherited && <Button size="sm" onClick={() => setIpcOpen(true)}>Avaliar IPC</Button>}
           </div>
           {!sn ? <p className="text-sm text-muted">{cs.isLoading ? 'Carregando…' : 'Sem acesso ao Score IPC desta conta.'}</p> : (
             <>
               <p className="flex items-baseline gap-2"><span className="num text-3xl font-extrabold text-ink">{sn.ipc.total ?? sn.ipc.partial}</span><span className="text-sm text-muted">/ 100{sn.ipc.total === null ? ` · incompleto (${sn.ipc.pending.length} critério(s) pendente(s))` : ''}</span></p>
               <span className="mt-1 block h-2 rounded-full bg-surface-2" aria-hidden><span className="block h-2 rounded-full bg-primary" style={{ width: `${Math.min(100, sn.ipc.total ?? sn.ipc.partial)}%` }} /></span>
+              {sn.ipc.inherited && <p className="mt-2 border-l-2 border-primary bg-primary-soft px-3 py-2 text-sm text-ink">{ipcInheritedText(sn.ipc.inherited)} O acompanhamento é o mesmo da conta principal; a avaliação é feita nela.{sn.ipc.own && <span className="block text-xs text-muted">IPC próprio desta conta: {sn.ipc.own.total ?? `${sn.ipc.own.partial} (incompleto)`}</span>}</p>}
               <ul className="mt-3 divide-y divide-line text-sm">
                 {IPC_CRITERIA.map((k) => {
                   const l = sn.ipc.levels[k];
