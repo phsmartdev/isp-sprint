@@ -31,6 +31,15 @@ it('brinde planejado vira lançamento; restrição, economia, nova autorização
   const central = ok(await carlos.get(`/budget/central?year=${year}&costCenterId=${cc}`)).json();
   expect(central.rows.find((r: { id: string }) => r.id === p.id)).toMatchObject({ planned: 25_000_00 });
   ok(await carlos.post(`/budget/lines/${p.id}/submit`, {}));
+  // planejado sem justificativa: o envio pede a justificativa e a edição (antes da aprovação) resolve
+  const p2 = ok(await carlos.post('/brindes/planos', { itemId: item, costCenterId: cc, accountId: acc, qty: 15, unitCostCents: 75_00, month }), 201).json().items[0];
+  expect((await carlos.post(`/budget/lines/${p2.id}/submit`, {})).statusCode).toBe(422);
+  const l2 = ok(await carlos.get(`/budget/lines/${p2.id}`)).json().line;
+  ok(await carlos.patch(`/budget/lines/${p2.id}`, { rowVersion: l2.rowVersion, qty: '20', unitCents: 70_00, month, justification: 'Kit para a visita técnica da prefeitura' }));
+  ok(await carlos.post(`/budget/lines/${p2.id}/submit`, {}));
+  const l2b = ok(await carlos.get(`/budget/lines/${p2.id}`)).json().line;
+  expect(l2b.amountCents).toBe(1400_00);
+  expect(l2b.justification).toBe('Kit para a visita técnica da prefeitura');
   // diretoria aprova só R$ 20.000: a restrição aparece no planejamento de brindes
   expect(ok(await dir.post('/budget/decisions', { items: [{ lineId: p.id, decision: 'aprovar_parcial', approvedCents: 20_000_00, note: 'Reduzir o volume' }] })).json().decided).toHaveLength(1);
   let plan = ok(await carlos.get(`/brindes/planos?year=${year}`)).json().plans.find((x: { lineId: string }) => x.lineId === p.id);

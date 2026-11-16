@@ -17,7 +17,7 @@ import { AccountSelect, errMsg, type Structure } from '../../features/budget/sha
 
 type Baixa = { id: string; occurredOn: string; description: string; amountCents: number; paymentMethod: string | null; docName: string | null; status: 'valido' | 'cancelado'; cancelReason: string | null; createdBy: string | null };
 type Paid = 'pago' | 'parcial' | 'aberto';
-type Item = { id: string; planId: string; costCenterId: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; approvalStage?: 'gerencia' | 'diretoria' | null; supplierId: string | null; status: LineStatus; decisionNote: string | null; costCenter: { id: string; code: string; name: string }; executedCents: number; paid: Paid; baixas: Baixa[] };
+type Item = { id: string; planId: string; costCenterId: string; accountId: string; what: string; how: string | null; month: string; amountCents: number; itemType: string; approvalStage?: 'gerencia' | 'diretoria' | null; supplierId: string | null; status: LineStatus; decisionNote: string | null; costCenter: { id: string; code: string; name: string }; executedCents: number; paid: Paid; baixas: Baixa[]; origin?: string | null };
 type Data = {
   label: string; months: string[]; items: Item[];
   totals: { planned: number; executed: number; deviation: number; unlinkedCents: number; unlinkedCount: number };
@@ -132,7 +132,7 @@ export function BudgetLaunches({ st, year, quarter }: { st: Structure; year: num
                   <td className="max-w-[220px] px-3 py-3"><p className="truncate text-text" title={a?.path}>{parts.at(-1) ?? '—'}</p>{parts.length > 2 && <p className="truncate text-2xs text-muted">{parts.at(-2)}</p>}</td>
                   <td className="max-w-[280px] px-3 py-3">
                     <button type="button" className="block max-w-full truncate text-left font-semibold text-ink hover:text-primary" title={i.what} onClick={(e) => { e.stopPropagation(); setOpen({ id: i.id, baixa: false }); }}>{i.what}</button>
-                    <span className={clsx('mt-0.5 inline-block text-2xs font-semibold', isInvestment(i.itemType) ? 'text-purple' : 'text-muted')}>{isInvestment(i.itemType) ? 'Investimento' : 'Custo'} · {ITEM_TYPE_LABELS[i.itemType as keyof typeof ITEM_TYPE_LABELS] ?? i.itemType}</span>
+                    {i.origin === 'concessao_nao_planejada' && <span className="mr-1.5 mt-0.5 inline-block bg-warning-soft px-1.5 text-2xs font-semibold text-[#9A4D06]" title="Criado a partir de uma concessão do Compliance de brindes sem orçamento provisionado">Concessão não planejada</span>}<span className={clsx('mt-0.5 inline-block text-2xs font-semibold', isInvestment(i.itemType) ? 'text-purple' : 'text-muted')}>{isInvestment(i.itemType) ? 'Investimento' : 'Custo'} · {ITEM_TYPE_LABELS[i.itemType as keyof typeof ITEM_TYPE_LABELS] ?? i.itemType}</span>
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums text-ink">{fmtBRL(i.amountCents)}</td>
                   <td className={clsx('px-3 py-3 text-right tabular-nums', i.executedCents > i.amountCents ? 'font-semibold text-danger' : 'text-ink')}>{fmtBRL(i.executedCents)}</td>

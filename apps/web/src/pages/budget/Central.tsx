@@ -322,7 +322,7 @@ function BudgetTable({ d, st, cols, setCols, selected, setSelected, onOpen, onCr
                       <tr key={r.id} className="border-t border-line hover:bg-primary-soft/40">
                         <td className="sticky left-0 bg-surface px-2 py-1.5">{r.canDecide && <input type="checkbox" aria-label={`Selecionar ${r.code}`} checked={selected.includes(r.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, r.id] : selected.filter((x) => x !== r.id))} />}</td>
                         <td className="sticky left-8 bg-surface px-3 py-1.5" style={{ paddingLeft: 12 + a.level * 14 }}>
-                          <button type="button" className="text-left hover:text-primary" onClick={() => onOpen(r.id, 'planejamento')}><span className="mr-2 text-xs text-muted">{r.code}</span><span className="text-ink">{r.what}</span></button>
+                          <button type="button" className="text-left hover:text-primary" onClick={() => onOpen(r.id, 'planejamento')}><span className="mr-2 text-xs text-muted">{r.code}</span><span className="text-ink">{r.what}</span>{(r as { origin?: string | null }).origin === 'concessao_nao_planejada' && <span className="ml-2 bg-warning-soft px-1.5 text-2xs font-semibold text-[#9A4D06]">Concessão não planejada</span>}</button>
                         </td>
                         {visibleCols.map((c) => <td key={c.key} className={clsx('whitespace-nowrap px-3 py-1.5', c.num && 'text-right')}>{cell(r, c.key)}</td>)}
                       </tr>

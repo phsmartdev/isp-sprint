@@ -67,6 +67,7 @@ export function ComplianceSection() {
   const [panel, setPanel] = useState<'' | 'report' | 'rules'>('');
   const [reportFor, setReportFor] = useState<string>('');
   const [measure, setMeasure] = useState<{ pendency?: Data['pendencies'][number]; edit?: Measure } | null>(null);
+  const [budgetLink, setBudgetLink] = useState<{ id: string; code: string } | null>(null);
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
@@ -133,6 +134,7 @@ export function ComplianceSection() {
               <button type="button" className="font-semibold text-ink hover:underline" onClick={() => setF({ id: p.requestId })}>{p.code}</button><span className="text-muted">· {p.text} · desde {fmtDate(p.since)}</span>
               {p.measure ? <button type="button" disabled={!d.can.measures} onClick={() => setMeasure({ edit: p.measure! })} className="text-xs"><Tag className={MEASURE_TONE[p.measure.status]}>Providência {MEASURE_LABEL[p.measure.status].toLowerCase()}{p.measure.late ? ' · prazo vencido' : ''} · {p.measure.responsibleName}</Tag></button>
                 : d.can.measures && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setMeasure({ pendency: p })}>Registrar providência</button>}
+              {p.key.endsWith(':sem_orcamento') && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setBudgetLink({ id: p.requestId, code: p.code })}>Vincular ao orçamento</button>}
             </li>
           ))}</ul>}
           {d.can.measures && d.measures.filter((m) => !m.pendencyKey || !d.pendencies.some((p) => p.key === m.pendencyKey)).length > 0 && (
@@ -166,6 +168,7 @@ export function ComplianceSection() {
       {f.id && <RequestDrawer id={f.id} catalog={d.catalog} units={d.options.units} onClose={() => setF({ id: '' })} onReport={d.can.report ? (rid) => { setReportFor(rid); setPanel('report'); } : undefined} />}
       {panel === 'report' && <ReportDrawer from={f.de} to={f.ate} units={d.options.units} concessions={d.rows} requestId={reportFor} onClose={() => { setPanel(''); setReportFor(''); }} />}
       {measure && <MeasureModal {...measure} onClose={() => setMeasure(null)} />}
+      {budgetLink && <BudgetLinkModal requestId={budgetLink.id} code={budgetLink.code} onClose={() => setBudgetLink(null)} />}
       {panel === 'rules' && <RulesDrawer catalog={d.catalog} onClose={() => setPanel('')} />}
     </div>
   );
@@ -322,6 +325,7 @@ function EvaluationView({ ev, level, accounts }: { ev: Evaluation; level: string
 
 // ------------------------------------------------------------------ painel da solicitação
 function RequestDrawer({ id, catalog, units, onClose, onReport }: { id: string; catalog: Catalog; units: { id: string; name: string }[]; onClose: () => void; onReport?: (requestId: string) => void }) {
+  const [budgetFor, setBudgetFor] = useState(false);
   const q = useQuery({ queryKey: ['compliance', 'req', id], queryFn: () => api<Detail>(`/brindes/compliance/solicitacoes/${id}`) });
   const [editing, setEditing] = useState(false);
   const [dec, setDec] = useState<{ decision: ConcessionDecision | ''; reason: string; conditions: string; approved: string }>({ decision: '', reason: '', conditions: '', approved: '' });
@@ -364,6 +368,12 @@ function RequestDrawer({ id, catalog, units, onClose, onReport }: { id: string; 
             </section>
           )}
 
+          <section className="flex flex-wrap items-center justify-between gap-2 border border-line p-3">
+            <span className="min-w-0"><span className="block text-xs font-semibold text-muted">Orçamento e centro de custo</span>
+              {d.budget ? <span className="text-ink">{d.budget.code ?? ''} · {d.budget.what}</span> : <span className="text-[#9A4D06]">Sem lançamento de orçamento vinculado</span>}</span>
+            {r.state !== 'rejeitado' && r.state !== 'cancelado' && <Button size="sm" onClick={() => setBudgetFor(true)}>{d.budget ? 'Trocar lançamento' : 'Vincular ao orçamento'}</Button>}
+          </section>
+          {budgetFor && <BudgetLinkModal requestId={r.id} code={r.code} onClose={() => setBudgetFor(false)} />}
           {(d.stock.length > 0 || d.budget) && (
             <section className="border border-line p-3">
               {d.stock.length > 0 && <><p className="mb-1 text-xs font-semibold text-muted">Materiais</p><ul className="space-y-0.5">{d.stock.map((x) => <li key={x.itemId} className="flex justify-between gap-2"><span>{x.need}× {x.name}</span><span className={clsx('text-xs', x.available < x.need ? 'font-semibold text-danger' : 'text-muted')}>{x.stock} em estoque · {x.reservedByOthers} reservado(s) por outras</span></li>)}</ul></>}
@@ -554,6 +564,58 @@ function MeasureModal({ pendency, edit, onClose }: { pendency?: { key: string; c
         {closing && <FormField label={v.status === 'concluida' ? 'Resultado da providência' : 'Motivo do cancelamento'} htmlFor="ms-o"><Textarea id="ms-o" rows={2} value={v.outcomeNote} onChange={(e) => setV({ ...v, outcomeNote: e.target.value })} /></FormField>}
         <p className="text-xs text-muted">Entra na seção 6 da prestação de contas (Pendências e medidas de melhoria). Nada é apagado: concluir ou cancelar fica no histórico.</p>
       </div>
+    </Modal>
+  );
+}
+
+type BudgetOptions = { costCenters: { id: string; code: string; name: string; canPlan: boolean }[]; accounts: { id: string; code: string; name: string }[]; lines: { id: string; code: string | null; what: string; month: string; amountCents: number; approvedCents: number | null; approvalState: string; origin: string | null }[]; suggestedMonth: string; amountCents: number; linked: string | null };
+
+/**
+ * Atrela a concessão ao orçamento: um lançamento existente (o centro de custo vem dele) ou, sem orçamento provisionado,
+ * cria o lançamento no Orçamento como "Concessão não planejada" (vai para aprovação lá e aparece no relatório do orçamento).
+ */
+function BudgetLinkModal({ requestId, code, onClose }: { requestId: string; code: string; onClose: () => void }) {
+  const [mode, setMode] = useState<'vincular' | 'criar'>('vincular');
+  const [cc, setCc] = useState('');
+  const [lineId, setLineId] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [month, setMonth] = useState('');
+  const [why, setWhy] = useState('');
+  const q = useQuery({ queryKey: ['compliance', 'budget-options', requestId, cc], queryFn: () => api<BudgetOptions>(`/brindes/compliance/solicitacoes/${requestId}/orcamento-opcoes${qs({ costCenterId: cc || undefined })}`) });
+  const save = useAct<{ code: string | null; created: boolean }>('Concessão vinculada ao orçamento', onClose);
+  const o = q.data;
+  const center = o?.costCenters.find((c) => c.id === cc);
+  const m = month || o?.suggestedMonth || '';
+  const ready = mode === 'vincular' ? !!lineId : !!cc && !!accountId && /^\d{4}-\d{2}$/.test(m) && why.trim().length >= 10 && !!center?.canPlan;
+  return (
+    <Modal open onClose={onClose} size="lg" title={`Vincular ${code} ao orçamento`}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ready} loading={save.isPending}
+        onClick={() => save.mutate({ url: `/brindes/compliance/solicitacoes/${requestId}/orcamento`, body: mode === 'vincular' ? { mode, budgetLineId: lineId } : { mode, costCenterId: cc, accountId, month: m, justification: why } })}>{mode === 'vincular' ? 'Vincular' : 'Criar lançamento e vincular'}</Button></>}>
+      {q.isLoading ? <LoadingRows rows={3} /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : o && (
+        <div className="space-y-3 text-sm">
+          <div className="flex border border-line" role="radiogroup" aria-label="Como vincular">
+            {([['vincular', 'Lançamento já provisionado', 'Escolha o centro de custo e o lançamento do orçamento'], ['criar', 'Concessão não planejada', 'Sem orçamento provisionado: cria o lançamento no Orçamento']] as const).map(([k, l, h]) => (
+              <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} className={clsx('flex-1 px-3 py-2 text-left', mode === k ? 'bg-primary-soft' : 'bg-surface hover:bg-surface-2')}><span className={clsx('block font-semibold', mode === k ? 'text-primary' : 'text-ink')}>{l}</span><span className="block text-xs text-muted">{h}</span></button>
+            ))}
+          </div>
+          <FormField label="Centro de custo" htmlFor="bl-cc"><Select id="bl-cc" value={cc} onChange={(e) => { setCc(e.target.value); setLineId(''); }}><option value="">Escolha</option>{o.costCenters.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.name}{mode === 'criar' && !c.canPlan ? ' (só o Dono do orçamento cria aqui)' : ''}</option>)}</Select></FormField>
+          {!o.costCenters.length && <Notice tone="warning">Você não é responsável por nenhum centro de custo no Orçamento. Peça ao Dono do orçamento do centro (ou à Diretoria) para vincular.</Notice>}
+          {mode === 'vincular' && cc && (
+            !o.lines.length ? <p className="text-muted">Nenhum lançamento deste centro no ano da concessão. Use "Concessão não planejada".</p>
+              : <FormField label="Lançamento" htmlFor="bl-l"><Select id="bl-l" value={lineId} onChange={(e) => setLineId(e.target.value)}><option value="">Escolha</option>{o.lines.map((l) => <option key={l.id} value={l.id}>{l.code ?? ''} · {l.month.slice(5)}/{l.month.slice(0, 4)} · {l.what} · {fmtBRL(l.approvedCents ?? l.amountCents)}{l.approvedCents == null ? ' (não aprovado)' : ''}</option>)}</Select></FormField>
+          )}
+          {mode === 'criar' && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField label="Subconta" htmlFor="bl-a"><Select id="bl-a" value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">Escolha</option>{o.accounts.map((a) => <option key={a.id} value={a.id}>{a.code} · {a.name}</option>)}</Select></FormField>
+                <FormField label="Competência" htmlFor="bl-m" hint="Mês da concessão; se estiver fechado, escolha um mês aberto."><Input id="bl-m" type="month" value={m} onChange={(e) => setMonth(e.target.value)} /></FormField>
+              </div>
+              <FormField label="Por que não estava planejada" htmlFor="bl-w"><Textarea id="bl-w" rows={2} value={why} onChange={(e) => setWhy(e.target.value)} /></FormField>
+              <p className="text-xs text-muted">Cria no Orçamento o lançamento "Concessão não planejada · {code}" de {fmtBRL(o.amountCents)}, marcado como fora do planejamento. Ele segue a aprovação do Orçamento e aparece no relatório de fechamento.</p>
+            </>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

@@ -177,7 +177,7 @@ export const budgetCentralRoutes = [
       const ccOf = new Map(ccs.map((c) => [c.id, c.code]));
       return {
         totals: { planned: sum('planned'), approved: sum('approved'), committed: sum('committed'), realized: sum('realized'), paid: sum('paid'), balance: sum('balance') },
-        rows: rows.map((r) => ({ id: r.l.id, code: r.l.code, what: r.l.what, month: r.l.month, costCenter: ccOf.get(r.l.costCenterId), approvalState: r.l.approvalState, financial: r.financial, ...r.f })),
+        rows: rows.map((r) => ({ id: r.l.id, code: r.l.code, what: r.l.what, origin: r.l.origin, month: r.l.month, costCenter: ccOf.get(r.l.costCenterId), approvalState: r.l.approvalState, financial: r.financial, ...r.f })),
       };
     },
   }),

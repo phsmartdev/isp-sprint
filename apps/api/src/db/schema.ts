@@ -5255,6 +5255,10 @@ export const budgetLines = pgTable('budget_lines', {
   giftItemId: uuid('gift_item_id'),
   /** destinação prevista do brinde (clientes, contas ABM, oportunidades, campanha, evento, ação institucional) */
   giftDestination: text('gift_destination'),
+  /** origem fora do planejamento: 'concessao_nao_planejada' = criado a partir de uma concessão do Compliance de brindes sem orçamento provisionado */
+  origin: text('origin'),
+  /** concessão (Compliance de brindes) que originou o lançamento */
+  giftRequestId: uuid('gift_request_id').references((): AnyPgColumn => giftRequests.id),
   qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull().default(1000),
   unit: text('unit').notNull().default('un'),
   unitCents: bigint('unit_cents', { mode: 'number' }),

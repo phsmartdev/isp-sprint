@@ -71,7 +71,11 @@ export async function closingSnapshot(db: DbOrTx, tenantId: string, month: strin
     .where(and(eq(s.opportunities.tenantId, tenantId), isNull(s.opportunities.deletedAt), eq(s.opportunities.stage, 'ganha'), sql`${s.opportunities.wonAt} >= ${new Date(`${month}-01T03:00:00Z`)} and ${s.opportunities.wonAt} < ${new Date(`${until}T03:00:00Z`)}`)).groupBy(s.opportunities.teamId);
   const scoped = ccIds ? sales.filter((x) => x.team && teamIds.includes(x.team)) : sales;
   const performance = { wins: scoped.reduce((t, x) => t + x.n, 0), resultCents: scoped.reduce((t, x) => t + Number(x.v), 0) };
-  return { month, centers, total, performance: { ...performance, efficiency: total.realized ? Math.round((performance.resultCents / total.realized) * 100) / 100 : null } };
+  // concessões não planejadas (Compliance de brindes): lançamentos criados fora do planejamento, sempre indicados no relatório
+  const unplannedLines = lines.filter((l) => l.origin === 'concessao_nao_planejada');
+  const giftCodes = unplannedLines.length ? await db.select({ id: s.giftRequests.id, code: s.giftRequests.code }).from(s.giftRequests).where(inArray(s.giftRequests.id, unplannedLines.map((l) => l.giftRequestId).filter((x): x is string => !!x))) : [];
+  const unplanned = unplannedLines.map((l) => ({ id: l.id, code: l.code, what: l.what, centerCode: ccs.find((c) => c.id === l.costCenterId)?.code ?? '', amountCents: l.amountCents, approvedCents: l.approvedCents, approvalState: l.approvalState, concession: giftCodes.find((g) => g.id === l.giftRequestId)?.code ?? null }));
+  return { month, centers, total, unplanned, performance: { ...performance, efficiency: total.realized ? Math.round((performance.resultCents / total.realized) * 100) / 100 : null } };
 }
 export type ClosingSnapshot = Awaited<ReturnType<typeof closingSnapshot>>;
 

@@ -29,9 +29,10 @@ export function GiftPlanning({ items, suppliers }: { items: { id: string; name: 
   const [creating, setCreating] = useState(false);
   const [buy, setBuy] = useState<Plan | null>(null);
   const [receive, setReceive] = useState<Plan | null>(null);
+  const [edit, setEdit] = useState<{ p: Plan; submitAfter: boolean } | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
-  const submit = useMutation({ mutationFn: (id: string) => api(`/budget/lines/${id}/submit`, { method: 'POST', body: {} }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['brindes'] }); toast({ tone: 'success', message: 'Enviado para aprovação' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const submit = useMutation({ mutationFn: (id: string) => api(`/budget/lines/${id}/submit`, { method: 'POST', body: {} }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['brindes'] }); toast({ tone: 'success', message: 'Enviado para aprovação' }); }, onError: (e) => { if (!/justificativa/i.test(errMsg(e))) toast({ tone: 'error', message: errMsg(e) }); } });
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const plans = q.data!.plans;
@@ -56,7 +57,7 @@ export function GiftPlanning({ items, suppliers }: { items: { id: string; name: 
               <td className={`${TD} num`}>{p.distributedQtyYear}</td>
               <td className={TD}><Chip tone={p.approvalState === 'rejeitado' ? 'red' : p.approvalState.startsWith('aprovado') ? 'green' : 'neutral'}>{APPROVAL_STATE_LABELS[p.approvalState]}</Chip><span className="mt-1 block text-xs text-muted">{EXECUTION_STATE_LABELS[p.executionState]}</span></td>
               <td className={`${TD} whitespace-nowrap text-right`}>
-                {(p.approvalState === 'planejado' || p.approvalState === 'em_revisao' || p.approvalState === 'rejeitado') && <Button size="sm" variant="outline" loading={submit.isPending} onClick={() => submit.mutate(p.lineId)}>Enviar para aprovação</Button>}
+                {(p.approvalState === 'planejado' || p.approvalState === 'em_revisao' || p.approvalState === 'rejeitado') && <span className="inline-flex gap-1.5"><Button size="sm" variant="ghost" onClick={() => setEdit({ p, submitAfter: false })}>Editar</Button><Button size="sm" variant="outline" loading={submit.isPending && submit.variables === p.lineId} onClick={() => submit.mutate(p.lineId, { onError: (e) => { if (/justificativa/i.test(errMsg(e))) setEdit({ p, submitAfter: true }); } })}>Enviar para aprovação</Button></span>}
                 {p.approvalState.startsWith('aprovado') && !p.purchasedQty && <Button size="sm" variant="outline" onClick={() => setBuy(p)}>Registrar compra</Button>}
                 {p.purchasedQty && p.receivedQty < Number(p.purchasedQty) && <Button size="sm" variant="outline" onClick={() => setReceive(p)}>Receber no estoque</Button>}
               </td>
@@ -67,6 +68,7 @@ export function GiftPlanning({ items, suppliers }: { items: { id: string; name: 
       {creating && <NewPlan items={items} onClose={() => setCreating(false)} />}
       {buy && <BuyModal p={buy} suppliers={suppliers} onClose={() => setBuy(null)} />}
       {receive && <ReceiveModal p={receive} onClose={() => setReceive(null)} />}
+      {edit && <EditPlan p={edit.p} submitAfter={edit.submitAfter} onClose={() => setEdit(null)} />}
     </section>
   );
 }
@@ -90,7 +92,7 @@ function NewPlan({ items, onClose }: { items: { id: string; name: string; unitCo
   const acc = v.accountId || giftAcc;
   const total = (Number(v.qty) || 0) * toCents(v.unit || '');
   return (
-    <Modal open onClose={onClose} size="lg" title="Planejar brinde" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" loading={act.isPending} disabled={!v.itemId || !cc || !acc || !Number(v.qty) || !toCents(v.unit)} onClick={() => act.mutate({ url: '/brindes/planos', body: { itemId: v.itemId, costCenterId: cc, accountId: acc, qty: Number(v.qty), unitCostCents: toCents(v.unit), month: v.month, campaignId: v.campaignId || null, destination: v.destination || null, justification: v.justification || null } })}>Planejar</Button></>}>
+    <Modal open onClose={onClose} size="lg" title="Planejar brinde" footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" loading={act.isPending} disabled={!v.itemId || !cc || !acc || !Number(v.qty) || !toCents(v.unit) || v.justification.trim().length < 10} onClick={() => act.mutate({ url: '/brindes/planos', body: { itemId: v.itemId, costCenterId: cc, accountId: acc, qty: Number(v.qty), unitCostCents: toCents(v.unit), month: v.month, campaignId: v.campaignId || null, destination: v.destination || null, justification: v.justification || null } })}>Planejar</Button></>}>
       {st.isLoading ? <LoadingRows rows={3} /> : !ccs.length ? <Notice tone="warning">Você não é Dono do orçamento de nenhum centro de custo. Quem planeja é o dono do centro (Recursos e Orçamento).</Notice> : (
         <div className="grid gap-3 sm:grid-cols-2">
           <FormField label="Brinde" htmlFor="gp-i" required><Select id="gp-i" value={v.itemId} onChange={(e) => { const it = items.find((x) => x.id === e.target.value); setV({ ...v, itemId: e.target.value, unit: it ? (it.unitCostCents / 100).toFixed(2).replace('.', ',') : v.unit }); }}><option value="">Escolha</option>{items.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</Select></FormField>
@@ -101,7 +103,7 @@ function NewPlan({ items, onClose }: { items: { id: string; name: string; unitCo
           <FormField label="Custo unitário previsto (R$)" htmlFor="gp-u" required hint={item ? `Custo médio atual: ${fmtBRL(item.unitCostCents)}` : undefined}><Input id="gp-u" inputMode="decimal" value={v.unit} onChange={(e) => setV({ ...v, unit: e.target.value })} /></FormField>
           <FormField label="Campanha" htmlFor="gp-cp"><Select id="gp-cp" value={v.campaignId} onChange={(e) => setV({ ...v, campaignId: e.target.value })}><option value="">Nenhuma</option>{dest.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></FormField>
           <FormField label="Destinação" htmlFor="gp-d"><Input id="gp-d" value={v.destination} onChange={(e) => setV({ ...v, destination: e.target.value })} placeholder="Ex.: contas ABM do evento de fim de ano" /></FormField>
-          <FormField label="Justificativa" htmlFor="gp-j" className="sm:col-span-2"><Textarea id="gp-j" rows={2} value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} /></FormField>
+          <FormField label="Justificativa" htmlFor="gp-j" className="sm:col-span-2" required hint="Obrigatória para enviar à aprovação (ao menos 10 caracteres)."><Textarea id="gp-j" rows={2} value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} /></FormField>
           <p className="text-sm text-muted sm:col-span-2">Total previsto: <b className="num text-ink">{fmtBRL(total)}</b> — entra no orçamento como lançamento planejado.</p>
         </div>
       )}
@@ -135,6 +137,46 @@ function ReceiveModal({ p, onClose }: { p: Plan; onClose: () => void }) {
     <Modal open onClose={onClose} size="sm" title={`Receber · ${p.itemName}`} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" loading={act.isPending} disabled={!Number(qty) || Number(qty) > left} onClick={() => act.mutate({ url: `/brindes/planos/${p.lineId}/recebimento`, body: { qty: Number(qty) } })}>Receber</Button></>}>
       <FormField label={`Quantidade recebida (faltam ${left})`} htmlFor="gr-q"><Input id="gr-q" inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} /></FormField>
       <p className="mt-2 text-sm text-muted">Entra no estoque pelo preço da compra. Não gera despesa nova: a despesa é a do lançamento no orçamento.</p>
+    </Modal>
+  );
+}
+
+/**
+ * Edita o brinde planejado enquanto não foi aprovado (planejado, em revisão ou rejeitado): quantidade, custo, competência e
+ * justificativa. Usa a mesma alteração do lançamento do orçamento (versão e auditoria campo a campo). Pode já enviar à aprovação.
+ */
+function EditPlan({ p, submitAfter, onClose }: { p: Plan; submitAfter: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const line = useQuery({ queryKey: ['budget', 'line', p.lineId], queryFn: () => api<{ line: { rowVersion: number; justification: string | null; qty: string; unitCents: number | null; month: string } }>(`/budget/lines/${p.lineId}`) });
+  const [v, setV] = useState<{ qty: string; unit: string; month: string; justification: string } | null>(null);
+  const cur = line.data?.line;
+  const f = v ?? (cur ? { qty: String(cur.qty), unit: ((cur.unitCents ?? 0) / 100).toFixed(2).replace('.', ','), month: cur.month, justification: cur.justification ?? '' } : null);
+  const save = useMutation({
+    mutationFn: async (send: boolean) => {
+      await api(`/budget/lines/${p.lineId}`, { method: 'PATCH', body: { rowVersion: cur!.rowVersion, qty: f!.qty, unitCents: toCents(f!.unit), month: f!.month, justification: f!.justification.trim() } });
+      if (send) await api(`/budget/lines/${p.lineId}/submit`, { method: 'POST', body: {} });
+      return send;
+    },
+    onSuccess: (sent) => { void qc.invalidateQueries({ queryKey: ['brindes'] }); void qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: sent ? 'Salvo e enviado para aprovação' : 'Planejamento atualizado' }); onClose(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const valid = !!f && Number(String(f.qty).replace(',', '.')) > 0 && toCents(f.unit) > 0 && /^\d{4}-\d{2}$/.test(f.month) && f.justification.trim().length >= 10;
+  return (
+    <Modal open onClose={onClose} title={`Editar ${p.code} · ${p.itemName}`}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button disabled={!valid} loading={save.isPending && save.variables === false} onClick={() => save.mutate(false)}>Salvar</Button><Button variant="primary" disabled={!valid} loading={save.isPending && save.variables === true} onClick={() => save.mutate(true)}>Salvar e enviar para aprovação</Button></>}>
+      {line.isLoading || !f ? <LoadingRows rows={3} /> : line.isError ? <ErrorState error={line.error} onRetry={() => line.refetch()} /> : (
+        <div className="space-y-3">
+          {submitAfter && <Notice tone="warning">Para enviar à aprovação, escreva a justificativa do brinde.</Notice>}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <FormField label="Quantidade" htmlFor="ep-q"><Input id="ep-q" inputMode="decimal" value={f.qty} onChange={(e) => setV({ ...f, qty: e.target.value })} /></FormField>
+            <FormField label="Custo unitário (R$)" htmlFor="ep-u"><Input id="ep-u" inputMode="decimal" value={f.unit} onChange={(e) => setV({ ...f, unit: e.target.value })} /></FormField>
+            <FormField label="Competência" htmlFor="ep-m" hint="Mesmo trimestre."><Input id="ep-m" type="month" value={f.month} onChange={(e) => setV({ ...f, month: e.target.value })} /></FormField>
+          </div>
+          <FormField label="Justificativa" htmlFor="ep-j" required hint="Por que este brinde, para quem e em que ação (ao menos 10 caracteres)."><Textarea id="ep-j" rows={3} autoFocus={submitAfter} value={f.justification} onChange={(e) => setV({ ...f, justification: e.target.value })} /></FormField>
+          <p className="text-xs text-muted">Total: {fmtBRL(Math.round(Number(String(f.qty).replace(',', '.')) * toCents(f.unit)) || 0)}. A alteração fica registrada no histórico do lançamento.</p>
+        </div>
+      )}
     </Modal>
   );
 }

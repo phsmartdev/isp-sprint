@@ -15,7 +15,7 @@ type Month = { month: string; status: string; label: string; closedAt: string | 
 type Center = { id: string; code: string; name: string; approved: number; revised: number; committed: number; realized: number; paid: number; balance: number; deviation: number; deviationPct: number | null; excess: number; overdueCents: number; charges: number; economy: number };
 type Detail = {
   closing: { status: string; label: string; live: boolean; closedAt: string | null; reopenReason: string | null };
-  snapshot: { centers: Center[]; total: Center & { overdueCount: number; latePayments: number; guardianUsed: number; pendingApproval: number }; performance: { wins: number; resultCents: number; efficiency: number | null } };
+  snapshot: { centers: Center[]; total: Center & { overdueCount: number; latePayments: number; guardianUsed: number; pendingApproval: number }; performance: { wins: number; resultCents: number; efficiency: number | null }; unplanned?: { id: string; code: string | null; what: string; centerCode: string; amountCents: number; approvalState: string; concession: string | null }[] };
   dispatches: { id: string; name: string; email: string; role: string; status: string; attempts: number; lastError: string | null; sentAt: string | null }[];
   events: { summary: string; at: string; actor: string | null }[];
   can: { conduct: boolean; validate: boolean; reopen: boolean; next: string[] };
@@ -83,6 +83,13 @@ function MonthDetail({ month }: { month: string }) {
           <div className="bg-surface px-3 py-2"><dt className="text-xs text-muted">Pagos com atraso</dt><dd className="num font-bold text-ink">{t.latePayments}</dd></div>
           <div className="bg-surface px-3 py-2"><dt className="text-xs text-muted">Eficiência</dt><dd className="num font-bold text-ink">{d.snapshot.performance.efficiency === null ? '—' : `R$ ${d.snapshot.performance.efficiency.toLocaleString('pt-BR')} por real`}</dd></div>
         </dl>
+        {(d.snapshot.unplanned?.length ?? 0) > 0 && (
+          <Notice tone="warning">
+            <b>Concessões não planejadas na competência ({d.snapshot.unplanned!.length}) · {fmtBRL(d.snapshot.unplanned!.reduce((s, u) => s + u.amountCents, 0))}</b>
+            <span className="block text-sm">{d.snapshot.unplanned!.map((u) => `${u.code ?? ''} ${u.centerCode}${u.concession ? ` · concessão ${u.concession}` : ''} · ${fmtBRL(u.amountCents)}`).join('; ')}</span>
+            <span className="block text-xs">Lançamentos criados a partir do Compliance de brindes, fora do planejamento. Também aparecem nos pontos de atenção do relatório de fechamento.</span>
+          </Notice>
+        )}
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[800px] text-sm">
             <thead className="bg-surface-2 text-left text-xs text-muted"><tr>{['Centro', 'Aprovado', 'Comprometido', 'Realizado', 'Pago', 'Saldo', 'Desvio', 'Vencidos'].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr></thead>

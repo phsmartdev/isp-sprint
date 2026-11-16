@@ -216,4 +216,31 @@ describe('compliance de concessões', () => {
     const cons = ok(await carlos.post('/brindes/compliance/prestacoes', { from: '2020-01-01', to: today }), 201).json();
     if (process.env.GC_PDF_OUT) (await import('node:fs')).writeFileSync(process.env.GC_PDF_OUT, (await carlos.get(`/brindes/compliance/prestacoes/${cons.id}/pdf`)).rawPayload);
   });
+  it('vincula a concessão ao orçamento ou cria o lançamento como concessão não planejada (indicado no fechamento)', async () => {
+    const data = ok(await carlos.get(`/brindes/compliance?from=2020-01-01&to=${today}`)).json();
+    const open = data.rows.filter((x: { state: string }) => x.state !== 'cancelado' && x.state !== 'rejeitado');
+    const r1 = open[0], r2 = open[1] ?? open[0];
+    // subconta própria do teste (não usa o plano sugerido: outra suíte testa a criação dele no mesmo banco)
+    const tenantId = (await ctx.app.db.select({ t: s.users.tenantId }).from(s.users).where(eq(s.users.email, 'carlos@yepnet.test')))[0]!.t;
+    await ctx.app.db.insert(s.budgetAccounts).values({ tenantId, code: 'ZZ-GC-TESTE', name: 'Concessões (teste)' }).onConflictDoNothing();
+    const opt = ok(await carlos.get(`/brindes/compliance/solicitacoes/${r1.id}/orcamento-opcoes`)).json();
+    expect(opt.accounts.length).toBeGreaterThan(0);
+    const cc = opt.costCenters.find((c: { canPlan: boolean }) => c.canPlan);
+    expect(cc).toBeTruthy();
+    expect((await lucas.post(`/brindes/compliance/solicitacoes/${r1.id}/orcamento`, { mode: 'criar', costCenterId: cc.id, accountId: opt.accounts[0].id, month: opt.suggestedMonth, justification: 'Evento surgiu fora do planejamento' })).statusCode).toBeGreaterThanOrEqual(403);
+    const created = ok(await carlos.post(`/brindes/compliance/solicitacoes/${r1.id}/orcamento`, { mode: 'criar', costCenterId: cc.id, accountId: opt.accounts[0].id, month: opt.suggestedMonth, justification: 'Evento surgiu fora do planejamento' })).json();
+    expect(created.created).toBe(true);
+    const line = ok(await carlos.get(`/budget/lines/${created.budgetLineId}`)).json().line;
+    expect(line.origin).toBe('concessao_nao_planejada');
+    expect(line.giftRequestId).toBe(r1.id);
+    expect(line.what).toContain('Concessão não planejada');
+    const det = ok(await carlos.get(`/brindes/compliance/solicitacoes/${r1.id}`)).json();
+    expect(det.request.budgetLineId ?? det.budget).toBeTruthy();
+    // outra concessão vincula ao lançamento existente
+    const linked = ok(await carlos.post(`/brindes/compliance/solicitacoes/${r2.id}/orcamento`, { mode: 'vincular', budgetLineId: created.budgetLineId })).json();
+    expect(linked.created).toBe(false);
+    // fechamento do mês indica a concessão não planejada
+    const cl = ok(await carlos.get(`/budget/closings/${opt.suggestedMonth}`)).json();
+    expect(cl.snapshot.unplanned.some((u: { id: string }) => u.id === created.budgetLineId)).toBe(true);
+  });
 });

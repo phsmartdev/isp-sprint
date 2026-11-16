@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  allowedDecisions, ATTENTION_SITUATIONS, effectiveLevel, requesterFloor, complianceKpis, currentRules, KIT_CATEGORIES, CONCESSION_DECISIONS, CONCESSION_KINDS, CONCESSION_PURPOSES, CONCESSION_STATES, CONTROL_TYPES, deliveryNeeds, RULE_PARAMS, splitEvenly, stockShortages,
+  allowedDecisions, ATTENTION_SITUATIONS, CONCESSION_KIND_LABELS, effectiveLevel, requesterFloor, complianceKpis, currentRules, KIT_CATEGORIES, CONCESSION_DECISIONS, CONCESSION_KINDS, CONCESSION_PURPOSES, CONCESSION_STATES, CONTROL_TYPES, deliveryNeeds, RULE_PARAMS, splitEvenly, stockShortages,
   type ApproverLevel, type ConcessionKind, type ConcessionPurpose, type Evaluation,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
@@ -24,6 +24,8 @@ import {
 } from '../services/giftCompliance';
 import { buildComplianceReport } from '../services/giftComplianceReport';
 import { letterheadForBranch } from '../services/contractErp';
+import { ccAccess, createLines, loadLine, logLine, visibleCostCenters } from './budgetCentral';
+import { accountsOf } from '../services/budget';
 
 /** Solicitar e acompanhar as próprias é de todos (Operação Comercial e Marketing); o que cada um vê e decide é filtrado no servidor. */
 const READ = { tag: 'Marketing', anyAuthenticated: true as const };
@@ -602,6 +604,58 @@ export const giftComplianceRoutes = [
   }),
 
   // ------------------------------------------------------------------ prestação de contas
+  defineRoute({
+    method: 'GET', url: '/brindes/compliance/solicitacoes/:id/orcamento-opcoes', summary: 'Centros de custo, subcontas e lançamentos do ano para vincular a concessão ao orçamento (ou criar um lançamento de concessão não planejada)', ...READ, params: IdParams,
+    query: z.object({ costCenterId: uuid.optional() }),
+    handler: async ({ app, auth, params, query }) => {
+      const r = await loadReq(app.db, auth, params.id);
+      const ccs = await visibleCostCenters(app.db, auth);
+      const year = (r.executedOn ?? r.plannedOn).slice(0, 4);
+      const lines = query.costCenterId && ccs.some((c) => c.id === query.costCenterId)
+        ? await app.db.select({ id: s.budgetLines.id, code: s.budgetLines.code, what: s.budgetLines.what, month: s.budgetLines.month, amountCents: s.budgetLines.amountCents, approvedCents: s.budgetLines.approvedCents, approvalState: s.budgetLines.approvalState, origin: s.budgetLines.origin })
+          .from(s.budgetLines).where(and(eq(s.budgetLines.tenantId, auth.tenantId), eq(s.budgetLines.costCenterId, query.costCenterId), isNull(s.budgetLines.deletedAt), sql`${s.budgetLines.month} like ${`${year}-%`}`, sql`${s.budgetLines.approvalState} <> 'rejeitado'`)).orderBy(asc(s.budgetLines.month), asc(s.budgetLines.code))
+        : [];
+      const accounts = (await accountsOf(app.db, auth.tenantId)).filter((a) => a.leaf && a.active).map((a) => ({ id: a.id, code: a.code, name: a.path }));
+      return {
+        costCenters: ccs.map((c) => ({ id: c.id, code: c.code, name: c.name, canPlan: ccAccess(auth, c).plan })),
+        accounts, lines, suggestedMonth: (r.executedOn ?? r.plannedOn).slice(0, 7), amountCents: r.executedCents ?? r.approvedCents ?? r.estimatedCents, linked: r.budgetLineId,
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/brindes/compliance/solicitacoes/:id/orcamento', summary: 'Vincula a concessão a um lançamento do orçamento (e ao centro de custo dele) ou cria o lançamento como "Concessão não planejada" quando não há orçamento provisionado', ...READ, params: IdParams,
+    body: z.discriminatedUnion('mode', [
+      z.object({ mode: z.literal('vincular'), budgetLineId: uuid }),
+      z.object({ mode: z.literal('criar'), costCenterId: uuid, accountId: uuid, month: z.string().regex(/^\d{4}-\d{2}$/), justification: z.string().trim().min(10, 'Explique por que a concessão não estava planejada').max(2000) }),
+    ]),
+    handler: async ({ app, auth, params, body, req }) => {
+      const r = await loadReq(app.db, auth, params.id);
+      if (r.state === 'rejeitado' || r.state === 'cancelado') throw unprocessable('Concessão encerrada: não há o que vincular ao orçamento.');
+      if (r.requesterId !== auth.userId && !canManageMeasures(auth) && !seesAll(auth)) throw forbidden('Vincular ao orçamento: quem solicitou, a gestão ou a administração.');
+      let line: { id: string; code: string | null; costCenterId: string; created: boolean };
+      if (body.mode === 'vincular') {
+        const { l } = await loadLine(app.db, auth, body.budgetLineId);
+        if (l.approvalState === 'rejeitado') throw unprocessable('Lançamento rejeitado no orçamento: escolha outro ou crie um de concessão não planejada.');
+        line = { id: l.id, code: l.code, costCenterId: l.costCenterId, created: false };
+      } else {
+        const amount = r.executedCents ?? r.approvedCents ?? r.estimatedCents;
+        // createLines valida: Dono do orçamento do centro, subconta analítica ativa e competência aberta
+        const [l] = await createLines(app.db, auth, {
+          costCenterId: body.costCenterId, accountId: body.accountId, month: body.month, recurrenceMonths: 1, qty: 1000 as never, unit: 'un', unitCents: amount,
+          what: `Concessão não planejada · ${r.code} · ${r.description}`.slice(0, 200), justification: body.justification, objective: `Concessão ${r.code} (${CONCESSION_KIND_LABELS[r.kind as ConcessionKind] ?? r.kind}) registrada no Compliance de brindes sem orçamento provisionado.`,
+          plannedOn: r.executedOn ?? r.plannedOn, priority: 'media', expenseType: 'pontual', ownerId: null, projectId: null, campaignId: r.campaignId, supplierId: null, how: null,
+        });
+        await app.db.update(s.budgetLines).set({ origin: 'concessao_nao_planejada', giftRequestId: r.id }).where(eq(s.budgetLines.id, l!.id));
+        await logLine(app.db, auth, l!, 'origem', `criado como concessão não planejada a partir de ${r.code}.`, { giftRequestId: r.id });
+        line = { id: l!.id, code: l!.code, costCenterId: l!.costCenterId, created: true };
+      }
+      // vínculo administrativo: não muda valor, contas nem finalidade (não reabre a autorização)
+      await app.db.update(s.giftRequests).set({ budgetLineId: line.id, costCenterId: line.costCenterId, rowVersion: r.rowVersion + 1, updatedAt: new Date() }).where(eq(s.giftRequests.id, r.id));
+      await logEv(app.db, auth, r, 'orcamento', line.created ? `Lançamento ${line.code} criado no Orçamento como concessão não planejada e vinculado (aguarda aprovação no Orçamento).` : `Vinculada ao lançamento ${line.code} do Orçamento.`, { budgetLineId: line.id, previous: r.budgetLineId, created: line.created });
+      await audit(app.db, req, { action: line.created ? 'gift_request.budget_unplanned' : 'gift_request.budget_link', entityType: 'gift_request', entityId: r.id, metadata: { budgetLineId: line.id, code: line.code, previous: r.budgetLineId } });
+      return { budgetLineId: line.id, code: line.code, created: line.created };
+    },
+  }),
   defineRoute({
     method: 'POST', url: '/brindes/compliance/medidas', summary: 'Registra a providência (medida de melhoria) para uma pendência de controle ou uma fragilidade apontada pela gestão: responsável, prazo e situação', ...READ,
     body: z.object({
