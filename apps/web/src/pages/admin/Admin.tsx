@@ -609,13 +609,13 @@ export function AdminSecurity() {
 // =================================================================== personalização
 /** Espaços de imagem que a empresa pode trocar; sem imagem, vale o grafismo padrão BKT. */
 const ART_SLOTS: { slot: BrandSlot; title: string; where: string; size: string; maxDim: number; aspect: string }[] = [
-  { slot: 'login_fundo', title: 'Fundo da tela de login', where: 'Cobre a tela de acesso, atrás das boas-vindas e do quadro de login.', size: 'Recomendado: 1920 × 1080 px, paisagem.', maxDim: 2560, aspect: 'aspect-[16/9]' },
+  { slot: 'login_fundo', title: 'Fundo da tela de login', where: 'Cobre a tela de acesso, atrás da animação RevOps e do quadro de login.', size: 'Recomendado: 1920 × 1080 px, paisagem.', maxDim: 2560, aspect: 'aspect-[16/9]' },
   { slot: 'banner_inicio', title: 'Banner do Início', where: 'O bloco “Nova oportunidade” da tela inicial. O texto fica à esquerda, com um véu escuro por cima da imagem.', size: 'Recomendado: 1600 × 520 px.', maxDim: 2000, aspect: 'aspect-[3/1]' },
   { slot: 'card_sidebar', title: 'Cartão do menu lateral', where: 'O cartão decorativo no rodapé do menu à esquerda.', size: 'Recomendado: 560 × 240 px.', maxDim: 1200, aspect: 'aspect-[7/3]' },
 ];
 
 export function AdminBranding() {
-  const q = useQuery({ queryKey: ['admin', 'branding'], queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null; sha256?: string })[]; loginStyle: 'hexagono' | 'revops' }>('/admin/branding') });
+  const q = useQuery({ queryKey: ['admin', 'branding'], queryFn: () => api<{ slots: ({ slot: BrandSlot; hasImage: boolean; sizeBytes?: number; updatedAt?: string; updatedByName?: string | null; sha256?: string })[]}>('/admin/branding') });
   const qc = useQueryClient();
   const toast = useToast();
   const { bump } = useBrand();
@@ -629,11 +629,6 @@ export function AdminBranding() {
       return api(`/admin/branding/${slot}`, { method: 'PUT', body: { data: await fileToBase64(small) } });
     },
     onSuccess: () => { refresh(); toast({ tone: 'success', message: 'Imagem atualizada' }); },
-    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
-  });
-  const loginStyle = useMutation({
-    mutationFn: (style: 'hexagono' | 'revops') => api('/admin/branding/estilo-login', { method: 'PUT', body: { style } }),
-    onSuccess: () => { refresh(); void qc.invalidateQueries({ queryKey: ['public', 'login-estilo'] }); toast({ tone: 'success', message: 'Arte do login atualizada' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const del = useMutation({
@@ -659,23 +654,6 @@ export function AdminBranding() {
               <section key={a.slot} className="card flex flex-col p-4" aria-label={a.title}>
                 <h3 className="font-bold text-ink">{a.title}</h3>
                 <p className="mt-0.5 text-sm text-muted">{a.where}</p>
-                {a.slot === 'login_fundo' && (
-                  <div className="mt-3">
-                    <p className="text-xs font-semibold text-ink">Arte da tela de login</p>
-                    <div className="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Arte da tela de login">
-                      {([['hexagono', 'Hexágono BKT', 'Boas-vindas e o hexágono'], ['revops', 'RevOps animado', 'O cliente no centro do ciclo']] as const).map(([k, l, d]) => {
-                        const on = (q.data?.loginStyle ?? 'hexagono') === k;
-                        return (
-                          <button key={k} type="button" role="radio" aria-checked={on} disabled={loginStyle.isPending || !q.data} onClick={() => !on && loginStyle.mutate(k)}
-                            className={clsx('border px-3 py-2 text-left', on ? 'border-primary bg-primary-soft' : 'border-line bg-surface hover:bg-surface-2')}>
-                            <span className="block text-sm font-semibold text-ink">{l}</span><span className="block text-xs text-muted">{d}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="mt-1 text-xs text-muted">Com uma imagem enviada abaixo, ela vira o fundo; a animação RevOps continua no lugar das boas-vindas.</p>
-                  </div>
-                )}
                 <div className={clsx('relative mt-3 overflow-hidden bg-gradient-to-br from-navy to-primary', a.aspect)}>
                   {cur?.hasImage
                     ? <img src={`/api/v1/brand/${a.slot}?v=${cur.sha256?.slice(0, 12) ?? ''}`} alt={`Imagem atual: ${a.title}`} className="absolute inset-0 h-full w-full object-cover" />

@@ -1,6 +1,6 @@
 /**
  * Fundo "RevOps animado" do login: o Cliente no centro e as três frentes (Marketing, Vendas e Sucesso do Cliente)
- * num ciclo contínuo. Só SVG + animação nativa; respeita "reduzir movimento" do sistema (fica parado).
+ * num ciclo contínuo. Só SVG + animação nativa, lenta e sem piscar (fica animada mesmo com "reduzir movimento").
  */
 const cx = 470, cy = 400, R = 230;
 const B = '#7CC4F2';
@@ -36,7 +36,6 @@ export function RevopsScene({ className }: { className?: string }) {
         @keyframes ro-spin { to { transform: rotate(360deg); } }
         @keyframes ro-breath { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
         @keyframes ro-halo { 0%,100% { opacity: 0; } 50% { opacity: .9; } }
-        @media (prefers-reduced-motion: reduce) { .ro-spin, .ro-spin-r, .ro-breath, .ro-halo { animation: none; } .ro-halo { opacity: .5; } .ro-move { display: none; } }
       `}</style>
       <defs>
         <linearGradient id="ro-ring" gradientUnits="userSpaceOnUse" x1={cx - R} y1={cy - R} x2={cx + R} y2={cy + R}>
@@ -76,9 +75,10 @@ export function RevopsScene({ className }: { className?: string }) {
         return (
           <g key={n.k}>
             <line x1={x0} y1={y0} x2={x} y2={y} stroke={W(0.14)} strokeDasharray="2 6" />
-            <circle className="ro-move" r="2.4" fill="#fff">
-              <animateMotion dur="3.2s" begin={`${i * 1.07}s`} repeatCount="indefinite" path={`M${x} ${y} L${x0} ${y0}`} />
-              <animate attributeName="opacity" values="0;1;0" dur="3.2s" begin={`${i * 1.07}s`} repeatCount="indefinite" />
+            {/* começa já em movimento (begin negativo) e invisível: nada aparece no canto antes da animação */}
+            <circle className="ro-move" r="2.4" fill="#fff" cx={x} cy={y} opacity="0">
+              <animateMotion dur="3.2s" begin={`${-i * 1.07}s`} repeatCount="indefinite" path={`M0 0 L${x0 - x} ${y0 - y}`} />
+              <animate attributeName="opacity" values="0;1;0" dur="3.2s" begin={`${-i * 1.07}s`} repeatCount="indefinite" />
             </circle>
           </g>
         );

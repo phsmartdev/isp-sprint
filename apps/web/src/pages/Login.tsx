@@ -22,46 +22,12 @@ const GOOGLE_ERRORS: Record<string, string> = {
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.problem.detail ?? err.problem.title : 'Não foi possível concluir. Verifique a conexão.');
 
-/** Hexágono 3D (forma do símbolo BKT) em anel, com luz azul: o grafismo do fundo do login. */
-function HexRing({ className }: { className?: string }) {
-  const hex = (r: number, cx = 300, cy = 300) => Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 3) * i - Math.PI / 2; return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`; });
-  const ring = (outer: number, inner: number, cx = 300, cy = 300) => `M${hex(outer, cx, cy).join('L')}Z M${hex(inner, cx, cy).reverse().join('L')}Z`;
-  return (
-    <svg className={className} viewBox="0 0 600 600" aria-hidden focusable="false">
-      <defs>
-        <linearGradient id="hx-face" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#4FBBFF" stopOpacity="0.55" />
-          <stop offset="0.45" stopColor="#2F5986" stopOpacity="0.85" />
-          <stop offset="1" stopColor="#0E1A27" stopOpacity="0.2" />
-        </linearGradient>
-        <linearGradient id="hx-side" x1="1" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#0B1622" stopOpacity="0.95" />
-          <stop offset="1" stopColor="#2F5986" stopOpacity="0.6" />
-        </linearGradient>
-        <radialGradient id="hx-glow" cx="0.5" cy="0.5" r="0.5">
-          <stop offset="0" stopColor="#4FBBFF" stopOpacity="0.28" />
-          <stop offset="1" stopColor="#4FBBFF" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <circle cx="300" cy="300" r="300" fill="url(#hx-glow)" />
-      {/* espessura: o mesmo anel deslocado, mais escuro, dá a profundidade */}
-      <path d={ring(250, 150, 322, 330)} fill="url(#hx-side)" fillRule="evenodd" />
-      <path d={ring(250, 150)} fill="url(#hx-face)" fillRule="evenodd" />
-      <polygon points={hex(250).join(' ')} fill="none" stroke="#4FBBFF" strokeOpacity="0.45" strokeWidth="1.5" />
-      <polygon points={hex(150).join(' ')} fill="none" stroke="#4FBBFF" strokeOpacity="0.3" strokeWidth="1" />
-    </svg>
-  );
-}
-
 /**
- * Login no padrão BKT: fundo grafite com o hexágono em 3D e as boas-vindas à esquerda;
+ * Login no padrão BKT: fundo grafite com a animação RevOps (o cliente no centro) à esquerda;
  * o quadro de acesso flutua à direita, sem encostar nas bordas.
  */
 export function AuthFrame({ children }: { children: ReactNode }) {
   const [bg, setBg] = useState<'loading' | 'ok' | 'none'>('loading');
-  // Personalização → arte padrão do login: hexágono (padrão) ou RevOps animado no lugar das boas-vindas
-  const style = useQuery({ queryKey: ['public', 'login-estilo'], queryFn: () => api<{ style: 'hexagono' | 'revops' }>('/public/login-estilo'), staleTime: 5 * 60_000, retry: false });
-  const revops = style.data?.style === 'revops';
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#1B2026] text-white">
       <div className="pointer-events-none absolute inset-0" aria-hidden>
@@ -71,21 +37,13 @@ export function AuthFrame({ children }: { children: ReactNode }) {
       </div>
       <div className={bg === 'ok' ? 'hidden' : 'pointer-events-none absolute inset-0'} aria-hidden>
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_30%_45%,rgba(47,89,134,0.55),transparent_60%)]" />
-        {!revops && <HexRing className="absolute left-[-18vw] top-1/2 hidden h-[115vh] max-h-[1100px] w-auto -translate-y-1/2 rotate-[8deg] opacity-90 lg:block xl:left-[-6vw]" />}
       </div>
       <div className="relative flex min-h-screen w-full flex-col items-center justify-center gap-8 px-4 py-10 lg:flex-row lg:justify-between lg:gap-12 lg:pl-[6vw] lg:pr-[7vw]">
-        {revops ? (
-          <section className="w-full max-w-md text-center lg:max-w-none lg:flex-1">
-            <RevopsScene className="mx-auto hidden h-auto max-h-[92vh] w-full max-w-[860px] lg:block" />
-            {/* telas pequenas: só a frase */}
-            <div className="lg:hidden"><h2 className="font-display text-2xl font-bold tracking-wide"><span className="text-white/70">Uma </span>única experiência</h2><p className="mt-3 text-base text-white/70">Do primeiro contato à renovação, cada passo pensado para o cliente.</p></div>
-          </section>
-        ) : (
-          <section className="w-full max-w-md text-center lg:max-w-lg lg:text-left">
-            <h2 className="font-display text-3xl font-bold tracking-wide lg:text-5xl">Boas-vindas</h2>
-            <p className="mt-3 text-base text-white/80 lg:text-lg">Acesse com suas credenciais e acompanhe negociações, contratos e resultados em um só lugar.</p>
-          </section>
-        )}
+        <section className="w-full max-w-md text-center lg:max-w-none lg:flex-1">
+          <RevopsScene className="mx-auto hidden h-auto max-h-[calc(100vh-5rem)] w-full max-w-[860px] lg:block" />
+          {/* telas pequenas: só a frase */}
+          <div className="lg:hidden"><h2 className="font-display text-2xl font-bold tracking-wide"><span className="text-white/70">Uma </span>única experiência</h2><p className="mt-3 text-base text-white/70">Do primeiro contato à renovação, cada passo pensado para o cliente.</p></div>
+        </section>
         <div className="w-full max-w-[420px] shrink-0">
           <div className="rounded-xl bg-surface p-7 text-text shadow-overlay ring-1 ring-black/5 sm:p-10">
             <div className="mb-6 flex items-center justify-center gap-3">
