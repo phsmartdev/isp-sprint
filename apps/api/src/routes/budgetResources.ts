@@ -11,13 +11,15 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
 import { costCentersOf, isBudgetAdmin, loadCostCenter, logBudget } from '../services/budget';
+import { supplierHistory, supplierUsage } from '../services/supplierHistory';
+import { todayIn } from '../services/vacations';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data no formato AAAA-MM-DD');
 const uuid = z.string().uuid();
 const M = { module: 'orcamento' as const };
 const today = () => new Date().toISOString().slice(0, 10);
 
-const SupplierBody = z.object({ name: z.string().trim().min(2).max(160), document: z.string().trim().max(30).nullable().optional(), category: z.string().trim().max(80).nullable().optional(), email: z.string().trim().email().max(160).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(), notes: z.string().trim().max(1000).nullable().optional(), active: z.boolean().optional() });
+const SupplierBody = z.object({ name: z.string().trim().min(2).max(160), document: z.string().trim().max(30).nullable().optional(), category: z.string().trim().max(80).nullable().optional(), email: z.string().trim().email().max(160).nullable().optional().or(z.literal('').transform(() => null)), phone: z.string().trim().max(40).nullable().optional(), notes: z.string().trim().max(1000).nullable().optional(), advantages: z.string().trim().max(2000).nullable().optional(), active: z.boolean().optional() });
 const AssetBody = z.object({
   costCenterId: uuid, accountId: uuid.nullable().optional(), name: z.string().trim().min(2).max(160), tag: z.string().trim().max(60).nullable().optional(), serial: z.string().trim().max(80).nullable().optional(),
   category: z.enum(ASSET_CATEGORIES).default('outro'), holderId: uuid.nullable().optional(), supplierId: uuid.nullable().optional(), acquiredOn: day, valueCents: z.number().int().min(0).max(10_000_000_000),
@@ -61,7 +63,31 @@ export const budgetResourceRoutes = [
     handler: async ({ app, auth, params, body }) => {
       const [f] = await app.db.update(s.suppliers).set({ ...body, updatedAt: new Date() }).where(and(eq(s.suppliers.id, params.id), eq(s.suppliers.tenantId, auth.tenantId))).returning();
       if (!f) throw notFound();
+      await logBudget(app.db, auth, null, 'fornecedor', f.id, 'alterado', `Fornecedor ${f.name} alterado (${Object.keys(body).join(', ')}).`);
       return f;
+    },
+  }),
+
+  defineRoute({
+    method: 'GET', url: '/budget/suppliers/:id/historico', summary: 'Ficha do fornecedor: compras (o que, quando, quanto, como), frequência, custo médio por item, economia medida, prazo de entrega e pagamentos', tag: 'Orçamento', ...M, params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const [f] = await app.db.select().from(s.suppliers).where(and(eq(s.suppliers.id, params.id), eq(s.suppliers.tenantId, auth.tenantId))).limit(1);
+      if (!f) throw notFound('Fornecedor não encontrado.');
+      const usage = await supplierUsage(app.db, auth.tenantId, f.id);
+      return { supplier: f, ...(await supplierHistory(app.db, auth.tenantId, f.id, todayIn(auth.timezone))), usage, canDelete: usage.total === 0 };
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/budget/suppliers/:id', summary: 'Exclui o fornecedor sem nenhuma movimentação (com movimentação, só inativar)', tag: 'Orçamento', ...M, params: IdParams,
+    handler: async ({ app, auth, params, req, reply }) => {
+      const [f] = await app.db.select().from(s.suppliers).where(and(eq(s.suppliers.id, params.id), eq(s.suppliers.tenantId, auth.tenantId))).limit(1);
+      if (!f) throw notFound('Fornecedor não encontrado.');
+      const usage = await supplierUsage(app.db, auth.tenantId, f.id);
+      if (usage.total) throw unprocessable(`${f.name} tem movimentação (${usage.used.join(', ')}). Para preservar o histórico, inative em vez de excluir.`);
+      await app.db.delete(s.suppliers).where(eq(s.suppliers.id, f.id));
+      await logBudget(app.db, auth, null, 'fornecedor', f.id, 'excluido', `Fornecedor ${f.name} excluído (sem movimentação).`);
+      await audit(app.db, req, { action: 'supplier.delete', entityType: 'supplier', entityId: f.id, metadata: { name: f.name, document: f.document } });
+      return reply.code(204).send();
     },
   }),
 

@@ -5546,6 +5546,8 @@ export const suppliers = pgTable('suppliers', {
   email: text('email'),
   phone: text('phone'),
   notes: text('notes'),
+  /** vantagens e condições comerciais (prazo de pagamento, frete, garantia, atendimento): o que a equipe registra */
+  advantages: text('advantages'),
   active: boolean('active').notNull().default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),

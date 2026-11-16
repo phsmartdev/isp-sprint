@@ -12,7 +12,7 @@ import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { useUrlState } from '../../lib/hooks';
 import { Button, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
-import { Modal, useToast } from '../../components/ui/overlay';
+import { ConfirmDialog, Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { AccountSelect, BudgetShell, CcSelect, Stat, errMsg, useStructure, type Structure } from '../../features/budget/shared';
 
 const toCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100) || 0;
@@ -204,6 +204,7 @@ export function BudgetPurchasesPage() {
   const q = useQuery({ queryKey: ['budget', 'purchases', f.cc], enabled: f.t === 'compras', queryFn: () => api<{ items: Purchase[] }>(`/budget/purchases${qs({ costCenterId: f.cc || undefined })}`) });
   const [edit, setEdit] = useState<Partial<Purchase> | null>(null);
   const [sup, setSup] = useState<Partial<Structure['suppliers'][number]> | null>(null);
+  const [card, setCard] = useState<string | null>(null);
   const items = q.data?.items ?? [];
   return (
     <BudgetShell subtitle="Pedidos de compra com o caminho da política: Financeiro, cotação de Compras ou negociação, Jurídico e assinatura da Diretoria."
@@ -237,8 +238,9 @@ export function BudgetPurchasesPage() {
           {!st.data ? <LoadingRows /> : !st.data.suppliers.length ? <EmptyState title="Nenhum fornecedor" /> : (
             <ul className="divide-y divide-line">
               {st.data.suppliers.map((s) => (
-                <li key={s.id} className={clsx('flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-surface-2', !s.active && 'opacity-50')} onClick={() => setSup(s)}>
-                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{s.name}</p><p className="text-xs text-muted">{[s.document, s.category, s.email, s.phone].filter(Boolean).join(' · ') || '—'}</p></div>
+                <li key={s.id} className={clsx('flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-surface-2', !s.active && 'opacity-50')} onClick={() => setCard(s.id)}>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{s.name}{!s.active && <span className="ml-2 text-xs font-normal text-muted">inativo</span>}</p><p className="text-xs text-muted">{[s.document, s.category, s.email, s.phone].filter(Boolean).join(' · ') || '—'}</p></div>
+                  <span className="text-xs font-semibold text-primary">Ver ficha</span>
                 </li>
               ))}
             </ul>
@@ -247,6 +249,7 @@ export function BudgetPurchasesPage() {
       )}
       {edit && st.data && <PurchaseModal st={st.data} p={edit} onClose={() => setEdit(null)} />}
       {sup && <SupplierModal s={sup} onClose={() => setSup(null)} />}
+      {card && <SupplierDrawer id={card} onEdit={(s) => setSup(s)} onClose={() => setCard(null)} />}
     </BudgetShell>
   );
 }
@@ -306,9 +309,9 @@ function PurchaseModal({ st, p, onClose }: { st: Structure; p: Partial<Purchase>
 }
 
 function SupplierModal({ s, onClose }: { s: Partial<Structure['suppliers'][number]>; onClose: () => void }) {
-  const [v, setV] = useState({ name: s.name ?? '', document: s.document ?? '', category: s.category ?? '', email: s.email ?? '', phone: s.phone ?? '', notes: s.notes ?? '', active: s.active ?? true });
+  const [v, setV] = useState({ name: s.name ?? '', document: s.document ?? '', category: s.category ?? '', email: s.email ?? '', phone: s.phone ?? '', notes: s.notes ?? '', advantages: s.advantages ?? '', active: s.active ?? true });
   const save = useSave(onClose);
-  const body = { name: v.name, document: v.document || null, category: v.category || null, email: v.email || null, phone: v.phone || null, notes: v.notes || null, active: v.active };
+  const body = { name: v.name, document: v.document || null, category: v.category || null, email: v.email || null, phone: v.phone || null, notes: v.notes || null, advantages: v.advantages || null, active: v.active };
   return (
     <Modal open onClose={onClose} title={s.id ? s.name! : 'Novo fornecedor'} footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={v.name.trim().length < 2} loading={save.isPending} onClick={() => save.mutate(s.id ? { url: `/budget/suppliers/${s.id}`, method: 'PATCH', body } : { url: '/budget/suppliers', method: 'POST', body })}>Salvar</Button></>}>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -317,9 +320,89 @@ function SupplierModal({ s, onClose }: { s: Partial<Structure['suppliers'][numbe
         <FormField label="Categoria" htmlFor="sp-c"><Input id="sp-c" value={v.category} onChange={(e) => setV({ ...v, category: e.target.value })} placeholder="Ex.: Software, Gráfica, Agência" /></FormField>
         <FormField label="E-mail" htmlFor="sp-e"><Input id="sp-e" type="email" value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} /></FormField>
         <FormField label="Telefone" htmlFor="sp-p"><Input id="sp-p" value={v.phone} onChange={(e) => setV({ ...v, phone: e.target.value })} /></FormField>
+        <FormField label="Vantagens e condições comerciais" htmlFor="sp-v" className="sm:col-span-2" hint="Prazo de pagamento, frete, garantia, atendimento, exclusividade…"><Textarea id="sp-v" rows={2} value={v.advantages} onChange={(e) => setV({ ...v, advantages: e.target.value })} /></FormField>
         <FormField label="Observações" htmlFor="sp-o" className="sm:col-span-2"><Textarea id="sp-o" rows={2} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></FormField>
         {s.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-[rgb(var(--primary))]" checked={v.active} onChange={(e) => setV({ ...v, active: e.target.checked })} />Fornecedor ativo</label>}
       </div>
     </Modal>
+  );
+}
+
+type SupplierCard = {
+  supplier: Structure['suppliers'][number];
+  purchases: { kind: string; on: string; what: string; qty: number | null; unitCents: number | null; amountCents: number; how: string; ref: string | null; referenceCents: number | null; deliveryDays: number | null }[];
+  kpis: { count: number; totalCents: number; avgTicketCents: number | null; firstOn: string | null; lastOn: string | null; avgDaysBetween: number | null; last12m: { count: number; cents: number }; paidCents: number; paymentsOnTimePct: number | null };
+  how: { kind: string; label: string; n: number }[];
+  items: { item: string; purchases: number; qty: number; avgUnitCents: number; lastUnitCents: number | null; lastOn: string | null }[];
+  measured: { savingsCents: number | null; savingsPct: number | null; savingsBase: number; avgDeliveryDays: number | null; deliveryBase: number; quoteWins: number };
+  usage: { total: number; used: string[] }; canDelete: boolean;
+};
+
+/** Ficha do fornecedor: dados, como e quanto compramos, frequência, custo médio por item e vantagens (medidas e registradas). */
+function SupplierDrawer({ id, onEdit, onClose }: { id: string; onEdit: (s: Structure['suppliers'][number]) => void; onClose: () => void }) {
+  const q = useQuery({ queryKey: ['budget', 'supplier', id], queryFn: () => api<SupplierCard>(`/budget/suppliers/${id}/historico`) });
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const del = useMutation({
+    mutationFn: () => api(`/budget/suppliers/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['budget'] }); toast({ tone: 'success', message: 'Fornecedor excluído' }); onClose(); },
+    onError: (e) => { setConfirm(false); toast({ tone: 'error', message: errMsg(e) }); },
+  });
+  const d = q.data;
+  const k = d?.kpis;
+  const freq = (n: number | null) => (n == null ? 'sem base (menos de 2 compras)' : n <= 1 ? 'mais de uma por dia' : `a cada ${n} dias, em média`);
+  return (
+    <Drawer open onClose={onClose} width="lg" title={d?.supplier.name ?? 'Fornecedor'}
+      footer={d && <div className="flex w-full flex-wrap items-center justify-between gap-2">
+        {d.canDelete ? <Button variant="ghost" className="text-danger" onClick={() => setConfirm(true)}>Excluir fornecedor</Button> : <span className="text-xs text-muted">Com movimentação: não pode ser excluído (inative em Editar).</span>}
+        <Button variant="primary" onClick={() => { onEdit(d.supplier); onClose(); }}>Editar</Button>
+      </div>}>
+      {q.isLoading ? <LoadingRows rows={6} /> : q.isError || !d || !k ? <EmptyState title="Não foi possível carregar a ficha" /> : (
+        <div className="space-y-5 text-sm">
+          <p className="text-muted">{[d.supplier.document, d.supplier.category, d.supplier.email, d.supplier.phone].filter(Boolean).join(' · ') || 'Sem dados de contato'}{!d.supplier.active && ' · inativo'}</p>
+          <dl className="grid grid-cols-2 gap-px border border-line bg-line sm:grid-cols-4">
+            {([['Total comprado', fmtBRL(k.totalCents)], ['Compras', String(k.count)], ['Ticket médio', k.avgTicketCents == null ? '—' : fmtBRL(k.avgTicketCents)], ['Últimos 12 meses', `${fmtBRL(k.last12m.cents)} · ${k.last12m.count}`]] as const).map(([l, v]) => (
+              <div key={l} className="bg-surface px-3 py-2"><dt className="text-xs text-muted">{l}</dt><dd className="num font-bold text-ink">{v}</dd></div>
+            ))}
+          </dl>
+          <section className="grid gap-4 sm:grid-cols-2">
+            <div><p className="mb-1 text-xs font-semibold text-muted">Frequência</p>
+              <p className="text-ink">{freq(k.avgDaysBetween)}</p>
+              <p className="text-xs text-muted">{k.firstOn ? `Primeira compra em ${fmtDate(k.firstOn)} · última em ${fmtDate(k.lastOn!)}` : 'Nenhuma compra registrada'}</p></div>
+            <div><p className="mb-1 text-xs font-semibold text-muted">Como compramos</p>
+              {d.how.length ? <ul className="space-y-0.5">{d.how.map((h) => <li key={h.kind} className="flex justify-between gap-2"><span className="text-text">{h.label}</span><span className="num font-semibold text-ink">{h.n}</span></li>)}</ul> : <p className="text-muted">—</p>}</div>
+          </section>
+          <section><p className="mb-1 text-xs font-semibold text-muted">Vantagens do fornecedor</p>
+            <ul className="space-y-1">
+              <li><span className="text-text">Economia em relação à cotação ou ao aprovado: </span><b className="text-ink">{d.measured.savingsCents == null ? 'sem base' : `${fmtBRL(d.measured.savingsCents)} (${d.measured.savingsPct?.toLocaleString('pt-BR')}%)`}</b>{d.measured.savingsBase > 0 && <span className="text-xs text-muted"> · {d.measured.savingsBase} compra(s) com referência</span>}</li>
+              <li><span className="text-text">Prazo médio de entrega: </span><b className="text-ink">{d.measured.avgDeliveryDays == null ? 'sem base' : `${d.measured.avgDeliveryDays} dia(s)`}</b>{d.measured.deliveryBase > 0 && <span className="text-xs text-muted"> · {d.measured.deliveryBase} entrega(s)</span>}</li>
+              <li><span className="text-text">Escolhido em cotações com concorrentes: </span><b className="text-ink">{d.measured.quoteWins}</b></li>
+              <li><span className="text-text">Pago a ele: </span><b className="text-ink">{fmtBRL(k.paidCents)}</b>{k.paymentsOnTimePct != null && <span className="text-xs text-muted"> · {k.paymentsOnTimePct}% dos pagamentos em dia</span>}</li>
+            </ul>
+            <p className="mt-2 border-l-2 border-primary bg-primary-soft/50 px-3 py-2 text-text">{d.supplier.advantages?.trim() || <span className="text-muted">Condições comerciais não registradas. Use Editar para anotar prazo de pagamento, frete, garantia, atendimento.</span>}</p>
+          </section>
+          {d.items.length > 0 && (
+            <section><p className="mb-1 text-xs font-semibold text-muted">Custo médio por item</p>
+              <table className="w-full text-xs"><thead><tr className="text-left text-muted"><th className="py-1 font-semibold">Item</th><th className="py-1 text-right font-semibold">Compras</th><th className="py-1 text-right font-semibold">Quantidade</th><th className="py-1 text-right font-semibold">Custo médio</th><th className="py-1 text-right font-semibold">Último</th></tr></thead>
+                <tbody>{d.items.map((i) => <tr key={i.item} className="border-t border-line"><td className="py-1.5 text-ink">{i.item}</td><td className="num py-1.5 text-right">{i.purchases}</td><td className="num py-1.5 text-right">{i.qty.toLocaleString('pt-BR')}</td><td className="num py-1.5 text-right font-semibold">{fmtBRL(i.avgUnitCents)}</td><td className={clsx('num py-1.5 text-right', i.lastUnitCents != null && i.lastUnitCents > i.avgUnitCents ? 'text-danger' : 'text-text')}>{i.lastUnitCents == null ? '—' : fmtBRL(i.lastUnitCents)}</td></tr>)}</tbody></table>
+            </section>
+          )}
+          <section><p className="mb-1 text-xs font-semibold text-muted">Histórico de compras</p>
+            {!d.purchases.length ? <p className="text-muted">Nenhuma compra registrada com este fornecedor.</p> : (
+              <ul className="divide-y divide-line border border-line">{d.purchases.map((p, i) => (
+                <li key={i} className="flex flex-wrap items-start justify-between gap-2 px-3 py-2">
+                  <span className="min-w-0"><span className="block font-semibold text-ink">{p.what}</span><span className="block text-xs text-muted">{fmtDate(p.on)} · {p.how}{p.ref ? ` · ${p.ref}` : ''}{p.qty ? ` · ${p.qty.toLocaleString('pt-BR')}${p.unitCents != null ? ` × ${fmtBRL(p.unitCents)}` : ''}` : ''}</span></span>
+                  <span className="num text-right font-semibold text-ink">{fmtBRL(p.amountCents)}{p.referenceCents != null && p.referenceCents > p.amountCents && <span className="block text-xs font-normal text-[#15803D]">economia {fmtBRL(p.referenceCents - p.amountCents)}</span>}</span>
+                </li>
+              ))}</ul>
+            )}
+          </section>
+        </div>
+      )}
+      <ConfirmDialog open={confirm} title="Excluir fornecedor?" confirmLabel="Excluir" tone="danger" loading={del.isPending} onCancel={() => setConfirm(false)} onConfirm={() => del.mutate()}>
+        {d?.supplier.name} não tem nenhuma movimentação e será excluído. A exclusão fica registrada na auditoria.
+      </ConfirmDialog>
+    </Drawer>
   );
 }
