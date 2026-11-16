@@ -62,6 +62,8 @@ export async function loadLine(db: DbOrTx, auth: AuthContext, id: string, lock =
   return { l, c, access: ccAccess(auth, c) };
 }
 const stageOf = (auth: AuthContext) => (auth.profiles.includes('diretoria') || auth.profiles.includes('gerencia') ? 'diretoria' : 'gerencia');
+/** Pode decidir agora: aguardando decisão; ou, para a Diretoria, a proposta ainda não enviada (planejado). */
+const decidableNow = (auth: AuthContext, l: Line) => DECIDABLE_STATES.includes(l.approvalState as ApprovalState) || (l.approvalState === 'planejado' && auth.profiles.includes('diretoria') && decidesStages(auth).includes('diretoria'));
 const canDecide = (auth: AuthContext, l: Line) => {
   const st = decidesStages(auth);
   return st.includes((l.approvalStage ?? 'diretoria') as 'gerencia' | 'diretoria') && l.createdBy !== auth.userId && l.ownerId !== auth.userId;
@@ -247,7 +249,7 @@ export const budgetCentralRoutes = [
           id: r.l.id, code: r.l.code, what: r.l.what, costCenterId: r.l.costCenterId, accountId: r.l.accountId, month: r.l.month, ownerId: r.l.ownerId, owner: r.l.ownerId ? nameOf.get(r.l.ownerId) ?? null : null,
           qty: milliToQty(r.l.qtyMilli), unit: r.l.unit, unitCents: r.l.unitCents, approvalState: r.l.approvalState, approvalStage: r.l.approvalStage, executionState: r.l.executionState, financial: r.financial,
           priority: r.l.priority, expenseType: r.l.expenseType, projectId: r.l.projectId, campaignId: r.l.campaignId, supplierId: r.l.supplierId, openQuestions: r.openQuestions, limitCents: r.l.limitCents, targetUnitCents: r.l.targetUnitCents,
-          ...r.f, canDecide: DECIDABLE_STATES.includes(r.l.approvalState as ApprovalState) && canDecide(auth, r.l),
+          ...r.f, canDecide: decidableNow(auth, r.l) && canDecide(auth, r.l), proposal: r.l.approvalState === 'planejado',
         })),
         accounts: accounts.map((a) => ({ id: a.id, parentId: a.parentId, code: a.code, name: a.name, leaf: a.leaf, level: a.level, nature: a.nature, active: a.active })),
         options: { costCenters: ccs.map((c) => ({ id: c.id, code: c.code, name: c.name })), users, suppliers, projects, campaigns },
@@ -287,7 +289,7 @@ export const budgetCentralRoutes = [
         events, documents: docs, expenses, adjustments: adjustments.map((a) => ({ ...a, requestedByName: nm(a.requestedBy), decidedByName: nm(a.decidedBy) })),
         payables: payables.map((p) => ({ ...p, payments: paymentRows.filter((x) => x.payableId === p.id).map((x) => ({ ...x, createdByName: nm(x.createdBy), reversed: paymentRows.some((y) => y.reversesId === x.id) })) })),
         can: {
-          edit: editable, submit: editable, decide: DECIDABLE_STATES.includes(l.approvalState as ApprovalState) && canDecide(auth, l), ask: decidesStages(auth).length > 0 && l.approvalState !== 'rascunho',
+          edit: editable, submit: editable, decide: decidableNow(auth, l) && canDecide(auth, l), ask: decidesStages(auth).length > 0 && l.approvalState !== 'rascunho',
           answer: access.plan || l.ownerId === auth.userId || l.createdBy === auth.userId, execute: access.execute && isApproved(l.approvalState as ApprovalState) && l.executionState !== 'encerrado',
           finance: isFinance(auth), guardian: access.plan && isApproved(l.approvalState as ApprovalState), decideGuardian: auth.profiles.includes('diretoria') && decidesStages(auth).includes('diretoria'),
         },
@@ -418,12 +420,12 @@ export const budgetCentralRoutes = [
       })).min(1).max(200),
     }),
     handler: async ({ app, auth, body, req }) => {
-      if (!decidesStages(auth).length) throw forbidden('Quem aprova o orçamento é a Gerência e a Diretoria (cargo Liderança / gestor).');
+      if (!decidesStages(auth).length) throw forbidden('Quem aprova o orçamento é a Diretoria e a Gerência (cargo Liderança).');
       const decided: { lineId: string; code: string | null; state: string }[] = [], blocked: { lineId: string; code: string | null; reason: string }[] = [];
       for (const it of body.items) {
         const r = await app.db.transaction(async (tx) => {
           const { l } = await loadLine(tx, auth, it.lineId, true);
-          if (!DECIDABLE_STATES.includes(l.approvalState as ApprovalState)) return { blocked: 'Não está aguardando decisão.' };
+          if (!decidableNow(auth, l)) return { blocked: 'Não está aguardando decisão.' };
           if (!canDecide(auth, l)) return { blocked: l.createdBy === auth.userId || l.ownerId === auth.userId ? 'Quem pediu não decide o próprio lançamento.' : 'Está na alçada de outra pessoa.' };
           const [{ open }] = await tx.select({ open: sql<number>`count(*)::int` }).from(s.budgetQuestions).where(and(eq(s.budgetQuestions.lineId, l.id), eq(s.budgetQuestions.status, 'aberto'), eq(s.budgetQuestions.blocking, true))) as [{ open: number }];
           if (open && it.decision !== 'rejeitar' && it.decision !== 'revisao') return { blocked: 'Há questionamento obrigatório sem resposta.' };

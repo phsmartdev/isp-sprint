@@ -24,7 +24,7 @@ import { AccountSelect, errMsg, type Structure } from '../../features/budget/sha
 type Figures = { planned: number; original: number; approved: number; reserved: number; committed: number; realized: number; paid: number; charges: number; consumption: number; balance: number; deviation: number | null; deviationPct: number | null; economy: number; excess: number; pending: number };
 type Row = Figures & {
   id: string; code: string | null; what: string; costCenterId: string; accountId: string; month: string; ownerId: string | null; owner: string | null; qty: string; unit: string; unitCents: number | null;
-  approvalState: ApprovalState; approvalStage: string | null; executionState: ExecutionState; financial: PaymentFlag; priority: string; expenseType: string; openQuestions: number; limitCents: number | null; targetUnitCents: number | null; canDecide: boolean;
+  approvalState: ApprovalState; approvalStage: string | null; executionState: ExecutionState; financial: PaymentFlag; priority: string; expenseType: string; openQuestions: number; limitCents: number | null; targetUnitCents: number | null; canDecide: boolean; proposal?: boolean;
 };
 type Kpis = { original: number; revised: number; approved: number; requested: number; reserved: number; committed: number; realized: number; paid: number; charges: number; available: number; awaiting: number; excessAuthorized: number; guardianBalance: number | null; projection: number; economy: number; excess: number };
 type SeriesPoint = { month: string; original: number; revised: number; approved: number; committed: number; realized: number; paid: number; projection: number };
@@ -47,6 +47,12 @@ const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao
 const key = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 const APPROVAL_TONE: Record<ApprovalState, Tone> = { rascunho: 'neutral', planejado: 'neutral', enviado: 'blue', em_analise: 'blue', questionado: 'orange', em_revisao: 'orange', aprovado: 'green', aprovado_ressalvas: 'green', rejeitado: 'red' };
 const FIN_TONE = (f: PaymentFlag): Tone => (f === 'vencido' ? 'red' : f === 'pago' || f === 'conciliado' || f === 'pago_em_dia' || f === 'pago_antecipado' ? 'green' : f === 'parcial' || f === 'a_vencer' || f === 'pago_atraso' || f === 'pago_com_juros' ? 'orange' : 'neutral');
+
+/** Situação discreta: ponto colorido + texto (no lugar de etiquetas cheias). */
+const DOT: Record<Tone, string> = { neutral: 'bg-line-strong', blue: 'bg-primary', sky: 'bg-sky', green: 'bg-[#15803D]', orange: 'bg-warning', purple: 'bg-purple', red: 'bg-danger', yellow: 'bg-warning' };
+function StatusDot({ tone, children }: { tone: Tone; children: ReactNode }) {
+  return <span className={clsx('inline-flex items-center gap-1.5 whitespace-nowrap text-xs', tone === 'neutral' ? 'text-muted' : 'text-text')}><span className={clsx('h-1.5 w-1.5 rounded-full', DOT[tone])} aria-hidden />{children}</span>;
+}
 
 type ColKey = 'conta' | 'centro' | 'responsavel' | 'competencia' | 'quantidade' | 'unitario' | 'planejado' | 'aprovado' | 'comprometido' | 'realizado' | 'pago' | 'saldo' | 'desvio' | 'aprovacao' | 'execucao' | 'financeiro';
 const COLS: { key: ColKey; label: string; num?: boolean }[] = [
@@ -112,6 +118,7 @@ export function BudgetCentral({ st, year }: { st: Structure; year: number }) {
           ))}
         </div>
       )}
+      {d.rows.some((r) => r.canDecide) && <DecisionPanel d={d} onOpen={(id) => setOpen({ id, tab: 'aprovacao' })} />}
       <BudgetTable d={d} st={st} cols={cols} setCols={setCols} selected={selected} setSelected={setSelected} onOpen={(id, tab) => setOpen({ id, tab })} onCreate={() => setCreating(true)} onBatch={() => setBatch(true)} />
       <Evolution series={d.series} onPick={(m) => set({ from: m, to: m })} />
       {open && <LinePanel id={open.id} tab={open.tab} onTab={(tab) => setOpen({ ...open, tab })} onClose={() => setOpen(null)} st={st} options={d.options} />}
@@ -265,9 +272,9 @@ function BudgetTable({ d, st, cols, setCols, selected, setSelected, onOpen, onCr
       case 'pago': return btn(r.paid ? fmtBRL(r.paid) : '—', 'financeiro', 'Pago');
       case 'saldo': return <span className={clsx('num', r.balance < 0 && 'font-semibold text-danger')}>{r.approved ? fmtBRL(r.balance) : '—'}</span>;
       case 'desvio': return btn(r.deviation === null ? '—' : <span className={clsx(r.deviation > 0 && 'text-danger')}>{fmtBRL(r.deviation)}{r.deviationPct !== null ? ` (${r.deviationPct.toLocaleString('pt-BR')}%)` : ''}</span>, 'resultado', 'Desvio');
-      case 'aprovacao': return <button type="button" onClick={() => onOpen(r.id, 'aprovacao')}><Chip tone={APPROVAL_TONE[r.approvalState]}>{APPROVAL_STATE_LABELS[r.approvalState]}{r.openQuestions ? ` · ${r.openQuestions}?` : ''}</Chip></button>;
-      case 'execucao': return <Chip tone="neutral">{EXECUTION_STATE_LABELS[r.executionState]}</Chip>;
-      case 'financeiro': return <button type="button" onClick={() => onOpen(r.id, 'financeiro')}><Chip tone={FIN_TONE(r.financial)}>{PAYMENT_FLAG_LABELS[r.financial]}</Chip></button>;
+      case 'aprovacao': return <button type="button" className="hover:underline" onClick={() => onOpen(r.id, 'aprovacao')}><StatusDot tone={APPROVAL_TONE[r.approvalState]}>{APPROVAL_STATE_LABELS[r.approvalState]}{r.openQuestions ? ` · ${r.openQuestions}?` : ''}</StatusDot></button>;
+      case 'execucao': return <StatusDot tone="neutral">{EXECUTION_STATE_LABELS[r.executionState]}</StatusDot>;
+      case 'financeiro': return <button type="button" className="hover:underline" onClick={() => onOpen(r.id, 'financeiro')}><StatusDot tone={FIN_TONE(r.financial)}>{PAYMENT_FLAG_LABELS[r.financial]}</StatusDot></button>;
     }
   };
   const subtotal = (rs: Row[], c: ColKey) => {
@@ -309,17 +316,17 @@ function BudgetTable({ d, st, cols, setCols, selected, setSelected, onOpen, onCr
                 const isClosed = closed.includes(a.id);
                 return (
                   <Fragment key={a.id}>
-                    <tr className={clsx('border-t border-line', a.level === 1 ? 'bg-navy/[0.06] font-bold text-ink' : 'bg-surface-2/60 font-semibold text-ink')}>
+                    <tr className={clsx('border-t border-line/70', a.level === 1 ? 'bg-surface-2/70 font-semibold text-ink' : 'bg-surface font-medium text-text')}>
                       <td className="sticky left-0 bg-inherit px-2 py-1.5" />
                       <td className="sticky left-8 bg-inherit px-3 py-1.5" style={{ paddingLeft: 12 + (a.level - 1) * 14 }}>
                         <button type="button" className="inline-flex items-center gap-1" aria-expanded={!isClosed} onClick={() => setClosed(isClosed ? closed.filter((x) => x !== a.id) : [...closed, a.id])}>
-                          {isClosed ? <ChevronRight className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}{a.code} {a.name}
+                          {isClosed ? <ChevronRight className="h-4 w-4 text-faint" aria-hidden /> : <ChevronDown className="h-4 w-4 text-faint" aria-hidden />}<span className="num text-xs text-muted">{a.code}</span> {a.name}
                         </button>
                       </td>
-                      {visibleCols.map((c) => <td key={c.key} className="px-3 py-1.5 text-right">{subtotal(rs, c.key)}</td>)}
+                      {visibleCols.map((c) => <td key={c.key} className="px-3 py-1.5 text-right text-muted">{subtotal(rs, c.key)}</td>)}
                     </tr>
                     {a.leaf && !isClosed && d.rows.filter((r) => r.accountId === a.id).map((r) => (
-                      <tr key={r.id} className="border-t border-line hover:bg-primary-soft/40">
+                      <tr key={r.id} className="border-t border-line/50 hover:bg-primary-soft/30">
                         <td className="sticky left-0 bg-surface px-2 py-1.5">{r.canDecide && <input type="checkbox" aria-label={`Selecionar ${r.code}`} checked={selected.includes(r.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, r.id] : selected.filter((x) => x !== r.id))} />}</td>
                         <td className="sticky left-8 bg-surface px-3 py-1.5" style={{ paddingLeft: 12 + a.level * 14 }}>
                           <button type="button" className="text-left hover:text-primary" onClick={() => onOpen(r.id, 'planejamento')}><span className="mr-2 text-xs text-muted">{r.code}</span><span className="text-ink">{r.what}</span>{(r as { origin?: string | null }).origin === 'concessao_nao_planejada' && <span className="ml-2 bg-warning-soft px-1.5 text-2xs font-semibold text-[#9A4D06]">Concessão não planejada</span>}</button>
@@ -381,6 +388,89 @@ function NewLine({ st, d, year, onClose, onCreated }: { st: Structure; d: Centra
 }
 
 // ------------------------------------------------------------------ aprovação em lote
+/**
+ * Proposta de orçamento para quem decide: tudo o que aguarda decisão (e, para a Diretoria, o que já foi planejado e ainda
+ * não enviado), por centro de custo. Aprovar item a item, o centro inteiro ou a proposta toda; pedir ajustes ou rejeitar com motivo.
+ * Aprovação parcial, valor-alvo e limite ficam no painel do lançamento (Detalhes).
+ */
+function DecisionPanel({ d, onOpen }: { d: CentralData; onOpen: (id: string) => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const rows = d.rows.filter((r) => r.canDecide);
+  const [ask, setAsk] = useState<{ ids: string[]; decision: 'revisao' | 'rejeitar'; label: string } | null>(null);
+  const [note, setNote] = useState('');
+  const [confirmAll, setConfirmAll] = useState<{ ids: string[]; label: string } | null>(null);
+  const m = useMutation({
+    mutationFn: (x: { ids: string[]; decision: BudgetDecision; note?: string }) => api<{ decided: { code: string | null }[]; blocked: { code: string | null; reason: string }[] }>('/budget/decisions', { method: 'POST', body: { items: x.ids.map((id) => ({ lineId: id, decision: x.decision, note: x.note || null })) } }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['budget'] });
+      setAsk(null); setNote(''); setConfirmAll(null);
+      toast({ tone: r.blocked.length ? 'error' : 'success', message: r.blocked.length ? `${r.decided.length} decidido(s); fora: ${r.blocked.map((b) => `${b.code} (${b.reason})`).join('; ')}` : `${r.decided.length} decisão(ões) registrada(s)` });
+    },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const centers = [...new Set(rows.map((r) => r.costCenterId))].map((id) => ({ id, cc: d.options.costCenters.find((c) => c.id === id) ?? d.centers.find((c) => c.id === id), rows: rows.filter((r) => r.costCenterId === id) }));
+  const total = rows.reduce((t, r) => t + r.planned, 0);
+  const notSent = rows.filter((r) => r.proposal).length;
+  const quiet = 'text-sm font-semibold text-primary hover:underline disabled:opacity-50';
+  return (
+    <section aria-label="Proposta de orçamento para sua decisão" className="card overflow-hidden p-0">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-primary-soft/40 px-5 py-3.5">
+        <div>
+          <h2 className="text-md font-bold text-ink">Proposta de orçamento para sua decisão</h2>
+          <p className="text-sm text-muted">{rows.length} item(ns) · <span className="num font-semibold text-ink">{fmtBRL(total)}</span>{notSent ? ` · ${notSent} ainda não enviado(s) pelo responsável` : ''}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" onClick={() => { setNote(''); setAsk({ ids: rows.map((r) => r.id), decision: 'revisao', label: 'toda a proposta' }); }}>Pedir ajustes</Button>
+          <Button variant="primary" loading={m.isPending && !ask && !!confirmAll} onClick={() => setConfirmAll({ ids: rows.map((r) => r.id), label: `toda a proposta (${rows.length} itens · ${fmtBRL(total)})` })}>Aprovar toda a proposta</Button>
+        </div>
+      </header>
+      <div className="divide-y divide-line">
+        {centers.map((g) => {
+          const sub = g.rows.reduce((t, r) => t + r.planned, 0);
+          return (
+            <div key={g.id}>
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-2/60 px-5 py-2 text-sm">
+                <span><b className="text-ink">{g.cc?.code}</b> <span className="text-text">{g.cc?.name}</span> <span className="text-muted">· {g.rows.length} item(ns) · <span className="num">{fmtBRL(sub)}</span></span></span>
+                {centers.length > 1 && <button type="button" className={quiet} onClick={() => setConfirmAll({ ids: g.rows.map((r) => r.id), label: `o centro ${g.cc?.code ?? ''} (${g.rows.length} itens · ${fmtBRL(sub)})` })}>Aprovar o centro</button>}
+              </div>
+              <ul className="divide-y divide-line">
+                {g.rows.map((r) => (
+                  <li key={r.id} className="grid items-center gap-x-4 gap-y-1 px-5 py-2.5 text-sm sm:grid-cols-[minmax(0,1fr)_7rem_8rem_auto]">
+                    <span className="min-w-0"><span className="mr-2 text-xs text-muted">{r.code}</span><span className="text-ink">{r.what}</span>
+                      <span className="block text-xs text-muted">{monthLabel(r.month)}{r.owner ? ` · ${r.owner}` : ''} · {r.proposal ? 'proposta ainda não enviada' : APPROVAL_STATE_LABELS[r.approvalState].toLowerCase()}{r.openQuestions ? ` · ${r.openQuestions} questionamento(s)` : ''}</span></span>
+                    <span className="num text-right font-semibold text-ink">{fmtBRL(r.planned)}</span>
+                    <span className="text-xs text-muted sm:text-right">{r.qty} {r.unit}{r.unitCents != null ? ` × ${fmtBRL(r.unitCents)}` : ''}</span>
+                    <span className="flex flex-wrap justify-end gap-3">
+                      <button type="button" className={quiet} disabled={m.isPending} onClick={() => m.mutate({ ids: [r.id], decision: 'aprovar' })}>Aprovar</button>
+                      <button type="button" className="text-sm text-text hover:underline" onClick={() => { setNote(''); setAsk({ ids: [r.id], decision: 'revisao', label: r.code ?? r.what }); }}>Ajustes</button>
+                      <button type="button" className="text-sm text-danger hover:underline" onClick={() => { setNote(''); setAsk({ ids: [r.id], decision: 'rejeitar', label: r.code ?? r.what }); }}>Rejeitar</button>
+                      <button type="button" className="text-sm text-muted hover:text-ink hover:underline" onClick={() => onOpen(r.id)}>Detalhes</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+      <p className="border-t border-line px-5 py-2 text-xs text-muted">Aprovar parcialmente, com valor-alvo ou limite: abra “Detalhes”. Ajustes devolvem o item ao responsável com o seu comentário; rejeição exige motivo. Cada decisão fica no histórico do lançamento.</p>
+      {ask && (
+        <Modal open onClose={() => setAsk(null)} title={ask.decision === 'revisao' ? `Pedir ajustes · ${ask.label}` : `Rejeitar · ${ask.label}`}
+          footer={<><Button variant="ghost" onClick={() => setAsk(null)}>Cancelar</Button><Button variant={ask.decision === 'rejeitar' ? 'danger' : 'primary'} disabled={note.trim().length < 5} loading={m.isPending} onClick={() => m.mutate({ ids: ask.ids, decision: ask.decision, note })}>{ask.decision === 'revisao' ? 'Pedir ajustes' : 'Rejeitar'}</Button></>}>
+          <FormField label={ask.decision === 'revisao' ? 'O que precisa ser ajustado' : 'Motivo da rejeição'} htmlFor="dp-note"><Textarea id="dp-note" rows={3} autoFocus value={note} onChange={(e) => setNote(e.target.value)} /></FormField>
+          <p className="mt-2 text-xs text-muted">{ask.ids.length > 1 ? `Vale para os ${ask.ids.length} itens. ` : ''}O responsável é avisado e o comentário fica no histórico.</p>
+        </Modal>
+      )}
+      {confirmAll && (
+        <Modal open onClose={() => setConfirmAll(null)} title="Aprovar" footer={<><Button variant="ghost" onClick={() => setConfirmAll(null)}>Cancelar</Button><Button variant="primary" loading={m.isPending} onClick={() => m.mutate({ ids: confirmAll.ids, decision: 'aprovar' })}>Aprovar</Button></>}>
+          <p className="text-sm text-text">Aprovar integralmente {confirmAll.label}? Itens com questionamento obrigatório em aberto ficam de fora e aparecem no aviso.</p>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function BatchDecision({ rows, onClose, onDone }: { rows: Row[]; onClose: () => void; onDone: () => void }) {
   const [items, setItems] = useState(rows.map((r) => ({ lineId: r.id, decision: 'aprovar' as BudgetDecision, note: '' })));
   const [result, setResult] = useState<{ decided: { code: string | null; state: string }[]; blocked: { code: string | null; reason: string }[] } | null>(null);

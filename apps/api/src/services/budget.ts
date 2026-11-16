@@ -23,8 +23,9 @@ export const budgetRole = (auth: AuthContext): BudgetRole => (auth.profiles.some
  * e quem não tem cargo Liderança / gestor no setor não aprova.
  */
 export const decidesStages = (auth: AuthContext & { sectorRole?: string | null }): ('gerencia' | 'diretoria')[] => {
+  // Diretoria é a aprovação final: decide pelo perfil (só quem é apenas observador nos setores fica de fora)
+  if (auth.profiles.includes('diretoria')) return auth.sectorRole === 'observador' ? [] : ['gerencia', 'diretoria'];
   if (auth.sectorRole && auth.sectorRole !== 'lideranca') return [];
-  if (auth.profiles.includes('diretoria')) return ['gerencia', 'diretoria'];
   if (auth.profiles.includes('gerencia')) return ['gerencia'];
   return [];
 };
