@@ -125,6 +125,8 @@ const AdminContractResponsibilities = lazy(() => import('./pages/admin/ContractR
 const AdminApprovalSettings = lazy(() => import('./pages/admin/ApprovalSettings').then((m) => ({ default: m.AdminApprovalSettings })));
 const AdminOverview = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminOverview })));
 const AdminUsers = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminUsers })));
+const AdminWebservice = lazy(() => import('./pages/admin/Webservice').then((m) => ({ default: m.AdminWebservice })));
+const ApiDocsPage = lazy(() => import('./pages/playbooks/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const AdminPlans = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminPlans })));
 const AdminSources = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSources })));
 const AdminIntegrations = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminIntegrations })));
@@ -232,6 +234,7 @@ export function App() {
         <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />
         <Route path="apoio" element={<SupportPage />} />
         <Route path="playbooks" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybooksPage /></Suspense>} />
+        <Route path="playbooks/api" element={<Suspense fallback={<LoadingRows rows={6} />}><ApiDocsPage /></Suspense>} />
         <Route path="playbooks/novo" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookNewPage /></Suspense>} />
         <Route path="playbooks/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookReaderPage /></Suspense>} />
         <Route path="playbooks/:id/editar" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookEditorPage /></Suspense>} />
@@ -301,6 +304,7 @@ export function App() {
           <Route path="contract-templates" element={<Navigate to="/settings/modelos?aba=contratos" replace />} />
           <Route path="sources" element={<AdminSources />} />
           <Route path="integrations" element={<AdminIntegrations />} />
+          <Route path="webservice" element={<AdminWebservice />} />
           <Route path="notifications" element={<Navigate to="/settings/modelos?aba=emails" replace />} />
           <Route path="security" element={<AdminSecurity />} />
           <Route path="branding" element={<AdminBranding />} />

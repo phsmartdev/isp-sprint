@@ -60,9 +60,44 @@ declare module 'fastify' {
 export const SESSION_COOKIE = 'isp_session';
 
 /** Resolve a sessão a partir do cookie. Nunca confia em tenant/usuário vindos do cliente. */
+/** Prefixo dos tokens da API de integração (usuário de webservice). */
+export const API_TOKEN_PREFIX = 'isk_';
+
+/**
+ * API de integração: "Authorization: Bearer isk_…" autentica como o usuário de webservice dono do token.
+ * Vale o perfil desse usuário (matriz de acesso, módulos, IP liberado), como para qualquer pessoa.
+ */
+async function resolveApiToken(app: FastifyInstance, req: FastifyRequest): Promise<AuthContext | null> {
+  const h = req.headers.authorization;
+  if (!h || !/^Bearer\s+/i.test(h)) return null;
+  const token = h.replace(/^Bearer\s+/i, '').trim();
+  if (!token.startsWith(API_TOKEN_PREFIX) || token.length > 100) return null;
+  const now = new Date();
+  const [row] = await app.db
+    .select({
+      tokenId: s.apiTokens.id, lastUsedAt: s.apiTokens.lastUsedAt,
+      userId: s.users.id, tenantId: s.users.tenantId, name: s.users.name, email: s.users.email, jobTitle: s.users.jobTitle, sectors: s.users.sectors,
+      sectorViewer: s.users.sectorViewer, sectorRole: s.users.sectorRole, active: s.users.active, service: s.users.service, ipBypass: s.users.ipBypass,
+      timezone: s.tenants.timezone, tenantName: s.tenants.name,
+    })
+    .from(s.apiTokens)
+    .innerJoin(s.users, eq(s.users.id, s.apiTokens.userId))
+    .innerJoin(s.tenants, eq(s.tenants.id, s.users.tenantId))
+    .where(and(eq(s.apiTokens.tokenHash, hashToken(token)), isNull(s.apiTokens.revokedAt), sql`(${s.apiTokens.expiresAt} is null or ${s.apiTokens.expiresAt} > ${now})`))
+    .limit(1);
+  if (!row || !row.active || !row.service) return null;
+  if (!row.lastUsedAt || now.getTime() - row.lastUsedAt.getTime() > 60_000) {
+    await app.db.update(s.apiTokens).set({ lastUsedAt: now, lastUsedIp: req.ip ?? null }).where(eq(s.apiTokens.id, row.tokenId));
+  }
+  const auth = await buildAuth(app.db, { ...row, sessionId: `api:${row.tokenId}` });
+  // integração nunca administra a empresa, mesmo com perfil de gerência/diretoria
+  auth.access.configuracoes = 'nenhum';
+  return auth;
+}
+
 export async function resolveSession(app: FastifyInstance, req: FastifyRequest): Promise<AuthContext | null> {
   const raw = req.cookies[SESSION_COOKIE];
-  if (!raw) return null;
+  if (!raw) return resolveApiToken(app, req);
   const unsigned = req.unsignCookie(raw);
   if (!unsigned.valid || !unsigned.value) return null;
   const now = new Date();

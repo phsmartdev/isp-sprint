@@ -13,8 +13,16 @@ import { useDebounced, useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { IpcQuestion } from './IpcQuestion';
 
-type Member = { id: string; structureId: string; contactId: string; role: StructureRole; roleLabel: string; notes: string | null; name: string; visible: boolean; segment: string | null; city: string | null; abmId: string | null };
+type IpcChoice = 'herda' | 'individual';
+/** Opções da pergunta do IPC ao vincular à estrutura: o IPC da estrutura é o da conta gestora. */
+const structureIpcOptions = (gestorName: string | null, who = 'A conta') => [
+  { value: 'herda' as IpcChoice, title: gestorName ? `${who} assume o IPC da estrutura (de ${gestorName})` : `${who} assume o IPC da estrutura`, detail: gestorName ? `Acompanhamento igual ao da estrutura: o score passa a ser sempre o de ${gestorName}, a conta gestora.` : 'A estrutura ainda não tem conta gestora (órgão gestor / coordenação): vincule a gestora antes para usar o IPC dela.', disabled: !gestorName },
+  { value: 'individual' as IpcChoice, title: 'IPC individualizado', detail: 'A conta mantém o próprio IPC e o próprio nível de acompanhamento.' },
+];
+
+type Member = { id: string; structureId: string; contactId: string; role: StructureRole; roleLabel: string; notes: string | null; inheritsIpc: boolean; name: string; visible: boolean; segment: string | null; city: string | null; abmId: string | null };
 type Ctr = { linkId: string; structureId: string; id: string; code: number; stage: string; contactId: string; clientName: string; number: string | null; object: string | null; endAt: string | null; monthlyCents: number | null; notes: string | null };
 type ListItem = { id: string; name: string; kind: StructureKind; kindLabel: string; description: string | null; ownerId: string | null; ownerName: string | null; active: boolean; accounts: number; contracts: number; monthlyCents: number; rowVersion: number };
 type Detail = ListItem & { canManage: boolean; seesContracts: boolean; members: Member[]; contracts: Ctr[]; hiddenContracts: number; suggestedContracts: { id: string; code: number; clientName: string; number: string | null; object: string | null; monthlyCents: number | null }[] };
@@ -66,15 +74,19 @@ function StructureForm({ initial, onClose }: { initial: ListItem | null; onClose
   );
 }
 
-function LinkAccount({ structureId, roles, onDone }: { structureId: string; roles: [StructureRole, string][]; onDone: () => void }) {
+function LinkAccount({ structureId, roles, gestorName, onDone }: { structureId: string; roles: [StructureRole, string][]; gestorName: string | null; onDone: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [q, setQ] = useState('');
   const term = useDebounced(q, 250);
   const found = useQuery({ queryKey: ['contacts-search', term], enabled: term.trim().length >= 2, queryFn: () => api<{ items: { id: string; name: string; segment: string }[] }>(`/contacts?q=${encodeURIComponent(term)}`) });
   const [role, setRole] = useState<StructureRole>('participante');
+  const [ipc, setIpc] = useState<IpcChoice | null>(null);
+  // a conta gestora é a referência do IPC da estrutura: para ela não há pergunta
+  const needsIpc = role !== 'gestor';
+  const ready = !needsIpc || ipc !== null;
   const m = useMutation({
-    mutationFn: (contactId: string) => api(`/structures/${structureId}/members`, { method: 'POST', body: { contactId, role } }),
+    mutationFn: (contactId: string) => api(`/structures/${structureId}/members`, { method: 'POST', body: { contactId, role, inheritsIpc: needsIpc && ipc === 'herda' } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['structures'] }); setQ(''); toast({ tone: 'success', message: 'Conta vinculada' }); onDone(); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -84,7 +96,8 @@ function LinkAccount({ structureId, roles, onDone }: { structureId: string; role
         <FormField label="Procurar conta" htmlFor="st-acc"><Input id="st-acc" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome, telefone ou e-mail" /></FormField>
         <FormField label="Papel na estrutura" htmlFor="st-role"><Select id="st-role" value={role} onChange={(e) => setRole(e.target.value as StructureRole)}>{roles.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></FormField>
       </div>
-      {!!found.data?.items.length && <ul className="max-h-44 overflow-y-auto border border-line bg-surface">{found.data.items.map((c) => <li key={c.id}><button type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-surface-2" onClick={() => m.mutate(c.id)}>{c.name}<span className="text-xs text-muted"> · {c.segment}</span></button></li>)}</ul>}
+      {needsIpc && <IpcQuestion name="st-ipc" value={ipc} onChange={setIpc} options={structureIpcOptions(gestorName)} />}
+      {!!found.data?.items.length && <ul className="max-h-44 overflow-y-auto border border-line bg-surface">{found.data.items.map((c) => <li key={c.id}><button type="button" disabled={!ready} title={ready ? undefined : 'Responda sobre o IPC antes'} className="block w-full px-3 py-2 text-left text-sm hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => m.mutate(c.id)}>{c.name}<span className="text-xs text-muted"> · {c.segment}</span></button></li>)}</ul>}
     </div>
   );
 }
@@ -136,11 +149,11 @@ export function StructureDrawer({ id, onClose }: { id: string | null; onClose: (
 
           <section aria-label="Contas da estrutura" className="space-y-2">
             <div className="flex items-center justify-between"><h4 className="font-bold text-ink">Contas</h4>{d.active && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(adding === 'conta' ? null : 'conta')}>Vincular conta</Button>}</div>
-            {adding === 'conta' && <LinkAccount structureId={d.id} roles={roles} onDone={() => setAdding(null)} />}
+            {adding === 'conta' && <LinkAccount structureId={d.id} roles={roles} gestorName={d.members.find((x) => x.role === 'gestor')?.name ?? null} onDone={() => setAdding(null)} />}
             {!d.members.length ? <p className="text-sm text-muted">Nenhuma conta vinculada.</p> : (
               <ul className="divide-y divide-line border border-line">{d.members.map((m) => (
                 <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
-                  <span>{m.visible ? <Link to={accLink(m)} className="font-semibold text-primary hover:underline">{m.name}</Link> : <span className="text-muted">{m.name}</span>} <Chip tone={m.role === 'gestor' ? 'blue' : 'neutral'}>{m.roleLabel}</Chip><span className="block text-xs text-muted">{[m.segment, m.city].filter(Boolean).join(' · ')}</span></span>
+                  <span>{m.visible ? <Link to={accLink(m)} className="font-semibold text-primary hover:underline">{m.name}</Link> : <span className="text-muted">{m.name}</span>} <Chip tone={m.role === 'gestor' ? 'blue' : 'neutral'}>{m.roleLabel}</Chip>{m.role === 'gestor' && <span className="ml-1 text-xs text-muted">referência do IPC</span>}{m.inheritsIpc && <span className="ml-1 text-xs font-semibold text-primary">assume o IPC da estrutura</span>}<span className="block text-xs text-muted">{[m.segment, m.city].filter(Boolean).join(' · ')}</span></span>
                   {m.visible && <Button size="sm" icon={<Trash2 className="h-4 w-4" />} aria-label={`Desvincular ${m.name}`} onClick={() => setRm({ title: 'Desvincular conta', text: `${m.name} sai de ${d.name}.`, url: `/structure-members/${m.id}/remove` })} />}
                 </li>
               ))}</ul>
@@ -216,13 +229,13 @@ export function StructuresAdmin() {
 export function AccountStructuresPanel({ contactId }: { contactId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['structures', 'account', contactId], queryFn: () => api<{ items: (ListItem & { me: Member | null; members: Member[]; contracts: Ctr[] })[]; available: { id: string; name: string; kindLabel: string }[] }>(`/accounts/${contactId}/structures`) });
-  const [sel, setSel] = useState({ id: '', role: 'participante' as StructureRole });
+  const q = useQuery({ queryKey: ['structures', 'account', contactId], queryFn: () => api<{ items: (ListItem & { me: Member | null; members: Member[]; contracts: Ctr[] })[]; available: { id: string; name: string; kindLabel: string; gestor: { contactId: string; name: string } | null }[] }>(`/accounts/${contactId}/structures`) });
+  const [sel, setSel] = useState({ id: '', role: 'participante' as StructureRole, ipc: null as IpcChoice | null });
   const [open, setOpen] = useState<string | null>(null);
   const [rm, setRm] = useState<{ title: string; text: string; url: string } | null>(null);
   const m = useMutation({
-    mutationFn: () => api(`/structures/${sel.id}/members`, { method: 'POST', body: { contactId, role: sel.role } }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['structures'] }); setSel({ id: '', role: 'participante' }); toast({ tone: 'success', message: 'Conta vinculada à estrutura' }); },
+    mutationFn: () => api(`/structures/${sel.id}/members`, { method: 'POST', body: { contactId, role: sel.role, inheritsIpc: sel.role !== 'gestor' && sel.ipc === 'herda' } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['structures'] }); void qc.invalidateQueries({ queryKey: ['cs-account'] }); void qc.invalidateQueries({ queryKey: ['cs'] }); setSel({ id: '', role: 'participante', ipc: null }); toast({ tone: 'success', message: 'Conta vinculada à estrutura' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   if (q.isLoading) return <LoadingRows rows={3} />;
@@ -235,7 +248,7 @@ export function AccountStructuresPanel({ contactId }: { contactId: string }) {
         <ul className="space-y-3">{d.items.map((s) => (
           <li key={s.id} className="border border-line p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span><button type="button" className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline" onClick={() => setOpen(s.id)}><Network className="h-4 w-4" aria-hidden />{s.name}</button> <span className="text-xs text-muted">{s.kindLabel}</span>{s.me && <> · <Chip tone={s.me.role === 'gestor' ? 'blue' : 'neutral'}>{s.me.roleLabel}</Chip></>}</span>
+              <span><button type="button" className="inline-flex items-center gap-1.5 font-bold text-primary hover:underline" onClick={() => setOpen(s.id)}><Network className="h-4 w-4" aria-hidden />{s.name}</button> <span className="text-xs text-muted">{s.kindLabel}</span>{s.me && <> · <Chip tone={s.me.role === 'gestor' ? 'blue' : 'neutral'}>{s.me.roleLabel}</Chip></>}{s.me?.inheritsIpc && <span className="ml-1 text-xs font-semibold text-primary">· assume o IPC da estrutura</span>}</span>
               {s.me && <Button size="sm" icon={<Trash2 className="h-4 w-4" />} aria-label={`Sair de ${s.name}`} onClick={() => setRm({ title: 'Desvincular da estrutura', text: `Esta conta sai de ${s.name}.`, url: `/structure-members/${s.me!.id}/remove` })} />}
             </div>
             <p className="mt-1 text-xs text-muted">Contas: {s.members.filter((x) => x.contactId !== contactId).map((x) => `${x.name} (${x.roleLabel.toLowerCase()})`).join(', ') || 'só esta'}</p>
@@ -243,13 +256,21 @@ export function AccountStructuresPanel({ contactId }: { contactId: string }) {
           </li>
         ))}</ul>
       )}
-      {d.available.length ? (
-        <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
-          <FormField label="Vincular a uma estrutura" htmlFor="as-s"><Select id="as-s" className="min-w-[240px]" value={sel.id} onChange={(e) => setSel({ ...sel, id: e.target.value })}><option value="">Escolha</option>{d.available.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.kindLabel})</option>)}</Select></FormField>
-          <FormField label="Papel" htmlFor="as-r"><Select id="as-r" value={sel.role} onChange={(e) => setSel({ ...sel, role: e.target.value as StructureRole })}>{(Object.keys(STRUCTURE_ROLE_LABELS) as StructureRole[]).map((k) => <option key={k} value={k}>{STRUCTURE_ROLE_LABELS[k]}</option>)}</Select></FormField>
-          <Button variant="primary" disabled={!sel.id} loading={m.isPending} onClick={() => m.mutate()}>Vincular</Button>
-        </div>
-      ) : <p className="text-xs text-muted">Para criar uma estrutura, vá em Configurações → Modelos → Estruturas.</p>}
+      {d.available.length ? (() => {
+        const chosen = d.available.find((a) => a.id === sel.id);
+        const needsIpc = !!chosen && sel.role !== 'gestor';
+        return (
+          <div className="space-y-2 border-t border-line pt-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <FormField label="Vincular a uma estrutura" htmlFor="as-s"><Select id="as-s" className="min-w-[240px]" value={sel.id} onChange={(e) => setSel({ ...sel, id: e.target.value, ipc: null })}><option value="">Escolha</option>{d.available.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.kindLabel})</option>)}</Select></FormField>
+              <FormField label="Papel" htmlFor="as-r"><Select id="as-r" value={sel.role} onChange={(e) => setSel({ ...sel, role: e.target.value as StructureRole })}>{(Object.keys(STRUCTURE_ROLE_LABELS) as StructureRole[]).map((k) => <option key={k} value={k}>{STRUCTURE_ROLE_LABELS[k]}</option>)}</Select></FormField>
+              <Button variant="primary" disabled={!sel.id || (needsIpc && sel.ipc === null)} loading={m.isPending} onClick={() => m.mutate()}>Vincular</Button>
+            </div>
+            {needsIpc && <IpcQuestion name="as-ipc" value={sel.ipc} onChange={(v) => setSel({ ...sel, ipc: v })} options={structureIpcOptions(chosen.gestor?.name ?? null, 'Esta conta')} />}
+            {chosen && sel.role === 'gestor' && <p className="text-xs text-muted">Como gestora, esta conta é a referência do IPC da estrutura: quem assumir o IPC da estrutura terá o score dela.</p>}
+          </div>
+        );
+      })() : <p className="text-xs text-muted">Para criar uma estrutura, vá em Configurações → Modelos → Estruturas.</p>}
       <StructureDrawer id={open} onClose={() => setOpen(null)} />
       {rm && <RemoveDialog {...rm} onClose={() => setRm(null)} />}
     </section>

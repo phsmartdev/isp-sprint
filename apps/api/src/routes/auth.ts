@@ -69,8 +69,9 @@ export const authRoutes = [
       const ok = await verifyPassword(body.password, user?.passwordHash ?? DUMMY_HASH);
       const generic = new AppError(401, 'Credenciais inválidas', 'E-mail ou senha incorretos.');
 
-      if (!user || !user.active) {
-        await audit(app.db, req, { action: 'auth.login_failed', tenantId: user?.tenantId ?? null, actorId: user?.id ?? null, metadata: { reason: user ? 'inactive' : 'unknown_user' } });
+      // usuário de webservice não entra pela tela: só pela API, com token
+      if (!user || !user.active || user.service) {
+        await audit(app.db, req, { action: 'auth.login_failed', tenantId: user?.tenantId ?? null, actorId: user?.id ?? null, metadata: { reason: !user ? 'unknown_user' : user.service ? 'webservice' : 'inactive' } });
         throw generic;
       }
       if (user.lockedUntil && user.lockedUntil > now) {

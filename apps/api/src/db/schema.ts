@@ -46,6 +46,8 @@ export const users = pgTable(
     failedLogins: integer('failed_logins').notNull().default(0),
     /** pode entrar de qualquer IP, mesmo com o acesso por IP ligado na empresa (viagem, diretoria) */
     ipBypass: boolean('ip_bypass').notNull().default(false),
+    /** usuário de webservice (integração): não entra pela tela, só pela API com token; acesso pelo perfil */
+    service: boolean('service').notNull().default(false),
     lockedUntil: ts('locked_until'),
     /** Cargo exibido no topo (ex.: "Comercial"). */
     jobTitle: text('job_title'),
@@ -4080,6 +4082,8 @@ export const structureMembers = pgTable('structure_members', {
   contactId: uuid('contact_id').notNull().references(() => contacts.id),
   role: text('role').notNull().default('participante'),
   notes: text('notes'),
+  /** a conta assume o IPC da estrutura (o da conta gestora); false = IPC próprio */
+  inheritsIpc: boolean('inherits_ipc').notNull().default(false),
   active: boolean('active').notNull().default(true),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
@@ -4121,6 +4125,8 @@ export const accountRelations = pgTable(
     toContactId: uuid('to_contact_id').notNull().references(() => contacts.id),
     kind: text('kind').notNull(),
     notes: text('notes'),
+    /** conta (uma das duas) que assume o IPC da outra (principal); null = cada uma com o próprio IPC */
+    ipcFollowerId: uuid('ipc_follower_id').references(() => contacts.id),
     active: boolean('active').notNull().default(true),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
@@ -7631,3 +7637,21 @@ export const institutionalShareLinks = pgTable('institutional_share_links', {
   lastAccessAt: ts('last_access_at'),
 }, (t) => ({ tok: uniqueIndex('institutional_share_links_token_idx').on(t.tokenHash), ten: index('institutional_share_links_tenant_idx').on(t.tenantId) }));
 
+
+/** Tokens de acesso dos usuários de webservice (API de integração). Guardamos só o hash; o token aparece uma vez. */
+export const apiTokens = pgTable('api_tokens', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  /** últimos 4 caracteres, para reconhecer o token na lista */
+  last4: text('last4').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  expiresAt: ts('expires_at'),
+  revokedAt: ts('revoked_at'),
+  revokedBy: uuid('revoked_by').references(() => users.id),
+  lastUsedAt: ts('last_used_at'),
+  lastUsedIp: text('last_used_ip'),
+}, (t) => ({ tok: uniqueIndex('api_tokens_hash_idx').on(t.tokenHash), usr: index('api_tokens_user_idx').on(t.userId) }));

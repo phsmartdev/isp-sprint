@@ -29,6 +29,7 @@ import { budgetClosingRoutes } from './routes/budgetClosing';
 import { budgetRevisionRoutes } from './routes/budgetRevisions';
 import { giftComplianceRoutes } from './routes/giftCompliance';
 import { institutionalRoutes } from './routes/institutional';
+import { webserviceRoutes } from './routes/webservice';
 import { csContractRoutes } from './routes/csContracts';
 import { budgetResourceRoutes } from './routes/budgetResources';
 import { insightsRoutes } from './routes/insights';
@@ -197,6 +198,10 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
   app.addHook('preHandler', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
     req.auth = await resolveSession(app, req);
+    // token de webservice: sem login/logout nem troca de senha (não há sessão nem senha conhecida)
+    if (req.auth?.sessionId.startsWith('api:') && /^\/api\/v1\/(auth\/|me\/password)/.test(req.url)) {
+      return sendProblem(reply, req, { status: 403, title: 'Não disponível pela API', detail: 'O usuário de webservice usa só o token; login, logout e senha não se aplicam.' });
+    }
     // acesso por IP liberado: sessão aberta fora da rede autorizada não usa o sistema (sair continua permitido)
     if (req.auth && !req.url.startsWith('/api/v1/auth/logout')) {
       const policy = await ipPolicyOf(db, req.auth.tenantId);
@@ -243,6 +248,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...budgetRevisionRoutes,
     ...giftComplianceRoutes,
     ...institutionalRoutes,
+    ...webserviceRoutes,
     ...csContractRoutes,
     ...budgetResourceRoutes,
     ...insightsRoutes,

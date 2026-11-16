@@ -104,7 +104,7 @@ export const authRecoveryRoutes = [
       if (!info.sub || !email || info.email_verified !== true) return fail('google_email');
       if (g.allowedDomains.length && !g.allowedDomains.includes(email.split('@')[1] ?? '')) return fail('google_dominio');
       const [user] = await app.db.select().from(s.users).where(sql`lower(${s.users.email}) = ${email}`).limit(1);
-      if (!user || !user.active) {
+      if (!user || !user.active || user.service) {
         await audit(app.db, req, { action: 'auth.login_failed', tenantId: user?.tenantId ?? null, actorId: user?.id ?? null, metadata: { via: 'google', reason: user ? 'inactive' : 'unknown_user' } });
         return fail('google_sem_usuario');
       }
@@ -130,7 +130,7 @@ export const authRecoveryRoutes = [
     handler: async ({ app, req, body }) => {
       const generic = { ok: true, message: 'Se o e-mail estiver cadastrado, enviamos o link para criar uma nova senha. Ele vale por 1 hora.' };
       const [user] = await app.db.select().from(s.users).where(sql`lower(${s.users.email}) = ${body.email}`).limit(1);
-      if (!user || !user.active) return generic;
+      if (!user || !user.active || user.service) return generic;
       const smtp = await smtpConfig(app.db, user.tenantId);
       if (!smtp?.enabled) {
         await audit(app.db, req, { action: 'auth.password_reset_unavailable', tenantId: user.tenantId, actorId: user.id });

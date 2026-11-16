@@ -87,6 +87,8 @@ export function registerRoutes(app: FastifyInstance, prefix: string, defs: Route
         if (!def.public) {
           if (!auth) throw unauthorized();
           auth.requestMethod = def.method;
+          // token de webservice nunca administra a empresa (usuários, permissões, tokens), seja qual for o perfil
+          if (auth.sessionId.startsWith('api:') && def.module === 'configuracoes') throw forbidden('Configurações não ficam disponíveis pela API de integração.');
           assertModuleOpen(auth, def.module, feature);
           if (def.module) requireLevel(auth, def.module, def.min ?? 'proprio');
           if (def.method === 'DELETE' && (/^\/[a-z-]+\/:id$/.test(def.url) || def.url === '/contracts/:id/documents/:docId') && !auth.actions.arquivar) throw forbidden('Seu perfil não pode arquivar nem excluir registros.');

@@ -11,7 +11,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
-import { HealthBadge, IPC_LEVEL_OPTS, LevelChip, TierChip, covText, useCsms, type Coverage, type Snapshot } from './shared';
+import { HealthBadge, IPC_LEVEL_OPTS, LevelChip, TierChip, covText, useCsms, ipcInheritedText, type Coverage, type Snapshot } from './shared';
 
 type FollowUp = { id: string; title: string; kind: string | null; dueAt: string | null; plannedAt: string | null; completedAt: string | null; result: string | null; cadence: string | null; ownerName: string | null };
 type Data = {
@@ -228,7 +228,7 @@ export function Account360({ contactId }: { contactId: string }) {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           <Stat label="CSM">{d.csm?.name ?? <span className="text-danger">Sem CSM</span>}</Stat>
           <Stat label="Tier · valor anual" hint={[sn.groupContacts > 1 ? `grupo com ${sn.groupContacts} cadastros` : null, sn.acvParts ? `recorrente ${fmtBRL(sn.acvParts.recorrente)} · medição ${fmtBRL(sn.acvParts.medicao)} · frequente ${fmtBRL(sn.acvParts.frequente)}${sn.acvParts.semContrato ? ` · ganhas sem contrato ${fmtBRL(sn.acvParts.semContrato)}` : ''}` : 'valor anual consolidado', sn.acvExcluded?.count ? `consumo de medição fora do total: ${fmtBRL(sn.acvExcluded.cents)}` : null].filter(Boolean).join(' · ')}><span className="flex items-center gap-2"><TierChip tier={sn.tier} /><span className="num">{fmtBRL(sn.groupAcvCents)}</span></span></Stat>
-          <Stat label="Score IPC" hint={sn.ipc.total === null ? `incompleto: ${sn.ipc.pending.length} critério(s) pendente(s)` : sn.ipc.reviewDue ? 'revisão vencida' : sn.ipc.assessedAt ? `avaliado em ${fmtDate(sn.ipc.assessedAt)}` : undefined}>{sn.ipc.total ?? <span className="text-muted">Incompleto ({sn.ipc.partial})</span>}</Stat>
+          <Stat label="Score IPC" hint={sn.ipc.inherited ? `herdado de ${sn.ipc.inherited.via === 'estrutura' && sn.ipc.inherited.structureName ? sn.ipc.inherited.structureName : sn.ipc.inherited.fromName}` : sn.ipc.total === null ? `incompleto: ${sn.ipc.pending.length} critério(s) pendente(s)` : sn.ipc.reviewDue ? 'revisão vencida' : sn.ipc.assessedAt ? `avaliado em ${fmtDate(sn.ipc.assessedAt)}` : undefined}>{sn.ipc.total ?? <span className="text-muted">Incompleto ({sn.ipc.partial})</span>}</Stat>
           <Stat label="Classe estratégica">{sn.classKey ?? <span className="text-muted">Não classificada</span>}</Stat>
           <Stat label="Saúde" hint={`dados em ${Math.round(sn.health.coverage * 100)}% dos pesos`}><HealthBadge score={sn.health.score} label={sn.health.label} /></Stat>
           <Stat label="Criticidade calculada"><LevelChip level={sn.criticality.level} /></Stat>
@@ -243,7 +243,7 @@ export function Account360({ contactId }: { contactId: string }) {
             <Button size="sm" variant="secondary" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => setDlg('visit')}>Agendar visita</Button>
             <Button size="sm" variant="secondary" icon={<Target className="h-4 w-4" />} onClick={() => { setPlanAlert(null); setDlg('plan'); }}>Plano de ação</Button>
             <Button size="sm" variant="secondary" icon={<Star className="h-4 w-4" />} onClick={() => setDlg('survey')}>Pesquisa</Button>
-            <Button size="sm" variant="secondary" icon={<ClipboardCheck className="h-4 w-4" />} onClick={() => setDlg('ipc')}>Avaliar IPC</Button>
+            {!sn.ipc.inherited && <Button size="sm" variant="secondary" icon={<ClipboardCheck className="h-4 w-4" />} onClick={() => setDlg('ipc')}>Avaliar IPC</Button>}
             <Button size="sm" variant="secondary" icon={<Flag className="h-4 w-4" />} onClick={() => setDlg('priority')}>Revisar prioridade</Button>
             <Link to="/opportunities/new" className="inline-flex h-9 items-center rounded-md border border-line bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">Abrir negociação</Link>
           </div>
@@ -266,8 +266,9 @@ export function Account360({ contactId }: { contactId: string }) {
           {d.canEdit && <div className="mt-3 flex items-center gap-2 text-sm"><label htmlFor="cs-churn" className="text-muted">Risco de cancelamento</label><Select id="cs-churn" className="h-9 w-auto" value={d.churnRisk ?? ''} onChange={(e) => patch.mutate({ churnRisk: e.target.value || null })}><option value="">Não avaliado</option><option value="baixo">Baixo</option><option value="medio">Médio</option><option value="alto">Alto</option></Select></div>}
         </Card>
 
-        <Card title="Score IPC" action={d.canEdit ? <button className="text-sm font-semibold text-primary hover:underline" onClick={() => setDlg('ipc')}>Avaliar</button> : undefined}>
+        <Card title="Score IPC" action={d.canEdit && !sn.ipc.inherited ? <button className="text-sm font-semibold text-primary hover:underline" onClick={() => setDlg('ipc')}>Avaliar</button> : undefined}>
           <ul className="space-y-1 text-sm">{IPC_CRITERIA.map((k) => { const l = sn.ipc.levels[k]; return <li key={k} className="flex justify-between gap-3"><span>{IPC_LABELS[k]}{IPC_OBJECTIVE.includes(k) && <span className="text-xs text-muted"> · calculado</span>}</span><span className={l ? 'font-semibold' : 'text-muted'}>{l ? IPC_LEVEL_TEXT[k][l] : 'Pendente'}</span></li>; })}</ul>
+          {sn.ipc.inherited && <p className="mb-2 border-l-2 border-primary bg-primary-soft px-3 py-2 text-sm text-ink">{ipcInheritedText(sn.ipc.inherited)}{sn.ipc.own && <span className="block text-xs text-muted">IPC próprio desta conta: {sn.ipc.own.total ?? `${sn.ipc.own.partial} (incompleto)`}</span>}</p>}
           <p className="mt-2 text-sm">Total: <span className="font-bold">{sn.ipc.total ?? `incompleto (${sn.ipc.partial} pts até agora)`}</span> · Classe estratégica: <span className="font-semibold">{sn.classKey ?? 'não classificada'}</span> <span className="text-xs text-muted">(não soma no IPC)</span></p>
           {!!d.ipcHistory.length && <details className="mt-2 text-sm"><summary className="cursor-pointer text-muted">Histórico de avaliações ({d.ipcHistory.length})</summary><ul className="mt-1 space-y-1">{d.ipcHistory.map((h) => <li key={h.id}>{fmtDate(h.createdAt)} · {h.score ?? 'incompleto'} · {h.actorName}: {h.justification}{h.evidence ? ` (evidência: ${h.evidence})` : ''}</li>)}</ul></details>}
         </Card>

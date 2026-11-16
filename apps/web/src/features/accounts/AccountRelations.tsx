@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { Building2, Lightbulb, Plus, Trash2 } from 'lucide-react';
 import { ACCOUNT_RELATION_LABELS, hierarchyTree, type AccountRelationKind } from '@isp/domain';
 import { api } from '../../lib/api';
+import { IpcQuestion } from './IpcQuestion';
 import { fmtDate } from '../../lib/format';
 import { useDebounced } from '../../lib/hooks';
 import { Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Textarea } from '../../components/ui/primitives';
@@ -18,7 +19,7 @@ import { AccountStructuresPanel } from './Structures';
 
 export type NetNode = { contactId: string; name: string; visible: boolean; segment: string | null; city: string | null; abmId: string | null; inAbm?: boolean };
 export type NetEdge = { id: string; fromId: string; toId: string; kind: AccountRelationKind };
-type Item = { id: string; kind: AccountRelationKind; direction: 'saida' | 'entrada'; label: string; group: string; other: NetNode; notes: string | null; createdByName: string | null; createdAt: string };
+type Item = { id: string; kind: AccountRelationKind; direction: 'saida' | 'entrada'; label: string; group: string; other: NetNode; notes: string | null; createdByName: string | null; createdAt: string; ipcFollower: 'esta' | 'outra' | null };
 type Data = { account: { contactId: string; name: string }; items: Item[]; network: { nodes: NetNode[]; edges: NetEdge[] }; suggestions: { contactId: string; name: string; reasons: string[]; kind: AccountRelationKind }[] };
 
 export const accountPath = (n: Pick<NetNode, 'contactId' | 'abmId'>, prefer: 'crm' | 'abm' = 'crm') => (prefer === 'abm' && n.abmId ? `/abm/contas/${n.abmId}?t=relacoes` : `/customers/${n.contactId}?t=relacoes`);
@@ -78,7 +79,7 @@ export function RelationMap({ nodes, edges, focusId, prefer = 'crm' }: { nodes: 
   );
 }
 
-function AddRelation({ contactId, preset, onClose }: { contactId: string; preset: { contactId: string; name: string; kind: AccountRelationKind } | null; onClose: () => void }) {
+function AddRelation({ contactId, accountName, preset, onClose }: { contactId: string; accountName: string; preset: { contactId: string; name: string; kind: AccountRelationKind } | null; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [q, setQ] = useState('');
@@ -88,14 +89,19 @@ function AddRelation({ contactId, preset, onClose }: { contactId: string; preset
   const [kind, setKind] = useState<AccountRelationKind>(preset?.kind ?? 'parceira');
   const [inverse, setInverse] = useState(false);
   const [notes, setNotes] = useState('');
+  // IPC: pergunta obrigatória (individualizado ou uma das duas assume o IPC da outra)
+  const [ipc, setIpc] = useState<'individual' | 'esta' | 'outra' | null>(null);
   const L = ACCOUNT_RELATION_LABELS[kind];
+  const otherName = other?.name ?? 'a outra conta';
+  // sugestão pelo tipo: filial/vinculada segue a matriz/órgão superior; membro segue o consórcio
+  const childIsThis = kind === 'membro' ? !inverse : (kind === 'matriz' || kind === 'orgao_superior') ? inverse : null;
   const m = useMutation({
-    mutationFn: () => api(`/accounts/${contactId}/account-relations`, { method: 'POST', body: { otherContactId: other!.id, kind, inverse: !L.symmetric && inverse, notes: notes.trim() || null } }),
+    mutationFn: () => api(`/accounts/${contactId}/account-relations`, { method: 'POST', body: { otherContactId: other!.id, kind, inverse: !L.symmetric && inverse, notes: notes.trim() || null, ipcFollower: ipc === 'individual' ? null : ipc } }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['account-relations'] }); toast({ tone: 'success', message: 'Relação registrada' }); onClose(); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   return (
-    <Modal open onClose={onClose} title="Relacionar com outra conta" size="lg" footer={<><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!other} loading={m.isPending} onClick={() => m.mutate()}>Registrar relação</Button></>}>
+    <Modal open onClose={onClose} title="Relacionar com outra conta" size="lg" footer={<><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!other || ipc === null} loading={m.isPending} onClick={() => m.mutate()}>Registrar relação</Button></>}>
       <div className="space-y-4">
         {other ? <p className="bg-surface-2 px-3 py-2 text-sm">Outra conta: <b>{other.name}</b> {!preset && <button type="button" className="ml-2 text-primary hover:underline" onClick={() => setOther(null)}>trocar</button>}</p> : (
           <>
@@ -110,6 +116,11 @@ function AddRelation({ contactId, preset, onClose }: { contactId: string; preset
             <label className="flex items-center gap-2 text-sm"><input type="radio" checked={inverse} onChange={() => setInverse(true)} />Esta conta <b>{L.in}</b> {other?.name ?? 'a outra'}</label>
           </fieldset>
         )}
+        <IpcQuestion name="ar-ipc" value={ipc} onChange={setIpc} options={[
+          { value: 'esta', title: `${accountName} assume o IPC de ${otherName}`, detail: `Acompanhamento igual: o score desta conta passa a ser sempre o de ${otherName}.`, suggested: childIsThis === true },
+          { value: 'outra', title: `${otherName} assume o IPC de ${accountName}`, detail: `Acompanhamento igual: o score de ${otherName} passa a ser sempre o desta conta.`, suggested: childIsThis === false },
+          { value: 'individual', title: 'IPC individualizado', detail: 'Cada conta mantém o próprio IPC e o próprio nível de acompanhamento.' },
+        ]} />
         <FormField label="Observação" htmlFor="ar-n"><Textarea id="ar-n" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></FormField>
       </div>
     </Modal>
@@ -158,6 +169,7 @@ export function AccountRelationsPanel({ contactId, prefer = 'crm' }: { contactId
                 <ul className="divide-y divide-line border border-line">{d.items.filter((i) => i.group === g).map((i) => (
                   <li key={i.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
                     <span className="min-w-0">Esta conta <b>{i.label}</b> {i.other.visible ? <Link to={accountPath(i.other, prefer)} className="font-semibold text-primary hover:underline">{i.other.name}</Link> : <span className="text-muted">{i.other.name}</span>}
+                      {i.ipcFollower && <span className="block text-xs font-semibold text-primary">{i.ipcFollower === 'esta' ? `Esta conta assume o IPC de ${i.other.name}` : `${i.other.name} assume o IPC desta conta`}</span>}
                       {i.notes && <span className="block text-xs text-muted">{i.notes}</span>}<span className="block text-2xs text-muted">{i.createdByName ?? '—'} · {fmtDate(i.createdAt)}</span></span>
                     <Button size="sm" icon={<Trash2 className="h-4 w-4" />} aria-label={`Remover relação com ${i.other.name}`} onClick={() => setRemoving(i)} />
                   </li>
@@ -169,10 +181,10 @@ export function AccountRelationsPanel({ contactId, prefer = 'crm' }: { contactId
         </>
       )}
 
-      {adding && <AddRelation contactId={contactId} preset={adding.preset} onClose={() => setAdding(null)} />}
+      {adding && <AddRelation contactId={contactId} accountName={d.account.name} preset={adding.preset} onClose={() => setAdding(null)} />}
       {removing && (
         <Modal open onClose={() => setRemoving(null)} title="Remover relação" footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>Cancelar</Button><Button variant="danger" disabled={reason.trim().length < 3} loading={rm.isPending} onClick={() => rm.mutate()}>Remover</Button></>}>
-          <p className="mb-3 text-sm">Esta conta {removing.label} <b>{removing.other.name}</b>. A relação sai do mapa e fica no histórico.</p>
+          <p className="mb-3 text-sm">Esta conta {removing.label} <b>{removing.other.name}</b>. A relação sai do mapa e fica no histórico.{removing.ipcFollower && <> {removing.ipcFollower === 'esta' ? 'Esta conta' : removing.other.name} deixa de assumir o IPC e volta ao IPC próprio.</>}</p>
           <FormField label="Motivo" htmlFor="ar-r" required><Input id="ar-r" value={reason} onChange={(e) => setReason(e.target.value)} /></FormField>
         </Modal>
       )}
