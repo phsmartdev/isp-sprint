@@ -22,6 +22,12 @@ const EconBody = z.object({
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
   commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
   fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(),
+  /** viabilidade B2G: modo A/B, rateio da negociação, alvo, margens manuais, payback pelo alvo, pesos e lances por produto */
+  b2g: z.object({
+    mode: z.enum(['A', 'B']).optional(), overheadBp: bp.nullable().optional(), netTargetBp: z.number().int().min(-5000).max(9_999).nullable().optional(),
+    contributionBp: z.object({ fornecimento: bp.nullable().optional(), implantacao: bp.nullable().optional() }).optional(), solvePayback: z.boolean().optional(),
+    weights: z.record(z.string().max(300), z.number().min(0).max(1)).optional(), bids: z.record(z.string().max(300), z.number().int().min(0).max(10_000_000_000)).optional(),
+  }).nullable().optional(),
 });
 
 export const economicsRoutes = [
@@ -39,6 +45,7 @@ export const economicsRoutes = [
       marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       variableExpenseBp: bp.nullable().optional(),
+      /** prazo médio de pagamento do órgão (dias): payback de caixa informativo na viabilidade B2G */ paymentTermDays: z.number().int().min(0).max(720).nullable().optional(),
       paybackMaxPrivate: z.number().int().min(1).max(120), paybackMaxPublic: z.number().int().min(1).max(120), blockOutsidePolicy: z.boolean(),
       validFrom: z.string().date(),
     }),

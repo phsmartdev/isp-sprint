@@ -80,6 +80,8 @@ export type EconSettings = {
   /** (3.2) faixa de margem líquida que torna a venda viável (meses 1..D): acima do mínimo e abaixo do máximo */
   netMarginMinBp?: number | null;
   netMarginMaxBp?: number | null;
+  /** prazo médio de pagamento do órgão (dias): só informa o payback de caixa (B2G) */
+  paymentTermDays?: number | null;
 };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
@@ -113,7 +115,7 @@ export const DEAL_KIND_LABELS: Record<DealKind, string> = { venda: 'Venda', serv
  */
 export const ECON_LOTS = ['venda', 'servico'] as const;
 export type EconLot = (typeof ECON_LOTS)[number];
-export const ECON_LOT_LABELS: Record<EconLot, string> = { venda: 'Cesta de Produtos', servico: 'Cesta de Serviços' };
+export const ECON_LOT_LABELS: Record<EconLot, string> = { venda: 'Fornecimento (venda pura)', servico: 'Implantação (instalação ou fornecimento + instalação)' };
 export const lotOfKind = (k: DealKind): EconLot => (k === 'venda' ? 'venda' : 'servico');
 /** pagamento único: venda e serviço único; mensal: recorrência e locação */
 export const isOneTimeKind = (k: DealKind) => k === 'venda' || k === 'servico';
@@ -135,6 +137,12 @@ export type EconInput = {
   /** negociação mista: preço informado da parte de venda (pagamento único); null = itens de venda */ salePriceCents?: number | null;
   /** chave temporal da simulação (ano de vigência do envelope fiscal); null = ano corrente */
   fiscalYear?: number | null;
+  /**
+   * Viabilidade B2G: modo (A custo → preço; B preço do edital → viabilidade), despesas fixas rateadas da negociação
+   * (null = Configurações), margem líquida alvo, margem de contribuição manual por cesta, resolver o payback pelo alvo,
+   * pesos manuais e lances simulados por produto (chave = descrição do produto).
+   */
+  b2g?: { mode?: 'A' | 'B'; overheadBp?: number | null; netTargetBp?: number | null; contributionBp?: { fornecimento?: number | null; implantacao?: number | null }; solvePayback?: boolean; weights?: Record<string, number>; bids?: Record<string, number> } | null;
 };
 export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
 export const costLineTotal = (l: CostLine) => Math.round((l.qtyMilli * l.unitCents) / 1000);
@@ -159,7 +167,7 @@ export function econInputErrors(i: EconInput) {
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
+export type EconItem = { /** perfil de custo B2G (vazio = padrão pelo tipo) */ costProfile?: 'fornecimento' | 'implantacao' | null; description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco', 'abaixo_faixa', 'acima_faixa', 'aguardando_sugerido', 'sem_margem_liquida'] as const;
@@ -205,6 +213,8 @@ export type EconDecision = {
 };
 
 export type EconResult = {
+  /** viabilidade B2G (produtos do edital × planilha da engenharia), calculada junto e guardada na fotografia */
+  b2g?: import('./b2gViability').B2gResult | null;
   engineVersion: string;
   /** negociação com venda e itens mensais juntos (um resultado só) */
   deal?: DealSummary;
@@ -437,7 +447,8 @@ function financeEngineCore(args0: EngineArgs): EconResult {
 
   const inp0 = args0.input;
   const kindOf = (i: EconItem): DealKind => i.kind ?? (inp0.mode === 'pontual' ? 'venda' : 'recorrencia');
-  const lotOfItem = (i: EconItem) => cestaOf(i.doc?.fiscalKind ?? null, kindOf(i));
+  // perfil de custo escolhido na oportunidade manda na cesta; sem escolha, a natureza do documento
+  const lotOfItem = (i: EconItem): EconLot => (i.costProfile ? (i.costProfile === 'fornecimento' ? 'venda' : 'servico') : cestaOf(i.doc?.fiscalKind ?? null, kindOf(i)));
   // teto de cada cesta: o documento de maior tributo entre os produtos da cesta (completos primeiro)
   const better = (d: NonNullable<EconItem['doc']>, cur?: NonNullable<EconItem['doc']>) => !cur || d.percentBp > cur.percentBp || (d.percentBp === cur.percentBp && d.fixedCents > cur.fixedCents);
   const top = new Map<EconLot, NonNullable<EconItem['doc']>>();
@@ -500,9 +511,10 @@ function financeEngineCore(args0: EngineArgs): EconResult {
     spread(inp0.opex.filter((l) => !l.kind), monthly, opex);
   } else if (inp0.opex.length) warnings.push('Sem produto mensal: os custos mensais não entram no cálculo (use o investimento inicial).');
   const wAll = weightOf(cells);
+  // despesas fixas rateadas não incidem no Fornecimento (venda pura): não há estrutura de serviço para só vender
   const parts = cells.map((c, k) => ({
     cell: c,
-    args: { ...args, items: c.items, input: { ...inp0, mode: c.ritmo === 'unico' ? 'pontual' as const : 'recorrente' as const, capex: capex.get(c.key)!, opex: c.ritmo === 'mensal' ? opex.get(c.key)! : [], extraInitialCents: Math.round(inp0.extraInitialCents * wAll[k]!), priceCents: null, salePriceCents: null } },
+    args: { ...args, settings: c.lot === 'venda' && args.settings.overheadBp != null ? { ...args.settings, overheadBp: 0 } : args.settings, items: c.items, input: { ...inp0, mode: c.ritmo === 'unico' ? 'pontual' as const : 'recorrente' as const, capex: capex.get(c.key)!, opex: c.ritmo === 'mensal' ? opex.get(c.key)! : [], extraInitialCents: Math.round(inp0.extraInitialCents * wAll[k]!), priceCents: null, salePriceCents: null } },
   }));
 
   // preço sugerido de cada célula (markup na margem escolhida) e o mínimo (no piso)
@@ -570,7 +582,7 @@ function financeEngineCore(args0: EngineArgs): EconResult {
 
 /**
  * Cesta fiscal do produto (regra provisória, decisão em aberto para NFCOM e locação): documento de venda (NF-e de
- * mercadoria) = Cesta de Produtos; qualquer outro documento = Cesta de Serviços; sem documento, pelo tipo de negociação.
+ * mercadoria) = Fornecimento (venda pura); qualquer outro documento = Implantação; sem documento, pelo tipo de negociação.
  */
 export function cestaOf(fiscalKind: string | null | undefined, kind: DealKind): EconLot {
   if (fiscalKind) return fiscalKind === 'venda' ? 'venda' : 'servico';

@@ -31,12 +31,12 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
 
 const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'netMarginTargetBp', 'netMarginMinBp', 'netMarginMaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
-type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; blockOutsidePolicy: boolean; validFrom: string };
-type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; blockOutsidePolicy: boolean };
+type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; paymentTermDays: number | null; blockOutsidePolicy: boolean; validFrom: string };
+type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; paymentTermDays?: number | null; blockOutsidePolicy: boolean };
 type EconData = { current: (EconVersion & { id: string; validFrom: string }) | null; versions: { id: string; validFrom: string; createdAt: string; createdByName: string | null; values: EconVersion }[]; today: string };
 
 /** Campos em grupos, na ordem em que o cálculo os usa. */
-type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic' | 'horizonMaxMonths'; label: string; hint: string; months?: boolean; factor?: boolean; optional?: boolean };
+type Field = { key: EconKey | 'paybackMaxPrivate' | 'paybackMaxPublic' | 'horizonMaxMonths' | 'paymentTermDays'; label: string; hint: string; months?: boolean; days?: boolean; factor?: boolean; optional?: boolean };
 const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   { title: 'Divisor do markup (sai da nota)', desc: 'Preço = custos ÷ (1 − tributos da cesta − despesas variáveis − margem). Os tributos vêm do documento fiscal de maior tributo de cada cesta. Não há comissão.', fields: [
     { key: 'variableExpenseBp', label: 'Despesas variáveis', hint: 'Sobre o preço (ex.: taxas de cobrança); em branco = 0. O vendedor pode ajustar', optional: true },
@@ -51,7 +51,7 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
     { key: 'contingencyOpexBp', label: 'Sobre os custos mensais', hint: 'Somada aos custos operacionais (OPEX)' },
   ] },
   { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa, inadimplência e despesas fixas; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [
-    { key: 'overheadBp', label: 'Despesas fixas rateadas', hint: 'Estrutura e administrativo, em % da receita' },
+    { key: 'overheadBp', label: 'Despesas fixas rateadas', hint: 'Padrão 35%. Só na Implantação: na venda única sobre o preço; no recorrente sobre o custo direto (somado ao investimento). Não incide no Fornecimento' },
     { key: 'incomeTaxBp', label: 'IR/CSLL', hint: 'Sobre a margem operacional positiva' },
     { key: 'netMarginMinBp', label: 'Margem líquida mínima (viável acima de)', hint: 'Viabilidade pela margem líquida dos meses 1 a D: viável acima da mínima e abaixo da máxima. Em branco = regra anterior (payback e piso de margem)', optional: true },
     { key: 'netMarginMaxBp', label: 'Margem líquida máxima (viável abaixo de)', hint: 'Acima dela o preço fica fora da faixa (risco de perder a venda)', optional: true },
@@ -61,6 +61,7 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
     { key: 'tmaAnnualBp', label: 'TMA anual', hint: 'Custo de capital; a mensal é (1 + anual)^(1/12) − 1' },
     { key: 'inflationAnnualBp', label: 'Inflação anual (reajuste)', hint: 'IPCA/IGP-M; a receita sobe a partir do 13º mês' },
     { key: 'horizonMaxMonths', label: 'Prazo máximo de previsão', hint: 'Horizonte da projeção (ex.: 24, 36 ou 60)', months: true },
+    { key: 'paymentTermDays', label: 'Prazo médio de pagamento do órgão', hint: 'Só informativo: soma ao payback contábil para mostrar o payback de caixa (não muda o preço)', days: true, optional: true },
   ] },
   { title: 'Comparativo com o modelo histórico', desc: 'Opcional. A memória de cálculo mostra o preço pela regra antiga e a margem real que ela deixa. Não entra na decisão.', fields: [
     { key: 'legacyOneTimeX100', label: 'Fator da venda pontual', hint: 'Sobre o investimento (ex.: 2,5)', factor: true, optional: true },
@@ -104,7 +105,7 @@ function EconEngine() {
   useEffect(() => {
     if (!q.data) return;
     const c = q.data.current;
-    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
+    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, paymentTermDays: c?.paymentTermDays ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
@@ -137,7 +138,7 @@ function EconEngine() {
           <Group key={g.title} title={g.title} desc={g.desc}>
             {g.fields.map((f) => (
               <FormField key={f.key} label={f.label} htmlFor={`ec-${f.key}`} hint={f.key === 'tmaAnnualBp' ? tmaHint(e.tmaAnnualBp, f.hint) : f.hint}>
-                <NumInput id={`ec-${f.key}`} label={f.label} int={f.months} value={e[f.key]} suffix={f.months ? 'meses' : f.factor ? '× o custo' : '%'} onChange={(v) => set({ [f.key]: v } as Partial<EconForm>)} />
+                <NumInput id={`ec-${f.key}`} label={f.label} int={f.months || f.days} value={e[f.key]} suffix={f.months ? 'meses' : f.days ? 'dias' : f.factor ? '× o custo' : '%'} onChange={(v) => set({ [f.key]: v } as Partial<EconForm>)} />
               </FormField>
             ))}
             {g.title === 'Política de aprovação' && (

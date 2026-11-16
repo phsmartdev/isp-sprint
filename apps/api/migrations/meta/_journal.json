@@ -1184,6 +1184,13 @@
       "when": 1794846280089,
       "tag": "0168_fornecedor_vantagens",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1794853497309,
+      "tag": "0169_item_perfil_custo",
+      "breakpoints": true
     }
   ]
 }

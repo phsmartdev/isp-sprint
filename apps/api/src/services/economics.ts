@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
+import { b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -103,7 +103,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
+    return { costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | null) ?? null, description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {
@@ -122,8 +122,17 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
 export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 
 /** null = sem parâmetros vigentes (a empresa ainda não informou em Configurações → Viabilidade). */
-export const computeEconomics = (ctx: EconContext, input?: EconInput) =>
-  ctx.settings ? financeEngine({ input: input ?? ctx.input, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal }) : null;
+export const computeEconomics = (ctx: EconContext, input?: EconInput) => {
+  if (!ctx.settings) return null;
+  const inp = input ?? ctx.input;
+  const r = financeEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
+  return { ...r, b2g: b2gOf(ctx, inp, r) };
+};
+
+/** Viabilidade B2G com os produtos da oportunidade (tributos da vigência fiscal), a planilha e os parâmetros vigentes. */
+export function b2gOf(ctx: EconContext, inp: EconInput, r: EconResult) {
+  return b2gFromEconomics({ input: inp, items: ctx.items, settings: ctx.settings!, publicSector: ctx.publicSector, fiscal: ctx.fiscal }, r.fiscal?.profitTaxBp ?? null);
+}
 
 /**
  * O resultado salvo deixou de valer? Recalcula as mesmas entradas com os itens, tributos, parâmetros e motor de hoje

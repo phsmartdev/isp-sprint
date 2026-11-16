@@ -154,7 +154,7 @@ describe('viabilidade econômica', () => {
   it('item sem documento fiscal: calcula com ressalvas', async () => {
     const lk = ok(await carlos.get('/meta/lookups')).json();
     const o = ok(await carlos.post('/opportunities', { newContact: { name: `Órgão Viab ${Date.now()}`, segment: 'governamental' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: lk.branches[0].id, saleKind: 'venda_consultiva' }), 201).json();
-    ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link', unit: 'un', qtyMilli: 1000, unitCents: 100_000, discountCents: 0, surchargeCents: 0 }] }));
+    ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [{ description: 'Link', unit: 'un', qtyMilli: 1000, unitCents: 100_000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: null }] }));
     ok(await carlos.put(`/opportunities/${o.id}/economics`, { mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null }));
     const r = ok(await carlos.get(`/opportunities/${o.id}/economics`)).json();
     expect(r.result.withReservations).toBe(true);
@@ -349,6 +349,43 @@ describe('viabilidade econômica', () => {
     expect(r27.result.kpi.investmentPaybackMonths).toBeCloseTo(3, 2);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.settings).toMatchObject({ fiscalYear: 2027, fiscalEnvelope: { year: 2027 } });
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+  });
+  it('B2G: perfil de custo no produto, mensalidade pela fórmula do payback e Modo B com lance', async () => {
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, netMarginMinBp: 800, overheadBp: 3500 }), 201);
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const branch = lk.branches[0].id;
+    const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
+    const o = ok(await carlos.post('/opportunities', { newContact: { name: `Órgão B2G ${Date.now()}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: branch, saleKind: 'venda_consultiva' }), 201).json();
+    // documento preenchido pela filial quando o produto vem sem ele; perfil de custo alterado só nesta oportunidade
+    ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items: [
+      { description: 'Link B2G', unit: 'un', qtyMilli: 1000, unitCents: 300_000, discountCents: 0, surchargeCents: 0, dealKind: 'recorrencia' },
+      { description: 'Roteador B2G', unit: 'un', qtyMilli: 2000, unitCents: 50_000, discountCents: 0, surchargeCents: 0, dealKind: 'venda', costProfile: 'implantacao' },
+    ] }));
+    const its = ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items;
+    expect(its.every((i: { fiscalDocTypeId: string | null }) => !!i.fiscalDocTypeId)).toBe(true);
+    expect(its.find((i: { description: string }) => i.description === 'Roteador B2G').costProfile).toBe('implantacao');
+    expect(its.find((i: { description: string }) => i.description === 'Link B2G').costProfile).toBeNull();
+
+    const input = { mode: 'recorrente', termMonths: 36, receiveMonth: 0, paybackMonths: 12, variableBp: 0, lossBp: 0, marginTargetBp: 3500, priceCents: null, commissionBp: null, extraInitialCents: 0,
+      capex: [{ description: 'Obra', impact: 'servico', kind: 'recorrencia', qtyMilli: 1000, unitCents: 1_000_000 }],
+      opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 100_000 }],
+      b2g: { mode: 'A' } };
+    const r = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json().result.b2g;
+    expect(r.kinds).toEqual({ unica: true, recorrente: true });
+    // investimento = 10.000 + 35% de rateio = 13.500; mensalidade = (13.500 ÷ 12 + 1.000) ÷ (1 − tributos)
+    const line = r.recorrente.lines[0];
+    expect(r.recorrente.investmentCents).toBe(1_350_000);
+    expect(Math.abs(r.recorrente.monthlyPriceCents - (1_350_000 / 12 + 100_000) / (1 - line.taxPct / 100))).toBeLessThanOrEqual(1);
+    expect(r.unica.lines[0].profile).toBe('implantacao');
+
+    // Modo B: lance abaixo do piso gera alerta, não bloqueia
+    const b = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, b2g: { mode: 'B', bids: { 'link b2g': 1_000 } } })).json().result.b2g;
+    expect(b.mode).toBe('B');
+    expect(b.recorrente.lines[0].netPct).toBeLessThan(8);
+    expect(['produto_abaixo', 'produto_negativo', 'abaixo_minimo']).toContain(b.verdict);
+    // a entrada B2G fica salva
+    expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().input.b2g).toMatchObject({ mode: 'B', bids: { 'link b2g': 1_000 } });
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
   });
 });

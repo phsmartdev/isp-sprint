@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, type CostProfile, type DealKind } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -19,6 +19,7 @@ const ItemBody = z.object({
   unitCents: cents, discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(), dealKind: z.enum(DEAL_KINDS).default('recorrencia'),
   /** documento fiscal do item (tributos da viabilidade econômica) */ fiscalDocTypeId: z.string().uuid().nullable().optional(),
   /** endereço de entrega do item (um dos outros endereços da oportunidade); vazio = o principal */ deliveryAddressId: z.string().uuid().nullable().optional(),
+  /** perfil de custo (viabilidade B2G); vazio = padrão pelo tipo (venda = fornecimento; os demais = implantação) */ costProfile: z.enum(['fornecimento', 'implantacao']).nullable().optional(),
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
@@ -76,6 +77,16 @@ export const opportunityItemRoutes = [
           if (found.length !== docIds.length) throw unprocessable('Documento fiscal inválido em algum item.');
         }
         await assertDeliveryAddresses(tx, auth.tenantId, opp.id, body.items.map((i) => i.deliveryAddressId).filter(Boolean) as string[]);
+        // documento fiscal pré-preenchido pelo perfil e pelo tipo (venda pura = NF-e; locação; o resto = serviço), da filial da oportunidade
+        if (opp.branchId && body.items.some((i) => i.fiscalDocTypeId === undefined)) {
+          const bdocs = await tx.select({ id: s.fiscalDocTypes.id, kind: s.fiscalDocTypes.fiscalKind }).from(s.fiscalDocTypes).where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), eq(s.fiscalDocTypes.branchId, opp.branchId), eq(s.fiscalDocTypes.active, true))).orderBy(asc(s.fiscalDocTypes.code));
+          for (const it of body.items) {
+            if (it.fiscalDocTypeId !== undefined) continue; // null = o usuário deixou sem documento de propósito
+            const prof = it.costProfile ?? defaultCostProfile(it.dealKind as DealKind);
+            const want = prof === 'fornecimento' && it.dealKind === 'venda' ? 'venda' : it.dealKind === 'locacao' ? 'locacao' : 'servico';
+            it.fiscalDocTypeId = bdocs.find((d) => d.kind === want)?.id ?? null;
+          }
+        }
         const bid = await isBid(tx, auth.tenantId, opp);
         const before = await tx.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, opp.id));
         const beforeTotals = itemsTotals(before);
@@ -91,7 +102,7 @@ export const opportunityItemRoutes = [
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
             ...(bid ? carry(it.description) : {}),
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
-            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, dealKind: it.dealKind, createdBy: auth.userId,
+            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, costProfile: it.costProfile ?? null, dealKind: it.dealKind, createdBy: auth.userId,
           })));
         }
         // cada item lançado/importado fica no catálogo para as próximas negociações (último valor e tipo usados)
@@ -118,9 +129,12 @@ export const opportunityItemRoutes = [
         const updated = await tx.update(s.opportunities).set({ valueCents, bidMode, bidGlobalCents, updatedAt: new Date(), rowVersion: bumpVersion() })
           .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(opp.rowVersion);
+        // perfil de custo alterado na oportunidade fica no histórico (e na fotografia da viabilidade ao fechar)
+        const profOf = (x: { costProfile?: string | null; dealKind: string }) => (x.costProfile ?? defaultCostProfile(x.dealKind as DealKind)) as CostProfile;
+        const profChanges = body.items.flatMap((it) => { const b = before.find((x) => x.description.trim().toLowerCase() === it.description.trim().toLowerCase()); return b && profOf(b) !== profOf(it) ? [`${it.description}: ${COST_PROFILE_SHORT[profOf(b)]} → ${COST_PROFILE_SHORT[profOf(it)]}`] : []; });
         await tx.insert(s.opportunityEvents).values({
           tenantId: auth.tenantId, opportunityId: opp.id, type: 'updated', actorId: auth.userId, rowVersion: updated[0]!.rowVersion,
-          payload: { changed: { itens: { from: `${beforeTotals.count} item(ns) · ${(beforeTotals.total / 100).toFixed(2)}`, to: `${totals.count} item(ns) · ${(totals.total / 100).toFixed(2)}` }, ...(bid && (bidMode !== (opp.bidMode ?? null) || bidGlobalCents !== (opp.bidGlobalCents ?? null)) ? { lance: { from: opp.bidMode ?? null, to: bidMode === 'global' ? `global ${((bidGlobalCents ?? 0) / 100).toFixed(2)}` : bidMode } } : {}) } },
+          payload: { changed: { ...(profChanges.length ? { 'perfil de custo': { from: '', to: profChanges.join('; ') } } : {}), itens: { from: `${beforeTotals.count} item(ns) · ${(beforeTotals.total / 100).toFixed(2)}`, to: `${totals.count} item(ns) · ${(totals.total / 100).toFixed(2)}` }, ...(bid && (bidMode !== (opp.bidMode ?? null) || bidGlobalCents !== (opp.bidGlobalCents ?? null)) ? { lance: { from: opp.bidMode ?? null, to: bidMode === 'global' ? `global ${((bidGlobalCents ?? 0) / 100).toFixed(2)}` : bidMode } } : {}) } },
         });
       });
       return opportunityDto(await loadOpportunity(app.db, auth, params.id));

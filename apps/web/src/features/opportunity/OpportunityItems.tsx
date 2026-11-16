@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardPaste, FileSpreadsheet, Package, Plus, Trash2 } from 'lucide-react';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS, type FiscalKind } from '@isp/shared';
-import { DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOTS, ECON_LOT_LABELS, cestaOf, isOneTimeKind, ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, type DealKind, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit } from '@isp/domain';
+import { DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOTS, ECON_LOT_LABELS, cestaOf, isOneTimeKind, ITEM_UNITS, ITEM_UNIT_LABELS, itemTotal, type DealKind, parseItemsTable, parseMoney, parseQty, type BidMode, type ItemInput, type ItemUnit, COST_PROFILES, COST_PROFILE_LABELS, COST_PROFILE_SHORT, defaultCostProfile, type CostProfile } from '@isp/domain';
 import { api, ApiError } from '../../lib/api';
 import { fmtBRL } from '../../lib/format';
 import type { Opportunity } from '../../lib/types';
@@ -16,19 +16,19 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 import { addressLine, NewDeliveryAddressModal, type DeliveryAddress } from './DeliveryAddresses';
 
-type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null };
+type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean; deliveryAddresses?: DeliveryAddress[]; principalAddress?: string | null };
 type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
-type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind; addr: string };
+type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind; addr: string; prof: CostProfile | '' };
 
 const NEW_ADDR = '__novo__';
 const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
-const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind, addr: '' });
-const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null }): Row => ({ key: `n${++seq}`, doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
-const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null });
+const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind, addr: '', prof: '' });
+const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null }): Row => ({ key: `n${++seq}`, prof: i.costProfile ?? '', doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
+const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null, costProfile: r.prof || null });
 
 export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
@@ -70,6 +70,8 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const docs = (docsQ.data?.items ?? []).filter((d) => (!opp.branchId || d.branchId === opp.branchId));
   const plans = useLookups().data?.plans ?? [];
   const docForPlan = (name: string) => { const code = plans.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())?.fiscalDocCode; return code ? docs.find((d) => d.code === code.toUpperCase())?.id ?? '' : ''; };
+  // documento sugerido pelo tipo e perfil (venda pura = NF-e de mercadoria; locação; o resto = serviço); o usuário pode trocar
+  const suggestDoc = (kind: DealKind, prof: CostProfile | '') => { const want = (prof || defaultCostProfile(kind)) === 'fornecimento' && kind === 'venda' ? 'venda' : kind === 'locacao' ? 'locacao' : 'servico'; return [...docs].sort((a, b) => a.code.localeCompare(b.code)).find((d) => d.fiscalKind === want)?.id ?? ''; };
   const docLabel = (d: Doc) => `${d.code} · ${(d.rates.percentBp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%${d.rates.fixedCents ? ` + ${fmtBRL(d.rates.fixedCents)}` : ''}`;
 
   const save = useMutation({
@@ -85,7 +87,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   const addImported = (table: (string | number | null)[][], from: string) => {
     const r = parseItemsTable(table);
     if (r.missing.length) { setImportMsg(`${from}: faltam as colunas ${r.missing.join(', ')}. A primeira linha precisa ter os títulos, em qualquer ordem: obrigatórias Descrição, Quantidade e Valor unitário; opcionais Item, Unidade, Desconto, Acréscimo, Observação${bid ? ', Lance' : ''}.`); return; }
-    setRows([...cur.filter((x) => x.description.trim()), ...r.items.map(fromSaved)]);
+    setRows([...cur.filter((x) => x.description.trim()), ...r.items.map(fromSaved).map((x) => (x.doc ? x : { ...x, doc: suggestDoc(x.kind, x.prof) }))]);
     setImportMsg(`${from}: ${r.items.length} item(ns) incluído(s)${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira e clique em Salvar.`);
   };
   const onFile = async (f: File) => {
@@ -112,7 +114,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
               <input type="file" accept=".xlsx,.xls,.csv,.txt" className="sr-only" aria-label="Importar planilha de produtos" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} />
             </label>
             <Button size="sm" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => setPasting(true)}>Colar do Excel</Button>
-            <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...cur, blank()])}>Adicionar item</Button>
+            <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setRows([...cur, blank(suggestDoc('recorrencia', ''))])}>Adicionar item</Button>
           </span>
         )}
       </div>
@@ -122,7 +124,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       ) : (
         <div className="scroll-thin overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
-            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Endereço de entrega', 'Tipo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
+            <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Endereço de entrega', 'Tipo', 'Perfil de custo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
                 const lt = lineTotal(parsed[i]!);
@@ -131,7 +133,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                     <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => {
                       const v = e.target.value;
                       const c = catalog.find((x) => x.description.toLowerCase() === v.trim().toLowerCase());
-                      const doc = !r.doc ? (c?.fiscalDocTypeId ?? docForPlan(v)) : '';
+                      const doc = !r.doc ? (c?.fiscalDocTypeId || docForPlan(v) || suggestDoc((c?.dealKind as DealKind) ?? r.kind, r.prof)) : '';
                       set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
                     }} /></td>
                     <td className="px-1.5 py-1.5">
@@ -142,9 +144,10 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                         <option value={NEW_ADDR}>+ Novo endereço de entrega…</option>
                       </Select>
                     </td>
-                    <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => set(r.key, { kind: e.target.value as DealKind })}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => { const k = e.target.value as DealKind; set(r.key, { kind: k, ...(!r.doc ? { doc: suggestDoc(k, r.prof) } : {}) }); }}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Perfil de custo ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.prof || defaultCostProfile(r.kind)} disabled={!editable} title={`${COST_PROFILE_LABELS[(r.prof || defaultCostProfile(r.kind)) as CostProfile]}. Despesas fixas rateadas só incidem na Implantação.${r.prof && r.prof !== defaultCostProfile(r.kind) ? ' Alterado nesta oportunidade (fica registrado no fechamento).' : ''}`} onChange={(e) => set(r.key, { prof: e.target.value === defaultCostProfile(r.kind) ? '' : (e.target.value as CostProfile) })}>{COST_PROFILES.map((c) => <option key={c} value={c}>{COST_PROFILE_SHORT[c]}{c === defaultCostProfile(r.kind) ? '' : ' *'}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5">
-                      <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Sem documento: a viabilidade econômica calcula sem os tributos deste item'}>
+                      <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Obrigatório: sem documento fiscal a viabilidade econômica fica bloqueada'}>
                         <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
                         {FISCAL_KINDS.filter((k) => docs.some((d) => d.fiscalKind === k)).map((k) => <optgroup key={k} label={FISCAL_KIND_LABELS[k]}>{docs.filter((d) => d.fiscalKind === k).map((d) => <option key={d.id} value={d.id}>{docLabel(d)}</option>)}</optgroup>)}
                         {r.doc && !docs.some((d) => d.id === r.doc) && <option value={r.doc}>Documento de outra filial</option>}
@@ -168,6 +171,8 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       )}
       {!!cur.length && <LotTaxes rows={cur} docs={docs} docLabel={docLabel} />}
       <datalist id="items-catalog">{catalog.map((c) => <option key={c.id} value={c.description}>{`${money(c.lastUnitCents)} · ${DEAL_KIND_LABELS[c.dealKind as DealKind] ?? ''}`}</option>)}{plans.filter((p) => !catalog.some((c) => c.description.toLowerCase() === p.name.toLowerCase())).map((p) => <option key={p.id} value={p.name} />)}</datalist>
+      {!!cur.length && cur.some((r) => !r.doc) && <p className="mt-2 text-xs text-[#C2610C]">{cur.filter((r) => !r.doc).length} produto(s) sem documento fiscal. O documento é obrigatório: sem ele a viabilidade econômica fica bloqueada.</p>}
+      {!!cur.length && <p className="mt-2 text-xs text-muted">Perfil de custo: <b className="text-ink">Fornecimento</b> = venda pura, sem despesas fixas rateadas; <b className="text-ink">Implantação</b> = instalação ou fornecimento + instalação, recebe o rateio das despesas fixas. * = diferente do padrão do tipo.</p>}
       {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
       {bid && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md bg-surface-2 p-3 text-sm" role="radiogroup" aria-label="Lance da licitação">
@@ -206,7 +211,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
 /** Por cesta (natureza do documento: NF-e de mercadoria = Produtos; demais = Serviços), o documento de maior tributo vale no cálculo. */
 function LotTaxes({ rows, docs, docLabel }: { rows: Row[]; docs: Doc[]; docLabel: (d: Doc) => string }) {
   const lots = ECON_LOTS.map((l) => {
-    const its = rows.filter((r) => cestaOf(docs.find((d) => d.id === r.doc)?.fiscalKind ?? null, r.kind) === l);
+    const its = rows.filter((r) => (r.prof ? (r.prof === 'fornecimento' ? 'venda' : 'servico') : cestaOf(docs.find((d) => d.id === r.doc)?.fiscalKind ?? null, r.kind)) === l);
     const ds = its.map((r) => docs.find((d) => d.id === r.doc)).filter((d): d is Doc => !!d);
     const pick = (xs: Doc[]) => xs.reduce<Doc | null>((b, d) => (!b || d.rates.percentBp > b.rates.percentBp || (d.rates.percentBp === b.rates.percentBp && d.rates.fixedCents > b.rates.fixedCents) ? d : b), null);
     return { l, n: its.length, top: pick(ds.filter((d) => d.rates.complete)) ?? pick(ds), without: its.filter((r) => !r.doc).length };

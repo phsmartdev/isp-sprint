@@ -9,7 +9,7 @@ import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  buildModel, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  buildModel, b2gFromEconomics, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -18,6 +18,7 @@ import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice } from 
 import { Modal, useToast } from '../../components/ui/overlay';
 import { CashflowChart, flowSeries } from '../../components/charts/Cashflow';
 import { errMsg } from '../contracts/shared';
+import { B2gPanel, emptyB2gForm, type B2gForm } from './B2gPanel';
 
 type Data = {
   settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
@@ -236,7 +237,7 @@ function CellsTable({ r, compact }: { r: EconResult; compact?: boolean }) {
           );
         })}</tbody>
       </table></div>
-      {!compact && <p className="mt-1 text-2xs text-muted">Cada cesta usa o maior tributo entre os documentos dos seus produtos (Produtos = NF-e de mercadoria; Serviços = os demais documentos — regra provisória). O proposto é dividido entre as cestas na proporção dos produtos (ou do sugerido).</p>}
+      {!compact && <p className="mt-1 text-2xs text-muted">Cada cesta usa o maior tributo entre os documentos dos seus produtos (Fornecimento = NF-e de mercadoria; Implantação = os demais documentos). O proposto é dividido entre as cestas na proporção dos produtos (ou do sugerido).</p>}
     </section>
   );
 }
@@ -590,6 +591,20 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
 const exportHref = (oppId: string, runId: string, format: 'pdf' | 'csv') => `/api/v1/opportunities/${oppId}/economics/runs/${runId}/export?format=${format}`;
 const emitterLine = (e: NonNullable<Data['emitter']>) => [e.name, e.cnpj ? `CNPJ ${e.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}` : null, e.taxRegime ? TAX_REGIME_LABELS[e.taxRegime as TaxRegime] ?? e.taxRegime : null, e.city ? `${e.city}${e.state ? `/${e.state}` : ''}` : null].filter(Boolean).join(' · ');
 
+/** B2G: formulário ⇄ entrada salva (percentuais em pontos-base; peso em fração; lance em centavos) */
+const b2gFormOf = (b: EconInput['b2g']): B2gForm => ({
+  ...emptyB2gForm(), mode: b?.mode ?? 'A', overhead: bpText(b?.overheadBp ?? null), netTarget: bpText(b?.netTargetBp ?? null),
+  mcForn: bpText(b?.contributionBp?.fornecimento ?? null), mcImpl: bpText(b?.contributionBp?.implantacao ?? null), solvePb: !!b?.solvePayback,
+  weights: Object.fromEntries(Object.entries(b?.weights ?? {}).map(([k, v]) => [k, (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })])),
+  bids: Object.fromEntries(Object.entries(b?.bids ?? {}).map(([k, v]) => [k, money(v)])),
+});
+const b2gInputOf = (b: B2gForm): NonNullable<EconInput['b2g']> => {
+  const ok = (v: number | null) => (v == null || Number.isNaN(v) ? null : v);
+  const weights: Record<string, number> = {}, bids: Record<string, number> = {};
+  for (const [k, v] of Object.entries(b.weights)) { const n = Number(v.replace(',', '.')); if (v.trim() && Number.isFinite(n) && n >= 0 && n <= 100) weights[k] = n / 100; }
+  for (const [k, v] of Object.entries(b.bids)) { const n = parseMoney(v); if (n != null && n >= 0) bids[k] = n; }
+  return { mode: b.mode, overheadBp: ok(parseBp(b.overhead)), netTargetBp: ok(parseBp(b.netTarget)), contributionBp: { fornecimento: ok(parseBp(b.mcForn)), implantacao: ok(parseBp(b.mcImpl)) }, solvePayback: b.solvePb, weights, bids };
+};
 const formKey = (f: object) => JSON.stringify(f, (k, v) => (k === 'key' ? undefined : v));
 
 /** Veredito sem números, para quem não vê valores financeiros. */
@@ -667,13 +682,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
   const catalog = catQ.data?.items ?? [];
-  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string } | null>(null);
+  const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string; b2g: B2gForm } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
   useEffect(() => {
     if (q.data?.input && !f) {
       const i = q.data.input;
-      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null), fiscalYear: i.fiscalYear ? String(i.fiscalYear) : '' };
+      const init = { mode: i.mode, term: String(i.termMonths), receive: String(i.receiveMonth), capex: toLines(i.capex), extra: i.extraInitialCents ? money(i.extraInitialCents) : '', opex: toLines(i.opex), commission: bpText(i.variableBp ?? null), loss: bpText(i.lossBp), margin: bpText(i.marginTargetBp), payback: i.paybackMonths ? String(i.paybackMonths) : '', price: money(i.priceCents), salePrice: money(i.salePriceCents ?? null), fiscalYear: i.fiscalYear ? String(i.fiscalYear) : '', b2g: b2gFormOf(i.b2g) };
       setF(init);
       setBase(formKey(init));
     }
@@ -684,10 +699,12 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
     commissionBp: null, variableBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
     salePriceCents: f.salePrice.trim() ? parseMoney(f.salePrice) : null,
     fiscalYear: f.fiscalYear.length === 4 ? Number(f.fiscalYear) : null,
+    b2g: b2gInputOf(f.b2g),
   } : null), [f]);
   const invalid = !input || [input.variableBp ?? null, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
   const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel, fiscal: q.data.fiscal }) : null), [q.data, input, invalid, liveModel]);
+  const liveB2g = useMemo(() => { if (!q.data?.settings || !input || invalid) return null; try { return b2gFromEconomics({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, fiscal: q.data.fiscal }, live?.fiscal?.profitTaxBp ?? null); } catch { return null; } }, [q.data, input, invalid, live]);
   const save = useMutation({
     mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
     onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
@@ -702,6 +719,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   // salvo e sem mudanças no formulário = o cálculo oficial; senão, a simulação ao vivo
   const official = !!d.saved && !!d.result && formKey(f) === base;
   const shownResult = official ? d.result : live;
+  const shownB2g = official ? d.result?.b2g ?? liveB2g : liveB2g;
   const dis = !d.editable;
   const set = (p: Partial<NonNullable<typeof f>>) => setF({ ...f, ...p });
   // tipos de negociação vêm dos produtos (aba Produtos); sem produtos vale a escolha abaixo
@@ -739,6 +757,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
       <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable && d.result?.priceSource !== 'sugerido'} />
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
+      {d.items.length > 0 && <B2gPanel r={shownB2g} f={f.b2g} set={(p) => set({ b2g: { ...f.b2g, ...p } })} settings={st} disabled={dis} />}
       {shownResult ? <EconomicsResult r={shownResult} settings={d.settings} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
       {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
         <section className="border border-line p-4" aria-labelledby="ec-flow">
@@ -755,19 +774,10 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
               <div>
                 <p className="mb-1 text-sm font-medium text-ink">Tipo de negociação (dos produtos)</p>
                 <div className="flex flex-wrap gap-1.5">{kinds.map((k) => <Chip key={k} tone={k === 'venda' ? 'blue' : 'green'}>{ECON_LOT_LABELS[lotOfKind(k)]}: {DEAL_KIND_LABELS[k]}{isOneTimeKind(k) ? ' · pagamento único' : ' · mensal'}</Chip>)}</div>
-                <p className="mt-1 text-xs text-muted">{mixed ? 'Pagamento único e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada investimento sai do seu lote (Venda ou Serviço).' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
+                <p className="mt-1 text-xs text-muted">{mixed ? 'Pagamento único e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada custo sai da sua cesta (Fornecimento ou Implantação).' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
               </div>
             ) : (
-            <fieldset>
-              <legend className="mb-1.5 text-sm font-medium text-ink">Tipo de receita</legend>
-              <div className="flex flex-wrap gap-2" role="radiogroup">
-                {(['recorrente', 'pontual'] as const).map((m) => (
-                  <label key={m} className={clsx('flex h-10 cursor-pointer items-center gap-2 border px-3 text-sm', f.mode === m ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line')}>
-                    <input type="radio" className="accent-primary" checked={f.mode === m} disabled={dis} onChange={() => set({ mode: m })} />{m === 'recorrente' ? 'Mensal (contrato)' : 'Pagamento único'}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+              <Notice tone="info">O tipo de receita (venda única, mensal ou os dois) vem de cada produto. Lance os produtos na aba Produtos e serviços.</Notice>
             )}
             <div className="grid grid-cols-2 gap-3">
             {mixed && <FormField label="Venda: recebe no mês" htmlFor="ec-rec" hint="0 = à vista"><Input id="ec-rec" inputMode="numeric" value={f.receive} disabled={dis} onChange={(e) => set({ receive: e.target.value.replace(/\D/g, '') })} /></FormField>}
@@ -808,12 +818,12 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             return (
               <div className="space-y-4">
                 <div>
-                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.venda} <span className="text-xs font-normal text-muted">equipamentos e materiais (NF-e): entram no preço da cesta de produtos · {fmtBRL(sub('venda'))}</span></p>
-                  <CostLines title="Investimento da Cesta de Produtos" example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.venda} <span className="text-xs font-normal text-muted">equipamentos e materiais vendidos sem instalação, sem despesas fixas rateadas · {fmtBRL(sub('venda'))}</span></p>
+                  <CostLines title="Custo direto do Fornecimento (venda pura)" example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </div>
                 <div>
-                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.servico} <span className="text-xs font-normal text-muted">obra, instalação, projeto: entram no preço da cesta de serviços · {fmtBRL(sub('servico'))}</span></p>
-                  <CostLines title="Investimento da Cesta de Serviços" example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.servico} <span className="text-xs font-normal text-muted">obra, instalação, projeto: recebem o rateio das despesas fixas · {fmtBRL(sub('servico'))}</span></p>
+                  <CostLines title="Custo direto da Implantação" example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </div>
                 {!!legacy.length && (
                   <div>

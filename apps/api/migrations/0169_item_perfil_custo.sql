@@ -1,0 +1,1 @@
+ALTER TABLE "opportunity_items" ADD COLUMN "cost_profile" text;

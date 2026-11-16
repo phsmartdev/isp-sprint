@@ -669,6 +669,8 @@ export const opportunityItems = pgTable('opportunity_items', {
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   /** Tipo de negociação do item: venda (pagamento único), recorrência ou locação/aluguel (mensais). */
   dealKind: text('deal_kind').notNull().default('recorrencia'),
+  /** Perfil de custo (viabilidade B2G): fornecimento (venda pura, sem rateio) ou implantação; vazio = padrão pelo tipo */
+  costProfile: text('cost_profile'),
   /** Endereço de entrega do item: um dos endereços extras da oportunidade; vazio = o endereço principal. */
   deliveryAddressId: uuid('delivery_address_id').references((): AnyPgColumn => opportunityDeliveryAddresses.id, { onDelete: 'set null' }),
   createdBy: uuid('created_by').references(() => users.id),
