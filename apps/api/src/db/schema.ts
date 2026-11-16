@@ -7580,6 +7580,31 @@ export const giftRequestDocuments = pgTable('gift_request_documents', {
   createdAt: createdAt(),
 }, (t) => ({ idx: index('gift_request_documents_idx').on(t.requestId), kindCk: check('gift_request_documents_kind_ck', inList('kind', ['evidencia', 'comprovante', 'autorizacao', 'entrega', 'outro'])) }));
 
+/**
+ * Medidas de melhoria do compliance: a providência para uma pendência de controle (ou uma fragilidade apontada pela gestão),
+ * com responsável, prazo e situação. Entram na seção 6 da prestação de contas. Nada é apagado: concluir ou cancelar fica no histórico.
+ */
+export const giftComplianceMeasures = pgTable('gift_compliance_measures', {
+  id: id(),
+  tenantId: tenantId(),
+  /** pendência calculada a que responde (concessão:tipo); null = fragilidade geral apontada pela gestão */
+  pendencyKey: text('pendency_key'),
+  requestId: uuid('request_id').references(() => giftRequests.id),
+  fragility: text('fragility').notNull(),
+  action: text('action').notNull(),
+  responsibleId: uuid('responsible_id').notNull().references(() => users.id),
+  dueOn: date('due_on', { mode: 'string' }),
+  status: text('status').notNull().default('aberta'),
+  outcomeNote: text('outcome_note'),
+  concludedAt: ts('concluded_at'),
+  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('gift_compliance_measures_idx').on(t.tenantId, t.status),
+  statusCk: check('gift_compliance_measures_status_ck', inList('status', ['aberta', 'em_andamento', 'concluida', 'cancelada'])),
+}));
+
 /** Prestações de contas emitidas: o PDF e as referências ficam guardados (o documento apresentado não muda depois). */
 export const giftComplianceReports = pgTable('gift_compliance_reports', {
   id: id(),

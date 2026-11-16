@@ -16,7 +16,7 @@ import {
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { fileToBase64 } from '../../lib/files';
-import { useUrlState } from '../../lib/hooks';
+import { useLookups, useUrlState } from '../../lib/hooks';
 import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
@@ -25,11 +25,15 @@ type Finding = { ruleKey: string; version: number; name: string; controlType: Co
 type Evaluation = { outcome: Outcome; level: string | null; findings: Finding[] };
 type Account = { contactId: string; name: string; shareCents: number };
 type Row = { id: string; code: string; kind: ConcessionKind; purpose: ConcessionPurpose; description: string; plannedOn: string; executedOn: string | null; state: ConcessionState; outcome: Outcome; exception: boolean; estimatedCents: number; approvedCents: number | null; executedCents: number | null; requesterId: string; requesterName: string; accounts: Account[]; institutionalClass: string | null; complete: boolean; approvalLevel?: string | null; canDecide?: boolean };
+type MeasureStatus = 'aberta' | 'em_andamento' | 'concluida' | 'cancelada';
+type Measure = { id: string; pendencyKey: string | null; requestId: string | null; code: string | null; fragility: string; action: string; responsibleId: string; responsibleName: string; dueOn: string | null; status: MeasureStatus; outcomeNote: string | null; pendencyOpen: boolean | null; late: boolean };
+const MEASURE_LABEL: Record<MeasureStatus, string> = { aberta: 'Aberta', em_andamento: 'Em andamento', concluida: 'Concluída', cancelada: 'Cancelada' };
+const MEASURE_TONE: Record<MeasureStatus, string> = { aberta: 'bg-warning-soft text-[#9A4D06]', em_andamento: 'bg-primary-soft text-primary', concluida: 'bg-success-soft text-[#15803D]', cancelada: 'bg-surface-2 text-muted' };
 type Kpis = { realizedCents: number; executed: number; accounts: number; exceptions: number; conformityPct: number | null; exceptionPct: number | null; traceabilityPct: number | null; pendencies: number };
 type Data = {
-  from: string; to: string; rows: Row[]; kpis: Kpis; pendencies: { requestId: string; code: string; text: string; since: string }[]; totals: { requested: number; approved: number; realized: number };
+  from: string; to: string; rows: Row[]; kpis: Kpis; pendencies: { key: string; requestId: string; code: string; text: string; since: string; measure: Measure | null }[]; measures: Measure[]; totals: { requested: number; approved: number; realized: number };
   options: { units: { id: string; name: string }[]; requesters: { id: string; name: string }[] }; catalog: { items: { id: string; name: string; unitCostCents: number; stock: number }[]; kits: { id: string; name: string; costCents: number; available: number }[] };
-  can: { decideLevels: string[]; configure: boolean; report: boolean; seesAll: boolean }; policy: { configured: boolean; rules: number; segregation: boolean; conformingLevel: string; note: string | null };
+  can: { decideLevels: string[]; configure: boolean; report: boolean; seesAll: boolean; measures: boolean }; policy: { configured: boolean; rules: number; segregation: boolean; conformingLevel: string; note: string | null };
 };
 
 const OUTCOME_TONE: Record<Outcome, string> = { conforme: 'text-[#15803D]', autorizacao: 'text-primary', excecao: 'text-[#C2610C]', impedido: 'text-danger' };
@@ -61,6 +65,8 @@ export function ComplianceSection() {
   const q = useQuery({ queryKey: ['compliance', params], queryFn: () => api<Data>(`/brindes/compliance${qs(params)}`) });
   const [creating, setCreating] = useState(false);
   const [panel, setPanel] = useState<'' | 'report' | 'rules'>('');
+  const [reportFor, setReportFor] = useState<string>('');
+  const [measure, setMeasure] = useState<{ pendency?: Data['pendencies'][number]; edit?: Measure } | null>(null);
   if (q.isLoading) return <div className="card"><LoadingRows /></div>;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
@@ -116,10 +122,24 @@ export function ComplianceSection() {
         </section>
       )}
 
-      {d.pendencies.length > 0 && (
+      {(d.pendencies.length > 0 || (d.can.measures && d.measures.length > 0)) && (
         <section aria-label="Pendências de controle" className="border-l-4 border-danger bg-danger-soft/40 px-4 py-3">
-          <p className="mb-1 flex items-center gap-2 text-sm font-bold text-ink"><AlertTriangle className="h-4 w-4 text-danger" aria-hidden />Pendências de controle</p>
-          <ul className="space-y-0.5 text-sm">{d.pendencies.slice(0, 6).map((p, n) => <li key={`${p.requestId}-${n}`}><button type="button" className="font-semibold text-ink hover:underline" onClick={() => setF({ id: p.requestId })}>{p.code}</button><span className="text-muted"> · {p.text} · desde {fmtDate(p.since)}</span></li>)}</ul>
+          <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-2 text-sm font-bold text-ink"><AlertTriangle className="h-4 w-4 text-danger" aria-hidden />Pendências de controle e medidas de melhoria</p>
+            {d.can.measures && <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={() => setMeasure({})}>Medida de melhoria</Button>}
+          </div>
+          {d.pendencies.length > 0 && <ul className="space-y-1 text-sm">{d.pendencies.slice(0, 8).map((p) => (
+            <li key={p.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <button type="button" className="font-semibold text-ink hover:underline" onClick={() => setF({ id: p.requestId })}>{p.code}</button><span className="text-muted">· {p.text} · desde {fmtDate(p.since)}</span>
+              {p.measure ? <button type="button" disabled={!d.can.measures} onClick={() => setMeasure({ edit: p.measure! })} className="text-xs"><Tag className={MEASURE_TONE[p.measure.status]}>Providência {MEASURE_LABEL[p.measure.status].toLowerCase()}{p.measure.late ? ' · prazo vencido' : ''} · {p.measure.responsibleName}</Tag></button>
+                : d.can.measures && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setMeasure({ pendency: p })}>Registrar providência</button>}
+            </li>
+          ))}</ul>}
+          {d.can.measures && d.measures.filter((m) => !m.pendencyKey || !d.pendencies.some((p) => p.key === m.pendencyKey)).length > 0 && (
+            <ul className="mt-2 space-y-1 border-t border-danger/20 pt-2 text-sm">{d.measures.filter((m) => !m.pendencyKey || !d.pendencies.some((p) => p.key === m.pendencyKey)).map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-x-2"><button type="button" onClick={() => setMeasure({ edit: m })} className="text-left font-semibold text-ink hover:underline">{m.code ? `${m.code} · ` : ''}{m.fragility}</button><span className="text-muted">· {m.action} · {m.responsibleName}{m.dueOn ? ` · até ${fmtDate(m.dueOn)}` : ''}{m.pendencyOpen === false ? ' · pendência regularizada' : ''}</span><Tag className={MEASURE_TONE[m.status]}>{MEASURE_LABEL[m.status]}{m.late ? ' · prazo vencido' : ''}</Tag></li>
+            ))}</ul>
+          )}
         </section>
       )}
 
@@ -143,18 +163,48 @@ export function ComplianceSection() {
       <p className="flex items-start gap-2 text-xs text-muted"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />Os indicadores contam só concessões executadas no período. Segregação de funções {d.policy.segregation ? 'ativa' : 'desativada'}; {d.policy.rules} diretriz(es) vigente(s){d.policy.note ? ` · ${d.policy.note}` : ''}.</p>
 
       {creating && <RequestForm catalog={d.catalog} units={d.options.units} onClose={() => setCreating(false)} onSaved={(id) => { setCreating(false); setF({ id }); }} />}
-      {f.id && <RequestDrawer id={f.id} catalog={d.catalog} units={d.options.units} onClose={() => setF({ id: '' })} />}
-      {panel === 'report' && <ReportDrawer from={f.de} to={f.ate} units={d.options.units} onClose={() => setPanel('')} />}
+      {f.id && <RequestDrawer id={f.id} catalog={d.catalog} units={d.options.units} onClose={() => setF({ id: '' })} onReport={d.can.report ? (rid) => { setReportFor(rid); setPanel('report'); } : undefined} />}
+      {panel === 'report' && <ReportDrawer from={f.de} to={f.ate} units={d.options.units} concessions={d.rows} requestId={reportFor} onClose={() => { setPanel(''); setReportFor(''); }} />}
+      {measure && <MeasureModal {...measure} onClose={() => setMeasure(null)} />}
       {panel === 'rules' && <RulesDrawer catalog={d.catalog} onClose={() => setPanel('')} />}
     </div>
   );
 }
 
 // ------------------------------------------------------------------ solicitação (criar e alterar)
+type Trail = { at: string; kind: 'saida_estoque' | 'devolucao' | 'atribuicao_conta' | 'execucao' | 'pagamento' | 'estorno_pagamento' | 'cancelamento'; what: string; qty: number | null; amountCents: number | null; to: string; by: string | null; ref: string | null };
+const TRAIL_LABEL: Record<Trail['kind'], string> = { saida_estoque: 'Saída de estoque', devolucao: 'Devolução (estorno)', atribuicao_conta: 'Atribuído à conta', execucao: 'Execução', pagamento: 'Pagamento', estorno_pagamento: 'Estorno de pagamento', cancelamento: 'Cancelamento' };
+
+/** Extrato da concessão: o que saiu, quando, quanto e para quem (estoque, rateio, execução e pagamentos). */
+function TrailView({ trail }: { trail: Trail[] }) {
+  return (
+    <section className="border border-line">
+      <p className="border-b border-line bg-surface-2 px-3 py-2 text-xs font-semibold text-muted">Extrato de saídas · o que, quando, quanto e para quem</p>
+      {!trail.length ? <p className="px-3 py-2 text-muted">Nada saiu ainda: sem execução, sem movimentação de estoque e sem pagamento no Financeiro.</p> : (
+        <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-xs">
+          <thead><tr className="text-left text-muted"><th className="px-3 py-1.5 font-semibold">Quando</th><th className="px-2 py-1.5 font-semibold">Movimento</th><th className="px-2 py-1.5 font-semibold">O que</th><th className="px-2 py-1.5 text-right font-semibold">Qtd.</th><th className="px-2 py-1.5 text-right font-semibold">Valor</th><th className="px-2 py-1.5 font-semibold">Para quem</th><th className="px-3 py-1.5 font-semibold">Por</th></tr></thead>
+          <tbody>{trail.map((e, i) => (
+            <tr key={i} className="border-t border-line align-top">
+              <td className="whitespace-nowrap px-3 py-1.5 text-text">{fmtDateTime(e.at)}</td>
+              <td className={clsx('px-2 py-1.5 font-semibold', e.kind === 'devolucao' || e.kind === 'estorno_pagamento' || e.kind === 'cancelamento' ? 'text-danger' : 'text-ink')}>{TRAIL_LABEL[e.kind]}</td>
+              <td className="px-2 py-1.5 text-text">{e.what}{e.ref && <span className="block text-muted">{e.ref}</span>}</td>
+              <td className="num px-2 py-1.5 text-right">{e.qty ?? '—'}</td>
+              <td className="num px-2 py-1.5 text-right">{e.amountCents == null ? '—' : fmtBRL(e.amountCents)}</td>
+              <td className="px-2 py-1.5 text-text">{e.to}</td>
+              <td className="px-3 py-1.5 text-text">{e.by ?? '—'}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
+  );
+}
+
 type Detail = {
   request: Row & { justification: string; kitId: string | null; kits: number; items: { itemId: string; qty: number }[]; kitCategory: KitCategory | null; collective: boolean; audience: string | null; attention: AttentionSituation[]; recipients: { stakeholderId: string; contactId: string; name: string; title: string | null; powerClass: string }[]; eventName: string | null; orgUnitId: string | null; rowVersion: number; executorName: string | null; cancelReason: string | null };
   accounts: (Account & { nature: string | null; history?: { executed: number; investedCents: number; exceptions: number; inProgress: number; lastOn: string | null } })[];
   evaluation: Evaluation; level: string | null; decisions: { id: string; decision: ConcessionDecision; deciderName: string; level: string; reason: string | null; conditions: string | null; amountCents: number; createdAt: string }[];
+  trail: Trail[];
   events: { id: string; type: string; text: string; actorName: string | null; createdAt: string }[]; documents: { id: string; kind: string; name: string; at: string }[];
   stock: { itemId: string; name: string; need: number; stock: number; reservedByOthers: number; available: number }[]; budget: { code: string | null; what: string; approved: number; committed: number; paid: number; balance: number } | null;
   can: { decide: ConcessionDecision[]; decideReason: string | null; edit: boolean; reserve: boolean; execute: boolean; cancel: boolean; upload: boolean };
@@ -271,7 +321,7 @@ function EvaluationView({ ev, level, accounts }: { ev: Evaluation; level: string
 }
 
 // ------------------------------------------------------------------ painel da solicitação
-function RequestDrawer({ id, catalog, units, onClose }: { id: string; catalog: Catalog; units: { id: string; name: string }[]; onClose: () => void }) {
+function RequestDrawer({ id, catalog, units, onClose, onReport }: { id: string; catalog: Catalog; units: { id: string; name: string }[]; onClose: () => void; onReport?: (requestId: string) => void }) {
   const q = useQuery({ queryKey: ['compliance', 'req', id], queryFn: () => api<Detail>(`/brindes/compliance/solicitacoes/${id}`) });
   const [editing, setEditing] = useState(false);
   const [dec, setDec] = useState<{ decision: ConcessionDecision | ''; reason: string; conditions: string; approved: string }>({ decision: '', reason: '', conditions: '', approved: '' });
@@ -282,7 +332,8 @@ function RequestDrawer({ id, catalog, units, onClose }: { id: string; catalog: C
   const d = q.data;
   const r = d?.request;
   return (
-    <Drawer open onClose={onClose} width="lg" title={r ? `${r.code} · ${r.description}` : 'Concessão'}>
+    <Drawer open onClose={onClose} width="lg" title={r ? `${r.code} · ${r.description}` : 'Concessão'}
+      footer={r && onReport ? <Button icon={<FileText className="h-4 w-4" />} onClick={() => { onClose(); onReport(r.id); }}>Relatório desta concessão (PDF)</Button> : undefined}>
       {q.isLoading ? <LoadingRows /> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : d && r && (
         <div className="space-y-5 text-sm">
           <div className="flex flex-wrap items-center gap-2"><Tag className={STATE_TONE[r.state]}>{CONCESSION_STATE_LABELS[r.state]}</Tag><span className={clsx('text-xs font-semibold', r.exception ? 'text-[#C2610C]' : OUTCOME_TONE[r.outcome])}>{r.exception ? 'Exceção autorizada' : OUTCOME_LABELS[r.outcome]}</span>{d.can.edit && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEditing(true)}>Alterar</Button>}</div>
@@ -296,6 +347,7 @@ function RequestDrawer({ id, catalog, units, onClose }: { id: string; catalog: C
             {r.attention.length > 0 && <p className="mt-1 text-xs text-[#9A4D06]">Situações de atenção: {r.attention.map((a) => ATTENTION_LABELS[a]).join(', ')}</p>}
           </div>
           <section className="border border-line p-3"><p className="text-xs font-semibold text-muted">Avaliação das diretrizes</p><EvaluationView ev={d.evaluation} level={d.level} /></section>
+          <TrailView trail={d.trail ?? []} />
 
           {r.state === 'solicitado' && (
             <section aria-label="Decisão" className="border border-line p-3">
@@ -349,31 +401,42 @@ function RequestDrawer({ id, catalog, units, onClose }: { id: string; catalog: C
 }
 
 // ------------------------------------------------------------------ prestação de contas
-function ReportDrawer({ from, to, units, onClose }: { from: string; to: string; units: { id: string; name: string }[]; onClose: () => void }) {
-  const q = useQuery({ queryKey: ['compliance', 'reports'], queryFn: () => api<{ items: { id: string; code: string; version: number; periodFrom: string; periodTo: string; createdAt: string; createdByName: string; records: number; letterhead: boolean; analysis: string | null }[]; branches: { id: string; name: string; letterhead: boolean }[] }>('/brindes/compliance/prestacoes') });
-  const [v, setV] = useState({ from, to, orgUnitId: '', kinds: [] as ConcessionKind[], detailed: true, justifications: true, exceptions: true, evidences: false, analysis: '', conclusion: '', branchId: '' });
+function ReportDrawer({ from, to, units, concessions, requestId, onClose }: { from: string; to: string; units: { id: string; name: string }[]; concessions: Row[]; requestId: string; onClose: () => void }) {
+  // consolidado do período ou relatório de uma concessão só
+  const [mode, setMode] = useState<'consolidado' | 'concessao'>(requestId ? 'concessao' : 'consolidado');
+  const [rid, setRid] = useState(requestId);
+  const q = useQuery({ queryKey: ['compliance', 'reports'], queryFn: () => api<{ items: { id: string; code: string; version: number; periodFrom: string; periodTo: string; createdAt: string; createdByName: string; records: number; letterhead: boolean; analysis: string | null; filters: { requestCode?: string | null } | null }[]; branches: { id: string; name: string; letterhead: boolean }[] }>('/brindes/compliance/prestacoes') });
+  const [v, setV] = useState({ from, to, orgUnitId: '', kinds: [] as ConcessionKind[], detailed: true, justifications: true, exceptions: true, evidences: false, trail: true, analysis: '', conclusion: '', branchId: '' });
   const gen = useAct<{ id: string; code: string; version: number }>('Prestação de contas emitida', (r) => { window.location.href = `/api/v1/brindes/compliance/prestacoes/${r.id}/pdf`; });
   const branches = q.data?.branches ?? [];
   useEffect(() => { if (!v.branchId && branches.length) setV((x) => ({ ...x, branchId: branches.find((b) => b.letterhead)?.id ?? '' })); }, [branches, v.branchId]);
-  const chk = (k: 'detailed' | 'justifications' | 'exceptions' | 'evidences', l: string) => <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.checked })} />{l}</label>;
+  const chk = (k: 'detailed' | 'justifications' | 'exceptions' | 'evidences' | 'trail', l: string) => <label className="flex items-center gap-2 text-sm text-text"><input type="checkbox" checked={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.checked })} />{l}</label>;
   return (
     <Drawer open onClose={onClose} width="lg" title="Prestação de Contas"
-      footer={<><Button variant="ghost" onClick={onClose}>Fechar</Button><Button variant="primary" icon={<FileDown className="h-4 w-4" />} loading={gen.isPending} onClick={() => gen.mutate({ url: '/brindes/compliance/prestacoes', body: { ...v, orgUnitId: v.orgUnitId || null, branchId: v.branchId || null, analysis: v.analysis || null, conclusion: v.conclusion || null } })}>Gerar PDF</Button></>}>
+      footer={<><Button variant="ghost" onClick={onClose}>Fechar</Button><Button variant="primary" icon={<FileDown className="h-4 w-4" />} loading={gen.isPending} disabled={mode === 'concessao' && !rid} onClick={() => gen.mutate({ url: '/brindes/compliance/prestacoes', body: { ...v, orgUnitId: v.orgUnitId || null, branchId: v.branchId || null, analysis: v.analysis || null, conclusion: v.conclusion || null, requestId: mode === 'concessao' ? rid : null } })}>Gerar PDF</Button></>}>
       <div className="space-y-4">
         <p className="text-sm text-muted">Relatório institucional da Gestão Comercial para a reunião do CIEI, montado com os registros do sistema. O PDF emitido fica guardado com versão: mudanças posteriores nos registros não alteram o documento apresentado.</p>
+        <div className="flex border border-line" role="radiogroup" aria-label="Tipo de relatório">
+          {([['consolidado', 'Consolidado do período', 'Todas as concessões do período e escopo, com indicadores e comparativo'], ['concessao', 'Por concessão', 'Uma concessão: solicitação, avaliação, decisões, execução e evidências']] as const).map(([k, l, h]) => (
+            <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)} className={clsx('flex-1 px-3 py-2 text-left', mode === k ? 'bg-primary-soft' : 'bg-surface hover:bg-surface-2')}><span className={clsx('block text-sm font-semibold', mode === k ? 'text-primary' : 'text-ink')}>{l}</span><span className="block text-xs text-muted">{h}</span></button>
+          ))}
+        </div>
+        {mode === 'concessao' && <FormField label="Concessão" htmlFor="pc-rq" hint="Concessões do período filtrado na tela."><Select id="pc-rq" value={rid} onChange={(e) => setRid(e.target.value)}><option value="">Escolha</option>{concessions.map((c) => <option key={c.id} value={c.id}>{c.code} · {c.description} · {CONCESSION_STATE_LABELS[c.state]}</option>)}</Select></FormField>}
         <div className="grid gap-3 sm:grid-cols-2">
+          {mode === 'consolidado' && <>
           <FormField label="De" htmlFor="pc-de"><Input id="pc-de" type="date" value={v.from} onChange={(e) => setV({ ...v, from: e.target.value })} /></FormField>
           <FormField label="Até" htmlFor="pc-ate"><Input id="pc-ate" type="date" value={v.to} onChange={(e) => setV({ ...v, to: e.target.value })} /></FormField>
-          {units.length > 0 && <FormField label="Unidade de negócio" htmlFor="pc-un"><Select id="pc-un" value={v.orgUnitId} onChange={(e) => setV({ ...v, orgUnitId: e.target.value })}><option value="">Todas</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
+          {units.length > 0 && <FormField label="Unidade de negócio" htmlFor="pc-un" hint="Unidade da estrutura organizacional (Gestão de Times). Todas = a empresa inteira."><Select id="pc-un" value={v.orgUnitId} onChange={(e) => setV({ ...v, orgUnitId: e.target.value })}><option value="">Todas</option>{units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>}
+          </>}
           <FormField label="Timbrado (filial)" htmlFor="pc-br"><Select id="pc-br" value={v.branchId} onChange={(e) => setV({ ...v, branchId: e.target.value })}><option value="">Sem timbrado</option>{branches.map((b) => <option key={b.id} value={b.id}>{b.name}{b.letterhead ? '' : ' (sem timbrado cadastrado)'}</option>)}</Select></FormField>
         </div>
         {!branches.some((b) => b.letterhead) && <Notice tone="warning">Nenhuma filial tem o timbrado oficial cadastrado. O PDF sai com cabeçalho padrão e informa isso. Cadastre em Configuração → Filiais.</Notice>}
-        <fieldset><legend className="mb-1 text-sm font-semibold text-ink">Categorias incluídas</legend><div className="flex flex-wrap gap-1.5">{CONCESSION_KINDS.map((k) => <button key={k} type="button" aria-pressed={v.kinds.includes(k)} onClick={() => setV({ ...v, kinds: v.kinds.includes(k) ? v.kinds.filter((x) => x !== k) : [...v.kinds, k] })} className={clsx('border px-2 py-1 text-xs', v.kinds.includes(k) ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line text-text')}>{CONCESSION_KIND_LABELS[k]}</button>)}</div><p className="mt-1 text-xs text-muted">Nenhuma marcada = todas.</p></fieldset>
-        <div className="grid gap-1 sm:grid-cols-2">{chk('detailed', 'Demonstrativo detalhado')}{chk('justifications', 'Justificativas')}{chk('exceptions', 'Exceções e autorizações')}{chk('evidences', 'Lista de evidências')}</div>
+        {mode === 'consolidado' && <fieldset><legend className="mb-1 text-sm font-semibold text-ink">Categorias incluídas</legend><div className="flex flex-wrap gap-1.5">{CONCESSION_KINDS.map((k) => <button key={k} type="button" aria-pressed={v.kinds.includes(k)} onClick={() => setV({ ...v, kinds: v.kinds.includes(k) ? v.kinds.filter((x) => x !== k) : [...v.kinds, k] })} className={clsx('border px-2 py-1 text-xs', v.kinds.includes(k) ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line text-text')}>{CONCESSION_KIND_LABELS[k]}</button>)}</div><p className="mt-1 text-xs text-muted">Nenhuma marcada = todas.</p></fieldset>}
+        <div className="grid gap-1 sm:grid-cols-2">{chk('detailed', 'Demonstrativo detalhado')}{chk('justifications', 'Justificativas')}{chk('exceptions', 'Exceções e autorizações')}{chk('evidences', 'Lista de evidências')}{mode === 'consolidado' && chk('trail', 'Extrato de saídas por concessão (anexo)')}</div>
         <FormField label="Análise executiva da gestão" htmlFor="pc-an"><Textarea id="pc-an" rows={3} value={v.analysis} onChange={(e) => setV({ ...v, analysis: e.target.value })} placeholder="Comportamento das concessões no período" /></FormField>
         <FormField label="Conclusão da Gestão Comercial" htmlFor="pc-co"><Textarea id="pc-co" rows={3} value={v.conclusion} onChange={(e) => setV({ ...v, conclusion: e.target.value })} placeholder="Efetividade dos controles, ocorrências, melhorias e pontos de atenção" /></FormField>
         <section><p className="mb-1 text-xs font-semibold text-muted">Relatórios emitidos</p>
-          {!q.data?.items.length ? <p className="text-sm text-muted">Nenhuma prestação de contas emitida.</p> : <ul className="divide-y divide-line border border-line text-sm">{q.data.items.map((x) => <li key={x.id} className="flex items-center justify-between gap-2 px-3 py-2"><span><b className="text-ink">{x.code} v{x.version}</b> · {fmtDate(x.periodFrom)} a {fmtDate(x.periodTo)}<span className="block text-xs text-muted">{fmtDateTime(x.createdAt)} por {x.createdByName} · {x.records} registro(s){x.letterhead ? '' : ' · sem timbrado'}</span></span><a className="inline-flex items-center gap-1 font-semibold text-primary hover:underline" href={`/api/v1/brindes/compliance/prestacoes/${x.id}/pdf`}><FileDown className="h-4 w-4" aria-hidden />PDF</a></li>)}</ul>}
+          {!q.data?.items.length ? <p className="text-sm text-muted">Nenhuma prestação de contas emitida.</p> : <ul className="divide-y divide-line border border-line text-sm">{q.data.items.map((x) => <li key={x.id} className="flex items-center justify-between gap-2 px-3 py-2"><span><b className="text-ink">{x.code} v{x.version}</b> · {x.filters?.requestCode ? `concessão ${x.filters.requestCode}` : `${fmtDate(x.periodFrom)} a ${fmtDate(x.periodTo)}`}<span className="block text-xs text-muted">{fmtDateTime(x.createdAt)} por {x.createdByName} · {x.records} registro(s){x.letterhead ? '' : ' · sem timbrado'}</span></span><a className="inline-flex items-center gap-1 font-semibold text-primary hover:underline" href={`/api/v1/brindes/compliance/prestacoes/${x.id}/pdf`}><FileDown className="h-4 w-4" aria-hidden />PDF</a></li>)}</ul>}
         </section>
       </div>
     </Drawer>
@@ -463,6 +526,33 @@ function RuleModal({ r, catalog, onClose }: { r: Partial<RuleRow> & { allowedKit
         </fieldset>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={v.active} onChange={(e) => setV({ ...v, active: e.target.checked })} />Ativa</label>
         <FormField label="Motivo da alteração" htmlFor="ru-cn" required className="sm:col-span-2"><Input id="ru-cn" value={v.changeNote} onChange={(e) => setV({ ...v, changeNote: e.target.value })} placeholder="Fica no histórico de versões" /></FormField>
+      </div>
+    </Modal>
+  );
+}
+
+/** Providência para uma pendência (ou fragilidade apontada pela gestão): responsável, prazo e situação. Entra na prestação de contas. */
+function MeasureModal({ pendency, edit, onClose }: { pendency?: { key: string; code: string; text: string; requestId: string }; edit?: Measure; onClose: () => void }) {
+  const lookups = useLookups();
+  const [v, setV] = useState({ fragility: edit?.fragility ?? (pendency ? `${pendency.code}: ${pendency.text}` : ''), action: edit?.action ?? '', responsibleId: edit?.responsibleId ?? '', dueOn: edit?.dueOn ?? '', status: edit?.status ?? 'aberta' as MeasureStatus, outcomeNote: edit?.outcomeNote ?? '' });
+  const save = useAct(edit ? 'Medida atualizada' : 'Providência registrada', onClose);
+  const closing = v.status === 'concluida' || v.status === 'cancelada';
+  return (
+    <Modal open onClose={onClose} title={edit ? 'Medida de melhoria' : pendency ? 'Registrar providência' : 'Nova medida de melhoria'}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} disabled={v.action.trim().length < 5 || !v.responsibleId || (!edit && v.fragility.trim().length < 5) || (closing && edit?.status !== v.status && !v.outcomeNote.trim())}
+        onClick={() => save.mutate(edit ? { url: `/brindes/compliance/medidas/${edit.id}`, method: 'PATCH', body: { action: v.action, responsibleId: v.responsibleId, dueOn: v.dueOn || null, status: v.status, outcomeNote: v.outcomeNote || null } }
+          : { url: '/brindes/compliance/medidas', body: { pendencyKey: pendency?.key ?? null, fragility: v.fragility, action: v.action, responsibleId: v.responsibleId, dueOn: v.dueOn || null, status: v.status } })}>Salvar</Button></>}>
+      <div className="space-y-3">
+        {edit || pendency ? <p className="bg-surface-2 px-3 py-2 text-sm text-ink">{v.fragility}</p>
+          : <FormField label="Fragilidade ou pendência" htmlFor="ms-f" hint="O que precisa melhorar no controle."><Textarea id="ms-f" rows={2} value={v.fragility} onChange={(e) => setV({ ...v, fragility: e.target.value })} /></FormField>}
+        <FormField label="Providência adotada" htmlFor="ms-a"><Textarea id="ms-a" rows={3} value={v.action} onChange={(e) => setV({ ...v, action: e.target.value })} placeholder="O que foi ou será feito para regularizar" /></FormField>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <FormField label="Responsável" htmlFor="ms-r"><Select id="ms-r" value={v.responsibleId} onChange={(e) => setV({ ...v, responsibleId: e.target.value })}><option value="">Escolha</option>{lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
+          <FormField label="Prazo" htmlFor="ms-d"><Input id="ms-d" type="date" value={v.dueOn} onChange={(e) => setV({ ...v, dueOn: e.target.value })} /></FormField>
+          <FormField label="Situação" htmlFor="ms-s"><Select id="ms-s" value={v.status} onChange={(e) => setV({ ...v, status: e.target.value as MeasureStatus })}>{(Object.keys(MEASURE_LABEL) as MeasureStatus[]).map((k) => <option key={k} value={k}>{MEASURE_LABEL[k]}</option>)}</Select></FormField>
+        </div>
+        {closing && <FormField label={v.status === 'concluida' ? 'Resultado da providência' : 'Motivo do cancelamento'} htmlFor="ms-o"><Textarea id="ms-o" rows={2} value={v.outcomeNote} onChange={(e) => setV({ ...v, outcomeNote: e.target.value })} /></FormField>}
+        <p className="text-xs text-muted">Entra na seção 6 da prestação de contas (Pendências e medidas de melhoria). Nada é apagado: concluir ou cancelar fica no histórico.</p>
       </div>
     </Modal>
   );

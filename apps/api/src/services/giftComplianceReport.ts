@@ -6,6 +6,7 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { CONCESSION_KIND_LABELS, CONCESSION_PURPOSE_LABELS, CONCESSION_STATE_LABELS, OUTCOME_LABELS, type ConcessionKind, type ConcessionPurpose, type ConcessionState, type Evaluation, type Outcome } from '@isp/domain';
 import { safeText, wrap } from './proposals';
+import { TRAIL_LABELS, type TrailEntry } from './giftCompliance';
 import { letterheadPainter, type Letterhead } from './economicsExport';
 import type { complianceData } from '../routes/giftCompliance';
 
@@ -17,10 +18,17 @@ type Doc = { requestId: string; kind: string; name: string; at: Date };
 export type ReportInput = {
   code: string; version: number; emittedAt: Date; emitter: string; tenantName: string; from: string; to: string;
   scope: { account: string | null; unit: string | null; kinds: ConcessionKind[] };
-  options: { detailed: boolean; justifications: boolean; exceptions: boolean; evidences: boolean };
+  options: { detailed: boolean; justifications: boolean; exceptions: boolean; evidences: boolean; trail: boolean };
   analysis: string | null; conclusion: string | null; letterhead: Letterhead | null;
   data: Data; decisions: Decision[]; documents: Doc[]; activeRules: number; segregation: boolean; policyNote: string | null;
+  /** mesmo escopo no período imediatamente anterior, de mesma duração (só números registrados) */
+  previous: { from: string; to: string; kpis: Data['kpis'] } | null;
+  /** relatório de uma concessão só */
+  single: { id: string; code: string } | null;
+  /** extrato de saídas (o que, quando, quanto, para quem) das concessões do relatório */
+  trail: TrailEntry[];
 };
+const MEASURE_LABEL: Record<string, string> = { aberta: 'Aberta', em_andamento: 'Em andamento', concluida: 'Concluída', cancelada: 'Cancelada' };
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const br = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
@@ -81,15 +89,28 @@ export async function buildComplianceReport(inp: ReportInput) {
   const decOf = (id: string) => inp.decisions.filter((x) => x.requestId === id);
   const docsOf = (id: string) => inp.documents.filter((x) => x.requestId === id);
 
+
+  /** Extrato: cada saída com data e hora, o que, quantidade, valor, para quem e quem registrou (só registros do sistema). */
+  const trailTable = (entries: TrailEntry[]) => {
+    if (!entries.length) { para('Nenhuma saída registrada (concessão ainda não executada, sem estoque movimentado e sem pagamento no Financeiro).', 9, font, muted); return; }
+    table([{ h: 'Data e hora', w: 1.35 }, { h: 'Movimento', w: 1.5 }, { h: 'O que', w: 2 }, { h: 'Qtd.', w: 0.6, right: true }, { h: 'Valor', w: 1.2, right: true }, { h: 'Para quem', w: 2.4 }, { h: 'Registrado por', w: 1.3 }],
+      entries.map((e) => [when(new Date(e.at)), TRAIL_LABELS[e.kind], `${e.what}${e.ref ? ` (${e.ref})` : ''}`, e.qty == null ? '—' : String(e.qty), e.amountCents == null ? '—' : brl(e.amountCents), e.to, e.by ?? '—']), 7);
+    const stock = entries.filter((e) => e.kind === 'saida_estoque' || e.kind === 'devolucao').reduce((t, e) => t + (e.amountCents ?? 0), 0);
+    const paid = entries.filter((e) => e.kind === 'pagamento' || e.kind === 'estorno_pagamento').reduce((t, e) => t + (e.amountCents ?? 0), 0);
+    const attributed = entries.filter((e) => e.kind === 'atribuicao_conta').reduce((t, e) => t + (e.amountCents ?? 0), 0);
+    para(`Totais do extrato: estoque líquido ${brl(stock)} · pago pelo Financeiro ${brl(paid)} · atribuído às contas ${brl(attributed)}.`, 8.5, font, muted);
+  };
+
   // 1. Identificação
   text('Relatório de Prestação de Contas', M, 18, bold, navy); y -= 20;
-  text('Brindes, Apoios e Patrocínios', M, 13, font, navy); y -= 22;
+  text(inp.single ? `Brindes, Apoios e Patrocínios · Concessão ${inp.single.code}` : 'Brindes, Apoios e Patrocínios · Consolidado do período', M, 13, font, navy); y -= 22;
   kv('Organização', `Grupo BKT${inp.tenantName && inp.tenantName !== 'Grupo BKT' ? ` (${inp.tenantName})` : ''}`);
   kv('Área responsável', 'Gestão Comercial');
-  kv('Período de referência', `${br(inp.from)} a ${br(inp.to)}`);
+  kv(inp.single ? 'Data da concessão' : 'Período de referência', inp.single ? br(inp.from) : `${br(inp.from)} a ${br(inp.to)}`);
   kv('Emissão', `${when(inp.emittedAt)} por ${inp.emitter}`);
   kv('Documento', `${inp.code} · versão ${inp.version}`);
-  kv('Critérios', [inp.scope.account ? `conta ${inp.scope.account}` : 'todas as contas visíveis ao emissor', inp.scope.unit ? `unidade ${inp.scope.unit}` : 'todas as unidades', inp.scope.kinds.length ? `categorias: ${inp.scope.kinds.map(kindLabel).join(', ')}` : 'todas as categorias', 'realizado = concessões executadas no período (data de execução); solicitações pendentes não entram nos indicadores de realização'].join('; '));
+  if (inp.single) kv('Critérios', `somente a concessão ${inp.single.code}, com decisões, execução, evidências e pendências dela`);
+  else kv('Critérios', [inp.scope.account ? `conta ${inp.scope.account}` : 'todas as contas visíveis ao emissor', inp.scope.unit ? `unidade ${inp.scope.unit}` : 'todas as unidades', inp.scope.kinds.length ? `categorias: ${inp.scope.kinds.map(kindLabel).join(', ')}` : 'todas as categorias', 'realizado = concessões executadas no período (data de execução); solicitações pendentes não entram nos indicadores de realização'].join('; '));
   if (!lh) kv('Timbrado', 'Timbrado oficial não cadastrado na filial escolhida: documento emitido com cabeçalho padrão. Cadastre o timbrado em Configuração → Filiais.');
 
   // 2. Sumário executivo
@@ -125,6 +146,20 @@ export async function buildComplianceReport(inp: ReportInput) {
     ['Pendências de controle', String(k.pendencies), 'ver seção 6'],
   ], 8.5);
 
+  if (inp.previous) {
+    const p = inp.previous.kpis;
+    need(130); // título e tabela do comparativo na mesma página
+    para(`Comparativo com o período anterior (${br(inp.previous.from)} a ${br(inp.previous.to)}, mesmo escopo):`, 9.5, bold);
+    table([{ h: 'Indicador', w: 3 }, { h: 'Período anterior', w: 1.6, right: true }, { h: 'Período atual', w: 1.6, right: true }], [
+      ['Concessões executadas', String(p.executed), String(k.executed)],
+      ['Investimento realizado', brl(p.realizedCents), brl(k.realizedCents)],
+      ['Contas beneficiadas', String(p.accounts), String(k.accounts)],
+      ['Exceções autorizadas', String(p.exceptions), String(k.exceptions)],
+      ['Taxa de conformidade', pct(p.conformityPct), pct(k.conformityPct)],
+      ['Índice de rastreabilidade', pct(p.traceabilityPct), pct(k.traceabilityPct)],
+    ], 8.5);
+  }
+
   // 4. Demonstrativo das concessões
   section(4, 'Demonstrativo das concessões');
   if (!rows.length) para('Nenhuma concessão registrada no período e escopo.', 9.5, font, muted);
@@ -143,6 +178,8 @@ export async function buildComplianceReport(inp: ReportInput) {
       table([{ h: 'Conta', w: 4 }, { h: 'Concessões', w: 1, right: true }, { h: 'Valor atribuído', w: 1.6, right: true }], [...[...byAcc.values()].sort((a, b) => b.cents - a.cents).map((a) => [a.name, String(a.n), brl(a.cents)]), ...(inst.length ? [['Ações institucionais sem conta', String(inst.length), brl(inst.reduce((t, r) => t + (r.executedCents ?? 0), 0))]] : [])]);
     }
   }
+
+  if (inp.single) { y -= 2; need(60); para('Extrato da concessão: o que saiu, quando, quanto e para quem', 10, bold); trailTable(inp.trail); }
 
   // 5. Exceções e justificativas
   section(5, 'Exceções e justificativas');
@@ -173,17 +210,30 @@ export async function buildComplianceReport(inp: ReportInput) {
 
   // 6. Pendências e medidas
   section(6, 'Pendências e medidas de melhoria');
+  const measureTxt = (m: Data['measures'][number] | null) => (m ? [m.action, m.responsibleName, m.dueOn ? br(m.dueOn) : 'sem prazo', `${MEASURE_LABEL[m.status] ?? m.status}${m.late ? ' (prazo vencido)' : ''}`] : ['Sem providência registrada', '—', '—', 'Em aberto']);
   if (!d.pendencies.length) para('Nenhuma pendência de controle identificada pelos registros no período.', 9.5);
-  else table([{ h: 'Concessão', w: 1.3 }, { h: 'Pendência', w: 3.6 }, { h: 'Desde', w: 1 }, { h: 'Responsável', w: 1.8 }, { h: 'Situação', w: 1.2 }],
-    d.pendencies.map((p) => [p.code, p.text, br(p.since), rows.find((r) => r.id === p.requestId)?.requesterName ?? '—', 'Em aberto']), 8);
-  para('Fragilidades, providências e prazos de regularização: descrever na conclusão da gestão (seção 7); o sistema registra apenas o que está nos registros.', 8.5, font, muted);
+  else {
+    need(60);
+    para('Pendências identificadas pelos registros e a providência adotada para cada uma:', 9.5, bold);
+    table([{ h: 'Concessão', w: 1.1 }, { h: 'Pendência', w: 2.6 }, { h: 'Desde', w: 0.9 }, { h: 'Providência', w: 2.6 }, { h: 'Responsável', w: 1.4 }, { h: 'Prazo', w: 0.9 }, { h: 'Situação', w: 1.2 }],
+      d.pendencies.map((p) => [p.code, p.text, br(p.since), ...measureTxt(p.measure)]), 7.5);
+  }
+  const other = d.measures.filter((m) => !m.pendencyKey || !d.pendencies.some((p) => p.key === m.pendencyKey));
+  if (other.length) {
+    need(60);
+    para('Fragilidades de controle e medidas de melhoria (inclui pendências já regularizadas):', 9.5, bold);
+    table([{ h: 'Fragilidade / origem', w: 2.8 }, { h: 'Providência', w: 2.8 }, { h: 'Responsável', w: 1.4 }, { h: 'Prazo', w: 0.9 }, { h: 'Situação', w: 1.6 }],
+      other.map((m) => [`${m.code ? `${m.code} · ` : ''}${m.fragility}${m.pendencyKey && m.pendencyOpen === false ? ' (pendência regularizada nos registros)' : ''}`, `${m.action}${m.outcomeNote ? ` Resultado: ${m.outcomeNote}` : ''}`, m.responsibleName, m.dueOn ? br(m.dueOn) : 'sem prazo', `${MEASURE_LABEL[m.status] ?? m.status}${m.late ? ' (prazo vencido)' : ''}`]), 7.5);
+  }
+  if (!d.pendencies.length && !other.length) para('Nenhuma medida de melhoria registrada no período.', 9.5, font, muted);
 
   // 7. Conclusão
   section(7, 'Conclusão da Gestão Comercial');
   para(inp.conclusion?.trim() || 'Conclusão não preenchida pelo emissor. Este relatório não contém declaração de conformidade plena.', 9.5, font, inp.conclusion?.trim() ? ink : muted);
 
   // 8. Anexos
-  if (inp.options.evidences || inp.options.justifications) {
+  const annexTrail = !inp.single && inp.options.trail && inp.trail.length > 0;
+  if (inp.options.evidences || inp.options.justifications || annexTrail) {
     section(8, 'Anexos');
     if (inp.options.justifications) {
       para('A. Justificativas e decisões por concessão', 10, bold);
@@ -203,6 +253,10 @@ export async function buildComplianceReport(inp: ReportInput) {
       const ev = rows.flatMap((r) => docsOf(r.id).map((x) => [r.code, x.kind, x.name, when(x.at)]));
       if (!ev.length) para('Nenhuma evidência anexada às concessões do período.', 9, font, muted);
       else table([{ h: 'Concessão', w: 1.3 }, { h: 'Tipo', w: 1 }, { h: 'Arquivo', w: 3.2 }, { h: 'Anexado em', w: 1.4 }], ev, 8);
+    }
+    if (annexTrail) {
+      para('C. Extrato de saídas por concessão (o que, quando, quanto e para quem)', 10, bold);
+      for (const r of rows.filter((x) => inp.trail.some((e) => e.requestId === x.id))) { need(50); para(`${r.code} · ${accTxt(r)}`, 9, bold); trailTable(inp.trail.filter((e) => e.requestId === r.id)); }
     }
   }
 

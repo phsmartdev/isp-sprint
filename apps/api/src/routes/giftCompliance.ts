@@ -19,7 +19,7 @@ import { audit } from '../services/audit';
 import { todayIn } from '../services/vacations';
 import { assertAccount } from './stakeholders';
 import {
-  accountConcessions, allRules, budgetAvailable, recipientsOf, detectedAttention, canConfigure, canReport, canSeeRequest, COMPLIANCE_EVENTS, profilesOf, decidersFor, evaluate, isComplete, levelsOf, notifyCompliance, pendenciesOf, seesAll, settingsOf,
+  accountConcessions, allRules, concessionTrail, budgetAvailable, recipientsOf, detectedAttention, canConfigure, canReport, canSeeRequest, COMPLIANCE_EVENTS, profilesOf, decidersFor, evaluate, isComplete, levelsOf, notifyCompliance, pendenciesOf, seesAll, settingsOf,
   type EvalInput, type Req,
 } from '../services/giftCompliance';
 import { buildComplianceReport } from '../services/giftComplianceReport';
@@ -28,6 +28,14 @@ import { letterheadForBranch } from '../services/contractErp';
 /** Solicitar e acompanhar as próprias é de todos (Operação Comercial e Marketing); o que cada um vê e decide é filtrado no servidor. */
 const READ = { tag: 'Marketing', anyAuthenticated: true as const };
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
+export const MEASURE_STATUSES = ['aberta', 'em_andamento', 'concluida', 'cancelada'] as const;
+export type MeasureStatus = (typeof MEASURE_STATUSES)[number];
+/** Medidas de melhoria: quem cuida da governança (prestação de contas) ou decide alçada. */
+const canManageMeasures = (auth: AuthContext) => canReport(auth) || levelsOf(auth).length > 0;
+async function assertResponsible(db: DbOrTx, tenantId: string, userId: string) {
+  const [u] = await db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.id, userId), eq(s.users.tenantId, tenantId), eq(s.users.active, true), eq(s.users.service, false))).limit(1);
+  if (!u) throw unprocessable('Responsável inválido: escolha um usuário ativo.');
+}
 const uuid = z.string().uuid();
 const lockBrindes = (db: DbOrTx, tenantId: string) => db.execute(sql`select pg_advisory_xact_lock(hashtext(${`brindes:${tenantId}`}))`);
 
@@ -161,7 +169,36 @@ export async function complianceData(db: DbOrTx, auth: AuthContext, q: z.infer<t
   const pend = pendenciesOf(full, today);
   const kpis = complianceKpis(executed.map((r) => ({ totalCents: r.executedCents ?? 0, accountIds: r.accounts.map((a) => a.contactId), exception: r.exception, complete: isComplete(r, r.decided, r.docKinds) })), pend.length);
   const byKind = Object.fromEntries(CONCESSION_KINDS.map((k) => [k, { count: executed.filter((r) => r.kind === k).length, cents: executed.filter((r) => r.kind === k).reduce((t, r) => t + (r.executedCents ?? 0), 0) }]));
-  return { from, to, today, rows: full, kpis, byKind, pendencies: pend, totals: { requested: full.filter((r) => r.state === 'solicitado' || r.state === 'ajustes').reduce((t, r) => t + r.estimatedCents, 0), approved: full.filter((r) => ['aprovado', 'reservado', 'executado'].includes(r.state)).reduce((t, r) => t + (r.approvedCents ?? 0), 0), realized: kpis.realizedCents } };
+  // medidas de melhoria: as das concessões visíveis e as gerais (só para quem cuida da governança); abertas sempre, concluídas do período
+  const visibleIds = full.map((r) => r.id);
+  const measureRows = await db.select({ m: s.giftComplianceMeasures, responsible: s.users.name }).from(s.giftComplianceMeasures).innerJoin(s.users, eq(s.users.id, s.giftComplianceMeasures.responsibleId))
+    .where(and(eq(s.giftComplianceMeasures.tenantId, auth.tenantId), sql`(${s.giftComplianceMeasures.status} in ('aberta','em_andamento') or (coalesce(${s.giftComplianceMeasures.concludedAt}, ${s.giftComplianceMeasures.createdAt}) at time zone 'America/Sao_Paulo')::date between ${from} and ${to})`))
+    .orderBy(asc(s.giftComplianceMeasures.createdAt));
+  const governance = canManageMeasures(auth);
+  const measures = measureRows.filter((x) => (x.m.requestId ? visibleIds.includes(x.m.requestId) : governance)).map((x) => {
+    const code = full.find((r) => r.id === x.m.requestId)?.code ?? null;
+    // a pendência sumiu dos registros (ex.: comprovante anexado): fica dito, sem esconder a medida
+    const pendencyOpen = x.m.pendencyKey ? pend.some((p) => p.key === x.m.pendencyKey) : null;
+    return { id: x.m.id, pendencyKey: x.m.pendencyKey, requestId: x.m.requestId, code, fragility: x.m.fragility, action: x.m.action, responsibleId: x.m.responsibleId, responsibleName: x.responsible, dueOn: x.m.dueOn, status: x.m.status as MeasureStatus, outcomeNote: x.m.outcomeNote, concludedAt: x.m.concludedAt, createdAt: x.m.createdAt, pendencyOpen, late: !!x.m.dueOn && x.m.dueOn < today && (x.m.status === 'aberta' || x.m.status === 'em_andamento') };
+  });
+  const pendencies = pend.map((p) => ({ ...p, measure: measures.filter((m) => m.pendencyKey === p.key && m.status !== 'cancelada').at(-1) ?? null }));
+  return { from, to, today, rows: full, kpis, byKind, pendencies, measures, totals: { requested: full.filter((r) => r.state === 'solicitado' || r.state === 'ajustes').reduce((t, r) => t + r.estimatedCents, 0), approved: full.filter((r) => ['aprovado', 'reservado', 'executado'].includes(r.state)).reduce((t, r) => t + (r.approvedCents ?? 0), 0), realized: kpis.realizedCents } };
+}
+
+/** Recorta os dados do compliance (categorias ou uma concessão) e recalcula indicadores, distribuição, pendências e medidas. */
+function scoped(d: Awaited<ReturnType<typeof complianceData>>, keep: (r: Awaited<ReturnType<typeof complianceData>>['rows'][number]) => boolean) {
+  const rows = d.rows.filter(keep);
+  const ids = new Set(rows.map((r) => r.id));
+  const executed = rows.filter((r) => r.state === 'executado');
+  const pendencies = d.pendencies.filter((p) => ids.has(p.requestId));
+  const all = rows.length === d.rows.length;
+  return {
+    ...d, rows, pendencies,
+    // medidas gerais (sem concessão) só no consolidado completo
+    measures: d.measures.filter((m) => (m.requestId ? ids.has(m.requestId) : all)),
+    kpis: complianceKpis(executed.map((r) => ({ totalCents: r.executedCents ?? 0, accountIds: r.accounts.map((a) => a.contactId), exception: r.exception, complete: isComplete(r, r.decided, r.docKinds) })), pendencies.length),
+    byKind: Object.fromEntries(CONCESSION_KINDS.map((k) => [k, { count: executed.filter((r) => r.kind === k).length, cents: executed.filter((r) => r.kind === k).reduce((t, r) => t + (r.executedCents ?? 0), 0) }])) as typeof d.byKind,
+  };
 }
 
 export const giftComplianceRoutes = [
@@ -186,7 +223,7 @@ export const giftComplianceRoutes = [
           approvalLevel: neededLevel(r.evaluation as unknown as Evaluation, st.conformingLevel, r.approvalLevel),
           canDecide: r.state === 'solicitado' && !(st.segregation && r.requesterId === auth.userId) && allowedDecisions(r.evaluation as unknown as Evaluation, levelsOf(auth), neededLevel(r.evaluation as unknown as Evaluation, st.conformingLevel, r.approvalLevel)).decisions.length > 0 })),
         options: { units, requesters }, catalog,
-        can: { create: true, decideLevels: levelsOf(auth), configure: canConfigure(auth), report: canReport(auth), seesAll: seesAll(auth) },
+        can: { create: true, decideLevels: levelsOf(auth), configure: canConfigure(auth), report: canReport(auth), seesAll: seesAll(auth), measures: canManageMeasures(auth) },
         policy: { configured: currentRules(rules, d.today).length > 0, rules: currentRules(rules, d.today).length, segregation: st.segregation, conformingLevel: st.conformingLevel, note: st.policyNote },
       };
     },
@@ -268,7 +305,10 @@ export const giftComplianceRoutes = [
       const segregated = st.segregation && r.requesterId === auth.userId && allowed.decisions.length > 0;
       const hist = await accountConcessions(app.db, auth.tenantId, accs.map((a) => a.a.contactId));
       const name = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
+      // extrato: o que saiu, quando, quanto e para quem (estoque, rateio, execução, pagamentos)
+      const trail = await concessionTrail(app.db, auth.tenantId, [r.id]);
       return {
+        trail,
         request: { ...r, requesterName: name(r.requesterId), executorName: name(r.executorId), kitName: kit[0]?.name ?? null },
         accounts: accs.map((a) => ({ contactId: a.a.contactId, name: a.name, nature: a.nature, shareCents: a.a.shareCents, history: hist.find((h) => h.contactId === a.a.contactId) })),
         evaluation: ev, level: neededLevel(ev, st.conformingLevel, r.approvalLevel),
@@ -563,6 +603,47 @@ export const giftComplianceRoutes = [
 
   // ------------------------------------------------------------------ prestação de contas
   defineRoute({
+    method: 'POST', url: '/brindes/compliance/medidas', summary: 'Registra a providência (medida de melhoria) para uma pendência de controle ou uma fragilidade apontada pela gestão: responsável, prazo e situação', ...READ,
+    body: z.object({
+      pendencyKey: z.string().regex(/^[0-9a-f-]{36}:[a-z_]{3,30}$/).nullable().optional(),
+      fragility: z.string().trim().min(5, 'Descreva a pendência ou fragilidade').max(500), action: z.string().trim().min(5, 'Descreva a providência').max(1000),
+      responsibleId: uuid, dueOn: isoDate.nullable().optional(), status: z.enum(MEASURE_STATUSES).default('aberta'),
+    }),
+    handler: async ({ app, auth, body, req, reply }) => {
+      if (!canManageMeasures(auth)) throw forbidden('Medidas de melhoria: Gestão comercial, Diretoria e Administração.');
+      const requestId = body.pendencyKey ? body.pendencyKey.slice(0, 36) : null;
+      if (requestId) {
+        const [r] = await app.db.select({ id: s.giftRequests.id, requesterId: s.giftRequests.requesterId }).from(s.giftRequests).where(and(eq(s.giftRequests.id, requestId), eq(s.giftRequests.tenantId, auth.tenantId))).limit(1);
+        if (!r || !canSeeRequest(auth, r.requesterId)) throw notFound('Concessão não encontrada.');
+      }
+      await assertResponsible(app.db, auth.tenantId, body.responsibleId);
+      const done = body.status === 'concluida' || body.status === 'cancelada';
+      const [m] = await app.db.insert(s.giftComplianceMeasures).values({ tenantId: auth.tenantId, pendencyKey: body.pendencyKey ?? null, requestId, fragility: body.fragility, action: body.action, responsibleId: body.responsibleId, dueOn: body.dueOn ?? null, status: body.status, concludedAt: done ? new Date() : null, createdBy: auth.userId }).returning();
+      await audit(app.db, req, { action: 'gift_compliance.measure_create', entityType: 'gift_compliance_measure', entityId: m!.id, metadata: { pendencyKey: body.pendencyKey ?? null, responsibleId: body.responsibleId, dueOn: body.dueOn ?? null, status: body.status } });
+      reply.code(201);
+      return { id: m!.id };
+    },
+  }),
+  defineRoute({
+    method: 'PATCH', url: '/brindes/compliance/medidas/:id', summary: 'Atualiza a medida de melhoria (situação, providência, responsável, prazo); concluir pede o resultado. Nada é apagado', ...READ, params: IdParams,
+    body: z.object({
+      action: z.string().trim().min(5).max(1000).optional(), responsibleId: uuid.optional(), dueOn: isoDate.nullable().optional(),
+      status: z.enum(MEASURE_STATUSES).optional(), outcomeNote: z.string().trim().max(1000).nullable().optional(),
+    }),
+    handler: async ({ app, auth, params, body, req }) => {
+      if (!canManageMeasures(auth)) throw forbidden('Medidas de melhoria: Gestão comercial, Diretoria e Administração.');
+      const [m] = await app.db.select().from(s.giftComplianceMeasures).where(and(eq(s.giftComplianceMeasures.id, params.id), eq(s.giftComplianceMeasures.tenantId, auth.tenantId))).limit(1);
+      if (!m) throw notFound('Medida não encontrada.');
+      if (body.responsibleId) await assertResponsible(app.db, auth.tenantId, body.responsibleId);
+      const closing = (body.status === 'concluida' || body.status === 'cancelada') && body.status !== m.status;
+      if (closing && !(body.outcomeNote ?? m.outcomeNote)?.trim()) throw unprocessable(body.status === 'concluida' ? 'Informe o resultado da providência para concluir.' : 'Informe o motivo do cancelamento.');
+      const reopening = (body.status === 'aberta' || body.status === 'em_andamento') && (m.status === 'concluida' || m.status === 'cancelada');
+      await app.db.update(s.giftComplianceMeasures).set({ action: body.action, responsibleId: body.responsibleId, dueOn: body.dueOn, status: body.status, outcomeNote: body.outcomeNote, concludedAt: closing ? new Date() : reopening ? null : undefined, updatedAt: new Date() }).where(eq(s.giftComplianceMeasures.id, m.id));
+      await audit(app.db, req, { action: 'gift_compliance.measure_update', entityType: 'gift_compliance_measure', entityId: m.id, metadata: { from: { status: m.status, responsibleId: m.responsibleId, dueOn: m.dueOn }, to: body } });
+      return { ok: true };
+    },
+  }),
+  defineRoute({
     method: 'GET', url: '/brindes/compliance/prestacoes', summary: 'Prestações de contas emitidas (sem o arquivo) e as filiais com timbrado', ...READ,
     handler: async ({ app, auth }) => {
       if (!canReport(auth)) throw forbidden('Prestação de contas: Gestão comercial, Diretoria e Administração.');
@@ -577,13 +658,26 @@ export const giftComplianceRoutes = [
     body: z.object({
       from: isoDate, to: isoDate, contactId: uuid.nullable().optional(), orgUnitId: uuid.nullable().optional(), kinds: z.array(z.enum(CONCESSION_KINDS)).default([]),
       detailed: z.boolean().default(true), justifications: z.boolean().default(true), exceptions: z.boolean().default(true), evidences: z.boolean().default(false),
+      /** extrato de saídas por concessão (o que, quando, quanto, para quem) */
+      trail: z.boolean().default(true),
       analysis: z.string().trim().max(6000).nullable().optional(), conclusion: z.string().trim().max(6000).nullable().optional(), branchId: uuid.nullable().optional(),
+      /** relatório de UMA concessão (o período vira a data dela); sem isso, consolidado do período */
+      requestId: uuid.nullable().optional(),
     }),
     handler: async ({ app, auth, body, reply, req }) => {
       if (!canReport(auth)) throw forbidden('Prestação de contas: Gestão comercial, Diretoria e Administração.');
+      let single: { id: string; code: string } | null = null;
+      if (body.requestId) {
+        const [r] = await app.db.select({ id: s.giftRequests.id, code: s.giftRequests.code, requesterId: s.giftRequests.requesterId, on: sql<string>`coalesce(${s.giftRequests.executedOn}, ${s.giftRequests.plannedOn})::text` }).from(s.giftRequests).where(and(eq(s.giftRequests.id, body.requestId), eq(s.giftRequests.tenantId, auth.tenantId))).limit(1);
+        if (!r || !canSeeRequest(auth, r.requesterId)) throw notFound('Concessão não encontrada.');
+        single = { id: r.id, code: r.code };
+        body.from = r.on; body.to = r.on; body.contactId = null; body.orgUnitId = null; body.kinds = [];
+      }
       if (body.to < body.from) throw unprocessable('Período inválido.');
-      const d = await complianceData(app.db, auth, { from: body.from, to: body.to, contactId: body.contactId ?? undefined, orgUnitId: body.orgUnitId ?? undefined });
-      const rows = d.rows.filter((r) => !body.kinds.length || body.kinds.includes(r.kind as ConcessionKind));
+      const raw = await complianceData(app.db, auth, { from: body.from, to: body.to, contactId: body.contactId ?? undefined, orgUnitId: body.orgUnitId ?? undefined });
+      // indicadores, pendências e medidas recalculados só sobre o escopo do relatório (categorias ou a concessão escolhida)
+      const d = scoped(raw, (r) => (single ? r.id === single.id : !body.kinds.length || body.kinds.includes(r.kind as ConcessionKind)));
+      const rows = d.rows;
       const ids = rows.map((r) => r.id);
       const [decisions, docs, rules] = await Promise.all([
         ids.length ? app.db.select({ d: s.giftRequestDecisions, name: s.users.name }).from(s.giftRequestDecisions).innerJoin(s.users, eq(s.users.id, s.giftRequestDecisions.deciderId)).where(inArray(s.giftRequestDecisions.requestId, ids)).orderBy(asc(s.giftRequestDecisions.createdAt)) : [],
@@ -593,6 +687,13 @@ export const giftComplianceRoutes = [
       const [unit] = body.orgUnitId ? await app.db.select({ name: s.orgUnits.name }).from(s.orgUnits).where(eq(s.orgUnits.id, body.orgUnitId)) : [];
       const [acc] = body.contactId ? await app.db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, body.contactId)) : [];
       const letterhead = body.branchId ? await letterheadForBranch(app.db, auth.tenantId, body.branchId) : null;
+      // período anterior de mesma duração, mesmo escopo: só para o comparativo factual (seção 3)
+      const dayMs = 86_400_000, f0 = Date.parse(`${body.from}T12:00:00Z`), t0 = Date.parse(`${body.to}T12:00:00Z`);
+      const prevTo = new Date(f0 - dayMs).toISOString().slice(0, 10), prevFrom = new Date(f0 - dayMs - (t0 - f0)).toISOString().slice(0, 10);
+      const previous = single ? null : await (async () => {
+        const pd = scoped(await complianceData(app.db, auth, { from: prevFrom, to: prevTo, contactId: body.contactId ?? undefined, orgUnitId: body.orgUnitId ?? undefined }), (r) => !body.kinds.length || body.kinds.includes(r.kind as ConcessionKind));
+        return { from: prevFrom, to: prevTo, kpis: pd.kpis };
+      })();
       const st = await settingsOf(app.db, auth.tenantId);
       const rep = await app.db.transaction(async (tx) => {
         const year = body.to.slice(0, 4);
@@ -605,12 +706,13 @@ export const giftComplianceRoutes = [
         const pdf = await buildComplianceReport({
           code, version, emittedAt, emitter: auth.name, tenantName: auth.tenantName, from: body.from, to: body.to,
           scope: { account: acc?.name ?? null, unit: unit?.name ?? null, kinds: body.kinds },
-          options: { detailed: body.detailed, justifications: body.justifications, exceptions: body.exceptions, evidences: body.evidences },
+          options: { detailed: body.detailed, justifications: body.justifications, exceptions: body.exceptions, evidences: body.evidences, trail: single ? true : body.trail },
           analysis: body.analysis ?? null, conclusion: body.conclusion ?? null, letterhead,
-          data: { ...d, rows }, decisions: decisions.map((x) => ({ ...x.d, deciderName: x.name })), documents: docs, activeRules: currentRules(rules, body.to).length, segregation: st.segregation, policyNote: st.policyNote,
+          data: { ...d, rows }, decisions: decisions.map((x) => ({ ...x.d, deciderName: x.name })), documents: docs, activeRules: currentRules(rules, body.to).length, segregation: st.segregation, policyNote: st.policyNote, previous, single,
+          trail: single || body.trail ? await concessionTrail(app.db, auth.tenantId, ids) : [],
         });
         const sha256 = createHash('sha256').update(pdf).digest('hex');
-        const [row] = await tx.insert(s.giftComplianceReports).values({ tenantId: auth.tenantId, code, version, periodFrom: body.from, periodTo: body.to, filters: { contactId: body.contactId ?? null, orgUnitId: body.orgUnitId ?? null, kinds: body.kinds, detailed: body.detailed, justifications: body.justifications, exceptions: body.exceptions, evidences: body.evidences, branchId: body.branchId ?? null }, analysis: body.analysis ?? null, conclusion: body.conclusion ?? null, refs: rows.map((r) => ({ id: r.id, code: r.code, rowVersion: (r as unknown as Req).rowVersion })), totals: d.kpis as unknown as Record<string, unknown>, letterhead: !!letterhead, pdf: Buffer.from(pdf), sha256, createdBy: auth.userId, createdAt: emittedAt }).returning({ id: s.giftComplianceReports.id, code: s.giftComplianceReports.code, version: s.giftComplianceReports.version, sha256: s.giftComplianceReports.sha256 });
+        const [row] = await tx.insert(s.giftComplianceReports).values({ tenantId: auth.tenantId, code, version, periodFrom: body.from, periodTo: body.to, filters: { requestId: single?.id ?? null, requestCode: single?.code ?? null, contactId: body.contactId ?? null, orgUnitId: body.orgUnitId ?? null, kinds: body.kinds, trail: body.trail, detailed: body.detailed, justifications: body.justifications, exceptions: body.exceptions, evidences: body.evidences, branchId: body.branchId ?? null }, analysis: body.analysis ?? null, conclusion: body.conclusion ?? null, refs: rows.map((r) => ({ id: r.id, code: r.code, rowVersion: (r as unknown as Req).rowVersion })), totals: d.kpis as unknown as Record<string, unknown>, letterhead: !!letterhead, pdf: Buffer.from(pdf), sha256, createdBy: auth.userId, createdAt: emittedAt }).returning({ id: s.giftComplianceReports.id, code: s.giftComplianceReports.code, version: s.giftComplianceReports.version, sha256: s.giftComplianceReports.sha256 });
         await audit(tx, req, { action: 'gift_compliance.report', entityType: 'gift_compliance_report', entityId: row!.id, metadata: { code, from: body.from, to: body.to, records: rows.length } });
         return row!;
       });

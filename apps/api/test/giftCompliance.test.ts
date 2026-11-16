@@ -183,4 +183,37 @@ describe('compliance de concessões', () => {
     const list = ok(await carlos.get('/brindes/compliance/prestacoes')).json();
     expect(list.items.find((x: { id: string }) => x.id === r.id)).toMatchObject({ sha256: r.sha256 });
   });
+  it('relatório por concessão e consolidado; providências das pendências entram no PDF', async () => {
+    const data = ok(await carlos.get(`/brindes/compliance?from=2020-01-01&to=${today}`)).json();
+    const one = data.rows[0];
+    const r = ok(await carlos.post('/brindes/compliance/prestacoes', { from: today, to: today, requestId: one.id }), 201).json();
+    const emitted = ok(await carlos.get('/brindes/compliance/prestacoes')).json().items.find((x: { id: string }) => x.id === r.id);
+    expect(emitted.filters.requestCode).toBe(one.code);
+    expect(emitted.records).toBe(1);
+    if (process.env.GC_PDF_ONE) (await import('node:fs')).writeFileSync(process.env.GC_PDF_ONE, (await carlos.get(`/brindes/compliance/prestacoes/${r.id}/pdf`)).rawPayload);
+    // providência: só quem cuida da governança; responsável obrigatório; concluir pede resultado
+    const me = (await carlos.get('/me')).json().user.id;
+    expect((await lucas.post('/brindes/compliance/medidas', { fragility: 'Comprovantes sem padrão', action: 'Modelo único de comprovante', responsibleId: me })).statusCode).toBe(403);
+    const m = ok(await carlos.post('/brindes/compliance/medidas', { fragility: 'Comprovantes sem padrão', action: 'Adotar modelo único de comprovante de entrega', responsibleId: me, dueOn: today }), 201).json();
+    expect((await carlos.patch(`/brindes/compliance/medidas/${m.id}`, { status: 'concluida' })).statusCode).toBe(422);
+    ok(await carlos.patch(`/brindes/compliance/medidas/${m.id}`, { status: 'concluida', outcomeNote: 'Modelo publicado no playbook.' }));
+    const after = ok(await carlos.get(`/brindes/compliance?from=2020-01-01&to=${today}`)).json();
+    expect(after.measures.find((x: { id: string }) => x.id === m.id).status).toBe('concluida');
+    const p = after.pendencies[0];
+    if (p) {
+      ok(await carlos.post('/brindes/compliance/medidas', { pendencyKey: p.key, fragility: p.text, action: 'Cobrar o comprovante do executor', responsibleId: me }), 201);
+      const again = ok(await carlos.get(`/brindes/compliance?from=2020-01-01&to=${today}`)).json();
+      expect(again.pendencies.find((x: { key: string }) => x.key === p.key).measure.action).toBe('Cobrar o comprovante do executor');
+    }
+    // extrato: o que saiu, quando, quanto e para quem
+    const exec = after.rows.find((x: { state: string }) => x.state === 'executado') ?? (await carlos.get(`/brindes/compliance?from=2020-01-01&to=${today}&state=cancelado`)).json().rows[0];
+    if (exec) {
+      const det = ok(await carlos.get(`/brindes/compliance/solicitacoes/${exec.id}`)).json();
+      expect(det.trail.length).toBeGreaterThan(0);
+      for (const e of det.trail) { expect(e.at).toBeTruthy(); expect(e.to).toBeTruthy(); }
+      if (process.env.GC_PDF_ONE) { const one2 = ok(await carlos.post('/brindes/compliance/prestacoes', { from: today, to: today, requestId: exec.id }), 201).json(); (await import('node:fs')).writeFileSync(process.env.GC_PDF_ONE, (await carlos.get(`/brindes/compliance/prestacoes/${one2.id}/pdf`)).rawPayload); }
+    }
+    const cons = ok(await carlos.post('/brindes/compliance/prestacoes', { from: '2020-01-01', to: today }), 201).json();
+    if (process.env.GC_PDF_OUT) (await import('node:fs')).writeFileSync(process.env.GC_PDF_OUT, (await carlos.get(`/brindes/compliance/prestacoes/${cons.id}/pdf`)).rawPayload);
+  });
 });

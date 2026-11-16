@@ -187,16 +187,85 @@ export const EVIDENCE_KINDS = ['comprovante', 'entrega', 'evidencia'];
 /** Registro completo para a prestação de contas: justificativa, decisão registrada e ao menos uma evidência de execução. */
 export const isComplete = (r: Pick<Req, 'justification'>, decided: boolean, docKinds: string[]) => !!r.justification?.trim() && decided && docKinds.some((k) => EVIDENCE_KINDS.includes(k));
 
-export type Pendency = { requestId: string; code: string; text: string; responsibleId: string; since: string };
+/** key = concessão:tipo (estável): liga a pendência à providência registrada (medida de melhoria). */
+export type Pendency = { key: string; requestId: string; code: string; text: string; responsibleId: string; since: string };
 export function pendenciesOf(rows: (Req & { docKinds: string[]; decided: boolean; paidCents: number | null })[], today: string): Pendency[] {
   const out: Pendency[] = [];
   for (const r of rows) {
-    if (r.state === 'executado' && !r.docKinds.some((k) => EVIDENCE_KINDS.includes(k))) out.push({ requestId: r.id, code: r.code, text: 'Executada sem comprovante ou registro de entrega', responsibleId: r.executorId ?? r.requesterId, since: r.executedOn! });
-    if (r.state === 'executado' && !r.decided) out.push({ requestId: r.id, code: r.code, text: 'Executada sem decisão registrada', responsibleId: r.requesterId, since: r.executedOn! });
-    if ((r.state === 'aprovado' || r.state === 'reservado') && r.plannedOn < today) out.push({ requestId: r.id, code: r.code, text: 'Aprovada e não executada na data prevista', responsibleId: r.requesterId, since: r.plannedOn });
-    if ((r.state === 'solicitado' || r.state === 'ajustes') && r.outcome === 'impedido') out.push({ requestId: r.id, code: r.code, text: 'Restrição obrigatória sem tratamento formal', responsibleId: r.requesterId, since: r.createdAt.toISOString().slice(0, 10) });
-    if (r.state === 'executado' && r.kind === 'patrocinio_financeiro' && r.paidCents !== null && r.executedCents !== null && r.paidCents !== r.executedCents) out.push({ requestId: r.id, code: r.code, text: `Pago diferente do executado no orçamento (${(r.paidCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`, responsibleId: r.requesterId, since: r.executedOn! });
-    if (r.state === 'executado' && r.kind === 'patrocinio_financeiro' && !r.budgetLineId) out.push({ requestId: r.id, code: r.code, text: 'Patrocínio financeiro sem lançamento de orçamento (pagamento não conciliável)', responsibleId: r.requesterId, since: r.executedOn! });
+    if (r.state === 'executado' && !r.docKinds.some((k) => EVIDENCE_KINDS.includes(k))) out.push({ key: `${r.id}:sem_evidencia`, requestId: r.id, code: r.code, text: 'Executada sem comprovante ou registro de entrega', responsibleId: r.executorId ?? r.requesterId, since: r.executedOn! });
+    if (r.state === 'executado' && !r.decided) out.push({ key: `${r.id}:sem_decisao`, requestId: r.id, code: r.code, text: 'Executada sem decisão registrada', responsibleId: r.requesterId, since: r.executedOn! });
+    if ((r.state === 'aprovado' || r.state === 'reservado') && r.plannedOn < today) out.push({ key: `${r.id}:nao_executada`, requestId: r.id, code: r.code, text: 'Aprovada e não executada na data prevista', responsibleId: r.requesterId, since: r.plannedOn });
+    if ((r.state === 'solicitado' || r.state === 'ajustes') && r.outcome === 'impedido') out.push({ key: `${r.id}:restricao`, requestId: r.id, code: r.code, text: 'Restrição obrigatória sem tratamento formal', responsibleId: r.requesterId, since: r.createdAt.toISOString().slice(0, 10) });
+    if (r.state === 'executado' && r.kind === 'patrocinio_financeiro' && r.paidCents !== null && r.executedCents !== null && r.paidCents !== r.executedCents) out.push({ key: `${r.id}:pago_diferente`, requestId: r.id, code: r.code, text: `Pago diferente do executado no orçamento (${(r.paidCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`, responsibleId: r.requesterId, since: r.executedOn! });
+    if (r.state === 'executado' && r.kind === 'patrocinio_financeiro' && !r.budgetLineId) out.push({ key: `${r.id}:sem_orcamento`, requestId: r.id, code: r.code, text: 'Patrocínio financeiro sem lançamento de orçamento (pagamento não conciliável)', responsibleId: r.requesterId, since: r.executedOn! });
   }
   return out;
+}
+
+// ------------------------------------------------------------------ extrato de saídas da concessão
+export type TrailEntry = {
+  requestId: string; at: string; on: string;
+  kind: 'saida_estoque' | 'devolucao' | 'atribuicao_conta' | 'execucao' | 'pagamento' | 'estorno_pagamento' | 'cancelamento';
+  what: string; qty: number | null; unitCents: number | null; amountCents: number | null; to: string; by: string | null; ref: string | null;
+};
+export const TRAIL_LABELS: Record<TrailEntry['kind'], string> = {
+  saida_estoque: 'Saída de estoque', devolucao: 'Devolução ao estoque (estorno)', atribuicao_conta: 'Valor atribuído à conta', execucao: 'Execução confirmada',
+  pagamento: 'Pagamento (Financeiro)', estorno_pagamento: 'Estorno de pagamento', cancelamento: 'Cancelamento',
+};
+
+/**
+ * O que saiu, quando, quanto e para quem, em cada concessão: só registros do sistema (nada digitado à parte).
+ * Estoque: movimentações ligadas à entrega da concessão (saída e devolução). Contas: valor executado pelo rateio.
+ * Patrocínio financeiro: pagamentos e estornos confirmados pelo Financeiro no lançamento de orçamento vinculado.
+ */
+export async function concessionTrail(db: DbOrTx, tenantId: string, requestIds: string[]): Promise<TrailEntry[]> {
+  if (!requestIds.length) return [];
+  const reqs = await db.select().from(s.giftRequests).where(and(eq(s.giftRequests.tenantId, tenantId), inArray(s.giftRequests.id, requestIds)));
+  if (!reqs.length) return [];
+  const ids = reqs.map((r) => r.id);
+  const [accs, events, users] = await Promise.all([
+    db.select({ requestId: s.giftRequestAccounts.requestId, shareCents: s.giftRequestAccounts.shareCents, name: s.contacts.name }).from(s.giftRequestAccounts).innerJoin(s.contacts, eq(s.contacts.id, s.giftRequestAccounts.contactId)).where(inArray(s.giftRequestAccounts.requestId, ids)),
+    db.select().from(s.giftRequestEvents).where(and(inArray(s.giftRequestEvents.requestId, ids), inArray(s.giftRequestEvents.type, ['executada', 'cancelada', 'estornada']))),
+    db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(eq(s.users.tenantId, tenantId)),
+  ]);
+  const uname = (id: string | null) => (id ? users.find((u) => u.id === id)?.name ?? null : null);
+  // entregas da concessão (a da execução; o estorno usa a mesma entrega)
+  const deliveryIds = reqs.map((r) => r.deliveryId).filter((x): x is string => !!x);
+  const moves = deliveryIds.length ? await db.select({ m: s.giftMovements, item: s.giftItems.name }).from(s.giftMovements).innerJoin(s.giftItems, eq(s.giftItems.id, s.giftMovements.itemId)).where(inArray(s.giftMovements.deliveryId, deliveryIds)) : [];
+  // pagamentos do lançamento vinculado (patrocínio financeiro); lançamento usado por mais de uma concessão fica indicado
+  const lineIds = [...new Set(reqs.map((r) => r.budgetLineId).filter((x): x is string => !!x))];
+  const pays = lineIds.length ? await db.select({ p: s.budgetPayments, payee: s.suppliers.name, invoice: s.budgetPayables.invoiceNumber, installment: s.budgetPayables.installment, installments: s.budgetPayables.installments })
+    .from(s.budgetPayments).innerJoin(s.budgetPayables, eq(s.budgetPayables.id, s.budgetPayments.payableId)).leftJoin(s.suppliers, eq(s.suppliers.id, s.budgetPayables.supplierId)).where(inArray(s.budgetPayments.lineId, lineIds)) : [];
+  const shared = lineIds.length ? await db.select({ lineId: s.giftRequests.budgetLineId, n: sql<number>`count(*)::int` }).from(s.giftRequests).where(and(eq(s.giftRequests.tenantId, tenantId), inArray(s.giftRequests.budgetLineId, lineIds))).groupBy(s.giftRequests.budgetLineId) : [];
+
+  const out: TrailEntry[] = [];
+  for (const r of reqs) {
+    const myAccs = accs.filter((a) => a.requestId === r.id);
+    const recipients = r.collective ? `Entrega coletiva: ${r.audience ?? '—'}` : r.recipients.length ? r.recipients.map((p) => `${p.name}${p.title ? ` (${p.title})` : ''}`).join(', ') : null;
+    const toAccounts = myAccs.length ? myAccs.map((a) => a.name).join(', ') : `Ação institucional${r.institutionalClass ? `: ${r.institutionalClass}` : ''}`;
+    const to = recipients ? `${toAccounts} · ${recipients}` : toAccounts;
+    for (const x of moves.filter((m) => m.m.deliveryId === r.deliveryId)) {
+      const qty = Math.abs(x.m.qty);
+      out.push({ requestId: r.id, at: x.m.createdAt.toISOString(), on: x.m.createdAt.toISOString().slice(0, 10), kind: x.m.kind === 'saida' ? 'saida_estoque' : 'devolucao', what: x.item, qty, unitCents: x.m.unitCostCents, amountCents: qty * x.m.unitCostCents * (x.m.kind === 'saida' ? 1 : -1), to, by: uname(x.m.actorId), ref: x.m.note });
+    }
+    for (const e of events.filter((ev) => ev.requestId === r.id)) {
+      const at = e.createdAt.toISOString();
+      if (e.type === 'executada') {
+        out.push({ requestId: r.id, at, on: r.executedOn ?? at.slice(0, 10), kind: 'execucao', what: r.description, qty: r.kits || null, unitCents: null, amountCents: r.executedCents, to, by: uname(r.executorId ?? e.actorId), ref: e.text });
+        for (const a of myAccs) out.push({ requestId: r.id, at, on: r.executedOn ?? at.slice(0, 10), kind: 'atribuicao_conta', what: `Rateio de ${r.code}`, qty: null, unitCents: null, amountCents: a.shareCents, to: a.name, by: uname(e.actorId), ref: myAccs.length > 1 ? `${myAccs.length} contas no rateio (o total conta uma vez)` : null });
+      } else {
+        out.push({ requestId: r.id, at, on: at.slice(0, 10), kind: 'cancelamento', what: r.description, qty: null, unitCents: null, amountCents: null, to, by: uname(e.actorId), ref: r.cancelReason ?? e.text });
+        // executada e depois estornada: o valor sai da conta (estorno do registro)
+        if (e.type === 'estornada') for (const a of myAccs) out.push({ requestId: r.id, at, on: at.slice(0, 10), kind: 'atribuicao_conta', what: `Estorno do rateio de ${r.code}`, qty: null, unitCents: null, amountCents: -a.shareCents, to: a.name, by: uname(e.actorId), ref: null });
+      }
+    }
+    if (r.budgetLineId) {
+      const n = shared.find((x) => x.lineId === r.budgetLineId)?.n ?? 1;
+      for (const x of pays.filter((p) => p.p.lineId === r.budgetLineId)) {
+        const rev = x.p.kind !== 'pagamento';
+        out.push({ requestId: r.id, at: x.p.createdAt.toISOString(), on: x.p.paidOn, kind: rev ? 'estorno_pagamento' : 'pagamento', what: `Parcela ${x.installment}/${x.installments}${x.invoice ? ` · NF ${x.invoice}` : ''}`, qty: null, unitCents: null, amountCents: rev ? -Math.abs(x.p.amountCents) : x.p.amountCents, to: x.payee ?? 'Favorecido não informado no Financeiro', by: uname(x.p.createdBy), ref: [x.p.method, n > 1 ? `lançamento de orçamento compartilhado com ${n - 1} outra(s) concessão(ões)` : null, x.p.reason].filter(Boolean).join(' · ') || null });
+      }
+    }
+  }
+  return out.sort((a, b) => a.requestId.localeCompare(b.requestId) || a.at.localeCompare(b.at));
 }
