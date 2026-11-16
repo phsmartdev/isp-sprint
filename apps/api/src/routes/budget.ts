@@ -13,6 +13,8 @@ import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { budgetGovernance } from '../services/budgetGovernance';
+import { todayIn } from '../services/vacations';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
 import { nextLineCode, accountsOf, availableFor, budgetCan, budgetRole, categoryOf, costCentersOf, decidesStages, isBudgetAdmin, isBudgetRestricted, loadCostCenter, costCenterRole, assertCostCenterPeople, logBudget, quarterNumbers, totals } from '../services/budget';
@@ -575,6 +577,11 @@ export const budgetRoutes = [
         bands: EXECUTION_BAND_INFO,
       };
     },
+  }),
+  defineRoute({
+    method: 'GET', url: '/budget/governanca', summary: 'Demonstrativo da governança do orçamento, brindes e patrocínios: orçamento (planejado, aprovado, comprometido, realizado, pago), aprovações, brindes, apoios e patrocínios, recursos, fornecedores, atividade e pontos de atenção', tag: 'Orçamento', ...M,
+    query: z.object({ year: z.coerce.number().int().min(2020).max(2100), quarter: z.coerce.number().int().min(1).max(4).optional(), month: z.coerce.number().int().min(1).max(12).optional(), costCenterId: uuid.optional() }),
+    handler: async ({ app, auth, query }) => budgetGovernance(app.db, auth, { ...query, today: todayIn(auth.timezone) }),
   }),
   defineRoute({
     method: 'GET', url: '/budget/events', summary: 'Histórico do orçamento (planejamento, decisões, Guardião, gastos, revisões)', tag: 'Orçamento', ...M,

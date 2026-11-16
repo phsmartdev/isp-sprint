@@ -238,6 +238,6 @@ Comprometido, realizado e pago são estágios da mesma despesa e não se somam. 
 - **Ferramenta ou equipamento:** responsável, situação (em uso, estoque, manutenção, baixado) e valor contábil com depreciação linear.
 - **Software ou licença, contrato de serviço, assinatura:** custo mensal, cotação, forma de pagamento, revisão — **sem credenciais** (use o cofre da empresa).
 - **Compras e fornecedores:** pedido com especificação completa e o que a política exige (Financeiro, cotação, Jurídico, Diretoria), cotações e fornecedor escolhido.
-- **Custos e indicadores:** orçado × realizado por centro, categoria e mês; recorrentes, ativos e Guardião.
+- **Demonstrativo da governança:** tudo o que acontece no orçamento, nos brindes e nos apoios e patrocínios, numa tela só: planejado, aprovado, comprometido, realizado e pago; fluxo de aprovação e Budget Guardião; por centro de custo e categoria; evolução mensal; brindes (planejado, comprado, estoque, envios e concessões); apoios e patrocínios; controles do Compliance; recursos; fornecedores; concessões não planejadas; pontos de atenção e a atividade do período. Filtros por ano, trimestre ou mês, centro de custo e visão; exporta em CSV.
 `,
 };

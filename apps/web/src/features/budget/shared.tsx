@@ -78,7 +78,7 @@ const NAV = [
   { to: '/orcamento', label: 'Planejamento orçamentário', end: true },
   { to: '/orcamento/recursos', label: 'Ferramentas, softwares e contratos' },
   { to: '/orcamento/compras', label: 'Compras e fornecedores' },
-  { to: '/orcamento/indicadores', label: 'Custos e indicadores' },
+  { to: '/orcamento/indicadores', label: 'Demonstrativo da governança' },
 ];
 /** Cabeçalho comum das telas do módulo, com a navegação entre as seções. */
 export function BudgetShell({ subtitle, actions, children }: { subtitle: string; actions?: ReactNode; children: ReactNode }) {

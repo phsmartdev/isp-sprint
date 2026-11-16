@@ -79,7 +79,7 @@ const NAV: NavEntry[] = [
     { to: '/orcamento', label: 'Planejamento orçamentário', module: 'orcamento', feature: 'orcamento.planejamento' },
     { to: '/orcamento/recursos', label: 'Ferramentas, softwares e contratos', module: 'orcamento', feature: 'orcamento.recursos' },
     { to: '/orcamento/compras', label: 'Compras e fornecedores', module: 'orcamento', feature: 'orcamento.recursos' },
-    { to: '/orcamento/indicadores', label: 'Custos e indicadores', module: 'orcamento', feature: 'orcamento.planejamento' },
+    { to: '/orcamento/indicadores', label: 'Demonstrativo da governança', module: 'orcamento', feature: 'orcamento.planejamento' },
   ] },
   { to: '/reports', label: 'Relatórios', icon: <BarChart3 className={ICON} />, module: 'relatorios', feature: 'relatorios.comercial' },
   { to: '/intelligence', label: 'Inteligência', icon: <Lightbulb className={ICON} />, module: 'inteligencia' },
