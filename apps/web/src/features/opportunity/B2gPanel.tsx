@@ -14,6 +14,7 @@ export const emptyB2gForm = (): B2gForm => ({ mode: 'A', overhead: '', netTarget
 const pct = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })}%`);
 const bpText = (bp: number | null | undefined) => (bp == null ? '' : (bp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 }));
 const money = (c: number) => (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const months = (m: number) => `${m.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ${m === 1 ? 'mês' : 'meses'}`;
 const brl = (c: number | null | undefined) => (c == null ? '—' : c < 0 ? `− ${fmtBRL(-c)}` : fmtBRL(c));
 const tone = (v: number | null | undefined, min: number | null) => (v == null ? 'text-muted' : v < 0 ? 'text-danger' : min != null && v < min ? 'text-[#C2610C]' : 'text-ink');
 
@@ -101,7 +102,7 @@ function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hi
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-1.5">
         <p className="text-sm font-semibold text-ink">{title} <span className="font-normal text-muted">· {hint}</span></p>
-        <p className="text-xs text-muted">Preço <b className="num text-ink">{brl(b.priceCents)}{per}</b> · margem líquida <b className={clsx('num', tone(b.netPct, minPct))}>{pct(b.netPct)}</b></p>
+        <p className="text-xs text-muted">{rec ? <>Mensalidade <b className="num text-ink">{brl(b.monthlyPriceCents ?? null)}/mês</b> · na vigência {brl(b.priceCents)}</> : <>Preço <b className="num text-ink">{brl(b.priceCents)}</b></>} · margem líquida <b className={clsx('num', tone(b.netPct, minPct))}>{pct(b.netPct)}</b></p>
       </div>
 
       {rec ? (
@@ -110,7 +111,7 @@ function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hi
           <Fact k="Despesas fixas (sobre o custo)" v={brl(b.overheadOnCostCents)} />
           <Fact k="Investimento a recuperar" v={brl(b.investmentCents)} strong />
           <Fact k="Custo mensal" v={`${brl(b.monthlyCostCents)}/mês`} />
-          <Fact k="Payback" v={b.paybackMonths != null ? `${b.paybackMonths} meses` : '—'} strong />
+          <Fact k="Payback" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
           <Fact k="Vigência" v={b.termMonths ? `${b.termMonths} meses` : '—'} />
           <Fact k="Mensalidade" v={`${brl(b.monthlyPriceCents ?? b.priceCents)}/mês`} strong />
           {b.paybackStatus ? <Fact k="Situação" v={b.paybackStatus} /> : null}
@@ -128,7 +129,7 @@ function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hi
       <div className="scroll-thin overflow-x-auto">
         <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="text-xs text-muted">
-            <tr>{['Produto', 'Perfil', 'Custo', 'Peso', 'Valor estimado', f.mode === 'B' ? 'Lance simulado' : 'Preço calculado', 'Contribuição', 'Operacional', 'Líquida', 'Piso', 'Desconto máx.', 'Faixa de lance'].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
+            <tr>{['Produto', 'Perfil', rec ? 'Custo na vigência' : 'Custo', 'Peso', 'Valor estimado', f.mode === 'B' ? 'Lance simulado' : 'Preço calculado', 'Contribuição', 'Operacional', 'Líquida', 'Piso', 'Desconto máx.', 'Faixa de lance'].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
           </thead>
           <tbody>{b.lines.map((l) => <Row key={l.id} l={l} f={f} set={set} disabled={disabled} minPct={minPct} per={per} />)}</tbody>
         </table>
@@ -163,7 +164,7 @@ function Row({ l, f, set, disabled, minPct, per }: { l: B2gLine; f: B2gForm; set
         <td className={clsx('num px-1.5 py-1.5 font-semibold', tone(l.netPct, minPct))}>{pct(l.netPct)}</td>
         <td className="num px-1.5 py-1.5">{brl(l.floorCents)}{l.floorCents != null && per}</td>
         <td className="num px-1.5 py-1.5">{l.maxDiscountPct == null ? '—' : pct(l.maxDiscountPct)}</td>
-        <td className="num whitespace-nowrap px-1.5 py-1.5 text-xs text-muted">{l.bidRange ? `${brl(l.bidRange.from)} a ${brl(l.bidRange.to)}` : '—'}{l.paybackMonths != null && <span className="block">payback {l.paybackMonths} m{l.cashPaybackMonths != null ? ` · caixa ${l.cashPaybackMonths.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} m` : ''}</span>}</td>
+        <td className="num whitespace-nowrap px-1.5 py-1.5 text-xs text-muted">{l.bidRange ? `${brl(l.bidRange.from)} a ${brl(l.bidRange.to)}` : '—'}{l.paybackMonths != null && <span className="block">payback {months(l.paybackMonths)}{l.cashPaybackMonths != null ? ` · caixa ${months(l.cashPaybackMonths)}` : ''}</span>}</td>
       </tr>
       {!!l.alerts.length && <tr><td colSpan={12} className="px-1.5 pb-2 text-xs text-[#C2610C]">{l.alerts.join(' · ')}</td></tr>}
     </>

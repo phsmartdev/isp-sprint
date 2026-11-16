@@ -173,6 +173,14 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     const lines: B2gLine[] = [];
     const cascade: B2gBlock['cascade'] = [];
     const varShare = distribute(unicaP, costs.variavel, p.weights);
+    // custo numa cesta sem produto vai para a outra cesta da venda única (o perfil escolhido no produto manda)
+    for (const prof of COST_PROFILES) {
+      const other: CostProfile = prof === 'fornecimento' ? 'implantacao' : 'fornecimento';
+      if (costs.unica[prof] && !unicaP.some((x) => x.profile === prof) && unicaP.some((x) => x.profile === other)) {
+        notes.push(`Custo lançado como ${COST_PROFILE_SHORT[prof]} entrou na ${COST_PROFILE_SHORT[other]}, porque os produtos de venda única estão com esse perfil.`);
+        costs.unica[other] += costs.unica[prof]; costs.unica[prof] = 0;
+      }
+    }
     for (const prof of COST_PROFILES) {
       const ps = unicaP.filter((x) => x.profile === prof);
       if (!ps.length) { if (costs.unica[prof]) alerts.push(`Custo de ${COST_PROFILE_SHORT[prof]} (venda única) sem produto nessa cesta.`); continue; }
