@@ -207,6 +207,7 @@ export type EconDecision = {
   marginPct: number | null; npvCents: number | null; paybackMonths: number | null; irrMonthly: number | null;
   autoApproval?: { ok: boolean; checks: { label: string; ok: boolean }[] };
   /** (3.2) margem líquida dos meses 1..D no preço da decisão; a faixa da política; o veredito antigo (só informativo) */
+  /** margem líquida do contrato inteiro (vigência), só informativa na recorrente */ contractNetMarginPct?: number | null;
   netMarginPct?: number | null; netMarginRange?: { minPct: number; maxPct: number } | null; policyVerdict?: EconVerdict;
   /** (3.2) payback do investimento: meses (contados do 1º faturamento) até o investimento voltar com a TMA, reservada a margem desejada */
   investmentPaybackMonths?: number | null;
@@ -337,6 +338,21 @@ export function statementOfPeriods(periods: Record<string, FValue[]>, months: nu
   const f = (key: keyof EconStatement) => { const v = rows.map((x) => x[key]); return v.some((y) => y == null) ? null : (v as number[]).reduce((s, y) => s + y, 0); };
   const total: EconStatement = { revenue: f('revenue') ?? 0, tax: f('tax') ?? 0, commission: f('commission') ?? 0, opex: f('opex') ?? 0, amortization: f('amortization') ?? 0, contribution: f('contribution') ?? 0, risk: f('risk') ?? 0, overhead: f('overhead'), operating: f('operating'), incomeTax: f('incomeTax'), net: f('net') };
   return { rows, total };
+}
+
+/**
+ * Margens do contrato inteiro (vigência): na recorrente (ou com mensalidades), soma todos os meses do fluxo — os primeiros
+ * meses carregam a amortização e ficam com margem menor, os seguintes compensam. Na venda única, é o próprio valor único.
+ */
+export function contractMargins(r: Pick<EconResult, 'mode' | 'statement' | 'kpi' | 'term'>): (NonNullable<NonNullable<EconResult['kpi']>['margins']> & { months: number; revenueCents: number }) | null {
+  const t = r.statement?.total;
+  if (r.mode !== 'recorrente' || !t || t.revenue <= 0 || !r.kpi?.margins) return null;
+  const pct = (v: number | null) => (v == null ? null : (v / t.revenue) * 100);
+  return {
+    contributionPct: pct(t.contribution + t.amortization) ?? 0, amortizationCents: t.amortization, overheadCents: t.overhead,
+    operatingCents: t.operating, operatingPct: pct(t.operating), incomeTaxCents: t.incomeTax, netCents: t.net, netPct: pct(t.net),
+    months: r.term.N, revenueCents: t.revenue,
+  };
 }
 
 /** Contribuição → operacional → líquida, no mesmo período da contribuição (mês na recorrente). */
@@ -608,7 +624,7 @@ function finalize(r: EconResult, p: EconResult | null, source: EconDecision['sou
     basis: p ? 'proposto' : 'sugerido', source: p ? source : 'motor', priceCents: d.priceCents, oneTimeCents: null,
     verdict: d.verdict, withinPolicy: d.withinPolicy, marginOk: d.marginOk, paybackOk: d.paybackOk,
     marginPct: d.kpi?.marginPct ?? null, npvCents: d.kpi?.npvCents ?? null, paybackMonths: d.kpi?.paybackMonths ?? null, irrMonthly: d.kpi?.irrMonthly ?? null,
-    autoApproval: d.autoApproval, netMarginPct: d.kpi?.margins?.netPct ?? null, investmentPaybackMonths: d.kpi?.investmentPaybackMonths ?? null,
+    autoApproval: d.autoApproval, netMarginPct: d.kpi?.margins?.netPct ?? null, contractNetMarginPct: contractMargins(d)?.netPct ?? null, investmentPaybackMonths: d.kpi?.investmentPaybackMonths ?? null,
   };
   out.verdict = d.verdict; out.withinPolicy = d.withinPolicy; out.marginOk = d.marginOk; out.paybackOk = d.paybackOk; out.autoApproval = d.autoApproval;
   return out;
@@ -1088,8 +1104,9 @@ export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) 
   if (dec.verdict === 'aguardando_sugerido') return `${fy}O motor ainda não tem preço sugerido (custos e margem): a decisão aguarda o cálculo do sugerido.`;
   const pc1 = (v: number) => v.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
   const rg = dec.netMarginRange;
-  const a = `${fy}No preço sugerido de ${fmt(sug)}${per}${one != null ? ` + ${fmt(one)} de pagamento único` : ''} (margem de contribuição ${m}%)${k ? `, ${pbv(pb)}${k.margins?.netPct != null ? `, margem líquida ${pc1(k.margins.netPct)}%` : ''}` : ''}.`;
-  const nm = dec.netMarginPct != null ? `margem líquida ${pc1(dec.netMarginPct)}%${rg ? ` (faixa viável: acima de ${pc1(rg.minPct)}% e abaixo de ${pc1(rg.maxPct)}%)` : ''}` : dec.marginPct != null ? `margem ${pc1(dec.marginPct)}%` : '';
+  const cm = contractMargins(rs);
+  const a = `${fy}No preço sugerido de ${fmt(sug)}${per}${one != null ? ` + ${fmt(one)} de pagamento único` : ''} (margem de contribuição ${m}%)${k ? `, ${pbv(pb)}${cm?.netPct != null ? `, margem líquida do contrato ${pc1(cm.netPct)}% (${cm.months} meses)` : k.margins?.netPct != null ? `, margem líquida ${pc1(k.margins.netPct)}%` : ''}` : ''}.`;
+  const nm = dec.netMarginPct != null ? `margem líquida${cm ? ' dos meses do payback' : ''} ${pc1(dec.netMarginPct)}%${rg ? ` (faixa viável: acima de ${pc1(rg.minPct)}% e abaixo de ${pc1(rg.maxPct)}%)` : ''}` : dec.marginPct != null ? `margem ${pc1(dec.marginPct)}%` : '';
   const b = dec.basis === 'proposto'
     ? ` Decisão no preço proposto de ${fmt(dec.priceCents)}${per}${dec.oneTimeCents != null ? ` + ${fmt(dec.oneTimeCents)} único` : ''}${dec.source === 'itens' ? ' (total dos produtos)' : ''}: ${ECON_VERDICT_LABELS[dec.verdict]}${nm ? `, ${nm}` : ''}.`
     : ` Sem preço proposto: a decisão usa o sugerido (${ECON_VERDICT_LABELS[dec.verdict]}${nm ? `, ${nm}` : ''}).`;

@@ -9,7 +9,7 @@ import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  buildModel, b2gFromEconomics, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -60,13 +60,15 @@ const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 /** Contribuição → operacional → líquida, em % da receita e R$ do período. */
-function MarginChain({ m, per, compact }: { m: NonNullable<NonNullable<EconResult['kpi']>['margins']>; per: string; compact?: boolean }) {
+function MarginChain({ m, per, compact, contract, firstMonthNetPct }: { m: NonNullable<NonNullable<EconResult['kpi']>['margins']>; per: string; compact?: boolean; /** margens do contrato inteiro (meses) */ contract?: number; firstMonthNetPct?: number | null }) {
   const steps = [
-    { label: 'Margem de contribuição', cents: null as number | null, pct: m.contributionPct, hint: 'depois de tributos, despesas variáveis e custos (no preço sugerido = a margem escolhida)' },
+    { label: 'Margem de contribuição', cents: null as number | null, pct: m.contributionPct, hint: contract ? 'na vigência: receita menos tributos, despesas variáveis e custos mensais, antes da amortização' : 'depois de tributos, despesas variáveis e custos (no preço sugerido = a margem escolhida)' },
     { label: 'Margem operacional', cents: m.operatingCents, pct: m.operatingPct, hint: `− amortização ${fmtBRL(m.amortizationCents)} · − despesas fixas ${fmtBRL(m.overheadCents)}` },
-    { label: 'Margem líquida', cents: m.netCents, pct: m.netPct, hint: `− IR/CSLL ${fmtBRL(m.incomeTaxCents)}` },
+    { label: contract ? `Margem líquida do contrato (${contract} meses)` : 'Margem líquida', cents: m.netCents, pct: m.netPct, hint: `− IR/CSLL ${fmtBRL(m.incomeTaxCents)}${contract && firstMonthNetPct != null ? ` · no 1º mês ${firstMonthNetPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% (a amortização pesa nos meses do payback)` : ''}` },
   ];
   return (
+    <>
+    {contract ? <p className="mt-2 text-2xs font-bold uppercase tracking-wide text-muted">Margens no contrato inteiro · {contract} meses</p> : null}
     <ol className="mt-2 grid grid-cols-1 gap-1.5" aria-label="Cadeia de margens">
       {steps.map((s) => (
         <li key={s.label} className="flex items-center justify-between gap-3 border border-line px-2.5 py-2">
@@ -80,6 +82,7 @@ function MarginChain({ m, per, compact }: { m: NonNullable<NonNullable<EconResul
         </li>
       ))}
     </ol>
+    </>
   );
 }
 
@@ -139,13 +142,13 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
               <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(d.priceCents))}><span>{fmtBRL(d.priceCents)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
               {d.oneTimeCents != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(d.oneTimeCents)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
               <p className={clsx('mt-1 text-sm font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</p>
-              {d.verdict !== 'aguardando_sugerido' && <p className="text-xs text-text">{d.netMarginPct != null ? <>Margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : <>Margem {pct(d.marginPct, 1)}</>}</p>}
+              {d.verdict !== 'aguardando_sugerido' && <p className="text-xs text-text">{d.contractNetMarginPct != null ? <>Margem líquida do contrato <b>{pct(d.contractNetMarginPct, 1)}</b>{d.netMarginPct != null ? <span className="block text-2xs text-muted">nos meses do payback {pct(d.netMarginPct, 1)}{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</span> : null}</> : d.netMarginPct != null ? <>Margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : <>Margem {pct(d.marginPct, 1)}</>}</p>}
               {diff != null && diff !== 0 && <p className="mt-1 text-2xs text-muted">{fmtBRL(Math.abs(diff))}{per} {diff > 0 ? 'acima' : 'abaixo'} do sugerido</p>}
             </>
           ) : (
             <>
               <p className="mt-1 text-xs font-semibold text-ink">Nenhum preço proposto</p>
-              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
+              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.contractNetMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida do contrato <b>{pct(d.contractNetMarginPct, 1)}</b> (nos meses do payback {pct(d.netMarginPct, 1)})</> : null}{d.contractNetMarginPct == null && d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
               <p className="mt-1 text-2xs text-muted">Para avaliar outro valor, informe o preço no passo 1 ou lance os valores dos produtos.</p>
             </>
           )}
@@ -383,7 +386,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Payback do investimento</dt><dd className="num font-bold text-ink">{k ? months(k.investmentPaybackMonths !== undefined ? k.investmentPaybackMonths : k.paybackMonths) : '—'}</dd><dd className="text-2xs text-muted">contado do 1º faturamento · pedido {r.term.D} meses{k?.investmentPaybackMonths !== undefined && k?.paybackMonths != null ? ` · de caixa ${months(k.paybackMonths)}` : ''}</dd></div>
         <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Ganho no contrato (VPL)</dt><dd className={clsx('num font-bold', k && k.npvCents < 0 ? 'text-danger' : 'text-ink')}>{fmtBRL(k?.npvCents ?? null)}</dd><dd className="text-2xs text-muted">TIR {k?.irrAnnual == null ? '—' : k.irrAnnual > 10 ? 'acima de 1.000%' : pct(k.irrAnnual * 100)} ao ano</dd></div>
       </dl>
-      {k?.margins && <MarginChain m={k.margins} per={per} compact={compact} />}
+      {k?.margins && (() => { const cm = contractMargins(r); return cm ? <MarginChain m={cm} per="" compact={compact} contract={cm.months} firstMonthNetPct={k.margins.netPct} /> : <MarginChain m={k.margins} per={per} compact={compact} />; })()}
       <PriceRuler r={r} />
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
         <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />Memória de cálculo
