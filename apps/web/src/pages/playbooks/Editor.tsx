@@ -67,7 +67,7 @@ export function MetaForm({ m, set, setup, compact }: { m: Meta; set: (m: Meta) =
       {m.reviewPeriod === 'personalizada' ? <FormField label="A cada (dias)" htmlFor="pm-rd" required><Input id="pm-rd" inputMode="numeric" value={m.reviewCustomDays ?? ''} onChange={(e) => f('reviewCustomDays', Number(e.target.value.replace(/\D/g, '')) || null)} /></FormField>
         : <FormField label="Próxima revisão prevista" htmlFor="pm-nr" hint="Em branco: calculada pela periodicidade na publicação"><Input id="pm-nr" type="date" value={m.nextReviewOn ?? ''} onChange={(e) => f('nextReviewOn', e.target.value || null)} /></FormField>}
       <label className="flex items-center gap-2 text-sm md:col-span-2"><input type="checkbox" className="h-4 w-4 accent-primary" checked={m.requiresAck} onChange={(e) => f('requiresAck', e.target.checked)} />Leitura obrigatória: pedir confirmação de ciência</label>
-      <div className="md:col-span-2"><Multi label="Onde este playbook se aplica no ISP Sprint" options={CONTEXTS.map(([id, label]) => ({ id, label }))} value={m.contexts} onChange={(v) => f('contexts', v)} /></div>
+      <div className="md:col-span-2"><Multi label="Onde este playbook se aplica no BKT RevOps" options={CONTEXTS.map(([id, label]) => ({ id, label }))} value={m.contexts} onChange={(v) => f('contexts', v)} /></div>
     </div>
   );
 }
@@ -260,7 +260,7 @@ function BlockForm({ b, set, playbookId }: { b: Block; set: (b: Block) => void; 
     case 'image': case 'pdf': case 'file': return <FileField playbookId={playbookId} b={b} set={set} />;
     case 'video': return <div className="space-y-2"><Input aria-label="Link do vídeo" placeholder="https://www.youtube.com/watch?v=… ou https://vimeo.com/…" value={b.url} onChange={(e) => set({ ...b, url: e.target.value })} /><Input aria-label="Legenda do vídeo" placeholder="Legenda (opcional)" value={b.caption ?? ''} onChange={(e) => set({ ...b, caption: e.target.value })} /></div>;
     case 'link': return <div className="grid gap-2 sm:grid-cols-2"><Input aria-label="Texto do link" placeholder="Texto" value={b.label} onChange={(e) => set({ ...b, label: e.target.value })} /><Input aria-label="Endereço" placeholder="https://" value={b.url} onChange={(e) => set({ ...b, url: e.target.value })} /></div>;
-    case 'feature': return <div className="grid gap-2 sm:grid-cols-2"><Input aria-label="Texto do botão" placeholder="Ex.: Abrir oportunidades" value={b.label} onChange={(e) => set({ ...b, label: e.target.value })} /><Input aria-label="Tela do ISP Sprint" placeholder="/opportunities" value={b.path} onChange={(e) => set({ ...b, path: e.target.value })} /></div>;
+    case 'feature': return <div className="grid gap-2 sm:grid-cols-2"><Input aria-label="Texto do botão" placeholder="Ex.: Abrir oportunidades" value={b.label} onChange={(e) => set({ ...b, label: e.target.value })} /><Input aria-label="Tela do BKT RevOps" placeholder="/opportunities" value={b.path} onChange={(e) => set({ ...b, path: e.target.value })} /></div>;
     case 'flow': return <ReactFlowProvider><FlowEditor b={b} set={set} /></ReactFlowProvider>;
     case 'decision': return <DecisionEditor b={b} set={set} />;
     case 'divider': return <hr className="border-line" />;

@@ -1,4 +1,4 @@
-# Fase 0 — Auditoria do legado ISP Sprint v1.5
+# Fase 0 — Auditoria do legado BKT RevOps v1.5
 
 **Data:** 2026-10-17 · **Fonte:** `isp-sprint-v1.5_1.zip` (10 arquivos, ~50 KB, 294 linhas, código minificado em linha única) · **Veredito:** legado experimental. **Nenhum código será reaproveitado diretamente**; reaproveitamos conhecimento de produto (roteiros, objeções, estratégias, salvaguardas do adaptador IXC) e criamos um migrador de dados que trata o legado como fonte **não verificada**.
 

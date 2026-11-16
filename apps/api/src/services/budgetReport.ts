@@ -19,7 +19,7 @@ const ROLE_INTRO: Record<Recipient['role'], string> = {
 };
 
 export function budgetReportSubject(month: string) {
-  return `ISP Sprint | Fechamento Orçamentário — ${monthName(month).replace(' de ', '/')}`;
+  return `BKT RevOps | Fechamento Orçamentário — ${monthName(month).replace(' de ', '/')}`;
 }
 
 export function renderBudgetReport(input: {
@@ -84,9 +84,9 @@ export function renderBudgetReport(input: {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr style="background:#F6F7F9;"><th align="left" style="padding:8px;font-size:12px;color:${MUTED};font-weight:600;">Centro</th><th align="right" style="padding:8px;font-size:12px;color:${MUTED};font-weight:600;">Aprovado</th><th align="right" style="padding:8px;font-size:12px;color:${MUTED};font-weight:600;">Realizado</th><th align="right" style="padding:8px;font-size:12px;color:${MUTED};font-weight:600;">Comprometido</th><th align="right" style="padding:8px;font-size:12px;color:${MUTED};font-weight:600;">Saldo</th></tr>${rows}</table>
   </td></tr>
   <tr><td style="padding:20px 28px 28px;">
-    <p style="margin:0 0 14px;font-size:14px;">Acesse o ISP Sprint para consultar o demonstrativo completo, acompanhar os lançamentos e analisar a evolução dos indicadores.</p>
+    <p style="margin:0 0 14px;font-size:14px;">Acesse o BKT RevOps para consultar o demonstrativo completo, acompanhar os lançamentos e analisar a evolução dos indicadores.</p>
     <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="background:${BLUE};"><a href="${esc(input.link)}" style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#FFFFFF;text-decoration:none;">Abrir o orçamento</a></td></tr></table>
-    <p style="margin:18px 0 0;font-size:14px;">Atenciosamente,<br><b>Gestão Orçamentária</b><br>ISP Sprint</p>
+    <p style="margin:18px 0 0;font-size:14px;">Atenciosamente,<br><b>Gestão Orçamentária</b><br>BKT RevOps</p>
   </td></tr>
   <tr><td style="background:${BG};padding:14px 28px;border-top:1px solid ${LINE};font-size:11px;color:${MUTED};">${esc(input.company)} · Relatório gerado em ${esc(input.generatedAt)} · Você recebe este e-mail pelo seu papel no orçamento. O link pede login: nenhum dado sai do sistema sem a sua senha.</td></tr>
 </table></td></tr></table></body></html>`;

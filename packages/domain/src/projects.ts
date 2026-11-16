@@ -96,7 +96,7 @@ export const BUILTIN_PROJECT_TEMPLATES: { key: string; name: string; kind: Proje
   },
   {
     key: 'implantacao_modulo',
-    name: 'Implantação de módulo do ISP Sprint',
+    name: 'Implantação de módulo do BKT RevOps',
     kind: 'implantacao',
     description: 'Uma frente da implantação modular: configuração, ajustes, testes, homologação com usuários, entrada em produção e acompanhamento. Cada marco tem critério de aceite e precisa ser homologado.',
     def: {

@@ -174,7 +174,7 @@ function TraceBox() {
       <h2 className="font-bold text-ink">De onde veio este registro?</h2>
       <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setGo(id.trim()); }}>
         <Select aria-label="Entidade" className="w-44" value={entity} onChange={(e) => setEntity(e.target.value)}><option value="conta">Conta</option><option value="pessoa">Pessoa</option><option value="oportunidade">Oportunidade</option><option value="tarefa">Tarefa</option><option value="anotacao">Anotação</option></Select>
-        <Input aria-label="ID no ISP Sprint" className="w-96" placeholder="ID do registro no ISP Sprint" value={id} onChange={(e) => setId(e.target.value)} /><Button type="submit">Rastrear</Button>
+        <Input aria-label="ID no BKT RevOps" className="w-96" placeholder="ID do registro no BKT RevOps" value={id} onChange={(e) => setId(e.target.value)} /><Button type="submit">Rastrear</Button>
       </form>
       {q.data && (!q.data.links.length ? <p className="text-sm text-muted">Este registro não veio de importação.</p> : (
         <div className="space-y-2 text-sm">{q.data.links.map((l) => <p key={l.sourceId}>Origem: <b>{IMPORT_SOURCE_LABELS[l.source as keyof typeof IMPORT_SOURCE_LABELS] ?? l.source}</b> · {l.sourceEntity} {l.sourceId} · importado em {fmtDateTime(l.importedAt)}</p>)}

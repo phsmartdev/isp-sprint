@@ -6370,7 +6370,7 @@ export const importRecordResults = pgTable('import_record_results', {
   actionCk: check('import_record_results_action_ck', inList('action', ['criar', 'atualizar', 'ignorar', 'revisar', 'erro'])),
   runIdx: index('import_record_results_run_idx').on(t.runId, t.action),
 }));
-/** Correspondência permanente origem → ISP Sprint (impede duplicar em importações sucessivas). */
+/** Correspondência permanente origem → BKT RevOps (impede duplicar em importações sucessivas). */
 export const importLinks = pgTable('import_links', {
   id: id(),
   tenantId: tenantId(),

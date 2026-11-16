@@ -70,7 +70,7 @@ export function RecordPage() {
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-3xl font-bold tracking-wide">{p.name}</h1>
             <p className="text-white/85">{orgLine(p) || 'Colaborador'}</p>
-            <p className="mt-1 text-sm text-white/75">{p.teams.length > 0 && <>Times: {p.teams.join(', ')} · </>}Na ISP-SPRINT desde {fmtDate(p.memberSince)}</p>
+            <p className="mt-1 text-sm text-white/75">{p.teams.length > 0 && <>Times: {p.teams.join(', ')} · </>}No BKT RevOps desde {fmtDate(p.memberSince)}</p>
             <div className="mt-2 flex flex-wrap gap-3 text-sm text-white/85">
               <span className="flex items-center gap-1"><Mail className="h-4 w-4" aria-hidden />{p.email}</span>
               {p.phone && <span className="flex items-center gap-1"><Phone className="h-4 w-4" aria-hidden />{p.phone}</span>}

@@ -15,7 +15,7 @@ import { errMsg } from '../contracts/shared';
 import { STATUS_TONE } from './shared';
 
 export type FrontItem = { id: string; code: number; name: string; status: ProjectStatus; ownerName: string; dueOn: string | null; tags: string[]; lateTasks: number; summary: FrontSummary };
-const DEFAULT_INITIATIVE = 'Implantação ISP Sprint';
+const DEFAULT_INITIATIVE = 'Implantação BKT RevOps';
 const DEFAULT_FRONTS = ['Contratos', 'CRM', 'Projetos — ajustes e homologação', 'Relatórios'];
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 

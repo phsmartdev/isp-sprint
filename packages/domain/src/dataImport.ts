@@ -1,5 +1,5 @@
 /**
- * Data Import Engine — regras puras (sem banco, sem rede): esquema de destino do ISP Sprint, mapeamento de campos,
+ * Data Import Engine — regras puras (sem banco, sem rede): esquema de destino do BKT RevOps, mapeamento de campos,
  * transformações declarativas, validação, sugestões de correspondência, comparação de versões e indicadores.
  * Nada aqui executa código fornecido pelo usuário: cada transformação é uma operação conhecida com parâmetros.
  */
@@ -9,7 +9,7 @@ export const IMPORT_SOURCES = ['rdstation_crm', 'csv'] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
 export const IMPORT_SOURCE_LABELS: Record<ImportSource, string> = { rdstation_crm: 'RD Station CRM', csv: 'Arquivo CSV' };
 
-// ------------------------------------------------------------------ destino (ISP Sprint)
+// ------------------------------------------------------------------ destino (BKT RevOps)
 export const TARGET_ENTITIES = ['conta', 'pessoa', 'oportunidade', 'tarefa', 'anotacao'] as const;
 export type TargetEntity = (typeof TARGET_ENTITIES)[number];
 export const TARGET_ENTITY_LABELS: Record<TargetEntity, string> = { conta: 'Contas', pessoa: 'Pessoas (contatos)', oportunidade: 'Oportunidades', tarefa: 'Tarefas', anotacao: 'Anotações' };
@@ -109,7 +109,7 @@ export type FieldMapping = {
 export type ImportPolicy = {
   onNew: 'criar' | 'ignorar' | 'revisar';
   onExisting: 'atualizar' | 'ignorar' | 'revisar';
-  /** valor vazio na origem: não apaga o que existe no ISP Sprint (padrão) ou limpa */
+  /** valor vazio na origem: não apaga o que existe no BKT RevOps (padrão) ou limpa */
   emptyValues: 'manter' | 'limpar';
   /** registro já existente achado por documento/e-mail (sem vínculo de importação): revisar (padrão) ou vincular */
   matchByKey: 'revisar' | 'vincular' | 'desligado';
@@ -332,7 +332,7 @@ export function evaluateRecord(record: Json, em: EntityMapping, fields: TargetFi
   const used = new Set<string>();
   for (const m of em.fields) {
     const tf = fields.find((f) => f.key === m.target);
-    if (!tf) { out.issues.push({ field: m.target, level: 'erro', message: 'Campo de destino não existe mais no ISP Sprint' }); continue; }
+    if (!tf) { out.issues.push({ field: m.target, level: 'erro', message: 'Campo de destino não existe mais no BKT RevOps' }); continue; }
     if (!m.approved) { out.issues.push({ field: m.target, level: 'revisao', message: 'Correspondência sugerida ainda não aprovada' }); continue; }
     m.sources.forEach((p) => used.add(p.replace(/\[.*$/, '').split('.')[0]!));
     let raw: unknown;
@@ -424,7 +424,7 @@ export function configIssues(c: ImportConfig, schema: Record<TargetEntity, Targe
     const fields = schema[e.target];
     const label = TARGET_ENTITY_LABELS[e.target];
     for (const m of e.fields) {
-      if (!fields.some((f) => f.key === m.target)) out.push({ field: `${e.target}.${m.target}`, level: 'erro', message: `${label}: o campo "${m.target}" não existe mais no ISP Sprint` });
+      if (!fields.some((f) => f.key === m.target)) out.push({ field: `${e.target}.${m.target}`, level: 'erro', message: `${label}: o campo "${m.target}" não existe mais no BKT RevOps` });
       if (m.kind !== 'constante' && !m.sources.length && !(m.kind === 'condicional' && m.rules?.length)) out.push({ field: `${e.target}.${m.target}`, level: 'erro', message: `${label}: escolha o campo de origem de "${m.target}"` });
       const tb = m.table ?? m.transforms.find((t): t is Extract<Transform, { op: 'equivalence' }> => t.op === 'equivalence')?.table;
       if ((m.kind === 'equivalencia' || tb) && (!tb || !tableKeys.has(tb))) out.push({ field: `${e.target}.${m.target}`, level: 'erro', message: `${label}: tabela de equivalência de "${m.target}" não encontrada` });

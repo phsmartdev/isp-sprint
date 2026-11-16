@@ -37,7 +37,7 @@ function js(method: string, path: string, body?: unknown) {
     `const res = await fetch("${BASE}${path}", {`,
     ...(method !== 'GET' ? [`  method: "${method}",`] : []),
     `  headers: {`,
-    `    Authorization: \`Bearer \${process.env.ISP_SPRINT_TOKEN}\`,`,
+    `    Authorization: \`Bearer \${process.env.BKT_REVOPS_TOKEN}\`,`,
     ...(body !== undefined ? [`    "Content-Type": "application/json",`] : []),
     `  },`,
     ...(body !== undefined ? [`  body: JSON.stringify(${JSON.stringify(body, null, 2).replace(/\n/g, '\n  ')}),`] : []),
@@ -52,7 +52,7 @@ function python(method: string, path: string, body?: unknown) {
     '',
     `r = requests.${method.toLowerCase()}(`,
     `    "${BASE}${path}",`,
-    `    headers={"Authorization": f"Bearer {os.environ['ISP_SPRINT_TOKEN']}"},`,
+    `    headers={"Authorization": f"Bearer {os.environ['BKT_REVOPS_TOKEN']}"},`,
     ...(body !== undefined ? [`    json=${JSON.stringify(body, null, 4).replace(/\n/g, '\n    ').replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False').replace(/\bnull\b/g, 'None')},`] : []),
     `    timeout=30,`,
     ')',
@@ -132,7 +132,7 @@ export function ApiDocsPage() {
       <p className="text-sm text-muted"><Link to="/playbooks" className="text-primary hover:underline">Central de Playbooks</Link> / API de integração</p>
       <header className="mt-1 border-b border-line pb-5">
         <h1 className="font-display text-3xl font-bold text-ink">API de integração</h1>
-        <p className="mt-2 max-w-3xl text-base text-text">Para desenvolvedores de outros sistemas (ERP, site, BI, atendimento) inserirem e coletarem dados no ISP Sprint, com segurança e com as mesmas regras de quem usa a tela.</p>
+        <p className="mt-2 max-w-3xl text-base text-text">Para desenvolvedores de outros sistemas (ERP, site, BI, atendimento) inserirem e coletarem dados no BKT RevOps, com segurança e com as mesmas regras de quem usa a tela.</p>
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <span className="text-muted">Endereço base: <C>{BASE}</C></span>
           <span className="text-muted">Formato: <C>JSON</C></span>
@@ -303,7 +303,7 @@ function Reference() {
     const spec = { ...q.data, paths: Object.fromEntries(Object.entries(q.data!.paths).map(([p, ms]) => [p, Object.fromEntries(Object.entries(ms).filter(([, op]) => usable(p, op)))]).filter(([, ms]) => Object.keys(ms as object).length)), servers: [{ url: window.location.origin }] };
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' }));
-    a.download = 'isp-sprint-openapi.json';
+    a.download = 'bkt-revops-openapi.json';
     a.click();
     URL.revokeObjectURL(a.href);
   };

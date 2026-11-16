@@ -126,7 +126,7 @@ export const peopleRecordRoutes = [
 
       type Ev = { at: string; kind: string; title: string; detail?: string | null };
       const timeline: Ev[] = [
-        { at: u.createdAt.toISOString(), kind: 'entrada', title: 'Entrou na ISP-SPRINT' },
+        { at: u.createdAt.toISOString(), kind: 'entrada', title: 'Entrou no BKT RevOps' },
         ...lines.map((l) => ({ at: l.validFrom.toISOString(), kind: 'lideranca', title: `Liderança: ${name(l.managerId)}`, detail: l.validTo ? `até ${l.validTo.toISOString().slice(0, 10).split('-').reverse().join('/')}` : 'atual' })),
         ...awards.map((a) => ({ at: a.awardedAt.toISOString(), kind: 'badge', title: `Badge ${a.badgeKey.charAt(0).toUpperCase()}${a.badgeKey.slice(1)} · ${a.tierName}`, detail: String(a.year) })),
         ...trainings.map((c) => ({ at: `${c.issuedOn}T12:00:00Z`, kind: 'treinamento', title: `Certificado: ${c.title}`, detail: `${c.hours} h` })),

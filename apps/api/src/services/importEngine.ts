@@ -134,13 +134,13 @@ async function loadCtx(db: DB, run: RunRow, actorId: string): Promise<Ctx> {
   };
 }
 
-/** Resolve uma referência para o ID no ISP Sprint (ou explica por que não dá). */
+/** Resolve uma referência para o ID no BKT RevOps (ou explica por que não dá). */
 async function resolveRef(c: Ctx, f: TargetField, v: unknown): Promise<{ id: string | null; issue?: Issue }> {
   const val = String(v).trim();
   switch (f.ref) {
     case 'usuario': {
       const id = c.users.get(val) ?? c.userEmails.get(val.toLowerCase());
-      return id ? { id } : { id: null, issue: { field: f.key, level: 'erro', message: `Usuário "${val}" sem equivalência no ISP Sprint (use a tabela de usuários ou o e-mail)` } };
+      return id ? { id } : { id: null, issue: { field: f.key, level: 'erro', message: `Usuário "${val}" sem equivalência no BKT RevOps (use a tabela de usuários ou o e-mail)` } };
     }
     case 'etapa': return c.stages.has(val) ? { id: val } : { id: null, issue: { field: f.key, level: 'erro', message: `Etapa "${val}" sem equivalência (tabela de etapas)` } };
     case 'origem': return c.sources.has(val) ? { id: val } : { id: null, issue: { field: f.key, level: 'erro', message: `Origem "${val}" sem equivalência` } };
@@ -321,9 +321,9 @@ async function processOne(c: Ctx, raw: typeof s.importRawRecords.$inferSelect, e
   }
   const decision = c.decisions.get(`${ent}|${skey}|${sid}`);
   if (issues.some((i) => i.level === 'erro')) { action = 'erro'; reason = 'Erro impeditivo'; }
-  else if (link && (!existing || existing.deleted)) { action = 'revisar'; reason = 'O registro importado antes foi excluído no ISP Sprint'; }
-  else if (existing && link && existing.updatedAt && existing.updatedAt.getTime() > link.lastWrittenAt.getTime() + 2000 && em.policy.onExisting === 'atualizar' && decision !== 'atualizar') { action = 'revisar'; reason = 'Alterado manualmente no ISP Sprint depois da última importação'; }
-  else if (existing && duplicate && !link && (weak || em.policy.matchByKey === 'revisar') && decision !== 'vincular') { action = 'revisar'; reason = weak ? 'Já existe uma conta com o mesmo nome no ISP Sprint' : ent === 'conta' ? 'Já existe uma conta com este CPF/CNPJ' : 'Já existe uma pessoa com este e-mail'; }
+  else if (link && (!existing || existing.deleted)) { action = 'revisar'; reason = 'O registro importado antes foi excluído no BKT RevOps'; }
+  else if (existing && link && existing.updatedAt && existing.updatedAt.getTime() > link.lastWrittenAt.getTime() + 2000 && em.policy.onExisting === 'atualizar' && decision !== 'atualizar') { action = 'revisar'; reason = 'Alterado manualmente no BKT RevOps depois da última importação'; }
+  else if (existing && duplicate && !link && (weak || em.policy.matchByKey === 'revisar') && decision !== 'vincular') { action = 'revisar'; reason = weak ? 'Já existe uma conta com o mesmo nome no BKT RevOps' : ent === 'conta' ? 'Já existe uma conta com este CPF/CNPJ' : 'Já existe uma pessoa com este e-mail'; }
   else if (existing) { action = em.policy.onExisting === 'atualizar' ? (ent === 'anotacao' ? 'ignorar' : 'atualizar') : em.policy.onExisting; reason = duplicate ? 'Vinculado a registro existente' : 'Já importado antes'; }
   else { action = em.policy.onNew; reason = 'Novo'; targetId = null; }
   if (issues.some((i) => i.level === 'revisao') && (action === 'criar' || action === 'atualizar') && decision !== 'importar') { action = 'revisar'; reason = 'Campos para revisar'; }

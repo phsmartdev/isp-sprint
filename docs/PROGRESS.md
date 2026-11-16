@@ -254,7 +254,7 @@ Atualizado em 2026-10-24. Leia junto com `DECISIONS.md` e `AUDIT_LEGACY_v1.5.md`
 ## Etapa 1 — Fase 2: Projetos para a implantação ✅ (2026-10-22)
 - **Frentes da implantação** (Projetos → Painel das frentes → "Criar frentes da implantação"):
   - Um projeto por frente (padrão: Contratos, CRM, Projetos — ajustes e homologação, Relatórios), cada uma com responsável próprio e a etiqueta da iniciativa.
-  - Todas nascem do novo modelo "Implantação de módulo do ISP Sprint": 4 etapas, 6 marcos e 7 tarefas. Os marcos são diagnóstico e configuração, ajustes, testes, homologação com usuários, entrada em produção e 30 dias de acompanhamento.
+  - Todas nascem do novo modelo "Implantação de módulo do BKT RevOps": 4 etapas, 6 marcos e 7 tarefas. Os marcos são diagnóstico e configuração, ajustes, testes, homologação com usuários, entrada em produção e 30 dias de acompanhamento.
   - Não é um projeto paralelo: são projetos comuns, com quadro, lista, calendário, equipe e histórico.
 - **Marcos com critério de aceite e homologação:**
   - Qualquer marco pode ter critério de aceite e exigir homologação; no modelo de implantação, todos exigem.

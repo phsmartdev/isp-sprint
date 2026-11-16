@@ -33,7 +33,7 @@ export function AdminWebservice() {
       <section className="card flex flex-wrap items-start justify-between gap-4 p-5">
         <div className="min-w-0 max-w-3xl">
           <h2 className="text-lg font-bold text-ink">Usuários de webservice</h2>
-          <p className="mt-1 text-sm text-text">Para outros sistemas inserirem ou coletarem dados no ISP Sprint. O usuário de webservice <strong>não entra pela tela</strong>: usa só o token. O que ele lê e grava segue o <strong>perfil</strong> escolhido (Configurações → Permissões), e Configurações nunca ficam disponíveis pela API.</p>
+          <p className="mt-1 text-sm text-text">Para outros sistemas inserirem ou coletarem dados no BKT RevOps. O usuário de webservice <strong>não entra pela tela</strong>: usa só o token. O que ele lê e grava segue o <strong>perfil</strong> escolhido (Configurações → Permissões), e Configurações nunca ficam disponíveis pela API.</p>
           <p className="mt-2 text-sm"><Link to="/playbooks/api" className="font-semibold text-primary hover:underline">Ver a documentação da API na wiki</Link></p>
         </div>
         <Button variant="primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" />Novo usuário de webservice</Button>

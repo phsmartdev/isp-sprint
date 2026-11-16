@@ -1,6 +1,6 @@
 # Pessoas & Cultura — Ambiente Digital de Experiência do Colaborador (Fase 1: Fundação Social)
 
-Módulo da ISP-SPRINT, não uma aplicação à parte: usa a mesma API (Fastify), o mesmo front (React + Vite),
+Módulo do BKT RevOps, não uma aplicação à parte: usa a mesma API (Fastify), o mesmo front (React + Vite),
 a mesma autenticação por sessão, a mesma matriz de acesso, a mesma liberação de módulos por equipe/pessoa,
 o mesmo isolamento por empresa (`tenant_id`) e o mesmo design system.
 

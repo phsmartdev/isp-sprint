@@ -50,7 +50,7 @@ export const webserviceRoutes = [
       const u = await app.db.transaction(async (tx) => {
         const roles = await ensureRoles(tx, auth.tenantId);
         // e-mail técnico (único, nunca recebe nada); senha aleatória que ninguém conhece
-        const email = `webservice-${randomBytes(5).toString('hex')}@api.ispsprint.invalid`;
+        const email = `webservice-${randomBytes(5).toString('hex')}@api.bktrevops.invalid`;
         const [row] = await tx.insert(s.users).values({ tenantId: auth.tenantId, name: body.name, email, jobTitle: body.description ?? 'Webservice', service: true, sectorRole: 'observador', sectorViewer: true, passwordHash: await hashPassword(randomBytes(32).toString('base64url')) }).returning({ id: s.users.id });
         await tx.insert(s.userRoles).values({ userId: row!.id, roleId: roles[body.profile as keyof typeof roles]! });
         await audit(tx, req, { action: 'webservice.create', entityType: 'user', entityId: row!.id, metadata: { name: body.name, profile: body.profile } });

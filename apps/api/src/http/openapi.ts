@@ -41,7 +41,7 @@ export function buildOpenApi(routes: RouteDef[]) {
   }
   return {
     openapi: '3.1.0',
-    info: { title: 'RevOps API', version: '1.0.0-fase1', description: 'API interna do CRM RevOps. Erros em application/problem+json com requestId.' },
+    info: { title: 'BKT RevOps API', version: '1.0.0-fase1', description: 'API do BKT RevOps. Erros em application/problem+json com requestId.' },
     servers: [{ url: '/' }],
     components: { securitySchemes: { session: { type: 'apiKey', in: 'cookie', name: 'isp_session' }, webservice: { type: 'http', scheme: 'bearer', description: 'Token do usuário de webservice (isk_…), gerado em Configurações → Webservice (API).' } } },
     paths,

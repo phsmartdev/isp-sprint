@@ -1,4 +1,4 @@
-# ISP Sprint — CRM comercial para provedores de internet
+# BKT RevOps — CRM comercial para provedores de internet
 
 CRM B2B com a ergonomia de um CRM profissional (sidebar, dashboard, leads, pipeline Kanban, oportunidades, clientes, atividades) e uma exceção: **“+ Nova oportunidade” abre o workspace Sprint**, com meta de decisão em 7 minutos que orienta, nunca bloqueia.
 

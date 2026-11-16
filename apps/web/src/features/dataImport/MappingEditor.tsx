@@ -1,5 +1,5 @@
 /**
- * Mapeamento visual, lado a lado: à esquerda o campo do ISP Sprint, ao centro a regra (de onde vem e como se
+ * Mapeamento visual, lado a lado: à esquerda o campo do BKT RevOps, ao centro a regra (de onde vem e como se
  * transforma), à direita exemplos reais da origem. Sugestões chegam com motivo e confiança e só valem aprovadas.
  */
 import { useMemo, useState } from 'react';
@@ -151,7 +151,7 @@ function TablesEditor({ tables, set, readOnly, refs, connectorId, config }: { ta
               <button type="button" aria-label={`Tirar tabela ${t.label}`} className="ml-auto pb-2 text-muted hover:text-danger" onClick={() => set(tables.filter((_, k) => k !== i))}><Trash2 className="h-4 w-4" /></button>
             </div>
             {!!missing && <p className="mb-1 text-xs text-[#9A6B00]">{missing} valor(es) sem equivalência.</p>}
-            <div className="max-h-72 overflow-auto"><table className="w-full text-sm"><thead className="text-left text-xs text-muted"><tr><th className="py-1 pr-2 font-medium">Valor na origem</th><th className="py-1 font-medium">No ISP Sprint</th><th /></tr></thead><tbody>
+            <div className="max-h-72 overflow-auto"><table className="w-full text-sm"><thead className="text-left text-xs text-muted"><tr><th className="py-1 pr-2 font-medium">Valor na origem</th><th className="py-1 font-medium">No BKT RevOps</th><th /></tr></thead><tbody>
               {t.rows.map((r, j) => (
                 <tr key={j} className="border-t border-line">
                   <td className="py-1 pr-2"><Input aria-label="Valor na origem" className="h-8 text-xs" value={r.from} onChange={(e) => upd({ rows: t.rows.map((x, k) => (k === j ? { ...x, from: e.target.value } : x)) })} />{r.label && <span className="text-[11px] text-muted">{r.label}</span>}</td>
@@ -213,8 +213,8 @@ export function MappingEditor({ config, onChange, connectorId, readOnly = false 
             <label className="flex items-center gap-2 pb-2 text-sm font-semibold"><input type="checkbox" className="h-4 w-4 accent-primary" checked={em.enabled} onChange={(e) => setEm({ ...em, enabled: e.target.checked })} />Importar esta entidade</label>
             <FormField label="Registro novo" htmlFor="pol-new"><Select id="pol-new" className="h-8" value={em.policy.onNew} onChange={(e) => setEm({ ...em, policy: { ...em.policy, onNew: e.target.value as 'criar' } })}><option value="criar">Criar</option><option value="revisar">Revisar antes</option><option value="ignorar">Ignorar</option></Select></FormField>
             <FormField label="Já importado antes" htmlFor="pol-ex"><Select id="pol-ex" className="h-8" value={em.policy.onExisting} onChange={(e) => setEm({ ...em, policy: { ...em.policy, onExisting: e.target.value as 'atualizar' } })}><option value="atualizar">Atualizar</option><option value="ignorar">Ignorar</option><option value="revisar">Revisar</option></Select></FormField>
-            <FormField label="Valor vazio na origem" htmlFor="pol-empty"><Select id="pol-empty" className="h-8" value={em.policy.emptyValues} onChange={(e) => setEm({ ...em, policy: { ...em.policy, emptyValues: e.target.value as 'manter' } })}><option value="manter">Não apagar o que existe</option><option value="limpar">Limpar no ISP Sprint</option></Select></FormField>
-            <FormField label="Já existe no ISP Sprint (CPF/CNPJ ou e-mail)" htmlFor="pol-key"><Select id="pol-key" className="h-8" value={em.policy.matchByKey} onChange={(e) => setEm({ ...em, policy: { ...em.policy, matchByKey: e.target.value as 'revisar' } })}><option value="revisar">Revisar</option><option value="vincular">Vincular e atualizar</option><option value="desligado">Não procurar</option></Select></FormField>
+            <FormField label="Valor vazio na origem" htmlFor="pol-empty"><Select id="pol-empty" className="h-8" value={em.policy.emptyValues} onChange={(e) => setEm({ ...em, policy: { ...em.policy, emptyValues: e.target.value as 'manter' } })}><option value="manter">Não apagar o que existe</option><option value="limpar">Limpar no BKT RevOps</option></Select></FormField>
+            <FormField label="Já existe no BKT RevOps (CPF/CNPJ ou e-mail)" htmlFor="pol-key"><Select id="pol-key" className="h-8" value={em.policy.matchByKey} onChange={(e) => setEm({ ...em, policy: { ...em.policy, matchByKey: e.target.value as 'revisar' } })}><option value="revisar">Revisar</option><option value="vincular">Vincular e atualizar</option><option value="desligado">Não procurar</option></Select></FormField>
             <FormField label="Campos sem correspondência" htmlFor="pol-leg"><Select id="pol-leg" className="h-8" value={em.legacy} onChange={(e) => setEm({ ...em, legacy: e.target.value as 'preservar' })}><option value="preservar">Preservar como legado</option><option value="descartar">Não guardar</option></Select></FormField>
             <FormField label="Identidade por colunas" htmlFor="pol-kf" hint="Linhas com os mesmos valores viram um registro só (ex.: Empresa)"><Input id="pol-kf" className="h-8 w-56" placeholder="vazio = ID da origem" value={(em.keyFrom ?? []).join(', ')} onChange={(e) => setEm({ ...em, keyFrom: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></FormField>
             {em.target === 'oportunidade' && <FormField label="Chave para tarefas/anotações" htmlFor="pol-ak" hint="Ex.: Nome, Empresa"><Input id="pol-ak" className="h-8 w-48" value={(em.altKeyFrom ?? []).join(', ')} onChange={(e) => setEm({ ...em, altKeyFrom: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} /></FormField>}
@@ -223,7 +223,7 @@ export function MappingEditor({ config, onChange, connectorId, readOnly = false 
           </fieldset>
           <div className="overflow-x-auto rounded-md border border-line bg-surface">
             <table className="w-full min-w-[960px] text-left text-sm">
-              <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 font-medium">ISP Sprint ({TARGET_ENTITY_LABELS[em.target]})</th><th className="px-3 py-2 font-medium">Regra (origem: {em.source})</th><th className="px-3 py-2 font-medium">Exemplos reais</th><th className="px-3 py-2 font-medium">Aprovação</th></tr></thead>
+              <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 font-medium">BKT RevOps ({TARGET_ENTITY_LABELS[em.target]})</th><th className="px-3 py-2 font-medium">Regra (origem: {em.source})</th><th className="px-3 py-2 font-medium">Exemplos reais</th><th className="px-3 py-2 font-medium">Aprovação</th></tr></thead>
               <tbody>
                 {sch[em.target].filter((tf) => all || tf.required || em.fields.some((f) => f.target === tf.key) || !tf.key.startsWith('custom.')).map((tf) => {
                   const m = em.fields.find((f) => f.target === tf.key);

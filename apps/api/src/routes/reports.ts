@@ -267,7 +267,7 @@ export const reportRoutes = [
       await audit(app.db, req, { action: 'export.csv', entityType: 'report', metadata: { kind: query.kind, from: query.from, to: query.to, rows: lines.length } });
       const meta = [`# RevOps — exportação de ${query.kind}`, `# Período: ${query.from} a ${query.to} (${auth.timezone})`, `# Gerado em: ${new Date().toISOString()} por ${auth.name}`];
       const csv = '﻿' + [...meta, header.map(csvSafe).join(';'), ...lines.map((l) => l.map(csvSafe).join(';'))].join('\r\n');
-      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="isp-sprint-${query.kind}-${query.from}-a-${query.to}.csv"`);
+      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="bkt-revops-${query.kind}-${query.from}-a-${query.to}.csv"`);
       return reply.send(csv);
     },
   }),

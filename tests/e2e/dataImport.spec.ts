@@ -64,13 +64,13 @@ test('importação por modelo salvo: simular, aprovar, executar e conferir', asy
         { id: 'f', target: 'valueCents', kind: 'direta', sources: ['valor'], transforms: [{ op: 'cents', decimal: ',', unit: 'reais' }], approved: true }] },
     ],
   };
-  const tpl = await (await page.request.post('/api/v1/admin/import/templates', { data: { name: `CSV → ISP Sprint | Empresas e negócios ${st}`, connectorId: conn.id, config } })).json();
+  const tpl = await (await page.request.post('/api/v1/admin/import/templates', { data: { name: `CSV → BKT RevOps | Empresas e negócios ${st}`, connectorId: conn.id, config } })).json();
   await login(page, dirEmail);
   expect((await page.request.post(`/api/v1/admin/import/versions/${tpl.versionId}/approve`)).ok()).toBe(true);
 
   // biblioteca → Utilizar → assistente
   await page.goto('/settings/importacao?aba=modelos');
-  const item = page.getByRole('listitem', { name: `CSV → ISP Sprint | Empresas e negócios ${st}` });
+  const item = page.getByRole('listitem', { name: `CSV → BKT RevOps | Empresas e negócios ${st}` });
   await expect(item.getByText('v1.0 aprovada')).toBeVisible();
   await item.getByRole('button', { name: 'Utilizar' }).click();
   const next = page.getByRole('button', { name: 'Continuar' });
@@ -100,7 +100,7 @@ test('importação por modelo salvo: simular, aprovar, executar e conferir', asy
   expect(psql(`select count(*) from opportunities where title like 'Negócio % ${st}'`)).toBe('0'); // simulação não grava
   await next.click(); // revisão
   await next.click(); // aprovação
-  await page.getByLabel('Confirmo a gravação definitiva no ISP Sprint conforme a simulação.').check();
+  await page.getByLabel('Confirmo a gravação definitiva no BKT RevOps conforme a simulação.').check();
   await page.getByRole('button', { name: 'Aprovar e executar' }).click();
   await expect(page.getByRole('region', { name: 'Simulação × importação' })).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: 'Conferir resultados' }).click();

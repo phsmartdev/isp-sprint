@@ -23,7 +23,7 @@ export const dataAdminRoutes = [
     tag: 'Base de dados',
     ...ADMIN,
     handler: async ({ app, auth, reply }) =>
-      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="modelo-clientes-isp-sprint.csv"').send(importTemplate(await customerFieldList(app.db, auth.tenantId))),
+      reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', 'attachment; filename="modelo-clientes-bkt-revops.csv"').send(importTemplate(await customerFieldList(app.db, auth.tenantId))),
   }),
   defineRoute({
     method: 'GET',

@@ -162,7 +162,7 @@ describe('Data Import Engine', () => {
   });
 
   it('modelo salvo, aprovação por outra pessoa e disponível em nova sessão', async () => {
-    const t = ok(await carlos.post('/admin/import/templates', { name: `RD → ISP Sprint | Migração completa ${st}`, connectorId, config: config() }), 201).json();
+    const t = ok(await carlos.post('/admin/import/templates', { name: `RD → BKT RevOps | Migração completa ${st}`, connectorId, config: config() }), 201).json();
     templateId = t.id; versionId = t.versionId;
     expect((await carlos.post(`/admin/import/versions/${versionId}/approve`)).statusCode).toBe(403); // gerência não aprova
     ok(await dir.post(`/admin/import/versions/${versionId}/approve`));
@@ -304,7 +304,7 @@ describe('Exportação de negociações do RD (planilha, sem IDs)', () => {
     const ids = ok(await carlos.post('/admin/import/id-columns', { headers: H })).json();
     expect(ids).toEqual({ kind: 'negociacoes_rd', columns: ['Nome', 'Empresa', 'Data de criação', 'Hora de criação', 'Contatos'] });
     for (const [entity, content, cols] of [['negociacoes', deals, ids.columns], ['negociacoes_cs', cs, ids.columns], ['tarefas', tasks, ['Negociação vinculada', 'Assunto', 'Data de criação', 'Hora de criação']]] as const) ok(await dir.post(`/admin/import/connectors/${conn}/files`, { entity, name: `${entity}.csv`, idColumn: cols.join(' + '), content }));
-    // conta que já existe no ISP Sprint com o mesmo nome (sem CNPJ): revisão, nunca vínculo automático
+    // conta que já existe no BKT RevOps com o mesmo nome (sem CNPJ): revisão, nunca vínculo automático
     ok(await lucas.post('/contacts', { name: E2, segment: 'empresarial', phone: '79999990077' }), 201);
     const cfg = ok(await carlos.post('/admin/import/templates/suggest', { connectorId: conn })).json();
     expect(cfg.entities.map((e: { source: string; target: string }) => `${e.source}→${e.target}`)).toEqual(['negociacoes→conta', 'negociacoes→pessoa', 'negociacoes→oportunidade', 'negociacoes_cs→conta', 'negociacoes_cs→pessoa', 'negociacoes_cs→oportunidade', 'tarefas→tarefa']);
@@ -319,11 +319,11 @@ describe('Exportação de negociações do RD (planilha, sem IDs)', () => {
     const det = ok(await carlos.get(`/admin/import/runs/${sim}`)).json();
     expect(det.byEntity).toEqual({ conta: { criar: 1, revisar: 1 }, pessoa: { criar: 2 }, oportunidade: { criar: 3, revisar: 1, erro: 1 }, tarefa: { criar: 2, revisar: 1 } });
     const g = ok(await carlos.get(`/admin/import/runs/${sim}/review-groups`)).json();
-    expect(g.review).toEqual(expect.arrayContaining([expect.objectContaining({ entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no ISP Sprint', n: 1 })]));
+    expect(g.review).toEqual(expect.arrayContaining([expect.objectContaining({ entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no BKT RevOps', n: 1 })]));
     expect(g.reviewIssues.map((x: { message: string }) => x.message).join(' ')).toMatch(/Depende da decisão sobre conta.*não está nesta importação|não está nesta importação.*Depende da decisão/);
     expect(g.errors).toEqual([{ entity: 'oportunidade', message: 'Conta é obrigatório', n: 1 }]);
     // decisões em lote: vincula a conta existente; tarefas sem negociação entram ligadas só à empresa
-    expect(ok(await carlos.post(`/admin/import/runs/${sim}/decisions`, { entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no ISP Sprint', decision: 'vincular' })).json().count).toBe(1);
+    expect(ok(await carlos.post(`/admin/import/runs/${sim}/decisions`, { entity: 'conta', reason: 'Já existe uma conta com o mesmo nome no BKT RevOps', decision: 'vincular' })).json().count).toBe(1);
     ok(await carlos.post(`/admin/import/runs/${sim}/decisions`, { entity: 'tarefa', reason: 'Campos para revisar', decision: 'importar' }));
     // a negociação que dependia da conta em revisão segue a decisão da conta (vinculada) — sem decisão própria
     const imp = ok(await dir.post('/admin/import/runs', { mode: 'importacao', connectorId: conn, scope: { mode: 'base_completa' }, config: cfg, simulationRunId: sim, confirm: true, acceptErrors: true }), 201).json().id;

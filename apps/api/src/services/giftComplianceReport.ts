@@ -128,7 +128,7 @@ export async function buildComplianceReport(inp: ReportInput) {
 
   // 3. Demonstrativo de controles
   section(3, 'Demonstrativo de controles');
-  para('Mecanismos aplicados pela área Comercial no ISP-SPRINT (registros do próprio sistema):', 9.5);
+  para('Mecanismos aplicados pela área Comercial no BKT RevOps (registros do próprio sistema):', 9.5);
   for (const t of [
     `Aplicação das diretrizes: ${inp.activeRules} diretriz(es) vigente(s) avaliada(s) automaticamente em cada solicitação, com versão registrada na decisão.${inp.policyNote ? ` Referência: ${inp.policyNote}` : ''}`,
     'Respeito às alçadas: decisão validada no servidor pela alçada exigida (Gestão comercial ou Diretoria); restrições obrigatórias não são afastadas por autorização gerencial.',

@@ -118,7 +118,7 @@ export function PlaybooksPage() {
                 <span className="text-sm font-semibold text-primary">Abrir</span>
               </Link>
               <Link to="/playbooks/api" className="flex items-center justify-between gap-3 border border-line bg-surface px-4 py-3 hover:border-line-strong">
-                <span><span className="block font-semibold text-ink">API de integração</span><span className="text-sm text-muted">Guia para desenvolvedores de outros sistemas inserirem e coletarem dados no ISP Sprint.</span></span>
+                <span><span className="block font-semibold text-ink">API de integração</span><span className="text-sm text-muted">Guia para desenvolvedores de outros sistemas inserirem e coletarem dados no BKT RevOps.</span></span>
                 <span className="text-sm font-semibold text-primary">Abrir</span>
               </Link>
               <Shelf title="Ciência pendente" hint="leia e confirme" items={d!.forYou.ackPending} />

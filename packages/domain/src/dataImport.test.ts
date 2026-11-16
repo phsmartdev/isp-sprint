@@ -85,7 +85,7 @@ describe('modelo', () => {
   it('valida contra o destino e a origem atuais', () => {
     expect(configIssues(cfg, targetSchema([]))).toEqual([]);
     const broken = { ...cfg, entities: [{ ...oppMapping, fields: oppMapping.fields.filter((f) => f.target !== 'owner').concat({ id: 'x', target: 'naoexiste', kind: 'direta', sources: ['a'], transforms: [], approved: true }) }] };
-    expect(configIssues(broken, targetSchema([])).map((i) => i.message)).toEqual(['Oportunidades: o campo "naoexiste" não existe mais no ISP Sprint', 'Oportunidades: falta mapear Responsável']);
+    expect(configIssues(broken, targetSchema([])).map((i) => i.message)).toEqual(['Oportunidades: o campo "naoexiste" não existe mais no BKT RevOps', 'Oportunidades: falta mapear Responsável']);
     expect(configIssues(cfg, targetSchema([]), { deals: ['name'] }).some((i) => i.message.includes('não apareceu'))).toBe(true);
   });
   it('versões e comparação', () => {

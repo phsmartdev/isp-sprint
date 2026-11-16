@@ -159,7 +159,7 @@ export const ERP_FIELDS: readonly ErpFieldDef[] = [
   f('D', 'd_tributario', 'Informações tributárias', 'textarea', false, false),
   f('D', 'd_obs', 'Observações financeiras', 'textarea', false, false),
 
-  // E. Reajustes (o IXC não tem campo próprio; o ISP-SPRINT acompanha)
+  // E. Reajustes (o IXC não tem campo próprio; o BKT RevOps acompanha)
   f('E', 'e_indice', 'Índice contratual', 'text', true, true, { inherit: 'version.adjustmentIndex' }),
   f('E', 'e_data_base', 'Data-base', 'date', true, true, { inherit: 'version.adjustmentBaseDate' }),
   f('E', 'e_periodicidade', 'Periodicidade (meses)', 'int', true, true),

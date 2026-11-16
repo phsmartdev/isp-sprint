@@ -8,7 +8,7 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, ana: Client, rafael: Client;
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const stamp = Date.now().toString(36);
-const TAG = `Implantação ISP Sprint ${stamp}`;
+const TAG = `Implantação BKT RevOps ${stamp}`;
 let fronts: { id: string; name: string }[] = [];
 type Item = { id: string; name: string; summary: { progress: { done: number; total: number; basis: string }; current: { name: string } | null; nextAction: { kind: string; text: string }; impediments: { open: number; high: number }; risks: { open: number; high: number }; pendingHomologation: { name: string }[] } };
 const portfolio = async () => ok(await carlos.get(`/projects/portfolio?tag=${encodeURIComponent(TAG)}`)).json() as { items: Item[]; tags: string[] };

@@ -6,7 +6,7 @@ de implantação por feature, cada uma testada e publicada só com autorização
 
 ## 1. O que já existe (reaproveitar, não duplicar)
 
-| Necessidade do prompt | O que o ISP Sprint já tem | Uso |
+| Necessidade do prompt | O que o BKT RevOps já tem | Uso |
 |---|---|---|
 | Oportunidade do tipo Licitação | `opportunities.sale_kind = 'licitacao'`, `bid_mode`, lances (`bid_participants`) e linha do tempo do pregão (`bid_actions`), campos do formulário do funil (`custom`: órgão, processo etc.) | É o gatilho da criação e a fonte dos dados herdados. Nenhum campo novo onde já existe equivalente. |
 | Projeto | `projects` (com `opportunity_id`, `contract_id`, `kind`, dono, prazos), `project_stages` (colunas do quadro), `project_milestones` (com critério de aceite e homologação), `project_members`, `project_events` (histórico), `project_risks` | O projeto de licitação é um projeto comum, `kind = 'licitacao'` (novo valor), vinculado à oportunidade. Aparece no módulo Projetos sem tela paralela. |

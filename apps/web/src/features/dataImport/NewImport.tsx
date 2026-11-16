@@ -196,7 +196,7 @@ export function NewImport({ initialTemplateId, initialConnectorId }: { initialTe
               <p className="text-sm font-semibold text-ink">Guardar estas regras (opcional)</p>
               <div className="grid gap-2 md:grid-cols-2">
                 <FormField label="Justificativa" htmlFor="ap-j"><Input id="ap-j" value={justif} onChange={(e) => setJustif(e.target.value)} placeholder="O que mudou e por quê" /></FormField>
-                <FormField label="Nome do novo modelo" htmlFor="ap-n"><Input id="ap-n" value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="RD Station → ISP Sprint | …" /></FormField>
+                <FormField label="Nome do novo modelo" htmlFor="ap-n"><Input id="ap-n" value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="RD Station → BKT RevOps | …" /></FormField>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button disabled={saveName.trim().length < 3} loading={saveNew.isPending} onClick={() => saveNew.mutate()}>Salvar como novo modelo</Button>
@@ -209,7 +209,7 @@ export function NewImport({ initialTemplateId, initialConnectorId }: { initialTe
             <div className="space-y-2 rounded-md border border-primary/40 bg-primary-soft/40 p-4">
               {sim.data.run.counters.identificados > (config?.execution.largeVolume ?? 500) && <p className="text-sm font-semibold text-[#9A4B07]">Grande volume ({sim.data.run.counters.identificados} registros): sua autorização fica registrada.</p>}
               {sim.data.run.counters.erros > 0 && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={acceptErrors} onChange={(e) => setAcceptErrors(e.target.checked)} />Entendo que os {sim.data.run.counters.erros} registro(s) com erro impeditivo ficam de fora (não são gravados).</label>}
-              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />Confirmo a gravação definitiva no ISP Sprint conforme a simulação.</label>
+              <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />Confirmo a gravação definitiva no BKT RevOps conforme a simulação.</label>
               <Button variant="primary" disabled={!confirm || (sim.data.run.counters.erros > 0 && !acceptErrors)} loading={startImp.isPending} onClick={() => startImp.mutate()}>Aprovar e executar</Button>
             </div>
           )}

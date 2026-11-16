@@ -145,7 +145,7 @@ function RecordBrowser({ runId, mode, canDecide }: { runId: string; mode: 'simul
               )}
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="min-w-0"><p className="mb-1 text-xs font-semibold text-muted">Original na origem ({r.sourceEntity} {r.sourceId})</p><pre className="max-h-96 overflow-auto rounded-sm bg-surface-2 p-2 text-[11px] leading-snug">{JSON.stringify(r.raw, null, 2)}</pre></div>
-                <div className="min-w-0"><p className="mb-1 text-xs font-semibold text-muted">No ISP Sprint ({TARGET_ENTITY_LABELS[r.targetEntity]})</p>
+                <div className="min-w-0"><p className="mb-1 text-xs font-semibold text-muted">No BKT RevOps ({TARGET_ENTITY_LABELS[r.targetEntity]})</p>
                   <table className="w-full text-sm"><tbody>{fields.map((f) => {
                     const has = f.key in r.values || f.key in r.originals;
                     if (!has) return null;

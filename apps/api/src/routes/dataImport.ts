@@ -280,7 +280,7 @@ export const dataImportRoutes = [
 
   // ---------------------------------------------------------------- destino
   defineRoute({
-    method: 'GET', url: '/admin/import/schema', summary: 'Campos de destino do ISP Sprint e opções das equivalências', ...M,
+    method: 'GET', url: '/admin/import/schema', summary: 'Campos de destino do BKT RevOps e opções das equivalências', ...M,
     handler: async ({ app, auth }) => {
       need(auth, 'painel');
       const T = auth.tenantId;
@@ -623,7 +623,7 @@ export const dataImportRoutes = [
     },
   }),
   defineRoute({
-    method: 'GET', url: '/admin/import/trace', summary: 'Origem de um registro do ISP Sprint: dado original, transformação aplicada e execuções', ...M,
+    method: 'GET', url: '/admin/import/trace', summary: 'Origem de um registro do BKT RevOps: dado original, transformação aplicada e execuções', ...M,
     query: z.object({ entity: z.enum(TARGET_ENTITIES), targetId: z.string().uuid() }),
     handler: async ({ app, auth, query }) => {
       need(auth, 'auditoria');

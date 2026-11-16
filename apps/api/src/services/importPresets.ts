@@ -74,7 +74,7 @@ export async function rdExportPreset(db: DbOrTx, tenantId: string, files: { enti
       ...when(h, 'Descrição', F('notes', ['Descrição'])),
     ] });
   }
-  // equivalências: valores reais das colunas; pré-preenche só quando o nome é exatamente igual no ISP Sprint
+  // equivalências: valores reais das colunas; pré-preenche só quando o nome é exatamente igual no BKT RevOps
   const nk = (x: string) => keyNorm([x]);
   // linhas quebradas da exportação (colunas deslocadas) trazem datas e horas onde deveria haver nomes: ficam fora das equivalências
   const junk = (v: string) => /^\d{4}-\d{2}-\d{2}|^\d{1,2}:\d{2}/.test(v);

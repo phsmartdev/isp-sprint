@@ -1,6 +1,6 @@
 /**
  * Integração Zenith (modelagem de contrato e cadastro de cliente). Regras puras: campos que o Zenith pede e que o
- * ISP Sprint ainda não tinha ficam no contrato como "cadastro Zenith" (obrigatórios); o resto sai do CRM.
+ * BKT RevOps ainda não tinha ficam no contrato como "cadastro Zenith" (obrigatórios); o resto sai do CRM.
  * O envio depende da API do Zenith (ainda não recebida): aqui só se monta e confere o que seria enviado.
  */
 /** Serviço do contrato: só Telecom vai para o Zenith. */

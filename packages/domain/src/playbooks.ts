@@ -9,7 +9,7 @@ export const BLOCK_TYPES = ['heading', 'text', 'callout', 'steps', 'checklist', 
 export type BlockType = (typeof BLOCK_TYPES)[number];
 export const BLOCK_LABELS: Record<BlockType, string> = {
   heading: 'Título de seção', text: 'Texto', callout: 'Bloco de destaque', steps: 'Etapas numeradas', checklist: 'Checklist', table: 'Tabela', faq: 'Perguntas frequentes',
-  image: 'Imagem', video: 'Vídeo', pdf: 'PDF', file: 'Arquivo para download', link: 'Link', feature: 'Link para tela do ISP Sprint', flow: 'Fluxograma', decision: 'Árvore de decisão', divider: 'Separador', gamification_calc: 'Calculadora de meta da gamificação', gamification_rule: 'Regra vigente da gamificação (com simulador de nota)',
+  image: 'Imagem', video: 'Vídeo', pdf: 'PDF', file: 'Arquivo para download', link: 'Link', feature: 'Link para tela do BKT RevOps', flow: 'Fluxograma', decision: 'Árvore de decisão', divider: 'Separador', gamification_calc: 'Calculadora de meta da gamificação', gamification_rule: 'Regra vigente da gamificação (com simulador de nota)',
 };
 export const CALLOUT_KINDS = ['atencao', 'importante', 'exemplo', 'dica'] as const;
 export type CalloutKind = (typeof CALLOUT_KINDS)[number];
@@ -39,7 +39,7 @@ export type Block =
   | { id: string; type: 'gamification_rule'; title?: string };
 export type PlaybookContent = { blocks: Block[] };
 
-/** Telas do ISP Sprint que podem ser apontadas por um bloco (só caminhos internos). */
+/** Telas do BKT RevOps que podem ser apontadas por um bloco (só caminhos internos). */
 export const FEATURE_PATH = /^\/[a-z0-9\-/?=&_.%]*$/i;
 /** Vídeo só de fontes conhecidas (incorporado com segurança). */
 export function videoEmbed(url: string): string | null {
