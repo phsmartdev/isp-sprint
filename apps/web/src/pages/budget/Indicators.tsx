@@ -14,6 +14,7 @@ import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { useUrlState } from '../../lib/hooks';
 import { EmptyState, ErrorState, LoadingRows } from '../../components/ui/primitives';
 import { BandChip, BudgetShell, ExecBar, type Totals } from '../../features/budget/shared';
+import { ColumnsChart, compactBRL, SeriesChips } from '../../components/charts/charts';
 
 type Cat = Totals & { accountId: string; code: string; name: string; deviationPct: number | null; needsJustification: boolean };
 type Sector = Totals & { costCenter: { id: string; code: string; name: string }; committed: number; paid: number; categories: Cat[] };
@@ -77,11 +78,11 @@ function Section({ title, hint, children, className, action }: { title: string; 
   );
 }
 /** Barra horizontal proporcional (fluxo do dinheiro, fornecedores). */
-function FlowBar({ label, cents, max, tone = 'bg-primary', note }: { label: string; cents: number; max: number; tone?: string; note?: string }) {
+function FlowBar({ label, cents, max, tone = 'bg-[#2A78D6]', note }: { label: string; cents: number; max: number; tone?: string; note?: string }) {
   return (
     <li className="grid grid-cols-[9.5rem_1fr_8rem] items-center gap-3 text-sm">
       <span className="text-text">{label}</span>
-      <span className="h-3 bg-surface-2"><span className={clsx('block h-full', tone)} style={{ width: `${max ? Math.max(cents ? 1.5 : 0, (cents / max) * 100) : 0}%` }} /></span>
+      <span className="h-1.5 overflow-hidden rounded-circle bg-[#EEF2F7]"><span className={clsx('block h-full rounded-circle', tone)} style={{ width: `${max ? Math.max(cents ? 1.5 : 0, (cents / max) * 100) : 0}%` }} /></span>
       <span className="num text-right font-semibold text-ink">{fmtBRL(cents)}{note && <span className="block text-2xs font-normal text-muted">{note}</span>}</span>
     </li>
   );
@@ -97,7 +98,7 @@ function GroupView({ g, empty }: { g: Group; empty: string }) {
           <FlowBar label="Aguardando decisão" cents={g.requested.cents} max={max} tone="bg-line-strong" note={`${g.requested.count} solicitação(ões)`} />
           <FlowBar label="Aprovado, a executar" cents={g.approved.cents} max={max} tone="bg-primary/50" note={`${g.approved.count} concessão(ões)`} />
           <FlowBar label="Executado" cents={g.executed.cents} max={max} note={`${g.executed.count} · ${g.executed.accounts} conta(s)`} />
-          {g.paid > 0 && <FlowBar label="Pago (Financeiro)" cents={g.paid} max={max} tone="bg-[#15803D]" />}
+          {g.paid > 0 && <FlowBar label="Pago (Financeiro)" cents={g.paid} max={max} tone="bg-[#1BAF7A]" />}
         </ul>
         <p className="mt-3 text-xs text-muted">{g.exceptions} por aprovação excepcional · {g.rejected} rejeitada(s) · {g.cancelled} cancelada(s)</p>
       </div>
@@ -174,21 +175,15 @@ export function BudgetIndicatorsPage() {
               <div className="grid gap-5 xl:grid-cols-[3fr_2fr]">
                 <Section title="Evolução no período" hint="Planejado, realizado e pago por mês">
                   {(() => {
-                    const max = Math.max(1, ...d.series.map((m) => Math.max(m.planned, m.realized, m.paid)));
+                    const sum = (k: 'planned' | 'realized' | 'paid') => d.series.reduce((t, m) => t + m[k], 0);
+                    const short = (c: number) => { const a = Math.abs(c) / 100; return a >= 1_000_000 ? `R$ ${(c / 100_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : a >= 1_000 ? `R$ ${(c / 100_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : fmtBRL(c); };
                     return (
                       <>
-                        <p className="mb-3 flex flex-wrap gap-4 text-xs text-muted"><span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 bg-primary-soft ring-1 ring-primary/40" />Planejado</span><span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 bg-primary" />Realizado</span><span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 bg-[#15803D]" />Pago</span></p>
-                        <ul className="space-y-2">{d.series.map((m) => (
-                          <li key={m.month} className="grid grid-cols-[3.5rem_1fr_9rem] items-center gap-3 text-sm">
-                            <span className="text-muted">{mLabel(m.month)}</span>
-                            <span className="relative h-5 bg-surface-2" title={`Planejado ${fmtBRL(m.planned)} · realizado ${fmtBRL(m.realized)} · pago ${fmtBRL(m.paid)}`}>
-                              <span className="absolute inset-y-0 left-0 bg-primary-soft ring-1 ring-inset ring-primary/30" style={{ width: `${(m.planned / max) * 100}%` }} />
-                              <span className={clsx('absolute inset-y-1 left-0', m.realized > m.planned ? 'bg-danger' : 'bg-primary')} style={{ width: `${(m.realized / max) * 100}%` }} />
-                              <span className="absolute inset-y-[7px] left-0 bg-[#15803D]" style={{ width: `${(m.paid / max) * 100}%` }} />
-                            </span>
-                            <span className="num text-right text-ink">{fmtBRL(m.realized)}<span className="block text-2xs text-muted">de {fmtBRL(m.planned)}</span></span>
-                          </li>
-                        ))}</ul>
+                        <SeriesChips items={[{ label: 'Planejado', color: '#D6E3F5', total: short(sum('planned')), shape: 'block' }, { label: 'Realizado', color: '#EB6834', total: short(sum('realized')) }, { label: 'Pago', color: '#1BAF7A', total: short(sum('paid')) }]} />
+                        <ColumnsChart categories={d.series.map((m) => mLabel(m.month).slice(0, 3))} tooltipTitle={(i) => mLabel(d.series[i]!.month)} ariaLabel="Planejado, realizado e pago por mês"
+                          back={{ label: 'Planejado', color: '#D6E3F5', values: d.series.map((m) => m.planned) }}
+                          front={[{ label: 'Realizado', color: '#EB6834', values: d.series.map((m) => m.realized) }, { label: 'Pago', color: '#1BAF7A', values: d.series.map((m) => m.paid) }]}
+                          format={(v) => fmtBRL(Math.round(v))} axisFormat={compactBRL} width={760} height={240} />
                       </>
                     );
                   })()}

@@ -15,7 +15,7 @@ import {
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { fileToBase64 } from '../../lib/files';
-import { LineChart } from '../../components/charts/charts';
+import { compactBRL, LineChart } from '../../components/charts/charts';
 import { Button, Chip, type Tone, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
 import { AccountSelect, errMsg, type Structure } from '../../features/budget/shared';
@@ -171,10 +171,12 @@ function KpiStrip({ k }: { k: Kpis }) {
   );
 }
 
+// cores validadas para daltonismo (azul, laranja e verde); as referências ficam em neutros com traço próprio
 const SERIES = [
-  { key: 'original', label: 'Original', color: '#7D8791', dashed: true }, { key: 'revised', label: 'Revisado', color: '#2D3339' }, { key: 'approved', label: 'Aprovado', color: '#2F5986' },
-  { key: 'committed', label: 'Comprometido', color: '#3885D3' }, { key: 'realized', label: 'Realizado', color: '#D4752C' }, { key: 'paid', label: 'Pago', color: '#16A34A' }, { key: 'projection', label: 'Projeção', color: '#8F6BB8', dashed: true },
+  { key: 'original', label: 'Original', color: '#9A9890', dashed: true }, { key: 'revised', label: 'Revisado', color: '#9A9890' }, { key: 'approved', label: 'Aprovado', color: '#2A78D6', area: true },
+  { key: 'committed', label: 'Comprometido', color: '#52514E' }, { key: 'realized', label: 'Realizado', color: '#EB6834' }, { key: 'paid', label: 'Pago', color: '#1BAF7A' }, { key: 'projection', label: 'Projeção', color: '#9A9890', dotted: true },
 ] as const;
+const compact = (c: number) => { const a = Math.abs(c) / 100; return a >= 1_000_000 ? `R$ ${(c / 100_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi` : a >= 1_000 ? `R$ ${(c / 100_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : fmtBRL(c); };
 const PERIODS = { mensal: 1, trimestral: 3, semestral: 6, anual: 12 } as const;
 
 /** Evolução em linhas: custos pela competência, pago pela data do pagamento. Clicar num ponto filtra a tabela. */
@@ -196,25 +198,36 @@ function Evolution({ series, onPick }: { series: SeriesPoint[]; onPick: (month: 
   const last = realized.length - 1, prev = realized[last - 1] ?? 0, cur = realized[last] ?? 0;
   const total = realized.reduce((t, x) => t + x, 0);
   return (
-    <section aria-label="Evolução orçamentária" className="border border-line bg-surface px-4 py-3">
-      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h2 className="font-display text-sm font-bold text-ink">Evolução orçamentária</h2>
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Séries">
-          {SERIES.map((s) => (
-            <button key={s.key} type="button" aria-pressed={on.includes(s.key)} onClick={() => setOn(on.includes(s.key) ? on.filter((x) => x !== s.key) : [...on, s.key])}
-              className={clsx('inline-flex items-center gap-1.5 px-2 py-0.5 text-2xs font-semibold', on.includes(s.key) ? 'text-ink' : 'text-faint line-through')}>
-              <span className="h-2 w-2" style={{ background: s.color }} />{s.label}
-            </button>
-          ))}
+    <section aria-label="Evolução orçamentária" className="rounded-lg border border-line bg-surface px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink">Evolução orçamentária</h2>
+          <p className="text-xs text-muted">Custos pela competência; pago pela data do pagamento</p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Select aria-label="Periodicidade" className="h-8 w-32 text-xs" value={period} onChange={(e) => setPeriod(e.target.value as keyof typeof PERIODS)}>{Object.keys(PERIODS).map((p) => <option key={p} value={p}>{p[0]!.toUpperCase() + p.slice(1)}</option>)}</Select>
-          <label className="flex items-center gap-1.5 text-xs text-text"><input type="checkbox" checked={acc} onChange={(e) => setAcc(e.target.checked)} /> Acumulado</label>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-md border border-line p-0.5 text-xs" role="radiogroup" aria-label="Periodicidade">
+            {(Object.keys(PERIODS) as (keyof typeof PERIODS)[]).map((p) => (
+              <button key={p} type="button" role="radio" aria-checked={period === p} onClick={() => setPeriod(p)} className={clsx('rounded px-2.5 py-1', period === p ? 'bg-primary-soft font-semibold text-primary' : 'text-muted hover:text-ink')}>{p[0]!.toUpperCase() + p.slice(1)}</button>
+            ))}
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-text"><input type="checkbox" className="accent-primary" checked={acc} onChange={(e) => setAcc(e.target.checked)} /> Acumulado</label>
         </div>
       </div>
-      {series.every((p) => !p.approved && !p.committed && !p.realized && !p.paid && !p.projection && !p.original) ? <p className="py-6 text-center text-sm text-muted">Ainda não há valores aprovados, comprometidos, realizados ou pagos neste período.</p> : <LineChart categories={buckets.map((b) => b.label)} series={SERIES.filter((s) => on.includes(s.key)).map((s) => ({ key: s.key, label: s.label, color: s.color, dashed: 'dashed' in s ? s.dashed : undefined, values: values(s.key) }))}
-        format={(v) => fmtBRL(Math.round(v))} ariaLabel="Evolução do orçamento por período" tooltipTitle={(i) => buckets[i]!.label} onPick={n === 1 ? (i) => onPick(buckets[i]!.months[0]!) : undefined} height={170} width={1280} />}
-      <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs [&>div]:flex [&>div]:items-baseline [&>div]:gap-1.5">
+      <div className="mb-1 mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Séries">
+        {SERIES.map((s) => {
+          const tot = series.reduce((t, p) => t + Number(p[s.key as keyof SeriesPoint] ?? 0), 0);
+          const isOn = on.includes(s.key);
+          return (
+            <button key={s.key} type="button" aria-pressed={isOn} onClick={() => setOn(isOn ? on.filter((x) => x !== s.key) : [...on, s.key])}
+              className={clsx('inline-flex items-center gap-2 border border-line px-2.5 py-1 text-xs transition-opacity hover:border-line-strong', isOn ? 'text-text' : 'opacity-45')}>
+              <span className="w-3.5 border-t-2" style={{ borderColor: s.color, borderTopStyle: 'dashed' in s ? 'dashed' : 'dotted' in s ? 'dotted' : 'solid' }} aria-hidden />{s.label}<b className="num font-semibold text-ink">{compact(tot)}</b>
+            </button>
+          );
+        })}
+      </div>
+      {series.every((p) => !p.approved && !p.committed && !p.realized && !p.paid && !p.projection && !p.original) ? <p className="py-6 text-center text-sm text-muted">Ainda não há valores aprovados, comprometidos, realizados ou pagos neste período.</p> : <LineChart categories={buckets.map((b) => b.label)} series={SERIES.filter((s) => on.includes(s.key)).map((s) => ({ key: s.key, label: s.label, color: s.color, dashed: 'dashed' in s ? s.dashed : undefined, dotted: 'dotted' in s ? s.dotted : undefined, area: 'area' in s ? s.area : undefined, values: values(s.key) }))}
+        format={(v) => fmtBRL(Math.round(v))} axisFormat={compactBRL} ariaLabel="Evolução do orçamento por período" tooltipTitle={(i) => buckets[i]!.label} onPick={n === 1 ? (i) => onPick(buckets[i]!.months[0]!) : undefined} height={230} width={1280} />}
+      <dl className="mt-3 flex flex-wrap gap-x-7 gap-y-1 border-t border-line pt-3 text-xs [&>div]:flex [&>div]:items-baseline [&>div]:gap-1.5">
         <div><dt className="text-xs text-muted">Variação do último período</dt><dd className="num font-semibold text-ink">{fmtBRL(cur - prev)} {prev ? `(${(((cur - prev) / prev) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%)` : ''}</dd></div>
         <div><dt className="text-xs text-muted">Média do realizado por período</dt><dd className="num font-semibold text-ink">{fmtBRL(Math.round(total / Math.max(1, realized.filter((x) => x).length)))}</dd></div>
         <div><dt className="text-xs text-muted">Desvio (realizado − aprovado)</dt><dd className="num font-semibold text-ink">{fmtBRL(total - approved.reduce((t, x) => t + x, 0))}</dd></div>

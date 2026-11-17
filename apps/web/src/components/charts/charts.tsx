@@ -277,7 +277,7 @@ export function LineChart({ categories, series, format, axisFormat, ariaLabel, h
       {hover !== null && (
         <div className="pointer-events-none absolute top-2 z-10 min-w-[200px] rounded-lg border border-line bg-surface px-3 py-2.5 text-xs shadow-overlay" style={{ left: `min(${((x(hover) + 16) / W) * 100}%, calc(100% - 220px))` }}>
           <p className="mb-1.5 font-semibold text-ink">{tooltipTitle(hover)}</p>
-          {series.map((s) => <p key={s.key} className="flex items-center justify-between gap-4 py-0.5 text-text"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: s.color }} />{s.label}</span><b className="num font-semibold text-ink">{format(s.values[hover] ?? 0)}</b></p>)}
+          {series.map((s) => <p key={s.key} className="flex items-center justify-between gap-4 py-0.5 text-text"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-circle" style={{ background: s.color }} />{s.label}</span><b className="num font-semibold text-ink">{format(s.values[hover] ?? 0)}</b></p>)}
         </div>
       )}
       <div className="sr-only"><table>
@@ -285,6 +285,84 @@ export function LineChart({ categories, series, format, axisFormat, ariaLabel, h
         <thead><tr><th>Mês</th>{series.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead>
         <tbody>{categories.map((c, i) => <tr key={c}><td>{c}</td>{series.map((s) => <td key={s.key}>{format(s.values[i] ?? 0)}</td>)}</tr>)}</tbody>
       </table></div>
+    </div>
+  );
+}
+
+/**
+ * Colunas por período: a referência (ex.: planejado) como coluna clara ao fundo e até duas séries finas à frente.
+ * Cantos de 4px no topo, grade pontilhada leve, eixo curto e tooltip por período.
+ */
+export function ColumnsChart({ categories, back, front, format, axisFormat, ariaLabel, height = 220, width = 720, tooltipTitle }: {
+  categories: string[];
+  back: { label: string; color: string; values: number[] };
+  front: { label: string; color: string; values: number[] }[];
+  format: (v: number) => string;
+  axisFormat?: (v: number) => string;
+  ariaLabel: string; height?: number; width?: number;
+  tooltipTitle: (i: number) => string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const af = axisFormat ?? format;
+  const W = width, H = height, padL = 48, padR = 8, padT = 10, padB = 26;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = niceMax(Math.max(0, ...back.values, ...front.flatMap((s) => s.values)));
+  const cw = innerW / Math.max(1, categories.length);
+  const y = (v: number) => padT + innerH - (v / max) * innerH;
+  const bw = Math.min(36, cw * 0.62), fw = Math.min(9, bw / (front.length + 1.2));
+  const col = (x: number, w: number, v: number, fill: string, key: string) => {
+    if (!(v > 0)) return null;
+    const h = (v / max) * innerH, r = Math.min(4, w / 2, h);
+    const top = y(v), base = y(0);
+    return <path key={key} d={`M${x},${base} V${top + r} Q${x},${top} ${x + r},${top} H${x + w - r} Q${x + w},${top} ${x + w},${top + r} V${base} Z`} fill={fill} />;
+  };
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
+        {[0, 0.5, 1].map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(max * t)} y2={y(max * t)} stroke={t === 0 ? '#E3E8EF' : '#EEF1F5'} strokeDasharray={t === 0 ? undefined : '2 4'} />
+            <text x={padL - 10} y={y(max * t) + 4} textAnchor="end" fontSize="11" fill="#8A94A3">{t === 0 ? '0' : af(max * t)}</text>
+          </g>
+        ))}
+        {categories.map((c, i) => {
+          const cx = padL + cw * i + cw / 2;
+          const fx0 = cx - (front.length * fw + (front.length - 1) * 2) / 2;
+          return (
+            <g key={c} onMouseEnter={() => setHover(i)}>
+              <rect x={padL + cw * i} y={padT} width={cw} height={innerH} fill={hover === i ? '#F5F7FA' : 'transparent'} />
+              {col(cx - bw / 2, bw, back.values[i] ?? 0, back.color, 'b')}
+              {front.map((s, k) => col(fx0 + k * (fw + 2), fw, s.values[i] ?? 0, s.color, s.label))}
+              <text x={cx} y={H - 8} textAnchor="middle" fontSize="11" fill={hover === i ? '#4B5563' : '#8A94A3'}>{c}</text>
+            </g>
+          );
+        })}
+      </svg>
+      {hover !== null && (
+        <div className="pointer-events-none absolute top-2 z-10 min-w-[200px] rounded-lg border border-line bg-surface px-3 py-2.5 text-xs shadow-overlay" style={{ left: `min(${((padL + cw * hover + cw) / W) * 100}%, calc(100% - 220px))` }}>
+          <p className="mb-1.5 font-semibold text-ink">{tooltipTitle(hover)}</p>
+          {[back, ...front].map((s) => <p key={s.label} className="flex items-center justify-between gap-4 py-0.5 text-text"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-circle" style={{ background: s.color }} />{s.label}</span><b className="num font-semibold text-ink">{format(s.values[hover] ?? 0)}</b></p>)}
+        </div>
+      )}
+      <div className="sr-only"><table>
+        <caption>{ariaLabel}</caption>
+        <thead><tr><th>Período</th>{[back, ...front].map((s) => <th key={s.label}>{s.label}</th>)}</tr></thead>
+        <tbody>{categories.map((c, i) => <tr key={c}><td>{c}</td>{[back, ...front].map((s) => <td key={s.label}>{format(s.values[i] ?? 0)}</td>)}</tr>)}</tbody>
+      </table></div>
+    </div>
+  );
+}
+
+/** Legenda em pílulas com o total de cada série (traço = linha; quadrado = coluna). */
+export function SeriesChips({ items }: { items: { label: string; color: string; total: string; shape?: 'line' | 'block' }[] }) {
+  return (
+    <div className="mb-1 flex flex-wrap gap-1.5">
+      {items.map((s) => (
+        <span key={s.label} className="inline-flex items-center gap-2 border border-line px-2.5 py-1 text-xs text-text">
+          {s.shape === 'block' ? <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} aria-hidden /> : <span className="w-3.5 border-t-2" style={{ borderColor: s.color }} aria-hidden />}
+          {s.label}<b className="num font-semibold text-ink">{s.total}</b>
+        </span>
+      ))}
     </div>
   );
 }
