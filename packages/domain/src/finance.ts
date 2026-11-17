@@ -207,7 +207,8 @@ export type EconDecision = {
   marginPct: number | null; npvCents: number | null; paybackMonths: number | null; irrMonthly: number | null;
   autoApproval?: { ok: boolean; checks: { label: string; ok: boolean }[] };
   /** (3.2) margem líquida dos meses 1..D no preço da decisão; a faixa da política; o veredito antigo (só informativo) */
-  /** margem líquida do contrato inteiro (vigência), só informativa na recorrente */ contractNetMarginPct?: number | null;
+  /** margem líquida do contrato inteiro (vigência): na recorrente, é a que decide a aprovação */ contractNetMarginPct?: number | null;
+  /** referência: margem líquida dos meses do payback (1º mês) */ paybackNetMarginPct?: number | null;
   netMarginPct?: number | null; netMarginRange?: { minPct: number; maxPct: number } | null; policyVerdict?: EconVerdict;
   /** (3.2) payback do investimento: meses (contados do 1º faturamento) até o investimento voltar com a TMA, reservada a margem desejada */
   investmentPaybackMonths?: number | null;
@@ -433,7 +434,7 @@ export function financeEngine(args: EngineArgs): EconResult {
 }
 
 /**
- * (3.2) Viabilidade pela margem líquida (meses 1..D): viável quando fica acima da mínima e abaixo da máxima da faixa
+ * (3.2) Viabilidade pela margem líquida (na recorrente, a do contrato inteiro): viável quando fica acima da mínima e abaixo da máxima da faixa
  * de Configurações → Viabilidade. Enquanto o motor não tem preço sugerido (> 0), a decisão fica "aguardando". VPL,
  * TIR, payback, piso de margem e preço mínimo continuam calculados, mas só informam (memória de cálculo).
  * Sem faixa configurada, vale a regra anterior.
@@ -624,7 +625,7 @@ function finalize(r: EconResult, p: EconResult | null, source: EconDecision['sou
     basis: p ? 'proposto' : 'sugerido', source: p ? source : 'motor', priceCents: d.priceCents, oneTimeCents: null,
     verdict: d.verdict, withinPolicy: d.withinPolicy, marginOk: d.marginOk, paybackOk: d.paybackOk,
     marginPct: d.kpi?.marginPct ?? null, npvCents: d.kpi?.npvCents ?? null, paybackMonths: d.kpi?.paybackMonths ?? null, irrMonthly: d.kpi?.irrMonthly ?? null,
-    autoApproval: d.autoApproval, netMarginPct: d.kpi?.margins?.netPct ?? null, contractNetMarginPct: contractMargins(d)?.netPct ?? null, investmentPaybackMonths: d.kpi?.investmentPaybackMonths ?? null,
+    autoApproval: d.autoApproval, netMarginPct: contractMargins(d)?.netPct ?? d.kpi?.margins?.netPct ?? null, contractNetMarginPct: contractMargins(d)?.netPct ?? null, paybackNetMarginPct: d.kpi?.margins?.netPct ?? null, investmentPaybackMonths: d.kpi?.investmentPaybackMonths ?? null,
   };
   out.verdict = d.verdict; out.withinPolicy = d.withinPolicy; out.marginOk = d.marginOk; out.paybackOk = d.paybackOk; out.autoApproval = d.autoApproval;
   return out;
@@ -856,11 +857,23 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     for (const w of run.warnings) if (!w.includes('Divisão por zero') && !warnings.includes(`Fórmula ${w}`)) warnings.push(`Fórmula ${w}`);
   }
   let recommendation: EconRecommendation | null = null;
-  // target seeking: preço que entrega a margem líquida t nos meses 1..D (mesma álgebra das fórmulas; só parâmetros)
+  // target seeking: preço que entrega a margem líquida t (recorrente: no contrato inteiro; única: no valor único) (mesma álgebra das fórmulas; só parâmetros)
+  // recorrente: margem líquida do contrato no preço P (o mesmo fluxo da aprovação: IR mês a mês, sem crédito nos meses negativos)
+  const contractAt = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const tt = statementOfPeriods(rr.periods, N).total; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
   const recAt = (t: number): RecPoint => {
     const irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null, fx = st.overheadBp != null ? bp(st.overheadBp) : null, cp = numv(pre.values.custo_preco), bm = numv(pre.values.base_markup);
     if (irA == null || fx == null || irA >= 1) return { netPct: t * 100, operatingPct: null, contributionPct: null, priceCents: null };
     const mo = t / (1 - irA), mc = mo + fx + glosa + badDebt;
+    if (rec && N > 0 && cp != null && cp > 0) {
+      // busca do preço em que a margem líquida do contrato inteiro chega a t
+      let lo = 0, hi = Math.max(1, cp);
+      let at = contractAt(hi);
+      for (let i = 0; i < 40 && (at == null || at.net < t); i++) { lo = hi; hi *= 2; at = contractAt(hi); }
+      if (at == null || at.net < t) return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: null };
+      for (let i = 0; i < 60 && hi - lo > 0.5; i++) { const mid = (lo + hi) / 2; const x = contractAt(mid); if (x && x.net >= t) hi = mid; else lo = mid; }
+      const fin = contractAt(hi)!.t;
+      return { netPct: t * 100, operatingPct: fin.operating == null ? null : (fin.operating / fin.revenue) * 100, contributionPct: ((fin.contribution + fin.amortization) / fin.revenue) * 100, priceCents: roundUp(hi) };
+    }
     return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: cp != null && bm != null && bm - mc > 0 ? roundUp(cp / (bm - mc)) : null };
   };
   const range = st.netMarginMinBp != null && st.netMarginMaxBp != null ? { min: recAt(bp(st.netMarginMinBp)), max: recAt(bp(st.netMarginMaxBp)) } : null;
@@ -870,7 +883,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     if (p.contributionPct == null) warnings.push('Faixa de margem líquida informada, mas faltam despesas fixas ou IR/CSLL: sem preço recomendado.');
   }
   if (st.netMarginTargetBp != null) {
-    const mo = numv(pre.values.margem_operacional_necessaria), mc = numv(pre.values.margem_contrib_recomendada), pr = numv(pre.values.preco_margem_liquida_alvo);
+    const mo = numv(pre.values.margem_operacional_necessaria), mc = numv(pre.values.margem_contrib_recomendada), pr = rec ? recAt(bp(st.netMarginTargetBp)).priceCents : numv(pre.values.preco_margem_liquida_alvo);
     const fixas = st.overheadBp != null ? bp(st.overheadBp) : null, irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null;
     recommendation = {
       netTargetPct: bp(st.netMarginTargetBp) * 100, operatingNeededPct: mo == null ? null : mo * 100, contributionPct: mc == null ? null : mc * 100,
@@ -1106,7 +1119,7 @@ export function econHeadline(rs: EconResult, fmt: (c: number | null) => string) 
   const rg = dec.netMarginRange;
   const cm = contractMargins(rs);
   const a = `${fy}No preço sugerido de ${fmt(sug)}${per}${one != null ? ` + ${fmt(one)} de pagamento único` : ''} (margem de contribuição ${m}%)${k ? `, ${pbv(pb)}${cm?.netPct != null ? `, margem líquida do contrato ${pc1(cm.netPct)}% (${cm.months} meses)` : k.margins?.netPct != null ? `, margem líquida ${pc1(k.margins.netPct)}%` : ''}` : ''}.`;
-  const nm = dec.netMarginPct != null ? `margem líquida${cm ? ' dos meses do payback' : ''} ${pc1(dec.netMarginPct)}%${rg ? ` (faixa viável: acima de ${pc1(rg.minPct)}% e abaixo de ${pc1(rg.maxPct)}%)` : ''}` : dec.marginPct != null ? `margem ${pc1(dec.marginPct)}%` : '';
+  const nm = dec.netMarginPct != null ? `margem líquida${cm ? ' do contrato' : ''} ${pc1(dec.netMarginPct)}%${rg ? ` (faixa viável: acima de ${pc1(rg.minPct)}% e abaixo de ${pc1(rg.maxPct)}%)` : ''}` : dec.marginPct != null ? `margem ${pc1(dec.marginPct)}%` : '';
   const b = dec.basis === 'proposto'
     ? ` Decisão no preço proposto de ${fmt(dec.priceCents)}${per}${dec.oneTimeCents != null ? ` + ${fmt(dec.oneTimeCents)} único` : ''}${dec.source === 'itens' ? ' (total dos produtos)' : ''}: ${ECON_VERDICT_LABELS[dec.verdict]}${nm ? `, ${nm}` : ''}.`
     : ` Sem preço proposto: a decisão usa o sugerido (${ECON_VERDICT_LABELS[dec.verdict]}${nm ? `, ${nm}` : ''}).`;

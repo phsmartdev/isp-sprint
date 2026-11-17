@@ -108,7 +108,7 @@ function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hi
       {rec ? (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
           <Fact k="Custo direto da implantação" v={brl(b.directImplCents)} />
-          <Fact k="Despesas fixas (sobre o custo)" v={brl(b.overheadOnCostCents)} />
+          <Fact k="Despesas fixas (da mensalidade)" v={`${brl(b.lines.reduce((t, l) => t + l.overheadCents, 0))}/mês`} />
           <Fact k="Investimento a recuperar" v={brl(b.investmentCents)} strong />
           <Fact k="Custo mensal" v={`${brl(b.monthlyCostCents)}/mês`} />
           <Fact k="Payback" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
@@ -160,7 +160,7 @@ function Row({ l, f, set, disabled, minPct, per }: { l: B2gLine; f: B2gForm; set
           {l.markup != null && <span className="block text-2xs text-muted">markup {l.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×</span>}
         </td>
         <td className={clsx('num px-1.5 py-1.5', tone(l.contributionPct, null))}>{pct(l.contributionPct)}</td>
-        <td className={clsx('num px-1.5 py-1.5', tone(l.operatingPct, null))}>{pct(l.operatingPct)}{l.overheadCents > 0 && <span className="block text-2xs text-muted">fixas {brl(l.overheadCents)} {l.overheadBase === 'custo' ? 's/ custo' : 's/ preço'}</span>}</td>
+        <td className={clsx('num px-1.5 py-1.5', tone(l.operatingPct, null))}>{pct(l.operatingPct)}{l.overheadCents > 0 && <span className="block text-2xs text-muted">fixas {brl(l.overheadCents)}{per} s/ preço</span>}</td>
         <td className={clsx('num px-1.5 py-1.5 font-semibold', tone(l.netPct, minPct))}>{pct(l.netPct)}</td>
         <td className="num px-1.5 py-1.5">{brl(l.floorCents)}{l.floorCents != null && per}</td>
         <td className="num px-1.5 py-1.5">{l.maxDiscountPct == null ? '—' : pct(l.maxDiscountPct)}</td>

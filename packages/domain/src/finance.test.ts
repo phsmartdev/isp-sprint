@@ -508,13 +508,12 @@ describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alv
     const r = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
     const rc = r.recommendation!;
     expect(rc.operatingNeededPct!).toBeCloseTo(47.0588, 3);
-    expect(rc.contributionPct!).toBeCloseTo(71.0588, 3);
     expect(rc.params).toEqual({ overheadPct: 20, glosaPct: 3, badDebtPct: 1, incomeTaxPct: 15 });
-    // 1 − 10% − 0% − 71,06% = 18,94%; preço = (parcela da anuidade) ÷ 18,94%
-    near(rc.priceCents!, (5_847_700 / annuityFactor(0.015, 3)) / (1 - 0.1 - (0.4 / 0.85 + 0.2 + 0.03 + 0.01)), 1);
-    // nesse preço a margem líquida dos meses 1..D fica no alvo
-    const at = evalAt({ input: { ...input, priceCents: rc.priceCents }, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
-    expect(at.kpi!.margins!.netPct!).toBeCloseTo(40, 1);
+    // recorrente: o preço é o que entrega 40% de margem líquida no contrato inteiro (IR mês a mês)
+    const at = financeEngine({ input: { ...input, priceCents: rc.priceCents }, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
+    near(at.decision!.netMarginPct!, 40, 0.01);
+    // e fica abaixo do preço da regra antiga (alvo só nos meses do payback)
+    expect(rc.priceCents!).toBeLessThan((5_847_700 / annuityFactor(0.015, 3)) / (1 - 0.1 - (0.4 / 0.85 + 0.2 + 0.03 + 0.01)));
     // muda o parâmetro → muda a recomendação (sem valor fixo no código)
     const r2 = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000, overheadBp: 4000 }, publicSector: false });
     expect(r2.recommendation!.contributionPct!).toBeCloseTo(91.0588, 3);
@@ -539,8 +538,6 @@ describe('FINANCE-3.2: viabilidade pela faixa de margem líquida, recomendação
   it('faixa: preço da margem mínima e da máxima (target seeking com o IR dos parâmetros); viável só dentro dela', () => {
     const r = financeEngine({ input, items: items([0, 1000]), settings: st, publicSector: false });
     const rg = r.recommendation!.range!;
-    expect(rg.min.contributionPct!).toBeCloseTo(12 / 0.85 + 24, 6);
-    expect(rg.max.contributionPct!).toBeCloseTo(25 / 0.85 + 24, 6);
     expect(rg.max.priceCents!).toBeGreaterThan(rg.min.priceCents!);
     const at = (P: number) => financeEngine({ input: { ...input, priceCents: P }, items: items([0, 1000]), settings: st, publicSector: false });
     const mid = Math.round((rg.min.priceCents! + rg.max.priceCents!) / 2);
@@ -550,8 +547,9 @@ describe('FINANCE-3.2: viabilidade pela faixa de margem líquida, recomendação
     expect(vMid.decision!.netMarginPct!).toBeLessThan(25);
     expect(at(Math.round(rg.min.priceCents! * 0.9)).decision!.verdict).toBe('abaixo_faixa');
     expect(at(Math.round(rg.max.priceCents! * 1.1)).decision!.verdict).toBe('acima_faixa');
-    // na margem mínima exata a margem líquida dos meses 1..D é 12%
+    // na margem mínima exata a margem líquida do contrato é 12% (a dos meses do payback fica só como referência)
     near(at(rg.min.priceCents!).decision!.netMarginPct!, 12, 0.01);
+    expect(at(rg.min.priceCents!).decision!.paybackNetMarginPct!).toBeLessThan(12);
     // VPL, TIR e payback viram informação (veredito antigo guardado)
     expect(vMid.decision!.policyVerdict).toBeDefined();
   });

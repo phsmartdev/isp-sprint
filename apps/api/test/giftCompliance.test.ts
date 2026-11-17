@@ -8,7 +8,7 @@ let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client, dir: Client;
 const ok = <R extends { statusCode: number; body: string }>(r: R, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 const stamp = Date.now().toString(36);
-const today = new Date().toISOString().slice(0, 10);
+const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()); // mesmo fuso do sistema
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF').toString('base64');
 let accA = '', accB = '', accPub = '', item = '', kit = '';
 const base = () => ({ kind: 'kit', purpose: 'relacionamento', description: 'Kit de fim de ano fictício', justification: 'Relacionamento com a conta no encerramento do ano', plannedOn: today, kitId: kit, kits: 1, items: [], estimatedCents: 50_00 });

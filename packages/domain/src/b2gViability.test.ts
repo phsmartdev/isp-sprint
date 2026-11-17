@@ -21,13 +21,14 @@ describe('viabilidade B2G', () => {
 
   it('só recorrente: mensalidade pela fórmula do payback (conta conferida)', () => {
     // custo direto da implantação R$ 10.000, rateio 35% sobre o custo = R$ 3.500 → investimento R$ 13.500
-    // mensalidade = (13.500 ÷ 12 + 1.000) ÷ (1 − 15%) = (1.125 + 1.000) ÷ 0,85 = R$ 2.500,00
+    // despesas fixas na mensalidade: (10.000 ÷ 12 + 1.000) ÷ (1 − 15% tributos − 35% fixas) = 1.833,33 ÷ 0,50 = R$ 3.666,67
     const r = b2gViability([prod('link', 'recorrencia', 'implantacao', 300_000)], [line('recorrencia', 1_000_000)], [{ description: 'mensal', qtyMilli: 1000, unitCents: 100_000 }], { ...base, paybackMonths: 12 });
     expect(r.unica).toBeNull();
-    expect(r.recorrente!.investmentCents).toBe(1_350_000);
-    expect(r.recorrente!.overheadOnCostCents).toBe(350_000);
-    expect(r.recorrente!.lines[0]!.priceCents).toBe(250_000);
-    expect(r.recorrente!.lines[0]!.overheadBase).toBe('custo');
+    expect(r.recorrente!.investmentCents).toBe(1_000_000);
+    expect(r.recorrente!.overheadOnCostCents).toBe(0);
+    expect(r.recorrente!.lines[0]!.priceCents).toBe(366_667);
+    expect(r.recorrente!.lines[0]!.overheadCents).toBe(128_333); // 35% da mensalidade, todo mês
+    expect(r.recorrente!.lines[0]!.overheadBase).toBe('preco');
     expect(r.recorrente!.lines[0]!.paybackMonths).toBeCloseTo(12, 6);
   });
 
@@ -43,7 +44,7 @@ describe('viabilidade B2G', () => {
     expect(r.global.netCents).toBe(r.unica!.netCents + r.recorrente!.netCents);
     expect(r.global.costCents).toBe(r.unica!.costCents + r.recorrente!.costCents);
     // o investimento do recorrente não é abatido pela venda única
-    expect(r.recorrente!.investmentCents).toBe(1_350_000);
+    expect(r.recorrente!.investmentCents).toBe(1_000_000);
     expect(r.global.markup).toBeCloseTo(r.global.priceCents / r.global.costCents, 10);
   });
 

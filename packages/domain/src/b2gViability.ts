@@ -227,7 +227,9 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   let recorrente: B2gBlock | null = null;
   if (recP.length) {
     const impl = Math.round(costs.recorrente.implantacao * capC), mat = Math.round(costs.recorrente.fornecimento * capC);
-    const overheadOnCost = Math.round(costs.recorrente.implantacao * f);
+    // despesas fixas rateadas: % da mensalidade (só produtos de Implantação), não entram no investimento
+    const overheadOnCost = 0;
+    const ohOf = (x: B2gProduct) => (x.profile === 'implantacao' ? f : 0);
     const monthly = Math.round(costs.mensal * opC);
     const implTargets = recP.filter((x) => x.profile === 'implantacao'), matTargets = recP.filter((x) => x.profile === 'fornecimento');
     const dImpl = distribute(implTargets.length ? implTargets : recP, impl + overheadOnCost, p.weights);
@@ -236,10 +238,10 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     const inv = (id: string) => (dImpl.get(id) ?? 0) + (dMat.get(id) ?? 0);
     const totalInv = impl + mat + overheadOnCost;
     // payback: entrada ou target seek (ML ao longo da vigência = alvo); 1 ≤ payback ≤ vigência
-    const mensal = (D: number) => recP.map((x) => { const a = bp(x.doc!.taxBp); const k = 1 - a - v; return k > 0 ? (inv(x.id) / D + (dOpex.get(x.id) ?? 0) + x.doc!.fixedCents) / k : null; });
+    const mensal = (D: number) => recP.map((x) => { const a = bp(x.doc!.taxBp); const k = 1 - a - v - ohOf(x); return k > 0 ? (inv(x.id) / D + (dOpex.get(x.id) ?? 0) + x.doc!.fixedCents) / k : null; });
     const netPctAt = (prices: (number | null)[]) => {
       let R = 0, NET = 0;
-      recP.forEach((x, k) => { const M = prices[k]; if (M == null) return; const s = recurringChain(M, x, inv(x.id), dOpex.get(x.id) ?? 0, N, p); R += s.revenue; NET += s.net; });
+      recP.forEach((x, k) => { const M = prices[k]; if (M == null) return; const s = recurringChain(M, x, inv(x.id), dOpex.get(x.id) ?? 0, N, p, ohOf(x)); R += s.revenue; NET += s.net; });
       return R > 0 ? NET / R : null;
     };
     let D: number | null = p.paybackMonths ?? null;
@@ -255,14 +257,15 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     const prices = p.mode === 'A' ? (D != null ? mensal(D) : recP.map(() => null)) : recP.map((x) => x.bidCents ?? x.estimatedCents);
     const lines: B2gLine[] = recP.map((x, k) => {
       const a = bp(x.doc!.taxBp), M = prices[k] ?? null, I = inv(x.id), O = dOpex.get(x.id) ?? 0, F = x.doc!.fixedCents;
-      const s = M != null && M > 0 ? recurringChain(M, x, I, O, N, p) : null;
-      const den = M != null ? M * (1 - a - v) - O - F : 0;
+      const oh = ohOf(x);
+      const s = M != null && M > 0 ? recurringChain(M, x, I, O, N, p, oh) : null;
+      const den = M != null ? M * (1 - a - v - oh) - O - F : 0;
       const pb = M != null ? (den > 0 ? I / den : null) : null;
-      const floor = Lmin == null ? null : recurringFloor(x, I, O, N, p, Lmin);
+      const floor = Lmin == null ? null : recurringFloor(x, I, O, N, p, Lmin, oh);
       return {
         id: x.id, description: x.description, profile: x.profile, revenue: 'recorrente', doc: x.doc!.name, taxPct: a * 100, estimatedCents: x.estimatedCents, costCents: Math.round(I + O * N),
         weightPct: totalInv > 0 ? (I / totalInv) * 100 : 0, priceCents: M == null ? null : Math.round(M), markup: M != null && I + O * N > 0 ? (M * N) / (I + O * N) : null,
-        contributionCents: s ? Math.round(s.contribution) : null, contributionPct: s ? (s.contribution / s.revenue) * 100 : null, overheadCents: Math.round(dImpl.get(x.id) && impl + overheadOnCost ? ((dImpl.get(x.id) ?? 0) * overheadOnCost) / (impl + overheadOnCost) : 0), overheadBase: overheadOnCost ? 'custo' : null,
+        contributionCents: s ? Math.round(s.contribution) : null, contributionPct: s ? (s.contribution / s.revenue) * 100 : null, overheadCents: s ? Math.round(s.overhead / N) : 0, overheadBase: oh ? 'preco' : null,
         operatingCents: s ? Math.round(s.operating) : null, operatingPct: s ? (s.operating / s.revenue) * 100 : null, netCents: s ? Math.round(s.net) : null, netPct: s ? (s.net / s.revenue) * 100 : null,
         floorCents: floor == null ? null : Math.ceil(floor - 1e-6), maxDiscountPct: floor != null && x.estimatedCents > 0 ? Math.max(0, (1 - Math.ceil(floor - 1e-6) / x.estimatedCents) * 100) : null,
         bidRange: floor != null && x.estimatedCents > 0 ? { from: Math.ceil(floor - 1e-6), to: x.estimatedCents } : null,
@@ -275,7 +278,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     const estM = recP.reduce((t, x) => t + x.estimatedCents, 0);
     Object.assign(recorrente, { investmentCents: totalInv, directImplCents: impl, overheadOnCostCents: overheadOnCost, monthlyCostCents: monthly, monthlyPriceCents: Mtot, termMonths: N, paybackMonths: p.mode === 'A' ? D : blockPayback(lines), paybackStatus: status });
     if (p.mode === 'A' && estM > 0 && Mtot > estM) {
-      const pbEst = blockPayback(recP.map((x, k) => ({ ...lines[k]!, priceCents: x.estimatedCents, paybackMonths: (() => { const a = bp(x.doc!.taxBp); const den = x.estimatedCents * (1 - a - v) - (dOpex.get(x.id) ?? 0) - x.doc!.fixedCents; return den > 0 ? inv(x.id) / den : null; })() })));
+      const pbEst = blockPayback(recP.map((x, k) => ({ ...lines[k]!, priceCents: x.estimatedCents, paybackMonths: (() => { const a = bp(x.doc!.taxBp); const den = x.estimatedCents * (1 - a - v - ohOf(x)) - (dOpex.get(x.id) ?? 0) - x.doc!.fixedCents; return den > 0 ? inv(x.id) / den : null; })() })));
       alerts.push(`A mensalidade calculada (${(Mtot / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}) passa do valor estimado do órgão (${(estM / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}). Com o valor estimado, o payback seria ${pbEst == null ? 'inviável' : `${pbEst.toFixed(1).replace('.', ',')} meses`}.`);
     }
     if (D != null && D > N) alerts.push('O payback não pode exceder a vigência.');
@@ -306,7 +309,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   else if (all.some((l) => l.alerts.length)) verdict = 'produto_abaixo';
   if (p.mode === 'B' && floorT != null && estT < floorT) alerts.push('O valor estimado do órgão fica abaixo do piso global: inviável no preço do edital.');
   notes.push('Dentro de cada cesta, o custo é distribuído pelo valor estimado (unitário × quantidade): a relação custo/preço é a mesma para todos os produtos da cesta (salvo peso manual). A decisão de viabilidade é global, com alerta por produto.');
-  if (f) notes.push(`Despesas fixas rateadas de ${(f * 100).toLocaleString('pt-BR')}%: na venda única, sobre o preço da Implantação; no recorrente, sobre o custo direto da implantação (somadas ao investimento). Não incidem no Fornecimento.`);
+  if (f) notes.push(`Despesas fixas rateadas de ${(f * 100).toLocaleString('pt-BR')}%: na venda única, sobre o preço da Implantação; no recorrente, sobre a mensalidade da Implantação (todo mês). Não incidem no Fornecimento.`);
   return {
     mode: p.mode, blocked, kinds, unica, recorrente,
     global: { priceCents: priceT, costCents: costT, markup: costT > 0 ? priceT / costT : null, netCents: netT, netPct, floorCents: floorT, estimatedCents: estT, maxDiscountPct: floorT != null && estT > 0 ? Math.max(0, (1 - floorT / estT) * 100) : null },
@@ -325,18 +328,20 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
 }
 
 /** Recorrente ao longo da vigência: receita N×M; o investimento (com o rateio) entra uma vez; sem despesas fixas mensais. */
-export function recurringChain(M: number, x: Pick<B2gProduct, 'doc'>, inv: number, opexMonthly: number, N: number, p: Pick<B2gParams, 'variableBp' | 'riskBp' | 'incomeTaxBp'>) {
+/** Cadeia do contrato recorrente; `oh` = despesas fixas rateadas em % da mensalidade (só Implantação). */
+export function recurringChain(M: number, x: Pick<B2gProduct, 'doc'>, inv: number, opexMonthly: number, N: number, p: Pick<B2gParams, 'variableBp' | 'riskBp' | 'incomeTaxBp'>, oh = 0) {
   const a = bp(x.doc!.taxBp), v = bp(p.variableBp), r = bp(p.riskBp), ir = bp(p.incomeTaxBp), F = x.doc!.fixedCents;
   const revenue = M * N;
   const contribution = revenue - N * (a * M + F) - N * v * M - N * opexMonthly - inv;
-  const operating = contribution - r * revenue;
+  const overhead = oh * revenue;
+  const operating = contribution - r * revenue - overhead;
   const net = operating - ir * Math.max(0, operating);
-  return { revenue, contribution, operating, net };
+  return { revenue, contribution, overhead, operating, net };
 }
 /** Mensalidade em que a margem líquida ao longo da vigência é exatamente `L`. */
-function recurringFloor(x: B2gProduct, inv: number, opex: number, N: number, p: B2gParams, L: number) {
+function recurringFloor(x: B2gProduct, inv: number, opex: number, N: number, p: B2gParams, L: number, oh = 0) {
   const a = bp(x.doc!.taxBp), v = bp(p.variableBp), r = bp(p.riskBp), ir = bp(p.incomeTaxBp), F = x.doc!.fixedCents;
-  const k = 1 - a - v - r;
+  const k = 1 - a - v - r - oh;
   const costs = N * (opex + F) + inv;
   const d = L >= 0 ? N * (k * (1 - ir) - L) : N * (k - L);
   return d > 0 ? (L >= 0 ? costs * (1 - ir) : costs) / d : null;

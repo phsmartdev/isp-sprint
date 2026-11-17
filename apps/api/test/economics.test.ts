@@ -110,8 +110,11 @@ describe('viabilidade econômica', () => {
     expect(rv['margem_liquida_alvo_%']).toBe(40);
     expect(rv['margem_contrib_recomendada_%']).toBeCloseTo(71.06, 2);
     expect(rv.parametros_utilizados).toMatchObject({ 'taxa_rateio_fixo_%': 20, 'glosa_%': 3, 'inadimplencia_%': 1 });
-    // TMA 0: parcela = 30.000 ÷ 6; preço = (5.000 + 2.000) ÷ (1 − 20% − 71,06%)
-    expect(rv['preco_mensal_recomendado_R$']).toBeCloseTo(7_000 / (1 - 0.2 - (0.4 / 0.85 + 0.24)), 1);
+    // mensalidade: o preço recomendado entrega 40% de margem líquida no contrato inteiro (24 meses), abaixo da regra antiga
+    expect(rv['preco_mensal_recomendado_R$']).toBeLessThan(7_000 / (1 - 0.2 - (0.4 / 0.85 + 0.24)));
+    const atRec = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, priceCents: Math.round(rv['preco_mensal_recomendado_R$'] * 100) })).json();
+    expect(atRec.result.decision.netMarginPct).toBeCloseTo(40, 1);
+    ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     expect(withTarget.result.statement.after.amortization).toBe(0);
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(71.06, 2);
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
@@ -373,10 +376,10 @@ describe('viabilidade econômica', () => {
       b2g: { mode: 'A' } };
     const r = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json().result.b2g;
     expect(r.kinds).toEqual({ unica: true, recorrente: true });
-    // investimento = 10.000 + 35% de rateio = 13.500; mensalidade = (13.500 ÷ 12 + 1.000) ÷ (1 − tributos)
+    // despesas fixas na mensalidade: investimento = 10.000; mensalidade = (10.000 ÷ 12 + 1.000) ÷ (1 − tributos − 35%)
     const line = r.recorrente.lines[0];
-    expect(r.recorrente.investmentCents).toBe(1_350_000);
-    expect(Math.abs(r.recorrente.monthlyPriceCents - (1_350_000 / 12 + 100_000) / (1 - line.taxPct / 100))).toBeLessThanOrEqual(1);
+    expect(r.recorrente.investmentCents).toBe(1_000_000);
+    expect(Math.abs(r.recorrente.monthlyPriceCents - (1_000_000 / 12 + 100_000) / (1 - line.taxPct / 100 - 0.35))).toBeLessThanOrEqual(1);
     expect(r.unica.lines[0].profile).toBe('implantacao');
 
     // Modo B: lance abaixo do piso gera alerta, não bloqueia

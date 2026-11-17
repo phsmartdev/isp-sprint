@@ -142,13 +142,13 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
               <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(d.priceCents))}><span>{fmtBRL(d.priceCents)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
               {d.oneTimeCents != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(d.oneTimeCents)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
               <p className={clsx('mt-1 text-sm font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</p>
-              {d.verdict !== 'aguardando_sugerido' && <p className="text-xs text-text">{d.contractNetMarginPct != null ? <>Margem líquida do contrato <b>{pct(d.contractNetMarginPct, 1)}</b>{d.netMarginPct != null ? <span className="block text-2xs text-muted">nos meses do payback {pct(d.netMarginPct, 1)}{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</span> : null}</> : d.netMarginPct != null ? <>Margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : <>Margem {pct(d.marginPct, 1)}</>}</p>}
+              {d.verdict !== 'aguardando_sugerido' && <p className="text-xs text-text">{d.contractNetMarginPct != null ? <>Margem líquida do contrato <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}{d.paybackNetMarginPct != null ? <span className="block text-2xs text-muted">nos meses do payback {pct(d.paybackNetMarginPct, 1)} (só referência)</span> : null}</> : d.netMarginPct != null ? <>Margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : <>Margem {pct(d.marginPct, 1)}</>}</p>}
               {diff != null && diff !== 0 && <p className="mt-1 text-2xs text-muted">{fmtBRL(Math.abs(diff))}{per} {diff > 0 ? 'acima' : 'abaixo'} do sugerido</p>}
             </>
           ) : (
             <>
               <p className="mt-1 text-xs font-semibold text-ink">Nenhum preço proposto</p>
-              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.contractNetMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida do contrato <b>{pct(d.contractNetMarginPct, 1)}</b> (nos meses do payback {pct(d.netMarginPct, 1)})</> : null}{d.contractNetMarginPct == null && d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
+              <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.contractNetMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida do contrato <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}{d.contractNetMarginPct == null && d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
               <p className="mt-1 text-2xs text-muted">Para avaliar outro valor, informe o preço no passo 1 ou lance os valores dos produtos.</p>
             </>
           )}
@@ -160,7 +160,7 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
 }
 
 /**
- * Target seeking: o preço que entrega a margem líquida pedida nos meses 1..D, com IR/CSLL, despesas fixas, glosa e
+ * Target seeking: o preço que entrega a margem líquida pedida (na mensalidade, no contrato inteiro), com IR/CSLL, despesas fixas, glosa e
  * inadimplência dos parâmetros (IR/CSLL da empresa no ano, quando cadastrado). Faixa viável: da mínima à máxima.
  */
 function TargetSeek({ r, per }: { r: EconResult; per: string }) {
@@ -178,11 +178,11 @@ function TargetSeek({ r, per }: { r: EconResult; per: string }) {
             <p className="text-xs text-muted">{k} {pct(p.netPct, 2)}</p>
             <p className="num flex flex-wrap items-baseline whitespace-nowrap text-lg font-bold text-ink"><span>{p.priceCents == null ? 'não cabe no markup' : fmtBRL(p.priceCents)}</span>{p.priceCents != null && <span className="text-xs font-normal text-muted">{per}</span>}</p>
             {p.oneTimePriceCents != null && <p className="num text-xs text-ink">+ {fmtBRL(p.oneTimePriceCents)} no pagamento único</p>}
-            <p className="text-2xs text-muted">margem de contribuição {pct(p.contributionPct, 2)} · operacional {pct(p.operatingPct, 2)}</p>
+            <p className="text-2xs text-muted">{r.mode === 'recorrente' ? 'no contrato: ' : ''}margem de contribuição {pct(p.contributionPct, 2)} · operacional {pct(p.operatingPct, 2)}</p>
           </div>
         ))}
       </div>
-      <p className="mt-2 font-mono text-2xs text-muted">MO = margem líquida ÷ (1 − IR/CSLL {pct(ir, 2)}) · MC = MO + despesas fixas {pct(prm.overheadPct, 2)} + glosa {pct(prm.glosaPct, 2)} + inadimplência {pct(prm.badDebtPct, 2)} · preço = custos ÷ (1 − tributos − desp. variáveis − MC)</p>
+      {r.mode === 'recorrente' ? <p className="mt-2 text-2xs text-muted">Na mensalidade, o preço é o que entrega a margem líquida no contrato inteiro ({r.term.N} meses): o investimento pesa só nos meses do payback e o IR/CSLL ({pct(ir, 2)}) incide mês a mês sobre a margem operacional positiva. Despesas fixas ({pct(prm.overheadPct, 2)}), glosa ({pct(prm.glosaPct, 2)}) e inadimplência ({pct(prm.badDebtPct, 2)}) saem de cada mensalidade.</p> : <p className="mt-2 font-mono text-2xs text-muted">MO = margem líquida ÷ (1 − IR/CSLL {pct(ir, 2)}) · MC = MO + despesas fixas {pct(prm.overheadPct, 2)} + glosa {pct(prm.glosaPct, 2)} + inadimplência {pct(prm.badDebtPct, 2)} · preço = custos ÷ (1 − tributos − desp. variáveis − MC)</p>}
       {rc.range && <p className="mt-1 text-2xs text-muted">Viável entre os dois preços: abaixo do primeiro a margem líquida fica abaixo da mínima; acima do segundo, acima da máxima.</p>}
     </section>
   );
