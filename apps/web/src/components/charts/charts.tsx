@@ -189,13 +189,45 @@ export function Progress({ value, className, color = '#5B9BFF' }: { value: numbe
   );
 }
 
-/** Linhas (várias séries no mesmo eixo), com legenda, tooltip por mês e tabela para leitor de tela. */
-export function LineChart({ categories, series, format, ariaLabel, height = 240, width = 640, tooltipTitle, onPick }: {
+/** Curva monotônica: suaviza sem ultrapassar os pontos (um mês zerado continua no zero). */
+export function smoothPath(pts: [number, number][]) {
+  const n = pts.length;
+  if (!n) return '';
+  if (n < 3) return pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ');
+  const d: number[] = [], m: number[] = [];
+  for (let i = 0; i < n - 1; i++) d.push((pts[i + 1]![1] - pts[i]![1]) / (pts[i + 1]![0] - pts[i]![0] || 1));
+  m[0] = d[0]!; m[n - 1] = d[n - 2]!;
+  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1]! * d[i]! <= 0 ? 0 : (d[i - 1]! + d[i]!) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    const a = m[i]! / d[i]!, b = m[i + 1]! / d[i]!, q = a * a + b * b;
+    if (q > 9) { const t = 3 / Math.sqrt(q); m[i] = t * a * d[i]!; m[i + 1] = t * b * d[i]!; }
+  }
+  let p = `M${pts[0]![0]},${pts[0]![1]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i]!, [x1, y1] = pts[i + 1]!, h = (x1 - x0) / 3;
+    p += ` C${x0 + h},${y0 + h * m[i]!} ${x1 - h},${y1 - h * m[i + 1]!} ${x1},${y1}`;
+  }
+  return p;
+}
+/** Eixo curto: 40 mil, 1,2 mi. */
+export const compactBRL = (v: number) => {
+  const a = Math.abs(v) / 100;
+  if (a >= 1_000_000) return `${(v / 100_000_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mi`;
+  if (a >= 1_000) return `${(v / 100_000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`;
+  return (v / 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+};
+
+/** Linhas (várias séries no mesmo eixo), suaves e finas, com tooltip por período e tabela para leitor de tela. */
+export function LineChart({ categories, series, format, axisFormat, ariaLabel, height = 240, width = 640, tooltipTitle, onPick }: {
   /** clique num ponto: detalha os registros que compõem aquele valor */
   onPick?: (i: number) => void;
   categories: string[];
-  series: (Series & { dashed?: boolean })[];
+  /** dashed = tracejado; dotted = pontilhado; area = degradê suave embaixo da linha (use em uma série só) */
+  series: (Series & { dashed?: boolean; dotted?: boolean; area?: boolean; weight?: number })[];
   format: (v: number) => string;
+  /** rótulos do eixo (padrão: o mesmo format) */
+  axisFormat?: (v: number) => string;
   ariaLabel: string;
   height?: number;
   /** largura do desenho: mais largo = gráfico mais baixo e texto menor em telas largas */
@@ -203,40 +235,49 @@ export function LineChart({ categories, series, format, ariaLabel, height = 240,
   tooltipTitle: (i: number) => string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const W = width, H = height, padL = 84, padR = 16, padT = 16, padB = 28;
+  const af = axisFormat ?? format;
+  const W = width, H = height, padL = axisFormat ? 48 : 84, padR = 16, padT = 12, padB = 26;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const max = niceMax(Math.max(...series.flatMap((s) => s.values), 0));
   const step = categories.length > 1 ? innerW / (categories.length - 1) : 0;
   const x = (i: number) => padL + (categories.length > 1 ? step * i : innerW / 2);
   const y = (v: number) => padT + innerH - (v / max) * innerH;
   const every = Math.max(1, Math.ceil(categories.length / 12));
+  const gid = `lg-${ariaLabel.replace(/\W+/g, '').slice(0, 24)}`;
   return (
     <div className="relative">
       <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full" role="img" aria-label={ariaLabel} onMouseLeave={() => setHover(null)}>
+        <defs>{series.filter((s) => s.area).map((s) => (
+          <linearGradient key={s.key} id={`${gid}-${s.key}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={s.color} stopOpacity="0.14" /><stop offset="1" stopColor={s.color} stopOpacity="0" /></linearGradient>
+        ))}</defs>
         {[0, 0.25, 0.5, 0.75, 1].map((t) => (
           <g key={t}>
-            <line x1={padL} x2={W - padR} y1={y(max * t)} y2={y(max * t)} stroke="#E8EDF5" />
-            <text x={padL - 10} y={y(max * t) + 4} textAnchor="end" fontSize="11" fill="#5C6A8A">{format(max * t)}</text>
+            <line x1={padL} x2={W - padR} y1={y(max * t)} y2={y(max * t)} stroke={t === 0 ? '#E3E8EF' : '#EEF1F5'} strokeDasharray={t === 0 ? undefined : '2 4'} />
+            <text x={padL - 10} y={y(max * t) + 4} textAnchor="end" fontSize="11" fill="#8A94A3">{t === 0 ? '0' : af(max * t)}</text>
           </g>
         ))}
         {categories.map((c, i) => (
           <g key={c} onMouseEnter={() => setHover(i)} onClick={onPick ? () => onPick(i) : undefined} style={onPick ? { cursor: 'pointer' } : undefined}>
             <rect x={x(i) - Math.max(step, 8) / 2} y={padT} width={Math.max(step, 8)} height={innerH} fill="transparent" />
-            {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill="#5C6A8A">{c}</text>}
+            {i % every === 0 && <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="11" fill={hover === i ? '#4B5563' : '#8A94A3'}>{c}</text>}
           </g>
         ))}
-        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + innerH} stroke="#C9D3E3" pointerEvents="none" />}
+        {hover !== null && <line x1={x(hover)} x2={x(hover)} y1={padT} y2={padT + innerH} stroke="#C9D1DB" strokeDasharray="3 3" pointerEvents="none" />}
+        {series.filter((s) => s.area).map((s) => {
+          const pts = s.values.map((v, i) => [x(i), y(v)] as [number, number]);
+          return pts.length ? <path key={`a-${s.key}`} d={`${smoothPath(pts)} L${pts.at(-1)![0]},${y(0)} L${pts[0]![0]},${y(0)} Z`} fill={`url(#${gid}-${s.key})`} pointerEvents="none" /> : null;
+        })}
         {series.map((s) => (
           <g key={s.key} pointerEvents="none">
-            <polyline points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke={s.color} strokeWidth="2.5" strokeDasharray={s.dashed ? '6 4' : undefined} strokeLinejoin="round" />
-            {hover !== null && <circle cx={x(hover)} cy={y(s.values[hover] ?? 0)} r="4" fill={s.color} stroke="#fff" strokeWidth="1.5" />}
+            <path d={smoothPath(s.values.map((v, i) => [x(i), y(v)]))} fill="none" stroke={s.color} strokeWidth={s.weight ?? (s.dashed || s.dotted ? 1.5 : 2)} strokeDasharray={s.dotted ? '1 4' : s.dashed ? '5 4' : undefined} strokeLinecap="round" strokeLinejoin="round" />
+            {hover !== null && !s.dashed && !s.dotted && <circle cx={x(hover)} cy={y(s.values[hover] ?? 0)} r="4.5" fill={s.color} stroke="#fff" strokeWidth="2" />}
           </g>
         ))}
       </svg>
       {hover !== null && (
-        <div className="pointer-events-none absolute top-2 z-10 min-w-[190px] rounded-md border border-line bg-surface px-3.5 py-2.5 shadow-overlay" style={{ left: `min(${((x(hover) + 14) / W) * 100}%, calc(100% - 210px))` }}>
-          <p className="mb-1 font-semibold text-ink">{tooltipTitle(hover)}</p>
-          {series.map((s) => <p key={s.key} className="flex items-center gap-2 text-sm text-text"><span className="h-3 w-3 rounded-circle" style={{ background: s.color }} />{s.label}: <b className="num">{format(s.values[hover] ?? 0)}</b></p>)}
+        <div className="pointer-events-none absolute top-2 z-10 min-w-[200px] rounded-lg border border-line bg-surface px-3 py-2.5 text-xs shadow-overlay" style={{ left: `min(${((x(hover) + 16) / W) * 100}%, calc(100% - 220px))` }}>
+          <p className="mb-1.5 font-semibold text-ink">{tooltipTitle(hover)}</p>
+          {series.map((s) => <p key={s.key} className="flex items-center justify-between gap-4 py-0.5 text-text"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: s.color }} />{s.label}</span><b className="num font-semibold text-ink">{format(s.values[hover] ?? 0)}</b></p>)}
         </div>
       )}
       <div className="sr-only"><table>
