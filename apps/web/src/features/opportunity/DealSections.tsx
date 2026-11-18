@@ -7,7 +7,7 @@
  *   visão geral do negócio (indicadores, gráfico acumulado e DRE consolidada).
  * O cálculo da tela usa o mesmo motor do servidor; salvar recalcula no servidor e guarda a fotografia auditável.
  */
-import { Fragment, useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ClipboardPaste, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
@@ -81,6 +81,13 @@ export function distributePrice(price: number, rows: { qtyMilli: number; totalCe
   });
 }
 
+/** Valor que só muda quando a pessoa para de digitar: o cálculo da viabilidade não roda a cada tecla. */
+function useDebounced<T>(value: T, ms = 600): T {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
 function useEconBase(oppId: string) {
   const econ = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<EconData>(`/opportunities/${oppId}/economics`) });
   const model = useMemo(() => { try { return buildModel(econ.data?.modelOverrides ?? []); } catch { return undefined; } }, [econ.data?.modelOverrides]);
@@ -103,9 +110,9 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
   const finance = econ.data ? !econ.data.financeHidden : false;
   const costQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CostCat[] }>('/cost-items'), staleTime: 60_000, enabled: finance });
   const plans = useLookups().data?.plans ?? [];
-  const docs = (docsQ.data?.items ?? []).filter((d) => !opp.branchId || d.branchId === opp.branchId);
+  const docs = useMemo(() => (docsQ.data?.items ?? []).filter((d) => !opp.branchId || d.branchId === opp.branchId), [docsQ.data, opp.branchId]);
   const products = prodQ.data?.items ?? [];
-  const costCat = costQ.data?.items ?? [];
+  const costCat = useMemo(() => costQ.data?.items ?? [], [costQ.data]);
   const [form, setForm] = useState<SecForm[] | null>(null);
   const [base, setBase] = useState('');
   const [values, setValues] = useState<Record<string, boolean>>({});
@@ -128,9 +135,11 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
     const d = docs.find((x) => x.id === r.doc);
     return { description: r.description, revenueCents: 0, kind: dealKindOf(f.kind, r.kind), section: si, costProfile: r.prof, doc: d ? { id: d.id, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind } : null };
   })), [form, docs]);
-  const deferred = useDeferredValue({ sections, liveItems });
-  const live = useMemo(() => (finance ? liveResult(econ.data, model, deferred.sections, deferred.liveItems) : null), [finance, econ.data, model, deferred]);
+  // a prévia só recalcula quando o conteúdo muda e a pessoa para de digitar (chave em texto: nada de recálculo por re-render)
+  const calcKey = useDebounced(useMemo(() => JSON.stringify({ sections, liveItems }), [sections, liveItems]), 700);
+  const live = useMemo(() => { if (!finance) return null; const x = JSON.parse(calcKey) as { sections: DealSection[]; liveItems: EconItem[] }; return liveResult(econ.data, model, x.sections, x.liveItems); }, [finance, econ.data, model, calcKey]);
 
+  const updateCosts = useCallback((k: string, fn: (c: CostRow[]) => CostRow[]) => setForm((cur) => (cur ?? []).map((f) => (f.key === k ? { ...f, costs: fn(f.costs) } : f))), []);
   const save = useMutation({
     mutationFn: async () => {
       const fs = form!;
@@ -158,7 +167,8 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
   if (itemsQ.isError) return <ErrorState error={itemsQ.error} onRetry={() => itemsQ.refetch()} />;
   if (econ.isError) return <ErrorState error={econ.error} onRetry={() => econ.refetch()} />;
   if (!form) return <LoadingRows rows={4} />;
-  const setSec = (k: string, p: Partial<SecForm>) => setForm(form.map((f) => (f.key === k ? { ...f, ...p } : f)));
+  // atualização funcional: as linhas memorizadas recebem funções estáveis e o que mudou em outra seção não se perde
+  const setSec = (k: string, p: Partial<SecForm>) => setForm((cur) => (cur ?? []).map((f) => (f.key === k ? { ...f, ...p } : f)));
   const suggestDoc = (k: SectionKind) => { const want: FiscalKind = k === 'venda' ? 'venda' : k === 'locacao' ? 'locacao' : 'servico'; return [...docs].sort((a, b) => a.code.localeCompare(b.code)).find((d) => d.fiscalKind === want)?.id ?? ''; };
   const docForPlan = (name: string) => { const code = plans.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())?.fiscalDocCode; return code ? docs.find((d) => d.code === code.toUpperCase())?.id ?? '' : ''; };
   const docLabel = (d: Doc) => `${d.code} · ${d.name}`;
@@ -232,7 +242,7 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
               {f.items.length > 0 && editable && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setValues({ ...values, [f.key]: !values[f.key] })}>{showValues ? 'Ocultar valores' : 'Editar valores'}</button>}
             </div>
 
-            {finance && <SectionCosts f={f} si={si} editable={editable} catalog={costCat} setCosts={(costs) => setSec(f.key, { costs })} />}
+            {finance && <SectionCosts secKey={f.key} kind={f.kind} costs={f.costs} si={si} editable={editable} catalog={costCat} update={updateCosts} />}
 
             {finance && out && (
               <div className="flex flex-wrap border-t border-line bg-surface-2">
@@ -262,17 +272,21 @@ const strip = (fs: SecForm[]) => fs.map(({ key: _k, items, costs, ...f }) => ({ 
 const Kpi = ({ label, value }: { label: string; value: string }) => <div className="border-r border-line px-4 py-2.5"><small className="block text-2xs text-muted">{label}</small><b className="num text-ink">{value}</b></div>;
 
 /** Custos da seção: dedução, descrição (catálogo), único/mensal, qtd. e valor; colar do Excel ou importar a planilha técnica. */
-function SectionCosts({ f, si, editable, catalog, setCosts }: { f: SecForm; si: number; editable: boolean; catalog: CostCat[]; setCosts: (c: CostRow[]) => void }) {
-  const monthly = isMonthlySection(f.kind);
+/** Custos da seção (memorizado): digitar num produto ou em outra seção não redesenha a tabela de custos. */
+const SectionCosts = memo(function SectionCosts({ secKey, kind, costs, si, editable, catalog, update }: { secKey: string; kind: SectionKind; costs: CostRow[]; si: number; editable: boolean; catalog: CostCat[]; update: (k: string, fn: (c: CostRow[]) => CostRow[]) => void }) {
+  const f = { kind, costs };
+  const monthly = isMonthlySection(kind);
+  const setCosts = (next: CostRow[]) => update(secKey, () => next);
   const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
   const [pasting, setPasting] = useState(false);
   const [pasteText, setPasteText] = useState('');
-  const set = (k: string, p: Partial<CostRow>) => setCosts(f.costs.map((c) => (c.key === k ? { ...c, ...p } : c)));
+  const set = useCallback((k: string, p: Partial<CostRow>) => update(secKey, (cs) => cs.map((c) => (c.key === k ? { ...c, ...p } : c))), [update, secKey]);
+  const remove = useCallback((k: string) => update(secKey, (cs) => cs.filter((x) => x.key !== k)), [update, secKey]);
   const findCat = (name: string) => catalog.find((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
-  const onName = (c: CostRow, v: string) => {
-    const hit = findCat(v);
+  const onName = useCallback((c: CostRow, v: string) => {
+    const hit = catalog.find((x) => x.name.trim().toLowerCase() === v.trim().toLowerCase());
     set(c.key, { description: v, costItemId: hit?.id ?? null, ...(hit && c.costItemId !== hit.id ? { ...(hit.unitCents != null ? { value: money(hit.unitCents) } : {}), ...(!c.category ? { category: hit.kind === 'mensal' ? (hit.impact === 'parceiro' ? 'parceiros' : 'despesas_operacionais') : categoryOfImpact(hit.impact) ?? '' } : {}), ...(monthly ? { frequency: hit.kind === 'mensal' ? 'mensal' : 'unico' } : {}), measure: hit.unit } : {}) });
-  };
+  }, [catalog, monthly, set]);
   const addTable = (table: (string | number | null)[][], from: string) => {
     const r = parseCostTable(table);
     if (r.missing.length) { setMsg({ text: `${from}: não encontrei as colunas ${r.missing.join(', ')}. Use os títulos Descrição, Quantidade e Valor unitário (Unidade, Valor total, Frequência e "Impacta o quê?" são opcionais).`, bad: true }); return; }
@@ -312,31 +326,7 @@ function SectionCosts({ f, si, editable, catalog, setCosts }: { f: SecForm; si: 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm" aria-label={`Custos do tipo de negócio ${si + 1}`}>
             <thead className="bg-surface-2 text-left text-xs text-muted"><tr><th className="w-[180px] px-2 py-2 font-medium">Dedução</th><th className="px-2 py-2 font-medium">Descrição</th><th className="w-[120px] px-2 py-2 font-medium">Quando</th><th className="w-[90px] px-2 py-2 font-medium">Qtd.</th><th className="w-[140px] px-2 py-2 text-right font-medium">Valor unitário</th><th className="w-[120px] px-2 py-2 text-right font-medium">Total</th><th className="w-[36px]" /></tr></thead>
-            <tbody>{f.costs.map((c, i) => {
-              const tot = (costQty(c.qty) ?? 0) && parseMoney(c.value) != null ? sectionCostTotal({ qtyMilli: costQty(c.qty)!, unitCents: parseMoney(c.value)! }) : null;
-              const toInv = monthly && c.frequency === 'unico';
-              return (
-                <tr key={c.key} className="border-t border-line align-top">
-                  <td className="px-2 py-1.5">
-                    <Select aria-label={`Dedução ${si + 1}.${i + 1}`} className={clsx('h-9 w-full text-xs font-semibold', c.category ? CAT_TONE[c.category] : 'border-warning text-[#C2610C]')} value={c.category} disabled={!editable} onChange={(e) => set(c.key, { category: e.target.value as CostCategory | '' })}>
-                      <option value="">Qual dedução?</option>
-                      {COST_CATEGORIES.map((k) => <option key={k} value={k}>{COST_CATEGORY_SHORT[k]}</option>)}
-                    </Select>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input aria-label={`Descrição do custo ${si + 1}.${i + 1}`} list={listId} className="h-9 w-full" value={c.description} disabled={!editable} onChange={(e) => onName(c, e.target.value)} />
-                    {(c.origin || c.costItemId || toInv) && <span className="mt-0.5 block text-2xs text-muted">{[c.origin === 'planilha' ? 'da planilha' : null, c.costItemId ? 'catálogo' : null, !c.category ? 'sem classificação' : null, toInv ? 'único: vai para o investimento' : null].filter(Boolean).join(' · ')}</span>}
-                  </td>
-                  <td className="px-2 py-1.5">{monthly
-                    ? <Select aria-label={`Quando ${si + 1}.${i + 1}`} className="h-9 w-full" value={c.frequency} disabled={!editable} onChange={(e) => set(c.key, { frequency: e.target.value as CostFrequency })}><option value="unico">Único</option><option value="mensal">Mensal</option></Select>
-                    : <span className="flex h-9 items-center text-sm text-muted">Único</span>}</td>
-                  <td className="px-2 py-1.5"><span className="flex items-center gap-1"><Input aria-label={`Quantidade do custo ${si + 1}.${i + 1}`} inputMode="decimal" className="num h-9 w-full" value={c.qty} disabled={!editable} onChange={(e) => set(c.key, { qty: e.target.value })} />{c.measure && <span className="text-2xs text-muted">{c.measure}</span>}</span></td>
-                  <td className="px-2 py-1.5"><Input aria-label={`Valor do custo ${si + 1}.${i + 1}`} inputMode="decimal" className="num h-9 w-full text-right" placeholder="0,00" value={c.value} disabled={!editable} onChange={(e) => set(c.key, { value: e.target.value })} /></td>
-                  <td className="num px-2 py-1.5 text-right leading-9 text-ink">{tot == null ? '—' : fmtBRL(tot)}</td>
-                  <td className="px-1 py-1.5">{editable && <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover custo ${si + 1}.${i + 1}`} onClick={() => setCosts(f.costs.filter((x) => x.key !== c.key))}><Trash2 className="h-4 w-4" /></button>}</td>
-                </tr>
-              );
-            })}</tbody>
+            <tbody>{f.costs.map((c, i) => <CostLine key={c.key} c={c} i={i} si={si} monthly={monthly} editable={editable} listId={listId} set={set} onName={onName} remove={remove} />)}</tbody>
           </table>
         </div>
       )}
@@ -349,7 +339,34 @@ function SectionCosts({ f, si, editable, catalog, setCosts }: { f: SecForm; si: 
       </Modal>
     </div>
   );
-}
+});
+
+/** Uma linha de custo (memorizada): só ela redesenha quando é editada. */
+const CostLine = memo(function CostLine({ c, i, si, monthly, editable, listId, set, onName, remove }: { c: CostRow; i: number; si: number; monthly: boolean; editable: boolean; listId: string; set: (k: string, p: Partial<CostRow>) => void; onName: (c: CostRow, v: string) => void; remove: (k: string) => void }) {
+  const tot = (costQty(c.qty) ?? 0) && parseMoney(c.value) != null ? sectionCostTotal({ qtyMilli: costQty(c.qty)!, unitCents: parseMoney(c.value)! }) : null;
+  const toInv = monthly && c.frequency === 'unico';
+  return (
+    <tr className="border-t border-line align-top">
+      <td className="px-2 py-1.5">
+        <Select aria-label={`Dedução ${si + 1}.${i + 1}`} className={clsx('h-9 w-full text-xs font-semibold', c.category ? CAT_TONE[c.category] : 'border-warning text-[#C2610C]')} value={c.category} disabled={!editable} onChange={(e) => set(c.key, { category: e.target.value as CostCategory | '' })}>
+          <option value="">Qual dedução?</option>
+          {COST_CATEGORIES.map((k) => <option key={k} value={k}>{COST_CATEGORY_SHORT[k]}</option>)}
+        </Select>
+      </td>
+      <td className="px-2 py-1.5">
+        <Input aria-label={`Descrição do custo ${si + 1}.${i + 1}`} list={listId} className="h-9 w-full" value={c.description} disabled={!editable} onChange={(e) => onName(c, e.target.value)} />
+        {(c.origin || c.costItemId || toInv) && <span className="mt-0.5 block text-2xs text-muted">{[c.origin === 'planilha' ? 'da planilha' : null, c.costItemId ? 'catálogo' : null, !c.category ? 'sem classificação' : null, toInv ? 'único: vai para o investimento' : null].filter(Boolean).join(' · ')}</span>}
+      </td>
+      <td className="px-2 py-1.5">{monthly
+        ? <Select aria-label={`Quando ${si + 1}.${i + 1}`} className="h-9 w-full" value={c.frequency} disabled={!editable} onChange={(e) => set(c.key, { frequency: e.target.value as CostFrequency })}><option value="unico">Único</option><option value="mensal">Mensal</option></Select>
+        : <span className="flex h-9 items-center text-sm text-muted">Único</span>}</td>
+      <td className="px-2 py-1.5"><span className="flex items-center gap-1"><Input aria-label={`Quantidade do custo ${si + 1}.${i + 1}`} inputMode="decimal" className="num h-9 w-full" value={c.qty} disabled={!editable} onChange={(e) => set(c.key, { qty: e.target.value })} />{c.measure && <span className="text-2xs text-muted">{c.measure}</span>}</span></td>
+      <td className="px-2 py-1.5"><Input aria-label={`Valor do custo ${si + 1}.${i + 1}`} inputMode="decimal" className="num h-9 w-full text-right" placeholder="0,00" value={c.value} disabled={!editable} onChange={(e) => set(c.key, { value: e.target.value })} /></td>
+      <td className="num px-2 py-1.5 text-right leading-9 text-ink">{tot == null ? '—' : fmtBRL(tot)}</td>
+      <td className="px-1 py-1.5">{editable && <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover custo ${si + 1}.${i + 1}`} onClick={() => remove(c.key)}><Trash2 className="h-4 w-4" /></button>}</td>
+    </tr>
+  );
+});
 
 // ------------------------------------------------------------------ aba Viabilidade econômica
 export function SectionsEconomics({ oppId, footer }: { oppId: string; footer?: (r: EconResult | null, official: boolean) => ReactNode }) {
@@ -369,14 +386,15 @@ export function SectionsEconomics({ oppId, footer }: { oppId: string; footer?: (
     return { ...s, marginTargetBp: a.margin.trim() === '' ? null : Number.isNaN(m) ? s.marginTargetBp : m, paybackMonths: a.payback.trim() === '' ? null : Math.max(1, Math.min(240, Number(a.payback) || 1)) };
   }), [savedSecs, adj]);
   const changed = Object.keys(adj).length > 0;
-  const deferred = useDeferredValue(sections);
-  const live = useMemo(() => (d && !d.financeHidden && changed ? liveResult(d, model, deferred, d.items) : null), [d, model, deferred, changed]);
+  const calcKey = useDebounced(useMemo(() => JSON.stringify(sections), [sections]), 500);
+  const live = useMemo(() => (d && !d.financeHidden && changed ? liveResult(d, model, JSON.parse(calcKey) as DealSection[], d.items) : null), [d, model, calcKey, changed]);
   const official = !changed && !!d?.result?.sections;
   const r = official ? d!.result : live ?? d?.result ?? null;
   const put = (secs: DealSection[]) => api(`/opportunities/${oppId}/economics`, { method: 'PUT', body: { ...d!.input, capex: [], opex: [], extraInitialCents: 0, b2g: null, sections: secs } });
   const save = useMutation({
-    mutationFn: () => put(sections),
-    onSuccess: () => { setAdj({}); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
+    // espera o salvo voltar antes de limpar os ajustes: senão a tela mostra (e aplica) o cálculo anterior por um instante
+    mutationFn: async () => { await put(sections); await qc.refetchQueries({ queryKey: ['economics', oppId] }); },
+    onSuccess: () => { setAdj({}); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   // usar o preço: fixa o preço da seção e grava o valor nos produtos (proposta e contrato usam esse valor)
@@ -392,8 +410,9 @@ export function SectionsEconomics({ oppId, footer }: { oppId: string; footer?: (
         qc.setQueryData(['opportunity', o.id], o);
       }
       await put(secs);
+      await Promise.all([qc.refetchQueries({ queryKey: ['economics', oppId] }), qc.refetchQueries({ queryKey: ['opp-items', oppId] })]);
     },
-    onSuccess: (_x, v) => { setAdj({}); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); void qc.invalidateQueries({ queryKey: ['opp-items', oppId] }); toast({ tone: 'success', message: v.price != null ? 'Preço aplicado na seção e nos produtos' : 'A seção voltou para o preço ideal' }); },
+    onSuccess: (_x, v) => { setAdj({}); toast({ tone: 'success', message: v.price != null ? 'Preço aplicado na seção e nos produtos' : 'A seção voltou para o preço ideal' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
 
@@ -473,7 +492,7 @@ export function SectionsEconomics({ oppId, footer }: { oppId: string; footer?: (
                   <p className="mt-2 text-xs text-muted">{monthly ? 'Só deduz o que é mensal. Matéria-prima e mão de obra da entrega são o investimento, que a margem mensal paga.' : 'Na venda, matéria-prima, mão de obra e despesas deduzem direto do preço.'}{o.unclassified ? ` ${o.unclassified} custo(s) sem dedução fora do cálculo: classifique na aba Produtos e serviços.` : ''}</p>
                   {editable && (
                     <div className="mt-3 flex flex-wrap items-center gap-3">
-                      {o.idealCents != null && (o.priceSource !== 'informado' || o.idealCents !== o.priceCents) && <Button size="sm" variant="primary" loading={usePrice.isPending} disabled={changed} title={changed ? 'Salve os ajustes antes de aplicar o preço' : undefined} onClick={() => usePrice.mutate({ k, price: o.idealCents })}>Usar este preço</Button>}
+                      {o.idealCents != null && (o.priceSource !== 'informado' || o.idealCents !== o.priceCents) && <Button size="sm" variant="primary" loading={usePrice.isPending} disabled={changed || save.isPending || econ.isFetching} title={changed ? 'Salve os ajustes antes de aplicar o preço' : undefined} onClick={() => usePrice.mutate({ k, price: o.idealCents })}>Usar este preço</Button>}
                       {o.priceSource === 'informado' && <button type="button" className="text-xs font-semibold text-primary hover:underline" disabled={usePrice.isPending || changed} onClick={() => usePrice.mutate({ k, price: null })}>Voltar ao preço ideal</button>}
                     </div>
                   )}

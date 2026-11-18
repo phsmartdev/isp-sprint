@@ -88,11 +88,12 @@ test('cliente da base mostra Inteligência do Cliente e classificação', async 
   await page.goto('/customers');
   await page.getByRole('row').nth(1).click();
   await expect(page).toHaveURL(/\/customers\/[0-9a-f-]{36}$/);
-  await page.getByRole('button', { name: /^(Classificar|Reclassificar)$/ }).click();
-  await page.getByLabel('Classe estratégica').selectOption('Reputação');
-  await page.getByLabel('Perfil pagador').selectOption('Pontual');
-  await page.getByRole('button', { name: 'Salvar classificação' }).click();
-  await expect(page.getByText(/Classificado em .* por Carlos Silva/)).toBeVisible();
+  // classificação estratégica (05/11/2026): só a Classe estratégica, revisada pela liderança
+  const cls = page.getByRole('region', { name: 'Classificação estratégica' });
+  await cls.getByRole('button', { name: /^(Classificar|Revisar)$/ }).click();
+  await cls.getByLabel('Classe estratégica').selectOption('Reputação');
+  await cls.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(cls.getByText(/Revisada em .* por Carlos Silva/)).toBeVisible();
 });
 
 test('relatórios: tela cheia para TV e olhinho', async ({ page }) => {

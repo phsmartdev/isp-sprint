@@ -92,12 +92,12 @@ test('gerência muda nível na matriz e o vendedor sente na hora', async ({ brow
   await login(g, 'carlos@yepnet.test');
   await g.goto('/settings/security');
   await g.getByLabel('Operação em Inteligência').selectOption('proprio');
-  await expect(g.getByText('Vendedor · Inteligência: Próprio')).toBeVisible();
+  await expect(g.getByText('Operação · Inteligência: Próprio')).toBeVisible();
   const v = await (await browser.newContext()).newPage();
   await login(v, 'lucas@yepnet.test');
   await expect(v.getByRole('navigation', { name: 'Navegação principal' }).getByRole('link', { name: /Inteligência/ })).toBeVisible();
   await g.getByLabel('Operação em Inteligência').selectOption('nenhum');
-  await expect(g.getByText('Vendedor · Inteligência: Sem acesso')).toBeVisible();
+  await expect(g.getByText('Operação · Inteligência: Sem acesso')).toBeVisible();
 });
 
 test('Personalização: logo e cores BKT fixos; só as artes (login, banner, menu) podem ser trocadas', async ({ page }) => {
@@ -105,7 +105,7 @@ test('Personalização: logo e cores BKT fixos; só as artes (login, banner, men
   await page.goto('/settings/branding');
   await expect(page.getByRole('heading', { name: 'Identidade visual BKT' })).toBeVisible();
   await expect(page.getByText('Mascote — Leads')).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 3 })).toHaveText(['Fundo da tela de login', 'Banner do Início', 'Cartão do menu lateral']);
+  await expect(page.getByRole('heading', { level: 3 })).toHaveText(['Fundo da tela de login', 'Banner do Início', 'Cartão do menu lateral', 'Selos e certificações']);
   await expect(page.getByRole('img', { name: 'BKT' }).first()).toBeVisible();
 });
 
@@ -153,10 +153,13 @@ test('Nova oportunidade: tipo de venda obrigatório; só os quatro tipos; CNPJ e
   expect(filiais).toEqual(['BKT Soluções', 'UPNET']);
   await page.getByLabel('Filial').selectOption({ label: 'UPNET' });
   await expect(page.getByRole('heading', { name: 'Informações de Licitação' })).toBeVisible();
-  await page.getByLabel('Tipo de disputa').selectOption('Dispensa');
-  // modalidade do pregão logo abaixo do tipo de disputa
+  await page.getByLabel('Tipo de disputa').selectOption('Aberta');
+  // logo abaixo do tipo de disputa: lance inicial, lance mínimo e a modalidade do pregão
   const order = await page.locator('select, input, textarea').evaluateAll((els) => els.map((e) => e.id));
-  expect(order.indexOf(order.find((x) => x.endsWith('modalidade_interna'))!)).toBe(order.indexOf(order.find((x) => x.endsWith('tipo_disputa'))!) + 1);
+  const at = (k: string) => order.indexOf(order.find((x) => x.endsWith(k))!);
+  expect([at('lance_inicial'), at('lance_minimo'), at('modalidade_interna')]).toEqual([1, 2, 3].map((n) => at('tipo_disputa') + n));
+  await page.getByLabel('Lance inicial').fill('100.000,00');
+  await page.getByLabel('Lance mínimo').fill('80.000,00');
   await page.getByRole('button', { name: 'Iniciar Negociação' }).click();
   await expect(page).toHaveURL(/\/opportunities\/[0-9a-f-]{36}$/);
   await expect(page.getByRole('region', { name: 'Informações do deal' })).toContainText('Licitação');
@@ -245,14 +248,19 @@ test('Oportunidades: mover pelo menu (alternativa ao arrastar) e perder exige mo
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
   await page.getByRole('menuitem', { name: 'Diagnóstico' }).click();
-  await expect(page.getByRole('region', { name: /Diagnóstico/ }).getByText('Cliente E2E Kanban')).toBeVisible();
+  await expect(page.getByRole('region', { name: /Diagnóstico/ }).getByText('Cliente E2E Kanban').first()).toBeVisible();
+  // o menu do cartão só move entre etapas abertas; perder é pela negociação, com motivo
+  await expect(card.getByRole('button', { name: /Mover .* para outra etapa/ })).toBeVisible();
   await card.getByRole('button', { name: /Mover .* para outra etapa/ }).click();
-  await page.getByRole('menuitem', { name: /^Perdid/ }).click();
+  await expect(page.getByRole('menuitem', { name: /^Perdid/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.goto(`/opportunities/${created.id}`);
+  await page.getByRole('button', { name: 'Venda perdida' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Marcar como perdida' })).toBeDisabled();
   await dialog.getByLabel('Motivo da perda').selectOption('preco');
   await dialog.getByRole('button', { name: 'Marcar como perdida' }).click();
-  await expect(page.getByText('Cliente E2E Kanban')).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Etapas do funil' }).locator('[aria-current="step"]')).toContainText(/Perdid/);
 });
 
 test('edição simultânea gera conflito visível, não sobrescreve em silêncio', async ({ browser }) => {
@@ -331,7 +339,7 @@ test('gerência abre jornadas, viabilidade, área, modelo de instrução e e-mai
   await login(g, 'carlos@yepnet.test');
   for (const [path, heading] of [
     ['/settings/journeys', 'Jornadas de vendas'],
-    ['/settings/viability', 'Viabilidade da venda'],
+    ['/settings/viability', 'Motor financeiro'],
     ['/settings/area', 'Área de atendimento'],
     ['/settings/instructions', 'Modelo de instrução da inteligência do negócio'],
     ['/settings/email', 'Servidor de e-mail (SMTP)'],

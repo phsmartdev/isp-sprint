@@ -31,7 +31,7 @@ export function AdminModules() {
       <div><h1 className="text-xl font-bold text-ink">Módulos e liberação</h1><p className="text-sm text-muted">Os sete módulos de negócio sobre a mesma base. Ligar um módulo não dá acesso a tudo: o nível de cada perfil (Segurança), as funcionalidades e as ações sensíveis continuam valendo.</p></div>
       <Notice>A fundação (usuários, contas e pessoas, catálogo, auditoria, notificações, integrações) está sempre ligada. Desligar um módulo esconde telas e rotas, mas não apaga nada: ao religar, o histórico está inteiro.</Notice>
       {q.isLoading ? <div className="card"><LoadingRows rows={6} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : (
-        <div className="grid gap-4 xl:grid-cols-2">{q.data!.items.map((m) => (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 [&>*]:min-w-0">{q.data!.items.map((m) => (
           <Fragment key={m.key}>
             <ModuleCard m={m} />
             {/* configuração própria do módulo, logo abaixo do cartão, na largura toda */}
@@ -78,7 +78,7 @@ function ModuleCard({ m }: { m: ModuleRow }) {
   });
   const state = !m.enabled ? { tone: 'neutral' as const, text: 'Desligado' } : m.mode === 'liberados' ? { tone: 'orange' as const, text: 'Só liberados' } : { tone: 'green' as const, text: 'Ligado' };
   return (
-    <section className="card space-y-3 p-4" aria-label={`Módulo ${m.label}`}>
+    <section className="card min-w-0 space-y-3 p-4" aria-label={`Módulo ${m.label}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0"><h2 className="text-lg font-bold text-ink">{m.label}</h2><p className="text-sm text-muted">{m.hint}</p></div>
         <Chip tone={state.tone} className="shrink-0">{state.text}</Chip>
@@ -177,7 +177,7 @@ function ActionsMatrix() {
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!;
   return (
-    <section className="card p-4" aria-label="Ações sensíveis por perfil">
+    <section className="card min-w-0 p-4" aria-label="Ações sensíveis por perfil">
       <h2 className="text-lg font-bold text-ink">Ações sensíveis por perfil</h2>
       <p className="mb-3 text-sm text-muted">Sem "Ver valores financeiros", os valores em R$ chegam ocultos em todas as telas, relatórios e indicadores, e as planilhas com valores são recusadas.</p>
       <div className="scroll-thin overflow-x-auto">
