@@ -170,7 +170,7 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
             <>
               <p className="mt-1 text-xs font-semibold text-ink">Nenhum preço proposto</p>
               <p className="mt-1 text-sm text-text">A aprovação usa o <b>preço sugerido</b>: <span className={clsx('font-bold', tone.text)}>{ECON_VERDICT_LABELS[d.verdict]}</span>{d.contractNetMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida do contrato <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}{d.contractNetMarginPct == null && d.netMarginPct != null && d.verdict !== 'aguardando_sugerido' ? <>, margem líquida <b>{pct(d.netMarginPct, 1)}</b>{d.netMarginRange ? ` (faixa ${pct(d.netMarginRange.minPct, 1)} a ${pct(d.netMarginRange.maxPct, 1)})` : ''}</> : null}.</p>
-              <p className="mt-1 text-2xs text-muted">Para avaliar outro valor, informe o preço no passo 1 ou lance os valores dos produtos.</p>
+              <p className="mt-1 text-2xs text-muted">Para avaliar outro valor, informe o preço em A venda ou lance os valores dos produtos.</p>
             </>
           )}
         </section>
@@ -438,10 +438,13 @@ function BasicCalculation({ r, onAdvanced }: { r: EconResult; onAdvanced: () => 
 }
 
 function ProductTotals({ r }: { r: B2gResult | null | undefined }) {
-  if (!r || r.blocked.length) return null;
+  if (!r) return null;
   const g = r.global;
-  const facts = [['Valor global', fmtBRL(g.priceCents)], ['Custo total', fmtBRL(g.costCents)], ['Markup efetivo (resultado)', g.markup == null ? '—' : `${g.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×`], ['Margem líquida', `${fmtBRL(g.netCents)} · ${pct(g.netPct)}`], ['Piso global', fmtBRL(g.floorCents)], ['Desconto máximo', pct(g.maxDiscountPct)]];
-  return <dl className="grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-2 p-3 text-xs sm:grid-cols-3" aria-label="Resumo dos preços por produto">{facts.map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd className="num font-semibold text-ink">{value}</dd></div>)}</dl>;
+  const facts = r.blocked.length ? [['Custo global do contrato', fmtBRL(g.costCents)]] : [['Valor global', fmtBRL(g.priceCents)], ['Custo global do contrato', fmtBRL(g.costCents)], ['Markup efetivo (resultado)', g.markup == null ? '—' : `${g.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×`], ['Margem líquida', `${fmtBRL(g.netCents)} · ${pct(g.netPct)}`], ['Piso global', fmtBRL(g.floorCents)], ['Desconto máximo', pct(g.maxDiscountPct)]];
+  return <div className="space-y-3">
+    {!!r.baskets?.length && <dl className="grid gap-2 sm:grid-cols-3" aria-label="Custos totais por cesta">{r.baskets.map((b) => <div key={b.profile} className="border border-line p-3 text-xs"><dt className="font-semibold text-ink">{b.profile === 'fornecimento' ? 'Fornecimento' : b.profile === 'instalacao' ? 'Serviço de Instalação (Sem recorrência)' : 'Serviço Fornecimento + Instalação'}</dt><dd className="num mt-1 font-bold text-ink">{fmtBRL(b.costCents)}</dd><dd className="mt-1 text-2xs text-muted">Investimento {fmtBRL(b.investmentCents)}{b.monthlyCostCents > 0 ? ` + ${fmtBRL(b.monthlyCostCents)}/mês durante a vigência` : ''}</dd></div>)}</dl>}
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-2 p-3 text-xs sm:grid-cols-3" aria-label="Resumo dos preços por produto">{facts.map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd className="num font-semibold text-ink">{value}</dd></div>)}</dl>
+  </div>;
 }
 
 export function EconomicsResult({ r, compact = false, settings }: { r: EconResult; compact?: boolean; settings?: EconSettings | null }) {
@@ -649,7 +652,7 @@ const emitterLine = (e: NonNullable<Data['emitter']>) => [e.name, e.cnpj ? `CNPJ
 /** B2G: formulário ⇄ entrada salva (percentuais em pontos-base; peso em fração; lance em centavos) */
 const b2gFormOf = (b: EconInput['b2g']): B2gForm => ({
   ...emptyB2gForm(), mode: b?.mode ?? 'A', overhead: bpText(b?.overheadBp ?? null), netTarget: bpText(b?.netTargetBp ?? null),
-  mcForn: bpText(b?.contributionBp?.fornecimento ?? null), mcImpl: bpText(b?.contributionBp?.implantacao ?? null), solvePb: !!b?.solvePayback,
+  mcForn: bpText(b?.contributionBp?.fornecimento ?? null), mcImpl: bpText(b?.contributionBp?.implantacao ?? null), mcInst: bpText(b?.contributionBp?.instalacao ?? null), solvePb: !!b?.solvePayback,
   weights: Object.fromEntries(Object.entries(b?.weights ?? {}).map(([k, v]) => [k, (v * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })])),
   bids: Object.fromEntries(Object.entries(b?.bids ?? {}).map(([k, v]) => [k, money(v)])),
 });
@@ -658,7 +661,7 @@ const b2gInputOf = (b: B2gForm): NonNullable<EconInput['b2g']> => {
   const weights: Record<string, number> = {}, bids: Record<string, number> = {};
   for (const [k, v] of Object.entries(b.weights)) { const n = Number(v.replace(',', '.')); if (v.trim() && Number.isFinite(n) && n >= 0 && n <= 100) weights[k] = n / 100; }
   for (const [k, v] of Object.entries(b.bids)) { const n = parseMoney(v); if (n != null && n >= 0) bids[k] = n; }
-  return { mode: b.mode, overheadBp: ok(parseBp(b.overhead)), netTargetBp: ok(parseBp(b.netTarget)), contributionBp: { fornecimento: ok(parseBp(b.mcForn)), implantacao: ok(parseBp(b.mcImpl)) }, solvePayback: b.solvePb, weights, bids };
+  return { mode: b.mode, overheadBp: ok(parseBp(b.overhead)), netTargetBp: ok(parseBp(b.netTarget)), contributionBp: { fornecimento: ok(parseBp(b.mcForn)), implantacao: ok(parseBp(b.mcImpl)), instalacao: ok(parseBp(b.mcInst)) }, solvePayback: b.solvePb, weights, bids };
 };
 const formKey = (f: object) => JSON.stringify(f, (k, v) => (k === 'key' ? undefined : v));
 
@@ -812,12 +815,12 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
       <div className="space-y-3">
           {(() => {
-            // passo 2 em lotes: Venda (patrimonial) e Serviço; linhas antigas sem lote ficam num bloco à parte (rateadas)
+            // Três perfis independentes; linhas antigas sem perfil ficam em um bloco explícito.
             const inLot = (l: Line, lot: EconLot) => !!l.kind && lotOfKind(l.kind) === lot;
             const byLot = (lot: EconLot | null) => f.capex.filter((l) => (lot ? inLot(l, lot) : !l.kind));
             const put = (lot: EconLot | null, lines: Line[]) => {
-              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'servico' as DealKind) : null }));
-              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
+              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'instalacao' ? 'servico' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'recorrencia' as DealKind) : null }));
+              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'instalacao' ? stamped : byLot('instalacao')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
             };
             const toOpex = f.mode === 'recorrente' ? (l: Line[]) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null, kind: null }))] } : x)) : undefined;
             const legacy = byLot(null);
@@ -827,11 +830,14 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
                   <CostLines title="Custo direto do Fornecimento (venda pura)" heading="Investimentos de fornecimento" hint="Equipamentos e materiais vendidos sem instalação." example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </section>
                 <section className="border border-line p-4">
-                  <CostLines title="Custo direto da Implantação" heading="Investimentos de implantação ou instalação" hint="Obra, instalação e projeto." example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                  <CostLines title="Custo direto da Instalação" heading="Serviço de Instalação (Sem recorrência)" hint="Custos de serviços únicos, pagos uma vez." example="Ex.: mão de obra de instalação avulsa" lines={byLot('instalacao')} setLines={(l) => put('instalacao', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                </section>
+                <section className="border border-line p-4">
+                  <CostLines title="Custo direto da Implantação" heading="Serviço Fornecimento + Instalação" hint="Investimento para atender recorrência e locação/aluguel." example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </section>
                 {!!legacy.length && (
                   <section className="border border-line p-4">
-                    <CostLines title="Investimento sem lote" heading="Investimentos sem cesta" hint="Custos comuns rateados pela receita." example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico']} frequency="unico" onOther={toOpex} />
+                    <CostLines title="Investimento sem lote" heading="Investimentos sem cesta" hint="Custos comuns rateados pela receita." example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico', 'recorrencia']} frequency="unico" onOther={toOpex} />
                   </section>
                 )}
               </div>
@@ -857,7 +863,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
               <div>
                 <p className="mb-1 text-sm font-medium text-ink">Tipo de negociação (dos produtos)</p>
                 <div className="flex flex-wrap gap-1.5">{kinds.map((k) => <Chip key={k} tone={k === 'venda' ? 'blue' : 'green'}>{ECON_LOT_LABELS[lotOfKind(k)]}: {DEAL_KIND_LABELS[k]}{isOneTimeKind(k) ? ' · pagamento único' : ' · mensal'}</Chip>)}</div>
-                <p className="mt-1 text-xs text-muted">{mixed ? 'Pagamento único e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada custo sai da sua cesta (Fornecimento ou Implantação).' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
+                <p className="mt-1 text-xs text-muted">{mixed ? 'Pagamento único e mensalidades na mesma negociação: um resultado só, com o fluxo de caixa de tudo junto. Cada custo sai da sua cesta: Fornecimento, Instalação ou Implantação.' : 'Para mudar, ajuste o tipo de cada produto na aba Produtos.'}</p>
               </div>
             ) : (
               <Notice tone="info">O tipo de receita (venda única, mensal ou os dois) vem de cada produto. Lance os produtos na aba Produtos e serviços.</Notice>

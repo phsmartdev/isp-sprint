@@ -25,7 +25,7 @@ const EconBody = z.object({
   /** viabilidade B2G: modo A/B, rateio da negociação, alvo, margens manuais, payback pelo alvo, pesos e lances por produto */
   b2g: z.object({
     mode: z.enum(['A', 'B']).optional(), overheadBp: bp.nullable().optional(), netTargetBp: z.number().int().min(-5000).max(9_999).nullable().optional(),
-    contributionBp: z.object({ fornecimento: bp.nullable().optional(), implantacao: bp.nullable().optional() }).optional(), solvePayback: z.boolean().optional(),
+    contributionBp: z.object({ fornecimento: bp.nullable().optional(), implantacao: bp.nullable().optional(), instalacao: bp.nullable().optional() }).optional(), solvePayback: z.boolean().optional(),
     weights: z.record(z.string().max(300), z.number().min(0).max(1)).optional(), bids: z.record(z.string().max(300), z.number().int().min(0).max(10_000_000_000)).optional(),
   }).nullable().optional(),
 });

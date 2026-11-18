@@ -8,7 +8,7 @@ import { MASK, moneyHidden, setMoneyHidden } from '../../lib/privacy';
 const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0 };
 const result = () => financeEngine({
   settings, publicSector: false,
-  input: { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', qtyMilli: 1000, unitCents: 90000 }, { description: 'Implantação', kind: 'servico', qtyMilli: 1000, unitCents: 220000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] },
+  input: { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', qtyMilli: 1000, unitCents: 90000 }, { description: 'Instalação', kind: 'servico', qtyMilli: 1000, unitCents: 100000 }, { description: 'Implantação', kind: 'recorrencia', qtyMilli: 1000, unitCents: 120000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] },
   items: [
     { description: 'Venda', kind: 'venda', revenueCents: 200000, doc: { name: 'NF-e', percentBp: 1000, fixedCents: 0, complete: true } },
     { description: 'Instalação', kind: 'servico', revenueCents: 100000, doc: { name: 'NFS-e', percentBp: 1500, fixedCents: 0, complete: true } },
@@ -26,8 +26,8 @@ describe('memória de cálculo no preço por cesta', () => {
     render(<EconomicsResult r={r} />);
     fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mostrar Preço por cesta' }));
-    const supplyTitle = title('Fornecimento (venda pura)', 'pagamento único');
-    const monthlyTitle = title('Implantação (instalação ou fornecimento + instalação)', 'mensal');
+    const supplyTitle = title('Fornecimento', 'pagamento único');
+    const monthlyTitle = title('Serviço Fornecimento + Instalação', 'mensal');
     const supply = screen.getByLabelText(supplyTitle) as HTMLDetailsElement;
     const monthly = screen.getByLabelText(monthlyTitle) as HTMLDetailsElement;
     expect(supply.open).toBe(false);

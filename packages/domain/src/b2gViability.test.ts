@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { b2gViability, distribute, type B2gParams, type B2gProduct } from './b2gViability';
-import type { CostLine } from './finance';
+import { b2gFromEconomics, b2gViability, distribute, type B2gParams, type B2gProduct } from './b2gViability';
+import { emptyEconInput, type CostLine, type EconSettings } from './finance';
 
 const nfe = { name: 'NF-e', taxBp: 1000, fixedCents: 0 }; // 10%
 const nfse = { name: 'NFS-e', taxBp: 1500, fixedCents: 0 }; // 15%
@@ -43,16 +43,16 @@ describe('viabilidade B2G', () => {
     expect(r.global.priceCents).toBe(r.unica!.priceCents + r.recorrente!.priceCents);
     expect(r.global.netCents).toBe(r.unica!.netCents + r.recorrente!.netCents);
     expect(r.global.costCents).toBe(r.unica!.costCents + r.recorrente!.costCents);
-    // O custo da Implantação atende ao serviço único e ao mensal, sem perda nem duplicação.
-    const uniqueImpl = Math.round(1_060_000 * 150_000 / (150_000 + 300_000 * 36));
+    // Instalação avulsa e investimento recorrente permanecem em perfis independentes.
+    const uniqueImpl = 60_000;
     expect(r.unica!.lines.find((l) => l.id === 'inst')!.costCents).toBe(uniqueImpl);
-    expect(r.recorrente!.investmentCents).toBe(1_060_000 - uniqueImpl);
+    expect(r.recorrente!.investmentCents).toBe(1_000_000);
     expect(r.global.markup).toBeCloseTo(r.global.priceCents / r.global.costCents, 10);
   });
 
-  it('contribuição 35% + rateio 35% na Implantação (venda única) zera a margem de operação', () => {
-    const r = b2gViability([prod('inst', 'servico', 'implantacao', 100_000)], [line('servico', 50_000)], [], { ...base, contributionBp: { implantacao: 3500 } });
-    const c = r.unica!.cascade!.find((x) => x.profile === 'implantacao')!;
+  it('contribuição 35% + rateio 35% na Instalação (venda única) zera a margem de operação', () => {
+    const r = b2gViability([prod('inst', 'servico', 'implantacao', 100_000)], [line('servico', 50_000)], [], { ...base, contributionBp: { instalacao: 3500 } });
+    const c = r.unica!.cascade!.find((x) => x.profile === 'instalacao')!;
     expect(c.contributionPct).toBeCloseTo(35, 4);
     expect(c.overheadPct).toBe(35);
     expect(c.operatingPct).toBeCloseTo(0, 2);
@@ -128,46 +128,57 @@ describe('viabilidade B2G', () => {
     expect(r.unica!.lines[0]!.floorCents).toBeNull();
     expect(r.alerts.join(' ')).toMatch(/Configure a margem líquida mínima/);
   });
-  it('serviço único e mensalidade compartilham o custo da Implantação, separado do Fornecimento', () => {
-    const ps = [prod('OTDR', 'venda', 'fornecimento', 200000), prod('Link único', 'servico', 'implantacao', 121700), prod('Link mensal', 'recorrencia', 'implantacao', 130000)];
-    const r = b2gViability(ps, [line('venda', 50001, 'material'), line('servico', 300001)], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
-    const upfront = Math.round(300001 * 121700 / (121700 + 130000 * 12));
-    expect(r.costs.unica.fornecimento).toBe(50001);
-    expect(r.costs.unica.implantacao).toBe(upfront);
-    expect(r.costs.recorrente.implantacao).toBe(300001 - upfront);
-    expect(r.unica!.lines.find((l) => l.id === 'OTDR')!.costCents).toBe(50001);
-    expect(r.unica!.lines.find((l) => l.id === 'Link único')!.costCents).toBe(upfront);
-    expect(r.recorrente!.investmentCents).toBe(300001 - upfront);
-    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
-    expect(r.unica!.costCents + r.recorrente!.investmentCents!).toBe(350002);
+  it('três perfis independentes: mudar a instalação não altera o custo ou preço mensal', () => {
+    const ps = [prod('Venda', 'venda', 'fornecimento', 200000), prod('Avulso', 'servico', 'implantacao', 100000), prod('Link', 'recorrencia', 'implantacao', 10000), prod('Aluguel', 'locacao', 'fornecimento', 20000)];
+    const capex = [line('venda', 50001), line('servico', 300001), line('recorrencia', 240003)];
+    const params = { ...base, autoPrice: true, termMonths: 12, paybackMonths: 6, overheadBp: 0, netTargetBp: 2000 };
+    const r = b2gViability(ps, capex, [line(null, 3000)], params);
+    expect(r.unica!.lines.find((l) => l.id === 'Venda')!.costCents).toBe(50001);
+    expect(r.unica!.lines.find((l) => l.id === 'Avulso')!).toMatchObject({ profile: 'instalacao', costCents: 300001 });
+    expect(r.recorrente!.investmentCents).toBe(240003);
+    expect(r.recorrente!.lines.every((l) => l.profile === 'implantacao')).toBe(true);
+    expect(r.recorrente!.lines.reduce((t, l) => t + l.investmentCents!, 0)).toBe(240003);
+    expect(r.baskets!.reduce((t, b) => t + b.costCents, 0)).toBe(r.global.costCents);
+    expect(r.global.costCents).toBe(626005);
+    const changed = b2gViability(ps, [...capex.slice(0, 1), line('servico', 700001), capex[2]!], [line(null, 3000)], params);
+    expect(changed.recorrente).toEqual(r.recorrente);
+    expect(changed.global.costCents - r.global.costCents).toBe(400000);
   });
 
-  it('serviço único permanece na Implantação mesmo com perfil antigo de Fornecimento', () => {
-    const ps = [prod('Serviço', 'servico', 'fornecimento', 100000, nfse), prod('Link', 'recorrencia', 'implantacao', 10000)];
-    const original = JSON.stringify(ps);
-    const r = b2gViability(ps, [line('servico', 240000)], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
-    expect(r.unica!.lines[0]!.profile).toBe('implantacao');
-    expect(r.unica!.costCents).toBeGreaterThan(0);
-    expect(r.recorrente!.investmentCents).toBeGreaterThan(0);
-    expect(JSON.stringify(ps)).toBe(original);
+  it.each([true, false])('mantém sugerido em ambos os contextos; valor informado = %s', (known) => {
+    const ps = [prod('Venda', 'venda', 'fornecimento', known ? 100000 : 0), prod('Avulso', 'servico', 'instalacao', known ? 120000 : 0), prod('Link', 'recorrencia', 'implantacao', known ? 20000 : 0)].map((x) => ({ ...x, priceDefined: known }));
+    const r = b2gViability(ps, [line('venda', 50001), line('servico', 60003), line('recorrencia', 120005)], [line(null, 1000)], { ...base, autoPrice: true, netTargetBp: 2000, paybackMonths: 6, termMonths: 12 });
+    for (const l of [...r.unica!.lines, ...r.recorrente!.lines]) {
+      expect(l.suggestedCents).toBeGreaterThan(0);
+      expect(l.priceBasis).toBe(known ? 'informado' : 'sugerido');
+      expect(l.priceCents).toBe(known ? l.estimatedCents : l.suggestedCents);
+      expect(l.netPct).not.toBeNull();
+    }
   });
 
-  it.each(['servico', 'recorrencia', 'locacao'] as const)('o custo da Implantação lançado como %s atende aos dois formatos, inclusive material', (kind) => {
-    const r = b2gViability([prod('Instalação', 'servico', 'implantacao', 10000), prod('Mensal', 'recorrencia', 'implantacao', 10000)], [line(kind, 130001, 'material')], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
-    expect(r.costs.unica.implantacao).toBe(10000);
-    expect(r.costs.recorrente.implantacao).toBe(120001);
-    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
-    expect(r.global.costCents).toBe(130001);
+  it('sem valores: divisão igual por cesta com centavos fechados e peso manual preservado', () => {
+    const ps = [prod('A', 'venda', 'fornecimento', 0), prod('B', 'venda', 'fornecimento', 0), prod('C', 'servico', 'instalacao', 0)];
+    const capex = [line('venda', 100001), line('servico', 70003)];
+    const params = { ...base, autoPrice: true, netTargetBp: 2000 };
+    const r = b2gViability(ps, capex, [], params);
+    expect(r.unica!.lines.map((l) => l.costCents)).toEqual([50001, 50000, 70003]);
+    const weighted = b2gViability(ps, capex, [], { ...params, weights: { A: 0.8 } });
+    expect(weighted.unica!.lines.map((l) => l.costCents)).toEqual([80001, 20000, 70003]);
+    expect(weighted.global.costCents).toBe(170004);
   });
 
-  it('Locação mensal com perfil Fornecimento usa o custo do Fornecimento, sem receber o da Implantação', () => {
-    const r = b2gViability([prod('Venda', 'venda', 'fornecimento', 50000), prod('Aluguel', 'locacao', 'fornecimento', 5000), prod('Serviço', 'servico', 'implantacao', 10000)], [line('venda', 110001, 'material'), line('servico', 20000)], [], { ...base, termMonths: 12, paybackMonths: 6 });
-    expect(r.costs.unica.fornecimento).toBe(50000);
-    expect(r.costs.recorrente.fornecimento).toBe(60001);
-    expect(r.unica!.lines.find((l) => l.id === 'Serviço')!.costCents).toBe(20000);
-    expect(r.recorrente!.investmentCents).toBe(60001);
-    expect(r.recorrente!.lines[0]!.overheadCents).toBe(0);
-    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
+  it('perfil sem produto avisa e mantém custo global, sem contaminar outra cesta', () => {
+    const r = b2gViability([prod('Venda', 'venda', 'fornecimento', 100000)], [line('servico', 50001)], [], { ...base, autoPrice: true, netTargetBp: 2000 });
+    expect(r.unica!.costCents).toBe(0);
+    expect(r.global.costCents).toBe(50001);
+    expect(r.alerts.join(' ')).toMatch(/não foi distribuído para outros perfis/);
+    expect(r.verdict).toBe('abaixo_minimo');
+  });
+  it('usa margem e payback padrão quando não existe margem líquida alvo', () => {
+    const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
+    const r = b2gFromEconomics({ publicSector: false, settings, input: { ...emptyEconInput(), capex: [line('venda', 60000), line('servico', 50000), line('recorrencia', 120000)] }, items: (['venda', 'servico', 'recorrencia'] as const).map((kind) => ({ description: kind, kind, priceDefined: false, revenueCents: 0, doc: { name: 'Doc', percentBp: 1000, fixedCents: 0, complete: true } })) });
+    expect(r.unica!.lines.map((l) => l.suggestedCents)).toEqual([85714, 71429]);
+    expect(r.recorrente!.monthlyPriceCents).toBe(22222);
   });
 
 });

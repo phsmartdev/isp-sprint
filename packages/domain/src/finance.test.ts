@@ -23,11 +23,12 @@ describe('resolução fiscal', () => {
     const [v, sv] = items([5000, 1000], [5000, 2000]);
     const two = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: [{ ...v!, kind: 'venda' }, { ...sv!, kind: 'servico' }], settings: { ...S, marginTargetBp: 0 }, publicSector: false });
     // cestas (3.0): cada cesta com o seu teto e o seu preço; nada de média entre cestas
-    expect(two.lots!.map((l) => [l.lot, l.percentBp])).toEqual([['venda', 1000], ['servico', 2000]]);
-    expect(two.deal!.cells.map((c) => [c.key, c.taxPct])).toEqual([['unico:venda', 10], ['unico:servico', 20]]);
-    // documento de serviço (natureza) leva o produto para a Cesta de Serviços mesmo marcado como venda
+    expect(two.lots!.map((l) => [l.lot, l.percentBp])).toEqual([['venda', 1000], ['instalacao', 2000]]);
+    expect(two.deal!.cells.map((c) => [c.key, c.taxPct])).toEqual([['unico:venda', 10], ['unico:instalacao', 20]]);
+    // O documento não troca o perfil: os dois produtos de venda ficam no Fornecimento.
     const nat = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: [{ ...v!, kind: 'venda', doc: { ...v!.doc!, fiscalKind: 'venda' } }, { ...sv!, kind: 'venda', doc: { ...sv!.doc!, fiscalKind: 'servico' } }], settings: { ...S, marginTargetBp: 0 }, publicSector: false });
-    expect(nat.deal!.cells.map((c) => [c.lot, c.taxPct])).toEqual([['venda', 10], ['servico', 20]]);
+    expect(nat.deal).toBeUndefined();
+    expect(nat.lots!.map((l) => [l.lot, l.percentBp])).toEqual([['venda', 2000]]);
     // produto sem documento usa o do lote (e não fica pendente)
     const noDoc = financeEngine({ input: { ...emptyEconInput(), mode: 'pontual' }, items: [{ ...v!, kind: 'venda' }, { description: 'Sem NF', revenueCents: 5000, kind: 'venda', doc: null }], settings: { ...S, marginTargetBp: 0 }, publicSector: false });
     expect(noDoc.rates.a).toBeCloseTo(0.1, 10);
@@ -422,7 +423,7 @@ describe('negociação mista: venda, recorrência e locação na mesma oportunid
 
 
 describe('lotes Venda e Serviço (11/2026)', () => {
-  it('serviço único no pagamento único com o tributo do Lote Serviço; investimento de cada lote sai do seu lote', () => {
+  it('serviço único tem tributo e investimento próprios na cesta de Instalação', () => {
     const doc = (id: string, pct: number) => ({ id, name: id, percentBp: pct, fixedCents: 0, complete: true });
     const r = financeEngine({
       input: { ...emptyEconInput(), mode: 'recorrente', termMonths: 12, capex: [{ description: 'Roteador (patrimonial)', qtyMilli: 1000, unitCents: 6_000, kind: 'venda' }, { description: 'Instalação', qtyMilli: 1000, unitCents: 3_000, kind: 'servico' }] },
@@ -433,18 +434,25 @@ describe('lotes Venda e Serviço (11/2026)', () => {
       ],
       settings: { ...S, marginTargetBp: 0, contingencyCapexBp: 0 }, publicSector: false,
     });
-    // Cesta de Serviços: o maior entre os serviços (15%) vale também para o serviço único
-    expect(r.lots!.map((l) => [l.lot, l.percentBp, l.items])).toEqual([['venda', 1000, 1], ['servico', 1500, 2]]);
+    // Cada perfil tem seu próprio teto fiscal: Instalação 5%, Implantação 15%.
+    expect(r.lots!.map((l) => [l.lot, l.percentBp, l.items])).toEqual([['venda', 1000, 1], ['instalacao', 500, 1], ['servico', 1500, 1]]);
     const cells = r.deal!.cells;
-    expect(cells.map((c) => [c.key, c.taxPct])).toEqual([['unico:venda', 10], ['unico:servico', 15], ['mensal:servico', 15]]);
-    // investimento: o da Cesta de Produtos inteiro na venda; o da Cesta de Serviços dividido entre o serviço único (5.000) e a recorrência (1.000 × 12)
-    const fS = 5_000 / (5_000 + 12_000);
+    expect(cells.map((c) => [c.key, c.taxPct])).toEqual([['unico:venda', 10], ['unico:instalacao', 5], ['mensal:servico', 15]]);
+    // O investimento de Instalação não é dividido com a recorrência.
     expect(cells[0]!.result.capexBaseCents).toBe(6_000);
-    expect(cells[1]!.result.capexBaseCents).toBe(Math.round(3_000 * fS));
-    expect(cells[2]!.result.capexBaseCents).toBe(Math.round(3_000 * (1 - fS)));
+    expect(cells[1]!.result.capexBaseCents).toBe(3_000);
+    expect(cells[2]!.result.capexBaseCents).toBe(0);
     expect(r.deal!.revenue).toMatchObject({ venda: 10_000, servico: 5_000, recorrencia: 1_000 });
     expect(r.suggestedOneTimeCents).toBe(cells[0]!.suggestedCents! + cells[1]!.suggestedCents!);
   });
+});
+
+it('custo de perfil sem produto não é transferido e impede aprovação do cálculo incompleto', () => {
+  const r = financeEngine({ input: { ...emptyEconInput(), capex: [{ description: 'Instalação avulsa', kind: 'servico', qtyMilli: 1000, unitCents: 50000 }] }, items: [{ description: 'Link', kind: 'recorrencia', revenueCents: 100000, doc: doc(1000) }], settings: { ...S, netMarginMinBp: 900, netMarginMaxBp: 4100 }, publicSector: false });
+  expect(r.initialCents).toBe(0);
+  expect(r.decision!.verdict).toBe('inviavel');
+  expect(r.decision!.withinPolicy).toBe(false);
+  expect(r.warnings.join(' ')).toMatch(/não foram rateados entre outros perfis/);
 });
 
 describe('comparativo com o modelo antigo', () => {

@@ -3,12 +3,12 @@
  *
  * Mesmas definições de margem do motor FINANCE (só muda a base das despesas fixas, como aprovado):
  *   Margem de contribuição (MC) = receita − tributos − despesas variáveis − custo
- *   Margem de operação (MO)     = MC − glosa/inadimplência − despesas fixas rateadas (só na Implantação, venda única)
+ *   Margem de operação (MO)     = MC − glosa/inadimplência − despesas fixas rateadas dos serviços
  *   Margem líquida (ML)         = MO − IR/CSLL (sobre MO positiva)
  *
- * Perfis de custo (cestas): Fornecimento (venda pura) não recebe rateio; Implantação recebe.
- *   Venda única + Implantação: rateio = % do PREÇO (na etapa do markup; MC 35% com rateio 35% zera a MO).
- *   Recorrente: rateio = % do CUSTO DIRETO da implantação, somado ao investimento inicial antes do payback.
+ * Perfis: Fornecimento (venda), Instalação (serviço único), Implantação (recorrência/locação).
+ *   Serviço único + Instalação: rateio = % do PREÇO (na etapa do markup; MC 35% com rateio 35% zera a MO).
+ *   Recorrente: despesas fixas rateadas sobre a mensalidade, fora do investimento inicial.
  * Recorrente: Mensalidade = (Investimento ÷ payback + custo mensal) ÷ (1 − tributos − despesas variáveis).
  * Modo A: custo → preço (margem desejada ou target seek). Modo B: preço do edital → margens, piso, desconto e faixa de lance.
  * Decisão global, com alerta por produto (nenhum produto negativo compensado por outro). Alerta, nunca bloqueio.
@@ -16,23 +16,24 @@
  */
 import { applyFiscalEnvelope, type CostLine, type DealKind, type EngineArgs } from './finance';
 
-export type CostProfile = 'fornecimento' | 'implantacao';
-export const COST_PROFILES: CostProfile[] = ['fornecimento', 'implantacao'];
-export const COST_PROFILE_LABELS: Record<CostProfile, string> = { fornecimento: 'Fornecimento (venda pura)', implantacao: 'Implantação (instalação ou fornecimento + instalação)' };
-export const COST_PROFILE_SHORT: Record<CostProfile, string> = { fornecimento: 'Fornecimento', implantacao: 'Implantação' };
-/** Perfil padrão pelo tipo do produto: venda = fornecimento; serviço, recorrência e locação = implantação (alterável na oportunidade). */
-export const defaultCostProfile = (k: DealKind): CostProfile => (k === 'venda' ? 'fornecimento' : 'implantacao');
+export type CostProfile = 'fornecimento' | 'implantacao' | 'instalacao';
+export const COST_PROFILES: CostProfile[] = ['fornecimento', 'instalacao', 'implantacao'];
+export const COST_PROFILE_LABELS: Record<CostProfile, string> = { fornecimento: 'Fornecimento', instalacao: 'Serviço de Instalação (Sem recorrência)', implantacao: 'Serviço Fornecimento + Instalação' };
+export const COST_PROFILE_SHORT: Record<CostProfile, string> = { fornecimento: 'Fornecimento', instalacao: 'Instalação', implantacao: 'Implantação' };
+/** Perfil fixo pelo tipo: venda = fornecimento; serviço único = instalação; recorrência/locação = implantação. */
+export const defaultCostProfile = (k: DealKind): CostProfile => (k === 'venda' ? 'fornecimento' : k === 'servico' ? 'instalacao' : 'implantacao');
 export type RevenueKind = 'unica' | 'recorrente';
 export const revenueOf = (k: DealKind): RevenueKind => (k === 'venda' || k === 'servico' ? 'unica' : 'recorrente');
 
 export type B2gProduct = {
   id: string; description: string; kind: DealKind; profile: CostProfile;
-  /** valor estimado do órgão: total do produto (unitário × quantidade); no recorrente, por mês */ estimatedCents: number;
+  /** valor estimado do órgão: total do produto (unitário × quantidade); no recorrente, por mês */ estimatedCents: number; priceDefined?: boolean;
   /** lance simulado (Modo B); sem ele vale o estimado */ bidCents?: number | null;
   doc: { name: string; taxBp: number; fixedCents: number } | null;
 };
 export type B2gParams = {
   mode: 'A' | 'B';
+  /** Valor do produto quando informado; sugerido quando em branco. */ autoPrice?: boolean;
   /** despesas variáveis (% do preço), glosa + inadimplência (% da receita), IR/CSLL sobre o lucro */
   variableBp: number; riskBp: number; incomeTaxBp: number | null;
   /** despesas fixas rateadas (padrão das Configurações, editável na oportunidade) */ overheadBp: number;
@@ -52,13 +53,13 @@ const isVarFixed = (l: CostLine) => l.impact === 'entrega' || l.impact === 'taxa
 
 /** Custo direto da engenharia por bloco e cesta (cada linha de custo diz de qual tipo de negociação sai). */
 export function b2gCosts(capex: CostLine[], opex: CostLine[], extraInitialCents = 0) {
-  const c = { unica: { fornecimento: 0, implantacao: 0 }, recorrente: { fornecimento: 0, implantacao: 0 }, mensal: 0, variavel: 0, semCesta: 0 };
+  const c = { unica: { fornecimento: 0, implantacao: 0, instalacao: 0 }, recorrente: { fornecimento: 0, implantacao: 0, instalacao: 0 }, mensal: 0, variavel: 0, semCesta: 0 };
   for (const l of capex) {
     const v = lineTotal(l);
     if (isVarFixed(l)) { c.variavel += v; continue; }
     if (!l.kind) { c.semCesta += v; continue; }
     // O bloco da engenharia identifica o perfil; material também pode ser custo da Implantação.
-    const profile = l.kind === 'venda' ? 'fornecimento' : 'implantacao';
+    const profile = defaultCostProfile(l.kind);
     c[revenueOf(l.kind)][profile] += v;
   }
   c.semCesta += extraInitialCents;
@@ -75,7 +76,8 @@ export function distribute(products: B2gProduct[], cost: number, weights?: Recor
   const scale = fixedSum > 1 ? 1 / fixedSum : 1;
   const rest = products.filter((p) => weights?.[p.id] == null);
   const restShare = Math.max(0, 1 - fixedSum * scale);
-  const base = rest.reduce((t, p) => t + Math.max(0, p.estimatedCents), 0);
+  const incomplete = products.some((p) => !(p.priceDefined ?? p.estimatedCents > 0));
+  const base = incomplete ? 0 : rest.reduce((t, p) => t + Math.max(0, p.estimatedCents), 0);
   const w = new Map<string, number>();
   for (const p of fixed) w.set(p.id, Math.max(0, weights![p.id]!) * scale);
   for (const p of rest) w.set(p.id, restShare * (base > 0 ? Math.max(0, p.estimatedCents) / base : 1 / rest.length));
@@ -89,6 +91,7 @@ export function distribute(products: B2gProduct[], cost: number, weights?: Recor
 export type B2gLine = {
   id: string; description: string; profile: CostProfile; revenue: RevenueKind; doc: string | null; taxPct: number;
   estimatedCents: number; costCents: number; weightPct: number;
+  suggestedCents?: number | null; priceDefined?: boolean; priceBasis?: 'informado' | 'sugerido' | 'lance';
   /** preço avaliado (único; no recorrente, mensal) */ priceCents: number | null;
   /** markup por produto = preço ÷ custo */ markup: number | null;
   contributionCents: number | null; contributionPct: number | null; overheadCents: number; overheadBase: 'preco' | 'custo' | null;
@@ -112,6 +115,7 @@ export type B2gResult = {
   verdict: 'viavel' | 'abaixo_minimo' | 'produto_abaixo' | 'produto_negativo' | 'sem_minimo' | 'bloqueado';
   alerts: string[]; notes: string[];
   costs: ReturnType<typeof b2gCosts>;
+  baskets?: { profile: CostProfile; investmentCents: number; monthlyCostCents: number; costCents: number; allocatedCents: number }[];
 };
 
 function chain(P: number, cost: number, a: number, fixed: number, p: B2gParams, overheadPct: number) {
@@ -131,13 +135,14 @@ function oneTimeFloor(cost: number, a: number, fixed: number, p: B2gParams, over
 }
 
 export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: CostLine[], p: B2gParams, extraInitialCents = 0): B2gResult {
-  // Serviço único continua serviço; o tipo define pagamento único, não Fornecimento.
-  products = products.map((x) => x.kind === 'servico' && x.profile !== 'implantacao' ? { ...x, profile: 'implantacao' } : x);
+  // O tipo define o perfil; um perfil legado divergente nunca altera o rateio.
+  products = products.map((x) => ({ ...x, profile: defaultCostProfile(x.kind) }));
   const costs = b2gCosts(capex, opex, extraInitialCents);
   const alerts: string[] = [], notes: string[] = [];
   const blocked = products.filter((x) => !x.doc).map((x) => ({ id: x.id, description: x.description }));
   const kinds = { unica: products.some((x) => revenueOf(x.kind) === 'unica'), recorrente: products.some((x) => revenueOf(x.kind) === 'recorrente') };
-  const empty: B2gResult = { mode: p.mode, blocked, kinds, unica: null, recorrente: null, global: { priceCents: 0, costCents: 0, markup: null, netCents: 0, netPct: null, floorCents: null, estimatedCents: 0, maxDiscountPct: null }, byDoc: [], verdict: 'bloqueado', alerts, notes, costs };
+  const initialBaskets = COST_PROFILES.map((profile) => { const investmentCents = Math.round((costs.unica[profile] + costs.recorrente[profile]) * (1 + bp(p.contingencyCapexBp))); const monthlyCostCents = profile === 'implantacao' ? Math.round(costs.mensal * (1 + bp(p.contingencyOpexBp))) : 0; return { profile, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * Math.max(1, p.termMonths), allocatedCents: 0 }; });
+  const empty: B2gResult = { mode: p.mode, blocked, kinds, unica: null, recorrente: null, global: { priceCents: 0, costCents: initialBaskets.reduce((t, b) => t + b.costCents, 0) + costs.semCesta + costs.variavel, markup: null, netCents: 0, netPct: null, floorCents: null, estimatedCents: 0, maxDiscountPct: null }, byDoc: [], verdict: 'bloqueado', alerts, notes, costs, baskets: initialBaskets };
   if (blocked.length) { alerts.push(`${blocked.length} produto(s) sem documento fiscal: informe em Produtos e serviços para calcular (sem documento, o produto ficaria sem tributos).`); return empty; }
   if (!products.length) return { ...empty, verdict: 'sem_minimo' };
 
@@ -150,74 +155,46 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
 
   // custo sem cesta: rateado pela receita entre os blocos/cestas que existem (aviso)
   const unicaP = products.filter((x) => revenueOf(x.kind) === 'unica'), recP = products.filter((x) => revenueOf(x.kind) === 'recorrente');
-  // O perfil escolhe a origem do custo; o tipo do produto escolhe único ou mensal.
-  // Usa a mesma base do motor principal: receita única versus mensalidade × vigência.
+  // Custo identificado fica no seu perfil, sem transferência para outro tipo de produto.
   for (const profile of COST_PROFILES) {
-    const total = costs.unica[profile] + costs.recorrente[profile];
-    if (!total) continue;
-    const sameProfile = products.filter((x) => x.profile === profile);
-    const targets = sameProfile.length ? sameProfile : products;
-    const groups = (['unica', 'recorrente'] as const).map((revenue) => ({ revenue, products: targets.filter((x) => revenueOf(x.kind) === revenue) })).filter((g) => g.products.length);
-    const amounts = groups.map((g) => g.products.reduce((t, x) => t + Math.max(0, x.estimatedCents), 0) * (g.revenue === 'recorrente' ? N : 1));
-    const known = amounts.some((v) => v > 0);
-    const split = distribute(groups.map((g, k) => ({ ...g.products[0]!, id: g.revenue, estimatedCents: known ? amounts[k]! : g.products.length })), total);
-    costs.unica[profile] = split.get('unica') ?? 0;
-    costs.recorrente[profile] = split.get('recorrente') ?? 0;
+    if ((costs.unica[profile] || costs.recorrente[profile]) && !products.some((x) => x.profile === profile)) alerts.push(`Custo de ${COST_PROFILE_SHORT[profile]} sem produto correspondente: não foi distribuído para outros perfis.`);
   }
   if (costs.semCesta) {
-    const ru = unicaP.reduce((t, x) => t + x.estimatedCents, 0), rr = recP.reduce((t, x) => t + x.estimatedCents, 0) * N;
-    const tot = ru + rr || 1;
-    const toU = Math.round(costs.semCesta * (ru / tot));
-    const uImpl = unicaP.some((x) => x.profile === 'implantacao');
-    if (toU) costs.unica[uImpl ? 'implantacao' : 'fornecimento'] += toU;
-    if (costs.semCesta - toU) costs.recorrente.implantacao += costs.semCesta - toU;
-    alerts.push('Há custo sem cesta (sem tipo de negociação): foi distribuído pela receita. Indique a cesta na planilha da engenharia.');
+    const weighted = products.map((x) => ({ ...x, estimatedCents: x.estimatedCents * (revenueOf(x.kind) === 'recorrente' ? N : 1) }));
+    const shared = distribute(weighted, costs.semCesta, p.weights);
+    for (const x of products) costs[revenueOf(x.kind)][x.profile] += shared.get(x.id) ?? 0;
+    alerts.push('Há custo comum sem perfil: distribuído entre os produtos. Classifique os custos antigos na cesta correta para separar os perfis.');
   }
-  // negócio só mensal (ou só venda única): o custo lançado no outro bloco pertence ao único bloco que existe
-  const moved = (from: 'unica' | 'recorrente', to: 'unica' | 'recorrente') => {
-    const tot = costs[from].fornecimento + costs[from].implantacao;
-    if (!tot) return;
-    for (const prof of COST_PROFILES) { costs[to][prof] += costs[from][prof]; costs[from][prof] = 0; }
-    notes.push(to === 'recorrente' ? 'Todos os produtos são mensais: o custo direto lançado entra no investimento da mensalidade.' : 'Todos os produtos são de venda única: o custo direto lançado entra no preço da venda única.');
-  };
-  if (!unicaP.length && recP.length) moved('unica', 'recorrente');
-  if (!recP.length && unicaP.length) moved('recorrente', 'unica');
-
   // ------------------------------------------------------------------ venda única
   let unica: B2gBlock | null = null;
   if (unicaP.length) {
     const lines: B2gLine[] = [];
     const cascade: B2gBlock['cascade'] = [];
     const varShare = distribute(unicaP, costs.variavel, p.weights);
-    // custo numa cesta sem produto vai para a outra cesta da venda única (o perfil escolhido no produto manda)
-    for (const prof of COST_PROFILES) {
-      const other: CostProfile = prof === 'fornecimento' ? 'implantacao' : 'fornecimento';
-      if (costs.unica[prof] && !unicaP.some((x) => x.profile === prof) && unicaP.some((x) => x.profile === other)) {
-        notes.push(`Custo lançado como ${COST_PROFILE_SHORT[prof]} entrou na ${COST_PROFILE_SHORT[other]}, porque os produtos de venda única estão com esse perfil.`);
-        costs.unica[other] += costs.unica[prof]; costs.unica[prof] = 0;
-      }
-    }
     for (const prof of COST_PROFILES) {
       const ps = unicaP.filter((x) => x.profile === prof);
       if (!ps.length) { if (costs.unica[prof]) alerts.push(`Custo de ${COST_PROFILE_SHORT[prof]} (venda única) sem produto nessa cesta.`); continue; }
       const cost = Math.round(costs.unica[prof] * capC);
       const dist = distribute(ps, cost, p.weights);
-      const oh = prof === 'implantacao' ? f : 0;
+      const oh = prof === 'fornecimento' ? 0 : f;
       // margem de contribuição: manual por cesta ou target seek (mesma ML alvo em cada cesta)
       const manual = p.contributionBp?.[prof];
       const seek = target != null ? target / (1 - ir) + r + oh : null;
       const mc = manual != null ? bp(manual) : seek;
-      if (p.mode === 'A' && mc == null) alerts.push(`Informe a margem de contribuição de ${COST_PROFILE_SHORT[prof]} ou a margem líquida alvo.`);
+      if ((p.mode === 'A' || p.autoPrice) && mc == null) alerts.push(`Informe a margem de contribuição de ${COST_PROFILE_SHORT[prof]} ou a margem líquida alvo.`);
       if (manual != null && seek != null && bp(manual) < seek - 1e-9) alerts.push(`${COST_PROFILE_SHORT[prof]}: a margem de contribuição manual (${(bp(manual) * 100).toFixed(1)}%) fica abaixo da necessária para a margem líquida alvo (${(seek * 100).toFixed(1)}%).`);
       for (const x of ps) {
         const a = bp(x.doc!.taxBp), fixed = x.doc!.fixedCents;
         const c = (dist.get(x.id) ?? 0) + (varShare.get(x.id) ?? 0);
-        let P: number | null;
-        if (p.mode === 'A') { const D = mc == null ? 0 : 1 - a - v - mc; P = D > 0 ? (c + fixed) / D : null; if (mc != null && D <= 0) alerts.push(`${x.description}: tributos, despesas variáveis e margem somam 100% ou mais: nenhum preço fecha o markup.`); }
-        else P = x.bidCents ?? x.estimatedCents;
+        const divisor = mc == null ? 0 : 1 - a - v - mc;
+        const suggested = divisor > 0 ? (c + fixed) / divisor : null;
+        if (mc != null && divisor <= 0) alerts.push(`${x.description}: tributos, despesas variáveis e margem somam 100% ou mais: nenhum preço fecha o markup.`);
+        const defined = x.priceDefined ?? x.estimatedCents > 0;
+        const P = p.autoPrice ? x.bidCents ?? (defined ? x.estimatedCents : suggested) : p.mode === 'A' ? suggested : x.bidCents ?? x.estimatedCents;
         const floor = Lmin == null ? null : oneTimeFloor(c, a, fixed, p, oh, Lmin);
         const ch = P != null && P > 0 ? chain(P, c, a, fixed, p, oh) : null;
         const line: B2gLine = {
+          suggestedCents: suggested == null ? null : Math.round(suggested), priceDefined: defined, priceBasis: x.bidCents != null ? 'lance' : (p.autoPrice ? defined : p.mode === 'B') ? 'informado' : 'sugerido',
           id: x.id, description: x.description, profile: prof, revenue: 'unica', doc: x.doc!.name, taxPct: a * 100, estimatedCents: x.estimatedCents, costCents: c,
           weightPct: cost > 0 ? ((dist.get(x.id) ?? 0) / cost) * 100 : 0,
           priceCents: P == null ? null : Math.round(P), markup: P != null && c > 0 ? P / c : null,
@@ -262,15 +239,16 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     };
     let D: number | null = p.paybackMonths ?? null;
     let status: string | null = null;
-    if (p.mode === 'A' && (p.solvePayback || D == null) && target != null) {
+    if ((p.mode === 'A' || p.autoPrice) && (p.solvePayback || D == null) && target != null) {
       const at = (d: number) => netPctAt(mensal(d)) ?? -Infinity;
       if (at(N) >= target) { D = N; status = 'O alvo já é atingido com o payback igual à vigência.'; }
       else if (at(1) < target) { D = null; status = 'Não há payback entre 1 mês e a vigência que entregue a margem líquida alvo.'; alerts.push(`Recorrente: ${status}`); }
       else { let lo = 1, hi = N; for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (at(mid) >= target) lo = mid; else hi = mid; } D = lo; status = 'Payback resolvido pela margem líquida alvo ao longo da vigência.'; }
     }
     if (D != null && (D < 1 || D > N)) { alerts.push(`O payback precisa ficar entre 1 mês e a vigência (${N} meses).`); D = Math.min(N, Math.max(1, D)); }
-    if (p.mode === 'A' && D == null && status == null) alerts.push('Informe o payback (meses) ou a margem líquida alvo para precificar a recorrência.');
-    const prices = p.mode === 'A' ? (D != null ? mensal(D) : recP.map(() => null)) : recP.map((x) => x.bidCents ?? x.estimatedCents);
+    if ((p.mode === 'A' || p.autoPrice) && D == null && status == null) alerts.push('Informe o payback (meses) ou a margem líquida alvo para precificar a recorrência.');
+    const suggestions = D != null ? mensal(D) : recP.map(() => null);
+    const prices = recP.map((x, k) => p.autoPrice ? x.bidCents ?? ((x.priceDefined ?? x.estimatedCents > 0) ? x.estimatedCents : suggestions[k]) : p.mode === 'A' ? suggestions[k] : x.bidCents ?? x.estimatedCents);
     const lines: B2gLine[] = recP.map((x, k) => {
       const a = bp(x.doc!.taxBp), M = prices[k] ?? null, I = inv(x.id), O = dOpex.get(x.id) ?? 0, F = x.doc!.fixedCents;
       const oh = ohOf(x);
@@ -279,6 +257,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
       const pb = M != null ? (den > 0 ? I / den : null) : null;
       const floor = Lmin == null ? null : recurringFloor(x, I, O, N, p, Lmin, oh);
       return {
+        suggestedCents: suggestions[k] == null ? null : Math.round(suggestions[k]!), priceDefined: x.priceDefined ?? x.estimatedCents > 0, priceBasis: x.bidCents != null ? 'lance' : (p.autoPrice ? (x.priceDefined ?? x.estimatedCents > 0) : p.mode === 'B') ? 'informado' : 'sugerido',
         id: x.id, description: x.description, profile: x.profile, revenue: 'recorrente', doc: x.doc!.name, taxPct: a * 100, estimatedCents: x.estimatedCents, costCents: Math.round(I + O * N),
         weightPct: totalInv > 0 ? (I / totalInv) * 100 : 0, priceCents: M == null ? null : Math.round(M), markup: M != null && I + O * N > 0 ? (M * N) / (I + O * N) : null,
         contributionCents: s ? Math.round(s.contribution) : null, contributionPct: s ? (s.contribution / s.revenue) * 100 : null, overheadCents: s ? Math.round(s.overhead / N) : 0, overheadBase: oh ? 'preco' : null,
@@ -304,8 +283,15 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   const all = [...(unica?.lines ?? []), ...(recorrente?.lines ?? [])];
   const revOf = (l: B2gLine) => (l.priceCents ?? 0) * (l.revenue === 'recorrente' ? N : 1);
   const estOf = (l: B2gLine) => l.estimatedCents * (l.revenue === 'recorrente' ? N : 1);
-  const priceT = all.reduce((t, l) => t + revOf(l), 0), costT = all.reduce((t, l) => t + l.costCents, 0);
-  const netT = all.reduce((t, l) => t + (l.netCents ?? 0), 0);
+  const baskets = COST_PROFILES.map((profile) => {
+    const investmentCents = Math.round((costs.unica[profile] + costs.recorrente[profile]) * capC);
+    const monthlyCostCents = profile === 'implantacao' ? Math.round(costs.mensal * opC) : 0;
+    return { profile, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * N, allocatedCents: all.filter((l) => l.profile === profile).reduce((t, l) => t + l.costCents, 0) };
+  });
+  const priceT = all.reduce((t, l) => t + revOf(l), 0), costT = baskets.reduce((t, b) => t + b.costCents, 0) + costs.variavel;
+  const netT = all.reduce((t, l) => t + (l.netCents ?? 0), 0) - Math.max(0, costT - all.reduce((t, l) => t + l.costCents, 0));
+  const unallocated = costT - all.reduce((t, l) => t + l.costCents, 0);
+  if (unallocated > 0) alerts.push('Existem custos sem produto no mesmo perfil. O custo global inclui esses valores; corrija as cestas antes de aprovar.');
   const floorOk = all.every((l) => l.floorCents != null);
   const floorT = floorOk ? all.reduce((t, l) => t + l.floorCents! * (l.revenue === 'recorrente' ? N : 1), 0) : null;
   const estT = all.reduce((t, l) => t + estOf(l), 0);
@@ -320,16 +306,17 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   const netPct = priceT > 0 ? (netT / priceT) * 100 : null;
   let verdict: B2gResult['verdict'] = 'viavel';
   if (Lmin == null) verdict = 'sem_minimo';
+  else if (unallocated > 0) verdict = 'abaixo_minimo';
   else if (netPct == null || netPct < Lmin * 100 - 1e-6) verdict = 'abaixo_minimo';
   else if (all.some((l) => l.netPct != null && l.netPct < 0)) verdict = 'produto_negativo';
   else if (all.some((l) => l.alerts.length)) verdict = 'produto_abaixo';
   if (p.mode === 'B' && floorT != null && estT < floorT) alerts.push('O valor estimado do órgão fica abaixo do piso global: inviável no preço do edital.');
-  notes.push('Dentro de cada cesta, o custo é distribuído pelo valor estimado (unitário × quantidade): a relação custo/preço é a mesma para todos os produtos da cesta (salvo peso manual). A decisão de viabilidade é global, com alerta por produto.');
-  if (f) notes.push(`Despesas fixas rateadas de ${(f * 100).toLocaleString('pt-BR')}%: na venda única, sobre o preço da Implantação; no recorrente, sobre a mensalidade da Implantação (todo mês). Não incidem no Fornecimento.`);
+  notes.push('Dentro de cada cesta, o custo é distribuído pelo valor informado; quando falta algum valor, usa pesos iguais (ajustáveis): a relação custo/preço é a mesma para todos os produtos da cesta (salvo peso manual). A decisão de viabilidade é global, com alerta por produto.');
+  if (f) notes.push(`Despesas fixas rateadas de ${(f * 100).toLocaleString('pt-BR')}%: na venda única, sobre o preço dos serviços de Instalação; no recorrente, sobre a mensalidade da Implantação (todo mês). Não incidem no Fornecimento.`);
   return {
     mode: p.mode, blocked, kinds, unica, recorrente,
     global: { priceCents: priceT, costCents: costT, markup: costT > 0 ? priceT / costT : null, netCents: netT, netPct, floorCents: floorT, estimatedCents: estT, maxDiscountPct: floorT != null && estT > 0 ? Math.max(0, (1 - floorT / estT) * 100) : null },
-    byDoc, verdict, alerts, notes, costs,
+    byDoc, verdict, alerts, notes, costs, baskets,
   };
 
   function blockOf(revenue: RevenueKind, lines: B2gLine[]): B2gBlock {
@@ -380,16 +367,19 @@ export function b2gFromEconomics(args: Omit<EngineArgs, 'model'>, profitTaxBp?: 
   const fx = applyFiscalEnvelope(args);
   const key = (d: string) => d.trim().toLowerCase();
   const b = inp.b2g ?? {};
+  const target = b.netTargetBp ?? st.netMarginTargetBp ?? null;
+  const defaultMargin = inp.marginTargetBp ?? st.marginSuggestedBp ?? st.marginTargetBp;
+  const contribution = Object.fromEntries(COST_PROFILES.map((profile) => [profile, b.contributionBp?.[profile] ?? (target == null ? defaultMargin : null)]));
   const products: B2gProduct[] = fx.args.items.map((i) => {
     const kind = (i.kind ?? 'recorrencia') as DealKind;
-    return { id: key(i.description), description: i.description, kind, profile: i.costProfile ?? defaultCostProfile(kind), estimatedCents: i.revenueCents, bidCents: b.bids?.[key(i.description)] ?? null, doc: i.doc && i.doc.complete ? { name: i.doc.name, taxBp: i.doc.percentBp, fixedCents: i.doc.fixedCents } : null };
+    return { id: key(i.description), description: i.description, kind, profile: defaultCostProfile(kind), estimatedCents: i.revenueCents, priceDefined: i.priceDefined, bidCents: b.bids?.[key(i.description)] ?? null, doc: i.doc && i.doc.complete ? { name: i.doc.name, taxBp: i.doc.percentBp, fixedCents: i.doc.fixedCents } : null };
   });
   return b2gViability(products, inp.capex, inp.opex, {
-    mode: b.mode ?? 'A', variableBp: inp.variableBp ?? st.variableExpenseBp ?? 0,
+    autoPrice: true, mode: b.mode ?? 'A', variableBp: inp.variableBp ?? st.variableExpenseBp ?? 0,
     riskBp: (inp.lossBp ?? (args.publicSector ? st.lossPublicBp : st.lossPrivateBp)) + (st.badDebtBp ?? 0),
     incomeTaxBp: profitTaxBp ?? fx.args.settings.incomeTaxBp ?? null, overheadBp: b.overheadBp ?? st.overheadBp ?? 0, netMinBp: st.netMarginMinBp ?? null,
-    netTargetBp: b.netTargetBp ?? st.netMarginTargetBp ?? null, contributionBp: b.contributionBp, solvePayback: b.solvePayback ?? false,
-    contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: inp.termMonths, paybackMonths: inp.paybackMonths ?? null,
+    netTargetBp: target, contributionBp: contribution, solvePayback: b.solvePayback ?? false,
+    contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: inp.termMonths, paybackMonths: inp.paybackMonths ?? (args.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate),
     paymentTermDays: st.paymentTermDays ?? null, weights: b.weights,
   }, inp.extraInitialCents);
 }

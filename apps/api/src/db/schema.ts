@@ -653,6 +653,8 @@ export const opportunityItems = pgTable('opportunity_items', {
   unit: text('unit').notNull().default('un'),
   qtyMilli: bigint('qty_milli', { mode: 'number' }).notNull(),
   unitCents: bigint('unit_cents', { mode: 'number' }).notNull(),
+  /** Distingue valor não informado de zero explícito. */
+  priceDefined: boolean('price_defined').notNull().default(true),
   discountCents: bigint('discount_cents', { mode: 'number' }).notNull().default(0),
   surchargeCents: bigint('surcharge_cents', { mode: 'number' }).notNull().default(0),
   notes: text('notes'),
@@ -687,6 +689,7 @@ export const productCatalog = pgTable('product_catalog', {
   description: text('description').notNull(),
   unit: text('unit').notNull().default('un'),
   lastUnitCents: bigint('last_unit_cents', { mode: 'number' }).notNull().default(0),
+  lastPriceDefined: boolean('last_price_defined').notNull().default(true),
   dealKind: text('deal_kind').notNull().default('recorrencia'),
   fiscalDocTypeId: uuid('fiscal_doc_type_id'),
   timesUsed: integer('times_used').notNull().default(1),

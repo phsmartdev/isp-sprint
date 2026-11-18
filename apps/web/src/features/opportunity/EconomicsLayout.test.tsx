@@ -8,7 +8,7 @@ import { moneyHidden, setMoneyHidden } from '../../lib/privacy';
 
 vi.mock('../../lib/api', async (original) => ({ ...await original<typeof import('../../lib/api')>(), api: vi.fn() }));
 const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0 };
-const input: EconInput = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', impact: 'material', qtyMilli: 1000, unitCents: 90000 }, { description: 'Implantação', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 220000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] };
+const input: EconInput = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', impact: 'material', qtyMilli: 1000, unitCents: 90000 }, { description: 'Instalação', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 100000 }, { description: 'Implantação', kind: 'recorrencia', qtyMilli: 1000, unitCents: 120000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] };
 const items: EconItem[] = [
   { description: 'Venda', kind: 'venda', revenueCents: 200000, doc: { name: 'NF-e', percentBp: 1000, fixedCents: 0, complete: true } },
   { description: 'Instalação', kind: 'servico', revenueCents: 100000, doc: { name: 'NFS-e', percentBp: 1500, fixedCents: 0, complete: true } },
@@ -62,7 +62,7 @@ describe('organização da viabilidade', () => {
   it('reordena os custos, preserva campos recolhidos e mantém salvar e cálculo avançado', async () => {
     const requests = setup();
     const supply = await screen.findByRole('heading', { name: 'Investimentos de fornecimento' });
-    const implantation = screen.getByRole('heading', { name: 'Investimentos de implantação ou instalação' });
+    const implantation = screen.getByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
     const monthly = screen.getByRole('heading', { name: 'Custos mensais para manter o serviço' });
     const sale = screen.getByRole('heading', { name: 'A venda' });
     expect(supply.compareDocumentPosition(implantation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
