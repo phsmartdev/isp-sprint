@@ -7,7 +7,7 @@ import { AccountPanel, SideSection } from '../features/opportunity/AccountPanel'
 import { OpportunityContacts } from '../features/opportunity/OpportunityContacts';
 import { OutcomeCelebration, type Outcome } from '../features/opportunity/Outcome';
 import { EconomicsSummary, EconomicsTab } from '../features/opportunity/Economics';
-import { OpportunityItems } from '../features/opportunity/OpportunityItems';
+import { ProductsTab } from '../features/opportunity/OpportunityItems';
 import { ExtraAddressesEditor, extraToInput, type ExtraAddress } from '../features/opportunity/DeliveryAddresses';
 import { BidParticipants, OurBid } from '../features/opportunity/BidParticipants';
 import { BidTimeline } from '../features/opportunity/BidTimeline';
@@ -780,6 +780,7 @@ export function OpportunityWorkspacePage() {
     </div>
   );
 
+  const wideTab = (centerTab === 'produtos' || centerTab === 'viabilidade') && opp.saleKind !== 'licitacao';
   const center = (
     <div className="space-y-4">
       {a.restored && <Notice tone="warning">Recuperamos alterações que não tinham sido salvas. Elas serão gravadas agora. <button className="underline" onClick={a.dismissRestored}>Entendi</button></Notice>}
@@ -808,7 +809,7 @@ export function OpportunityWorkspacePage() {
         </div>
         <div className="p-5" role="tabpanel">
           {centerTab === 'historico' && <Timeline opportunityId={opp.id} />}
-          {centerTab === 'produtos' && <OpportunityItems opp={opp} embedded />}
+          {centerTab === 'produtos' && <ProductsTab opp={opp} />}
           {centerTab === 'viabilidade' && econOn && <EconomicsTab oppId={opp.id} />}
           {centerTab === 'email' && <OriginEmail oppId={opp.id} />}
           {centerTab === 'licitacao' && bidProjectOn && <BidProjectsTab oppId={opp.id} />}
@@ -905,10 +906,11 @@ export function OpportunityWorkspacePage() {
         <Tabs label="Seções do atendimento" value={mobileTab} onChange={setMobileTab} tabs={[{ key: 'cliente', label: 'Deal e conta' }, { key: 'conversa', label: 'Acompanhamento' }, { key: 'passo', label: unread.data?.chat ? `Viabilidade e chat • ${unread.data.chat}` : 'Viabilidade e chat' }]} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 ws2:grid-cols-[300px_minmax(0,1fr)] ws3:grid-cols-[320px_minmax(0,1fr)_380px]">
-        <div className={clsx(mobileTab !== 'cliente' && 'max-ws2:hidden')}>{left}</div>
+      {/* produtos e viabilidade (por seções) usam a largura toda: tabelas de produtos, custos e a DRE */}
+      <div className={clsx('grid grid-cols-1 gap-4', !wideTab && 'ws2:grid-cols-[300px_minmax(0,1fr)] ws3:grid-cols-[320px_minmax(0,1fr)_380px]')}>
+        <div className={clsx(mobileTab !== 'cliente' && 'max-ws2:hidden', wideTab && 'ws2:hidden')}>{left}</div>
         <div className={clsx(mobileTab !== 'conversa' && 'max-ws2:hidden')}>{center}</div>
-        <div className={clsx('hidden ws3:block', mobileTab === 'passo' && 'max-ws2:block')}>{right}</div>
+        <div className={clsx('hidden', !wideTab && 'ws3:block', mobileTab === 'passo' && 'max-ws2:block')}>{right}</div>
       </div>
 
       <Drawer open={copilot} onClose={() => setCopilot(false)} title="Viabilidade e chat" width="lg">{right}</Drawer>

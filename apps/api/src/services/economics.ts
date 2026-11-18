@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
+import { impactOfCategory, sectionsEngine, type SectionCost, b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -103,7 +103,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | null) ?? null, description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
+    return { section: i.section ?? 0, costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | null) ?? null, description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {
@@ -125,6 +125,8 @@ export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 export const computeEconomics = (ctx: EconContext, input?: EconInput) => {
   if (!ctx.settings) return null;
   const inp = input ?? ctx.input;
+  // negociação por seções (tipos de negócio): cada seção no motor e a visão geral consolidada
+  if (inp.sections?.length) return sectionsEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
   const r = financeEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
   return { ...r, b2g: b2gOf(ctx, inp, r) };
 };
@@ -259,7 +261,7 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
   const learn = async (kind: CostItemRow['kind'], l: CostLine): Promise<CostLine> => {
     const unit = (l.unit ?? '').trim() || 'un';
     let it = cat.find((c) => c.kind === kind && keyOf(c.name, c.unit) === keyOf(l.description, unit));
-    const impact: CostImpact | null = kind === 'mensal' ? 'operacional' : (l.impact ?? it?.impact ?? null);
+    const impact: CostImpact | null = kind === 'mensal' ? (l.impact === 'parceiro' ? 'parceiro' : 'operacional') : (l.impact ?? it?.impact ?? null);
     if (!impact) { missing.push(l.description); return l; }
     if (!it) {
       const [n] = await db.insert(s.costItems).values({ tenantId, name: l.description.trim().slice(0, 120), kind, unit, impact }).onConflictDoNothing().returning();
@@ -277,6 +279,32 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
   const capex: CostLine[] = [], opex: CostLine[] = [];
   for (const l of input.capex) capex.push(await learn('investimento', l));
   for (const l of input.opex) opex.push(await learn('mensal', l));
-  if (missing.length) throw unprocessable(`Classifique o que cada item novo impacta (material, serviço, entrega ou taxa fixa de venda): ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}.`, [{ path: 'capex', message: 'impacto' }]);
+  if (missing.length) throw unprocessable(`Classifique o que cada item novo impacta (matéria-prima, mão de obra, parceiros ou despesas operacionais): ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '…' : ''}.`, [{ path: 'capex', message: 'impacto' }]);
   return { ...input, capex, opex };
+}
+
+/**
+ * Seções: os custos classificados passam pelo catálogo (confere o item e aprende a cotação) como investimento (únicos)
+ * ou custo mensal; o que volta (item, preço, manual) é gravado de novo em cada custo. Sem classificação, fica como está.
+ */
+export async function catalogSectionCosts(db: DbOrTx, tenantId: string, actorId: string | null, input: EconInput): Promise<EconInput> {
+  const secs = input.sections ?? [];
+  const refs: { s: number; c: number; kind: 'capex' | 'opex' }[] = [];
+  const capex: CostLine[] = [], opex: CostLine[] = [];
+  secs.forEach((sec, si) => sec.costs.forEach((c, ci) => {
+    if (!c.category) return;
+    const monthly = c.frequency === 'mensal' && sec.kind !== 'venda';
+    const line: CostLine = { description: c.description, qtyMilli: c.qtyMilli, unitCents: c.unitCents, unit: c.unit ?? null, impact: impactOfCategory(c.category, monthly ? 'mensal' : 'unico'), costItemId: c.costItemId ?? null, priceId: c.priceId ?? null, manual: c.manual };
+    (monthly ? opex : capex).push(line); refs.push({ s: si, c: ci, kind: monthly ? 'opex' : 'capex' });
+  }));
+  if (!refs.length) return input;
+  const flat = await learnCostLines(db, tenantId, actorId, await resolveCostLines(db, tenantId, { ...input, capex, opex, sections: null }));
+  const out = secs.map((x) => ({ ...x, costs: x.costs.map((c) => ({ ...c })) }));
+  let a = 0, b = 0;
+  for (const r of refs) {
+    const l = r.kind === 'capex' ? flat.capex[a++]! : flat.opex[b++]!;
+    const c: SectionCost = out[r.s]!.costs[r.c]!;
+    Object.assign(c, { unit: l.unit ?? c.unit ?? null, costItemId: l.costItemId ?? null, priceId: l.priceId ?? null, manual: l.manual });
+  }
+  return { ...input, sections: out };
 }

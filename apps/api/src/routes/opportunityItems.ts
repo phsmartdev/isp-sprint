@@ -20,6 +20,7 @@ const ItemBody = z.object({
   /** documento fiscal do item (tributos da viabilidade econômica) */ fiscalDocTypeId: z.string().uuid().nullable().optional(),
   /** endereço de entrega do item (um dos outros endereços da oportunidade); vazio = o principal */ deliveryAddressId: z.string().uuid().nullable().optional(),
   /** perfil de custo (viabilidade B2G); vazio = padrão pelo tipo (venda = fornecimento; os demais = implantação) */ costProfile: z.enum(['fornecimento', 'implantacao']).nullable().optional(),
+  /** seção (tipo de negócio) da negociação; 0 = a primeira */ section: z.number().int().min(0).max(9).default(0),
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
@@ -102,7 +103,7 @@ export const opportunityItemRoutes = [
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
             ...(bid ? carry(it.description) : {}),
             tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
-            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, costProfile: it.costProfile ?? null, dealKind: it.dealKind, createdBy: auth.userId,
+            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, costProfile: it.costProfile ?? null, dealKind: it.dealKind, section: it.section ?? 0, createdBy: auth.userId,
           })));
         }
         // cada item lançado/importado fica no catálogo para as próximas negociações (último valor e tipo usados)

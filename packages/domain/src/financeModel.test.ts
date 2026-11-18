@@ -56,7 +56,7 @@ describe('compatibilidade: no mesmo preço, o fluxo e os indicadores seguem o mo
       const args = { ...args0, input: { ...args0.input, commissionBp: null }, settings: { ...args0.settings, variableExpenseBp: dv } };
       const P = args.input.priceCents ?? (args.items.length ? args.items[0]!.revenueCents : null);
       if (P == null) continue;
-      const a = legacyEngine({ ...args0, input: { ...args0.input, commissionBp: null, priceCents: P }, items: lotTop(args.items) });
+      const a = legacyEngine({ ...args0, input: { ...args0.input, commissionBp: null, priceCents: P } as Parameters<typeof legacyEngine>[0]["input"], items: lotTop(args.items) });
       const b = financeEngineDetailed({ ...args, input: { ...args.input, priceCents: P } }).result;
       const ctx = `cenário ${k}: ${JSON.stringify(args.input.mode)}`;
       where = ctx;

@@ -50,7 +50,8 @@ test('Oportunidade: deal e conta à esquerda, abas na nova ordem, viabilidade e 
   await expect(conta).toContainText(opp.contactName);
 
   const tabs = page.getByRole('tablist', { name: 'Acompanhamento' }).getByRole('tab');
-  const names = (await tabs.allTextContents()).map((t) => t.replace(/\s*\(\d+\)|\s*•.*$/g, '').trim());
+  // a aba Viabilidade econômica aparece quando a empresa já informou os parâmetros (depende de outros testes no mesmo banco)
+  const names = (await tabs.allTextContents()).map((t) => t.replace(/\s*\(\d+\)|\s*•.*$/g, '').trim()).filter((t) => t !== 'Viabilidade econômica');
   expect(names).toEqual(['Histórico', 'Produtos', 'Projetos', 'Tarefas', 'Anexos', 'Chamados']);
   await expect(page.getByRole('tab', { name: /^Histórico/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('region', { name: 'Chat da negociação' })).toBeVisible();

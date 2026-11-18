@@ -14,6 +14,7 @@ import { useLookups } from '../../lib/hooks';
 import { Button, Input, Notice, Select, Textarea } from '../../components/ui/primitives';
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
+import { DealSectionsEditor } from './DealSections';
 import { addressLine, NewDeliveryAddressModal, type DeliveryAddress } from './DeliveryAddresses';
 
 type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null };
@@ -29,6 +30,13 @@ let seq = 0;
 const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind, addr: '', prof: '' });
 const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null }): Row => ({ key: `n${++seq}`, prof: i.costProfile ?? '', doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
 const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null, costProfile: r.prof || null });
+
+/** Aba Produtos e serviços: por seções (tipos de negócio); licitação segue na tabela de itens com lances. */
+export function ProductsTab({ opp }: { opp: Opportunity }) {
+  const q = useQuery({ queryKey: ['opp-items', opp.id], queryFn: () => api<Data>(`/opportunities/${opp.id}/items`) });
+  if (!q.data) return q.isError ? <Notice tone="warning">{errMsg(q.error)}</Notice> : <p className="text-sm text-muted">Carregando…</p>;
+  return q.data.bid ? <OpportunityItems opp={opp} embedded /> : <DealSectionsEditor opp={opp} />;
+}
 
 export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; /** dentro da aba do acompanhamento: sem o cartão próprio */ embedded?: boolean }) {
   const toast = useToast();
