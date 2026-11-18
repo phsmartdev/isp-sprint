@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { emptyEconInput, financeEngine, type EconInput, type EconItem, type EconSettings } from '@isp/domain';
+import { b2gFromEconomics, emptyEconInput, financeEngine, type EconResult, type EconInput, type EconItem, type EconSettings } from '@isp/domain';
 import { EconomicsResult, EconomicsTab } from './Economics';
 import { api } from '../../lib/api';
 import { moneyHidden, setMoneyHidden } from '../../lib/privacy';
@@ -23,15 +23,16 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); clients.splice(0).forEach((c) => c.clear()); setMoneyHidden(hidden); vi.unstubAllGlobals(); });
 
-function setup() {
+function setup(selected = items, previous?: EconResult, stale = false) {
+  const calc = (value = input) => financeEngine({ input: value, items: selected, settings, publicSector: false });
   const requests: EconInput[] = [];
-  let data = { input, settings, items, publicSector: false, saved: { updatedAt: '2026-11-18T12:00:00Z' }, result: calculate(), stale: false, editable: true, emitter: null, financeHidden: false, modelOverrides: [], settingsVersion: { id: 'settings', validFrom: '2026-11-18' }, status: 'calculada', canDecide: false, decisions: [], history: [] };
+  let data = { input, settings, items: selected, publicSector: false, saved: { updatedAt: '2026-11-18T12:00:00Z' }, result: previous ?? calc(), stale, editable: true, emitter: null, financeHidden: false, modelOverrides: [], settingsVersion: { id: 'settings', validFrom: '2026-11-18' }, status: 'calculada', canDecide: false, decisions: [], history: [] };
   vi.mocked(api).mockImplementation(async (url, options) => {
     if (url === '/cost-items') return { items: [] } as never;
     if (options?.method === 'PUT') {
       const body = options.body as EconInput;
       requests.push(body);
-      data = { ...data, input: body, result: calculate(body) };
+      data = { ...data, input: body, result: calc(body) };
       return { result: data.result } as never;
     }
     return data as never;
@@ -112,4 +113,45 @@ describe('organização da viabilidade', () => {
     await waitFor(() => expect(within(section).getByDisplayValue('Cabo colado')).toBeTruthy());
     expect(within(section).getByDisplayValue('Cabo CSV')).toBeTruthy();
   });
+  it.each([
+    ['venda'], ['servico'], ['recorrencia'], ['locacao'], ['recorrencia', 'locacao'],
+    ['venda', 'servico'], ['venda', 'recorrencia'], ['servico', 'recorrencia'],
+    ['venda', 'servico', 'recorrencia'],
+  ])('mostra apenas as cestas dos tipos %j', async (...selectedKinds) => {
+    const selected = selectedKinds.map((kind) => ({ ...items[kind === 'venda' ? 0 : kind === 'servico' ? 1 : 2]!, kind: kind as EconItem['kind'] }));
+    setup(selected);
+    await screen.findByRole('heading', { name: 'A venda' });
+    await waitFor(() => {
+      expect(!!screen.queryByRole('heading', { name: 'Investimentos de fornecimento' })).toBe(selectedKinds.includes('venda'));
+      expect(!!screen.queryByRole('heading', { name: 'Serviço de Instalação (Sem recorrência)' })).toBe(selectedKinds.includes('servico'));
+      expect(!!screen.queryByRole('heading', { name: 'Serviço Fornecimento + Instalação' })).toBe(selectedKinds.includes('recorrencia') || selectedKinds.includes('locacao'));
+    });
+    const totals = screen.getByLabelText('Custos totais por cesta');
+    expect(within(totals).getAllByRole('term')).toHaveLength(new Set(selectedKinds.map((k) => k === 'venda' ? 'fornecimento' : k === 'servico' ? 'instalacao' : 'implantacao')).size);
+    expect(!!screen.queryByRole('heading', { name: 'Custos mensais para manter o serviço' })).toBe(selectedKinds.includes('recorrencia') || selectedKinds.includes('locacao'));
+  });
+
+  it('preserva custos de um perfil removido e permite revisá-los sob demanda', async () => {
+    const requests = setup([items[2]!]);
+    await screen.findByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
+    expect(screen.queryByRole('heading', { name: 'Investimentos de fornecimento' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar custos preservados' }));
+    expect(screen.getByRole('heading', { name: 'Investimentos de fornecimento' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Recolher custos preservados' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade econômica' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.capex.map((c) => c.unitCents)).toEqual([90000, 100000, 120000]);
+  });
+
+  it('trocar o perfil dos produtos atualiza a cesta mesmo com cálculo salvo anterior', async () => {
+    const previousArgs = { input, items: [items[0]!], settings, publicSector: false };
+    const previous = { ...financeEngine(previousArgs), b2g: b2gFromEconomics(previousArgs) };
+    setup([items[2]!], previous, true);
+    await screen.findByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar Preço sugerido por produto' }));
+    const basket = screen.getByRole('region', { name: 'Cesta Serviço Fornecimento + Instalação' });
+    expect(within(basket).getByText('Link')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Cesta Fornecimento' })).toBeNull();
+  });
+
 });

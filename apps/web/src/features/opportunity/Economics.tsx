@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, ClipboardPaste, Eye, EyeOff, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
-  COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  defaultCostProfile, type CostProfile, COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
   buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict, type B2gResult,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -437,12 +437,13 @@ function BasicCalculation({ r, onAdvanced }: { r: EconResult; onAdvanced: () => 
   </section>;
 }
 
-function ProductTotals({ r }: { r: B2gResult | null | undefined }) {
+function ProductTotals({ r, profiles }: { r: B2gResult | null | undefined; profiles: CostProfile[] }) {
   if (!r) return null;
   const g = r.global;
+  const baskets = r.baskets?.filter((b) => profiles.includes(b.profile)) ?? [];
   const facts = r.blocked.length ? [['Custo global do contrato', fmtBRL(g.costCents)]] : [['Valor global', fmtBRL(g.priceCents)], ['Custo global do contrato', fmtBRL(g.costCents)], ['Markup efetivo (resultado)', g.markup == null ? '—' : `${g.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×`], ['Margem líquida', `${fmtBRL(g.netCents)} · ${pct(g.netPct)}`], ['Piso global', fmtBRL(g.floorCents)], ['Desconto máximo', pct(g.maxDiscountPct)]];
   return <div className="space-y-3">
-    {!!r.baskets?.length && <dl className="grid gap-2 sm:grid-cols-3" aria-label="Custos totais por cesta">{r.baskets.map((b) => <div key={b.profile} className="border border-line p-3 text-xs"><dt className="font-semibold text-ink">{b.profile === 'fornecimento' ? 'Fornecimento' : b.profile === 'instalacao' ? 'Serviço de Instalação (Sem recorrência)' : 'Serviço Fornecimento + Instalação'}</dt><dd className="num mt-1 font-bold text-ink">{fmtBRL(b.costCents)}</dd><dd className="mt-1 text-2xs text-muted">Investimento {fmtBRL(b.investmentCents)}{b.monthlyCostCents > 0 ? ` + ${fmtBRL(b.monthlyCostCents)}/mês durante a vigência` : ''}</dd></div>)}</dl>}
+    {!!baskets.length && <dl className={clsx('grid gap-2', baskets.length === 2 ? 'sm:grid-cols-2' : baskets.length === 3 && 'sm:grid-cols-3')} aria-label="Custos totais por cesta">{baskets.map((b) => <div key={b.profile} className="border border-line p-3 text-xs"><dt className="font-semibold text-ink">{b.profile === 'fornecimento' ? 'Fornecimento' : b.profile === 'instalacao' ? 'Serviço de Instalação (Sem recorrência)' : 'Serviço Fornecimento + Instalação'}</dt><dd className="num mt-1 font-bold text-ink">{fmtBRL(b.costCents)}</dd><dd className="mt-1 text-2xs text-muted">Investimento {fmtBRL(b.investmentCents)}{b.monthlyCostCents > 0 ? ` + ${fmtBRL(b.monthlyCostCents)}/mês durante a vigência` : ''}</dd></div>)}</dl>}
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-2 p-3 text-xs sm:grid-cols-3" aria-label="Resumo dos preços por produto">{facts.map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd className="num font-semibold text-ink">{value}</dd></div>)}</dl>
   </div>;
 }
@@ -735,6 +736,7 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
 }
 
 export function EconomicsTab({ oppId }: { oppId: string }) {
+  const [reviewInactive, setReviewInactive] = useState(false);
   const [basicOpen, setBasicOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const qc = useQueryClient();
@@ -777,7 +779,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   if (!d.settings) return <div className="space-y-3"><h2 className="flex items-center gap-2 text-md font-bold text-ink"><Calculator className="h-5 w-5 text-primary" aria-hidden />Viabilidade econômica</h2><Notice tone="warning">A empresa ainda não informou os parâmetros da viabilidade (margem mínima, TMA, glosa, contingências e payback). Quem administra preenche em Configurações → Viabilidade.</Notice></div>;
   const st = d.settings;
   // salvo e sem mudanças no formulário = o cálculo oficial; senão, a simulação ao vivo
-  const official = !!d.saved && !!d.result && formKey(f) === base;
+  const official = !!d.saved && !!d.result && !d.stale && formKey(f) === base;
   const shownResult = official ? d.result : live;
   const shownB2g = official ? d.result?.b2g ?? liveB2g : liveB2g;
   const dis = !d.editable;
@@ -785,6 +787,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   // tipos de negociação vêm dos produtos (aba Produtos); sem produtos vale a escolha abaixo
   const kindOf = (i: EconItem): DealKind => i.kind ?? (f.mode === 'pontual' ? 'venda' : 'recorrencia');
   const kinds = DEAL_KINDS.filter((k) => d.items.some((i) => kindOf(i) === k));
+  const profiles = [...new Set(kinds.map(defaultCostProfile))];
+  const hasInactiveCosts = f.capex.some((l) => l.kind && !profiles.includes(defaultCostProfile(l.kind))) || (!profiles.includes('implantacao') && f.opex.length > 0);
   const mixed = kinds.some(isOneTimeKind) && kinds.some(isMonthlyKind);
   const derivedMode: EconInput['mode'] | null = !d.items.length || mixed ? null : kinds.some(isOneTimeKind) ? 'pontual' : 'recorrente';
   if (derivedMode && f.mode !== derivedMode) queueMicrotask(() => setF((x) => (x && x.mode !== derivedMode ? { ...x, mode: derivedMode } : x)));
@@ -813,6 +817,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>
       <p className="text-xs text-muted">{d.emitter ? <>Emitente: {emitterLine(d.emitter)}{(!d.emitter.cnpj || !d.emitter.taxRegime) && <span className="text-[#C2610C]"> · complete CNPJ e regime em Configurações → Filiais e documentos fiscais</span>}</> : <span className="text-[#C2610C]">Oportunidade sem filial: escolha a filial para usar os documentos fiscais dela.</span>}</p>
 
+      {!profiles.length && <Notice tone="info">As cestas aparecem conforme o tipo dos produtos. Adicione os itens na aba Produtos e serviços.</Notice>}
+      {hasInactiveCosts && <Notice tone="warning"><p>Há custos de perfis sem produtos. Os valores foram preservados; revise esses custos antes de salvar a análise.</p><button type="button" className="mt-1 text-xs font-semibold text-primary hover:underline" aria-expanded={reviewInactive} onClick={() => setReviewInactive(!reviewInactive)}>{reviewInactive ? 'Recolher custos preservados' : 'Revisar custos preservados'}</button></Notice>}
       <div className="space-y-3">
           {(() => {
             // Três perfis independentes; linhas antigas sem perfil ficam em um bloco explícito.
@@ -826,13 +832,13 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             const legacy = byLot(null);
             return (
               <div className="space-y-4">
-                <section className="border border-line p-4">
+                <section hidden={!profiles.includes('fornecimento') && !(reviewInactive && byLot('venda').length > 0)} className="border border-line p-4">
                   <CostLines title="Custo direto do Fornecimento (venda pura)" heading="Investimentos de fornecimento" hint="Equipamentos e materiais vendidos sem instalação." example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </section>
-                <section className="border border-line p-4">
+                <section hidden={!profiles.includes('instalacao') && !(reviewInactive && byLot('instalacao').length > 0)} className="border border-line p-4">
                   <CostLines title="Custo direto da Instalação" heading="Serviço de Instalação (Sem recorrência)" hint="Custos de serviços únicos, pagos uma vez." example="Ex.: mão de obra de instalação avulsa" lines={byLot('instalacao')} setLines={(l) => put('instalacao', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </section>
-                <section className="border border-line p-4">
+                <section hidden={!profiles.includes('implantacao') && !(reviewInactive && byLot('servico').length > 0)} className="border border-line p-4">
                   <CostLines title="Custo direto da Implantação" heading="Serviço Fornecimento + Instalação" hint="Investimento para atender recorrência e locação/aluguel." example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
                 </section>
                 {!!legacy.length && (
@@ -844,7 +850,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             );
           })()}
 
-        {f.mode === 'recorrente' && (
+        {(profiles.includes('implantacao') || (reviewInactive && f.opex.length > 0)) && (
           <section className="border border-line p-4">
             <CostLines title="Custo mensal" heading="Custos mensais para manter o serviço" hint="Trânsito, link de terceiro, licenças e suporte durante o contrato." example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} kinds={kinds.filter(isMonthlyKind)} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
           </section>
@@ -922,9 +928,9 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>}
       {shownResult && <AdvancedCalculation r={shownResult} settings={st} open={advancedOpen} onClose={() => setAdvancedOpen(false)} />}
       {d.items.length > 0 && <div className="space-y-3">
-        <ProductTotals r={shownB2g} />
+        <ProductTotals r={shownB2g} profiles={profiles} />
         <Disclosure title="Preço sugerido por produto" hint="Abra para conferir os produtos, pesos, preços, margens e simular lances.">
-          <B2gPanel r={shownB2g} f={f.b2g} set={(p) => set({ b2g: { ...f.b2g, ...p } })} settings={st} disabled={dis} />
+          <B2gPanel r={shownB2g} profiles={profiles} f={f.b2g} set={(p) => set({ b2g: { ...f.b2g, ...p } })} settings={st} disabled={dis} />
         </Disclosure>
       </div>}
       <Disclosure key={d.status} title="Aprovação da viabilidade" total={<Chip tone={STATUS_LOOK[d.status].tone}>{STATUS_LOOK[d.status].label}</Chip>} defaultOpen={d.status === 'em_decisao' || d.status === 'devolvida'}>
