@@ -1,7 +1,7 @@
 /** Configurações → Integrações: IXC, WhatsApp (Z-API e Cloud API), Meta Lead Ads e formulário do site. */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Database, LifeBuoy, Globe, MessageCircle, PenLine, MessageSquare, PlugZap, RefreshCw, Users } from 'lucide-react';
+import { Copy, Database, LifeBuoy, Globe, MessageCircle, PenLine, MessageSquare, PlugZap, RefreshCw, Users, Youtube } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { fmtDateTime } from '../../lib/format';
 import { useLookups } from '../../lib/hooks';
@@ -12,9 +12,9 @@ type Field = { key: string; label: string; secret?: boolean; hint?: string; type
 type Item = { kind: 'ixc' | 'zapi' | 'zapsign' | 'glpi' | 'whatsapp' | 'meta' | 'site'; name: string; description: string; status: string; fields: Field[]; receivesLeads: boolean; enabled: boolean; config: Record<string, string | null>; secretsSet: Record<string, boolean>; webhookUrl: string | null; lastEventAt: string | null };
 type Event = { id: string; kind: string; status: string; summary: string; leadId: string | null; createdAt: string };
 
-const ICONS = { ixc: Database, zapi: MessageCircle, zapsign: PenLine, glpi: LifeBuoy, whatsapp: MessageSquare, meta: Users, site: Globe };
+const ICONS: Record<string, typeof Database> = { ixc: Database, zapi: MessageCircle, zapsign: PenLine, glpi: LifeBuoy, whatsapp: MessageSquare, meta: Users, site: Globe, youtube: Youtube };
 const EVENT_LABEL: Record<string, { label: string; tone: 'green' | 'neutral' | 'red' | 'yellow' }> = { lead_criado: { label: 'Lead criado', tone: 'green' }, duplicado: { label: 'Já existia', tone: 'yellow' }, ignorado: { label: 'Ignorado', tone: 'neutral' }, erro: { label: 'Erro', tone: 'red' }, recebido: { label: 'Recebido', tone: 'neutral' }, enviado: { label: 'Enviado', tone: 'green' } };
-const KIND_NAME: Record<string, string> = { ixc: 'IXC', zapi: 'Z-API', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp Cloud', meta: 'Meta', site: 'Site' };
+const KIND_NAME: Record<string, string> = { ixc: 'IXC', zapi: 'Z-API', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp Cloud', meta: 'Meta', site: 'Site', youtube: 'YouTube' };
 
 function copy(text: string, toast: ReturnType<typeof useToast>) {
   void navigator.clipboard?.writeText(text).then(() => toast({ tone: 'success', message: 'Copiado' }), () => toast({ tone: 'error', message: 'Não foi possível copiar' }));
@@ -46,7 +46,7 @@ function IntegrationCard({ item }: { item: Item }) {
   const [config, setConfig] = useState<Record<string, string>>(() => Object.fromEntries(item.fields.filter((f) => !f.secret).map((f) => [f.key, item.config[f.key] ?? ''])));
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [showSnippet, setShowSnippet] = useState(false);
-  const Icon = ICONS[item.kind];
+  const Icon = ICONS[item.kind] ?? PlugZap; // tipo novo sem ícone não derruba a tela
   // resultado do último teste fica no cartão (a mensagem é longa e o aviso some sozinho)
   const [lastTest, setLastTest] = useState<{ ok: boolean; message: string; ip?: string | null; at: Date } | null>(null);
   const test = useMutation({
