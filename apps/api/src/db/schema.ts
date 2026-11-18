@@ -1304,7 +1304,7 @@ export const integrations = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.kind] }),
     tokenUq: uniqueIndex('integrations_token_uq').on(t.webhookToken),
-    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site'])),
+    kindCk: check('integrations_kind_ck', inList('kind', ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site', 'youtube'])),
   }),
 );
 
@@ -7690,3 +7690,220 @@ export const apiTokens = pgTable('api_tokens', {
   lastUsedAt: ts('last_used_at'),
   lastUsedIp: text('last_used_ip'),
 }, (t) => ({ tok: uniqueIndex('api_tokens_hash_idx').on(t.tokenHash), usr: index('api_tokens_user_idx').on(t.userId) }));
+
+// ---------------------------------------------------------------- Academia RevOps (Central de Playbooks): trilhas, cursos, módulos, aulas e progresso
+/** Trilha de aprendizagem: dados, público (as mesmas regras do Playbook), regras de progresso e governança. */
+export const academyTracks = pgTable('academy_tracks', {
+  id: id(),
+  tenantId: tenantId(),
+  title: text('title').notNull(),
+  description: text('description'),
+  /** capa enviada (imagem); sem capa, a tela usa a miniatura da primeira aula */
+  coverMime: text('cover_mime'),
+  cover: bytea('cover'),
+  objectives: text('objectives').array().notNull().default(sql`'{}'::text[]`),
+  competencies: text('competencies').array().notNull().default(sql`'{}'::text[]`),
+  ownerTeamId: uuid('owner_team_id').references(() => teams.id),
+  curatorId: uuid('curator_id').references(() => users.id),
+  visibility: text('visibility').notNull().default('corporativo'),
+  teamIds: uuid('team_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  costCenterIds: uuid('cost_center_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  profiles: text('profiles').array().notNull().default(sql`'{}'::text[]`),
+  userIds: uuid('user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  mode: text('mode').notNull().default('livre'),
+  level: text('level').notNull().default('basico'),
+  /** carga horária informada (minutos); sem ela vale a soma das durações */
+  workloadMinutes: integer('workload_minutes'),
+  /** prazo para concluir, em dias a partir da inscrição ou atribuição */
+  dueDays: integer('due_days'),
+  prerequisiteIds: uuid('prerequisite_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  minWatchPct: integer('min_watch_pct').notNull().default(90),
+  progressMethod: text('progress_method').notNull().default('quantidade'),
+  sequential: boolean('sequential').notNull().default(false),
+  /** fase 2: certificado, validade e reciclagem (guardados desde já) */
+  certificate: boolean('certificate').notNull().default(false),
+  validityMonths: integer('validity_months'),
+  recycleMonths: integer('recycle_months'),
+  status: text('status').notNull().default('rascunho'),
+  currentVersionId: uuid('current_version_id'),
+  createdBy: uuid('created_by').references(() => users.id),
+  rowVersion: integer('row_version').notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({
+  idx: index('academy_tracks_idx').on(t.tenantId, t.status),
+  modeCk: check('academy_tracks_mode_ck', inList('mode', ['livre', 'obrigatoria', 'atribuida'])),
+  levelCk: check('academy_tracks_level_ck', inList('level', ['basico', 'intermediario', 'avancado'])),
+  methodCk: check('academy_tracks_method_ck', inList('progress_method', ['quantidade', 'duracao'])),
+  statusCk: check('academy_tracks_status_ck', inList('status', ['rascunho', 'revisao_gerencia', 'homologacao_diretoria', 'publicada', 'arquivada'])),
+  visCk: check('academy_tracks_visibility_ck', inList('visibility', ['corporativo', 'compartilhado', 'restrito'])),
+  pctCk: check('academy_tracks_pct_ck', sql`min_watch_pct between 1 and 100`),
+}));
+
+/** Conteúdo reutilizável: vídeo do YouTube (código, título, duração, miniatura, situação) ou link. */
+export const academyContents = pgTable('academy_contents', {
+  id: id(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  externalId: text('external_id'),
+  url: text('url'),
+  title: text('title').notNull(),
+  description: text('description'),
+  durationSeconds: integer('duration_seconds'),
+  /** de onde veio a duração: a Data API (cadastro) ou o player (primeira reprodução) */
+  durationSource: text('duration_source'),
+  thumbnailUrl: text('thumbnail_url'),
+  channel: text('channel'),
+  state: text('state').notNull().default('desconhecido'),
+  lastSyncedAt: ts('last_synced_at'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  ext: uniqueIndex('academy_contents_ext_uq').on(t.tenantId, t.kind, t.externalId).where(sql`external_id is not null`),
+  kindCk: check('academy_contents_kind_ck', inList('kind', ['youtube_video', 'link'])),
+  stateCk: check('academy_contents_state_ck', inList('state', ['disponivel', 'indisponivel', 'privado', 'removido', 'sem_incorporacao', 'desconhecido'])),
+}));
+
+/** Playlist do YouTube importada: vídeos na ordem original e última sincronização. */
+export const academyPlaylists = pgTable('academy_playlists', {
+  id: id(),
+  tenantId: tenantId(),
+  playlistId: text('playlist_id').notNull(),
+  title: text('title').notNull(),
+  channel: text('channel'),
+  videoIds: text('video_ids').array().notNull().default(sql`'{}'::text[]`),
+  lastSyncedAt: ts('last_synced_at').notNull().defaultNow(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('academy_playlists_uq').on(t.tenantId, t.playlistId) }));
+
+export const academyCourses = pgTable('academy_courses', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  position: integer('position').notNull(),
+  minWatchPct: integer('min_watch_pct'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('academy_courses_idx').on(t.trackId, t.position) }));
+
+export const academyModules = pgTable('academy_modules', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id, { onDelete: 'cascade' }),
+  courseId: uuid('course_id').notNull().references(() => academyCourses.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  position: integer('position').notNull(),
+  playlistId: uuid('playlist_id').references(() => academyPlaylists.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('academy_modules_idx').on(t.courseId, t.position) }));
+
+/** Aula = conteúdo colocado num módulo. O progresso é por aula (não por conteúdo): reutilizar não mistura registros. */
+export const academyLessons = pgTable('academy_lessons', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id, { onDelete: 'cascade' }),
+  moduleId: uuid('module_id').notNull().references(() => academyModules.id, { onDelete: 'cascade' }),
+  contentId: uuid('content_id').notNull().references(() => academyContents.id),
+  title: text('title'),
+  description: text('description'),
+  position: integer('position').notNull(),
+  required: boolean('required').notNull().default(true),
+  minWatchPct: integer('min_watch_pct'),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('academy_lessons_idx').on(t.moduleId, t.position) }));
+
+/** Versão publicada (fotografia da estrutura) e o caminho da aprovação. */
+export const academyTrackVersions = pgTable('academy_track_versions', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  number: integer('number').notNull(),
+  status: text('status').notNull().default('revisao_gerencia'),
+  structure: jsonb('structure').$type<Record<string, unknown>>().notNull(),
+  meta: jsonb('meta').$type<Record<string, unknown>>().notNull(),
+  stages: text('stages').array().notNull().default(sql`'{}'::text[]`),
+  submittedBy: uuid('submitted_by').references(() => users.id),
+  submittedAt: ts('submitted_at'),
+  publishedAt: ts('published_at'),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('academy_track_versions_uq').on(t.trackId, t.number),
+  statusCk: check('academy_track_versions_status_ck', inList('status', ['revisao_gerencia', 'homologacao_diretoria', 'publicada', 'substituida', 'rejeitada', 'ajustes'])),
+  oneOpen: uniqueIndex('academy_track_versions_one_open').on(t.trackId).where(sql`status in ('revisao_gerencia','homologacao_diretoria')`),
+}));
+
+/** Histórico da trilha (criação, edição, envio, decisões, publicação, atribuições), só acrescentado. */
+export const academyTrackEvents = pgTable('academy_track_events', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  versionId: uuid('version_id'),
+  type: text('type').notNull(),
+  note: text('note'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('academy_track_events_idx').on(t.trackId, t.createdAt) }));
+
+/** Inscrição (livre) ou atribuição (obrigatória ou individual), presa à versão em que a pessoa entrou. */
+export const academyEnrollments = pgTable('academy_enrollments', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  versionId: uuid('version_id').notNull().references(() => academyTrackVersions.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  source: text('source').notNull(),
+  assignedBy: uuid('assigned_by').references(() => users.id),
+  dueOn: date('due_on', { mode: 'string' }),
+  startedAt: ts('started_at'),
+  completedAt: ts('completed_at'),
+  lastLessonId: uuid('last_lesson_id'),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('academy_enrollments_uq').on(t.trackId, t.userId),
+  user: index('academy_enrollments_user_idx').on(t.tenantId, t.userId),
+  srcCk: check('academy_enrollments_source_ck', inList('source', ['livre', 'obrigatoria', 'atribuida'])),
+}));
+
+/** Sessão do player (uma por aba/aparelho): o código vem do navegador; a sequência dos envios evita duplicar. */
+export const academyPlaySessions = pgTable('academy_play_sessions', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  /** aula da versão publicada (a fotografia é a fonte; a cópia de trabalho pode mudar) */
+  lessonId: uuid('lesson_id').notNull(),
+  clientSessionId: text('client_session_id').notNull(),
+  device: text('device'),
+  lastSeq: integer('last_seq').notNull().default(0),
+  startedAt: createdAt(),
+  lastBeatAt: ts('last_beat_at'),
+}, (t) => ({ uq: uniqueIndex('academy_play_sessions_uq').on(t.userId, t.lessonId, t.clientSessionId) }));
+
+/** Cada envio do player (trechos, posição, crédito), só acrescentado: a trilha de auditoria do progresso. */
+export const academyWatchBeats = pgTable('academy_watch_beats', {
+  id: id(),
+  tenantId: tenantId(),
+  sessionId: uuid('session_id').notNull().references(() => academyPlaySessions.id),
+  seq: integer('seq').notNull(),
+  intervals: jsonb('intervals').$type<[number, number][]>().notNull(),
+  position: integer('position_ms'),
+  creditedMs: integer('credited_ms').notNull().default(0),
+  rejectedMs: integer('rejected_ms').notNull().default(0),
+  receivedAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('academy_watch_beats_uq').on(t.sessionId, t.seq) }));
+
+/** Progresso por pessoa e aula: trechos unidos, segundos assistidos, percentual, última posição e conclusão. */
+export const academyLessonProgress = pgTable('academy_lesson_progress', {
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  lessonId: uuid('lesson_id').notNull(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  intervals: jsonb('intervals').$type<[number, number][]>().notNull().default(sql`'[]'::jsonb`),
+  watchedMs: integer('watched_ms').notNull().default(0),
+  durationSeconds: integer('duration_seconds'),
+  lastPositionMs: integer('last_position_ms').notNull().default(0),
+  completedAt: ts('completed_at'),
+  lastCreditAt: ts('last_credit_at'),
+  updatedAt: updatedAt(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.lessonId] }), track: index('academy_lesson_progress_track_idx').on(t.trackId, t.userId) }));

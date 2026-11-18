@@ -113,6 +113,7 @@ import { giftRoutes } from './routes/gifts';
 import { supportRoutes } from './routes/support';
 import { contractSectorRoutes } from './routes/contractSectors';
 import { playbookCentralRoutes } from './routes/playbooks';
+import { academyRoutes } from './routes/academy';
 import { zenithRoutes } from './routes/zenith';
 import { dataImportRoutes } from './routes/dataImport';
 import { gamificationRoutes } from './routes/gamification';
@@ -333,6 +334,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...supportRoutes,
     ...contractSectorRoutes,
     ...playbookCentralRoutes,
+    ...academyRoutes,
     ...zenithRoutes,
     ...dataImportRoutes,
     ...gamificationRoutes,

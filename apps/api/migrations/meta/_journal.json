@@ -1198,6 +1198,13 @@
       "when": 1795023735108,
       "tag": "0170_negocio_secoes",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1795040628313,
+      "tag": "0171_academia",
+      "breakpoints": true
     }
   ]
 }

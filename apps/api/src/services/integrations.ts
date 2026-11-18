@@ -8,7 +8,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { encryptSecret } from './email';
 
-export const INTEGRATION_KINDS = ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site'] as const;
+export const INTEGRATION_KINDS = ['ixc', 'zapi', 'zapsign', 'glpi', 'whatsapp', 'meta', 'site', 'youtube'] as const;
 export type IntegrationKind = (typeof INTEGRATION_KINDS)[number];
 type Field = { key: string; label: string; secret?: boolean; hint?: string; type?: 'user' | 'text' };
 
@@ -48,6 +48,15 @@ export const INTEGRATION_SPECS: Record<IntegrationKind, { name: string; descript
     fields: [
       { key: 'apiToken', label: 'Token da API', secret: true, hint: 'ZapSign → Configurações → Integrações → ZAPSIGN API' },
       { key: 'environment', label: 'Ambiente', hint: 'producao ou sandbox (sandbox não tem validade jurídica)' },
+    ],
+  },
+  youtube: {
+    name: 'YouTube (Academia)',
+    description: 'Lê título, duração, situação e a ordem dos vídeos das playlists para a Academia, pela YouTube Data API v3 (somente leitura). No Google Cloud Console, ative a "YouTube Data API v3" e crie uma chave de API restrita a essa API. A chave fica cifrada no servidor e nunca vai para a tela. Sem a chave, vídeos avulsos ainda funcionam (título e miniatura pelo oEmbed público e a duração lida pelo player), mas playlists não.',
+    receivesLeads: false,
+    status: 'Somente leitura · vídeos e playlists',
+    fields: [
+      { key: 'apiKey', label: 'Chave da API (YouTube Data API v3)', secret: true, hint: 'Google Cloud Console → APIs e serviços → Credenciais → Criar chave de API' },
     ],
   },
   glpi: {
@@ -139,7 +148,7 @@ export async function logEvent(db: DbOrTx, tenantId: string, kind: IntegrationKi
   await db.update(s.integrations).set({ lastEventAt: new Date() }).where(and(eq(s.integrations.tenantId, tenantId), eq(s.integrations.kind, kind)));
 }
 
-const DEFAULT_SOURCE: Record<IntegrationKind, string> = { ixc: 'IXC', zapi: 'WhatsApp', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
+const DEFAULT_SOURCE: Record<IntegrationKind, string> = { youtube: 'YouTube', ixc: 'IXC', zapi: 'WhatsApp', zapsign: 'ZapSign', glpi: 'GLPI', whatsapp: 'WhatsApp', meta: 'Instagram/Facebook', site: 'Site' };
 const clean = (v: unknown, max = 200) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 const digits = (v: string | null) => (v ? v.replace(/\D/g, '') : '');
 
