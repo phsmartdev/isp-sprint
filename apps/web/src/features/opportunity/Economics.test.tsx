@@ -24,6 +24,8 @@ describe('memória de cálculo no preço por cesta', () => {
   it('detalha cada cesta e ritmo com seus próprios valores e a fórmula da parcela mensal', () => {
     const r = result(), before = JSON.stringify(r);
     render(<EconomicsResult r={r} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mostrar Preço por cesta' }));
     const supplyTitle = title('Fornecimento (venda pura)', 'pagamento único');
     const monthlyTitle = title('Implantação (instalação ou fornecimento + instalação)', 'mensal');
     const supply = screen.getByLabelText(supplyTitle) as HTMLDetailsElement;
@@ -46,6 +48,8 @@ describe('memória de cálculo no preço por cesta', () => {
     const r = result(), visiblePrice = fmtBRL(46154);
     setMoneyHidden(true);
     render(<EconomicsResult r={r} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mostrar Preço por cesta' }));
     const memory = screen.getByLabelText('Memórias de cálculo por cesta');
     expect(memory.textContent).toContain(MASK);
     expect(memory.textContent).not.toContain(visiblePrice);
@@ -55,6 +59,8 @@ describe('memória de cálculo no preço por cesta', () => {
     const r = result();
     delete (r.deal!.cells[0] as Partial<EconCell>).result;
     const { unmount } = render(<EconomicsResult r={r} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mostrar Preço por cesta' }));
     expect(screen.getByText(/Esta fotografia não tem o detalhamento da cesta/)).toBeTruthy();
     unmount();
     render(<EconomicsResult r={result()} compact />);

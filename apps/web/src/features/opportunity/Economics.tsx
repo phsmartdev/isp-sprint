@@ -3,13 +3,13 @@
  * e o resultado na hora — preço mínimo, recomendado, margem, payback, VPL e TIR — numa leitura rápida para o time.
  * O cálculo da tela usa o mesmo motor do servidor; ao salvar, o servidor recalcula e guarda a fotografia auditável.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Calculator, ChevronDown, ClipboardPaste, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
+import { Calculator, ChevronDown, ClipboardPaste, Eye, EyeOff, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
 import {
   COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
-  buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict,
+  buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict, type B2gResult,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
 import { api } from '../../lib/api';
@@ -57,6 +57,27 @@ let seq = 0;
 const qtyText = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 3 });
 const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
 const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
+
+/** Recolher não apaga os campos: o formulário continua montado com seus valores. */
+function EyeToggle({ open, onToggle, label, controls }: { open: boolean; onToggle: () => void; label: string; controls: string }) {
+  const Icon = open ? EyeOff : Eye;
+  return <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={controls} aria-label={`${open ? 'Recolher' : 'Mostrar'} ${label}`} title={`${open ? 'Recolher' : 'Mostrar'} ${label}`} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-surface-2 hover:text-primary"><Icon className="h-4 w-4" aria-hidden /></button>;
+}
+
+function Disclosure({ title, hint, total, children, defaultOpen = false, index }: { title: string; hint?: string; total?: ReactNode; children: ReactNode; defaultOpen?: boolean; index?: number }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = useId();
+  return <section className="border border-line p-3 sm:p-4" aria-label={title}>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex min-w-0 items-start gap-2">
+        {index != null && <span className="mt-1 grid h-5 w-5 shrink-0 place-items-center bg-primary text-2xs font-bold text-white" aria-hidden>{index}</span>}
+        <div><div className="flex items-center gap-1"><h3 className="text-sm font-semibold text-ink">{title}</h3><EyeToggle open={open} onToggle={() => setOpen(!open)} label={title} controls={id} /></div>{hint && <p className="text-xs text-muted">{hint}</p>}</div>
+      </div>
+      {total && <div className="num text-sm text-muted">{total}</div>}
+    </div>
+    <div id={id} hidden={!open} className="mt-3">{children}</div>
+  </section>;
+}
 
 /** Régua do preço: onde o preço proposto fica em relação ao mínimo e ao recomendado. */
 /** Contribuição → operacional → líquida, em % da receita e R$ do período. */
@@ -340,11 +361,8 @@ function Memory({ r, settings }: { r: EconResult; settings?: EconSettings | null
   return (
     <ol className="space-y-3" aria-label="Memória de cálculo">
       {steps.map((s, n) => (
-        <li key={s.key} className={clsx('border border-line', s.key === 'historico' && 'border-dashed')}>
-          <div className="flex items-start gap-2.5 border-b border-line bg-surface-2 px-3 py-2">
-            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center bg-primary text-2xs font-bold text-white" aria-hidden>{n + 1}</span>
-            <div><p className="text-sm font-bold text-ink">{s.title}</p><p className="text-2xs text-muted">{s.desc}</p></div>
-          </div>
+        <li key={s.key}>
+          <Disclosure title={s.title} hint={s.desc} index={n + 1} defaultOpen={s.key === 'decisao'}>
           <dl className="divide-y divide-line">
             {s.rows.map((row) => (
               <div key={row.label} className="flex items-start justify-between gap-3 px-3 py-1.5">
@@ -357,6 +375,7 @@ function Memory({ r, settings }: { r: EconResult; settings?: EconSettings | null
             ))}
           </dl>
           {s.note && <p className="border-t border-line bg-warning-soft/40 px-3 py-2 text-xs text-ink">{s.note}</p>}
+          </Disclosure>
         </li>
       ))}
     </ol>
@@ -364,13 +383,9 @@ function Memory({ r, settings }: { r: EconResult; settings?: EconSettings | null
 }
 
 /** Leitura rápida do resultado: veredito, uma frase e quatro números. Detalhes só para quem abrir. */
-export function EconomicsResult({ r, compact = false, settings }: { r: EconResult; compact?: boolean; settings?: EconSettings | null }) {
-  const [open, setOpen] = useState(false);
-  const per = r.mode === 'recorrente' ? '/mês' : '';
-  const k = r.kpi;
+function CalculationBanner({ r }: { r: EconResult }) {
   return (
-    <div>
-      <div className={clsx('border-l-4 p-3', TONE[r.verdict].bar)}>
+<div className={clsx('border-l-4 p-3', TONE[r.verdict].bar)}>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-md font-bold text-ink">{ECON_VERDICT_LABELS[r.verdict]}</p>
           {r.fiscal && <span className="inline-flex items-center border-2 border-primary bg-primary/10 px-2 py-0.5 text-sm font-bold text-primary" aria-label={`Resultado gerado com a vigência fiscal ${r.fiscal.year}`}>Vigência fiscal {r.fiscal.year} · {r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'}</span>}
@@ -384,9 +399,58 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
           </p>
         )}
       </div>
+  );
+}
+
+function AdvancedCalculation({ r, settings, open, onClose }: { r: EconResult; settings?: EconSettings | null; open: boolean; onClose: () => void }) {
+  return <Modal open={open} onClose={onClose} title="Cálculo avançado" size="xl" footer={<Button variant="primary" onClick={onClose}>Fechar</Button>}>
+    <div className="space-y-3">
+      <CalculationBanner r={r} />
+      <Memory r={r} settings={settings} />
+      {r.kpi && r.priceCents != null && <Disclosure title="Desdobramento financeiro" defaultOpen><Dre r={r} /></Disclosure>}
+      {r.recommendation && <Disclosure title="Faixa de preço viável"><TargetSeek r={r} per={r.mode === 'recorrente' ? '/mês' : ''} /></Disclosure>}
+      {r.deal?.cells && <Disclosure title="Preço por cesta"><CellsTable r={r} /></Disclosure>}
+      <Disclosure title="Documentos fiscais e avisos">
+          <p className="text-2xs text-muted">Motor {r.engineVersion ?? 'anterior'}. Tributo fixo contado uma vez por documento fiscal (fatura).</p>
+          {!!r.items.length && (
+            <table className="w-full text-xs">
+              <thead className="text-muted"><tr><th className="py-1 text-left font-medium">Produto</th><th className="py-1 text-left font-medium">Documento fiscal</th><th className="py-1 text-right font-medium">Peso na receita</th><th className="py-1 text-right font-medium">Tributos</th></tr></thead>
+              <tbody>{r.items.map((i, n) => <tr key={n} className="border-t border-line"><td className="py-1">{i.description}</td><td className={clsx('py-1', i.pending && 'text-[#C2610C]')}>{i.doc ?? 'sem documento'}{i.docVersion ? ` · tributos v${i.docVersion}` : ''}</td><td className="num py-1 text-right">{pct(i.weight * 100)}</td><td className="num py-1 text-right">{pct(i.percentBp / 100, 2)}{i.fixedCents ? ` + ${fmtBRL(i.fixedCents)}` : ''}</td></tr>)}</tbody>
+            </table>
+          )}
+          {!!r.warnings.length && <ul className="list-disc space-y-0.5 pl-5 text-xs text-[#C2610C]">{r.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
+      </Disclosure>
+    </div>
+  </Modal>;
+}
+
+function BasicCalculation({ r, onAdvanced }: { r: EconResult; onAdvanced: () => void }) {
+  const steps = econMemory(r, fmtBRL);
+  const rows = steps.flatMap((s) => s.rows).filter((row) => ['Investimento inicial (I)', 'Custos mensais (O)', 'Tributos sobre o preço (a)'].includes(row.label));
+  const price = steps.flatMap((s) => s.rows).find((row) => row.label === 'Preço sugerido');
+  return <section className="space-y-3" aria-label="Cálculo básico">
+    <dl className="divide-y divide-line text-sm">
+      {rows.map((row) => <div key={row.label} className="flex items-start justify-between gap-3 py-2"><dt><span className="font-semibold text-ink">{row.label}</span>{row.formula && <span className="block font-mono text-2xs text-muted">{row.formula}</span>}</dt><dd className="num shrink-0 font-semibold text-ink">{row.value}</dd></div>)}
+      <div className="flex items-start justify-between gap-3 py-2"><dt className="min-w-0"><span className="font-semibold text-ink">Preço sugerido</span><span className="block text-2xs text-muted">{r.deal ? 'Soma das cestas, separada em pagamento único e mensalidade.' : price?.formula}</span></dt><dd className="num shrink-0 text-right font-bold text-primary">{fmtBRL(r.suggestedCents ?? r.recommendedCents)}{r.mode === 'recorrente' ? '/mês' : ''}{r.suggestedOneTimeCents != null && <span className="block text-xs">+ {fmtBRL(r.suggestedOneTimeCents)} único</span>}</dd></div>
+    </dl>
+    <div className="flex justify-end"><Button variant="primary" onClick={onAdvanced}>Ver cálculo avançado</Button></div>
+  </section>;
+}
+
+function ProductTotals({ r }: { r: B2gResult | null | undefined }) {
+  if (!r || r.blocked.length) return null;
+  const g = r.global;
+  const facts = [['Valor global', fmtBRL(g.priceCents)], ['Custo total', fmtBRL(g.costCents)], ['Markup efetivo (resultado)', g.markup == null ? '—' : `${g.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×`], ['Margem líquida', `${fmtBRL(g.netCents)} · ${pct(g.netPct)}`], ['Piso global', fmtBRL(g.floorCents)], ['Desconto máximo', pct(g.maxDiscountPct)]];
+  return <dl className="grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-2 p-3 text-xs sm:grid-cols-3" aria-label="Resumo dos preços por produto">{facts.map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd className="num font-semibold text-ink">{value}</dd></div>)}</dl>;
+}
+
+export function EconomicsResult({ r, compact = false, settings }: { r: EconResult; compact?: boolean; settings?: EconSettings | null }) {
+  const [open, setOpen] = useState(false);
+  const per = r.mode === 'recorrente' ? '/mês' : '';
+  const k = r.kpi;
+  return (
+    <div>
       <PriceBasis r={r} per={per} settings={settings} compact={compact} />
-      <TargetSeek r={r} per={per} />
-      {r.deal?.cells && <CellsTable r={r} compact={compact} />}
       <div className="mt-3 flex items-center justify-between gap-2">
         <Badge dot={r.decision ? SUG.dot : 'bg-line-strong'}>{r.decision ? 'Indicadores no preço sugerido' : 'Indicadores'}</Badge>
       </div>
@@ -400,43 +464,9 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
       </dl>
       {k?.margins && (() => { const cm = contractMargins(r); return cm ? <MarginChain m={cm} per="" compact={compact} contract={cm.months} firstMonthNetPct={k.margins.netPct} /> : <MarginChain m={k.margins} per={per} compact={compact} />; })()}
       <PriceRuler r={r} />
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="mt-2 flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
-        <ChevronDown className={clsx('h-4 w-4 transition-transform', open && 'rotate-180')} aria-hidden />Memória de cálculo
-      </button>
-      {open && (
-        <div className="mt-2 space-y-3 text-sm">
-          <Memory r={r} settings={settings} />
-          {k && r.priceCents != null && <Dre r={r} />}
-          <p className="text-2xs text-muted">Motor {r.engineVersion ?? 'anterior'}. Tributo fixo contado uma vez por documento fiscal (fatura).</p>
-          {!!r.items.length && (
-            <table className="w-full text-xs">
-              <thead className="text-muted"><tr><th className="py-1 text-left font-medium">Produto</th><th className="py-1 text-left font-medium">Documento fiscal</th><th className="py-1 text-right font-medium">Peso na receita</th><th className="py-1 text-right font-medium">Tributos</th></tr></thead>
-              <tbody>{r.items.map((i, n) => <tr key={n} className="border-t border-line"><td className="py-1">{i.description}</td><td className={clsx('py-1', i.pending && 'text-[#C2610C]')}>{i.doc ?? 'sem documento'}{i.docVersion ? ` · tributos v${i.docVersion}` : ''}</td><td className="num py-1 text-right">{pct(i.weight * 100)}</td><td className="num py-1 text-right">{pct(i.percentBp / 100, 2)}{i.fixedCents ? ` + ${fmtBRL(i.fixedCents)}` : ''}</td></tr>)}</tbody>
-            </table>
-          )}
-          {!!r.warnings.length && <ul className="list-disc space-y-0.5 pl-5 text-xs text-[#C2610C]">{r.warnings.map((w) => <li key={w}>{w}</li>)}</ul>}
-        </div>
-      )}
+      <button type="button" onClick={() => setOpen(true)} className="mt-3 text-xs font-semibold text-primary hover:underline">Ver cálculo avançado</button>
+      <AdvancedCalculation r={r} settings={settings} open={open} onClose={() => setOpen(false)} />
     </div>
-  );
-}
-
-/** Bloco numerado do formulário: passo, título, explicação curta e o total do bloco à direita. */
-function Step({ n, title, hint, total, children }: { n: number; title: string; hint: string; total?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="border border-line p-4" aria-labelledby={`ec-step-${n}`}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="flex min-w-0 gap-2.5">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary text-xs font-bold text-white" aria-hidden>{n}</span>
-          <div className="min-w-0">
-            <h3 id={`ec-step-${n}`} className="text-sm font-semibold text-ink">{title}</h3>
-            <p className="text-xs text-muted">{hint}</p>
-          </div>
-        </div>
-        {total && <span className="num text-sm text-muted">{total}</span>}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -450,7 +480,10 @@ const findCat = (catalog: CatalogItem[], name: string, unit?: string | null) => 
 };
 
 /** Custos da planilha; `impacts` liga a coluna "Impacta o quê?"; `onOther` recebe as linhas coladas da outra frequência. */
-function CostLines({ title, example, lines, setLines, disabled, catalog, impacts, frequency, onOther, kinds = [] }: { title: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void; /** tipos de negociação dos produtos: com mais de um, cada custo diz de qual sai */ kinds?: DealKind[] }) {
+function CostLines({ title, heading, hint, example, lines, setLines, disabled, catalog, impacts, frequency, onOther, kinds = [] }: { title: string; heading?: string; hint?: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void; /** tipos de negociação dos produtos: com mais de um, cada custo diz de qual sai */ kinds?: DealKind[] }) {
+  const [visible, setVisible] = useState(false);
+  const previousCount = useRef(lines.length);
+  useEffect(() => { if (lines.length > previousCount.current) setVisible(true); previousCount.current = lines.length; }, [lines.length]);
   const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
   const listId = `cat-${title.replace(/\W/g, '')}`;
   // auto-preenchimento: descrição + unidade já conhecidas trazem o impacto e o preço da última cotação
@@ -474,7 +507,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
     </select>
   ) : null;
   const origin = (l: Line) => { const c = l.costItemId ? catalog.find((x) => x.id === l.costItemId) : null; return !c ? null : c.unitCents === parseMoney(l.unit) ? 'catálogo' : 'alterado'; };
-  const add = () => setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]);
+  const add = () => { setVisible(true); setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]); };
   const [pasting, setPasting] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [view, setView] = useState<'tabela' | 'lista'>(() => { try { return localStorage.getItem('econ-cost-view') === 'lista' ? 'lista' : 'tabela'; } catch { return 'tabela'; } });
@@ -519,6 +552,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
   const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
   // tabela colada ou importada: entra no fim (as linhas vazias saem); nome igual ao do catálogo liga a linha ao item
   const addTable = (table: (string | number | null)[][], from: string) => {
+    setVisible(true);
     const r = parseCostTable(table);
     if (r.missing.length) { setMsg({ text: `${from}: não encontrei as colunas ${r.missing.join(', ')}. Use os títulos Descrição, Quantidade e Valor unitário (Unidade e Valor total são opcionais).`, bad: true }); return; }
     const toLine = (x: (typeof r.lines)[number]): Line => {
@@ -549,6 +583,11 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
   const cols = 'grid grid-cols-[110px_130px_minmax(0,1fr)_28px] items-center gap-1.5';
   return (
     <div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div><div className="flex items-center gap-1"><h3 className="text-sm font-semibold text-ink">{heading ?? title}</h3><EyeToggle open={visible} onToggle={() => setVisible(!visible)} label={title} controls={`${listId}-rows`} /></div>{hint && <p className="text-xs text-muted">{hint}</p>}</div>
+        <span className="num text-xs text-muted">{lines.length} item(ns) · <b className="text-ink">{fmtBRL(linesTotal(lines))}{frequency === 'mensal' ? '/mês' : ''}</b></span>
+      </div>
+      <div id={`${listId}-rows`} hidden={!visible} className="mt-2">
       {lines.length > 0 && (
         <>
           <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -578,6 +617,7 @@ function CostLines({ title, example, lines, setLines, disabled, catalog, impacts
           )}
         </>
       )}
+      </div>
       <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${fmtBRL(c.unitCents)} / ${c.unit}` : 'sem preço'}</option>)}</datalist>
       {!disabled && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -692,6 +732,8 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
 }
 
 export function EconomicsTab({ oppId }: { oppId: string }) {
+  const [basicOpen, setBasicOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
@@ -746,8 +788,6 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   if (mixed && f.mode !== 'recorrente') queueMicrotask(() => setF((x) => (x && x.mode !== 'recorrente' ? { ...x, mode: 'recorrente' } : x)));
   const saleTotal = d.items.filter((i) => isOneTimeKind(kindOf(i))).reduce((t, i) => t + i.revenueCents, 0);
   const itemsTotal = d.items.filter((i) => (mixed ? isMonthlyKind(kindOf(i)) : true)).reduce((t, i) => t + i.revenueCents, 0);
-  const capexTotal = linesTotal(f.capex);
-  const opexTotal = linesTotal(f.opex);
   const customized = [f.commission, f.loss].some((v) => v.trim() !== '');
   const teto = d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
   const mPiso = st.marginTargetBp, mTeto = st.marginMaxBp ?? null, mSug = st.marginSuggestedBp ?? st.marginTargetBp;
@@ -770,20 +810,48 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>
       <p className="text-xs text-muted">{d.emitter ? <>Emitente: {emitterLine(d.emitter)}{(!d.emitter.cnpj || !d.emitter.taxRegime) && <span className="text-[#C2610C]"> · complete CNPJ e regime em Configurações → Filiais e documentos fiscais</span>}</> : <span className="text-[#C2610C]">Oportunidade sem filial: escolha a filial para usar os documentos fiscais dela.</span>}</p>
 
-      <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable && d.result?.priceSource !== 'sugerido'} />
-      {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois que esta viabilidade foi salva. O resultado abaixo é o salvo; confira e salve de novo, porque o pedido de aprovação exige o cálculo atualizado.</Notice>}
-      {d.items.length > 0 && <B2gPanel r={shownB2g} f={f.b2g} set={(p) => set({ b2g: { ...f.b2g, ...p } })} settings={st} disabled={dis} />}
-      {shownResult ? <EconomicsResult r={shownResult} settings={d.settings} /> : <Notice tone="warning">Confira os campos destacados para ver o resultado.</Notice>}
-      {shownResult && shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) && (
-        <section className="border border-line p-4" aria-labelledby="ec-flow">
-          <h3 id="ec-flow" className="text-sm font-semibold text-ink">Fluxo de caixa</h3>
-          <p className="mb-3 text-xs text-muted">Início = investimento; depois, o que sobra a cada mês. A linha mostra quanto já voltou para o caixa.</p>
-          <CashflowChart labels={shownResult.cashflow.map((_, i) => (i === 0 ? 'Início' : `M${i}`))} {...flowSeries(shownResult.cashflow)} ariaLabel="Fluxo de caixa mensal da oportunidade" height={220} />
-        </section>
-      )}
-
       <div className="space-y-3">
-        <Step n={1} title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">
+          {(() => {
+            // passo 2 em lotes: Venda (patrimonial) e Serviço; linhas antigas sem lote ficam num bloco à parte (rateadas)
+            const inLot = (l: Line, lot: EconLot) => !!l.kind && lotOfKind(l.kind) === lot;
+            const byLot = (lot: EconLot | null) => f.capex.filter((l) => (lot ? inLot(l, lot) : !l.kind));
+            const put = (lot: EconLot | null, lines: Line[]) => {
+              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'servico' as DealKind) : null }));
+              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
+            };
+            const toOpex = f.mode === 'recorrente' ? (l: Line[]) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null, kind: null }))] } : x)) : undefined;
+            const legacy = byLot(null);
+            return (
+              <div className="space-y-4">
+                <section className="border border-line p-4">
+                  <CostLines title="Custo direto do Fornecimento (venda pura)" heading="Investimentos de fornecimento" hint="Equipamentos e materiais vendidos sem instalação." example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                </section>
+                <section className="border border-line p-4">
+                  <CostLines title="Custo direto da Implantação" heading="Investimentos de implantação ou instalação" hint="Obra, instalação e projeto." example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
+                </section>
+                {!!legacy.length && (
+                  <section className="border border-line p-4">
+                    <CostLines title="Investimento sem lote" heading="Investimentos sem cesta" hint="Custos comuns rateados pela receita." example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico']} frequency="unico" onOther={toOpex} />
+                  </section>
+                )}
+              </div>
+            );
+          })()}
+
+        {f.mode === 'recorrente' && (
+          <section className="border border-line p-4">
+            <CostLines title="Custo mensal" heading="Custos mensais para manter o serviço" hint="Trânsito, link de terceiro, licenças e suporte durante o contrato." example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} kinds={kinds.filter(isMonthlyKind)} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
+          </section>
+        )}
+
+        <Disclosure title="Outras despesas de entrega e taxas" total={fmtBRL(Math.max(0, parseMoney(f.extra) ?? 0))}>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
+            <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
+          </div>
+        </Disclosure>
+
+        <Disclosure title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">
           <div className="space-y-3">
             {d.items.length ? (
               <div>
@@ -816,55 +884,10 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             <FormField label={mixed ? 'Preço por mês (R$, recorrência + locação)' : f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`${mixed ? 'Produtos mensais' : 'Total dos produtos'}: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{(shownResult?.suggestedCents ?? shownResult?.suggestedMinCents) != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money((shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)!) })}>Usar o preço sugerido ({fmtBRL(shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)})</button>}</></FormField>
             </div>
           </div>
-        </Step>
-
-        <Step n={2} title="Investimento para começar" hint="Pago uma vez, antes de faturar: equipamentos, obra, instalação, projeto, frete." total={<>Total <b className="text-ink">{fmtBRL(capexTotal + Math.max(0, parseMoney(f.extra) ?? 0))}</b></>}>
-          {(() => {
-            // passo 2 em lotes: Venda (patrimonial) e Serviço; linhas antigas sem lote ficam num bloco à parte (rateadas)
-            const inLot = (l: Line, lot: EconLot) => !!l.kind && lotOfKind(l.kind) === lot;
-            const byLot = (lot: EconLot | null) => f.capex.filter((l) => (lot ? inLot(l, lot) : !l.kind));
-            const put = (lot: EconLot | null, lines: Line[]) => {
-              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'servico' as DealKind) : null }));
-              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
-            };
-            const toOpex = f.mode === 'recorrente' ? (l: Line[]) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null, kind: null }))] } : x)) : undefined;
-            const legacy = byLot(null);
-            const sub = (lot: EconLot) => linesTotal(byLot(lot));
-            return (
-              <div className="space-y-4">
-                <div>
-                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.venda} <span className="text-xs font-normal text-muted">equipamentos e materiais vendidos sem instalação, sem despesas fixas rateadas · {fmtBRL(sub('venda'))}</span></p>
-                  <CostLines title="Custo direto do Fornecimento (venda pura)" example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
-                </div>
-                <div>
-                  <p className="mb-1 flex flex-wrap items-baseline justify-between gap-2 text-sm font-semibold text-ink">{ECON_LOT_LABELS.servico} <span className="text-xs font-normal text-muted">obra, instalação, projeto: recebem o rateio das despesas fixas · {fmtBRL(sub('servico'))}</span></p>
-                  <CostLines title="Custo direto da Implantação" example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
-                </div>
-                {!!legacy.length && (
-                  <div>
-                    <p className="mb-1 text-sm font-semibold text-ink">Sem lote <span className="text-xs font-normal text-muted">(lançados antes dos lotes: rateados pela receita) · {fmtBRL(linesTotal(legacy))}</span></p>
-                    <CostLines title="Investimento sem lote" example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico']} frequency="unico" onOther={toOpex} />
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
-            <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
-          </div>
-        </Step>
-
-        {f.mode === 'recorrente' && (
-          <Step n={3} title="Custos mensais para manter o serviço" hint="Todo mês enquanto o contrato durar: trânsito, link de terceiro, licenças, suporte." total={<>Total <b className="text-ink">{fmtBRL(opexTotal)}</b>/mês</>}>
-            <CostLines title="Custo mensal" example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} kinds={kinds.filter(isMonthlyKind)} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
-          </Step>
-        )}
-
+        </Disclosure>
         <details className="border border-line p-4" open={customized}>
           <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2.5">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-surface-2 text-xs font-bold text-muted" aria-hidden>{f.mode === 'recorrente' ? 4 : 3}</span>
               <span><span className="block text-sm font-semibold text-ink">Ajustes da negociação <span className="font-normal text-muted">(opcional)</span></span><span className="block text-xs text-muted">Despesas variáveis {shown(f.commission, st.variableExpenseBp ?? 0)}% · glosa {shown(f.loss, segLoss)}% (só no fluxo de caixa){customized ? '' : ' — padrão da empresa'}</span></span>
             </span>
             <span className="text-xs font-semibold text-primary">Alterar</span>
@@ -877,7 +900,30 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
         </details>
       </div>
 
-      {d.editable && <div className="flex justify-end"><Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button></div>}
+      {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois do último cálculo salvo. Confira e salve novamente antes de pedir aprovação.</Notice>}
+      {invalid && <Notice tone="warning">Confira os campos destacados para calcular e salvar a viabilidade.</Notice>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button type="button" disabled={!shownResult} aria-expanded={basicOpen} onClick={() => setBasicOpen(!basicOpen)} className="text-sm font-semibold text-primary hover:underline disabled:opacity-50">{basicOpen ? 'Recolher fluxo de caixa e cálculo básico' : 'Ver fluxo de caixa e cálculo básico'}</button>
+        {d.editable && <Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button>}
+      </div>
+      {basicOpen && shownResult && <div className="space-y-4" aria-label="Fluxo de caixa e cálculo básico">
+        {shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) &&         <section className="border border-line p-4" aria-labelledby="ec-flow">
+          <h3 id="ec-flow" className="text-sm font-semibold text-ink">Fluxo de caixa</h3>
+          <p className="mb-3 text-xs text-muted">Início = investimento; depois, o que sobra a cada mês. A linha mostra quanto já voltou para o caixa.</p>
+          <CashflowChart labels={shownResult.cashflow.map((_, i) => (i === 0 ? 'Início' : `M${i}`))} {...flowSeries(shownResult.cashflow)} ariaLabel="Fluxo de caixa mensal da oportunidade" height={220} />
+        </section>}
+        <BasicCalculation r={shownResult} onAdvanced={() => setAdvancedOpen(true)} />
+      </div>}
+      {shownResult && <AdvancedCalculation r={shownResult} settings={st} open={advancedOpen} onClose={() => setAdvancedOpen(false)} />}
+      {d.items.length > 0 && <div className="space-y-3">
+        <ProductTotals r={shownB2g} />
+        <Disclosure title="Preço sugerido por produto" hint="Abra para conferir os produtos, pesos, preços, margens e simular lances.">
+          <B2gPanel r={shownB2g} f={f.b2g} set={(p) => set({ b2g: { ...f.b2g, ...p } })} settings={st} disabled={dis} />
+        </Disclosure>
+      </div>}
+      <Disclosure key={d.status} title="Aprovação da viabilidade" total={<Chip tone={STATUS_LOOK[d.status].tone}>{STATUS_LOOK[d.status].label}</Chip>} defaultOpen={d.status === 'em_decisao' || d.status === 'devolvida'}>
+        <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable && d.result?.priceSource !== 'sugerido'} />
+      </Disclosure>
       {!!d.history.length && (
         <details className="text-sm">
           <summary className="cursor-pointer font-semibold text-ink">Histórico de cálculos ({d.history.length})</summary>

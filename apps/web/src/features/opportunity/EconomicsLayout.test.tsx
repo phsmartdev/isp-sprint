@@ -1,0 +1,115 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { emptyEconInput, financeEngine, type EconInput, type EconItem, type EconSettings } from '@isp/domain';
+import { EconomicsResult, EconomicsTab } from './Economics';
+import { api } from '../../lib/api';
+import { moneyHidden, setMoneyHidden } from '../../lib/privacy';
+
+vi.mock('../../lib/api', async (original) => ({ ...await original<typeof import('../../lib/api')>(), api: vi.fn() }));
+const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0 };
+const input: EconInput = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', impact: 'material', qtyMilli: 1000, unitCents: 90000 }, { description: 'Implantação', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 220000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] };
+const items: EconItem[] = [
+  { description: 'Venda', kind: 'venda', revenueCents: 200000, doc: { name: 'NF-e', percentBp: 1000, fixedCents: 0, complete: true } },
+  { description: 'Instalação', kind: 'servico', revenueCents: 100000, doc: { name: 'NFS-e', percentBp: 1500, fixedCents: 0, complete: true } },
+  { description: 'Link', kind: 'recorrencia', revenueCents: 10000, doc: { name: 'NFS-e', percentBp: 1500, fixedCents: 0, complete: true } },
+];
+const calculate = (value = input) => financeEngine({ input: value, items, settings, publicSector: false });
+let hidden: boolean;
+const clients: QueryClient[] = [];
+beforeEach(() => {
+  hidden = moneyHidden(); setMoneyHidden(false); vi.mocked(api).mockReset();
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+});
+afterEach(() => { cleanup(); clients.splice(0).forEach((c) => c.clear()); setMoneyHidden(hidden); vi.unstubAllGlobals(); });
+
+function setup() {
+  const requests: EconInput[] = [];
+  let data = { input, settings, items, publicSector: false, saved: { updatedAt: '2026-11-18T12:00:00Z' }, result: calculate(), stale: false, editable: true, emitter: null, financeHidden: false, modelOverrides: [], settingsVersion: { id: 'settings', validFrom: '2026-11-18' }, status: 'calculada', canDecide: false, decisions: [], history: [] };
+  vi.mocked(api).mockImplementation(async (url, options) => {
+    if (url === '/cost-items') return { items: [] } as never;
+    if (options?.method === 'PUT') {
+      const body = options.body as EconInput;
+      requests.push(body);
+      data = { ...data, input: body, result: calculate(body) };
+      return { result: data.result } as never;
+    }
+    return data as never;
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); clients.push(client);
+  render(<QueryClientProvider client={client}><EconomicsTab oppId="opp" /></QueryClientProvider>);
+  return requests;
+}
+
+describe('organização da viabilidade', () => {
+  it('mantém os indicadores laterais e abre o detalhamento em janela', () => {
+    render(<EconomicsResult r={calculate()} settings={settings} compact />);
+    expect(screen.getByText('Base dos indicadores')).toBeTruthy();
+    expect(screen.getByText('Base da aprovação')).toBeTruthy();
+    expect(screen.queryByText(/Vigência fiscal.*No preço sugerido/)).toBeNull();
+    expect(screen.queryByLabelText('Preço por cesta')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));
+    const dialog = screen.getByRole('dialog', { name: 'Cálculo avançado' });
+    const entries = within(dialog).getByRole('button', { name: 'Mostrar Entradas' });
+    expect(entries.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(entries);
+    expect(entries.getAttribute('aria-expanded')).toBe('true');
+    expect(within(dialog).getByRole('button', { name: 'Recolher Desdobramento financeiro' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('reordena os custos, preserva campos recolhidos e mantém salvar e cálculo avançado', async () => {
+    const requests = setup();
+    const supply = await screen.findByRole('heading', { name: 'Investimentos de fornecimento' });
+    const implantation = screen.getByRole('heading', { name: 'Investimentos de implantação ou instalação' });
+    const monthly = screen.getByRole('heading', { name: 'Custos mensais para manter o serviço' });
+    const sale = screen.getByRole('heading', { name: 'A venda' });
+    expect(supply.compareDocumentPosition(implantation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(implantation.compareDocumentPosition(monthly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(monthly.compareDocumentPosition(sale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Base dos indicadores')).toBeNull();
+    const section = supply.closest('section')!;
+    expect(within(section).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(section).getByRole('button', { name: 'Adicionar outro' }));
+    const description = within(section).getByLabelText('Custo direto do Fornecimento (venda pura): descrição 2');
+    fireEvent.change(description, { target: { value: 'Cabo adicional' } });
+    fireEvent.change(within(section).getByLabelText('Custo direto do Fornecimento (venda pura): valor 2'), { target: { value: '50,00' } });
+    fireEvent.change(within(section).getByLabelText('Custo direto do Fornecimento (venda pura): impacta o quê 2'), { target: { value: 'material' } });
+    fireEvent.click(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' }));
+    expect(within(section).queryByRole('textbox')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar A venda' }));
+    fireEvent.change(screen.getByLabelText('Vigência (meses)'), { target: { value: '24' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Recolher A venda' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade econômica' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.termMonths).toBe(24);
+    expect(requests[0]!.capex.find((c) => c.description === 'Cabo adicional')).toMatchObject({ unitCents: 5000, kind: 'venda', impact: 'material' });
+    expect(requests[0]!.capex.find((c) => c.description === 'Equipamento')!.unitCents).toBe(90000);
+    fireEvent.click(screen.getByRole('button', { name: 'Ver fluxo de caixa e cálculo básico' }));
+    const basic = screen.getByLabelText('Fluxo de caixa e cálculo básico');
+    fireEvent.click(within(basic).getByRole('button', { name: 'Ver cálculo avançado' }));
+    expect(screen.getByRole('dialog', { name: 'Cálculo avançado' })).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(within(section).getByRole('button', { name: 'Mostrar Custo direto do Fornecimento (venda pura)' }));
+    expect((within(section).getByLabelText('Custo direto do Fornecimento (venda pura): descrição 2') as HTMLInputElement).value).toBe('Cabo adicional');
+  });
+
+  it('permite importar e colar com a listagem recolhida e abre os itens incluídos', async () => {
+    setup();
+    const heading = await screen.findByRole('heading', { name: 'Investimentos de fornecimento' });
+    const section = heading.closest('section')!;
+    const file = new File([''], 'custos.csv', { type: 'text/csv' });
+    Object.defineProperty(file, 'text', { value: async () => 'Descrição;Unidade;Quantidade;Valor unitário;Impacta o quê?\nCabo CSV;un;2;10,00;Material/Equipamento' });
+    fireEvent.change(within(section).getByLabelText('Importar planilha: Custo direto do Fornecimento (venda pura)'), { target: { files: [file] } });
+    await waitFor(() => expect(within(section).getByDisplayValue('Cabo CSV')).toBeTruthy());
+    expect(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' })).toBeTruthy();
+    fireEvent.click(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' }));
+    fireEvent.click(within(section).getByRole('button', { name: 'Colar do Excel' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Itens colados'), { target: { value: 'Descrição\tUnidade\tQuantidade\tValor unitário\nCabo colado\tun\t3\t20,00' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Incluir itens' }));
+    await waitFor(() => expect(within(section).getByDisplayValue('Cabo colado')).toBeTruthy());
+    expect(within(section).getByDisplayValue('Cabo CSV')).toBeTruthy();
+  });
+});
