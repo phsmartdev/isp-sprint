@@ -56,7 +56,9 @@ describe('compatibilidade: no mesmo preço, o fluxo e os indicadores seguem o mo
       const args = { ...args0, input: { ...args0.input, commissionBp: null }, settings: { ...args0.settings, variableExpenseBp: dv } };
       const P = args.input.priceCents ?? (args.items.length ? args.items[0]!.revenueCents : null);
       if (P == null) continue;
-      const a = legacyEngine({ ...args0, input: { ...args0.input, commissionBp: null, priceCents: P }, items: lotTop(args.items) });
+      // Referência anterior recebe os 35% como desembolso inicial separado, sem aplicar contingência novamente.
+      const serviceExtra = args.input.mode === 'recorrente' && args.items.length ? Math.round(args.input.capex.filter((l) => l.impact !== 'entrega' && l.impact !== 'taxa_venda').reduce((t, l) => t + Math.round(l.qtyMilli * l.unitCents / 1000), 0) * 0.35) : 0;
+      const a = legacyEngine({ ...args0, input: { ...args0.input, extraInitialCents: args0.input.extraInitialCents + serviceExtra, commissionBp: null, priceCents: P }, items: lotTop(args.items) });
       const b = financeEngineDetailed({ ...args, input: { ...args.input, priceCents: P } }).result;
       const ctx = `cenário ${k}: ${JSON.stringify(args.input.mode)}`;
       where = ctx;

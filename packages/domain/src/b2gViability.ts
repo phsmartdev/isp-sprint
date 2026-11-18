@@ -14,7 +14,7 @@
  * Decisão global, com alerta por produto (nenhum produto negativo compensado por outro). Alerta, nunca bloqueio.
  * Dinheiro em centavos; percentuais em frações (0,35 = 35%).
  */
-import { applyFiscalEnvelope, type CostLine, type DealKind, type EngineArgs } from './finance';
+import { serviceInvestmentExtra, applyFiscalEnvelope, type CostLine, type DealKind, type EngineArgs } from './finance';
 
 export type CostProfile = 'fornecimento' | 'implantacao' | 'instalacao';
 export const COST_PROFILES: CostProfile[] = ['fornecimento', 'instalacao', 'implantacao'];
@@ -115,7 +115,7 @@ export type B2gResult = {
   verdict: 'viavel' | 'abaixo_minimo' | 'produto_abaixo' | 'produto_negativo' | 'sem_minimo' | 'bloqueado';
   alerts: string[]; notes: string[];
   costs: ReturnType<typeof b2gCosts>;
-  baskets?: { profile: CostProfile; investmentCents: number; monthlyCostCents: number; costCents: number; allocatedCents: number }[];
+  baskets?: { profile: CostProfile; investmentCents: number; baseCents?: number; contingencyCents?: number; serviceInvestmentCents?: number; monthlyCostCents: number; costCents: number; allocatedCents: number }[];
 };
 
 function chain(P: number, cost: number, a: number, fixed: number, p: B2gParams, overheadPct: number) {
@@ -141,13 +141,14 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   const alerts: string[] = [], notes: string[] = [];
   const blocked = products.filter((x) => !x.doc).map((x) => ({ id: x.id, description: x.description }));
   const kinds = { unica: products.some((x) => revenueOf(x.kind) === 'unica'), recorrente: products.some((x) => revenueOf(x.kind) === 'recorrente') };
-  const initialBaskets = COST_PROFILES.map((profile) => { const investmentCents = Math.round((costs.unica[profile] + costs.recorrente[profile]) * (1 + bp(p.contingencyCapexBp))); const monthlyCostCents = profile === 'implantacao' ? Math.round(costs.mensal * (1 + bp(p.contingencyOpexBp))) : 0; return { profile, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * Math.max(1, p.termMonths), allocatedCents: 0 }; });
+  const investmentOf = (baseCents: number, profile: CostProfile) => Math.round(baseCents * (1 + bp(p.contingencyCapexBp))) + (profile === 'fornecimento' ? 0 : serviceInvestmentExtra(baseCents));
+  const initialBaskets = COST_PROFILES.map((profile) => { const baseCents = costs.unica[profile] + costs.recorrente[profile]; const contingencyCents = Math.round(baseCents * bp(p.contingencyCapexBp)); const serviceInvestmentCents = profile === 'fornecimento' ? 0 : serviceInvestmentExtra(baseCents); const investmentCents = investmentOf(baseCents, profile); const monthlyCostCents = profile === 'implantacao' ? Math.round(costs.mensal * (1 + bp(p.contingencyOpexBp))) : 0; return { profile, baseCents, contingencyCents, serviceInvestmentCents, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * Math.max(1, p.termMonths), allocatedCents: 0 }; });
   const empty: B2gResult = { mode: p.mode, blocked, kinds, unica: null, recorrente: null, global: { priceCents: 0, costCents: initialBaskets.reduce((t, b) => t + b.costCents, 0) + costs.semCesta + costs.variavel, markup: null, netCents: 0, netPct: null, floorCents: null, estimatedCents: 0, maxDiscountPct: null }, byDoc: [], verdict: 'bloqueado', alerts, notes, costs, baskets: initialBaskets };
   if (blocked.length) { alerts.push(`${blocked.length} produto(s) sem documento fiscal: informe em Produtos e serviços para calcular (sem documento, o produto ficaria sem tributos).`); return empty; }
   if (!products.length) return { ...empty, verdict: 'sem_minimo' };
 
   const ir = bp(p.incomeTaxBp), v = bp(p.variableBp), r = bp(p.riskBp), f = bp(p.overheadBp), Lmin = p.netMinBp == null ? null : bp(p.netMinBp);
-  const capC = 1 + bp(p.contingencyCapexBp), opC = 1 + bp(p.contingencyOpexBp);
+  const opC = 1 + bp(p.contingencyOpexBp);
   if (Lmin == null) alerts.push('Configure a margem líquida mínima em Configurações → Viabilidade: sem ela, o piso não é calculado.');
   const target = p.netTargetBp != null ? bp(p.netTargetBp) : null;
   if (target != null && Lmin != null && target < Lmin) alerts.push(`A margem líquida alvo (${(target * 100).toFixed(1)}%) está abaixo da mínima das Configurações (${(Lmin * 100).toFixed(1)}%).`);
@@ -174,7 +175,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     for (const prof of COST_PROFILES) {
       const ps = unicaP.filter((x) => x.profile === prof);
       if (!ps.length) { if (costs.unica[prof]) alerts.push(`Custo de ${COST_PROFILE_SHORT[prof]} (venda única) sem produto nessa cesta.`); continue; }
-      const cost = Math.round(costs.unica[prof] * capC);
+      const cost = investmentOf(costs.unica[prof], prof);
       const dist = distribute(ps, cost, p.weights);
       const oh = prof === 'fornecimento' ? 0 : f;
       // margem de contribuição: manual por cesta ou target seek (mesma ML alvo em cada cesta)
@@ -219,7 +220,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   // ------------------------------------------------------------------ recorrente
   let recorrente: B2gBlock | null = null;
   if (recP.length) {
-    const impl = Math.round(costs.recorrente.implantacao * capC), mat = Math.round(costs.recorrente.fornecimento * capC);
+    const impl = investmentOf(costs.recorrente.implantacao, 'implantacao'), mat = investmentOf(costs.recorrente.fornecimento, 'fornecimento');
     // despesas fixas rateadas: % da mensalidade (só produtos de Implantação), não entram no investimento
     const overheadOnCost = 0;
     const ohOf = (x: B2gProduct) => (x.profile === 'implantacao' ? f : 0);
@@ -284,9 +285,12 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   const revOf = (l: B2gLine) => (l.priceCents ?? 0) * (l.revenue === 'recorrente' ? N : 1);
   const estOf = (l: B2gLine) => l.estimatedCents * (l.revenue === 'recorrente' ? N : 1);
   const baskets = COST_PROFILES.map((profile) => {
-    const investmentCents = Math.round((costs.unica[profile] + costs.recorrente[profile]) * capC);
+    const baseCents = costs.unica[profile] + costs.recorrente[profile];
+    const contingencyCents = Math.round(baseCents * bp(p.contingencyCapexBp));
+    const serviceInvestmentCents = profile === 'fornecimento' ? 0 : serviceInvestmentExtra(baseCents);
+    const investmentCents = investmentOf(baseCents, profile);
     const monthlyCostCents = profile === 'implantacao' ? Math.round(costs.mensal * opC) : 0;
-    return { profile, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * N, allocatedCents: all.filter((l) => l.profile === profile).reduce((t, l) => t + l.costCents, 0) };
+    return { profile, baseCents, contingencyCents, serviceInvestmentCents, investmentCents, monthlyCostCents, costCents: investmentCents + monthlyCostCents * N, allocatedCents: all.filter((l) => l.profile === profile).reduce((t, l) => t + l.costCents, 0) };
   });
   const priceT = all.reduce((t, l) => t + revOf(l), 0), costT = baskets.reduce((t, b) => t + b.costCents, 0) + costs.variavel;
   const netT = all.reduce((t, l) => t + (l.netCents ?? 0), 0) - Math.max(0, costT - all.reduce((t, l) => t + l.costCents, 0));
