@@ -22,7 +22,7 @@ import { todayIn } from '../services/vacations';
 import { playlistInfo, videoInfo, type VideoInfo } from '../services/youtube';
 import {
   audOf, canEditTrack, canManageAcademy, contentsById, decidesVersion, eligibleUserIds, followedUserIds, metaOf, peopleContext, progressOf,
-  stageFor, statusOf, trackEvent, usersWithProfiles, versionMeta, versionSnap, workingSnapshot, type TrackRow, type VersionRow,
+  markRead, stageFor, statusOf, trackEvent, usersWithProfiles, versionMeta, versionSnap, workingSnapshot, type TrackRow, type VersionRow,
 } from '../services/academy';
 
 const A = { tag: 'Academia', anyAuthenticated: true as const };
@@ -182,6 +182,7 @@ export const academyRoutes = [
       const versions = await app.db.select().from(s.academyTrackVersions).where(eq(s.academyTrackVersions.trackId, t.id)).orderBy(desc(s.academyTrackVersions.number));
       const open = versions.find((v) => v.status === 'revisao_gerencia' || v.status === 'homologacao_diretoria') ?? null;
       if (!edit && !(open && decidesVersion(auth, open))) throw forbidden('Você não edita nem decide esta trilha.');
+      await markRead(app.db, auth.userId, t.id);
       const snap = await workingSnapshot(app.db, t.id);
       const contents = await contentsById(app.db, snapshotLessons(snap).map((l) => l.contentId));
       const events = await app.db.select({ e: s.academyTrackEvents, actor: s.users.name }).from(s.academyTrackEvents).leftJoin(s.users, eq(s.users.id, s.academyTrackEvents.actorId)).where(eq(s.academyTrackEvents.trackId, t.id)).orderBy(desc(s.academyTrackEvents.createdAt)).limit(100);
@@ -463,6 +464,7 @@ export const academyRoutes = [
       if (!(await canSee(app.db, auth, t))) throw forbidden('Esta trilha não está disponível para você.');
       const ls = await learnerState(app.db, auth, t);
       if (!ls) throw notFound('Trilha sem versão publicada.');
+      await markRead(app.db, auth.userId, t.id);
       const n = await names(app.db, auth);
       const preTracks = t.prerequisiteIds.length ? await app.db.select({ id: s.academyTracks.id, title: s.academyTracks.title }).from(s.academyTracks).where(inArray(s.academyTracks.id, t.prerequisiteIds)) : [];
       const preDone = t.prerequisiteIds.length ? await app.db.select({ trackId: s.academyEnrollments.trackId, done: s.academyEnrollments.completedAt }).from(s.academyEnrollments).where(and(eq(s.academyEnrollments.userId, auth.userId), inArray(s.academyEnrollments.trackId, t.prerequisiteIds))) : [];

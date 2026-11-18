@@ -35,7 +35,7 @@ const BLANK: Meta = { title: '', description: '', keywords: [], type: 'procedime
 const CONTEXTS: [string, string][] = [['crm:licitacao', 'CRM · Licitação'], ['crm:adesao_ata', 'CRM · Adesão à Ata'], ['crm:consumo_contrato', 'CRM · Consumo de Contrato'], ['crm:venda_consultiva', 'CRM · Venda Consultiva'], ['contratos:cadastro', 'Contratos · Cadastro'], ['contratos:renovacao', 'Contratos · Renovação'], ['contratos:faturamento', 'Contratos · Faturamento'], ['contratos:encerramento', 'Contratos · Encerramento'], ['projetos', 'Projetos'], ['marketing', 'Marketing'], ['gestao_times', 'Gestão de Times']];
 const uid = () => `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-function Multi({ label, options, value, onChange }: { label: string; options: { id: string; label: string }[]; value: string[]; onChange: (v: string[]) => void }) {
+export function Multi({ label, options, value, onChange }: { label: string; options: { id: string; label: string }[]; value: string[]; onChange: (v: string[]) => void }) {
   return (
     <fieldset><legend className="mb-1 text-sm font-semibold text-ink">{label}</legend>
       <div className="flex max-h-40 flex-wrap gap-1.5 overflow-auto">{options.map((o) => { const on = value.includes(o.id); return <button key={o.id} type="button" aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])} className={clsx('border px-2.5 py-1 text-xs font-semibold', on ? 'border-primary bg-primary text-white' : 'border-line text-ink hover:border-primary')}>{o.label}</button>; })}</div>

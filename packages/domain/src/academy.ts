@@ -188,7 +188,7 @@ export function lockedLessons(order: readonly LessonState[], sequential: boolean
 
 // ------------------------------------------------------------------ estrutura publicada (fotografia da versão)
 export type SnapLesson = { id: string; title: string; description: string | null; contentId: string; kind: ContentKind; externalId: string | null; url: string | null; durationSeconds: number | null; thumbnailUrl: string | null; required: boolean; minWatchPct: number | null };
-export type SnapModule = { id: string; title: string; lessons: SnapLesson[] };
+export type SnapModule = { id: string; title: string; playlistId?: string | null; lessons: SnapLesson[] };
 export type SnapCourse = { id: string; title: string; description: string | null; minWatchPct: number | null; modules: SnapModule[] };
 export type TrackSnapshot = { courses: SnapCourse[] };
 export const snapshotLessons = (s: TrackSnapshot) => s.courses.flatMap((c) => c.modules.flatMap((m) => m.lessons.map((l) => ({ ...l, courseId: c.id, moduleId: m.id, courseMinPct: c.minWatchPct }))));

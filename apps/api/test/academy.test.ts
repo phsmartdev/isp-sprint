@@ -125,7 +125,7 @@ describe('Academia — Fase 1', () => {
     ok(await carlos.post(`/academia/versoes/${sub.id}/decidir`, { decision: 'aprovar' }));
     // aviso no sino de quem enviou
     const n = (await ctx.db.execute<{ type: string }>(sql`select type from governance_events where entity = 'academia' and entity_id = ${trackId} order by created_at`)).rows.map((r) => r.type);
-    expect(n).toEqual(['academia_enviada', 'academia_publicada']);
+    expect(n).toEqual(['enviada', 'publicada']);
     expect(ok(await lucas.get('/academia/catalogo')).json().items.some((x: { id: string }) => x.id === trackId)).toBe(true);
     expect(ok(await mariana.get('/academia/catalogo')).json().items.some((x: { id: string }) => x.id === trackId)).toBe(false);
     expect((await mariana.get(`/academia/trilhas/${trackId}`)).statusCode).toBe(403);

@@ -57,7 +57,7 @@ export async function workingSnapshot(db: DbOrTx, trackId: string): Promise<Trac
     courses: courses.map((c) => ({
       id: c.id, title: c.title, description: c.description, minWatchPct: c.minWatchPct,
       modules: modules.filter((m) => m.courseId === c.id).map((m) => ({
-        id: m.id, title: m.title,
+        id: m.id, title: m.title, playlistId: m.playlistId,
         lessons: lessons.filter((x) => x.l.moduleId === m.id).map(({ l, c: ct }) => ({
           id: l.id, title: l.title || ct.title, description: l.description ?? ct.description, contentId: ct.id, kind: ct.kind as 'youtube_video' | 'link',
           externalId: ct.externalId, url: ct.url, durationSeconds: ct.durationSeconds, thumbnailUrl: ct.thumbnailUrl, required: l.required, minWatchPct: l.minWatchPct,
@@ -89,7 +89,7 @@ export async function progressOf(db: DbOrTx, userId: string, trackId: string, sn
     const state = (ct?.state ?? 'desconhecido') as ContentState;
     return {
       lessonId: l.id, required: l.required, available: l.kind === 'link' || playableState(state), durationSeconds: dur, watchedSeconds: watched, done: !!p?.completedAt,
-      pct: dur ? Math.min(100, Math.round((watched / dur) * 1000) / 10) : 0, lastPositionSeconds: Math.round((p?.lastPositionMs ?? 0) / 1000),
+      pct: dur ? Math.min(100, Math.round((watched / dur) * 1000) / 10) : 0, lastPositionSeconds: Math.floor((p?.lastPositionMs ?? 0) / 1000),
       minPct: effectiveMinPct(l.minWatchPct, l.courseMinPct, meta.minWatchPct), state,
     };
   });
@@ -139,8 +139,11 @@ export const statusOf = (e: { completedAt: Date | null; dueOn: string | null }, 
 export async function trackEvent(db: DbOrTx, auth: AuthContext, trackId: string, versionId: string | null, type: string, note: string | null, notify: (string | null | undefined)[] = [], title?: string) {
   await db.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId, versionId, type, note, actorId: auth.userId });
   const to = [...new Set(notify.filter((x): x is string => !!x && x !== auth.userId))];
-  if (to.length) await db.insert(s.governanceEvents).values({ tenantId: auth.tenantId, entity: 'academia', entityId: trackId, type, notify: to, payload: { title: title ?? note ?? '' }, actorId: auth.userId });
+  if (to.length) await db.insert(s.governanceEvents).values({ tenantId: auth.tenantId, entity: 'academia', entityId: trackId, type: type.replace(/^academia_/, ''), notify: to, payload: { title: title ?? note ?? '' }, actorId: auth.userId });
 }
+/** Marca os avisos da trilha como lidos (sino) ao abrir a trilha ou o editor. */
+export const markRead = (db: DbOrTx, userId: string, trackId: string) =>
+  db.insert(s.governanceReads).values({ userId, entityId: trackId }).onConflictDoUpdate({ target: [s.governanceReads.userId, s.governanceReads.entityId], set: { lastReadAt: new Date() } });
 export async function usersWithProfiles(db: DbOrTx, tenantId: string, profiles: string[]) {
   const r = await db.execute<{ id: string }>(sql`select distinct u.id from users u join user_roles ur on ur.user_id = u.id join roles r on r.id = ur.role_id where u.tenant_id = ${tenantId} and u.active and r.key in ${sql.raw(`(${profiles.map((p) => `'${p.replace(/'/g, '')}'`).join(',')})`)}`);
   return r.rows.map((x) => x.id);

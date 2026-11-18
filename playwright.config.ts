@@ -10,6 +10,7 @@ const API_PORT = 3334;
 const WEB_PORT = 5174;
 const FAKE_GOOGLE_PORT = 3399;
 const FAKE_GLPI_PORT = 3398;
+const FAKE_YOUTUBE_PORT = 3397;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -43,10 +44,17 @@ export default defineConfig({
       env: { FAKE_GLPI_PORT: String(FAKE_GLPI_PORT) },
     },
     {
+      // YouTube SIMULADO (oEmbed) para a Academia; o player do navegador é simulado no próprio teste
+      command: `pnpm --filter @isp/api exec tsx test/fakeYoutubeServer.ts`,
+      url: `http://127.0.0.1:${FAKE_YOUTUBE_PORT}/__test/health`,
+      reuseExistingServer: false,
+      env: { FAKE_YOUTUBE_PORT: String(FAKE_YOUTUBE_PORT) },
+    },
+    {
       command: `pnpm --filter @isp/api exec tsx src/server.ts`,
       url: `http://127.0.0.1:${API_PORT}/health/ready`,
       reuseExistingServer: false,
-      env: { DATABASE_URL: TEST_DB, API_PORT: String(API_PORT), WEB_ORIGIN: `http://localhost:${WEB_PORT}`, LOG_LEVEL: 'warn', LOGIN_RATE_LIMIT_PER_MINUTE: '200', GOOGLE_CLIENT_ID: 'e2e.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'e2e-secret', GOOGLE_FAKE_BASE: `http://127.0.0.1:${FAKE_GOOGLE_PORT}`, PUBLIC_URL: `http://localhost:${WEB_PORT}` },
+      env: { DATABASE_URL: TEST_DB, API_PORT: String(API_PORT), WEB_ORIGIN: `http://localhost:${WEB_PORT}`, LOG_LEVEL: 'warn', LOGIN_RATE_LIMIT_PER_MINUTE: '200', GOOGLE_CLIENT_ID: 'e2e.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'e2e-secret', GOOGLE_FAKE_BASE: `http://127.0.0.1:${FAKE_GOOGLE_PORT}`, PUBLIC_URL: `http://localhost:${WEB_PORT}`, YOUTUBE_OEMBED_URL: `http://127.0.0.1:${FAKE_YOUTUBE_PORT}/oembed` },
     },
     {
       command: `pnpm --filter @isp/web exec vite --host 127.0.0.1`,

@@ -14,6 +14,8 @@ import { useDebounced, useUrlState } from '../../lib/hooks';
 import { Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { ConfirmDialog, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
+import { MyLearning, TrackCatalog } from './academy/Learn';
+import { AcademyAdmin, useAcademyGestao } from './academy/Manage';
 import { CatIcon, ICON_CHOICES, PlaybookCard, ReviewTag, type Card, type Category } from '../../features/playbooks/shared';
 
 type Home = {
@@ -28,7 +30,7 @@ export type Setup = {
   teams: { id: string; name: string }[]; costCenters: { id: string; code: string; name: string; teamId: string | null }[]; users: { id: string; name: string }[];
   can: { categories: boolean; create: boolean };
 };
-type Tab = 'biblioteca' | 'aprovacoes' | 'gestao' | 'configuracoes';
+type Tab = 'biblioteca' | 'trilhas' | 'aprendizagem' | 'academia' | 'aprovacoes' | 'gestao' | 'configuracoes';
 
 export const usePbSetup = () => useQuery({ queryKey: ['playbooks', 'setup'], queryFn: () => api<Setup>('/playbooks/setup'), staleTime: 60_000 });
 
@@ -56,8 +58,13 @@ export function PlaybooksPage() {
   const d = home.data;
   const nav = useNavigate();
   const toDecide = pend.data?.items.filter((x) => x.canDecide).length ?? 0;
+  const ac = useAcademyGestao();
+  const acDecide = ac.data?.items.filter((x) => x.can.decide).length ?? 0;
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: 'biblioteca', label: 'Biblioteca' },
+    { key: 'biblioteca', label: 'Biblioteca de Playbooks' },
+    { key: 'trilhas', label: 'Trilhas de Aprendizagem' },
+    { key: 'aprendizagem', label: 'Minha Aprendizagem' },
+    ...(ac.data && (ac.data.can.create || ac.data.can.follow || ac.data.items.length) ? [{ key: 'academia' as Tab, label: 'Academia — Gestão', count: acDecide || undefined }] : []),
     ...(d?.can.manage || pend.data?.items.length ? [{ key: 'aprovacoes' as Tab, label: 'Aprovações', count: toDecide || undefined }] : []),
     ...(d?.can.create || d?.can.manage ? [{ key: 'gestao' as Tab, label: 'Gestão' }] : []),
     ...(d?.can.manage ? [{ key: 'configuracoes' as Tab, label: 'Configurações' }] : []),
@@ -133,6 +140,9 @@ export function PlaybooksPage() {
           )}
         </>
       )}
+      {tab === 'trilhas' && <TrackCatalog />}
+      {tab === 'aprendizagem' && <MyLearning />}
+      {tab === 'academia' && <AcademyAdmin />}
       {tab === 'aprovacoes' && <Approvals />}
       {tab === 'gestao' && <Manage />}
       {tab === 'configuracoes' && <Settings />}
