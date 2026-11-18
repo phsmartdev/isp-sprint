@@ -47,10 +47,10 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.5.0';
+export const ENGINE_VERSION = 'FINANCE-3.6.0';
 /** Acréscimo de investimento dos serviços; independente de contingência, margem e despesas fixas. */
 export const SERVICE_INVESTMENT_BP = 3500;
-export const serviceInvestmentExtra = (baseCents: number) => Math.round(baseCents * SERVICE_INVESTMENT_BP / 10_000);
+export const serviceInvestmentExtra = (baseCents: number, serviceCostBp?: number | null) => Math.round(baseCents * (serviceCostBp ?? SERVICE_INVESTMENT_BP) / 10_000);
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -67,6 +67,7 @@ export type EconSettings = {
   /** c: comissão padrão sobre a receita bruta */ commissionBp: number;
   /** g: perda esperada / glosa padrão por segmento */ lossPrivateBp: number; lossPublicBp: number;
   /** contingência sobre o investimento inicial e sobre os custos mensais */ contingencyCapexBp: number; contingencyOpexBp: number;
+  /** Inferência sobre o investimento-base dos serviços; padrão 35% em versões antigas. */ serviceCostBp?: number | null;
   /** D_alvo por segmento (meses), comparado ao payback descontado */ paybackMaxPrivate: number; paybackMaxPublic: number;
   /** Trava: venda fora da política não vai para aprovação */ blockOutsidePolicy: boolean;
   /** despesas fixas rateadas (estrutura, administrativo) em % da receita bruta → margem operacional; ausente em versões antigas */ overheadBp?: number | null;
@@ -88,7 +89,7 @@ export type EconSettings = {
 };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
-  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : []), ...(s.netMarginTargetBp != null ? [['Margem líquida alvo', s.netMarginTargetBp] as const] : []), ...(s.netMarginMinBp != null ? [['Margem líquida mínima', s.netMarginMinBp] as const] : []), ...(s.netMarginMaxBp != null ? [['Margem líquida máxima', s.netMarginMaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.serviceCostBp != null ? [['Inferência custo de serviço', s.serviceCostBp] as const] : []), ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : []), ...(s.netMarginTargetBp != null ? [['Margem líquida alvo', s.netMarginTargetBp] as const] : []), ...(s.netMarginMinBp != null ? [['Margem líquida mínima', s.netMarginMinBp] as const] : []), ...(s.netMarginMaxBp != null ? [['Margem líquida máxima', s.netMarginMaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
   for (const [k, v] of [['Teto da margem', s.marginMaxBp], ['Sugestão de margem', s.marginSuggestedBp], ['TMA anual', s.tmaAnnualBp], ['Inflação anual', s.inflationAnnualBp], ['Inadimplência', s.badDebtBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 100_000)) e.push(`${k} inválida.`);
   if (s.marginMaxBp != null && s.marginMaxBp < s.marginTargetBp) e.push('O teto da margem precisa ser maior ou igual ao piso.');
   if (s.netMarginMinBp != null && s.netMarginMaxBp != null && s.netMarginMaxBp <= s.netMarginMinBp) e.push('A margem líquida máxima precisa ser maior que a mínima.');
@@ -238,7 +239,7 @@ export type EconResult = {
   fixedTaxCents: number;
   /** I (investimento) e O (custo mensal) já com contingência; as bases e as contingências vêm separadas */
   initialCents: number; monthlyCostCents: number;
-  capexBaseCents: number; capexContingencyCents: number; serviceInvestmentCents?: number; opexBaseCents: number; opexContingencyCents: number;
+  capexBaseCents: number; capexContingencyCents: number; serviceInvestmentCents?: number; serviceCostBp?: number; opexBaseCents: number; opexContingencyCents: number;
   /** (v2) despesas variáveis em R$ de valor único (entrega, taxa fixa de venda): sem contingência; investimento total = I + E */
   variableFixedCents?: number; investmentCents?: number;
   /** N meses projetados (vigência limitada ao horizonte máximo) · Dalvo teto de payback · D payback do vendedor · d mês do recebimento */
@@ -753,7 +754,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   const opexBase = rec ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
   const serviceItems = args.items.length > 0 && args.items.every((i) => (i.kind ?? (rec ? 'recorrencia' : 'venda')) !== 'venda');
   const serviceBase = inp.capex.filter((l) => !isVariableFixed(l.impact) && (l.kind ? l.kind !== 'venda' : serviceItems)).reduce((t, l) => t + costLineTotal(l), 0);
-  const serviceInvestmentCents = serviceInvestmentExtra(serviceBase);
+  const serviceInvestmentCents = serviceInvestmentExtra(serviceBase, st.serviceCostBp);
   const invEstimate = capexBase * (1 + bp(st.contingencyCapexBp)) + serviceInvestmentCents + E; // só para os avisos de prazo
   if (!rec && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
   // tributos por lote: em cada lote (Venda / Serviço) vale o documento fiscal de maior tributo entre os produtos do lote;
@@ -953,7 +954,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
     rates: { a, c, g, m, r, b, glosa, badDebt, bMarkup: bMk, mMin, mMax, inflationMonthly: inflM, tmaAnnual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null },
     fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
-    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), serviceInvestmentCents, opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
+    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), serviceInvestmentCents, serviceCostBp: st.serviceCostBp ?? SERVICE_INVESTMENT_BP, opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     variableFixedCents: E, investmentCents: Math.round(Inv),
     term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items, lots: lotsOut,
     floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
@@ -1214,7 +1215,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Planilha de custos classificada (frequência e impacto), tributos do documento fiscal e parâmetros da Direção.',
     rows: [
-      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + acréscimo de investimento em serviços (35%) ${money(r.serviceInvestmentCents)}` : ''}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
       ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
@@ -1331,7 +1332,7 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Custos da oportunidade, tributos dos documentos fiscais e parâmetros vigentes do motor.',
     rows: [
-      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + acréscimo de investimento em serviços (35%) ${money(r.serviceInvestmentCents)}` : ''}` : undefined, value: money(I), strong: true },
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : undefined, value: money(I), strong: true },
       ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}` : undefined, value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),

@@ -29,7 +29,7 @@ function NumInput({ id, value, onChange, label, suffix, int }: { id: string; val
   );
 }
 
-const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'overheadBp', 'incomeTaxBp', 'netMarginTargetBp', 'netMarginMinBp', 'netMarginMaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
+const ECON_KEYS = ['marginTargetBp', 'marginSuggestedBp', 'marginMaxBp', 'tmaAnnualBp', 'inflationAnnualBp', 'badDebtBp', 'commissionBp', 'variableExpenseBp', 'lossPrivateBp', 'lossPublicBp', 'contingencyCapexBp', 'contingencyOpexBp', 'serviceCostBp', 'overheadBp', 'incomeTaxBp', 'netMarginTargetBp', 'netMarginMinBp', 'netMarginMaxBp', 'legacyOneTimeX100', 'legacyRecurringX100'] as const;
 type EconKey = (typeof ECON_KEYS)[number];
 type EconForm = Record<EconKey, number | null> & { paybackMaxPrivate: number | null; paybackMaxPublic: number | null; horizonMaxMonths: number | null; paymentTermDays: number | null; blockOutsidePolicy: boolean; validFrom: string };
 type EconVersion = Record<EconKey, number | undefined> & { tmaMonthlyBp?: number; paybackMaxPrivate: number; paybackMaxPublic: number; horizonMaxMonths?: number; paymentTermDays?: number | null; blockOutsidePolicy: boolean };
@@ -46,12 +46,12 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
     { key: 'lossPublicBp', label: 'Glosa, setor público', hint: 'Conta governamental, natureza pública ou licitação' },
     { key: 'badDebtBp', label: 'Inadimplência', hint: 'Perda ou atraso esperado sobre o faturamento' },
   ] },
-  { title: 'Contingências', desc: 'Folga somada aos custos informados na oportunidade.', fields: [
+  { title: 'Acréscimos sobre os custos', desc: 'Folga somada aos custos informados na oportunidade.', fields: [
     { key: 'contingencyCapexBp', label: 'Sobre o investimento', hint: 'Somada ao investimento inicial (CAPEX)' },
+    { key: 'serviceCostBp', label: 'Inferência custo de serviço', hint: 'Sobre o investimento-base de Instalação e Implantação. Soma-se à contingência, sem incidir no Fornecimento ou nos custos mensais' },
     { key: 'contingencyOpexBp', label: 'Sobre os custos mensais', hint: 'Somada aos custos operacionais (OPEX)' },
   ] },
-  { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa, inadimplência e despesas fixas; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [
-    { key: 'overheadBp', label: 'Despesas fixas rateadas', hint: 'Padrão 35%. Só na Implantação: na venda única sobre o preço; no recorrente sobre o custo direto (somado ao investimento). Não incide no Fornecimento' },
+  { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa e inadimplência; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [
     { key: 'incomeTaxBp', label: 'IR/CSLL', hint: 'Sobre a margem operacional positiva' },
     { key: 'netMarginMinBp', label: 'Margem líquida mínima (viável acima de)', hint: 'Viabilidade pela margem líquida dos meses 1 a D: viável acima da mínima e abaixo da máxima. Em branco = regra anterior (payback e piso de margem)', optional: true },
     { key: 'netMarginMaxBp', label: 'Margem líquida máxima (viável abaixo de)', hint: 'Acima dela o preço fica fora da faixa (risco de perder a venda)', optional: true },
@@ -102,11 +102,11 @@ function EconEngine() {
   useEffect(() => {
     if (!q.data) return;
     const c = q.data.current;
-    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? ({ marginTargetBp: 0, marginSuggestedBp: 0, marginMaxBp: 9999 } as Partial<Record<EconKey, number>>)[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, paymentTermDays: c?.paymentTermDays ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
+    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? ({ marginTargetBp: 0, marginSuggestedBp: 0, marginMaxBp: 9999, serviceCostBp: 3500 } as Partial<Record<EconKey, number>>)[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, paymentTermDays: c?.paymentTermDays ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
-    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: { ...e, commissionBp: 0 } }),
+    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: { ...e, commissionBp: 0, overheadBp: 0 } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Parâmetros publicados' }); },
     onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
   });
@@ -158,7 +158,7 @@ function EconEngine() {
           <summary className="cursor-pointer font-semibold text-ink">Histórico de publicações ({q.data.versions.length})</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[960px] text-xs">
-              <thead className="text-muted"><tr>{['Vigência', 'MC histórica piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Margem líq. esperada', 'Faixa líq.', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="text-muted"><tr>{['Vigência', 'MC histórica piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Inferência custo de serviço', 'Desp. fixas históricas', 'IR/CSLL', 'Margem líq. esperada', 'Faixa líq.', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{q.data.versions.map((v) => (
                 <tr key={v.id} className="border-t border-line">
                   <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>
@@ -167,6 +167,7 @@ function EconEngine() {
                   <td className="num py-1 pr-3">{p2(v.values.variableExpenseBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.lossPrivateBp)} / {p2(v.values.lossPublicBp)} · {p2(v.values.badDebtBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.contingencyCapexBp)} / {p2(v.values.contingencyOpexBp)}</td>
+                  <td className="num py-1 pr-3">{p2(v.values.serviceCostBp ?? 3500)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.overheadBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.incomeTaxBp)}</td>
                   <td className="num py-1 pr-3">{p2(v.values.netMarginTargetBp)}</td>

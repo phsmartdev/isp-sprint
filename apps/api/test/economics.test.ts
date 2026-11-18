@@ -8,12 +8,26 @@ import { login, makeApp, type Client } from './helpers';
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-const ECON = { marginTargetBp: 3500, marginSuggestedBp: 3500, marginMaxBp: 6000, tmaAnnualBp: 0, inflationAnnualBp: 0, horizonMaxMonths: 120, badDebtBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 0, incomeTaxBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, netMarginTargetBp: 2000, netMarginMinBp: 900, netMarginMaxBp: 4100, validFrom: today };
+const ECON = { marginTargetBp: 3500, marginSuggestedBp: 3500, marginMaxBp: 6000, tmaAnnualBp: 0, inflationAnnualBp: 0, horizonMaxMonths: 120, badDebtBp: 0, commissionBp: 500, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, serviceCostBp: 3500, overheadBp: 0, incomeTaxBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, netMarginTargetBp: 2000, netMarginMinBp: 900, netMarginMaxBp: 4100, validFrom: today };
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test'), login(ctx.app, 'rafael@yepnet.test')]); });
 afterAll(async () => ctx.close());
 
 describe('viabilidade econômica', () => {
+  it('publica e preserva a inferência de serviço no histórico versionado', async () => {
+    const { serviceCostBp: ignored, ...legacy } = ECON;
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: -1 }), 422);
+    const published = ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: 2000 }), 201).json();
+    expect(published.serviceCostBp).toBe(2000);
+    expect(ok(await carlos.get('/admin/viability/econ')).json().current.serviceCostBp).toBe(2000);
+    expect(ok(await carlos.post('/admin/viability/econ', legacy), 201).json().serviceCostBp).toBe(2000);
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: 0 }), 201);
+    const versions = ok(await carlos.get('/admin/viability/econ')).json();
+    expect(versions.current.serviceCostBp).toBe(0);
+    expect(versions.versions.find((v: { id: string }) => v.id === published.id).values.serviceCostBp).toBe(2000);
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+  });
+
   it('documentos fiscais por filial, item com documento, cálculo com tributo ponderado, fotografia e trava de payback', async () => {
     // parâmetros do motor (Configurações → Viabilidade)
     ok(await lucas.post('/admin/viability/econ', {}), 403);
@@ -57,7 +71,7 @@ describe('viabilidade econômica', () => {
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
     // FINANCE-3.1: preço sugerido = (parcela da anuidade de 30.000 pela TMA em 6 meses + 2.000) ÷ (1 − 20% − 35%)
-    expect(saved.result.engineVersion).toBe('FINANCE-3.5.0');
+    expect(saved.result.engineVersion).toBe('FINANCE-3.6.0');
     const parc = 4_050_000 / annuityFactor(saved.result.rates.r, 6);
     expect(Math.abs(saved.result.suggestedCents - (4_050_000 / 24 + 200_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(saved.result.rates.m * 100, 4);
@@ -420,7 +434,7 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.verified).toBe(true);
-    expect(run.engineVersion).toBe('FINANCE-3.5.0');
+    expect(run.engineVersion).toBe('FINANCE-3.6.0');
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
   });

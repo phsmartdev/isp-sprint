@@ -42,7 +42,7 @@ export const economicsRoutes = [
   defineRoute({
     method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
     body: z.object({
-      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
+      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, serviceCostBp: bp.optional(), overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       variableExpenseBp: bp.nullable().optional(),
       /** prazo médio de pagamento do órgão (dias): payback de caixa informativo na viabilidade B2G */ paymentTermDays: z.number().int().min(0).max(720).nullable().optional(),
@@ -51,12 +51,12 @@ export const economicsRoutes = [
     }),
     handler: async ({ app, auth, body, req, reply }) => {
       const { validFrom, ...rest } = body;
+      const before = await econSettingsOf(app.db, auth.tenantId);
       // a TMA é informada ao ano; a mensal equivalente fica guardada junto (compatível com os cálculos anteriores)
-      const values = { ...rest, tmaMonthlyBp: Math.round(((1 + rest.tmaAnnualBp / 10_000) ** (1 / 12) - 1) * 10_000) };
+      const values = { ...rest, serviceCostBp: rest.serviceCostBp ?? before?.settings.serviceCostBp ?? 3500, tmaMonthlyBp: Math.round(((1 + rest.tmaAnnualBp / 10_000) ** (1 / 12) - 1) * 10_000) };
       const e = econSettingsErrors(values);
       if (e.length) throw unprocessable(e.join(' '));
       if (validFrom < today()) throw unprocessable('A vigência começa hoje ou numa data futura: cálculos já salvos não mudam de regra.');
-      const before = await econSettingsOf(app.db, auth.tenantId);
       const [v] = await app.db.insert(s.econSettingsVersions).values({ tenantId: auth.tenantId, values, validFrom, createdBy: auth.userId }).returning({ id: s.econSettingsVersions.id });
       await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
       reply.code(201);
