@@ -152,7 +152,7 @@ export function sectionOutcome(sec: DealSection, index: number, args: SecArgs): 
   const kind = dealKindOfSection(sec.kind);
   const items = args.items.filter((i) => (i.section ?? 0) === index).map((i) => ({ ...i, kind: monthly ? kind : i.kind === 'servico' ? 'servico' as const : 'venda' as const }));
   const st: EconSettings = args.settings;
-  const run = (P: number | null) => financeEngine({ ...args, items, input: sectionEngineInput(sec, args.input, P) });
+  const run = (P: number | null, quick = false) => financeEngine({ ...args, items, input: { ...sectionEngineInput(sec, args.input, P), skipRecommendation: quick } });
   // 1. preço que atinge a margem (e o mínimo da faixa de margem líquida, quando configurada)
   const r0 = run(null);
   const marginPrice = ceil(Math.max(r0.suggestedCents ?? 0, r0.recommendedCents ?? 0)) || null;
@@ -162,10 +162,24 @@ export function sectionOutcome(sec: DealSection, index: number, args: SecArgs): 
   let paybackPrice: number | null = null;
   const inv = Math.max(0, -(r0.cashflow[0] ?? 0)) || (r0.investmentCents ?? 0);
   if (monthly && Dmax != null && inv > 0) {
-    const ok = (P: number) => { const r = run(P); const pb = r.kpi?.paybackMonths ?? null; return pb != null && pb <= Dmax; };
-    let lo = 0, hi = Math.max(1000, marginPrice ?? 0, Math.ceil(inv / Math.max(1, Dmax)));
-    for (let i = 0; i < 30 && !ok(hi); i++) { lo = hi; hi *= 2; }
-    if (ok(hi)) { for (let i = 0; i < 40 && hi - lo > 1; i++) { const mid = Math.floor((lo + hi) / 2); if (ok(mid)) hi = mid; else lo = mid; } paybackPrice = hi; }
+    // o caixa mensal é linear no preço: duas simulações dão a reta e o preço que paga o investimento (com a TMA) em
+    // Dmax meses sai direto; a conferência final no motor ajusta o centavo (poucas simulações, sem travar a tela)
+    const pbAt = (P: number) => run(P, true).kpi?.paybackMonths ?? null;
+    const ok = (P: number) => { const pb = pbAt(P); return pb != null && pb <= Dmax + 1e-9; };
+    const cash = (P: number) => run(P, true).cashflow.slice(1, Math.max(2, Math.min(Dmax, 12) + 1));
+    const p1 = Math.max(10_000, marginPrice ?? 10_000), p2 = p1 * 2;
+    const c1 = cash(p1), c2 = cash(p2);
+    const beta = ((c2[0] ?? 0) - (c1[0] ?? 0)) / (p2 - p1);
+    const rM = r0.rates?.r ?? 0;
+    // anuidade: fator que leva o caixa mensal constante ao valor presente de Dmax meses
+    const ann = rM > 0 ? (1 - (1 + rM) ** -Dmax) / rM : Dmax;
+    let guess = beta > 0 ? Math.ceil(p1 + (inv / ann - (c1[0] ?? 0)) / beta) : null;
+    if (guess != null && guess > 0) {
+      let lo = Math.max(0, Math.floor(guess * 0.97)), hi = guess;
+      for (let i = 0; i < 6 && !ok(hi); i++) { lo = hi; hi = Math.ceil(hi * 1.05) + 100; }
+      if (ok(hi)) { for (let i = 0; i < 14 && hi - lo > 1; i++) { const mid = Math.floor((lo + hi) / 2); if (ok(mid)) hi = mid; else lo = mid; } paybackPrice = hi; }
+    }
+    guess = null;
   }
   const cands = [marginPrice, paybackPrice, bandMin != null ? bandMin + 1 : null].filter((x): x is number => x != null && x > 0);
   const ideal = cands.length ? Math.max(...cands) : null;

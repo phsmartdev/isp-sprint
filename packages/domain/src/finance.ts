@@ -150,6 +150,8 @@ export type EconInput = {
   investmentOutOfPrice?: boolean;
   /** (seções) indicadores no preço proposto (não no sugerido): a seção mostra a DRE do preço praticado */
   atProposed?: boolean;
+  /** (seções) simulação intermediária: não busca os preços da faixa de margem líquida (só o preço avaliado importa) */
+  skipRecommendation?: boolean;
   /** (seções) tipos de negócio da negociação: cada seção com seus produtos, custos, margem, payback e preço */
   sections?: DealSection[] | null;
   b2g?: { mode?: 'A' | 'B'; overheadBp?: number | null; netTargetBp?: number | null; contributionBp?: { fornecimento?: number | null; implantacao?: number | null }; solvePayback?: boolean; weights?: Record<string, number>; bids?: Record<string, number> } | null;
@@ -904,13 +906,13 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     }
     return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: cp != null && bm != null && bm - mc > 0 ? roundUp(cp / (bm - mc)) : null };
   };
-  const range = st.netMarginMinBp != null && st.netMarginMaxBp != null ? { min: recAt(bp(st.netMarginMinBp)), max: recAt(bp(st.netMarginMaxBp)) } : null;
+  const range = !inp.skipRecommendation && st.netMarginMinBp != null && st.netMarginMaxBp != null ? { min: recAt(bp(st.netMarginMinBp)), max: recAt(bp(st.netMarginMaxBp)) } : null;
   if (st.netMarginTargetBp == null && range) {
     const p = range.min;
     recommendation = { netTargetPct: p.netPct, operatingNeededPct: p.operatingPct, contributionPct: p.contributionPct, priceCents: p.priceCents, params: { overheadPct: st.overheadBp != null ? bp(st.overheadBp) * 100 : null, glosaPct: glosa * 100, badDebtPct: badDebt * 100, incomeTaxPct: st.incomeTaxBp != null ? bp(st.incomeTaxBp) * 100 : null }, feasible: p.priceCents != null, range };
     if (p.contributionPct == null) warnings.push('Faixa de margem líquida informada, mas faltam despesas fixas ou IR/CSLL: sem preço recomendado.');
   }
-  if (st.netMarginTargetBp != null) {
+  if (!inp.skipRecommendation && st.netMarginTargetBp != null) {
     const mo = numv(pre.values.margem_operacional_necessaria), mc = numv(pre.values.margem_contrib_recomendada), pr = rec ? recAt(bp(st.netMarginTargetBp)).priceCents : numv(pre.values.preco_margem_liquida_alvo);
     const fixas = st.overheadBp != null ? bp(st.overheadBp) : null, irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null;
     recommendation = {

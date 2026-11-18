@@ -171,6 +171,8 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   <button type="button" aria-expanded={open} onClick={() => toggle(n.key, !open)} className={clsx(NAV_ITEM, active ? 'text-white [&>svg:first-child]:text-lime' : 'text-white/70 hover:bg-white/[0.04] hover:text-white', active && !open && NAV_ON)}>
                     {n.icon}
                     <span className="min-w-0 flex-1 text-balance">{n.label}</span>
+                    {/* pendências do grupo (ex.: aprovações) aparecem também com o grupo recolhido */}
+                    {kids.some((c) => c.badge === 'approvals') && approvals > 0 && <span className="num rounded-full bg-white px-2 py-0.5 text-xs font-bold text-navy" aria-label={`${approvals} aguardando sua decisão`}>{approvals}</span>}
                     <ChevronDown className={clsx('h-3.5 w-3.5 shrink-0 text-white/35 transition-transform duration-200', open && 'rotate-180')} aria-hidden />
                   </button>
                   {open && (
