@@ -241,6 +241,18 @@ function CellsTable({ r, compact }: { r: EconResult; compact?: boolean }) {
         })}</tbody>
       </table></div>
       {!compact && <p className="mt-1 text-2xs text-muted">Cada cesta usa o maior tributo entre os documentos dos seus produtos (Fornecimento = NF-e de mercadoria; Implantação = os demais documentos). O proposto é dividido entre as cestas na proporção dos produtos (ou do sugerido).</p>}
+      {!compact && <div className="mt-3 space-y-2" aria-label="Memórias de cálculo por cesta">
+        <p className="text-xs text-muted">O rateio usa a receita de pagamento único ou a mensalidade × vigência; custos sem cesta são distribuídos entre todas as cestas. Sem valores de receita, vale o número de produtos. Os custos abaixo já incluem esse rateio. Abra a memória para conferir as entradas, o investimento, a parcela mensal, os tributos, o divisor e os preços calculados pelo motor.</p>
+        {d.cells.map((c) => {
+          const title = `Memória de cálculo · ${ECON_LOT_LABELS[c.lot]} · ${c.ritmo === 'unico' ? 'pagamento único' : 'mensal'}`;
+          return <details key={c.key} className="border border-line p-3" aria-label={title}>
+            <summary className="cursor-pointer text-xs font-semibold text-primary">{title}</summary>
+            <div className="mt-3">
+              {c.result ? <Memory r={c.result} /> : <p className="text-xs text-muted">Esta fotografia não tem o detalhamento da cesta. Salve um novo cálculo para gerar sua memória.</p>}
+            </div>
+          </details>;
+        })}
+      </div>}
     </section>
   );
 }
