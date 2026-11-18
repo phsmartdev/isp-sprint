@@ -57,7 +57,7 @@ describe('viabilidade econômica', () => {
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
     // FINANCE-3.1: preço sugerido = (parcela da anuidade de 30.000 pela TMA em 6 meses + 2.000) ÷ (1 − 20% − 35%)
-    expect(saved.result.engineVersion).toBe('FINANCE-3.2');
+    expect(saved.result.engineVersion).toBe('FINANCE-3.2.1');
     const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
     expect(Math.abs(saved.result.suggestedCents - (parc + 200_000) / 0.45)).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(35, 2);
@@ -376,10 +376,12 @@ describe('viabilidade econômica', () => {
       b2g: { mode: 'A' } };
     const r = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json().result.b2g;
     expect(r.kinds).toEqual({ unica: true, recorrente: true });
-    // despesas fixas na mensalidade: investimento = 10.000; mensalidade = (10.000 ÷ 12 + 1.000) ÷ (1 − tributos − 35%)
+    // O custo da Implantação é compartilhado: receita única versus receita mensal na vigência.
     const line = r.recorrente.lines[0];
-    expect(r.recorrente.investmentCents).toBe(1_000_000);
-    expect(Math.abs(r.recorrente.monthlyPriceCents - (1_000_000 / 12 + 100_000) / (1 - line.taxPct / 100 - 0.35))).toBeLessThanOrEqual(1);
+    const monthlyInvestment = 1_000_000 - Math.round(1_000_000 * 100_000 / (100_000 + 300_000 * 36));
+    expect(r.recorrente.investmentCents).toBe(monthlyInvestment);
+    expect(r.unica.costCents + r.recorrente.investmentCents).toBe(1_000_000);
+    expect(Math.abs(r.recorrente.monthlyPriceCents - (monthlyInvestment / 12 + 100_000) / (1 - line.taxPct / 100 - 0.35))).toBeLessThanOrEqual(1);
     expect(r.unica.lines[0].profile).toBe('implantacao');
 
     // Modo B: lance abaixo do piso gera alerta, não bloqueia
@@ -391,4 +393,30 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().input.b2g).toMatchObject({ mode: 'B', bids: { 'link b2g': 1_000 } });
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
   });
+  it('preço por produto divide a Implantação entre serviço único e mensal, mantendo o Fornecimento separado', async () => {
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+    const lk = ok(await carlos.get('/meta/lookups')).json(), branch = lk.branches[0].id;
+    const docs = ok(await carlos.put(`/admin/fiscal-docs/${branch}`, { items: [
+      { id: null, fiscalKind: 'venda', code: 'RATEIO-NFE', name: 'Fornecimento', active: true, taxes: [{ name: 'Tributo', percentBp: 1800, fixedCents: 0, active: true }] },
+      { id: null, fiscalKind: 'servico', code: 'RATEIO-NFSE', name: 'Implantação', active: true, taxes: [{ name: 'Tributo', percentBp: 1500, fixedCents: 0, active: true }] },
+    ] })).json().items;
+    const o = ok(await carlos.post('/opportunities', { newContact: { name: `Misto perfil ${Date.now()}`, segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: branch, saleKind: 'venda_consultiva' }), 201).json();
+    const items = [['OTDR', 'venda', 'fornecimento', 200000], ['Link único', 'servico', 'implantacao', 121700], ['Link mensal', 'recorrencia', 'implantacao', 130000]].map(([description, dealKind, costProfile, unitCents]) => ({ description, dealKind, costProfile, unitCents, unit: 'un', qtyMilli: 1000, discountCents: 0, surchargeCents: 0, fiscalDocTypeId: docs.find((d: { fiscalKind: string }) => d.fiscalKind === (costProfile === 'fornecimento' ? 'venda' : 'servico')).id }));
+    ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: o.rowVersion, items }));
+    const originalItems = ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items;
+    const input = { mode: 'recorrente', termMonths: 12, receiveMonth: 0, paybackMonths: 6, capex: [{ description: 'Custo de Fornecimento', kind: 'venda', impact: 'material', qtyMilli: 1000, unitCents: 50001 }, { description: 'Custo de Implantação', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 300001 }], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null, b2g: { mode: 'A', contributionBp: { fornecimento: 2000, implantacao: 2000 } } };
+    const saved = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
+    expect(saved.result.b2g.costs.unica.fornecimento).toBe(50001);
+    expect(saved.result.b2g.costs.unica.implantacao).toBe(21710);
+    expect(saved.result.b2g.recorrente.investmentCents).toBe(278291);
+    expect(saved.result.b2g.recorrente.monthlyPriceCents).toBeGreaterThan(0);
+    expect(saved.result.b2g.global.costCents).toBe(350002);
+    expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
+    const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
+    expect(run.verified).toBe(true);
+    expect(run.engineVersion).toBe('FINANCE-3.2.1');
+    ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
+    ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
+  });
+
 });

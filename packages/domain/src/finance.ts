@@ -47,7 +47,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.2';
+export const ENGINE_VERSION = 'FINANCE-3.2.1';
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.

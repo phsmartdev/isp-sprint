@@ -57,9 +57,9 @@ export function b2gCosts(capex: CostLine[], opex: CostLine[], extraInitialCents 
     const v = lineTotal(l);
     if (isVarFixed(l)) { c.variavel += v; continue; }
     if (!l.kind) { c.semCesta += v; continue; }
-    if (revenueOf(l.kind) === 'unica') c.unica[l.kind === 'venda' ? 'fornecimento' : 'implantacao'] += v;
-    // no recorrente, material/equipamento é fornecimento (sem rateio); o resto é implantação
-    else c.recorrente[l.impact === 'material' ? 'fornecimento' : 'implantacao'] += v;
+    // O bloco da engenharia identifica o perfil; material também pode ser custo da Implantação.
+    const profile = l.kind === 'venda' ? 'fornecimento' : 'implantacao';
+    c[revenueOf(l.kind)][profile] += v;
   }
   c.semCesta += extraInitialCents;
   for (const l of opex) c.mensal += lineTotal(l);
@@ -131,6 +131,8 @@ function oneTimeFloor(cost: number, a: number, fixed: number, p: B2gParams, over
 }
 
 export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: CostLine[], p: B2gParams, extraInitialCents = 0): B2gResult {
+  // Serviço único continua serviço; o tipo define pagamento único, não Fornecimento.
+  products = products.map((x) => x.kind === 'servico' && x.profile !== 'implantacao' ? { ...x, profile: 'implantacao' } : x);
   const costs = b2gCosts(capex, opex, extraInitialCents);
   const alerts: string[] = [], notes: string[] = [];
   const blocked = products.filter((x) => !x.doc).map((x) => ({ id: x.id, description: x.description }));
@@ -148,6 +150,20 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
 
   // custo sem cesta: rateado pela receita entre os blocos/cestas que existem (aviso)
   const unicaP = products.filter((x) => revenueOf(x.kind) === 'unica'), recP = products.filter((x) => revenueOf(x.kind) === 'recorrente');
+  // O perfil escolhe a origem do custo; o tipo do produto escolhe único ou mensal.
+  // Usa a mesma base do motor principal: receita única versus mensalidade × vigência.
+  for (const profile of COST_PROFILES) {
+    const total = costs.unica[profile] + costs.recorrente[profile];
+    if (!total) continue;
+    const sameProfile = products.filter((x) => x.profile === profile);
+    const targets = sameProfile.length ? sameProfile : products;
+    const groups = (['unica', 'recorrente'] as const).map((revenue) => ({ revenue, products: targets.filter((x) => revenueOf(x.kind) === revenue) })).filter((g) => g.products.length);
+    const amounts = groups.map((g) => g.products.reduce((t, x) => t + Math.max(0, x.estimatedCents), 0) * (g.revenue === 'recorrente' ? N : 1));
+    const known = amounts.some((v) => v > 0);
+    const split = distribute(groups.map((g, k) => ({ ...g.products[0]!, id: g.revenue, estimatedCents: known ? amounts[k]! : g.products.length })), total);
+    costs.unica[profile] = split.get('unica') ?? 0;
+    costs.recorrente[profile] = split.get('recorrente') ?? 0;
+  }
   if (costs.semCesta) {
     const ru = unicaP.reduce((t, x) => t + x.estimatedCents, 0), rr = recP.reduce((t, x) => t + x.estimatedCents, 0) * N;
     const tot = ru + rr || 1;

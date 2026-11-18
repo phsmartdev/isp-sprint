@@ -43,8 +43,10 @@ describe('viabilidade B2G', () => {
     expect(r.global.priceCents).toBe(r.unica!.priceCents + r.recorrente!.priceCents);
     expect(r.global.netCents).toBe(r.unica!.netCents + r.recorrente!.netCents);
     expect(r.global.costCents).toBe(r.unica!.costCents + r.recorrente!.costCents);
-    // o investimento do recorrente não é abatido pela venda única
-    expect(r.recorrente!.investmentCents).toBe(1_000_000);
+    // O custo da Implantação atende ao serviço único e ao mensal, sem perda nem duplicação.
+    const uniqueImpl = Math.round(1_060_000 * 150_000 / (150_000 + 300_000 * 36));
+    expect(r.unica!.lines.find((l) => l.id === 'inst')!.costCents).toBe(uniqueImpl);
+    expect(r.recorrente!.investmentCents).toBe(1_060_000 - uniqueImpl);
     expect(r.global.markup).toBeCloseTo(r.global.priceCents / r.global.costCents, 10);
   });
 
@@ -126,4 +128,46 @@ describe('viabilidade B2G', () => {
     expect(r.unica!.lines[0]!.floorCents).toBeNull();
     expect(r.alerts.join(' ')).toMatch(/Configure a margem líquida mínima/);
   });
+  it('serviço único e mensalidade compartilham o custo da Implantação, separado do Fornecimento', () => {
+    const ps = [prod('OTDR', 'venda', 'fornecimento', 200000), prod('Link único', 'servico', 'implantacao', 121700), prod('Link mensal', 'recorrencia', 'implantacao', 130000)];
+    const r = b2gViability(ps, [line('venda', 50001, 'material'), line('servico', 300001)], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
+    const upfront = Math.round(300001 * 121700 / (121700 + 130000 * 12));
+    expect(r.costs.unica.fornecimento).toBe(50001);
+    expect(r.costs.unica.implantacao).toBe(upfront);
+    expect(r.costs.recorrente.implantacao).toBe(300001 - upfront);
+    expect(r.unica!.lines.find((l) => l.id === 'OTDR')!.costCents).toBe(50001);
+    expect(r.unica!.lines.find((l) => l.id === 'Link único')!.costCents).toBe(upfront);
+    expect(r.recorrente!.investmentCents).toBe(300001 - upfront);
+    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
+    expect(r.unica!.costCents + r.recorrente!.investmentCents!).toBe(350002);
+  });
+
+  it('serviço único permanece na Implantação mesmo com perfil antigo de Fornecimento', () => {
+    const ps = [prod('Serviço', 'servico', 'fornecimento', 100000, nfse), prod('Link', 'recorrencia', 'implantacao', 10000)];
+    const original = JSON.stringify(ps);
+    const r = b2gViability(ps, [line('servico', 240000)], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
+    expect(r.unica!.lines[0]!.profile).toBe('implantacao');
+    expect(r.unica!.costCents).toBeGreaterThan(0);
+    expect(r.recorrente!.investmentCents).toBeGreaterThan(0);
+    expect(JSON.stringify(ps)).toBe(original);
+  });
+
+  it.each(['servico', 'recorrencia', 'locacao'] as const)('o custo da Implantação lançado como %s atende aos dois formatos, inclusive material', (kind) => {
+    const r = b2gViability([prod('Instalação', 'servico', 'implantacao', 10000), prod('Mensal', 'recorrencia', 'implantacao', 10000)], [line(kind, 130001, 'material')], [], { ...base, termMonths: 12, paybackMonths: 6, overheadBp: 0 });
+    expect(r.costs.unica.implantacao).toBe(10000);
+    expect(r.costs.recorrente.implantacao).toBe(120001);
+    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
+    expect(r.global.costCents).toBe(130001);
+  });
+
+  it('Locação mensal com perfil Fornecimento usa o custo do Fornecimento, sem receber o da Implantação', () => {
+    const r = b2gViability([prod('Venda', 'venda', 'fornecimento', 50000), prod('Aluguel', 'locacao', 'fornecimento', 5000), prod('Serviço', 'servico', 'implantacao', 10000)], [line('venda', 110001, 'material'), line('servico', 20000)], [], { ...base, termMonths: 12, paybackMonths: 6 });
+    expect(r.costs.unica.fornecimento).toBe(50000);
+    expect(r.costs.recorrente.fornecimento).toBe(60001);
+    expect(r.unica!.lines.find((l) => l.id === 'Serviço')!.costCents).toBe(20000);
+    expect(r.recorrente!.investmentCents).toBe(60001);
+    expect(r.recorrente!.lines[0]!.overheadCents).toBe(0);
+    expect(r.recorrente!.monthlyPriceCents).toBeGreaterThan(0);
+  });
+
 });
