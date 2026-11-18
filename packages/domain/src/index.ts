@@ -49,6 +49,7 @@ export * from './budgetEfficiency';
 export * from './ixc';
 export * from './finance';
 export * from './dealSections';
+export * from './academy';
 export * from './b2gViability';
 export * from './formula';
 export * from './financeModel';
