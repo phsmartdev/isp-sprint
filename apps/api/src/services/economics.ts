@@ -131,7 +131,7 @@ export const computeEconomics = (ctx: EconContext, input?: EconInput) => {
 
 /** Viabilidade B2G com os produtos da oportunidade (tributos da vigência fiscal), a planilha e os parâmetros vigentes. */
 export function b2gOf(ctx: EconContext, inp: EconInput, r: EconResult) {
-  return b2gFromEconomics({ input: inp, items: ctx.items, settings: ctx.settings!, publicSector: ctx.publicSector, fiscal: ctx.fiscal }, r.fiscal?.profitTaxBp ?? null);
+  return b2gFromEconomics({ input: inp, items: ctx.items, settings: ctx.settings!, publicSector: ctx.publicSector, fiscal: ctx.fiscal }, r.fiscal?.profitTaxBp ?? null, r);
 }
 
 /**

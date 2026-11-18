@@ -8,7 +8,7 @@ import * as s from '../src/db/schema';
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, diretora: Client, lucas: Client;
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-const ECON = { marginTargetBp: 2000, marginSuggestedBp: 3000, marginMaxBp: 4500, tmaAnnualBp: 1500, inflationAnnualBp: 450, horizonMaxMonths: 36, badDebtBp: 150, commissionBp: 200, lossPrivateBp: 100, lossPublicBp: 200, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 500, incomeTaxBp: 3400, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, validFrom: today };
+const ECON = { marginTargetBp: 2000, marginSuggestedBp: 3000, marginMaxBp: 4500, tmaAnnualBp: 1500, inflationAnnualBp: 450, horizonMaxMonths: 36, badDebtBp: 150, commissionBp: 200, lossPrivateBp: 100, lossPublicBp: 200, contingencyCapexBp: 0, contingencyOpexBp: 0, overheadBp: 500, incomeTaxBp: 3400, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, netMarginTargetBp: 2000, netMarginMinBp: 900, netMarginMaxBp: 4100, validFrom: today };
 const ok = <T extends { statusCode: number; body: string }>(r: T, code = 200) => { expect(r.statusCode, r.body).toBe(code); return r; };
 let oppId = '';
 

@@ -524,9 +524,9 @@ describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alv
     expect(rc.priceCents!).toBeLessThan((5_847_700 / annuityFactor(0.015, 3)) / (1 - 0.1 - (0.4 / 0.85 + 0.2 + 0.03 + 0.01)));
     // muda o parâmetro → muda a recomendação (sem valor fixo no código)
     const r2 = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000, overheadBp: 4000 }, publicSector: false });
-    expect(r2.recommendation!.contributionPct!).toBeCloseTo(91.0588, 3);
+    expect(r2.recommendation!.contributionPct).toBeNull();
     expect(r2.recommendation!.priceCents).toBeNull();
-    expect(r2.warnings.join(' ')).toMatch(/não cabe no markup/);
+    expect(r2.warnings.join(' ')).toMatch(/margem líquida esperada não é alcançável/);
   });
   it('sem margem líquida alvo nos parâmetros: sem recomendação', () => {
     expect(financeEngine({ input, items: items([0, 1000]), settings: st, publicSector: false }).recommendation ?? null).toBeNull();

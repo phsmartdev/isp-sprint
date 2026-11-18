@@ -30,9 +30,6 @@ const VERDICT: Record<B2gResult['verdict'], { label: string; cls: string }> = {
 export function B2gPanel({ r, profiles, f, set, settings, disabled }: { profiles?: CostProfile[]; r: B2gResult | null | undefined; f: B2gForm; set: (p: Partial<B2gForm>) => void; settings: EconSettings; disabled: boolean }) {
   const maxPct = settings.netMarginMaxBp != null ? settings.netMarginMaxBp / 100 : null;
   const minPct = settings.netMarginMinBp != null ? settings.netMarginMinBp / 100 : null;
-  const hasUnica = !!r?.kinds.unica, hasRec = !!r?.kinds.recorrente;
-  const hasForn = !!r?.unica?.lines.some((l) => l.profile === 'fornecimento');
-  const hasInst = !!r?.unica?.lines.some((l) => l.profile === 'instalacao');
   return (
     <section className="space-y-4 border border-line p-4" aria-labelledby="b2g-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -53,26 +50,10 @@ export function B2gPanel({ r, profiles, f, set, settings, disabled }: { profiles
         <FormField label="Despesas fixas rateadas (%)" htmlFor="b2g-oh" hint={`Nos serviços de Instalação e Implantação. Padrão ${bpText(settings.overheadBp ?? 0)}%.`}>
           <Input id="b2g-oh" inputMode="decimal" placeholder={bpText(settings.overheadBp ?? 0)} value={f.overhead} disabled={disabled} onChange={(e) => set({ overhead: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
         </FormField>
-        <FormField label="Margem líquida alvo (%)" htmlFor="b2g-nt" hint={minPct != null ? `Mínimo da diretoria: ${pct(minPct)}` : 'Sem mínimo configurado'}>
-          <Input id="b2g-nt" inputMode="decimal" placeholder={bpText(settings.netMarginTargetBp ?? settings.netMarginMinBp ?? null)} value={f.netTarget} disabled={disabled} onChange={(e) => set({ netTarget: e.target.value.replace(/[^\d,.-]/g, '').slice(0, 6) })} />
+        <FormField label="Margem líquida esperada (%)" htmlFor="b2g-nt" hint="Parâmetro das Configurações. A contribuição é um resultado do cálculo.">
+          <Input id="b2g-nt" value={bpText(settings.netMarginTargetBp)} disabled placeholder="Configure a margem líquida esperada" />
         </FormField>
-        {f.mode === 'A' && hasUnica && hasForn && (
-          <FormField label="Margem de contribuição · Fornecimento (%)" htmlFor="b2g-mf" hint="Em branco: calculada pela margem líquida alvo">
-            <Input id="b2g-mf" inputMode="decimal" value={f.mcForn} disabled={disabled} onChange={(e) => set({ mcForn: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
-          </FormField>
-        )}
-        {f.mode === 'A' && hasUnica && hasInst && (
-          <FormField label="Margem de contribuição · Instalação (%)" htmlFor="b2g-mi" hint="Em branco: calculada pela margem líquida alvo">
-            <Input id="b2g-mi" inputMode="decimal" value={f.mcInst} disabled={disabled} onChange={(e) => set({ mcInst: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
-          </FormField>
-        )}
       </div>
-      {f.mode === 'A' && hasRec && (
-        <label className="flex items-start gap-2 text-sm text-text">
-          <input type="checkbox" className="mt-0.5 accent-primary" checked={f.solvePb} disabled={disabled} onChange={(e) => set({ solvePb: e.target.checked })} />
-          <span>Calcular o payback pela margem líquida alvo <span className="block text-xs text-muted">Desmarcado, vale o payback informado acima. Marcado, o sistema acha o payback em que a margem líquida da vigência chega ao alvo (os primeiros meses ficam com margem baixa).</span></span>
-        </label>
-      )}
 
       {!r ? <Notice tone="warning">Confira os campos destacados para ver o preço por produto.</Notice> : (
         <>
@@ -93,7 +74,7 @@ export function B2gPanel({ r, profiles, f, set, settings, disabled }: { profiles
             const lines = source?.lines.filter((l) => l.profile === profile) ?? [];
             if (!source || !lines.length) return null;
             const sum = (field: 'costCents' | 'contributionCents' | 'operatingCents' | 'netCents' | 'overheadCents') => lines.reduce((t, l) => t + (l[field] ?? 0), 0);
-            const price = lines.reduce((t, l) => t + (l.priceCents ?? 0) * (source.revenue === 'recorrente' ? source.termMonths ?? 1 : 1), 0);
+            const price = source.revenue === 'recorrente' ? source.priceCents : lines.reduce((t, l) => t + (l.priceCents ?? 0), 0);
             const b = { ...source, lines, priceCents: price, costCents: sum('costCents'), contributionCents: sum('contributionCents'), overheadCents: sum('overheadCents'), operatingCents: sum('operatingCents'), netCents: sum('netCents'), netPct: price > 0 ? sum('netCents') / price * 100 : null, cascade: source.cascade?.filter((c) => c.profile === profile) };
             return <Block key={profile} title={COST_PROFILE_LABELS[profile]} hint={source.revenue === 'recorrente' ? 'Pagamento mensal' : 'Pagamento único'} b={b} f={f} set={set} disabled={disabled} minPct={minPct} maxPct={maxPct} />;
           })}

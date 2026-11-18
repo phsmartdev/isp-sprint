@@ -5,7 +5,7 @@ import { EconomicsResult } from './Economics';
 import { fmtBRL } from '../../lib/format';
 import { MASK, moneyHidden, setMoneyHidden } from '../../lib/privacy';
 
-const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0 };
+const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0, netMarginTargetBp: 2000, netMarginMinBp: 900, netMarginMaxBp: 4100 };
 const result = () => financeEngine({
   settings, publicSector: false,
   input: { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', qtyMilli: 1000, unitCents: 90000 }, { description: 'Instalação', kind: 'servico', qtyMilli: 1000, unitCents: 100000 }, { description: 'Implantação', kind: 'recorrencia', qtyMilli: 1000, unitCents: 120000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] },
@@ -38,14 +38,14 @@ describe('memória de cálculo no preço por cesta', () => {
     expect(row.textContent).toContain(fmtBRL(90000));
     expect(supply.textContent).toContain(fmtBRL(128572));
     expect(monthly.textContent).toContain(fmtBRL(162000));
-    expect(monthly.textContent).toContain(fmtBRL(56924));
+    expect(monthly.textContent).toContain(fmtBRL(36154));
     expect(within(monthly).getByText('Parcela do investimento (P_inv)')).toBeTruthy();
     expect(monthly.textContent).toContain('1–6');
     expect(JSON.stringify(r)).toBe(before);
   });
 
   it('respeita a ocultação dos valores financeiros', () => {
-    const r = result(), visiblePrice = fmtBRL(56924);
+    const r = result(), visiblePrice = fmtBRL(36154);
     setMoneyHidden(true);
     render(<EconomicsResult r={r} />);
     fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));

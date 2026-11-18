@@ -41,7 +41,7 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   { title: 'Divisor do markup (sai da nota)', desc: 'Preço = custos ÷ (1 − tributos da cesta − despesas variáveis − margem). Os tributos vêm do documento fiscal de maior tributo de cada cesta. Não há comissão.', fields: [
     { key: 'variableExpenseBp', label: 'Despesas variáveis', hint: 'Sobre o preço (ex.: taxas de cobrança); em branco = 0. O vendedor pode ajustar', optional: true },
   ] },
-  { title: 'Fora do preço: perdas no fluxo de caixa', desc: 'Não entram no divisor do markup. Reduzem o caixa (VPL, TIR, payback) e a margem operacional.', fields: [
+  { title: 'Perdas no fluxo de caixa', desc: 'Glosa e inadimplência reduzem o caixa e são consideradas no preço necessário para alcançar a margem líquida esperada.', fields: [
     { key: 'lossPrivateBp', label: 'Glosa, setor privado', hint: 'Retenção ou não aceite parcial das faturas (SLA, disputas)' },
     { key: 'lossPublicBp', label: 'Glosa, setor público', hint: 'Conta governamental, natureza pública ou licitação' },
     { key: 'badDebtBp', label: 'Inadimplência', hint: 'Perda ou atraso esperado sobre o faturamento' },
@@ -55,7 +55,7 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
     { key: 'incomeTaxBp', label: 'IR/CSLL', hint: 'Sobre a margem operacional positiva' },
     { key: 'netMarginMinBp', label: 'Margem líquida mínima (viável acima de)', hint: 'Viabilidade pela margem líquida dos meses 1 a D: viável acima da mínima e abaixo da máxima. Em branco = regra anterior (payback e piso de margem)', optional: true },
     { key: 'netMarginMaxBp', label: 'Margem líquida máxima (viável abaixo de)', hint: 'Acima dela o preço fica fora da faixa (risco de perder a venda)', optional: true },
-    { key: 'netMarginTargetBp', label: 'Margem líquida alvo', hint: 'Gera a margem de contribuição recomendada: alvo ÷ (1 − IR/CSLL) + despesas fixas + glosa + inadimplência. Em branco = sem recomendação', optional: true },
+    { key: 'netMarginTargetBp', label: 'Margem líquida esperada', hint: 'Determina o preço sugerido do contrato. Deve ficar entre a mínima e a máxima; a contribuição é calculada pelo motor' },
   ] },
   { title: 'Premissas da projeção de caixa', desc: 'Alimentam o fluxo de caixa: VPL, TIR e payback descontado.', fields: [
     { key: 'tmaAnnualBp', label: 'TMA anual', hint: 'Custo de capital; a mensal é (1 + anual)^(1/12) − 1' },
@@ -68,9 +68,6 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
     { key: 'legacyRecurringX100', label: 'Fator da recorrente', hint: 'Sobre o custo mensal (ex.: 3,2)', factor: true, optional: true },
   ] },
   { title: 'Política de aprovação', desc: 'Aprovação automática com VPL positivo, TIR acima da TMA, margem no piso ou acima e payback descontado dentro do teto; senão, alçada superior.', fields: [
-    { key: 'marginTargetBp', label: 'Piso da margem de contribuição', hint: 'Abaixo dele, só com a alçada superior' },
-    { key: 'marginSuggestedBp', label: 'Sugestão de margem', hint: 'Valor inicial na tela do vendedor' },
-    { key: 'marginMaxBp', label: 'Teto da margem', hint: 'Máximo que o vendedor pode escolher' },
     { key: 'paybackMaxPrivate', label: 'Teto de payback, privado', hint: 'O vendedor escolhe até aqui (ex.: 6)', months: true },
     { key: 'paybackMaxPublic', label: 'Teto de payback, público', hint: 'O vendedor escolhe até aqui (ex.: 12 a 18)', months: true },
   ] },
@@ -105,7 +102,7 @@ function EconEngine() {
   useEffect(() => {
     if (!q.data) return;
     const c = q.data.current;
-    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, paymentTermDays: c?.paymentTermDays ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
+    setE({ ...(Object.fromEntries(ECON_KEYS.map((k) => [k, c?.[k] ?? ({ marginTargetBp: 0, marginSuggestedBp: 0, marginMaxBp: 9999 } as Partial<Record<EconKey, number>>)[k] ?? null])) as Record<EconKey, number | null>), paybackMaxPrivate: c?.paybackMaxPrivate ?? null, paybackMaxPublic: c?.paybackMaxPublic ?? null, horizonMaxMonths: c?.horizonMaxMonths ?? null, paymentTermDays: c?.paymentTermDays ?? null, blockOutsidePolicy: c?.blockOutsidePolicy ?? true, validFrom: q.data.today });
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
@@ -130,7 +127,7 @@ function EconEngine() {
       {!cur && <div className="mt-3"><Notice tone="warning">A viabilidade econômica não calcula até você preencher e publicar.</Notice></div>}
 
       <p className="mt-4 rounded-md bg-surface-2 px-3 py-2 text-xs text-text" aria-label="Como o cálculo usa os parâmetros">
-        Preço exato = (parcela do investimento pela TMA no payback + custos mensais + tributo fixo) ÷ (1 − tributos da nota − despesas variáveis − <b>margem</b>) · margem de contribuição − glosa e inadimplência − despesas fixas = <b>margem operacional</b> − IR/CSLL = <b>margem líquida</b>
+        O preço sugerido é calculado para entregar a <b>margem líquida esperada</b> no contrato inteiro. A contribuição é um resultado; tributos, custos, reajustes, perdas, despesas fixas e IR/CSLL entram nessa conta.
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -161,7 +158,7 @@ function EconEngine() {
           <summary className="cursor-pointer font-semibold text-ink">Histórico de publicações ({q.data.versions.length})</summary>
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[960px] text-xs">
-              <thead className="text-muted"><tr>{['Vigência', 'Margem piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Margem líq. alvo', 'Faixa líq.', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
+              <thead className="text-muted"><tr>{['Vigência', 'MC histórica piso/sug./teto', 'TMA', 'Desp. variáveis', 'Glosa priv./púb. · inadimp.', 'Contingência inv./mensal', 'Desp. fixas', 'IR/CSLL', 'Margem líq. esperada', 'Faixa líq.', 'Payback priv./púb.', 'Publicado por'].map((h) => <th key={h} className="py-1 pr-3 text-left font-medium">{h}</th>)}</tr></thead>
               <tbody>{q.data.versions.map((v) => (
                 <tr key={v.id} className="border-t border-line">
                   <td className="py-1 pr-3">{fmtDate(v.validFrom)}{cur?.id === v.id ? ' (em vigor)' : ''}</td>

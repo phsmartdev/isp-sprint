@@ -151,8 +151,8 @@ function PriceBasis({ r, per, settings, compact }: { r: EconResult; per: string;
           <p className="mt-1 text-xs font-semibold text-ink">Preço sugerido pelo motor</p>
           <p className={clsx('num flex min-w-0 flex-wrap items-baseline font-bold text-ink whitespace-nowrap', bigCls(sug))}><span>{fmtBRL(sug)}</span><span className="whitespace-normal text-xs font-normal text-muted">{per}</span></p>
           {one != null && <p className="num text-sm font-semibold text-ink">+ {fmtBRL(one)} <span className="text-xs font-normal text-muted">pagamento único</span></p>}
-          <p className="mt-1 text-xs text-text">Margem {pct(m, 1)}{c.engine.markupPct != null && !r.deal ? ` · markup efetivo ${pct(c.engine.markupPct, 1)}` : ''}</p>
-          <p className="mt-1 text-2xs text-muted">custos ÷ (1 − tributos {pct(r.rates.a * 100, 2)} − desp. variáveis {pct(r.rates.c * 100, 2)} − margem {pct(m, 1)}){r.deal ? ', por cesta' : ''}</p>
+          <p className="mt-1 text-xs text-text">{r.pricingBasis === 'net_margin' ? `Margem líquida esperada ${pct(r.targetNetMarginPct, 1)}` : `Margem ${pct(m, 1)}`}{c.engine.markupPct != null && !r.deal ? ` · markup efetivo ${pct(c.engine.markupPct, 1)}` : ''}</p>
+          <p className="mt-1 text-2xs text-muted">{r.pricingBasis === 'net_margin' ? 'Preço resolvido pela margem líquida do contrato. A contribuição é calculada por cesta.' : <>custos ÷ (1 − tributos {pct(r.rates.a * 100, 2)} − desp. variáveis {pct(r.rates.c * 100, 2)} − margem {pct(m, 1)}){r.deal ? ', por cesta' : ''}</>}</p>
           <button type="button" className={clsx('mt-2 text-xs font-semibold hover:underline', SUG.text)} aria-expanded={cmp} onClick={() => setCmp((v) => !v)}>{cmp ? 'Fechar comparativo' : 'Comparar com o modelo antigo'}</button>
         </section>
         <section className={clsx('min-w-0 border-2 p-3', proposed ? [tone.border, tone.soft] : 'border-dashed border-line bg-surface-2')} aria-label="Preço proposto">
@@ -443,7 +443,7 @@ function ProductTotals({ r, profiles }: { r: B2gResult | null | undefined; profi
   const baskets = r.baskets?.filter((b) => profiles.includes(b.profile)) ?? [];
   const facts = r.blocked.length ? [['Custo global do contrato', fmtBRL(g.costCents)]] : [['Valor global', fmtBRL(g.priceCents)], ['Custo global do contrato', fmtBRL(g.costCents)], ['Markup efetivo (resultado)', g.markup == null ? '—' : `${g.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×`], ['Margem líquida', `${fmtBRL(g.netCents)} · ${pct(g.netPct)}`], ['Piso global', fmtBRL(g.floorCents)], ['Desconto máximo', pct(g.maxDiscountPct)]];
   return <div className="space-y-3">
-    {!!baskets.length && <dl className={clsx('grid gap-2', baskets.length === 2 ? 'sm:grid-cols-2' : baskets.length === 3 && 'sm:grid-cols-3')} aria-label="Custos totais por cesta">{baskets.map((b) => <div key={b.profile} className="border border-line p-3 text-xs"><dt className="font-semibold text-ink">{b.profile === 'fornecimento' ? 'Fornecimento' : b.profile === 'instalacao' ? 'Serviço de Instalação (Sem recorrência)' : 'Serviço Fornecimento + Instalação'}</dt><dd className="num mt-1 font-bold text-ink">{fmtBRL(b.costCents)}</dd>{b.baseCents != null && <dd className="mt-1 text-2xs text-muted">Base {fmtBRL(b.baseCents)} + contingência {fmtBRL(b.contingencyCents ?? 0)}{b.serviceInvestmentCents ? ` + investimento em serviços (35%) ${fmtBRL(b.serviceInvestmentCents)}` : ''}</dd>}<dd className="mt-1 text-2xs text-muted">Investimento {fmtBRL(b.investmentCents)}{b.monthlyCostCents > 0 ? ` + ${fmtBRL(b.monthlyCostCents)}/mês durante a vigência` : ''}</dd></div>)}</dl>}
+    {!!baskets.length && <dl className={clsx('grid gap-2', baskets.length === 2 ? 'sm:grid-cols-2' : baskets.length === 3 && 'sm:grid-cols-3')} aria-label="Custos totais por cesta">{baskets.map((b) => <div key={b.profile} className="border border-line p-3 text-xs"><dt className="font-semibold text-ink">{b.profile === 'fornecimento' ? 'Fornecimento' : b.profile === 'instalacao' ? 'Serviço de Instalação (Sem recorrência)' : 'Serviço Fornecimento + Instalação'}</dt><dd className="num mt-1 font-bold text-ink">{fmtBRL(b.costCents)}</dd>{b.baseCents != null && <dd className="mt-1 text-2xs text-muted">Base {fmtBRL(b.baseCents)} + contingência {fmtBRL(b.contingencyCents ?? 0)}{b.serviceInvestmentCents ? ` + investimento em serviços (35%) ${fmtBRL(b.serviceInvestmentCents)}` : ''}{b.variableFixedCents ? ` + entrega/taxas ${fmtBRL(b.variableFixedCents)}` : ''}</dd>}<dd className="mt-1 text-2xs text-muted">Investimento {fmtBRL(b.investmentCents)}{b.monthlyCostCents > 0 ? ` + ${fmtBRL(b.monthlyCostCents)}/mês durante a vigência` : ''}</dd></div>)}</dl>}
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 bg-surface-2 p-3 text-xs sm:grid-cols-3" aria-label="Resumo dos preços por produto">{facts.map(([label, value]) => <div key={label}><dt className="text-muted">{label}</dt><dd className="num font-semibold text-ink">{value}</dd></div>)}</dl>
   </div>;
 }
@@ -459,7 +459,7 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
         <Badge dot={r.decision ? SUG.dot : 'bg-line-strong'}>{r.decision ? 'Indicadores no preço sugerido' : 'Indicadores'}</Badge>
       </div>
       <dl className={clsx('mt-1.5 grid gap-2', compact ? 'grid-cols-[repeat(auto-fit,minmax(140px,1fr))]' : 'grid-cols-[repeat(auto-fit,minmax(150px,1fr))]')}>
-        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Margem de contribuição</dt><dd className={clsx('num font-bold', k && k.marginPct < (r.rates.mMin ?? r.rates.m) * 100 - 1e-6 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">piso {pct((r.rates.mMin ?? r.rates.m) * 100, 0)}</dd></div>
+        <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]"><dt className="text-xs text-muted">Margem de contribuição{r.mode === 'recorrente' ? ' (1º mês)' : ''}</dt><dd className={clsx('num font-bold', k && k.marginPct < (r.rates.mMin ?? r.rates.m) * 100 - 1e-6 ? 'text-[#C2610C]' : 'text-ink')}>{pct(k?.marginPct)}</dd><dd className="text-2xs text-muted">piso {pct((r.rates.mMin ?? r.rates.m) * 100, 0)}</dd></div>
         {(() => { const c = econCompare(r, { oneTimeX100: settings?.legacyOneTimeX100, recurringX100: settings?.legacyRecurringX100 }); return (
           <div className="min-w-0 border-l-2 border-primary/60 bg-surface-2 p-2.5 [overflow-wrap:break-word]" title="(preço sugerido − custo) ÷ custo"><dt className="text-xs text-muted">Markup efetivo</dt><dd className="num font-bold text-ink">{r.deal ? '—' : pct(c.engine.markupPct, 1)}</dd><dd className="text-2xs text-muted">{r.deal ? 'por cesta no comparativo' : `sobre ${c.baseLabel}`}</dd></div>
         ); })()}
@@ -758,15 +758,15 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const input = useMemo<EconInput | null>(() => (f ? {
     ...emptyEconInput(), mode: f.mode, termMonths: Number(f.term) || 0, receiveMonth: Number(f.receive) || 0,
     capex: fromLines(f.capex), extraInitialCents: parseMoney(f.extra) ?? -1, opex: fromLines(f.opex),
-    commissionBp: null, variableBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: parseBp(f.margin), paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
+    commissionBp: null, variableBp: parseBp(f.commission), lossBp: parseBp(f.loss), marginTargetBp: null, paybackMonths: f.payback ? Number(f.payback) : null, priceCents: f.price.trim() ? parseMoney(f.price) : null,
     salePriceCents: f.salePrice.trim() ? parseMoney(f.salePrice) : null,
     fiscalYear: f.fiscalYear.length === 4 ? Number(f.fiscalYear) : null,
     b2g: b2gInputOf(f.b2g),
   } : null), [f]);
   const invalid = !input || [input.variableBp ?? null, input.lossBp, input.marginTargetBp].some((v) => Number.isNaN(v)) || input.extraInitialCents < 0 || [...input.capex, ...input.opex].some((l) => l.unitCents < 0 || l.qtyMilli <= 0 || l.description.length < 2) || (input.mode === 'recorrente' && (input.termMonths < 1 || input.termMonths > 240));
   const liveModel = useMemo(() => { try { return buildModel(q.data?.modelOverrides ?? []); } catch { return undefined; } }, [q.data?.modelOverrides]);
-  const live = useMemo(() => (q.data?.settings && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel, fiscal: q.data.fiscal }) : null), [q.data, input, invalid, liveModel]);
-  const liveB2g = useMemo(() => { if (!q.data?.settings || !input || invalid) return null; try { return b2gFromEconomics({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, fiscal: q.data.fiscal }, live?.fiscal?.profitTaxBp ?? null); } catch { return null; } }, [q.data, input, invalid, live]);
+  const live = useMemo(() => (q.data?.settings && q.data.settings.netMarginTargetBp != null && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel, fiscal: q.data.fiscal }) : null), [q.data, input, invalid, liveModel]);
+  const liveB2g = useMemo(() => { if (!q.data?.settings || q.data.settings.netMarginTargetBp == null || !input || invalid) return null; try { return b2gFromEconomics({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, fiscal: q.data.fiscal }, live?.fiscal?.profitTaxBp ?? null, live); } catch { return null; } }, [q.data, input, invalid, live]);
   const save = useMutation({
     mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
     onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
@@ -797,9 +797,6 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const itemsTotal = d.items.filter((i) => (mixed ? isMonthlyKind(kindOf(i)) : true)).reduce((t, i) => t + i.revenueCents, 0);
   const customized = [f.commission, f.loss].some((v) => v.trim() !== '');
   const teto = d.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
-  const mPiso = st.marginTargetBp, mTeto = st.marginMaxBp ?? null, mSug = st.marginSuggestedBp ?? st.marginTargetBp;
-  const mNow = parseBp(f.margin) ?? mSug;
-  const mOut = f.margin.trim() !== '' && !Number.isNaN(mNow) && (mNow < mPiso || (mTeto != null && mNow > mTeto));
   const tmaText = st.tmaAnnualBp != null ? `TMA de ${bpText(st.tmaAnnualBp)}% ao ano` : `TMA de ${bpText(st.tmaMonthlyBp)}% ao mês`;
   const shown = (v: string, def: number) => (v.trim() ? v : bpText(def));
   const segLoss = d.publicSector ? st.lossPublicBp : st.lossPrivateBp;
@@ -890,8 +887,8 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
             <FormField label="Vigência fiscal (ano)" htmlFor="ec-fy" hint={`Ano dos tributos dos documentos fiscais e do IR/CSLL da empresa (Filiais → Documentos fiscais). Em branco = ${d.fiscal?.today.slice(0, 4) ?? 'ano corrente'}.`}>
               <Input id="ec-fy" inputMode="numeric" placeholder={d.fiscal?.today.slice(0, 4) ?? ''} value={f.fiscalYear} disabled={dis} invalid={!!f.fiscalYear && f.fiscalYear.length !== 4} onChange={(e) => set({ fiscalYear: e.target.value.replace(/\D/g, '').slice(0, 4) })} />
             </FormField>
-            <FormField label="Margem de contribuição (%)" htmlFor="ec-mar" error={mOut ? `Fora dos limites: o cálculo usa ${bpText(Math.min(Math.max(mNow, mPiso), mTeto ?? 10_000))}%.` : undefined} hint={`Piso ${bpText(mPiso)}%${mTeto != null ? ` · teto ${bpText(mTeto)}%` : ''} · sugestão ${bpText(mSug)}%. Em branco vale a sugestão.`}>
-              <Input id="ec-mar" inputMode="decimal" placeholder={bpText(mSug)} value={f.margin} disabled={dis} invalid={Number.isNaN(parseBp(f.margin)) || mOut} onChange={(e) => set({ margin: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
+            <FormField label="Margem líquida esperada (%)" htmlFor="ec-net-target" hint="Definida em Configurações → Viabilidade. A margem de contribuição é calculada pelo motor.">
+              <Input id="ec-net-target" value={bpText(st.netMarginTargetBp ?? null)} disabled placeholder="Configure a margem líquida esperada" />
             </FormField>
             <FormField label={mixed ? 'Preço por mês (R$, recorrência + locação)' : f.mode === 'recorrente' ? 'Preço por mês (R$)' : 'Preço (R$)'} htmlFor="ec-price" hint={`${mixed ? 'Produtos mensais' : 'Total dos produtos'}: ${fmtBRL(itemsTotal)}`}><><Input id="ec-price" inputMode="decimal" placeholder={money(itemsTotal)} value={f.price} disabled={dis} onChange={(e) => set({ price: e.target.value })} />{(shownResult?.suggestedCents ?? shownResult?.suggestedMinCents) != null && !dis && <button type="button" className="mt-1 block text-xs font-semibold text-primary hover:underline" onClick={() => set({ price: money((shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)!) })}>Usar o preço sugerido ({fmtBRL(shownResult!.suggestedCents ?? shownResult!.suggestedMinCents)})</button>}</></FormField>
             </div>
@@ -913,10 +910,11 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       </div>
 
       {official && d.stale && <Notice tone="warning">Produtos, tributos ou parâmetros mudaram depois do último cálculo salvo. Confira e salve novamente antes de pedir aprovação.</Notice>}
+      {st.netMarginTargetBp == null && <Notice tone="warning">Configure a margem líquida esperada em Configurações → Viabilidade para salvar a análise.</Notice>}
       {invalid && <Notice tone="warning">Confira os campos destacados para calcular e salvar a viabilidade.</Notice>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button type="button" disabled={!shownResult} aria-expanded={basicOpen} onClick={() => setBasicOpen(!basicOpen)} className="text-sm font-semibold text-primary hover:underline disabled:opacity-50">{basicOpen ? 'Recolher fluxo de caixa e cálculo básico' : 'Ver fluxo de caixa e cálculo básico'}</button>
-        {d.editable && <Button variant="primary" disabled={invalid} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button>}
+        {d.editable && <Button variant="primary" disabled={invalid || st.netMarginTargetBp == null} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button>}
       </div>
       {basicOpen && shownResult && <div className="space-y-4" aria-label="Fluxo de caixa e cálculo básico">
         {shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) &&         <section className="border border-line p-4" aria-labelledby="ec-flow">

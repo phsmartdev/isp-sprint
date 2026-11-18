@@ -7,7 +7,7 @@ import { api } from '../../lib/api';
 import { moneyHidden, setMoneyHidden } from '../../lib/privacy';
 
 vi.mock('../../lib/api', async (original) => ({ ...await original<typeof import('../../lib/api')>(), api: vi.fn() }));
-const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0 };
+const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true, overheadBp: 0, incomeTaxBp: 0, netMarginTargetBp: 2000, netMarginMinBp: 900, netMarginMaxBp: 4100 };
 const input: EconInput = { ...emptyEconInput(), termMonths: 12, capex: [{ description: 'Equipamento', kind: 'venda', impact: 'material', qtyMilli: 1000, unitCents: 90000 }, { description: 'Instalação', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 100000 }, { description: 'Implantação', kind: 'recorrencia', qtyMilli: 1000, unitCents: 120000 }], opex: [{ description: 'Mensal', qtyMilli: 1000, unitCents: 10000 }] };
 const items: EconItem[] = [
   { description: 'Venda', kind: 'venda', revenueCents: 200000, doc: { name: 'NF-e', percentBp: 1000, fixedCents: 0, complete: true } },
@@ -152,6 +152,17 @@ describe('organização da viabilidade', () => {
     const basket = screen.getByRole('region', { name: 'Cesta Serviço Fornecimento + Instalação' });
     expect(within(basket).getByText('Link')).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Cesta Fornecimento' })).toBeNull();
+  });
+
+  it('usa o alvo das configurações e não permite informar contribuição manual', async () => {
+    setup();
+    await screen.findByRole('button', { name: 'Mostrar A venda' });
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar A venda' }));
+    const sale = screen.getByRole('region', { name: 'A venda' });
+    const target = within(sale).getByLabelText('Margem líquida esperada (%)') as HTMLInputElement;
+    expect(target.disabled).toBe(true);
+    expect(target.value).toBe('20');
+    expect(within(sale).queryByLabelText('Margem de contribuição (%)')).toBeNull();
   });
 
 });

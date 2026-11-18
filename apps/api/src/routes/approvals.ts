@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
   featureOn,
   APPROVAL_LEVELS, APPROVAL_LEVEL_LABELS, CLASSIFICATION_DIMENSIONS, DECISIONS, DECISION_LABELS, NEGOTIATION_TYPES, NEGOTIATION_TYPE_LABELS,
-  canDecide, renderApprovalTemplate, userApprovalLevel, type ApprovalLevel,
+  canDecide, renderApprovalTemplate, userApprovalLevel, type ApprovalLevel, type EconVerdict,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
@@ -164,13 +164,18 @@ export const approvalRoutes = [
         if (er.withReservations) throw unprocessable('Viabilidade econômica: todos os produtos precisam de documento fiscal com tributos vigentes cadastrados na filial antes de pedir aprovação.');
         if (ctx.settings.blockOutsidePolicy && er.verdict !== 'viavel') {
           const pb = er.kpi?.paybackMonths;
-          throw unprocessable({
+          throw unprocessable(({
+            viavel: 'Viabilidade econômica dentro da faixa.',
+            abaixo_faixa: 'Viabilidade econômica: margem líquida abaixo da faixa configurada. Revise o preço ou os custos antes de pedir aprovação.',
+            acima_faixa: 'Viabilidade econômica: margem líquida acima da faixa configurada. Revise o preço antes de pedir aprovação.',
+            aguardando_sugerido: 'Viabilidade econômica aguardando preço sugerido. Confira a margem líquida esperada e os custos.',
+            sem_margem_liquida: 'Viabilidade econômica sem margem líquida calculada. Confira os parâmetros de despesas fixas e IR/CSLL.',
             inviavel: 'Viabilidade econômica: tributos, comissão e perdas consomem a receita. Revise antes de pedir aprovação.',
             sem_preco: 'Viabilidade econômica sem preço: lance os produtos ou informe o preço.',
             abaixo_minimo: 'Viabilidade econômica abaixo do preço mínimo: o preço não cobre custos, tributos e o investimento no prazo da política.',
             fora_politica: `Viabilidade econômica fora da política: o investimento volta em ${pb == null ? 'mais que a vigência' : `${pb.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} meses`} (payback descontado) e o limite para ${ctx.publicSector ? 'setor público' : 'setor privado'} é ${er.term.Dalvo}. Ajuste preço, investimento ou vigência.`,
             abaixo_recomendado: `Viabilidade econômica abaixo da margem mínima: ${(er.kpi?.marginPct ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% contra ${(er.rates.m * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% exigidos.`,
-          }[er.verdict as 'inviavel']);
+          } satisfies Record<EconVerdict, string>)[er.verdict]);
         }
       }
       const a = await buildAnalysis(app.db, auth, opp, { proposedMonthlyCents: body.proposedMonthlyCents, activationFeeCents: body.activationFeeCents, replacesMonthlyCents: body.replacesMonthlyCents, negotiationType: body.negotiationType });
