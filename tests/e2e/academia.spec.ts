@@ -144,3 +144,10 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   await expect(person).toContainText('50%');
   await shot(page, '4-acompanhamento');
 });
+
+test('integrações: a tela abre com o cartão do YouTube (Academia) e a chave não aparece', async ({ page }) => {
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/integrations');
+  await expect(page.getByRole('heading', { name: 'YouTube (Academia)' })).toBeVisible();
+  await expect(page.getByText('Esta tela encontrou um erro')).toHaveCount(0);
+});
