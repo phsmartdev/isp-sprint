@@ -6,7 +6,7 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
-  MIN_WATCH_PCTS, PROGRESS_METHODS, TRACK_LEVELS, TRACK_MODES, VISIBILITIES, audienceAllows, audienceErrors, creditIntervals, effectiveMinPct,
+  MIN_WATCH_PCTS, PROGRESS_METHODS, academyCertificateCode, certificateWorkload, TRACK_LEVELS, TRACK_MODES, VISIBILITIES, audienceAllows, audienceErrors, creditIntervals, effectiveMinPct,
   isoAddDays, lessonDone, lockedLessons, parseYoutube, snapshotLessons, snapshotMinutes, structureErrors, trackProgress, youtubeThumb,
   type ContentState, type Interval, type LessonState, type TrackSnapshot,
 } from '@isp/domain';
@@ -20,6 +20,7 @@ import { decodeImage } from '../services/images';
 import { isDirector, isManager, viewerOf } from '../services/playbooks';
 import { todayIn } from '../services/vacations';
 import { playlistInfo, videoInfo, type VideoInfo } from '../services/youtube';
+import { academyCertificatePdf } from '../services/academyCertificate';
 import {
   audOf, canEditTrack, canManageAcademy, contentsById, decidesVersion, eligibleUserIds, followedUserIds, metaOf, peopleContext, progressOf,
   markRead, stageFor, statusOf, trackEvent, usersWithProfiles, versionMeta, versionSnap, workingSnapshot, type TrackRow, type VersionRow,
@@ -41,7 +42,7 @@ const TrackBody = z.object({
   prerequisiteIds: z.array(uuid).max(20).default([]),
   minWatchPct: z.number().int().refine((n) => (MIN_WATCH_PCTS as readonly number[]).includes(n), 'Use 50, 75, 90 ou 100%.').default(90),
   progressMethod: z.enum(PROGRESS_METHODS).default('quantidade'), sequential: z.boolean().default(false),
-  certificate: z.boolean().default(false), validityMonths: z.number().int().min(1).max(120).nullable().default(null), recycleMonths: z.number().int().min(1).max(120).nullable().default(null),
+  certificate: z.boolean().default(true), validityMonths: z.number().int().min(1).max(120).nullable().default(null), recycleMonths: z.number().int().min(1).max(120).nullable().default(null),
   /** capa: imagem em base64 (data URL); null remove; ausente mantém */
   cover: z.string().min(16).max(3_000_000).nullable().optional(),
 });
@@ -131,6 +132,32 @@ async function names(db: DbOrTx, auth: AuthContext) {
   ]);
   return { teams: new Map(teams.map((x) => [x.id, x.name])), users: new Map(users.map((x) => [x.id, x.name])) };
 }
+
+/** Certificado da pessoa nesta trilha: emite na primeira vez (trilha concluída e certificado ligado na versão), depois devolve o guardado. */
+async function certificateFor(db: DbOrTx, auth: AuthContext, t: TrackRow, issue: boolean) {
+  const [cur] = await db.select().from(s.academyCertificates).where(and(eq(s.academyCertificates.trackId, t.id), eq(s.academyCertificates.userId, auth.userId)));
+  if (cur || !issue) return cur ?? null;
+  const ls = await learnerState(db, auth, t);
+  if (!ls?.enr?.completedAt || !ls.meta.certificate) return null;
+  const lessons = snapshotLessons(ls.snap).map((l) => { const st = ls.pr.byId.get(l.id)!; return { kind: l.kind, durationSeconds: st.durationSeconds, done: st.done }; });
+  const w = certificateWorkload(lessons);
+  const today = todayIn(auth.timezone), year = Number(today.slice(0, 4));
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`acd-cert:${auth.tenantId}:${year}`}))`);
+    const [again] = await tx.select().from(s.academyCertificates).where(and(eq(s.academyCertificates.trackId, t.id), eq(s.academyCertificates.userId, auth.userId)));
+    if (again) return again;
+    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(s.academyCertificates).where(and(eq(s.academyCertificates.tenantId, auth.tenantId), sql`extract(year from ${s.academyCertificates.issuedOn}) = ${year}`)) as [{ n: number }];
+    const code = academyCertificateCode(year, n + 1);
+    const [u] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId));
+    const [tn] = await tx.select({ name: s.tenants.name }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId));
+    const pdf = await academyCertificatePdf({ company: tn?.name ?? '', person: u?.name ?? '', track: ls.meta.title, seconds: w.seconds, lessons: w.lessons, issuedOn: today, code, competencies: ls.meta.competencies });
+    const [c] = await tx.insert(s.academyCertificates).values({ tenantId: auth.tenantId, trackId: t.id, versionId: ls.v.id, userId: auth.userId, code, title: ls.meta.title, seconds: w.seconds, lessons: w.lessons, issuedOn: today, data: pdf }).returning();
+    await tx.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId: t.id, versionId: ls.v.id, type: 'certificado', note: code, actorId: auth.userId });
+    return c!;
+  });
+}
+const certView = (c: typeof s.academyCertificates.$inferSelect | null) => (c ? { id: c.id, code: c.code, seconds: c.seconds, lessons: c.lessons, issuedOn: c.issuedOn } : null);
+const noteView = (n: typeof s.academyNotes.$inferSelect) => ({ id: n.id, lessonId: n.lessonId, position: n.positionSeconds, text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt });
 
 export const academyRoutes = [
   // ------------------------------------------------------------------ gestão
@@ -479,6 +506,8 @@ export const academyRoutes = [
         me: ls.enr ? { enrolled: true, status: statusOf(ls.enr, ls.pr.started, auth.timezone), dueOn: ls.enr.dueOn, source: ls.enr.source, completedAt: ls.enr.completedAt, lastLessonId: ls.enr.lastLessonId } : null,
         progress: ls.pr.progress, nextLessonId: ls.pr.nextLessonId,
         newerVersion: !!ls.enr && t.currentVersionId !== ls.enr.versionId,
+        certificate: { enabled: ls.meta.certificate, issued: certView(ls.enr ? await certificateFor(app.db, auth, t, !!ls.enr.completedAt) : null) },
+        notes: ls.enr ? (await app.db.select().from(s.academyNotes).where(and(eq(s.academyNotes.trackId, t.id), eq(s.academyNotes.userId, auth.userId))).orderBy(asc(s.academyNotes.positionSeconds))).map(noteView) : [],
       };
     },
   }),
@@ -505,6 +534,7 @@ export const academyRoutes = [
         course: { id: course.id, title: course.title }, module: { id: mod.id, title: mod.title, lessons: mod.lessons.filter((x) => x.kind !== 'link').map((x) => item({ ...x, courseId: course.id, moduleId: mod.id, courseMinPct: course.minWatchPct })) },
         modules: ls.snap.courses.flatMap((c) => c.modules.map((m) => { const first = m.lessons.find((x) => x.kind !== 'link'); return { id: m.id, title: m.title, course: c.title, firstLessonId: first?.id ?? null, done: m.lessons.filter((x) => x.required && ls.pr.byId.get(x.id)?.available).every((x) => ls.pr.byId.get(x.id)?.done) }; })),
         materials,
+        notes: (await app.db.select().from(s.academyNotes).where(and(eq(s.academyNotes.lessonId, l.id), eq(s.academyNotes.userId, auth.userId))).orderBy(asc(s.academyNotes.positionSeconds), asc(s.academyNotes.createdAt))).map(noteView),
         prevId: all.slice(0, idx).reverse().find((x) => x.kind !== 'link')?.id ?? null,
         nextId: all.slice(idx + 1).find((x) => x.kind !== 'link')?.id ?? null,
       };
@@ -579,6 +609,59 @@ export const academyRoutes = [
           done, minPct, durationSeconds: dur, track: { pct: pr.progress.pct, complete: trackDone, nextLessonId: pr.nextLessonId },
         };
       });
+    },
+  }),
+
+  // ------------------------------------------------------------------ anotações (pessoais, presas a um ponto do vídeo)
+  defineRoute({
+    method: 'POST', url: '/academia/trilhas/:id/aulas/:lessonId/anotacoes', summary: 'Cria uma anotação na aula, no ponto do vídeo informado', ...A, params: TrackParams,
+    body: z.object({ position: z.number().min(0).max(86_400), text: z.string().trim().min(1).max(2000) }),
+    handler: async ({ app, auth, params, body, reply }) => {
+      const t = await loadTrack(app.db, auth, params.id);
+      const ls = await learnerState(app.db, auth, t);
+      if (!ls?.enr) throw forbidden('Inscreva-se na trilha para fazer anotações.');
+      if (!snapshotLessons(ls.snap).some((x) => x.id === params.lessonId)) throw notFound('Aula não encontrada nesta versão da trilha.');
+      const [n] = await app.db.insert(s.academyNotes).values({ tenantId: auth.tenantId, userId: auth.userId, trackId: t.id, lessonId: params.lessonId, positionSeconds: Math.floor(body.position), text: body.text }).returning();
+      reply.code(201);
+      return noteView(n!);
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/academia/anotacoes/:id', summary: 'Edita a própria anotação (texto e ponto do vídeo)', ...A, params: IdParams,
+    body: z.object({ position: z.number().min(0).max(86_400), text: z.string().trim().min(1).max(2000) }),
+    handler: async ({ app, auth, params, body }) => {
+      const [n] = await app.db.update(s.academyNotes).set({ text: body.text, positionSeconds: Math.floor(body.position), updatedAt: new Date() })
+        .where(and(eq(s.academyNotes.id, params.id), eq(s.academyNotes.userId, auth.userId), eq(s.academyNotes.tenantId, auth.tenantId))).returning();
+      if (!n) throw notFound('Anotação não encontrada.');
+      return noteView(n);
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/academia/anotacoes/:id', summary: 'Exclui a própria anotação', ...A, params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const r = await app.db.delete(s.academyNotes).where(and(eq(s.academyNotes.id, params.id), eq(s.academyNotes.userId, auth.userId), eq(s.academyNotes.tenantId, auth.tenantId))).returning({ id: s.academyNotes.id });
+      if (!r.length) throw notFound('Anotação não encontrada.');
+      return { ok: true };
+    },
+  }),
+
+  // ------------------------------------------------------------------ certificado
+  defineRoute({
+    method: 'GET', url: '/academia/trilhas/:id/certificado', summary: 'Baixa o certificado da trilha concluída (emite na primeira vez; a carga é a soma das aulas concluídas)', ...A, params: IdParams,
+    handler: async ({ app, auth, params, reply }) => {
+      const t = await loadTrack(app.db, auth, params.id);
+      const c = await certificateFor(app.db, auth, t, true);
+      if (!c) throw unprocessable('O certificado sai quando a trilha é concluída (e se ela emite certificado).');
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${c.code}.pdf"`).header('cache-control', 'private, no-store').send(c.data);
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/academia/certificados/verificar/:code', summary: 'Confere um certificado da Academia pelo código (qualquer pessoa da empresa)', ...A,
+    params: z.object({ code: z.string().regex(/^ACD-\d{4}-\d{6}$/) }),
+    handler: async ({ app, auth, params }) => {
+      const [c] = await app.db.select({ title: s.academyCertificates.title, seconds: s.academyCertificates.seconds, lessons: s.academyCertificates.lessons, issuedOn: s.academyCertificates.issuedOn, person: s.users.name }).from(s.academyCertificates)
+        .innerJoin(s.users, eq(s.users.id, s.academyCertificates.userId)).where(and(eq(s.academyCertificates.tenantId, auth.tenantId), eq(s.academyCertificates.code, params.code)));
+      return c ? { valid: true as const, ...c } : { valid: false as const };
     },
   }),
 

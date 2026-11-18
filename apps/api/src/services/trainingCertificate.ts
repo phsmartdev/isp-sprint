@@ -21,14 +21,14 @@ const HEX = 'M50 4 L90 27 L90 73 L50 96 L10 73 L10 27 Z';
 const ARROW = 'M27 70 L45 52 L54 61 L67 46 L67 56 L73 56 L73 34 L51 34 L51 40 L61 40 L54 48 L45 39 L23 61 Z';
 
 /** Badge Crescimento (faixa alcançada: grafite com detalhe lima), canto superior esquerdo em (x, top). */
-function drawGrowthBadge(page: PDFPage, x: number, top: number, size: number) {
+export function drawGrowthBadge(page: PDFPage, x: number, top: number, size: number) {
   const s = size / 100;
   page.drawSvgPath(HEX, { x, y: top, scale: s, color: BLUE, borderColor: WHITE, borderWidth: 3 * s });
   page.drawSvgPath(ARROW, { x, y: top, scale: s, color: WHITE });
   for (let i = 0; i < 3; i++) page.drawRectangle({ x: x + (35 + i * 11) * s, y: top + 6, width: 7 * s, height: 5 * s, color: SKY });
 }
 
-function fit(font: PDFFont, text: string, size: number, max: number, min = 9) {
+export function fit(font: PDFFont, text: string, size: number, max: number, min = 9) {
   const t = safeText(font, text);
   let sz = size;
   while (font.widthOfTextAtSize(t, sz) > max && sz > min) sz -= 0.5;
@@ -36,7 +36,7 @@ function fit(font: PDFFont, text: string, size: number, max: number, min = 9) {
 }
 
 /** Quebra o texto em até `lines` linhas na largura dada. */
-function wrap(font: PDFFont, text: string, size: number, max: number, lines: number) {
+export function wrap(font: PDFFont, text: string, size: number, max: number, lines: number) {
   const out: string[] = [];
   let cur = '';
   for (const w of safeText(font, text).split(/\s+/)) {

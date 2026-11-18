@@ -86,3 +86,22 @@ describe('motor de progresso', () => {
     expect(structureErrors({ courses: [{ id: 'c', title: 'C', description: null, minWatchPct: null, modules: [{ id: 'm', title: 'M', lessons: [] }] }] })).toContain('Cada módulo precisa de ao menos uma aula.');
   });
 });
+
+describe('certificado e anotações', () => {
+  it('carga horária soma só as aulas concluídas; tempo da anotação', async () => {
+    const { certificateWorkload, fmtWorkload, fmtTimecode, academyCertificateCode } = await import('./academy');
+    const w = certificateWorkload([
+      { kind: 'youtube_video', durationSeconds: 3600, done: true },
+      { kind: 'youtube_video', durationSeconds: 900, done: true }, // opcional concluída também conta
+      { kind: 'youtube_video', durationSeconds: 600, done: false },
+      { kind: 'link', durationSeconds: null, done: true },
+    ]);
+    expect(w).toEqual({ seconds: 4500, lessons: 2 });
+    expect(fmtWorkload(4500)).toBe('1 h 15 min');
+    expect(fmtWorkload(3600)).toBe('1 h');
+    expect(fmtWorkload(20)).toBe('1 min');
+    expect(fmtTimecode(187)).toBe('3:07');
+    expect(fmtTimecode(3725)).toBe('1:02:05');
+    expect(academyCertificateCode(2026, 7)).toBe('ACD-2026-000007');
+  });
+});

@@ -36,9 +36,12 @@ export type BeatResult = { duplicate: boolean; credited?: number; watchedSeconds
 const sessKey = (lessonId: string) => `academia:sessao:${lessonId}`;
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-export function YoutubePlayer({ trackId, lessonId, videoId, resumeAt, onBeat, onEnded }: {
+/** Controle do player para a tela: ler o tempo atual (anotações) e levar o vídeo a um ponto (links das anotações). */
+export type PlayerControl = { time: () => number; seek: (seconds: number) => void };
+
+export function YoutubePlayer({ trackId, lessonId, videoId, resumeAt, onBeat, onEnded, control }: {
   trackId: string; lessonId: string; videoId: string; resumeAt: number;
-  onBeat: (r: BeatResult) => void; onEnded?: () => void;
+  onBeat: (r: BeatResult) => void; onEnded?: () => void; control?: { current: PlayerControl | null };
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +117,11 @@ export function YoutubePlayer({ trackId, lessonId, videoId, resumeAt, onBeat, on
             onError: (e: { data: number }) => setError(e.data === 101 || e.data === 150 ? 'O dono do vídeo não permite reproduzi-lo fora do YouTube. Avise quem cuida da trilha.' : e.data === 100 ? 'Este vídeo foi removido ou ficou privado. Avise quem cuida da trilha.' : 'O YouTube não conseguiu reproduzir este vídeo agora.'),
           },
         });
+        if (control) control.current = {
+          time: () => { try { return player?.getCurrentTime() ?? 0; } catch { return 0; } },
+          // ir a um ponto não credita o trecho pulado: a próxima leitura vê o salto e não conta
+          seek: (sec) => { try { sample(); player?.seekTo(Math.max(0, sec), true); } catch { /* player ainda não pronto */ } },
+        };
         sampler = window.setInterval(() => sample(), 1000);
         beater = window.setInterval(() => void send(), 10_000);
       } catch (e) { if (!dead) setError((e as Error).message); }
@@ -126,6 +134,7 @@ export function YoutubePlayer({ trackId, lessonId, videoId, resumeAt, onBeat, on
       window.clearInterval(sampler); window.clearInterval(beater);
       void send({ keepalive: true });
       dead = true;
+      if (control) control.current = null;
       try { player?.destroy(); } catch { /* já destruído */ }
     };
   }, [trackId, lessonId, videoId, resumeAt]);

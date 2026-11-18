@@ -2,19 +2,22 @@
  * Academia — lado de quem aprende: Trilhas de Aprendizagem (catálogo), Minha Aprendizagem, a página da trilha (jornada)
  * e a página da aula com o player. Tudo o que aparece de progresso vem do servidor.
  */
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, Lock, Play, Search } from 'lucide-react';
-import { CONTENT_STATE_LABELS, ENROLLMENT_STATUS_LABELS, TRACK_LEVEL_LABELS, TRACK_MODE_LABELS, fmtDuration, type ContentState, type EnrollmentStatus, type TrackLevel, type TrackMode } from '@isp/domain';
+import { AlertTriangle, Award, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, Lock, Pencil, Play, Search, Trash2 } from 'lucide-react';
+import { CONTENT_STATE_LABELS, ENROLLMENT_STATUS_LABELS, TRACK_LEVEL_LABELS, TRACK_MODE_LABELS, fmtDuration, fmtTimecode, fmtWorkload, type ContentState, type EnrollmentStatus, type TrackLevel, type TrackMode } from '@isp/domain';
 import { api, qs } from '../../../lib/api';
 import { fmtDate } from '../../../lib/format';
 import { useDebounced } from '../../../lib/hooks';
-import { Breadcrumb, Button, EmptyState, ErrorState, LoadingRows } from '../../../components/ui/primitives';
+import { Breadcrumb, Button, EmptyState, ErrorState, LoadingRows, Textarea } from '../../../components/ui/primitives';
 import { useToast } from '../../../components/ui/overlay';
 import { errMsg } from '../../../features/contracts/shared';
-import { YoutubePlayer, type BeatResult } from '../../../features/academy/YoutubePlayer';
+import { YoutubePlayer, type BeatResult, type PlayerControl } from '../../../features/academy/YoutubePlayer';
+
+export type Note = { id: string; lessonId: string; position: number; text: string; createdAt: string; updatedAt: string };
+const lessonLink = (trackId: string, lessonId: string, t?: number) => `/playbooks/academia/trilhas/${trackId}/aulas/${lessonId}${t !== undefined ? `?t=${t}` : ''}`;
 
 export type TrackCard = {
   id: string; title: string; description: string | null; cover: string | null; mode: TrackMode; level: TrackLevel; minutes: number; lessons: number;
@@ -114,6 +117,8 @@ type TrackPage = {
   prerequisites: { id: string; title: string; done: boolean }[];
   me: { enrolled: true; status: EnrollmentStatus; dueOn: string | null; source: string; completedAt: string | null; lastLessonId: string | null } | null;
   progress: { pct: number; doneRequired: number; totalRequired: number; unavailable: number }; nextLessonId: string | null; newerVersion: boolean;
+  certificate: { enabled: boolean; issued: { id: string; code: string; seconds: number; lessons: number; issuedOn: string } | null };
+  notes: Note[];
 };
 
 function Node({ l, enrolled, trackId }: { l: LessonView; enrolled: boolean; trackId: string }) {
@@ -176,6 +181,13 @@ export function AcademyTrackPage() {
               <p className="text-sm text-white/80">{d.progress.doneRequired} de {d.progress.totalRequired} aulas obrigatórias concluídas{d.progress.unavailable ? ` · ${d.progress.unavailable} indisponível(is) fora da conta` : ''}</p>
               {d.nextLessonId && <Button variant="primary" onClick={() => nav(`/playbooks/academia/trilhas/${id}/aulas/${d.nextLessonId}`)} icon={<Play className="h-4 w-4" />}>{d.progress.pct > 0 ? 'Continuar' : 'Começar'}</Button>}
               {d.me.completedAt && <p className="text-sm font-semibold">Concluída em {fmtDate(d.me.completedAt)}</p>}
+              {d.certificate.issued && (
+                <a href={`/api/v1/academia/trilhas/${id}/certificado`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 border border-white/25 px-3 py-2 hover:bg-white/10" data-testid="certificate">
+                  <Award className="h-6 w-6 shrink-0" aria-hidden />
+                  <span><span className="block font-semibold">Baixar certificado</span><span className="text-xs text-white/75">{fmtWorkload(d.certificate.issued.seconds)} · {d.certificate.issued.lessons} aula(s) · {d.certificate.issued.code}</span></span>
+                </a>
+              )}
+              {d.certificate.enabled && !d.me.completedAt && <p className="text-xs text-white/70">Ao concluir, você recebe o certificado com a carga horária das aulas que assistiu.</p>}
             </>
           ) : (
             <>
@@ -205,7 +217,79 @@ export function AcademyTrackPage() {
           </div>
         ))}
       </section>
+      {!!d.notes.length && (
+        <section aria-label="Minhas anotações" className="border border-line bg-surface">
+          <h2 className="border-b border-line px-5 py-3 font-display text-lg font-bold text-ink">Minhas anotações</h2>
+          <ul className="divide-y divide-line">{d.courses.flatMap((c) => c.modules.flatMap((m) => m.lessons)).filter((l) => d.notes.some((n) => n.lessonId === l.id)).map((l) => (
+            <li key={l.id} className="px-5 py-3">
+              <p className="mb-1 text-sm font-semibold text-ink">{l.title}</p>
+              <ul className="space-y-1">{d.notes.filter((n) => n.lessonId === l.id).map((n) => (
+                <li key={n.id} className="flex gap-3 text-sm"><Link to={lessonLink(id, l.id, n.position)} className="num shrink-0 font-semibold text-primary hover:underline" aria-label={`Ir para ${fmtTimecode(n.position)} de ${l.title}`}>{fmtTimecode(n.position)}</Link><span className="whitespace-pre-line text-text">{n.text}</span></li>
+              ))}</ul>
+            </li>
+          ))}</ul>
+        </section>
+      )}
     </div>
+  );
+}
+
+/** Anotações da aula: cada uma presa ao ponto do vídeo em que foi feita; o tempo é um link que leva o vídeo até lá. */
+function LessonNotes({ trackId, lessonId, initial, control, canSeek }: { trackId: string; lessonId: string; initial: Note[]; control: { current: PlayerControl | null }; canSeek: boolean }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [notes, setNotes] = useState(initial);
+  const [text, setText] = useState('');
+  const [at, setAt] = useState<number | null>(null);
+  const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
+  const now = () => Math.floor(control.current?.time() ?? 0);
+  const sorted = (xs: Note[]) => [...xs].sort((a, b) => a.position - b.position);
+  const done = () => void qc.invalidateQueries({ queryKey: ['academia', 'trilha', trackId] });
+  const add = useMutation({
+    mutationFn: () => api<Note>(`/academia/trilhas/${trackId}/aulas/${lessonId}/anotacoes`, { method: 'POST', body: { position: at ?? now(), text } }),
+    onSuccess: (n) => { setNotes((xs) => sorted([...xs, n])); setText(''); setAt(null); done(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const save = useMutation({
+    mutationFn: (x: { id: string; text: string; position: number }) => api<Note>(`/academia/anotacoes/${x.id}`, { method: 'PUT', body: { text: x.text, position: x.position } }),
+    onSuccess: (n) => { setNotes((xs) => sorted(xs.map((y) => (y.id === n.id ? n : y)))); setEdit(null); done(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const del = useMutation({
+    mutationFn: (nid: string) => api(`/academia/anotacoes/${nid}`, { method: 'DELETE' }),
+    onSuccess: (_r, nid) => { setNotes((xs) => xs.filter((y) => y.id !== nid)); done(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const go = (sec: number) => { control.current?.seek(sec); document.querySelector('[data-testid="yt-player"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+  return (
+    <section aria-label="Anotações" className="space-y-3 border border-line bg-surface p-4">
+      <h2 className="font-semibold text-ink">Anotações</h2>
+      <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (text.trim()) add.mutate(); }}>
+        <Textarea aria-label="Nova anotação" rows={2} value={text} placeholder="Escreva o que quer lembrar deste ponto do vídeo" onFocus={() => { if (at === null) setAt(now()); }} onChange={(e) => { if (at === null) setAt(now()); setText(e.target.value); }} />
+        <div className="flex flex-wrap items-center gap-2">
+          {at === null ? <span className="text-sm text-muted">O ponto do vídeo é marcado quando você começa a escrever.</span> : <span className="text-sm text-muted">No vídeo em <span className="num font-semibold text-ink" data-testid="note-at">{fmtTimecode(at)}</span></span>}
+          <button type="button" className="text-sm font-semibold text-primary hover:underline" onClick={() => setAt(now())}>Usar o tempo atual</button>
+          <Button type="submit" size="sm" variant="primary" className="ml-auto" disabled={!text.trim()} loading={add.isPending}>Salvar anotação</Button>
+        </div>
+      </form>
+      {!notes.length ? <p className="text-sm text-muted">Suas anotações ficam só para você e levam o vídeo de volta ao ponto em que foram feitas.</p> : (
+        <ul className="divide-y divide-line border-t border-line" data-testid="notes">{notes.map((n) => (
+          <li key={n.id} className="flex items-start gap-3 py-2">
+            <a href={lessonLink(trackId, lessonId, n.position)} onClick={(e) => { if (canSeek) { e.preventDefault(); go(n.position); } }} className="num shrink-0 bg-primary-soft px-2 py-0.5 text-sm font-semibold text-primary hover:underline" aria-label={`Ir para ${fmtTimecode(n.position)} do vídeo`}>{fmtTimecode(n.position)}</a>
+            {edit?.id === n.id ? (
+              <form className="flex-1 space-y-1" onSubmit={(e) => { e.preventDefault(); if (edit.text.trim()) save.mutate({ id: n.id, text: edit.text, position: n.position }); }}>
+                <Textarea aria-label="Editar anotação" rows={2} value={edit.text} onChange={(e) => setEdit({ id: n.id, text: e.target.value })} />
+                <div className="flex gap-2"><Button size="sm" type="submit" variant="primary" loading={save.isPending}>Salvar</Button><Button size="sm" onClick={() => setEdit(null)}>Cancelar</Button></div>
+              </form>
+            ) : <p className="flex-1 whitespace-pre-line text-sm text-text">{n.text}</p>}
+            {edit?.id !== n.id && <span className="flex shrink-0 gap-1">
+              <button type="button" aria-label="Editar anotação" className="p-1 text-muted hover:text-ink" onClick={() => setEdit({ id: n.id, text: n.text })}><Pencil className="h-3.5 w-3.5" /></button>
+              <button type="button" aria-label="Excluir anotação" className="p-1 text-muted hover:text-danger" onClick={() => del.mutate(n.id)}><Trash2 className="h-3.5 w-3.5" /></button>
+            </span>}
+          </li>
+        ))}</ul>
+      )}
+    </section>
   );
 }
 
@@ -216,13 +300,25 @@ type LessonPage = {
   progress: { pct: number; watchedSeconds: number; done: boolean; resumeAt: number };
   course: { id: string; title: string }; module: { id: string; title: string; lessons: { id: string; title: string; durationSeconds: number | null; pct: number; done: boolean; locked: boolean; available: boolean; required: boolean }[] };
   materials: { id: string; title: string; url: string | null }[];
+  notes: Note[];
   prevId: string | null; nextId: string | null;
 };
+/** Uma instância por aula e por link de anotação (?t=), para o player abrir no ponto certo ao trocar de aula. */
 export function AcademyLessonPage() {
+  const { lessonId = '' } = useParams();
+  const [sp] = useSearchParams();
+  return <LessonPage key={`${lessonId}:${sp.get('t') ?? ''}`} />;
+}
+
+function LessonPage() {
   const { id = '', lessonId = '' } = useParams();
   const qc = useQueryClient();
   const r = useQuery({ queryKey: ['academia', 'aula', id, lessonId], queryFn: () => api<LessonPage>(`/academia/trilhas/${id}/aulas/${lessonId}`), staleTime: Infinity });
   const [live, setLive] = useState<BeatResult | null>(null);
+  const control = useRef<PlayerControl | null>(null);
+  // ?t= vindo de uma anotação: abre o vídeo naquele ponto (lido uma vez, para não recriar o player)
+  const [sp] = useSearchParams();
+  const [startAt] = useState(() => { const t = Number(sp.get('t')); return Number.isFinite(t) && t >= 0 && sp.has('t') ? Math.floor(t) : null; });
   if (r.isLoading) return <LoadingRows rows={6} />;
   if (r.isError) return <ErrorState error={r.error} onRetry={() => r.refetch()} />;
   const d = r.data!, l = d.lesson;
@@ -237,7 +333,7 @@ export function AcademyLessonPage() {
         <div className="min-w-0 space-y-4">
           {l.locked ? <EmptyState title="Aula bloqueada" description="Conclua as aulas obrigatórias anteriores para liberar esta." />
             : !l.available || !l.videoId ? <div role="alert" className="flex aspect-video items-center justify-center bg-navy p-6 text-center text-white">Vídeo {CONTENT_STATE_LABELS[l.state].toLowerCase()}. Esta aula fica fora do cálculo até quem cuida da trilha trocar o vídeo.</div>
-              : <YoutubePlayer key={l.id} trackId={id} lessonId={l.id} videoId={l.videoId} resumeAt={d.progress.resumeAt} onBeat={onBeat} />}
+              : <YoutubePlayer key={l.id} trackId={id} lessonId={l.id} videoId={l.videoId} resumeAt={startAt ?? d.progress.resumeAt} onBeat={onBeat} control={control} />}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs text-muted">{d.course.title} · {d.module.title}</p>
@@ -250,6 +346,7 @@ export function AcademyLessonPage() {
               <p className="mt-1 text-xs text-muted">Trilha: <span className="num" data-testid="lesson-track-pct">{trackPct.toLocaleString('pt-BR')}%</span></p>
             </div>
           </div>
+          {!l.locked && l.available && l.videoId && <LessonNotes key={l.id} trackId={id} lessonId={l.id} initial={d.notes} control={control} canSeek />}
           {l.description && <p className="whitespace-pre-line text-sm text-text">{l.description}</p>}
           {!!d.materials.length && (
             <section aria-label="Materiais de apoio"><h2 className="mb-1 font-semibold text-ink">Materiais de apoio</h2>
