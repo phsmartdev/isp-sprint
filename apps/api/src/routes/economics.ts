@@ -1,14 +1,14 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
+import { COST_CATEGORIES, SECTION_KINDS, sectionErrors, COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
-import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
+import { catalogSectionCosts, computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
@@ -17,7 +17,11 @@ const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('u
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
 const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional(), kind: z.enum(DEAL_KINDS).nullable().optional() });
+const SectionCostBody = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), category: z.enum(COST_CATEGORIES).nullable(), frequency: z.enum(['unico', 'mensal']), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
+const SectionBody = z.object({ id: z.string().trim().min(1).max(20), kind: z.enum(SECTION_KINDS), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60), costs: z.array(SectionCostBody).max(300), marginTargetBp: bp.nullable(), paybackMonths: z.number().int().min(1).max(240).nullable(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable() });
 const EconBody = z.object({
+  /** tipos de negócio da negociação (Venda, Aluguel, Recorrência), cada um com produtos, custos, margem, payback e preço */
+  sections: z.array(SectionBody).max(10).nullable().optional(),
   mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
   capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
   commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
@@ -269,10 +273,12 @@ export const economicsRoutes = [
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
-      const e = econInputErrors(body as EconInput);
+      const e = [...econInputErrors(body as EconInput), ...sectionErrors((body.sections ?? []) as never)];
       if (e.length) throw unprocessable(e.join(' '));
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
-      const input = await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));
+      const input = body.sections?.length
+        ? await catalogSectionCosts(app.db, auth.tenantId, auth.userId, { ...(body as EconInput), capex: [], opex: [], extraInitialCents: 0 })
+        : await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));
       const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
       await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });

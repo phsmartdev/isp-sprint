@@ -19,6 +19,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { CashflowChart, flowSeries } from '../../components/charts/Cashflow';
 import { errMsg } from '../contracts/shared';
 import { B2gPanel, emptyB2gForm, type B2gForm } from './B2gPanel';
+import { SectionsEconomics, SectionsSummary } from './DealSections';
 
 type Data = {
   settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
@@ -679,7 +680,40 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
   );
 }
 
+/** Viabilidade econômica: por seções (tipos de negócio); licitação segue na tela por cestas (lances e B2G). */
 export function EconomicsTab({ oppId }: { oppId: string }) {
+  const items = useQuery({ queryKey: ['opp-items', oppId], queryFn: () => api<{ bid: boolean }>(`/opportunities/${oppId}/items`) });
+  const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
+  if (items.isError) return <ErrorState error={items.error} onRetry={() => items.refetch()} />;
+  if (!items.data || !q.data) return <LoadingRows rows={5} />;
+  if (items.data.bid) return <LegacyEconomicsTab oppId={oppId} />;
+  const d = q.data;
+  if (d.financeHidden) return <HiddenEconomics d={d} />;
+  return (
+    <SectionsEconomics oppId={oppId} footer={(r, official) => {
+      const priced = !!r?.sections?.length && r.sections.every((s) => s.priceSource === 'informado');
+      return (
+        <>
+          <DecisionBar oppId={oppId} d={d} canSubmit={official && !d.stale && d.editable && priced} />
+          {official && !priced && d.editable && <p className="text-xs text-muted">Para enviar para decisão, use o preço ideal (ou defina o preço) em cada tipo de negócio.</p>}
+          {!!d.history.length && (
+            <details className="text-sm">
+              <summary className="cursor-pointer font-semibold text-ink">Histórico de cálculos ({d.history.length})</summary>
+              <ul className="mt-2 divide-y divide-line">{d.history.map((h) => (
+                <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                  <span>{fmtDateTime(h.createdAt)} · {h.actorName ?? 'sistema'}{h.reason === 'ganha' ? ' · fechamento' : ''}</span>
+                  <span className="flex flex-wrap items-center gap-2 text-muted">{ECON_VERDICT_LABELS[h.verdict]} · {fmtBRL(h.priceCents)}<a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, h.id, 'pdf')}>PDF</a><a className="text-xs font-semibold text-primary hover:underline" href={exportHref(oppId, h.id, 'csv')}>CSV</a></span>
+                </li>
+              ))}</ul>
+            </details>
+          )}
+        </>
+      );
+    }} />
+  );
+}
+
+function LegacyEconomicsTab({ oppId }: { oppId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
@@ -900,7 +934,7 @@ export function EconomicsSummary({ oppId, onOpen }: { oppId: string; onOpen: () 
       </div>
       <p className="mb-2 text-2xs text-muted">Último cálculo salvo ({fmtDateTime(d.saved.updatedAt)}). A aba Viabilidade econômica mostra a simulação ao vivo; salve lá para atualizar este painel.</p>
       {d.stale && <Notice tone="warning">Desatualizada: produtos, tributos, parâmetros ou o motor mudaram depois de salva. Abra e salve de novo.</Notice>}
-      {d.financeHidden ? <HiddenVerdict r={r} /> : <EconomicsResult r={r} compact settings={d.settings} />}
+      {d.financeHidden ? <HiddenVerdict r={r} /> : r.sections ? <SectionsSummary r={r} /> : <EconomicsResult r={r} compact settings={d.settings} />}
     </section>
   );
 }

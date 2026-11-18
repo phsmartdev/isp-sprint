@@ -214,11 +214,12 @@ test('Sprint: venda fechada pede confirmação e não confirma contrato', async 
   // o funil Corporativo só fecha com produtos lançados
   await page.getByRole('tab', { name: /^Produtos/ }).click();
   const items = page.getByRole('region', { name: 'Produtos e serviços' });
-  await items.getByRole('button', { name: 'Adicionar item' }).click();
-  await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');
-  await items.getByLabel('Valor 1').fill('1.200,00');
-  await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
-  await expect(page.getByText('Produtos e serviços salvos')).toBeVisible();
+  await items.getByRole('button', { name: 'Adicionar produto ou serviço' }).click();
+  await items.getByLabel('Produto ou serviço 1.1').fill('Link dedicado 100 Mb');
+  await items.getByRole('button', { name: 'Editar valores' }).click();
+  await items.getByLabel('Valor unitário 1.1').fill('1.200,00');
+  await items.getByRole('button', { name: 'Salvar produtos e custos' }).first().click();
+  await expect(page.getByText(/^Produtos(, custos e viabilidade| e serviços) salvos$/)).toBeVisible();
   await page.getByRole('button', { name: 'Venda fechada' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('O contrato só conta como confirmado após validação no IXC');

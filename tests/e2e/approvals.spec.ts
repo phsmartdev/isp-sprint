@@ -24,11 +24,12 @@ test('aprovação: vendedor pede com desconto, gerência analisa e aprova; fila 
   // produtos lançados pela tela: o total vira o valor que vai para a aprovação
   await seller.getByRole('tab', { name: /^Produtos/ }).click();
   const items = seller.getByRole('region', { name: 'Produtos e serviços' });
-  await items.getByRole('button', { name: 'Adicionar item' }).click();
-  await items.getByLabel('Produto ou serviço 1').fill('Link dedicado 100 Mb');
-  await items.getByLabel('Valor 1').fill('1.200,00');
-  await items.getByRole('button', { name: 'Salvar produtos e serviços' }).click();
-  await expect(seller.getByText('Produtos e serviços salvos')).toBeVisible();
+  await items.getByRole('button', { name: 'Adicionar produto ou serviço' }).click();
+  await items.getByLabel('Produto ou serviço 1.1').fill('Link dedicado 100 Mb');
+  await items.getByRole('button', { name: 'Editar valores' }).click();
+  await items.getByLabel('Valor unitário 1.1').fill('1.200,00');
+  await items.getByRole('button', { name: 'Salvar produtos e custos' }).first().click();
+  await expect(seller.getByText(/^Produtos(, custos e viabilidade| e serviços) salvos$/)).toBeVisible();
 
   await seller.getByRole('button', { name: /Pedir aprovação/ }).click();
   await expect(seller.getByRole('heading', { name: 'Análise e aprovação' })).toBeVisible();

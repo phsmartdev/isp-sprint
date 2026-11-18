@@ -1,3 +1,4 @@
+import type { DealSection, SectionOutcome, SectionsOverview } from './dealSections';
 import { annuityFactor, irr as irrOf, npv as npvOf, paybackMonths as paybackOf, type FValue } from './formula';
 import { buildModel, runModel, type FinBase, type FinModel, type ModelRun } from './financeModel';
 import { docTaxesForYear, ENVELOPE_RETENTIONS, pickFiscalEnvelope, regimeOfYear, type EnvelopeRetention, type FiscalContextInfo, type FiscalEnvelope } from './fiscalEnvelope';
@@ -100,9 +101,9 @@ export const ECON_MODES = ['recorrente', 'pontual'] as const;
 export type EconMode = (typeof ECON_MODES)[number];
 export const ECON_MODE_LABELS: Record<EconMode, string> = { recorrente: 'Contrato recorrente (mensalidade)', pontual: 'Venda pontual (valor único)' };
 /** "Impacta o quê?" de cada custo da planilha: define onde ele entra no cálculo. */
-export const COST_IMPACTS = ['material', 'servico', 'operacional', 'entrega', 'taxa_venda'] as const;
+export const COST_IMPACTS = ['material', 'servico', 'operacional', 'entrega', 'taxa_venda', 'parceiro'] as const;
 export type CostImpact = (typeof COST_IMPACTS)[number];
-export const COST_IMPACT_LABELS: Record<CostImpact, string> = { material: 'Material/Equipamento', servico: 'Serviço/Mão de obra', operacional: 'Custo operacional', entrega: 'Despesa de entrega', taxa_venda: 'Taxa fixa de venda' };
+export const COST_IMPACT_LABELS: Record<CostImpact, string> = { material: 'Material/Equipamento', servico: 'Serviço/Mão de obra', operacional: 'Custo operacional', entrega: 'Despesa de entrega', taxa_venda: 'Taxa fixa de venda', parceiro: 'Parceiro' };
 /** Despesa de entrega e taxa fixa de venda são despesas variáveis em R$: entram no preço, mas fora do investimento (sem contingência). */
 export const isVariableFixed = (impact?: CostImpact | null) => impact === 'entrega' || impact === 'taxa_venda';
 /** Tipo de negociação de cada produto/serviço: venda (pagamento único), recorrência (mensalidade) ou locação/aluguel (mensal, mesma conta da recorrência). */
@@ -142,6 +143,15 @@ export type EconInput = {
    * (null = Configurações), margem líquida alvo, margem de contribuição manual por cesta, resolver o payback pelo alvo,
    * pesos manuais e lances simulados por produto (chave = descrição do produto).
    */
+  /**
+   * (seções) recorrência e aluguel por seção: o investimento (custos únicos) fica FORA do preço; o preço sai da margem
+   * sobre o que é mensal e o payback real (descontado) mostra quando o investimento volta. A DRE do contrato desconta o investimento.
+   */
+  investmentOutOfPrice?: boolean;
+  /** (seções) indicadores no preço proposto (não no sugerido): a seção mostra a DRE do preço praticado */
+  atProposed?: boolean;
+  /** (seções) tipos de negócio da negociação: cada seção com seus produtos, custos, margem, payback e preço */
+  sections?: DealSection[] | null;
   b2g?: { mode?: 'A' | 'B'; overheadBp?: number | null; netTargetBp?: number | null; contributionBp?: { fornecimento?: number | null; implantacao?: number | null }; solvePayback?: boolean; weights?: Record<string, number>; bids?: Record<string, number> } | null;
 };
 export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
@@ -167,7 +177,7 @@ export function econInputErrors(i: EconInput) {
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { /** perfil de custo B2G (vazio = padrão pelo tipo) */ costProfile?: 'fornecimento' | 'implantacao' | null; description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
+export type EconItem = { /** (seções) índice da seção do produto */ section?: number | null; /** perfil de custo B2G (vazio = padrão pelo tipo) */ costProfile?: 'fornecimento' | 'implantacao' | null; description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco', 'abaixo_faixa', 'acima_faixa', 'aguardando_sugerido', 'sem_margem_liquida'] as const;
@@ -220,6 +230,8 @@ export type EconResult = {
   engineVersion: string;
   /** negociação com venda e itens mensais juntos (um resultado só) */
   deal?: DealSummary;
+  /** (seções) resultado de cada tipo de negócio e a visão geral consolidada */
+  sections?: SectionOutcome[]; sectionsOverview?: SectionsOverview;
   mode: EconMode; publicSector: boolean;
   /** P = preço informado; sem ele, o total dos produtos; sem produtos, o preço exato do motor */
   revenueCents: number; priceCents: number | null; /** sugerido = produtos lançados sem valor: a análise roda no preço mínimo sugerido (que acompanha payback e margem) */ priceSource: 'itens' | 'informado' | 'motor' | 'sugerido';
@@ -354,6 +366,18 @@ export function contractMargins(r: Pick<EconResult, 'mode' | 'statement' | 'kpi'
     operatingCents: t.operating, operatingPct: pct(t.operating), incomeTaxCents: t.incomeTax, netCents: t.net, netPct: pct(t.net),
     months: r.term.N, revenueCents: t.revenue,
   };
+}
+
+/**
+ * (seções) Contrato com o investimento fora do preço: a DRE do contrato desconta o investimento uma vez (como amortização
+ * total), e o IR/CSLL cai na mesma proporção do operacional que o investimento consome.
+ */
+export function withInvestment(t: EconStatement, inv: number, incomeTaxBp: number | null | undefined): EconStatement {
+  if (!(inv > 0)) return t;
+  const I = Math.round(inv);
+  const operating = t.operating == null ? null : t.operating - I;
+  const incomeTax = t.incomeTax == null || operating == null ? t.incomeTax : Math.max(0, Math.round(t.incomeTax - (incomeTaxBp != null ? (I * incomeTaxBp) / 10_000 : 0)));
+  return { ...t, amortization: t.amortization + I, contribution: t.contribution - I, operating, incomeTax, net: operating == null || incomeTax == null ? null : operating - incomeTax };
 }
 
 /** Contribuição → operacional → líquida, no mesmo período da contribuição (mês na recorrente). */
@@ -559,6 +583,7 @@ function financeEngineCore(args0: EngineArgs): EconResult {
   const P = anyProposed ? parts.map((p, k) => evalAt(p.args, (p.cell.ritmo === 'unico' ? shU : shM).get(k) ?? null)) : null;
 
   if (cells.length === 1) {
+    if (inp0.atProposed && P) { const r = finalize(P[0]!, P[0]!, source, warnings); r.suggestedCents = S[0]!.priceCents; r.lots = lotsOf([P[0]!]); return r; }
     const r = finalize(S[0]!, P?.[0] ?? null, source, warnings);
     r.lots = lotsOf([S[0]!]);
     return r;
@@ -574,8 +599,10 @@ function financeEngineCore(args0: EngineArgs): EconResult {
     suggestedMinCents: main === 'mensal' ? minM : minU, recommendedCents: main === 'mensal' ? sugM : sugU, markupPriceCents: main === 'mensal' ? sugM : sugU, marginPriceCents: main === 'mensal' ? minM : minU,
     floor: { cashCents: null, economicCents: null, minCents: main === 'mensal' ? minM : minU }, operatingFloorCents: null,
   });
-  const r = finalize(comb, combP, source, []);
-  r.priceCents = comb.priceCents;
+  const atP = !!(inp0.atProposed && combP);
+  if (atP) Object.assign(combP!, { suggestedCents: comb.suggestedCents, suggestedOneTimeCents: comb.suggestedOneTimeCents, suggestedMinCents: comb.suggestedMinCents, recommendedCents: comb.recommendedCents, markupPriceCents: comb.markupPriceCents, marginPriceCents: comb.marginPriceCents, floor: comb.floor, operatingFloorCents: null });
+  const r = atP ? finalize(combP!, combP!, source, []) : finalize(comb, combP, source, []);
+  if (atP) r.suggestedCents = comb.suggestedCents; else r.priceCents = comb.priceCents;
   if (combP) r.decision = { ...r.decision!, priceCents: main === 'mensal' ? propM : propU, oneTimeCents: hasM && hasU ? propU : null };
   r.lots = lotsOf(S);
   const revK = (k: DealKind) => items.filter((i) => i.kind === k).reduce((t, i) => t + Math.max(0, i.revenueCents), 0);
@@ -776,9 +803,10 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const pbAsk = inp.paybackMonths ?? null;
   // o vendedor ajusta o payback livremente (até o prazo projetado) e a análise toda acompanha;
   // o teto do setor continua como regra de aprovação, pelo payback descontado real (atende_payback)
-  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, N || 1)) : 0;
-  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o preço mínimo cai, mas se o retorno real passar do teto a viabilidade vai para a alçada superior.`);
-  if (rec && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
+  const outOfPrice = rec && !!inp.investmentOutOfPrice;
+  const D = rec ? (outOfPrice ? 0 : Math.max(1, Math.min(pbAsk ?? Dalvo, N || 1))) : 0;
+  if (rec && !outOfPrice && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o preço mínimo cai, mas se o retorno real passar do teto a viabilidade vai para a alçada superior.`);
+  if (rec && !outOfPrice && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
   const d = rec ? 0 : inp.receiveMonth;
 
   // 2–4. preço, fluxo de caixa e decisão: executados pelo modelo de fórmulas (Financial Studio; padrão = motor 2.0)
@@ -834,7 +862,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     const months = rec ? N : 1;
     const sp = statementOfPeriods(run.periods, months);
     const afterFrom = rec && D < N ? D + 1 : null;
-    statement = { month: sp.rows[0]!, after: afterFrom ? sp.rows[afterFrom - 1]! : null, afterFrom, total: sp.total };
+    statement = { month: sp.rows[0]!, after: afterFrom ? sp.rows[afterFrom - 1]! : null, afterFrom, total: outOfPrice ? withInvestment(sp.total, Inv, st.incomeTaxBp) : sp.total };
     const mcPct = numv(v.margem_contribuicao_pct);
     const ir = numv(v.tir);
     // payback do investimento: o que sobra da receita depois de tributos, despesas variáveis, custo mensal e da margem
@@ -859,7 +887,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   let recommendation: EconRecommendation | null = null;
   // target seeking: preço que entrega a margem líquida t (recorrente: no contrato inteiro; única: no valor único) (mesma álgebra das fórmulas; só parâmetros)
   // recorrente: margem líquida do contrato no preço P (o mesmo fluxo da aprovação: IR mês a mês, sem crédito nos meses negativos)
-  const contractAt = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const tt = statementOfPeriods(rr.periods, N).total; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
+  const contractAt = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const t0 = statementOfPeriods(rr.periods, N).total; const tt = outOfPrice ? withInvestment(t0, Inv, st.incomeTaxBp) : t0; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
   const recAt = (t: number): RecPoint => {
     const irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null, fx = st.overheadBp != null ? bp(st.overheadBp) : null, cp = numv(pre.values.custo_preco), bm = numv(pre.values.base_markup);
     if (irA == null || fx == null || irA >= 1) return { netPct: t * 100, operatingPct: null, contributionPct: null, priceCents: null };
@@ -955,7 +983,7 @@ const COST_COLS = {
   impact: ['impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
 };
 const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
-const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
+const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /parceir|terceir/.test(s) ? 'parceiro' : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
 /** Quantidade de planilha ou digitada: "8400", "8.400" (milhar), "2,5", 21 → milésimos. */
 export function costQty(raw: unknown): number | null {
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 1000) : null;

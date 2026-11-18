@@ -671,6 +671,8 @@ export const opportunityItems = pgTable('opportunity_items', {
   dealKind: text('deal_kind').notNull().default('recorrencia'),
   /** Perfil de custo (viabilidade B2G): fornecimento (venda pura, sem rateio) ou implantação; vazio = padrão pelo tipo */
   costProfile: text('cost_profile'),
+  /** Seção (tipo de negócio) do item na negociação: índice da seção na viabilidade (0 = a primeira). */
+  section: integer('section').notNull().default(0),
   /** Endereço de entrega do item: um dos endereços extras da oportunidade; vazio = o endereço principal. */
   deliveryAddressId: uuid('delivery_address_id').references((): AnyPgColumn => opportunityDeliveryAddresses.id, { onDelete: 'set null' }),
   createdBy: uuid('created_by').references(() => users.id),
@@ -5734,7 +5736,7 @@ export const costItems = pgTable('cost_items', {
 }, (t) => ({
   /** chave do item: descrição + unidade (mesma descrição em outra unidade é outro item) */
   uq: uniqueIndex('cost_items_uq').on(t.tenantId, t.kind, sql`lower(${t.name})`, sql`lower(${t.unit})`),
-  impactCk: check('cost_items_impact_ck', sql`impact is null or impact in ('material','servico','operacional','entrega','taxa_venda')`),
+  impactCk: check('cost_items_impact_ck', sql`impact is null or impact in ('material','servico','operacional','entrega','taxa_venda','parceiro')`),
   kindCk: check('cost_items_kind_ck', inList('kind', ['investimento', 'mensal'])),
 }));
 
