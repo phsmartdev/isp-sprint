@@ -1205,6 +1205,13 @@
       "when": 1795040628313,
       "tag": "0171_academia",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1795044922111,
+      "tag": "0172_academia_certificado_anotacoes",
+      "breakpoints": true
     }
   ]
 }

@@ -206,6 +206,41 @@ describe('Academia — Fase 1', () => {
     await ctx.db.execute(sql`update academy_contents set state = 'disponivel' where id = ${contents[V3]}`);
   });
 
+  it('certificado: sai na conclusão, com a carga somando as aulas concluídas; código confere', async () => {
+    const page = ok(await lucas.get(`/academia/trilhas/${trackId}`)).json();
+    // concluídas: V1 (100 s) e V2 (200 s); a opcional V4 e o link não foram assistidos
+    expect(page.certificate).toMatchObject({ enabled: true, issued: { seconds: 300, lessons: 2 } });
+    const code = page.certificate.issued.code as string;
+    expect(code).toMatch(/^ACD-\d{4}-\d{6}$/);
+    const pdf = ok(await lucas.get(`/academia/trilhas/${trackId}/certificado`));
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+    // emitido uma vez só
+    expect(ok(await lucas.get(`/academia/trilhas/${trackId}`)).json().certificate.issued.code).toBe(code);
+    expect(ok(await mariana.get(`/academia/certificados/verificar/${code}`)).json()).toMatchObject({ valid: true, person: 'Lucas Lima', seconds: 300 });
+    expect(ok(await mariana.get('/academia/certificados/verificar/ACD-2000-000001')).json()).toEqual({ valid: false });
+    // quem não concluiu não tem certificado
+    expect((await ana.get(`/academia/trilhas/${trackId}/certificado`)).statusCode).toBe(422);
+  });
+
+  it('anotações: presas ao ponto do vídeo, só da própria pessoa, na aula e na página da trilha', async () => {
+    const L1 = lessons[0]!.id;
+    const n = ok(await lucas.post(`/academia/trilhas/${trackId}/aulas/${L1}/anotacoes`, { position: 72.8, text: 'Pergunta de descoberta sobre orçamento' }), 201).json();
+    expect(n).toMatchObject({ lessonId: L1, position: 72 });
+    ok(await lucas.post(`/academia/trilhas/${trackId}/aulas/${L1}/anotacoes`, { position: 10, text: 'Abertura da reunião' }), 201);
+    expect((await lucas.post(`/academia/trilhas/${trackId}/aulas/${L1}/anotacoes`, { position: 5, text: '   ' })).statusCode).toBe(422);
+    expect((await mariana.post(`/academia/trilhas/${trackId}/aulas/${L1}/anotacoes`, { position: 5, text: 'x' })).statusCode).toBe(403); // não inscrita
+    const lp = ok(await lucas.get(`/academia/trilhas/${trackId}/aulas/${L1}`)).json();
+    expect(lp.notes.map((x: { position: number }) => x.position)).toEqual([10, 72]);
+    expect(ok(await lucas.get(`/academia/trilhas/${trackId}`)).json().notes).toHaveLength(2);
+    // de outra pessoa: não vê, não edita, não exclui
+    expect((await ana.put(`/academia/anotacoes/${n.id}`, { position: 1, text: 'x' })).statusCode).toBe(404);
+    expect((await ana.del(`/academia/anotacoes/${n.id}`)).statusCode).toBe(404);
+    expect(ok(await lucas.put(`/academia/anotacoes/${n.id}`, { position: 75, text: 'Orçamento e prazo' })).json()).toMatchObject({ position: 75, text: 'Orçamento e prazo' });
+    ok(await lucas.del(`/academia/anotacoes/${n.id}`));
+    expect(ok(await lucas.get(`/academia/trilhas/${trackId}/aulas/${L1}`)).json().notes).toHaveLength(1);
+  });
+
   it('atribuição, acompanhamento da liderança e permissões', async () => {
     const mar = (await ctx.db.execute<{ id: string }>(sql`select id from users where email = 'mariana@yepnet.test'`)).rows[0]!.id;
     expect((await lucas.post(`/academia/trilhas/${trackId}/atribuir`, { userIds: [mar] })).statusCode).toBe(403);

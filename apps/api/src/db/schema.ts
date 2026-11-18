@@ -7907,3 +7907,32 @@ export const academyLessonProgress = pgTable('academy_lesson_progress', {
   lastCreditAt: ts('last_credit_at'),
   updatedAt: updatedAt(),
 }, (t) => ({ pk: primaryKey({ columns: [t.userId, t.lessonId] }), track: index('academy_lesson_progress_track_idx').on(t.trackId, t.userId) }));
+
+/** Certificado da trilha: emitido na conclusão; a carga horária é a soma da duração das aulas que a pessoa concluiu. O PDF é guardado. */
+export const academyCertificates = pgTable('academy_certificates', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  versionId: uuid('version_id').notNull().references(() => academyTrackVersions.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  code: text('code').notNull(),
+  title: text('title').notNull(),
+  seconds: integer('seconds').notNull(),
+  lessons: integer('lessons').notNull(),
+  issuedOn: date('issued_on', { mode: 'string' }).notNull(),
+  data: bytea('data').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ one: uniqueIndex('academy_certificates_user_uq').on(t.trackId, t.userId), code: uniqueIndex('academy_certificates_code_uq').on(t.tenantId, t.code) }));
+
+/** Anotação pessoal numa aula, presa a um ponto do vídeo (segundos). Só a própria pessoa vê. */
+export const academyNotes = pgTable('academy_notes', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  lessonId: uuid('lesson_id').notNull(),
+  positionSeconds: integer('position_seconds').notNull(),
+  text: text('text').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => ({ mine: index('academy_notes_user_idx').on(t.userId, t.trackId), pos: check('academy_notes_pos_ck', sql`${t.positionSeconds} >= 0`) }));

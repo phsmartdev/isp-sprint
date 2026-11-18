@@ -208,3 +208,23 @@ export const fmtDuration = (sec: number | null | undefined) => {
   const s = Math.max(0, Math.round(sec)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
   return h ? `${h}h${String(m).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
 };
+
+// ------------------------------------------------------------------ certificado e anotações
+/** Código de verificação do certificado da trilha: ACD-AAAA-NNNNNN. */
+export const academyCertificateCode = (year: number, n: number) => `ACD-${year}-${String(n).padStart(6, '0')}`;
+/** Carga horária a partir de segundos: "2 h 15 min", "45 min", "1 h". Menos de 1 min vira "1 min". */
+export function fmtWorkload(seconds: number) {
+  const min = Math.max(1, Math.round(seconds / 60));
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h} h${m ? ` ${m} min` : ''}` : `${m} min`;
+}
+/** Tempo do vídeo para a anotação: "3:07" ou "1:02:05". */
+export const fmtTimecode = (sec: number) => {
+  const s = Math.max(0, Math.floor(sec)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
+};
+/** Carga do certificado: soma da duração das aulas em vídeo concluídas (obrigatórias e opcionais); links não têm duração. */
+export function certificateWorkload(lessons: readonly { kind: ContentKind; durationSeconds: number | null; done: boolean }[]) {
+  const done = lessons.filter((l) => l.done && l.kind === 'youtube_video');
+  return { seconds: done.reduce((t, l) => t + (l.durationSeconds ?? 0), 0), lessons: done.length };
+}

@@ -99,6 +99,13 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   const partial = Number((await page.getByTestId('lesson-pct').textContent())!.replace('%', '').replace(',', '.'));
   expect(partial).toBeLessThan(90);
   await expect(page.getByText('Conclui com 90%')).toBeVisible();
+  // anotação presa ao ponto em que o vídeo parou (~12 s)
+  await page.getByLabel('Nova anotação').fill('Pergunta sobre orçamento');
+  const at = (await page.getByTestId('note-at').textContent())!;
+  expect(at).toMatch(/^0:1[0-4]$/);
+  await page.getByRole('button', { name: 'Salvar anotação' }).click();
+  await expect(page.getByTestId('notes')).toContainText('Pergunta sobre orçamento');
+  await expect(page.getByRole('link', { name: `Ir para ${at} do vídeo` })).toBeVisible();
   await shot(page, '2-aula');
 
   // 4) sai, entra de novo: o progresso continua e o player retoma de onde parou
@@ -109,6 +116,11 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   await expect(page.getByTestId('lesson-pct')).toHaveText(`${partial.toLocaleString('pt-BR')}%`);
   const start = await page.evaluate(() => (window as any).__yt.start as number);
   expect(start).toBeGreaterThanOrEqual(10);
+  // a anotação continua lá; clicar no tempo leva o vídeo àquele ponto
+  await page.evaluate(() => (window as any).__yt.p.seek(2));
+  await page.getByRole('link', { name: `Ir para ${at} do vídeo` }).click();
+  const atSec = Number(at.split(':')[1]);
+  expect(Math.floor(await page.evaluate(() => (window as any).__yt.p.pos() as number))).toBe(atSec);
   // termina o vídeo: chega a 100% e conclui a aula
   await page.evaluate(() => (window as any).__yt.p.play(2));
   await expect(page.getByText('Aula concluída')).toBeVisible({ timeout: 20_000 });
@@ -133,7 +145,14 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   await expect(page.getByText('Removido — fora do cálculo')).toBeVisible();
   await expect(page.getByTestId('track-pct')).toHaveText('50%'); // 1 de 2 obrigatórias disponíveis
   await expect(page.getByText('1 de 2 aulas obrigatórias concluídas · 1 indisponível(is) fora da conta')).toBeVisible();
+  await expect(page.getByText('Ao concluir, você recebe o certificado')).toBeVisible();
+  // anotações na página da trilha: o link abre a aula no ponto anotado
+  await expect(page.getByRole('region', { name: 'Minhas anotações' })).toContainText('Pergunta sobre orçamento');
   await shot(page, '3-jornada');
+  await page.getByRole('region', { name: 'Minhas anotações' }).getByRole('link', { name: new RegExp(`Ir para ${at}`) }).click();
+  await page.waitForFunction(() => !!(window as any).__yt?.p);
+  expect(await page.evaluate(() => (window as any).__yt.start as number)).toBe(atSec);
+  await page.goto('/playbooks?aba=trilhas'); // volta para o fluxo da liderança
 
   // 7) a liderança acompanha o progresso real
   await login(page, 'ana@yepnet.test');
