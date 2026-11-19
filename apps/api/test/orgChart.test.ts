@@ -68,4 +68,22 @@ describe('organograma de acessos', () => {
     d = await get();
     expect(team('Residencial').memberIds).toContain(id('Lucas'));
   });
+
+  it('diretoria, gestão hierárquica e funcional e participantes que não entram no organograma', async () => {
+    type T = { id: string; name: string; directorIds: string[]; managers: { userId: string; kind: string }[]; leadIds: string[]; memberIds: string[]; participantIds: string[] };
+    const get = async () => (await carlos.get('/admin/org-chart')).json() as { people: Person[]; teams: T[] };
+    let d = await get();
+    const id = (n: string) => d.people.find((p) => p.name.startsWith(n))!.id;
+    const gov = d.teams.find((t) => t.name === 'Governo')!;
+    const r = await carlos.put(`/admin/org-chart/teams/${gov.id}`, { directorIds: [id('Carlos')], managers: [{ userId: id('Carlos'), kind: 'hierarquico_funcional' }, { userId: id('Ana'), kind: 'funcional' }], leadIds: gov.leadIds, memberIds: gov.memberIds, participantIds: [id('Lucas')] });
+    expect(r.statusCode, r.body).toBe(200);
+    d = await get();
+    const g = d.teams.find((t) => t.id === gov.id)!;
+    expect(g.directorIds).toEqual([id('Carlos')]);
+    expect(g.managers).toEqual([{ userId: id('Carlos'), kind: 'hierarquico_funcional' }, { userId: id('Ana'), kind: 'funcional' }]);
+    expect(g.participantIds).toEqual([id('Lucas')]);
+    expect(g.memberIds).not.toContain(id('Lucas'));
+    // desfaz
+    expect((await carlos.put(`/admin/org-chart/teams/${gov.id}`, { directorIds: gov.directorIds, managers: gov.managers, leadIds: gov.leadIds, memberIds: gov.memberIds, participantIds: gov.participantIds })).statusCode).toBe(200);
+  });
 });

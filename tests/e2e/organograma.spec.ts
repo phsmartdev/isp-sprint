@@ -89,11 +89,56 @@ test('organograma: ajustar topo, times (arrastar, incluir, tirar, gestores) e o 
   // gestor do time: Carlos passa a gerir o Governo (o time vai para baixo dele) e depois sai
   await gov.getByRole('button', { name: /^Governo/ }).click();
   const tp = page.getByRole('complementary', { name: 'Time Governo' });
-  await tp.getByRole('group', { name: /Gestores/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Carlos Silva' }).click();
   await tp.getByRole('button', { name: 'Salvar time' }).click();
   await expect(page.getByText('Time atualizado')).toBeVisible();
-  await expect(page.getByText('Times sem gestor definido')).toBeVisible(); // outros times seguem sem gestor
-  await tp.getByRole('group', { name: /Gestores/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await expect(page.getByText('Sem gestão hierárquica').first()).toBeVisible(); // outros times seguem sem gestor
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('button', { name: 'Salvar time' }).click();
+  await expect(page.getByText('Time atualizado').first()).toBeVisible();
+});
+
+test('organograma: diretoria, gestão hierárquica e funcional, participante fora do desenho e zoom', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/users?visao=organograma');
+  // cabe na tela: o zoom já vem ajustado
+  const zoom = page.getByTestId('org-zoom');
+  await expect(zoom).toHaveText(/%$/);
+  const z0 = parseInt((await zoom.textContent())!, 10);
+  await page.getByRole('button', { name: 'Aumentar zoom' }).click();
+  await expect.poll(async () => parseInt((await zoom.textContent())!, 10)).toBeGreaterThan(z0);
+  await page.getByRole('button', { name: 'Ajustar à tela' }).click();
+  await expect.poll(async () => parseInt((await zoom.textContent())!, 10)).toBe(z0);
+
+  // Governo: diretoria Carlos; Carlos gestão hierárquica + funcional; Ana só funcional; Lucas participante
+  const gov = page.locator('[data-testid="org-team"][aria-label="Time Governo"]');
+  await gov.getByRole('button', { name: /^Governo/ }).click();
+  const tp = page.getByRole('complementary', { name: 'Time Governo' });
+  await tp.getByRole('group', { name: 'Diretoria' }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Ana Souza' }).click();
+  await tp.getByLabel('Tipo de gestão de Ana Souza').selectOption('funcional');
+  await tp.getByRole('group', { name: /^Participantes/ }).getByRole('button', { name: 'Lucas Lima' }).click();
+  await tp.getByRole('button', { name: 'Salvar time' }).click();
+  await expect(page.getByText('Time atualizado')).toBeVisible();
+
+  await expect(page.getByRole('region', { name: 'Diretoria de Carlos Silva' })).toBeVisible();
+  await expect(gov.getByLabel('Gestão do time Governo')).toContainText('Hierárq. + funcional: Carlos Silva');
+  await expect(gov.getByLabel('Gestão do time Governo')).toContainText('Funcional: Ana Souza');
+  // embaixo da Ana, o Governo aparece tracejado (gestão funcional)
+  await expect(page.getByRole('button', { name: 'Time Governo (gestão funcional)' })).toBeVisible();
+  // Lucas colabora: fica fora do desenho do Governo
+  await expect(gov.getByRole('button', { name: /^Lucas Lima/ })).toHaveCount(0);
+  await expect(gov).toContainText('1 participante(s) colaborando');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/organograma-hierarquia.png` });
+
+  // desfaz
+  await tp.getByRole('group', { name: 'Diretoria' }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('group', { name: /^Gestão/ }).getByRole('button', { name: 'Ana Souza' }).click();
+  await tp.getByRole('group', { name: /^Participantes/ }).getByRole('button', { name: 'Lucas Lima' }).click();
   await tp.getByRole('button', { name: 'Salvar time' }).click();
   await expect(page.getByText('Time atualizado').first()).toBeVisible();
 });

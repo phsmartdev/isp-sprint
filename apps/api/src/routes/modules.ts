@@ -136,8 +136,8 @@ export const moduleRoutes = [
     handler: async ({ app, auth }) => {
       const [users, teams, members, grants] = await Promise.all([
         app.db.select({ id: s.users.id, name: s.users.name, jobTitle: s.users.jobTitle, hasAvatar: s.userAvatars.userId }).from(s.users).leftJoin(s.userAvatars, eq(s.userAvatars.userId, s.users.id)).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
-        app.db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
-        app.db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
+        app.db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds, managerKinds: s.teams.managerKinds, directorIds: s.teams.directorIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
+        app.db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead, role: s.teamMemberships.role }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
         app.db.select().from(s.moduleGrants).where(eq(s.moduleGrants.tenantId, auth.tenantId)),
       ]);
       const rank = (l: AccessLevel) => ACCESS_LEVELS.indexOf(l);
@@ -160,7 +160,13 @@ export const moduleRoutes = [
         modules: BUSINESS_MODULES.map((m: BusinessModule) => ({ key: m, label: BUSINESS_MODULE_LABELS[m], technical: (MODULES as readonly Module[]).filter((t) => MODULE_OWNER[t] === m) })),
         profiles: PROFILE_KEYS.map((k) => ({ key: k, label: PROFILE_LABELS[k] })),
         people,
-        teams: teams.map((t) => ({ id: t.id, name: t.name, managerIds: t.managerIds, leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId), memberIds: members.filter((m) => m.teamId === t.id && !m.isLead).map((m) => m.userId) })),
+        teams: teams.map((t) => ({
+          id: t.id, name: t.name, directorIds: t.directorIds, managerIds: t.managerIds,
+          managers: t.managerIds.map((u) => ({ userId: u, kind: t.managerKinds[u] ?? 'hierarquico_funcional' })),
+          leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId),
+          memberIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role !== 'participante').map((m) => m.userId),
+          participantIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role === 'participante').map((m) => m.userId),
+        })),
         grants: grants.map((g) => ({ id: g.id, module: g.module, subjectType: g.subjectType, subjectId: g.subjectId, effect: g.effect, reason: g.reason, validUntil: g.validUntil })),
       };
     },
@@ -175,21 +181,30 @@ export const moduleRoutes = [
     },
   }),
   defineRoute({
-    method: 'PUT', url: '/admin/org-chart/teams/:id', summary: 'Monta o time pelo organograma: gestores, liderança e membros (substitui a composição atual, auditado)', tag: 'Administração', ...ADMIN, params: IdParams,
-    body: z.object({ managerIds: z.array(z.string().uuid()).max(20), leadIds: z.array(z.string().uuid()).max(30), memberIds: z.array(z.string().uuid()).max(300) }),
+    method: 'PUT', url: '/admin/org-chart/teams/:id', summary: 'Monta o time pelo organograma: diretoria, gestores (hierárquico/funcional), liderança, operação e participantes (substitui a composição atual, auditado)', tag: 'Administração', ...ADMIN, params: IdParams,
+    body: z.object({
+      directorIds: z.array(z.string().uuid()).max(10).default([]),
+      managers: z.array(z.object({ userId: z.string().uuid(), kind: z.enum(['hierarquico_funcional', 'hierarquico', 'funcional']) })).max(20).optional(),
+      managerIds: z.array(z.string().uuid()).max(20).optional(),
+      leadIds: z.array(z.string().uuid()).max(30), memberIds: z.array(z.string().uuid()).max(300), participantIds: z.array(z.string().uuid()).max(300).default([]),
+    }),
     handler: async ({ app, auth, req, params, body }) => {
-      const leads = [...new Set(body.leadIds)], members = [...new Set(body.memberIds)].filter((x) => !leads.includes(x)), managers = [...new Set(body.managerIds)];
+      const mgrs = body.managers ?? (body.managerIds ?? []).map((userId) => ({ userId, kind: 'hierarquico_funcional' as const }));
+      const leads = [...new Set(body.leadIds)], members = [...new Set(body.memberIds)].filter((x) => !leads.includes(x));
+      const participants = [...new Set(body.participantIds)].filter((x) => !leads.includes(x) && !members.includes(x));
+      const managers = [...new Set(mgrs.map((m) => m.userId))], kinds = Object.fromEntries(mgrs.map((m) => [m.userId, m.kind]));
+      const directors = [...new Set(body.directorIds)];
       return app.db.transaction(async (tx) => {
         const [t] = await tx.select().from(s.teams).where(and(eq(s.teams.id, params.id), eq(s.teams.tenantId, auth.tenantId), isNull(s.teams.deletedAt)));
         if (!t) throw notFound('Time não encontrado.');
-        await assertActiveUsers(tx, auth.tenantId, [...leads, ...members, ...managers]);
+        await assertActiveUsers(tx, auth.tenantId, [...leads, ...members, ...participants, ...managers, ...directors]);
         const before = await tx.select().from(s.teamMemberships).where(eq(s.teamMemberships.teamId, t.id));
         await tx.delete(s.teamMemberships).where(eq(s.teamMemberships.teamId, t.id));
-        const rows = [...leads.map((u) => ({ teamId: t.id, userId: u, isLead: true })), ...members.map((u) => ({ teamId: t.id, userId: u, isLead: false }))];
+        const rows = [...leads.map((u) => ({ teamId: t.id, userId: u, isLead: true, role: 'operacao' })), ...members.map((u) => ({ teamId: t.id, userId: u, isLead: false, role: 'operacao' })), ...participants.map((u) => ({ teamId: t.id, userId: u, isLead: false, role: 'participante' }))];
         if (rows.length) await tx.insert(s.teamMemberships).values(rows);
-        await tx.update(s.teams).set({ managerIds: managers }).where(eq(s.teams.id, t.id));
+        await tx.update(s.teams).set({ managerIds: managers, managerKinds: kinds, directorIds: directors }).where(eq(s.teams.id, t.id));
         await assertSupervisorsLead(tx, auth.tenantId, before.filter((b) => b.isLead && !leads.includes(b.userId)).map((b) => b.userId));
-        await audit(tx, req, { action: 'org_chart.team', entityType: 'team', entityId: t.id, metadata: { name: t.name, managers, leads, members, before: { leads: before.filter((b) => b.isLead).map((b) => b.userId), members: before.filter((b) => !b.isLead).map((b) => b.userId), managers: t.managerIds } } });
+        await audit(tx, req, { action: 'org_chart.team', entityType: 'team', entityId: t.id, metadata: { name: t.name, directors, managers: mgrs, leads, members, participants, before: { leads: before.filter((b) => b.isLead).map((b) => b.userId), members: before.filter((b) => !b.isLead).map((b) => b.userId), managers: t.managerIds } } });
         return { ok: true };
       });
     },
@@ -204,7 +219,7 @@ export const moduleRoutes = [
         await assertActiveUsers(tx, auth.tenantId, [body.userId]);
         const wasLead = body.fromTeamId ? (await tx.select().from(s.teamMemberships).where(and(eq(s.teamMemberships.teamId, body.fromTeamId), eq(s.teamMemberships.userId, body.userId))))[0]?.isLead ?? false : false;
         if (body.fromTeamId && body.fromTeamId !== body.toTeamId) await tx.delete(s.teamMemberships).where(and(eq(s.teamMemberships.teamId, body.fromTeamId), eq(s.teamMemberships.userId, body.userId)));
-        await tx.insert(s.teamMemberships).values({ teamId: body.toTeamId, userId: body.userId, isLead: body.lead }).onConflictDoUpdate({ target: [s.teamMemberships.teamId, s.teamMemberships.userId], set: { isLead: body.lead } });
+        await tx.insert(s.teamMemberships).values({ teamId: body.toTeamId, userId: body.userId, isLead: body.lead, role: 'operacao' }).onConflictDoUpdate({ target: [s.teamMemberships.teamId, s.teamMemberships.userId], set: { isLead: body.lead, role: 'operacao' } });
         if (wasLead) await assertSupervisorsLead(tx, auth.tenantId, [body.userId]);
         await audit(tx, req, { action: 'org_chart.move', entityType: 'user', entityId: body.userId, metadata: { from: body.fromTeamId, to: body.toTeamId, lead: body.lead } });
         return { ok: true };
