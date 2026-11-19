@@ -12,7 +12,7 @@ import clsx from 'clsx';
 import { Expand, GripVertical, Maximize2, Minus, Pencil, Plus, X } from 'lucide-react';
 import type { AccessLevel, BusinessModule, ProfileKey } from '@isp/domain';
 import { api } from '../../lib/api';
-import { Hexagons } from '../../components/brand';
+import { Hexagons, Logo } from '../../components/brand';
 import { Multi } from '../playbooks/Editor';
 import { Avatar, Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select } from '../../components/ui/primitives';
 import { ConfirmDialog, Modal, useToast } from '../../components/ui/overlay';
@@ -21,7 +21,7 @@ import { errMsg } from '../../features/contracts/shared';
 type View = { level: AccessLevel; enabled: boolean; reason: string; profileLevel: AccessLevel };
 type Person = { id: string; name: string; jobTitle: string | null; hasAvatar: boolean; profile: ProfileKey | null; view: Record<BusinessModule, View> };
 type MgrKind = 'hierarquico_funcional' | 'hierarquico' | 'funcional';
-type Team = { id: string; name: string; directorIds: string[]; managerIds: string[]; managers: { userId: string; kind: MgrKind }[]; leadIds: string[]; memberIds: string[]; participantIds: string[] };
+type Team = { id: string; name: string; functionalGroupOf?: string | null; directorIds: string[]; managerIds: string[]; managers: { userId: string; kind: MgrKind }[]; leadIds: string[]; memberIds: string[]; participantIds: string[] };
 type Grant = { id: string; module: BusinessModule; subjectType: 'equipe' | 'usuario'; subjectId: string; effect: 'liberar' | 'bloquear'; reason: string; validUntil: string | null };
 type Chart = { canEdit?: boolean; viewers?: { userIds: string[]; profiles: ProfileKey[] }; top: { name: string | null; title: string | null }; modules: { key: BusinessModule; label: string; technical: string[] }[]; profiles: { key: ProfileKey; label: string }[]; people: Person[]; teams: Team[]; grants: Grant[] };
 export const MGR_KIND_LABELS: Record<MgrKind, string> = { hierarquico_funcional: 'Hierárquica e funcional', hierarquico: 'Só hierárquica', funcional: 'Só funcional' };
@@ -89,7 +89,7 @@ function TeamBox({ t, people, module, profiles, open, sel, edit, onDrop, functio
       <button type="button" onClick={() => open({ kind: 'team', id: t.id })} className={clsx('relative flex w-full items-center gap-2 overflow-hidden px-3 py-2 text-left', F ? 'bg-sky text-white hover:bg-primary' : 'bg-ink text-white hover:bg-navy-2', sel?.kind === 'team' && sel.id === t.id && 'outline outline-2 outline-lime')}>
         <span className={clsx('h-3.5 w-3.5 shrink-0', F ? 'border-2 border-white' : 'bg-lime')} style={hex} aria-hidden />
         <span className="font-display text-sm font-bold tracking-wide">{t.name}</span>
-        <span className="ml-auto text-xs text-white/80">{F ? 'gestão funcional' : `${leads.length + members.length} pessoa(s)`}</span>
+        <span className="ml-auto text-xs text-white/80">{F ? (t.functionalGroupOf ? 'pessoas atreladas' : 'gestão funcional') : t.functionalGroupOf ? 'grupo da gestão funcional' : `${leads.length + members.length} pessoa(s)`}</span>
       </button>
       {/* gestão do time: hierárquica (contínua) e funcional (tracejada) */}
       <div className="flex flex-wrap gap-1 px-3 pt-2" aria-label={`Gestão do time ${t.name}`}>
@@ -198,7 +198,13 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
   const tree = useMemo(() => {
     if (!q.data) return null;
     const d = q.data, people = new Map(d.people.map((p) => [p.id, p]));
-    const dirOf = (t: Team) => t.directorIds.find((x) => people.has(x)) ?? null;
+    const ownDir = (t: Team) => t.directorIds.find((x) => people.has(x)) ?? null;
+    // grupo de pessoas avulsas segue a diretoria dos setores que o gestor funcional acompanha
+    const dirOf = (t: Team): string | null => {
+      if (ownDir(t) || !t.functionalGroupOf) return ownDir(t);
+      const other = d.teams.find((x) => x.id !== t.id && !x.functionalGroupOf && x.managers.some((m) => m.userId === t.functionalGroupOf) && ownDir(x));
+      return other ? ownDir(other) : null;
+    };
     const hierOf = (t: Team) => t.managers.find((m) => isHier(m.kind) && people.has(m.userId))?.userId ?? null;
     const directorIds = [...new Set([...d.teams.map(dirOf).filter((x): x is string => !!x), ...d.people.filter((p) => p.profile === 'diretoria').map((p) => p.id)])];
     const groups = [...directorIds.map((id) => ({ director: people.get(id)!, teams: d.teams.filter((t) => dirOf(t) === id) })), { director: null as Person | null, teams: d.teams.filter((t) => !dirOf(t)) }]
@@ -214,7 +220,8 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
             ...mgrIds.map((id) => ({ person: people.get(id)!, teams: g.teams.filter((t) => hierOf(t) === id), functional: funcOf(id), onlyFunctional: false })),
             ...funcIds.map((id) => ({ person: people.get(id)!, teams: [] as Team[], functional: funcOf(id), onlyFunctional: true })),
           ],
-          loose: g.teams.filter((t) => !hierOf(t)),
+          // time só funcional (sem gestão hierárquica, com gestão funcional) ou grupo de pessoas avulsas: só aparece solto na edição
+          loose: g.teams.filter((t) => !hierOf(t) && (edit || !(t.functionalGroupOf || t.managers.some((m) => m.kind === 'funcional')))),
         };
       });
     // gestores só funcionais de times em outra diretoria já aparecem lá; não há mais área separada
@@ -223,7 +230,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
     const participantsOnly = new Set(d.teams.flatMap((t) => t.participantIds));
     const noTeam = d.people.filter((p) => !inChart.has(p.id) && !participantsOnly.has(p.id));
     return { people, groups, onlyFunctional, noTeam };
-  }, [q.data]);
+  }, [q.data, edit]);
 
   if (q.isLoading) return <div className="card"><LoadingRows rows={6} /></div>;
   if (q.isError) return (q.error as { status?: number })?.status === 403
@@ -254,6 +261,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
         <Hexagons className="absolute inset-0" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
+            <span className="mb-2 flex items-center gap-3" aria-label="BKT RevOps"><Logo className="h-7" /><span className="border-l border-white/30 pl-3 font-display text-sm font-semibold text-white/80">RevOps</span></span>
             <h2 className="font-display text-xl font-bold tracking-wide">Organograma de acessos</h2>
             <p className="mt-1 max-w-2xl text-sm text-white/80">Diretoria &gt; Gestão &gt; Liderança &gt; Operação, por time. Clique numa pessoa ou num time para ver o porquê e ajustar.</p>
           </div>
@@ -398,6 +406,15 @@ function SidePanel({ chart, sel, onClose, readOnly }: { chart: Chart; sel: Sel; 
     onSuccess: () => { toast({ tone: 'success', message: 'Regra retirada: vale a regra do módulo' }); setRevoke(null); setNote(''); refresh(); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
+  const group = person ? chart.teams.find((t) => t.functionalGroupOf === person.id) ?? null : null;
+  const [fTeams, setFTeams] = useState<string[]>(person ? chart.teams.filter((t) => !t.functionalGroupOf && t.managers.some((m) => m.userId === person.id && m.kind === 'funcional')).map((t) => t.id) : []);
+  const [fPeople, setFPeople] = useState<string[]>(group ? [...group.memberIds] : []);
+  const [fName, setFName] = useState(group?.name ?? '');
+  const saveFunc = useMutation({
+    mutationFn: () => api(`/admin/org-chart/functional/${sel.id}`, { method: 'PUT', body: { teamIds: fTeams, userIds: fPeople, ...(fName.trim().length >= 2 ? { groupName: fName.trim() } : {}) } }),
+    onSuccess: () => { toast({ tone: 'success', message: 'Gestão funcional atualizada' }); refresh(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const saveProfile = useMutation({
     mutationFn: () => api(`/admin/users/${sel.id}`, { method: 'PUT', body: { profile } }),
     onSuccess: () => { toast({ tone: 'success', message: 'Perfil atualizado' }); refresh(); },
@@ -454,6 +471,16 @@ function SidePanel({ chart, sel, onClose, readOnly }: { chart: Chart; sel: Sel; 
             </div>
           );
         })()}
+        {person && !readOnly && (
+          <form className="space-y-3 border-l-2 border-dashed border-sky pl-3" aria-label="Gestão funcional" onSubmit={(e) => { e.preventDefault(); saveFunc.mutate(); }}>
+            <p className="text-sm font-semibold text-ink">Gestão funcional</p>
+            <p className="text-xs text-muted">Atrele setores inteiros e/ou pessoas avulsas. No organograma, eles aparecem replicados em azul embaixo de {person.name}, ao lado da gestão hierárquica.</p>
+            <Multi label="Setores (times inteiros)" options={chart.teams.filter((t) => !t.functionalGroupOf && !t.managers.some((m) => m.userId === person.id && m.kind !== 'funcional')).map((t) => ({ id: t.id, label: t.name }))} value={fTeams} onChange={setFTeams} />
+            <Multi label="Pessoas avulsas" options={chart.people.filter((p) => p.id !== person.id).map((p) => ({ id: p.id, label: p.name }))} value={fPeople} onChange={setFPeople} />
+            {(!!fPeople.length || group) && <FormField label="Nome do grupo de pessoas" htmlFor="oc-fg" hint="Ex.: Negócios. O grupo só aparece solto no organograma na edição."><Input id="oc-fg" value={fName} onChange={(e) => setFName(e.target.value)} placeholder={`Gestão funcional — ${person.name}`} /></FormField>}
+            <Button type="submit" size="sm" variant="primary" loading={saveFunc.isPending}>Salvar gestão funcional</Button>
+          </form>
+        )}
         {team && comp && !readOnly && (
           <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); saveTeam.mutate(); }} aria-label="Composição do time">
             <p className="text-sm font-semibold text-ink">Composição do time</p>

@@ -41,7 +41,7 @@ async function assertSupervisorsLead(db: DbOrTx, tenantId: string, ids: string[]
 async function buildOrgChart(db: DbOrTx, auth: AuthContext) {
   const [users, teams, members, grants] = await Promise.all([
     db.select({ id: s.users.id, name: s.users.name, jobTitle: s.users.jobTitle, hasAvatar: s.userAvatars.userId }).from(s.users).leftJoin(s.userAvatars, eq(s.userAvatars.userId, s.users.id)).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
-    db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds, managerKinds: s.teams.managerKinds, directorIds: s.teams.directorIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
+    db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds, managerKinds: s.teams.managerKinds, directorIds: s.teams.directorIds, functionalGroupOf: s.teams.functionalGroupOf }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
     db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead, role: s.teamMemberships.role }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
     db.select().from(s.moduleGrants).where(eq(s.moduleGrants.tenantId, auth.tenantId)),
   ]);
@@ -66,7 +66,7 @@ async function buildOrgChart(db: DbOrTx, auth: AuthContext) {
     profiles: PROFILE_KEYS.map((k) => ({ key: k, label: PROFILE_LABELS[k] })),
     people,
     teams: teams.map((t) => ({
-      id: t.id, name: t.name, directorIds: t.directorIds, managerIds: t.managerIds,
+      id: t.id, name: t.name, directorIds: t.directorIds, managerIds: t.managerIds, functionalGroupOf: t.functionalGroupOf,
       managers: t.managerIds.map((u) => ({ userId: u, kind: t.managerKinds[u] ?? 'hierarquico_funcional' })),
       leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId),
       memberIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role !== 'participante').map((m) => m.userId),
@@ -240,6 +240,45 @@ export const moduleRoutes = [
         await assertSupervisorsLead(tx, auth.tenantId, before.filter((b) => b.isLead && !leads.includes(b.userId)).map((b) => b.userId));
         await audit(tx, req, { action: 'org_chart.team', entityType: 'team', entityId: t.id, metadata: { name: t.name, directors, managers: mgrs, leads, members, participants, before: { leads: before.filter((b) => b.isLead).map((b) => b.userId), members: before.filter((b) => !b.isLead).map((b) => b.userId), managers: t.managerIds } } });
         return { ok: true };
+      });
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/admin/org-chart/functional/:id', summary: 'Gestão funcional de uma pessoa: setores (times inteiros) e pessoas atreladas (auditado)', tag: 'Administração', ...ADMIN, params: IdParams,
+    body: z.object({ teamIds: z.array(z.string().uuid()).max(50), userIds: z.array(z.string().uuid()).max(300), groupName: z.string().trim().min(2).max(60).optional() }),
+    handler: async ({ app, auth, req, params, body }) => {
+      return app.db.transaction(async (tx) => {
+        await assertActiveUsers(tx, auth.tenantId, [params.id, ...body.userIds]);
+        const [me] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, params.id));
+        const teams = await tx.select().from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), isNull(s.teams.deletedAt)));
+        const kindOf = (t: typeof teams[number], u: string) => (t.managerIds.includes(u) ? t.managerKinds[u] ?? 'hierarquico_funcional' : null);
+        /** grupo de pessoas: time em que a pessoa é a única gestão, só funcional (é o "setor" das pessoas avulsas) */
+        const isGroup = (t: typeof teams[number]) => t.functionalGroupOf === params.id;
+        let group = teams.find(isGroup) ?? null;
+        const wanted = new Set(body.teamIds.filter((id) => id !== group?.id));
+        // setores: atrela ou solta a gestão só funcional (quem já é hierárquico no time continua como está)
+        for (const t of teams) {
+          if (group && t.id === group.id) continue;
+          const k = kindOf(t, params.id);
+          if (wanted.has(t.id) && !k) await tx.update(s.teams).set({ managerIds: [...t.managerIds, params.id], managerKinds: { ...t.managerKinds, [params.id]: 'funcional' } }).where(eq(s.teams.id, t.id));
+          if (!wanted.has(t.id) && k === 'funcional') {
+            const { [params.id]: _drop, ...rest } = t.managerKinds;
+            await tx.update(s.teams).set({ managerIds: t.managerIds.filter((x) => x !== params.id), managerKinds: rest }).where(eq(s.teams.id, t.id));
+          }
+        }
+        // pessoas avulsas: ficam no grupo (criado na primeira vez)
+        const people = [...new Set(body.userIds)].filter((u) => u !== params.id);
+        if (people.length && !group) {
+          const [created] = await tx.insert(s.teams).values({ tenantId: auth.tenantId, name: body.groupName ?? `Gestão funcional — ${me?.name ?? ''}`.slice(0, 60), managerIds: [params.id], managerKinds: { [params.id]: 'funcional' }, functionalGroupOf: params.id }).returning();
+          group = created ?? null;
+        }
+        if (group) {
+          if (body.groupName && body.groupName !== group.name) await tx.update(s.teams).set({ name: body.groupName }).where(eq(s.teams.id, group.id));
+          await tx.delete(s.teamMemberships).where(and(eq(s.teamMemberships.teamId, group.id), eq(s.teamMemberships.isLead, false)));
+          if (people.length) await tx.insert(s.teamMemberships).values(people.map((u) => ({ teamId: group!.id, userId: u, isLead: false, role: 'operacao' }))).onConflictDoNothing();
+        }
+        await audit(tx, req, { action: 'org_chart.functional', entityType: 'user', entityId: params.id, metadata: { teamIds: [...wanted], userIds: people, groupId: group?.id ?? null } });
+        return { ok: true, groupId: group?.id ?? null };
       });
     },
   }),

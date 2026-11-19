@@ -106,4 +106,26 @@ describe('organograma de acessos', () => {
     expect((await lucas.get('/org-chart')).statusCode).toBe(403);
     expect((await carlos.get('/org-chart')).json().canEdit).toBe(true);
   });
+
+  it('gestão funcional atrela setores inteiros e pessoas avulsas', async () => {
+    type T = { id: string; name: string; managers: { userId: string; kind: string }[]; leadIds: string[]; memberIds: string[] };
+    const get = async () => (await carlos.get('/admin/org-chart')).json() as { people: Person[]; teams: T[] };
+    let d = await get();
+    const id = (n: string) => d.people.find((p) => p.name.startsWith(n))!.id;
+    const res = d.teams.find((t) => t.name === 'Residencial')!;
+    expect((await lucas.put(`/admin/org-chart/functional/${id('Rafael')}`, { teamIds: [res.id], userIds: [] })).statusCode).toBe(403);
+    const r = await carlos.put(`/admin/org-chart/functional/${id('Rafael')}`, { teamIds: [res.id], userIds: [id('Mariana'), id('Lucas')], groupName: 'Negócios teste' });
+    expect(r.statusCode, r.body).toBe(200);
+    d = await get();
+    expect(d.teams.find((t) => t.id === res.id)!.managers).toContainEqual({ userId: id('Rafael'), kind: 'funcional' });
+    const g = d.teams.find((t) => t.id === r.json().groupId)!;
+    expect(g).toMatchObject({ name: 'Negócios teste', managers: [{ userId: id('Rafael'), kind: 'funcional' }] });
+    expect(g.memberIds.sort()).toEqual([id('Mariana'), id('Lucas')].sort());
+    // soltar tudo: sai do setor e o grupo fica vazio
+    expect((await carlos.put(`/admin/org-chart/functional/${id('Rafael')}`, { teamIds: [], userIds: [] })).statusCode).toBe(200);
+    d = await get();
+    expect(d.teams.find((t) => t.id === res.id)!.managers.some((m) => m.userId === id('Rafael'))).toBe(false);
+    expect(d.teams.find((t) => t.id === g.id)!.memberIds).toEqual([]);
+    await carlos.del(`/admin/teams/${g.id}`);
+  });
 });

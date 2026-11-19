@@ -195,6 +195,8 @@ export const teams = pgTable(
     managerKinds: jsonb('manager_kinds').$type<Record<string, 'hierarquico_funcional' | 'hierarquico' | 'funcional'>>().notNull().default(sql`'{}'::jsonb`),
     /** Diretoria a que o time responde (topo da cadeia Diretor > Gestor > Líder > Operação). */
     directorIds: uuid('director_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Grupo de pessoas avulsas sob a gestão funcional desta pessoa (não é um setor: só aparece no organograma em edição). */
+    functionalGroupOf: uuid('functional_group_of'),
     /** Time excluído: some de todas as escolhas e listas; o histórico continua apontando para ele. */
     deletedAt: ts('deleted_at'),
     createdAt: createdAt(),
