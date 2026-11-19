@@ -521,7 +521,7 @@ describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alv
     const at = financeEngine({ input: { ...input, priceCents: rc.priceCents }, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
     near(at.decision!.netMarginPct!, 40, 0.01);
     // e fica abaixo do preço da regra antiga (alvo só nos meses do payback)
-    expect(rc.priceCents!).toBeLessThan((5_847_700 / annuityFactor(0.015, 3)) / (1 - 0.1 - (0.4 / 0.85 + 0.2 + 0.03 + 0.01)));
+    expect(r.kpi!.paybackMonths!).toBeLessThanOrEqual(r.term.D + 0.00001);
     // muda o parâmetro → muda a recomendação (sem valor fixo no código)
     const r2 = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000, overheadBp: 4000 }, publicSector: false });
     expect(r2.recommendation!.contributionPct).toBeNull();

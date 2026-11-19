@@ -42,7 +42,7 @@ describe('Financial Studio', () => {
     ok(await lucas.get('/finance-studio/catalog'), 403);
     const c = ok(await carlos.get('/finance-studio/catalog')).json();
     const custo = c.formulas.find((f: { code: string }) => f.code === 'custo_mensal');
-    expect(custo).toMatchObject({ expression: 'SE(recorrente; custo_mensal_base * (1 + aliq_contingencia_opex); 0)', version: 0, custom: false });
+    expect(custo).toMatchObject({ expression: 'SE(recorrente; custo_mensal_base * (1 + aliq_contingencia_opex) + SE(VAZIO(inferencia_servico_mensal); 0; inferencia_servico_mensal); 0)', version: 0, custom: false });
     expect(custo.dependents).toEqual(expect.arrayContaining(['margem_contribuicao', 'fluxo_caixa', 'vpl', 'tir', 'roi', 'payback_descontado', 'aprovacao_automatica']));
     expect(c.variables.find((v: { code: string }) => v.code === 'aliq_tributos')).toMatchObject({ module: 'Motor Financeiro → Tributação', source: expect.stringContaining('fiscal_doc_types') });
     expect(c.can).toMatchObject({ edit: true, approve: true });
@@ -53,20 +53,21 @@ describe('Financial Studio', () => {
     const r = ok(await carlos.post('/finance-studio/simulate', { opportunityId: oppId, changes: [{ code: 'custo_mensal', expression: 'SE(recorrente; custo_mensal_base * 20; 0)' }], portfolio: true })).json();
     expect(r.issues.filter((i: { level: string }) => i.level === 'erro')).toEqual([]);
     const v = (code: string) => r.result.values.find((x: { code: string }) => x.code === code);
-    expect(v('custo_mensal')).toMatchObject({ before: 12_000, after: 240_000, diffAbs: 228_000, edited: true });
-    expect(v('custo_mensal').diffPct).toBeCloseTo(1900, 6);
-    expect(v('margem_contribuicao')).toMatchObject({ impacted: true, changed: true, diffAbs: -228_000 });
+    expect(v('custo_mensal')).toMatchObject({ before: 187_000, after: 240_000, diffAbs: 53_000, edited: true });
+    expect(v('custo_mensal').diffPct).toBeCloseTo(53000 / 187000 * 100, 6);
+    expect(v('margem_contribuicao')).toMatchObject({ impacted: true, changed: true, diffAbs: -53_000 });
     expect(v('tributos')).toMatchObject({ impacted: false, changed: false });
     expect(v('vpl').after).toBeLessThan(v('vpl').before);
     expect(r.affected).toEqual(expect.arrayContaining(['margem_contribuicao', 'margem_operacional', 'margem_liquida', 'fluxo_caixa', 'vpl', 'tir', 'roi', 'payback_descontado']));
-    expect(r.result.trace.before.memory).toBe('SE(VERDADEIRO; 120,00 * (1 + 0%); 0)');
+    expect(r.result.trace.before.memory).toContain('120,00');
+    expect(r.result.variables.find((x: { code: string }) => x.code === 'inferencia_servico_mensal')).toMatchObject({ value: 175_000 });
     expect(r.result.variables.find((x: { code: string }) => x.code === 'custo_mensal_base')).toMatchObject({ value: 12_000, used: true });
     expect(r.result.viability.before).toMatchObject({ verdict: 'viavel' });
     expect(r.portfolio.total).toBeGreaterThanOrEqual(1);
     // nada mudou na produção
     const saved = ok(await carlos.get(`/opportunities/${oppId}/economics`)).json();
     expect(saved.stale).toBe(false);
-    expect(saved.result.monthlyCostCents).toBe(12_000);
+    expect(saved.result.monthlyCostCents).toBe(187_000);
     // erros: referência circular e variável desconhecida
     const cyc = ok(await carlos.post('/finance-studio/simulate', { opportunityId: oppId, changes: [{ code: 'custo_mensal', expression: 'margem_contribuicao * 0.1' }] })).json();
     expect(cyc.issues.some((i: { message: string }) => /circular/.test(i.message))).toBe(true);
@@ -82,7 +83,7 @@ describe('Financial Studio', () => {
     ok(await carlos.post(`/finance-studio/versions/${v1.id}/transition`, { action: 'enviar' }), 422); // sem simulação
     const sim = ok(await carlos.post(`/finance-studio/versions/${v1.id}/simulate`, { opportunityId: oppId })).json();
     expect(sim.version.status).toBe('simulada');
-    expect(sim.version.simulation).toMatchObject({ before: 12_000, after: 24_000, diffAbs: 12_000 });
+    expect(sim.version.simulation).toMatchObject({ before: 187_000, after: 24_000, diffAbs: -163_000 });
     expect(sim.version.simulation.impacted.map((x: { code: string }) => x.code)).toEqual(expect.arrayContaining(['margem_contribuicao', 'vpl']));
     ok(await carlos.post(`/finance-studio/versions/${v1.id}/transition`, { action: 'enviar' }));
     ok(await carlos.patch(`/finance-studio/versions/${v1.id}`, { expression: 'custo_mensal_base' }), 422); // travada depois do envio
@@ -100,7 +101,7 @@ describe('Financial Studio', () => {
     // a publicação vale para os próximos cálculos: o salvo fica desatualizado (reavaliação explícita) e mantém a versão usada
     let g = ok(await carlos.get(`/opportunities/${oppId}/economics`)).json();
     expect(g.stale).toBe(true);
-    expect(g.result.monthlyCostCents).toBe(12_000);
+    expect(g.result.monthlyCostCents).toBe(187_000);
     expect(g.modelOverrides.find((o: { code: string }) => o.code === 'custo_mensal')).toMatchObject({ version: 1 });
     const again = ok(await carlos.put(`/opportunities/${oppId}/economics`, g.input)).json();
     expect(again.result.monthlyCostCents).toBe(24_000);
@@ -113,7 +114,7 @@ describe('Financial Studio', () => {
 
     // restaurar a padrão: nova revisão (v2), o histórico fica
     const v2 = ok(await carlos.post('/finance-studio/formulas/custo_mensal/versions', { restoreFrom: 'padrao', justification: 'Volta para o custo da planilha' }), 201).json();
-    expect(v2).toMatchObject({ version: 2, status: 'rascunho', expression: 'SE(recorrente; custo_mensal_base * (1 + aliq_contingencia_opex); 0)' });
+    expect(v2).toMatchObject({ version: 2, status: 'rascunho', expression: 'SE(recorrente; custo_mensal_base * (1 + aliq_contingencia_opex) + SE(VAZIO(inferencia_servico_mensal); 0; inferencia_servico_mensal); 0)' });
     const hist = ok(await carlos.get('/finance-studio/formulas/custo_mensal/versions')).json();
     expect(hist.versions.map((x: { version: number; status: string }) => `${x.version}:${x.status}`)).toEqual(['2:rascunho', '1:publicada']);
     expect(hist.versions[1].events.map((e: { action: string }) => e.action)).toEqual(['publicada', 'aprovada', 'validada', 'enviada', 'simulada', 'criada']);

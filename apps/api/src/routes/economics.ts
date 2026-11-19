@@ -272,6 +272,9 @@ export const economicsRoutes = [
       const e = econInputErrors(body as EconInput);
       if (e.length) throw unprocessable(e.join(' '));
       const pricingSettings = await econSettingsOf(app.db, auth.tenantId);
+      const requestedTarget = body.b2g?.netTargetBp;
+      const policy = pricingSettings?.settings;
+      if (requestedTarget != null && (!policy || (policy.netMarginMinBp != null && requestedTarget < policy.netMarginMinBp) || (policy.netMarginMaxBp != null && requestedTarget > policy.netMarginMaxBp))) throw unprocessable('A margem líquida esperada deve ficar dentro da faixa das Configurações.');
       if (pricingSettings?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para calcular o preço.');
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
       const input = await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));

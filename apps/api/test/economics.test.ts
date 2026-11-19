@@ -70,16 +70,18 @@ describe('viabilidade econômica', () => {
     expect(saved.result.rates.a).toBeCloseTo(0.2, 8);
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
-    // FINANCE-3.1: preço sugerido = (parcela da anuidade de 30.000 pela TMA em 6 meses + 2.000) ÷ (1 − 20% − 35%)
-    expect(saved.result.engineVersion).toBe('FINANCE-3.6.0');
-    const parc = 4_050_000 / annuityFactor(saved.result.rates.r, 6);
-    expect(Math.abs(saved.result.suggestedCents - (4_050_000 / 24 + 200_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
+    // Investimento 30.000; operação 2.000 + inferência mensal 10.500. O sugerido atende margem e payback.
+    expect(saved.result.engineVersion).toBe('FINANCE-3.7.0');
+    const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
+    expect(Math.abs(saved.result.suggestedCents - (3_000_000 / 24 + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(saved.result.rates.m * 100, 4);
     expect(saved.result.recommendation.netTargetPct).toBe(20); // sem margem líquida alvo nos parâmetros
-    // decisão no proposto (total dos produtos, 10.000): caixa do mês = 10.000 − 2.000 − 2.000 = 6.000; MC = 6.000 − parcela
+    // No proposto de 10.000, tributos e custo mensal deixam caixa negativo: o retorno não fecha.
     expect(saved.result.decision).toMatchObject({ basis: 'proposto', source: 'itens', priceCents: 1_000_000 });
-    expect(saved.result.decision.marginPct).toBeCloseTo(((600_000 - parc) / 1_000_000) * 100, 6);
-    expect(saved.result.decision.paybackMonths).toBeCloseTo(4_050_000 / 600_000, 4);
+    expect(saved.result.decision.marginPct).toBeCloseTo(((-450_000 - parc) / 1_000_000) * 100, 6);
+    expect(saved.result.decision.paybackMonths).toBeNull();
+    expect(saved.result.monthlyCostCents).toBe(1_250_000);
+    expect(saved.result.serviceMonthlyCents).toBe(1_050_000);
     expect(saved.result.verdict).not.toBe('fora_politica');
     expect(saved.history).toHaveLength(1);
 
@@ -97,7 +99,7 @@ describe('viabilidade econômica', () => {
     // Inteligência: fluxo consolidado (em andamento começa neste mês; mês 0 = investimento)
     const intel = ok(await carlos.get('/intelligence/economics?status=andamento')).json();
     const mine = intel.items.find((i: { id: string }) => i.id === o.id);
-    expect(mine.investmentCents).toBe(13_500_000);
+    expect(mine.investmentCents).toBe(10_000_000);
     expect(mine.months).toBe(24);
     expect(intel.flow.outflow[0]).toBeLessThanOrEqual(-10_000_000);
     expect(intel.totals.investmentCents).toBeGreaterThanOrEqual(10_000_000);
@@ -125,7 +127,7 @@ describe('viabilidade econômica', () => {
     expect(rv['margem_contrib_recomendada_%']).toBeCloseTo(withTarget.result.kpi.marginPct, 2);
     expect(rv.parametros_utilizados).toMatchObject({ 'taxa_rateio_fixo_%': 20, 'glosa_%': 3, 'inadimplencia_%': 1 });
     // mensalidade: o preço recomendado entrega 40% de margem líquida no contrato inteiro (24 meses), abaixo da regra antiga
-    expect(rv['preco_mensal_recomendado_R$']).toBeLessThan(7_000 / (1 - 0.2 - (0.4 / 0.85 + 0.24)));
+    expect(rv['preco_mensal_recomendado_R$']).toBeLessThan(17_500 / (1 - 0.2 - (0.4 / 0.85 + 0.24)));
     const atRec = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, priceCents: Math.round(rv['preco_mensal_recomendado_R$'] * 100) })).json();
     expect(atRec.result.decision.netMarginPct).toBeCloseTo(40, 1);
     ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
@@ -184,6 +186,7 @@ describe('viabilidade econômica', () => {
   });
 
   it('decisão: o vendedor envia, a gestão aprova ou devolve com motivo; ninguém decide o que enviou; salvar de novo reabre', async () => {
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: 0 }), 201);
     const lk = ok(await rafael.get('/meta/lookups')).json();
     const branch = lk.branches[0].id;
     const doc = ok(await rafael.get('/fiscal-docs')).json().items.find((d: { branchId: string; code: string }) => d.branchId === branch && d.code === 'NFS-E');
@@ -397,9 +400,9 @@ describe('viabilidade econômica', () => {
     expect(r.kinds).toEqual({ unica: true, recorrente: true });
     // O custo da Implantação fica integralmente na recorrência.
     const line = r.recorrente.lines[0];
-    const monthlyInvestment = 1_350_000;
+    const monthlyInvestment = 1_000_000;
     expect(r.recorrente.investmentCents).toBe(monthlyInvestment);
-    expect(r.unica.costCents + r.recorrente.investmentCents).toBe(1_350_000);
+    expect(r.unica.costCents + r.recorrente.investmentCents).toBe(1_000_000);
     expect(line.suggestedCents).toBe(calculated.suggestedCents);
     expect(r.unica.lines[0].profile).toBe('fornecimento');
     expect(line.priceCents).toBe(300000);
@@ -428,13 +431,14 @@ describe('viabilidade econômica', () => {
     const saved = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
     expect(saved.result.b2g.costs.unica.fornecimento).toBe(50001);
     expect(saved.result.b2g.costs.unica.instalacao).toBe(21710);
-    expect(saved.result.b2g.recorrente.investmentCents).toBe(375693);
+    expect(saved.result.b2g.recorrente.investmentCents).toBe(278291);
+    expect(saved.result.b2g.recorrente.monthlyCostCents).toBe(97402);
     expect(saved.result.b2g.recorrente.monthlyPriceCents).toBeGreaterThan(0);
-    expect(saved.result.b2g.global.costCents).toBe(455003);
+    expect(saved.result.b2g.global.costCents).toBe(1526425);
     expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.verified).toBe(true);
-    expect(run.engineVersion).toBe('FINANCE-3.6.0');
+    expect(run.engineVersion).toBe('FINANCE-3.7.0');
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
   });
@@ -455,9 +459,11 @@ describe('viabilidade econômica', () => {
     const known = ok(await carlos.put(`/opportunities/${o.id}/economics`, input)).json();
     const allKnown = [...known.result.b2g.unica.lines, ...known.result.b2g.recorrente.lines];
     expect(allKnown.every((l: { priceBasis: string; suggestedCents: number }) => l.priceBasis === 'informado' && l.suggestedCents > 0)).toBe(true);
+    for (const netTargetBp of [800, 4200]) ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...input, b2g: { netTargetBp } }), 422);
     const adjusted = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, marginTargetBp: 9500, b2g: { netTargetBp: 4000, contributionBp: { fornecimento: 9500, instalacao: 9500 } } })).json();
-    expect(adjusted.result.suggestedCents).toBe(known.result.suggestedCents);
-    expect(adjusted.result.suggestedOneTimeCents).toBe(known.result.suggestedOneTimeCents);
+    expect(adjusted.result.targetNetMarginPct).toBe(40);
+    expect(adjusted.result.suggestedCents).toBeGreaterThan(known.result.suggestedCents);
+    expect(adjusted.result.suggestedOneTimeCents).toBeGreaterThan(known.result.suggestedOneTimeCents);
     const old = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     const blank = items.map((i) => ({ ...i, fiscalDocTypeId: serviceDoc, unitCents: 0, priceDefined: false }));
     ok(await carlos.put(`/opportunities/${o.id}/items`, { rowVersion: opp.rowVersion, items: [blank[0], ...items.slice(1)] }), 422);
@@ -468,8 +474,8 @@ describe('viabilidade econômica', () => {
     expect(unknown.result.decision.basis).toBe('sugerido');
     const allUnknown = [...unknown.result.b2g.unica.lines, ...unknown.result.b2g.recorrente.lines];
     expect(allUnknown.every((l: { priceBasis: string; priceCents: number; suggestedCents: number }) => l.priceBasis === 'sugerido' && l.priceCents === l.suggestedCents && l.suggestedCents > 0)).toBe(true);
-    expect(unknown.result.b2g.baskets.map((b: { costCents: number }) => b.costCents)).toEqual([60001, 40504, 444007]);
-    expect(unknown.result.b2g.global.costCents).toBe(544512);
+    expect(unknown.result.b2g.baskets.map((b: { costCents: number }) => b.costCents)).toEqual([60001, 40504, 1368029]);
+    expect(unknown.result.b2g.global.costCents).toBe(1468534);
     expect(unknown.result.deal.cells.map((c: { lot: string }) => c.lot)).toEqual(['venda', 'instalacao', 'servico']);
     const snapshot = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${old.id}`)).json();
     expect(snapshot.verified).toBe(true);

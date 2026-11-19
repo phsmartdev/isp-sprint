@@ -47,7 +47,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.6.0';
+export const ENGINE_VERSION = 'FINANCE-3.7.0';
 /** Acréscimo de investimento dos serviços; independente de contingência, margem e despesas fixas. */
 export const SERVICE_INVESTMENT_BP = 3500;
 export const serviceInvestmentExtra = (baseCents: number, serviceCostBp?: number | null) => Math.round(baseCents * (serviceCostBp ?? SERVICE_INVESTMENT_BP) / 10_000);
@@ -239,7 +239,7 @@ export type EconResult = {
   fixedTaxCents: number;
   /** I (investimento) e O (custo mensal) já com contingência; as bases e as contingências vêm separadas */
   initialCents: number; monthlyCostCents: number;
-  capexBaseCents: number; capexContingencyCents: number; serviceInvestmentCents?: number; serviceCostBp?: number; opexBaseCents: number; opexContingencyCents: number;
+  capexBaseCents: number; capexContingencyCents: number; serviceInvestmentCents?: number; serviceMonthlyCents?: number; serviceCostBp?: number; opexBaseCents: number; opexContingencyCents: number;
   /** (v2) despesas variáveis em R$ de valor único (entrega, taxa fixa de venda): sem contingência; investimento total = I + E */
   variableFixedCents?: number; investmentCents?: number;
   /** N meses projetados (vigência limitada ao horizonte máximo) · Dalvo teto de payback · D payback do vendedor · d mês do recebimento */
@@ -433,7 +433,8 @@ export function applyFiscalEnvelope(args: EngineArgs): { args: EngineArgs; info:
 }
 
 export function financeEngine(args: EngineArgs): EconResult {
-  const effective = args.input.b2g?.overheadBp != null ? { ...args, settings: { ...args.settings, overheadBp: args.input.b2g.overheadBp } } : args;
+  const target = args.input.b2g?.netTargetBp ?? args.settings.netMarginTargetBp;
+  const effective = { ...args, settings: { ...args.settings, netMarginTargetBp: target, overheadBp: args.input.b2g?.overheadBp ?? args.settings.overheadBp } };
   const fx = applyFiscalEnvelope(effective);
   let r0 = financeEngineCore(fx.args);
   const profiles = new Set(fx.args.items.map((i) => lotOfKind(i.kind ?? (fx.args.input.mode === 'pontual' ? 'venda' : 'recorrencia'))));
@@ -692,7 +693,7 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
     rates: { ...base.rates, a: revB > 0 ? (add('tax') ?? 0) / revB : base.rates.a },
     fixedTaxCents: parts.reduce((t, p) => t + p.fixedTaxCents, 0),
     initialCents: parts.reduce((t, p) => t + p.initialCents, 0), monthlyCostCents: monthParts.reduce((t, p) => t + p.monthlyCostCents, 0),
-    capexBaseCents: parts.reduce((t, p) => t + p.capexBaseCents, 0), capexContingencyCents: parts.reduce((t, p) => t + p.capexContingencyCents, 0), serviceInvestmentCents: parts.reduce((t, p) => t + (p.serviceInvestmentCents ?? 0), 0),
+    capexBaseCents: parts.reduce((t, p) => t + p.capexBaseCents, 0), capexContingencyCents: parts.reduce((t, p) => t + p.capexContingencyCents, 0), serviceInvestmentCents: parts.reduce((t, p) => t + (p.serviceInvestmentCents ?? 0), 0), serviceMonthlyCents: parts.reduce((t, p) => t + (p.serviceMonthlyCents ?? 0), 0),
     opexBaseCents: monthParts.reduce((t, p) => t + p.opexBaseCents, 0), opexContingencyCents: monthParts.reduce((t, p) => t + p.opexContingencyCents, 0),
     variableFixedCents: parts.reduce((t, p) => t + (p.variableFixedCents ?? 0), 0), investmentCents: inv,
     term: { ...base.term, N: hasM ? N : 0 },
@@ -733,7 +734,24 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   if (pricing === undefined && args.settings.netMarginTargetBp != null) {
     const probe = financeEngineDetailed(args, false);
     const recommendation = probe.result.recommendation ?? null;
-    const price = recommendation?.priceCents ?? null;
+    let price = recommendation?.priceCents ?? null;
+    // O preço deve devolver o investimento no prazo escolhido, depois dos desembolsos do fluxo.
+    const D = probe.result.term.D;
+    if (price != null && args.input.mode === 'recorrente' && D > 0) {
+      const balance = (P: number) => {
+        const rr = runModel(probe.model, { ...probe.base, preco: P });
+        return rr.fluxo.slice(0, D + 1).reduce((sum, value, k) => sum + value / (1 + probe.result.rates.r) ** k, 0);
+      };
+      if (balance(price) < -0.000001) {
+        let lo = price, hi = Math.max(1, price);
+        for (let k = 0; k < 48 && balance(hi) < 0; k++) hi *= 2;
+        if (balance(hi) >= 0) {
+          for (let k = 0; k < 65 && hi - lo > 0.001; k++) { const mid = (hi + lo) / 2; if (balance(mid) >= 0) hi = mid; else lo = mid; }
+          price = Math.ceil(hi - 1e-8);
+        } else price = null;
+      }
+    }
+    if (recommendation) recommendation.priceCents = price;
     const contributionAt = (value: number | null | undefined) => {
       if (value == null || value <= 0) return 0;
       const run = runModel(probe.model, { ...probe.base, preco: value });
@@ -754,7 +772,11 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   const opexBase = rec ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
   const serviceItems = args.items.length > 0 && args.items.every((i) => (i.kind ?? (rec ? 'recorrencia' : 'venda')) !== 'venda');
   const serviceBase = inp.capex.filter((l) => !isVariableFixed(l.impact) && (l.kind ? l.kind !== 'venda' : serviceItems)).reduce((t, l) => t + costLineTotal(l), 0);
-  const serviceInvestmentCents = serviceInvestmentExtra(serviceBase, st.serviceCostBp);
+  const serviceExtra = serviceInvestmentExtra(serviceBase, st.serviceCostBp);
+  // Sem alvo líquido, mantém a compatibilidade do motor histórico.
+  const monthlyService = rec && st.netMarginTargetBp != null;
+  const serviceInvestmentCents = monthlyService ? 0 : serviceExtra;
+  const serviceMonthlyCents = monthlyService ? serviceExtra : 0;
   const invEstimate = capexBase * (1 + bp(st.contingencyCapexBp)) + serviceInvestmentCents + E; // só para os avisos de prazo
   if (!rec && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
   // tributos por lote: em cada lote (Venda / Serviço) vale o documento fiscal de maior tributo entre os produtos do lote;
@@ -811,7 +833,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   // 2–4. preço, fluxo de caixa e decisão: executados pelo modelo de fórmulas (Financial Studio; padrão = motor 2.0)
   const fm = args.model ?? defaultModel();
   const base: FinBase = {
-    recorrente: rec, receita_produtos: revenue, investimento_base: capexBase, acrescimo_investimento_servico: serviceInvestmentCents, despesas_variaveis: E, custo_mensal_base: rec ? opexBase : 0,
+    recorrente: rec, receita_produtos: revenue, investimento_base: capexBase, acrescimo_investimento_servico: serviceInvestmentCents, inferencia_servico_mensal: serviceMonthlyCents, despesas_variaveis: E, custo_mensal_base: rec ? opexBase : 0,
     aliq_contingencia_capex: bp(st.contingencyCapexBp), aliq_contingencia_opex: bp(st.contingencyOpexBp),
     aliq_tributos: a, tributo_fixo: F, tributos_completos: !(pendingItems.length > 0 || !n),
     aliq_comissao: 0, aliq_despesas_variaveis: c, aliq_glosa: glosa, aliq_inadimplencia: badDebt, margem: m, margem_piso: mMin,
@@ -828,7 +850,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   const r = numv(pre.values.tma_mensal) ?? 0;
   const inflM = numv(pre.values.inflacao_mensal) ?? 0;
   const I = numv(pre.values.investimento) ?? 0, Inv = numv(pre.values.investimento_total) ?? 0, O = numv(pre.values.custo_mensal) ?? 0;
-  const capexCont = I - capexBase - serviceInvestmentCents, opexCont = rec ? O - opexBase : 0;
+  const capexCont = I - capexBase - serviceInvestmentCents, opexCont = rec ? O - opexBase - serviceMonthlyCents : 0;
   const cash = numv(pre.values.preco_caixa), eco = numv(pre.values.preco_tma), minP = numv(pre.values.preco_minimo);
   const marginPrice = numv(pre.values.preco_margem_minima), markupPrice = numv(pre.values.preco_exato), recP = numv(pre.values.preco_recomendado);
   const opFloor = numv(pre.values.preco_margem_operacional_zero), suggested = numv(pre.values.preco_minimo_sugerido);
@@ -920,6 +942,12 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
     if (mc == null) warnings.push('Margem líquida alvo informada, mas faltam despesas fixas ou IR/CSLL em Configurações → Viabilidade: sem margem de contribuição recomendada.');
     else if (pr == null) warnings.push(`A margem de contribuição recomendada (${(mc * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%) não cabe no markup com os tributos e despesas variáveis: a margem líquida alvo não é alcançável por preço.`);
   }
+  if (targetPricing && rec && targetPricing.priceCents != null && st.netMarginTargetBp != null) {
+    const rr = runModel(fm, { ...base, preco: targetPricing.priceCents });
+    const total = statementOfPeriods(rr.periods, N).total;
+    const actual = total.net != null && total.revenue > 0 ? total.net / total.revenue * 100 : null;
+    if (actual != null && actual > st.netMarginTargetBp / 100 + 0.02) warnings.push(`O payback de ${D} meses exige preço maior que o alvo de margem líquida: no sugerido, a margem do contrato é ${actual.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%.`);
+  }
   if (targetPricing && targetPricing.priceCents == null) warnings.push('A margem líquida esperada não é alcançável com os custos e tributos configurados.');
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
   if (st.inflationAnnualBp == null && rec && N > 12) warnings.push('Inflação anual não informada: a receita não é reajustada depois do 12º mês.');
@@ -954,7 +982,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
     rates: { a, c, g, m, r, b, glosa, badDebt, bMarkup: bMk, mMin, mMax, inflationMonthly: inflM, tmaAnnual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null },
     fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
-    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), serviceInvestmentCents, serviceCostBp: st.serviceCostBp ?? SERVICE_INVESTMENT_BP, opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
+    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), serviceInvestmentCents, serviceMonthlyCents, serviceCostBp: st.serviceCostBp ?? SERVICE_INVESTMENT_BP, opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     variableFixedCents: E, investmentCents: Math.round(Inv),
     term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items, lots: lotsOut,
     floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
@@ -1217,7 +1245,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
     rows: [
       { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
       ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
-      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}${r.serviceMonthlyCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceMonthlyCents)}/mês` : ''}`, value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(r.fiscal ? [
         { label: `Vigência fiscal ${r.fiscal.year} (${r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'})`, formula: r.fiscal.docs?.length ? r.fiscal.docs.map((x) => `${x.name}: ${pc(x.percentBp / 100)}${x.fromYear != null ? ` (tributos de ${x.fromYear})` : ' (cadastro atual)'}`).join(' · ') : 'sem documento fiscal nos produtos', value: 'na carga da nota' },
@@ -1333,7 +1361,7 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
     key: 'entradas', title: 'Entradas', desc: 'Custos da oportunidade, tributos dos documentos fiscais e parâmetros vigentes do motor.',
     rows: [
       { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : undefined, value: money(I), strong: true },
-      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}` : undefined, value: money(O), strong: true }] : []),
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}${r.serviceMonthlyCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceMonthlyCents)}/mês` : ''}`, value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Comissão (c)', value: pc(c * 100) },

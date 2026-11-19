@@ -50,8 +50,8 @@ export function B2gPanel({ r, profiles, f, set, settings, disabled }: { profiles
         <FormField label="Despesas fixas rateadas (%)" htmlFor="b2g-oh" hint={`Nos serviços de Instalação e Implantação. Padrão ${bpText(settings.overheadBp ?? 0)}%.`}>
           <Input id="b2g-oh" inputMode="decimal" placeholder={bpText(settings.overheadBp ?? 0)} value={f.overhead} disabled={disabled} onChange={(e) => set({ overhead: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
         </FormField>
-        <FormField label="Margem líquida esperada (%)" htmlFor="b2g-nt" hint="Parâmetro das Configurações. A contribuição é um resultado do cálculo.">
-          <Input id="b2g-nt" value={bpText(settings.netMarginTargetBp)} disabled placeholder="Configure a margem líquida esperada" />
+        <FormField label="Margem líquida esperada (%)" htmlFor="b2g-nt" hint={`Recomendação: ${bpText(settings.netMarginTargetBp)}%. Permitido: ${bpText(settings.netMarginMinBp)}% a ${bpText(settings.netMarginMaxBp)}%.`}>
+          <Input id="b2g-nt" inputMode="decimal" value={f.netTarget} disabled={disabled} placeholder={bpText(settings.netMarginTargetBp)} onChange={(e) => set({ netTarget: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
         </FormField>
       </div>
 
@@ -105,7 +105,7 @@ function Block({ title, hint, b, f, set, disabled, minPct, maxPct }: { title: st
           <Fact k="Despesas fixas (da mensalidade)" v={`${brl(b.lines.reduce((t, l) => t + l.overheadCents, 0))}/mês`} />
           <Fact k="Investimento a recuperar" v={brl(b.investmentCents)} strong />
           <Fact k="Custo mensal" v={`${brl(b.monthlyCostCents)}/mês`} />
-          <Fact k="Payback" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
+          <Fact k="Payback real" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
           <Fact k="Vigência" v={b.termMonths ? `${b.termMonths} meses` : '—'} />
           <Fact k="Mensalidade" v={`${brl(b.monthlyPriceCents ?? b.priceCents)}/mês`} strong />
           {b.paybackStatus ? <Fact k="Situação" v={b.paybackStatus} /> : null}

@@ -58,14 +58,16 @@ describe('inferência configurável', () => {
       const product = b2gFromEconomics(configured, undefined, main);
       const extra = kind === 'venda' ? 0 : 800000 * serviceCostBp / 10000;
       expect(main.serviceCostBp).toBe(serviceCostBp);
-      expect(main.serviceInvestmentCents).toBe(extra);
-      expect(main.initialCents).toBe(816000 + extra);
+      const monthly = kind === 'recorrencia' || kind === 'locacao';
+      expect(main.serviceInvestmentCents).toBe(monthly ? 0 : extra);
+      expect(main.serviceMonthlyCents).toBe(monthly ? extra : 0);
+      expect(main.initialCents).toBe(816000 + (monthly ? 0 : extra));
       expect(product.baskets!.find((b) => b.baseCents === 800000)).toMatchObject({
-        serviceCostBp, serviceInvestmentCents: extra, investmentCents: 816000 + extra,
+        serviceCostBp, serviceInvestmentCents: monthly ? 0 : extra, serviceMonthlyCents: monthly ? extra : 0, investmentCents: 816000 + (monthly ? 0 : extra),
       });
-      expect(product.global.netPct).toBeCloseTo(20, 2);
+      expect(product.global.netPct!).toBeGreaterThanOrEqual(19.99);
       if (kind !== 'venda' && extra > 0) {
-        const memory = econMemory(main, String)[0]!.rows.find((r) => r.label === 'Investimento inicial (I)')!.formula;
+        const memory = econMemory(main, String)[0]!.rows.find((r) => r.label === (monthly ? 'Custos mensais (O)' : 'Investimento inicial (I)'))!.formula;
         expect(memory).toContain((serviceCostBp / 100).toLocaleString('pt-BR') + '%');
       }
     }

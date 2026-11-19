@@ -154,15 +154,25 @@ describe('organização da viabilidade', () => {
     expect(screen.queryByRole('region', { name: 'Cesta Fornecimento' })).toBeNull();
   });
 
-  it('usa o alvo das configurações e não permite informar contribuição manual', async () => {
-    setup();
+  it('recomenda o alvo das configurações, permite editar a margem e bloqueia fora da faixa', async () => {
+    const requests = setup();
     await screen.findByRole('button', { name: 'Mostrar A venda' });
     fireEvent.click(screen.getByRole('button', { name: 'Mostrar A venda' }));
     const sale = screen.getByRole('region', { name: 'A venda' });
     const target = within(sale).getByLabelText('Margem líquida esperada (%)') as HTMLInputElement;
-    expect(target.disabled).toBe(true);
+    expect(target.disabled).toBe(false);
     expect(target.value).toBe('20');
     expect(within(sale).queryByLabelText('Margem de contribuição (%)')).toBeNull();
+    fireEvent.change(target, { target: { value: '30' } });
+    expect((screen.getByLabelText('Margem líquida esperada (%)', { selector: '#b2g-nt' }) as HTMLInputElement).value).toBe('30');
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade econômica' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.b2g!.netTargetBp).toBe(3000);
+    fireEvent.change(target, { target: { value: '8' } });
+    expect((screen.getByRole('button', { name: 'Salvar viabilidade econômica' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(target, { target: { value: '42' } });
+    expect((screen.getByRole('button', { name: 'Salvar viabilidade econômica' }) as HTMLButtonElement).disabled).toBe(true);
+
   });
 
 });
