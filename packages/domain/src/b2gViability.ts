@@ -34,7 +34,7 @@ export type B2gProduct = {
 };
 export type B2gParams = {
   mode: 'A' | 'B';
-  netPricing?: boolean; reference?: { investments: Map<string, number>; monthly: Map<string, number>; suggested: Map<string, number>; baskets: NonNullable<B2gResult['baskets']> }; tmaRate?: number; inflationAnnualBp?: number | null;
+  netPricing?: boolean; reference?: { investments: Map<string, number>; monthly: Map<string, number>; suggested: Map<string, number>; prices?: Map<string, number>; proposedProfiles?: Set<CostProfile>; totals?: Partial<Record<CostProfile, { contribution: number; operating: number; net: number }>>; baskets: NonNullable<B2gResult['baskets']> }; tmaRate?: number; inflationAnnualBp?: number | null;
   /** Valor do produto quando informado; sugerido quando em branco. */ autoPrice?: boolean;
   /** despesas variáveis (% do preço), glosa + inadimplência (% da receita), IR/CSLL sobre o lucro */
   variableBp: number; riskBp: number; incomeTaxBp: number | null;
@@ -194,11 +194,11 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
         const suggested = p.reference ? p.reference.suggested.get(`${x.profile}:${x.id}`) ?? null : divisor > 0 ? (c + fixed) / divisor : null;
         if (mc != null && divisor <= 0) alerts.push(`${x.description}: tributos, despesas variáveis e margem somam 100% ou mais: nenhum preço fecha o markup.`);
         const defined = x.priceDefined ?? x.estimatedCents > 0;
-        const P = p.autoPrice ? x.bidCents ?? (defined ? x.estimatedCents : suggested) : p.mode === 'A' ? suggested : x.bidCents ?? x.estimatedCents;
+        const P = p.autoPrice ? x.bidCents ?? p.reference?.prices?.get(x.profile + ':' + x.id) ?? (defined ? x.estimatedCents : suggested) : p.mode === 'A' ? suggested : x.bidCents ?? x.estimatedCents;
         const floor = Lmin == null ? null : oneTimeFloor(c, a, fixed, p, oh, Lmin);
         const ch = P != null && P > 0 ? chain(P, c, a, fixed, p, oh) : null;
         const line: B2gLine = {
-          suggestedCents: suggested == null ? null : Math.round(suggested), priceDefined: defined, priceBasis: x.bidCents != null ? 'lance' : (p.autoPrice ? defined : p.mode === 'B') ? 'informado' : 'sugerido',
+          suggestedCents: suggested == null ? null : Math.round(suggested), priceDefined: defined, priceBasis: p.reference?.proposedProfiles?.has(x.profile) ? 'informado' : x.bidCents != null ? 'lance' : (p.autoPrice ? defined : p.mode === 'B') ? 'informado' : 'sugerido',
           id: x.id, description: x.description, profile: prof, revenue: 'unica', doc: x.doc!.name, taxPct: a * 100, estimatedCents: x.estimatedCents, costCents: c,
           weightPct: cost > 0 ? ((dist.get(x.id) ?? 0) / cost) * 100 : 0,
           priceCents: P == null ? null : Math.round(P), markup: P != null && c > 0 ? P / c : null,
@@ -252,7 +252,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
     if (D != null && (D < 1 || D > N)) { alerts.push(`O payback precisa ficar entre 1 mês e a vigência (${N} meses).`); D = Math.min(N, Math.max(1, D)); }
     if ((p.mode === 'A' || p.autoPrice) && D == null && status == null) alerts.push('Informe o payback (meses) ou a margem líquida alvo para precificar a recorrência.');
     const suggestions = p.reference ? recP.map((x) => p.reference!.suggested.get(`${x.profile}:${x.id}`) ?? null) : p.netPricing ? recP.map((x) => target == null ? null : recurringFloor(x, inv(x.id), dOpex.get(x.id) ?? 0, N, p, target, ohOf(x))) : D != null ? mensal(D) : recP.map(() => null);
-    const prices = recP.map((x, k) => p.autoPrice ? x.bidCents ?? ((x.priceDefined ?? x.estimatedCents > 0) ? x.estimatedCents : suggestions[k]) : p.mode === 'A' ? suggestions[k] : x.bidCents ?? x.estimatedCents);
+    const prices = recP.map((x, k) => p.autoPrice ? x.bidCents ?? p.reference?.prices?.get(x.profile + ':' + x.id) ?? ((x.priceDefined ?? x.estimatedCents > 0) ? x.estimatedCents : suggestions[k]) : p.mode === 'A' ? suggestions[k] : x.bidCents ?? x.estimatedCents);
     const lines: B2gLine[] = recP.map((x, k) => {
       const a = bp(x.doc!.taxBp), M = prices[k] ?? null, I = inv(x.id), O = dOpex.get(x.id) ?? 0, F = x.doc!.fixedCents;
       const oh = ohOf(x);
@@ -261,7 +261,7 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
       const pb = p.netPricing && s ? paybackOf(s.cashflow, p.tmaRate ?? 0) : M != null ? (den > 0 ? I / den : null) : null;
       const floor = Lmin == null ? null : recurringFloor(x, I, O, N, p, Lmin, oh);
       return {
-        suggestedCents: suggestions[k] == null ? null : Math.round(suggestions[k]!), priceDefined: x.priceDefined ?? x.estimatedCents > 0, priceBasis: x.bidCents != null ? 'lance' : (p.autoPrice ? (x.priceDefined ?? x.estimatedCents > 0) : p.mode === 'B') ? 'informado' : 'sugerido',
+        suggestedCents: suggestions[k] == null ? null : Math.round(suggestions[k]!), priceDefined: x.priceDefined ?? x.estimatedCents > 0, priceBasis: p.reference?.proposedProfiles?.has(x.profile) ? 'informado' : x.bidCents != null ? 'lance' : (p.autoPrice ? (x.priceDefined ?? x.estimatedCents > 0) : p.mode === 'B') ? 'informado' : 'sugerido',
         id: x.id, description: x.description, profile: x.profile, revenue: 'recorrente', doc: x.doc!.name, taxPct: a * 100, estimatedCents: x.estimatedCents, costCents: Math.round(I + O * N),
         weightPct: totalInv > 0 ? (I / totalInv) * 100 : 0, priceCents: M == null ? null : Math.round(M), markup: M != null && I + O * N > 0 ? (M * N) / (I + O * N) : null,
         contributionCents: s ? Math.round(s.contribution) : null, contributionPct: s ? (s.contribution / s.revenue) * 100 : null, overheadCents: s ? Math.round(s.overhead / N) : 0, overheadBase: oh ? 'preco' : null,
@@ -284,6 +284,28 @@ export function b2gViability(products: B2gProduct[], capex: CostLine[], opex: Co
   }
 
   // ------------------------------------------------------------------ consolidado (de baixo para cima; a decisão é global)
+  if (p.reference?.totals) {
+    // No modo global, os resultados da cesta são a referência; os itens recebem seu rateio em centavos.
+    for (const profile of COST_PROFILES) {
+      const total = p.reference.totals[profile];
+      if (!total) continue;
+      const same = products.filter((x) => x.profile === profile);
+      const mc = distribute(same, total.contribution, p.weights), op = distribute(same, total.operating, p.weights), net = distribute(same, total.net, p.weights);
+      for (const block of [unica, recorrente]) if (block) {
+        for (const line of block.lines.filter((l) => l.profile === profile)) {
+          const revenue = (line.priceCents ?? 0) * (line.revenue === 'recorrente' ? contractMultiplier : 1);
+          line.contributionCents = mc.get(line.id) ?? 0; line.operatingCents = op.get(line.id) ?? 0; line.netCents = net.get(line.id) ?? 0;
+          line.contributionPct = revenue > 0 ? line.contributionCents / revenue * 100 : null;
+          line.operatingPct = revenue > 0 ? line.operatingCents / revenue * 100 : null;
+          line.netPct = revenue > 0 ? line.netCents / revenue * 100 : null;
+        }
+        block.contributionCents = block.lines.reduce((n, l) => n + (l.contributionCents ?? 0), 0);
+        block.operatingCents = block.lines.reduce((n, l) => n + (l.operatingCents ?? 0), 0);
+        block.netCents = block.lines.reduce((n, l) => n + (l.netCents ?? 0), 0);
+        block.netPct = block.priceCents > 0 ? block.netCents / block.priceCents * 100 : null;
+      }
+    }
+  }
   const all = [...(unica?.lines ?? []), ...(recorrente?.lines ?? [])];
   const revOf = (l: B2gLine) => Math.round((l.priceCents ?? 0) * (l.revenue === 'recorrente' ? contractMultiplier : 1));
   const estOf = (l: B2gLine) => Math.round(l.estimatedCents * (l.revenue === 'recorrente' ? contractMultiplier : 1));
@@ -401,21 +423,27 @@ export function b2gFromEconomics(args: Omit<EngineArgs, 'model'>, profitTaxBp?: 
   const target = b.netTargetBp ?? st.netMarginTargetBp ?? null;
   const defaultMargin = inp.marginTargetBp ?? st.marginSuggestedBp ?? st.marginTargetBp;
   const contribution = Object.fromEntries(COST_PROFILES.map((profile) => [profile, b.contributionBp?.[profile] ?? (target == null ? defaultMargin : null)]));
-  const products: B2gProduct[] = fx.args.items.map((i) => {
+  const globalMode = inp.pricingMode === 'global';
+  const products: B2gProduct[] = fx.args.items.map((i, index) => {
     const kind = (i.kind ?? 'recorrencia') as DealKind;
-    return { id: key(i.description), description: i.description, kind, profile: defaultCostProfile(kind), estimatedCents: i.revenueCents, priceDefined: i.priceDefined, bidCents: b.bids?.[key(i.description)] ?? null, doc: i.doc && i.doc.complete ? { name: i.doc.name, taxBp: i.doc.percentBp, fixedCents: i.doc.fixedCents } : null };
+    return { id: globalMode ? 'global:' + index : key(i.description), description: i.description, kind, profile: defaultCostProfile(kind), estimatedCents: i.revenueCents, priceDefined: i.priceDefined, bidCents: globalMode ? null : b.bids?.[key(i.description)] ?? null, doc: i.doc && i.doc.complete ? { name: i.doc.name, taxBp: i.doc.percentBp, fixedCents: i.doc.fixedCents } : null };
   });
+  const sourceWeights = b.weights;
+  const weights = globalMode ? Object.fromEntries(products.flatMap((p) => {
+    const value = sourceWeights?.[p.id] ?? sourceWeights?.[key(p.description)];
+    return value == null ? [] : [[p.id, value]];
+  })) : sourceWeights;
   if (target != null) for (const profile of COST_PROFILES) {
     const same = products.filter((x) => x.profile === profile);
     const top = same.map((x) => x.doc).filter((d): d is NonNullable<B2gProduct['doc']> => !!d).sort((a, b) => b.taxBp - a.taxBp || b.fixedCents - a.fixedCents)[0];
     if (!top) continue;
-    const fixed = distribute(same, top.fixedCents, b.weights);
+    const fixed = distribute(same, top.fixedCents, weights);
     for (const x of same) if (x.doc) x.doc = { ...top, fixedCents: fixed.get(x.id) ?? 0 };
   }
   let reference: B2gParams['reference'];
   if (target != null) {
     const main = mainReference ?? financeEngine(args);
-    reference = { investments: new Map(), monthly: new Map(), suggested: new Map(), baskets: [] };
+    reference = { investments: new Map(), monthly: new Map(), suggested: new Map(), prices: globalMode ? new Map() : undefined, proposedProfiles: globalMode ? new Set() : undefined, totals: globalMode ? {} : undefined, baskets: [] };
     for (const profile of COST_PROFILES) {
       const same = products.filter((x) => x.profile === profile);
       if (!same.length) {
@@ -434,10 +462,18 @@ export function b2gFromEconomics(args: Omit<EngineArgs, 'model'>, profitTaxBp?: 
       if (!result) continue;
       const investmentCents = result.investmentCents ?? result.initialCents;
       const monthlyCostCents = profile === 'implantacao' ? result.monthlyCostCents : 0;
-      for (const [id, value] of distribute(same, investmentCents, b.weights)) reference.investments.set(`${profile}:${id}`, value);
-      for (const [id, value] of distribute(same, monthlyCostCents, b.weights)) reference.monthly.set(`${profile}:${id}`, value);
+      for (const [id, value] of distribute(same, investmentCents, weights)) reference.investments.set(`${profile}:${id}`, value);
+      for (const [id, value] of distribute(same, monthlyCostCents, weights)) reference.monthly.set(`${profile}:${id}`, value);
       const suggested = cell?.suggestedCents ?? result.suggestedCents;
-      if (suggested != null) for (const [id, value] of distribute(same, suggested, b.weights)) reference.suggested.set(`${profile}:${id}`, value);
+      if (suggested != null) for (const [id, value] of distribute(same, suggested, weights)) reference.suggested.set(`${profile}:${id}`, value);
+      if (globalMode) {
+        const proposed = cell?.proposedResult ?? (!main.deal ? main.proposedResult : null);
+        const total = (proposed ?? result).statement?.total;
+        if (total?.operating != null && total.net != null) reference.totals![profile] = { contribution: total.contribution, operating: total.operating, net: total.net };
+        const price = proposed?.priceCents ?? suggested;
+        if (proposed) reference.proposedProfiles!.add(profile);
+        if (price != null) for (const [id, value] of distribute(same, price, weights)) reference.prices!.set(profile + ':' + id, value);
+      }
       reference.baskets.push({ profile, investmentCents, monthlyCostCents, baseCents: result.capexBaseCents, contingencyCents: result.capexContingencyCents, serviceInvestmentCents: result.serviceInvestmentCents, serviceMonthlyCents: result.serviceMonthlyCents, serviceCostBp: result.serviceCostBp, variableFixedCents: result.variableFixedCents, costCents: investmentCents + monthlyCostCents * result.term.N, allocatedCents: investmentCents + monthlyCostCents * result.term.N });
     }
   }
@@ -446,7 +482,7 @@ export function b2gFromEconomics(args: Omit<EngineArgs, 'model'>, profitTaxBp?: 
     riskBp: (inp.lossBp ?? (args.publicSector ? st.lossPublicBp : st.lossPrivateBp)) + (st.badDebtBp ?? 0),
     incomeTaxBp: profitTaxBp ?? fx.args.settings.incomeTaxBp ?? null, overheadBp: b.overheadBp ?? st.overheadBp ?? 0, netMinBp: st.netMarginMinBp ?? null,
     netTargetBp: target, contributionBp: target != null ? undefined : contribution, solvePayback: false,
-    serviceCostBp: st.serviceCostBp, contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths), paybackMonths: inp.paybackMonths ?? (args.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate),
-    paymentTermDays: st.paymentTermDays ?? null, weights: b.weights,
+    serviceCostBp: st.serviceCostBp, contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths), paybackMonths: inp.baskets?.implantacao?.paybackMonths ?? inp.paybackMonths ?? (args.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate),
+    paymentTermDays: st.paymentTermDays ?? null, weights: weights,
   }, inp.extraInitialCents);
 }

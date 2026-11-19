@@ -103,7 +103,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | 'instalacao' | null) ?? null, priceDefined: i.priceDefined, description: i.description, revenueCents: i.priceDefined ? itemTotal(i) : 0, kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
+    return { id: i.id, qtyMilli: i.qtyMilli, unit: i.unit, costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | 'instalacao' | null) ?? null, priceDefined: i.priceDefined, description: i.description, revenueCents: i.priceDefined ? itemTotal(i) : 0, kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {

@@ -17,7 +17,8 @@ describe('editor de produtos: preservação financeira', () => {
     expect(rebuilt.capex.every((c) => c.kind == null)).toBe(true);
     expect(rebuilt.capex.map((c) => c.unitCents)).toEqual([30000, 12000, 1234]);
     const items = kinds.map((kind) => ({ kind, description: kind, priceDefined: false, revenueCents: 0, doc: { name: 'Nota', percentBp: 1000, fixedCents: 0, complete: true } }));
-    expect(financeEngine({ input: rebuilt, items, settings, publicSector: false })).toEqual(financeEngine({ input: old, items, settings, publicSector: false }));
+    const financial = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => key === 'costInput' ? undefined : v));
+    expect(financial(financeEngine({ input: rebuilt, items, settings, publicSector: false }))).toEqual(financial(financeEngine({ input: old, items, settings, publicSector: false })));
   });
   it('Quando move somente a linha escolhida para o custo mensal', () => {
     const drafts = costDrafts(input, kinds).map((c) => c.description === 'recorrencia' ? { ...c, frequency: 'mensal' as const } : c);

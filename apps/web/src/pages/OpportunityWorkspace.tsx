@@ -780,7 +780,7 @@ export function OpportunityWorkspacePage() {
     </div>
   );
 
-  const wideProducts = centerTab === 'produtos';
+  const wideProducts = centerTab === 'produtos' || centerTab === 'viabilidade';
   const center = (
     <div className="space-y-4">
       {a.restored && <Notice tone="warning">Recuperamos alterações que não tinham sido salvas. Elas serão gravadas agora. <button className="underline" onClick={a.dismissRestored}>Entendi</button></Notice>}

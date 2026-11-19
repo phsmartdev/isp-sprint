@@ -1,7 +1,7 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econTargetErrors, econInputErrors, econBasketViews, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
@@ -267,9 +267,8 @@ export const economicsRoutes = [
       const e = econInputErrors(body as EconInput);
       if (e.length) throw unprocessable(e.join(' '));
       const pricingSettings = await econSettingsOf(tx, auth.tenantId);
-      const requestedTarget = body.b2g?.netTargetBp;
-      const policy = pricingSettings?.settings;
-      if (requestedTarget != null && (!policy || (policy.netMarginMinBp != null && requestedTarget < policy.netMarginMinBp) || (policy.netMarginMaxBp != null && requestedTarget > policy.netMarginMaxBp))) throw unprocessable('A margem líquida esperada deve ficar dentro da faixa das Configurações.');
+      const targetErrors = pricingSettings ? econTargetErrors(body as EconInput, pricingSettings.settings) : [];
+      if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
       if (pricingSettings?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para calcular o preço.');
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
       const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body as EconInput));
@@ -315,6 +314,7 @@ export const economicsRoutes = [
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada.');
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
       if (!ctx.savedResult) throw unprocessable('Salve a viabilidade econômica antes de enviar.');
+      if (ctx.input.pricingMode === 'global' && ctx.settings && econBasketViews(ctx.input, ctx.items, ctx.settings, ctx.savedResult).some((v) => v.result.decision?.basis !== 'proposto')) throw unprocessable('Defina ou adote o preço global de cada cesta e salve antes de enviar para decisão.');
       if (ctx.savedResult.priceSource === 'sugerido') throw unprocessable('Os produtos estão sem preço: defina o preço (nos produtos ou no campo Preço da viabilidade) e salve antes de enviar.');
       assertDecidable(ctx);
       const st = await econStatus(app.db, auth.tenantId, opp.id);

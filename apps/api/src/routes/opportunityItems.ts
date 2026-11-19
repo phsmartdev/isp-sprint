@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econTargetErrors, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -81,8 +81,8 @@ export const opportunityItemRoutes = [
           if (errors.length) throw unprocessable(errors.join(' '));
           const version = await econSettingsOf(tx, auth.tenantId);
           if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
-          const target = body.economics.b2g?.netTargetBp;
-          if (target != null && ((version.settings.netMarginMinBp != null && target < version.settings.netMarginMinBp) || (version.settings.netMarginMaxBp != null && target > version.settings.netMarginMaxBp))) throw unprocessable('A margem líquida esperada deve ficar dentro da faixa das Configurações.');
+          const targetErrors = econTargetErrors(body.economics as EconInput, version.settings);
+          if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
         }
         for (const [i, it] of body.items.entries()) {
           it.costProfile = defaultCostProfile(it.dealKind);
