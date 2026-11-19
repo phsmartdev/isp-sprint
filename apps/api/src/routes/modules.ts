@@ -11,8 +11,8 @@ import {
   SENSITIVE_ACTIONS, SENSITIVE_ACTION_LABELS, ACCESS_LEVELS, defaultTenantModule, grantErrors, type AccessLevel, type BusinessModule, type Module,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
-import { notFound, unprocessable } from '../http/errors';
-import { authForUser } from '../http/context';
+import { forbidden, notFound, unprocessable } from '../http/errors';
+import { authForUser, type AuthContext } from '../http/context';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { ensureRoles } from './admin';
@@ -35,6 +35,57 @@ async function assertSupervisorsLead(db: DbOrTx, tenantId: string, ids: string[]
     where u.tenant_id = ${tenantId} and r.key = 'supervisor' and u.id in ${sql.raw(`(${[...new Set(ids)].map((i) => `'${i.replace(/[^0-9a-f-]/gi, '')}'`).join(',')})`)}
     and not exists (select 1 from team_memberships m join teams t on t.id = m.team_id where m.user_id = u.id and m.is_lead and t.deleted_at is null)`);
   if (r.rows.length) throw unprocessable(`${r.rows.map((x) => x.name).join(', ')} tem perfil Supervisão e ficaria sem liderar nenhum time (a Supervisão só enxerga os times que lidera). Coloque como liderança de outro time ou troque o perfil antes.`);
+}
+
+/** Monta o organograma (o mesmo para quem edita e para quem só consulta). */
+async function buildOrgChart(db: DbOrTx, auth: AuthContext) {
+  const [users, teams, members, grants] = await Promise.all([
+    db.select({ id: s.users.id, name: s.users.name, jobTitle: s.users.jobTitle, hasAvatar: s.userAvatars.userId }).from(s.users).leftJoin(s.userAvatars, eq(s.userAvatars.userId, s.users.id)).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
+    db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds, managerKinds: s.teams.managerKinds, directorIds: s.teams.directorIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
+    db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead, role: s.teamMemberships.role }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
+    db.select().from(s.moduleGrants).where(eq(s.moduleGrants.tenantId, auth.tenantId)),
+  ]);
+  const rank = (l: AccessLevel) => ACCESS_LEVELS.indexOf(l);
+  const people = [];
+  for (const u of users) {
+    const a = await authForUser(db, auth.tenantId, u.id);
+    if (!a) continue;
+    // o que a pessoa enxerga em cada módulo de negócio: o maior nível entre as telas do módulo (já com o módulo ligado ou não para ela)
+    const view = Object.fromEntries(BUSINESS_MODULES.map((bm: BusinessModule) => {
+      const techs = (MODULES as readonly Module[]).filter((m) => MODULE_OWNER[m] === bm);
+      const lvl = techs.reduce<AccessLevel>((best, m) => (rank(a.access[m] ?? 'nenhum') > rank(best) ? a.access[m]! : best), 'nenhum');
+      const prof = techs.reduce<AccessLevel>((best, m) => (rank(a.profileAccess[m] ?? 'nenhum') > rank(best) ? a.profileAccess[m]! : best), 'nenhum');
+      return [bm, { level: a.modules[bm] ? lvl : 'nenhum', enabled: a.modules[bm], reason: a.moduleReasons[bm], profileLevel: prof }];
+    }));
+    people.push({ id: u.id, name: u.name, jobTitle: u.jobTitle, hasAvatar: !!u.hasAvatar, profile: a.profiles[0] ?? null, profiles: a.profiles, view });
+  }
+  const [tn] = await db.select({ name: s.tenants.orgTopName, title: s.tenants.orgTopTitle }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId));
+  return {
+    top: { name: tn?.name ?? null, title: tn?.title ?? null },
+    modules: BUSINESS_MODULES.map((m: BusinessModule) => ({ key: m, label: BUSINESS_MODULE_LABELS[m], technical: (MODULES as readonly Module[]).filter((t) => MODULE_OWNER[t] === m) })),
+    profiles: PROFILE_KEYS.map((k) => ({ key: k, label: PROFILE_LABELS[k] })),
+    people,
+    teams: teams.map((t) => ({
+      id: t.id, name: t.name, directorIds: t.directorIds, managerIds: t.managerIds,
+      managers: t.managerIds.map((u) => ({ userId: u, kind: t.managerKinds[u] ?? 'hierarquico_funcional' })),
+      leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId),
+      memberIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role !== 'participante').map((m) => m.userId),
+      participantIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role === 'participante').map((m) => m.userId),
+    })),
+    grants: grants.map((g) => ({ id: g.id, module: g.module, subjectType: g.subjectType, subjectId: g.subjectId, effect: g.effect, reason: g.reason, validUntil: g.validUntil })),
+  };
+}
+
+/** Quem pode ver o organograma, além da Administração. */
+async function orgChartViewers(db: DbOrTx, tenantId: string) {
+  const [t] = await db.select({ ids: s.tenants.orgChartViewerIds, profiles: s.tenants.orgChartViewerProfiles }).from(s.tenants).where(eq(s.tenants.id, tenantId));
+  return { userIds: t?.ids ?? [], profiles: t?.profiles ?? [] };
+}
+/** Administração (Configurações em Total) sempre; os demais só se autorizados por pessoa ou perfil. */
+export async function canViewOrgChart(db: DbOrTx, auth: AuthContext) {
+  if (auth.access.configuracoes === 'total') return true;
+  const v = await orgChartViewers(db, auth.tenantId);
+  return v.userIds.includes(auth.userId) || auth.profiles.some((p) => v.profiles.includes(p));
 }
 
 export const moduleRoutes = [
@@ -133,42 +184,25 @@ export const moduleRoutes = [
   }),
   defineRoute({
     method: 'GET', url: '/admin/org-chart', summary: 'Organograma de acessos: pessoas, times (gestores, líderes e membros) e, por módulo, o que cada pessoa enxerga e por quê', tag: 'Administração', ...ADMIN,
+    handler: async ({ app, auth }) => ({ ...(await buildOrgChart(app.db, auth)), canEdit: true, viewers: await orgChartViewers(app.db, auth.tenantId) }),
+  }),
+  defineRoute({
+    method: 'GET', url: '/org-chart', summary: 'Organograma só para consulta: Administração e as pessoas ou perfis autorizados', tag: 'Administração', anyAuthenticated: true,
     handler: async ({ app, auth }) => {
-      const [users, teams, members, grants] = await Promise.all([
-        app.db.select({ id: s.users.id, name: s.users.name, jobTitle: s.users.jobTitle, hasAvatar: s.userAvatars.userId }).from(s.users).leftJoin(s.userAvatars, eq(s.userAvatars.userId, s.users.id)).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
-        app.db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds, managerKinds: s.teams.managerKinds, directorIds: s.teams.directorIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
-        app.db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead, role: s.teamMemberships.role }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
-        app.db.select().from(s.moduleGrants).where(eq(s.moduleGrants.tenantId, auth.tenantId)),
-      ]);
-      const rank = (l: AccessLevel) => ACCESS_LEVELS.indexOf(l);
-      const people = [];
-      for (const u of users) {
-        const a = await authForUser(app.db, auth.tenantId, u.id);
-        if (!a) continue;
-        // o que a pessoa enxerga em cada módulo de negócio: o maior nível entre as telas do módulo (já com o módulo ligado ou não para ela)
-        const view = Object.fromEntries(BUSINESS_MODULES.map((bm: BusinessModule) => {
-          const techs = (MODULES as readonly Module[]).filter((m) => MODULE_OWNER[m] === bm);
-          const lvl = techs.reduce<AccessLevel>((best, m) => (rank(a.access[m] ?? 'nenhum') > rank(best) ? a.access[m]! : best), 'nenhum');
-          const prof = techs.reduce<AccessLevel>((best, m) => (rank(a.profileAccess[m] ?? 'nenhum') > rank(best) ? a.profileAccess[m]! : best), 'nenhum');
-          return [bm, { level: a.modules[bm] ? lvl : 'nenhum', enabled: a.modules[bm], reason: a.moduleReasons[bm], profileLevel: prof }];
-        }));
-        people.push({ id: u.id, name: u.name, jobTitle: u.jobTitle, hasAvatar: !!u.hasAvatar, profile: a.profiles[0] ?? null, profiles: a.profiles, view });
-      }
-      const [tn] = await app.db.select({ name: s.tenants.orgTopName, title: s.tenants.orgTopTitle }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId));
-      return {
-        top: { name: tn?.name ?? null, title: tn?.title ?? null },
-        modules: BUSINESS_MODULES.map((m: BusinessModule) => ({ key: m, label: BUSINESS_MODULE_LABELS[m], technical: (MODULES as readonly Module[]).filter((t) => MODULE_OWNER[t] === m) })),
-        profiles: PROFILE_KEYS.map((k) => ({ key: k, label: PROFILE_LABELS[k] })),
-        people,
-        teams: teams.map((t) => ({
-          id: t.id, name: t.name, directorIds: t.directorIds, managerIds: t.managerIds,
-          managers: t.managerIds.map((u) => ({ userId: u, kind: t.managerKinds[u] ?? 'hierarquico_funcional' })),
-          leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId),
-          memberIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role !== 'participante').map((m) => m.userId),
-          participantIds: members.filter((m) => m.teamId === t.id && !m.isLead && m.role === 'participante').map((m) => m.userId),
-        })),
-        grants: grants.map((g) => ({ id: g.id, module: g.module, subjectType: g.subjectType, subjectId: g.subjectId, effect: g.effect, reason: g.reason, validUntil: g.validUntil })),
-      };
+      if (!(await canViewOrgChart(app.db, auth))) throw forbidden('O organograma é visto só por pessoas autorizadas. Peça à Administração.');
+      const edit = auth.access.configuracoes === 'total';
+      return { ...(await buildOrgChart(app.db, auth)), canEdit: edit };
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/admin/org-chart/viewers', summary: 'Define quem pode ver o organograma (pessoas e perfis), além da Administração', tag: 'Administração', ...ADMIN,
+    body: z.object({ userIds: z.array(z.string().uuid()).max(500), profiles: z.array(z.enum(PROFILE_KEYS)).max(10) }),
+    handler: async ({ app, auth, req, body }) => {
+      await assertActiveUsers(app.db, auth.tenantId, body.userIds);
+      const before = await orgChartViewers(app.db, auth.tenantId);
+      await app.db.update(s.tenants).set({ orgChartViewerIds: [...new Set(body.userIds)], orgChartViewerProfiles: [...new Set(body.profiles)], updatedAt: new Date() }).where(eq(s.tenants.id, auth.tenantId));
+      await audit(app.db, req, { action: 'org_chart.viewers', entityType: 'tenant', entityId: auth.tenantId, metadata: { from: before, to: body } });
+      return { ok: true };
     },
   }),
   defineRoute({

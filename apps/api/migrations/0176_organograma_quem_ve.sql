@@ -1,0 +1,2 @@
+ALTER TABLE "tenants" ADD COLUMN "org_chart_viewer_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "tenants" ADD COLUMN "org_chart_viewer_profiles" text[] DEFAULT '{}'::text[] NOT NULL;

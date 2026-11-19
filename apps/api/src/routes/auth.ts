@@ -1,3 +1,4 @@
+import { canViewOrgChart } from './modules';
 import { ipCheck } from '../services/ipAccess';
 import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -113,6 +114,6 @@ export const authRoutes = [
     summary: 'Usuário, empresa, papéis e permissões da sessão',
     tag: 'Auth',
     anyAuthenticated: true,
-    handler: async ({ app, auth }) => meDto(auth, await hasAvatar(app, auth.userId)),
+    handler: async ({ app, auth }) => ({ ...meDto(auth, await hasAvatar(app, auth.userId)), orgChart: await canViewOrgChart(app.db, auth) }),
   }),
 ];

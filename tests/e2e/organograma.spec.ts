@@ -156,4 +156,43 @@ test('organograma: só a administração acessa', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await page.goto('/settings/users?visao=organograma');
   await expect(page.getByRole('heading', { name: 'Organograma de acessos' })).toHaveCount(0);
+  // sem autorização, nem pelo link de consulta
+  await page.goto('/times/organograma');
+  await expect(page.getByText('Organograma restrito')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Organograma', exact: true })).toHaveCount(0);
+});
+
+test('organograma: a Administração autoriza quem vê; a pessoa autorizada só consulta', async ({ page }) => {
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/users?visao=organograma');
+  await page.getByRole('button', { name: 'Quem pode ver' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Quem pode ver o organograma' });
+  await dlg.getByRole('group', { name: 'Pessoas autorizadas' }).getByRole('button', { name: 'Lucas Lima' }).click();
+  await dlg.getByRole('button', { name: 'Salvar' }).click();
+  await expect(page.getByText('Quem pode ver o organograma foi atualizado')).toBeVisible();
+
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/times/organograma');
+  await expect(page.getByRole('heading', { name: 'Organograma de acessos' })).toBeVisible();
+  await expect(page.getByText('Só consulta').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Organograma', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ajustar estrutura' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Quem pode ver' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Editar o topo da estrutura' })).toHaveCount(0);
+  await page.locator('[data-testid="org-team"][aria-label="Time Residencial"]').getByRole('button', { name: /^Lucas Lima/ }).click();
+  const panel = page.getByRole('complementary', { name: 'Acesso de Lucas Lima' });
+  await expect(panel.getByTestId('org-mod-crm')).toContainText('Só o próprio');
+  await expect(panel.getByRole('button', { name: 'Bloquear' })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Trocar perfil' })).toHaveCount(0);
+
+  // a Administração retira a autorização
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/users?visao=organograma');
+  await page.getByRole('button', { name: 'Quem pode ver' }).click();
+  await page.getByRole('dialog', { name: 'Quem pode ver o organograma' }).getByRole('group', { name: 'Pessoas autorizadas' }).getByRole('button', { name: 'Lucas Lima' }).click();
+  await page.getByRole('dialog', { name: 'Quem pode ver o organograma' }).getByRole('button', { name: 'Salvar' }).click();
+  await expect(page.getByText('Quem pode ver o organograma foi atualizado')).toBeVisible();
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/times/organograma');
+  await expect(page.getByText('Organograma restrito')).toBeVisible();
 });

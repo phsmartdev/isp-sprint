@@ -86,4 +86,24 @@ describe('organograma de acessos', () => {
     // desfaz
     expect((await carlos.put(`/admin/org-chart/teams/${gov.id}`, { directorIds: gov.directorIds, managers: gov.managers, leadIds: gov.leadIds, memberIds: gov.memberIds, participantIds: gov.participantIds })).statusCode).toBe(200);
   });
+
+  it('só pessoas autorizadas veem o organograma (consulta); a Administração define quem', async () => {
+    const d = (await carlos.get('/admin/org-chart')).json() as { people: Person[]; viewers: { userIds: string[] } };
+    const id = (n: string) => d.people.find((p) => p.name.startsWith(n))!.id;
+    expect((await lucas.get('/org-chart')).statusCode).toBe(403);
+    expect((await lucas.get('/me')).json().orgChart).toBe(false);
+    expect((await lucas.put('/admin/org-chart/viewers', { userIds: [id('Lucas')], profiles: [] })).statusCode).toBe(403);
+    expect((await carlos.put('/admin/org-chart/viewers', { userIds: [id('Lucas')], profiles: [] })).statusCode).toBe(200);
+    const v = await lucas.get('/org-chart');
+    expect(v.statusCode, v.body).toBe(200);
+    expect(v.json().canEdit).toBe(false);
+    expect((await lucas.get('/me')).json().orgChart).toBe(true);
+    expect((await lucas.get('/admin/org-chart')).statusCode).toBe(403); // ver não é editar
+    // por perfil
+    expect((await carlos.put('/admin/org-chart/viewers', { userIds: [], profiles: ['operacao'] })).statusCode).toBe(200);
+    expect((await lucas.get('/org-chart')).statusCode).toBe(200);
+    expect((await carlos.put('/admin/org-chart/viewers', { userIds: [], profiles: [] })).statusCode).toBe(200);
+    expect((await lucas.get('/org-chart')).statusCode).toBe(403);
+    expect((await carlos.get('/org-chart')).json().canEdit).toBe(true);
+  });
 });

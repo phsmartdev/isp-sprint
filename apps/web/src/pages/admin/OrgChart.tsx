@@ -14,8 +14,8 @@ import type { AccessLevel, BusinessModule, ProfileKey } from '@isp/domain';
 import { api } from '../../lib/api';
 import { Hexagons } from '../../components/brand';
 import { Multi } from '../playbooks/Editor';
-import { Avatar, Button, ErrorState, FormField, Input, LoadingRows, Select } from '../../components/ui/primitives';
-import { ConfirmDialog, useToast } from '../../components/ui/overlay';
+import { Avatar, Button, EmptyState, ErrorState, FormField, Input, LoadingRows, Select } from '../../components/ui/primitives';
+import { ConfirmDialog, Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 
 type View = { level: AccessLevel; enabled: boolean; reason: string; profileLevel: AccessLevel };
@@ -23,7 +23,7 @@ type Person = { id: string; name: string; jobTitle: string | null; hasAvatar: bo
 type MgrKind = 'hierarquico_funcional' | 'hierarquico' | 'funcional';
 type Team = { id: string; name: string; directorIds: string[]; managerIds: string[]; managers: { userId: string; kind: MgrKind }[]; leadIds: string[]; memberIds: string[]; participantIds: string[] };
 type Grant = { id: string; module: BusinessModule; subjectType: 'equipe' | 'usuario'; subjectId: string; effect: 'liberar' | 'bloquear'; reason: string; validUntil: string | null };
-type Chart = { top: { name: string | null; title: string | null }; modules: { key: BusinessModule; label: string; technical: string[] }[]; profiles: { key: ProfileKey; label: string }[]; people: Person[]; teams: Team[]; grants: Grant[] };
+type Chart = { canEdit?: boolean; viewers?: { userIds: string[]; profiles: ProfileKey[] }; top: { name: string | null; title: string | null }; modules: { key: BusinessModule; label: string; technical: string[] }[]; profiles: { key: ProfileKey; label: string }[]; people: Person[]; teams: Team[]; grants: Grant[] };
 export const MGR_KIND_LABELS: Record<MgrKind, string> = { hierarquico_funcional: 'Hierárquica e funcional', hierarquico: 'Só hierárquica', funcional: 'Só funcional' };
 const isHier = (k: MgrKind) => k !== 'funcional';
 const isFunc = (k: MgrKind) => k !== 'hierarquico';
@@ -156,8 +156,14 @@ function ZoomViewport({ children, refitKey }: { children: ReactNode; refitKey: s
 
 type Sel = { kind: 'person' | 'team'; id: string };
 
-export function OrgChart() {
-  const q = useQuery({ queryKey: ['admin', 'org-chart'], queryFn: () => api<Chart>('/admin/org-chart') });
+/** Gestão de Times → Organograma: só consulta, para quem a Administração autorizou. */
+export function OrgChartPage() {
+  return <div className="space-y-3"><OrgChart readOnly /></div>;
+}
+
+export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
+  const q = useQuery({ queryKey: ['admin', 'org-chart', readOnly ? 'consulta' : 'edicao'], queryFn: () => api<Chart>(readOnly ? '/org-chart' : '/admin/org-chart'), retry: false });
+  const [viewersOpen, setViewersOpen] = useState(false);
   const [module, setModule] = useState<BusinessModule | null>('crm');
   const [sel, setSel] = useState<Sel | null>(null);
   const [edit, setEdit] = useState(false);
@@ -214,8 +220,11 @@ export function OrgChart() {
   }, [q.data]);
 
   if (q.isLoading) return <div className="card"><LoadingRows rows={6} /></div>;
-  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
+  if (q.isError) return (q.error as { status?: number })?.status === 403
+    ? <EmptyState title="Organograma restrito" description="O organograma é visto só por pessoas autorizadas. Peça à Administração." />
+    : <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data!, t = tree!;
+  const canEdit = !readOnly && d.canEdit !== false;
   const open = (x: Sel) => setSel(x);
   const card = (p: Person, role?: string) => <PersonCard key={p.id} p={p} module={module} profiles={d.profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role={role} edit={edit} fromTeamId={null} />;
   const box = (team: Team, functional?: boolean) => <TeamBox key={`${team.id}${functional ? 'f' : ''}`} t={team} people={t.people} module={module} profiles={d.profiles} open={open} sel={sel} edit={edit} onDrop={drop} functional={functional} />;
@@ -251,8 +260,10 @@ export function OrgChart() {
           <button type="button" aria-pressed={!module} onClick={() => setModule(null)} className={clsx('border px-3 py-1.5 text-sm font-semibold', !module ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>Visão geral</button>
           {d.modules.map((m) => <button key={m.key} type="button" aria-pressed={module === m.key} onClick={() => setModule(m.key)} className={clsx('border px-3 py-1.5 text-sm font-semibold', module === m.key ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>{m.label}</button>)}
           <span className="ml-auto flex gap-1.5">
+            {canEdit && <button type="button" onClick={() => setViewersOpen(true)} className="inline-flex items-center gap-1.5 border border-white/30 px-3 py-1.5 text-sm font-semibold text-white hover:border-white">Quem pode ver</button>}
             {edit && <button type="button" onClick={() => setNewTeam('')} className="inline-flex items-center gap-1.5 border border-white/30 px-3 py-1.5 text-sm font-semibold text-white hover:border-white"><Plus className="h-4 w-4" />Novo time</button>}
-            <button type="button" aria-pressed={edit} onClick={() => setEdit((v) => !v)} className={clsx('inline-flex items-center gap-1.5 border px-3 py-1.5 text-sm font-semibold', edit ? 'border-lime bg-lime text-ink' : 'border-white/30 text-white hover:border-white')}>{edit ? 'Concluir ajustes' : 'Ajustar estrutura'}</button>
+            {canEdit && <button type="button" aria-pressed={edit} onClick={() => setEdit((v) => !v)} className={clsx('inline-flex items-center gap-1.5 border px-3 py-1.5 text-sm font-semibold', edit ? 'border-lime bg-lime text-ink' : 'border-white/30 text-white hover:border-white')}>{edit ? 'Concluir ajustes' : 'Ajustar estrutura'}</button>}
+            {readOnly && <span className="border border-white/30 px-3 py-1.5 text-sm text-white/85">Só consulta</span>}
           </span>
         </div>
         {edit && <p className="relative mt-3 text-sm text-white/85">Arraste uma pessoa para outro time. Clique num time para definir diretoria, gestão (hierárquica ou funcional), liderança, operação e participantes; clique numa pessoa para os times, as liberações e o perfil. Tudo fica registrado na auditoria.</p>}
@@ -278,7 +289,7 @@ export function OrgChart() {
               <div className="relative min-w-[280px] overflow-hidden border-l-4 border-primary bg-ink px-6 py-3.5 text-white shadow-card" data-testid="org-top">
                 <p className="font-display text-base font-bold tracking-wide">{d.top.name ?? 'Defina quem encabeça a estrutura'}</p>
                 {d.top.title && <p className="text-sm text-white/75">{d.top.title}</p>}
-                <button type="button" onClick={() => setTopForm({ name: d.top.name ?? '', title: d.top.title ?? '' })} aria-label="Editar o topo da estrutura" className="absolute right-2 top-2 p-1 text-white/60 hover:text-white"><Pencil className="h-3.5 w-3.5" /></button>
+                {canEdit && <button type="button" onClick={() => setTopForm({ name: d.top.name ?? '', title: d.top.title ?? '' })} aria-label="Editar o topo da estrutura" className="absolute right-2 top-2 p-1 text-white/60 hover:text-white"><Pencil className="h-3.5 w-3.5" /></button>}
               </div>
             )}
             <VLine />
@@ -327,14 +338,15 @@ export function OrgChart() {
             )}
           </div>
         </ZoomViewport>
-        {sel && <SidePanel key={`${sel.kind}:${sel.id}`} chart={d} sel={sel} onClose={() => setSel(null)} />}
+        {sel && <SidePanel key={`${sel.kind}:${sel.id}`} chart={d} sel={sel} onClose={() => setSel(null)} readOnly={!canEdit} />}
+        {viewersOpen && <ViewersModal chart={d} onClose={() => setViewersOpen(false)} />}
       </div>
     </div>
   );
 }
 
 // ------------------------------------------------------------------ painel: o porquê e as ações
-function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: () => void }) {
+function SidePanel({ chart, sel, onClose, readOnly }: { chart: Chart; sel: Sel; onClose: () => void; readOnly?: boolean }) {
   const qc = useQueryClient(), toast = useToast();
   const person = sel.kind === 'person' ? chart.people.find((p) => p.id === sel.id) ?? null : null;
   const team = sel.kind === 'team' ? chart.teams.find((t) => t.id === sel.id) ?? null : null;
@@ -402,7 +414,7 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
         )}
       </div>
       <div className="max-h-[70vh] space-y-4 overflow-y-auto p-5">
-        {person && (
+        {person && !readOnly && (
           <div className="flex items-end gap-2">
             <FormField label="Perfil" htmlFor="oc-prof" className="flex-1"><Select id="oc-prof" value={profile} onChange={(e) => setProfile(e.target.value as ProfileKey)}>{chart.profiles.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}</Select></FormField>
             <Button variant="primary" disabled={!profile || profile === person.profile} loading={saveProfile.isPending} onClick={() => saveProfile.mutate()}>Trocar perfil</Button>
@@ -420,13 +432,13 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
                   return (
                     <li key={t.id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
                       <span className="flex-1 font-semibold text-ink">{t.name}<span className="ml-1.5 text-xs font-normal text-muted">{lead ? 'liderança' : part ? 'participante (fora do organograma)' : 'operação'}</span></span>
-                      <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => moveTo.mutate({ fromTeamId: t.id, toTeamId: t.id, lead: !lead })}>{lead ? 'Tirar liderança' : 'Tornar liderança'}</button>
-                      <button type="button" className="text-xs font-semibold text-danger hover:underline" onClick={() => leave.mutate(t.id)}>Tirar do time</button>
+                      {!readOnly && <><button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => moveTo.mutate({ fromTeamId: t.id, toTeamId: t.id, lead: !lead })}>{lead ? 'Tirar liderança' : 'Tornar liderança'}</button>
+                      <button type="button" className="text-xs font-semibold text-danger hover:underline" onClick={() => leave.mutate(t.id)}>Tirar do time</button></>}
                     </li>
                   );
                 })}</ul>
               )}
-              {!!others.length && (
+              {!!others.length && !readOnly && (
                 <form className="mt-2 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (addTo) moveTo.mutate({ fromTeamId: null, toTeamId: addTo, lead: addLead }); }}>
                   <FormField label="Incluir em outro time" htmlFor="oc-add" className="min-w-[160px] flex-1"><Select id="oc-add" value={addTo} onChange={(e) => setAddTo(e.target.value)}><option value="">Escolha o time</option>{others.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></FormField>
                   <label className="flex h-10 items-center gap-1.5 text-xs text-ink"><input type="checkbox" checked={addLead} onChange={(e) => setAddLead(e.target.checked)} />como liderança</label>
@@ -436,7 +448,7 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
             </div>
           );
         })()}
-        {team && comp && (
+        {team && comp && !readOnly && (
           <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); saveTeam.mutate(); }} aria-label="Composição do time">
             <p className="text-sm font-semibold text-ink">Composição do time</p>
             <Multi label="Diretoria" options={chart.people.map((p) => ({ id: p.id, label: p.name }))} value={comp.directorIds} onChange={(v) => setComp({ ...comp, directorIds: v })} />
@@ -468,7 +480,7 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
                   {v && <span className={clsx('px-1.5 py-0.5 text-[11px] font-semibold', LEVEL[v.level].chip)}>{LEVEL[v.level].label}</span>}
                 </div>
                 {v && <p className="text-xs text-muted">{v.enabled ? `${REASON[v.reason] ?? v.reason}; o nível vem do perfil` : REASON[v.reason] ?? v.reason}</p>}
-                {v && person?.profile && (
+                {v && person?.profile && !readOnly && (
                   <label className="mt-1.5 flex items-center gap-2 text-xs text-text">Nível do perfil {profileLabel}
                     <Select aria-label={`Nível do perfil ${profileLabel} em ${m.label}`} value={v.profileLevel} onChange={(e) => setLvlAsk({ module: m.key, level: e.target.value as AccessLevel })} className="h-8 w-36 text-xs">
                       {(['nenhum', 'proprio', 'equipe', 'total'] as AccessLevel[]).map((l) => <option key={l} value={l}>{LEVEL[l].label}</option>)}
@@ -476,12 +488,12 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
                   </label>
                 )}
                 {g && <p className="mt-0.5 text-xs text-text">Regra {person ? 'da pessoa' : 'do time'}: <b>{g.effect === 'liberar' ? 'liberado' : 'bloqueado'}</b>{g.validUntil ? ` até ${g.validUntil.split('-').reverse().join('/')}` : ''} — {g.reason}</p>}
-                <div className="mt-1.5 flex gap-3 text-xs font-semibold">
+                {!readOnly && <div className="mt-1.5 flex gap-3 text-xs font-semibold">
                   {g ? <button type="button" className="text-primary hover:underline" onClick={() => { setRevoke(g); setForm(null); }}>Retirar regra</button> : <>
                     <button type="button" className="text-primary hover:underline" onClick={() => { setForm({ module: m.key, effect: 'liberar' }); setRevoke(null); }}>Liberar</button>
                     <button type="button" className="text-danger hover:underline" onClick={() => { setForm({ module: m.key, effect: 'bloquear' }); setRevoke(null); }}>Bloquear</button>
                   </>}
-                </div>
+                </div>}
                 {form?.module === m.key && (
                   <form className="mt-2 space-y-2 border-l-2 border-primary pl-3" onSubmit={(e) => { e.preventDefault(); grant.mutate(); }}>
                     <FormField label={`Motivo para ${form.effect === 'liberar' ? 'liberar' : 'bloquear'}`} htmlFor={`oc-r-${m.key}`}><Input id={`oc-r-${m.key}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex.: acompanha os contratos do time" /></FormField>
@@ -502,8 +514,30 @@ function SidePanel({ chart, sel, onClose }: { chart: Chart; sel: Sel; onClose: (
         <ConfirmDialog open={!!lvlAsk} title={`Mudar o nível do perfil ${profileLabel}?`} confirmLabel="Mudar para todo o perfil" loading={setLevel.isPending} onConfirm={() => lvlAsk && setLevel.mutate(lvlAsk)} onCancel={() => setLvlAsk(null)}>
           {lvlAsk && <>Em {chart.modules.find((m) => m.key === lvlAsk.module)?.label}, o perfil {profileLabel} passa a ver: <b>{LEVEL[lvlAsk.level].label}</b>. Vale para as {samePerfil} pessoa(s) com esse perfil, não só para {person?.name}. Para mudar só esta pessoa, use Liberar ou Bloquear, ou troque o perfil dela.</>}
         </ConfirmDialog>
-        <p className="text-xs text-muted">Liberar não aumenta o nível do perfil: o que a pessoa enxerga dentro do módulo continua definido em <Link to="/settings/security" className="font-semibold text-primary hover:underline">Segurança</Link>. Detalhes de cada módulo em <Link to="/settings/modulos" className="font-semibold text-primary hover:underline">Módulos e liberação</Link>.</p>
+        {readOnly ? <p className="text-xs text-muted">Só consulta. Mudanças na estrutura e nos acessos são feitas pela Administração.</p> : <p className="text-xs text-muted">Liberar não aumenta o nível do perfil: o que a pessoa enxerga dentro do módulo continua definido em <Link to="/settings/security" className="font-semibold text-primary hover:underline">Segurança</Link>. Detalhes de cada módulo em <Link to="/settings/modulos" className="font-semibold text-primary hover:underline">Módulos e liberação</Link>.</p>}
       </div>
     </aside>
+  );
+}
+
+/** Quem pode ver o organograma (só consulta), além da Administração. */
+function ViewersModal({ chart, onClose }: { chart: Chart; onClose: () => void }) {
+  const qc = useQueryClient(), toast = useToast();
+  const [userIds, setUsers] = useState<string[]>(chart.viewers?.userIds ?? []);
+  const [profiles, setProfiles] = useState<string[]>(chart.viewers?.profiles ?? []);
+  const save = useMutation({
+    mutationFn: () => api('/admin/org-chart/viewers', { method: 'PUT', body: { userIds, profiles } }),
+    onSuccess: () => { toast({ tone: 'success', message: 'Quem pode ver o organograma foi atualizado' }); void qc.invalidateQueries({ queryKey: ['admin'] }); onClose(); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  return (
+    <Modal open onClose={onClose} title="Quem pode ver o organograma" size="lg" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button></>}>
+      <div className="space-y-4">
+        <p className="text-sm text-text">A Administração sempre vê e ajusta. Quem for autorizado aqui vê o organograma em <b>Gestão de Times → Organograma</b>, só para consulta: não muda times, perfis nem acessos.</p>
+        <Multi label="Perfis autorizados" options={chart.profiles.map((p) => ({ id: p.key, label: p.label }))} value={profiles} onChange={setProfiles} />
+        <Multi label="Pessoas autorizadas" options={chart.people.map((p) => ({ id: p.id, label: p.name }))} value={userIds} onChange={setUsers} />
+        <p className="text-xs text-muted">Quem não está autorizado não vê o item no menu e, mesmo com o link, o sistema recusa. A mudança fica na auditoria.</p>
+      </div>
+    </Modal>
   );
 }
