@@ -152,6 +152,34 @@ test('organograma: diretoria, gestão hierárquica e funcional, participante for
   await expect(page.getByText('Time atualizado').first()).toBeVisible();
 });
 
+test('organograma: gestão funcional no mesmo nível da hierárquica, com os dois times replicados e participantes abaixo', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1700, height: 1100 });
+  await login(page, 'carlos@yepnet.test');
+  const d = await (await page.request.get('/api/v1/admin/org-chart')).json() as { people: { id: string; name: string }[]; teams: { id: string; name: string; directorIds: string[]; managers: unknown[]; leadIds: string[]; memberIds: string[]; participantIds: string[] }[] };
+  const id = (n: string) => d.people.find((p) => p.name.startsWith(n))!.id;
+  const before = d.teams.filter((t) => t.name === 'Residencial' || t.name === 'Empresarial');
+  for (const t of before) {
+    const extra = t.name === 'Empresarial' ? [id('Mariana')] : [];
+    const r = await page.request.put(`/api/v1/admin/org-chart/teams/${t.id}`, { data: { directorIds: [id('Carlos')], managers: [{ userId: id('Carlos'), kind: 'hierarquico_funcional' }, { userId: id('Rafael'), kind: 'funcional' }], leadIds: t.leadIds, memberIds: t.memberIds.filter((x) => !extra.includes(x)), participantIds: [...t.participantIds, ...extra] } });
+    expect(r.status(), await r.text()).toBe(200);
+  }
+  await page.goto('/settings/users?visao=organograma');
+  const dir = page.getByRole('region', { name: 'Diretoria de Carlos Silva' });
+  const hier = dir.getByTestId('org-person').filter({ has: page.getByText('Gestão', { exact: true }) }).filter({ hasText: 'Carlos Silva' });
+  const func = dir.getByTestId('org-person').filter({ has: page.getByText('Gestão funcional', { exact: true }) }).filter({ hasText: 'Rafael Mendes' });
+  const yh = (await hier.boundingBox())!.y, yf = (await func.boundingBox())!.y;
+  expect(Math.abs(yh - yf)).toBeLessThan(4); // mesmo nível, abaixo da diretoria
+  const fb = dir.getByLabel('Gestão funcional de Rafael Mendes');
+  await expect(fb.getByLabel('Time Empresarial (gestão funcional)')).toBeVisible();
+  await expect(fb.getByLabel('Time Residencial (gestão funcional)')).toBeVisible();
+  // participante aparece abaixo, na réplica funcional; no time hierárquico, fica fora do desenho
+  await expect(fb.getByLabel('Time Empresarial (gestão funcional)').getByRole('button', { name: /^Mariana Costa/ })).toBeVisible();
+  await expect(page.locator('[data-testid="org-team"][aria-label="Time Empresarial"]').getByRole('button', { name: /^Mariana Costa/ })).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/organograma-funcional.png` });
+  for (const t of before) await page.request.put(`/api/v1/admin/org-chart/teams/${t.id}`, { data: { directorIds: t.directorIds, managers: t.managers, leadIds: t.leadIds, memberIds: t.memberIds, participantIds: t.participantIds } });
+});
+
 test('organograma: só a administração acessa', async ({ page }) => {
   await login(page, 'lucas@yepnet.test');
   await page.goto('/settings/users?visao=organograma');
