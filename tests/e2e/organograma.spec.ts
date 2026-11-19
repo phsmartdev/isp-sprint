@@ -127,8 +127,11 @@ test('organograma: diretoria, gestão hierárquica e funcional, participante for
   await expect(page.getByRole('region', { name: 'Diretoria de Carlos Silva' })).toBeVisible();
   await expect(gov.getByLabel('Gestão do time Governo')).toContainText('Hierárq. + funcional: Carlos Silva');
   await expect(gov.getByLabel('Gestão do time Governo')).toContainText('Funcional: Ana Souza');
-  // embaixo da Ana, o Governo aparece tracejado (gestão funcional)
-  await expect(page.getByRole('button', { name: 'Time Governo (gestão funcional)' })).toBeVisible();
+  // como no desenho: a gestão só funcional (Ana) fica embaixo da mesma diretoria, ao lado da hierárquica, ligada ao time por tracejado
+  const dir = page.getByRole('region', { name: 'Diretoria de Carlos Silva' });
+  await expect(dir.getByLabel('Gestão funcional de Ana Souza')).toBeVisible();
+  await expect(dir.getByRole('button', { name: 'Time Governo (gestão funcional)' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Gestão só funcional' })).toHaveCount(0);
   // Lucas colabora: fica fora do desenho do Governo
   await expect(gov.getByRole('button', { name: /^Lucas Lima/ })).toHaveCount(0);
   await expect(gov).toContainText('1 participante(s) colaborando');
