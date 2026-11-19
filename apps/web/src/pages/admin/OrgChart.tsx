@@ -102,9 +102,15 @@ function TeamBox({ t, people, module, profiles, open, sel, edit, onDrop, functio
         {!!leads.length && !!members.length && <div className="ml-6 h-3 border-l-2 border-line-strong" aria-hidden />}
         {members.map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Operação" edit={edit && !F} fromTeamId={t.id} />)}
         {!leads.length && !members.length && <p className="text-xs text-muted">Sem pessoas ativas.</p>}
-        {!!t.participantIds.length && <p className="text-[11px] text-muted" title={t.participantIds.map(name).join(', ')}>+ {t.participantIds.length} participante(s) colaborando (fora do organograma)</p>}
+        {!!t.participantIds.length && !F && <p className="text-[11px] text-muted" title={t.participantIds.map(name).join(', ')}>+ {t.participantIds.length} participante(s) colaborando (fora do organograma)</p>}
+        {/* na gestão funcional, quem colabora aparece abaixo da operação */}
+        {F && !!t.participantIds.length && <>
+          <div className="ml-6 h-3 border-l-2 border-dashed border-sky" aria-hidden />
+          <p className="text-[11px] font-semibold text-sky">Participantes</p>
+          {(t.participantIds.map((id) => people.get(id)).filter(Boolean) as Person[]).map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Participante" fromTeamId={t.id} />)}
+        </>}
         {edit && !F && <p className="border border-dashed border-line-strong px-2 py-1.5 text-center text-[11px] text-muted">Solte uma pessoa aqui para trazer ao time</p>}
-        {F && <p className="text-[11px] text-sky">Réplica do time: a composição é a mesma da gestão hierárquica.</p>}
+        {F && <p className="text-[11px] text-sky">Réplica do time: a mesma composição da gestão hierárquica, com os participantes.</p>}
       </div>
     </div>
   );
@@ -325,7 +331,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
             </div>
             <section aria-label="Legenda do organograma" className="mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border border-line bg-surface px-6 py-4 text-sm text-text" data-testid="org-legend">
               <span className="flex items-center gap-2"><span className="flex h-6 w-16 items-center border border-ink/80 bg-ink px-1.5 text-[10px] font-bold text-white">Time</span>Time na gestão hierárquica</span>
-              <span className="flex items-center gap-2"><span className="flex h-6 w-16 items-center border-2 border-dashed border-sky bg-sky px-1.5 text-[10px] font-bold text-white">Time</span>Mesmo time replicado na gestão funcional</span>
+              <span className="flex items-center gap-2"><span className="flex h-6 w-16 items-center border-2 border-dashed border-sky bg-sky px-1.5 text-[10px] font-bold text-white">Time</span>Mesmo time replicado na gestão funcional, com os participantes</span>
               <span className="flex items-center gap-2"><span className="w-10 border-t-2 border-line-strong" />Ligação hierárquica</span>
               <span className="flex items-center gap-2"><span className="w-10 border-t-2 border-dashed border-sky" />Ligação funcional</span>
               <span className="flex items-center gap-2"><span className="border border-primary bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-white">Hierárq. + funcional</span><span className="border border-dashed border-sky px-1.5 py-0.5 text-[10px] font-semibold text-sky">Funcional</span>Tipo de gestão do time</span>
