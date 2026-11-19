@@ -8,6 +8,8 @@ import { level, ownerScope, visibleUserIds } from '../services/scope';
 import { opportunityDto, opportunityQuery } from '../services/opportunities';
 import { opportunityKpis } from './opportunities';
 import { pctDelta, ratio } from '../services/metrics';
+import { strategicContribution } from '../services/strategicContribution';
+import { ensureFreshEvents } from '../services/businessEvents';
 
 /** Início: visão do dia na carteira visível pelo nível do módulo Início. */
 export const homeRoutes = [
@@ -31,6 +33,8 @@ export const homeRoutes = [
       const localDay = sql`(${s.activities.dueAt} at time zone ${tz})::date`;
       const today = sql`(now() at time zone ${tz})::date`;
 
+      await ensureFreshEvents(app.db, auth.tenantId);
+      const strategy = await strategicContribution(app.db, auth, todayStr);
       const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const [oppK, actK, month, goals, agenda, pipeline, recent] = await Promise.all([
         opportunityKpis(app.db, auth, 'inicio'),
@@ -97,6 +101,7 @@ export const homeRoutes = [
         recent: recent.map((o) => opportunityDto(o)),
         today: new Date().toISOString(),
         period: { from, to },
+        strategy,
       };
     },
   }),
