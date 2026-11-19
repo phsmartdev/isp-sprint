@@ -8,7 +8,7 @@ import {
   BarChart3, Bell, UsersRound, HandHelping, Eye, EyeOff, Briefcase, FileSignature, ChevronDown, CircleHelp, Home, Lightbulb, LogOut, Megaphone, Menu, Monitor, Moon, Package, Settings, Sun, UserRound, X, HeartHandshake, FolderKanban, Gauge, Mail, Wallet, Star, BookOpen, Presentation } from 'lucide-react';
 import { CONTRACT_MENU_TABS, type ContractTab, type FeatureKey, type Module } from '@isp/domain';
 import { useApprovalCount } from '../../pages/Approvals';
-import { MentionsMenu } from '../../features/MentionsMenu';
+import { MentionsMenu, NotificationsMenu } from '../../features/MentionsMenu';
 import { settingsLocate, visibleGroups } from '../../features/settings/nav';
 import { useAuth } from '../../auth/AuthProvider';
 import { api } from '../../lib/api';
@@ -359,10 +359,7 @@ export function AppShell() {
           <button className="rounded-sm p-1.5 text-ink hover:bg-surface-2 lg:hidden" aria-label="Abrir menu" onClick={() => setMobileOpen(true)}><Menu className="h-6 w-6" /></button>
           <GlobalSearch ref={search} />
           <div className="ml-auto flex items-center gap-1 sm:gap-4">
-            <Link to="/activities" className="relative flex h-11 w-11 items-center justify-center rounded-circle text-ink hover:bg-surface-2" aria-label={notify ? `${notify} atividades para hoje ou vencidas` : 'Sem atividades pendentes hoje'}>
-              <Bell className="h-7 w-7" strokeWidth={1.6} />
-              {notify > 0 && <span className="absolute right-2 top-1.5 h-3.5 w-3.5 rounded-circle border-2 border-surface bg-danger" aria-hidden />}
-            </Link>
+            <NotificationsMenu activities={can('atividades') ? { due: notify } : null} />
             {/* no celular estes vão para o menu da conta (o topo não pode passar da largura da tela) */}
             <div className="hidden items-center gap-4 sm:flex"><HeaderSupport /><HeaderPlaybooks /><HeaderMoneyToggle /></div>
             <MentionsMenu />

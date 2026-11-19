@@ -313,13 +313,14 @@ export function AcademyLessonPage() {
 function LessonPage() {
   const { id = '', lessonId = '' } = useParams();
   const qc = useQueryClient();
-  const r = useQuery({ queryKey: ['academia', 'aula', id, lessonId], queryFn: () => api<LessonPage>(`/academia/trilhas/${id}/aulas/${lessonId}`), staleTime: Infinity });
+  // sempre busca de novo ao abrir a aula (anotações e ponto de retomada atuais); não recarrega com a aula aberta, para não recriar o player
+  const r = useQuery({ queryKey: ['academia', 'aula', id, lessonId], queryFn: () => api<LessonPage>(`/academia/trilhas/${id}/aulas/${lessonId}`), staleTime: 0, gcTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const [live, setLive] = useState<BeatResult | null>(null);
   const control = useRef<PlayerControl | null>(null);
   // ?t= vindo de uma anotação: abre o vídeo naquele ponto (lido uma vez, para não recriar o player)
   const [sp] = useSearchParams();
   const [startAt] = useState(() => { const t = Number(sp.get('t')); return Number.isFinite(t) && t >= 0 && sp.has('t') ? Math.floor(t) : null; });
-  if (r.isLoading) return <LoadingRows rows={6} />;
+  if (r.isLoading || !r.isFetchedAfterMount) return <LoadingRows rows={6} />;
   if (r.isError) return <ErrorState error={r.error} onRetry={() => r.refetch()} />;
   const d = r.data!, l = d.lesson;
   const pct = live && !live.duplicate ? live.pct : d.progress.pct;
