@@ -37,7 +37,7 @@ Valores de fábrica; a empresa ajusta em Configurações → Permissões → Seg
 ## Operação
 Trabalha a própria carteira: leads, oportunidades, propostas, atividades e tarefas; pede aprovação de descontos; cadastra contratos das vendas fechadas; acompanha metas e pontos em Meus pontos; lê e dá ciência nos playbooks; usa a comunidade. Vê as negociações do time em leitura.
 ## Supervisão
-Tudo da Operação no escopo dos times que lidera (precisa liderar ao menos um time); aprova dentro da sua alçada quando é Liderança / gestor; conduz rituais, intervenções e impedimentos; valida certificados do time; acompanha férias e pedidos de apoio; pode ser responsável pela execução de um centro de custo.
+Tudo da Operação no escopo dos times que lidera (precisa liderar ao menos um time); aprova dentro da sua alçada quando o cargo no setor é Liderança, Gestão ou Diretoria; conduz rituais, intervenções e impedimentos; valida certificados do time; acompanha férias e pedidos de apoio; pode ser responsável pela execução de um centro de custo.
 ## Gerência
 Visão total da empresa; administra Configurações; aprova descontos, viabilidades, planejamento orçamentário da liderança, Budget Guardião (pedido), playbooks (primeira alçada) e operações de atas; pode ser dona de centro de custo; trata a central de atenção de contratos.
 ## Diretoria

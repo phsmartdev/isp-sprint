@@ -7,8 +7,7 @@ import { z } from 'zod';
 import {
   featureOn,
   APPROVAL_LEVELS, APPROVAL_LEVEL_LABELS, CLASSIFICATION_DIMENSIONS, DECISIONS, DECISION_LABELS, NEGOTIATION_TYPES, NEGOTIATION_TYPE_LABELS,
-  canDecide, renderApprovalTemplate, userApprovalLevel, type ApprovalLevel,
-} from '@isp/domain';
+  canDecide, renderApprovalTemplate, userApprovalLevel, type ApprovalLevel, isApproverSectorRole } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, notFound, unprocessable } from '../http/errors';
 import type { AuthContext } from '../http/context';
@@ -67,8 +66,8 @@ async function approversFor(db: DbOrTx, tenantId: string, required: ApprovalLeve
     if (r.role) u.profiles.push(r.role);
     byUser.set(r.id, u);
   }
-  // lista de aprovadores pelo cargo: só liderança/gestor
-  const leaders = new Set(rows.filter((r) => r.sectorRole === 'lideranca').map((r) => r.id));
+  // lista de aprovadores pelo cargo: Diretoria, Gestão ou Liderança
+  const leaders = new Set(rows.filter((r) => isApproverSectorRole(r.sectorRole)).map((r) => r.id));
   return [...byUser.values()].filter((u) => u.id !== exceptId && leaders.has(u.id) && canDecide(userApprovalLevel(u.profiles, u.sectors), required));
 }
 

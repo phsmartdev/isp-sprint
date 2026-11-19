@@ -5,8 +5,7 @@
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import {
   currentRules, deliveryNeeds, evaluateConcession,
-  ATTENTION_LABELS, type ApproverLevel, type AttentionSituation, type ComplianceRule, type KitCategory, type PowerClass, type ConcessionKind, type ConcessionPurpose, type Evaluation, type HistoryEntry,
-} from '@isp/domain';
+  ATTENTION_LABELS, type ApproverLevel, type AttentionSituation, type ComplianceRule, type KitCategory, type PowerClass, type ConcessionKind, type ConcessionPurpose, type Evaluation, type HistoryEntry, isApproverSectorRole } from '@isp/domain';
 import type { Config } from '../config';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
@@ -141,7 +140,7 @@ export type ComplianceEvent = keyof typeof COMPLIANCE_EVENTS;
 export async function decidersFor(db: DbOrTx, tenantId: string, level: ApproverLevel) {
   const rows = await db.select({ id: s.users.id, key: s.roles.key, sectorRole: s.users.sectorRole }).from(s.users).innerJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId))
     .where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), inArray(s.roles.key, level === 'gerencia' ? ['gerencia', 'diretoria'] : ['diretoria'])));
-  return [...new Set(rows.filter((r) => r.sectorRole === 'lideranca').map((r) => r.id))];
+  return [...new Set(rows.filter((r) => isApproverSectorRole(r.sectorRole)).map((r) => r.id))];
 }
 
 /**

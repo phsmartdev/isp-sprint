@@ -41,6 +41,12 @@ it('cargo no setor: só liderança/gestor entra na lista de aprovadores', async 
   const { approvalLevelOf } = await import('../src/services/approvals');
   expect(approvalLevelOf({ profiles: ['supervisor'], sectors: [], sectorRole: 'operador' })).toBe('vendedor');
   expect(approvalLevelOf({ profiles: ['supervisor'], sectors: [], sectorRole: 'lideranca' })).toBe('supervisor');
+  // Diretoria > Gestão > Liderança aprovam (pela alçada do perfil); Operação e Observador não
+  expect(approvalLevelOf({ profiles: ['gerencia'], sectors: [], sectorRole: 'gestao' })).not.toBe('vendedor');
+  expect(approvalLevelOf({ profiles: ['diretoria'], sectors: ['diretoria'], sectorRole: 'diretoria' })).toBe('diretoria');
+  expect(approvalLevelOf({ profiles: ['diretoria'], sectors: ['diretoria'], sectorRole: 'observador' })).toBe('vendedor');
+  ok(await carlos.patch(`/admin/users/${sup.id}`, { sectorRole: 'gestao' }));
+  expect((await list()).find((u) => u.id === sup.id)?.sectorRole).toBe('gestao');
   ok(await carlos.patch(`/admin/users/${sup.id}`, { sectorRole: 'observador' }));
   expect((await list()).find((u) => u.id === sup.id)).toMatchObject({ sectorRole: 'observador', sectorViewer: true });
 });

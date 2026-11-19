@@ -1,6 +1,6 @@
 /** Recursos e Orçamento: visibilidade por centro de custo, saldo disponível, consolidação do trimestre e histórico. */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { accountPath, executionBand, executionPct, monthsOfQuarter, sortAccounts, type AccountNature } from '@isp/domain';
+import { accountPath, executionBand, executionPct, monthsOfQuarter, sortAccounts, type AccountNature, isApproverSectorRole } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { AuthContext } from '../http/context';
@@ -20,12 +20,12 @@ export const budgetRole = (auth: AuthContext): BudgetRole => (auth.profiles.some
 /**
  * Quem decide o orçamento: Diretoria (aprovação final; também decide a etapa da Gerência) e Gerência.
  * Administrador configura, mas não recebe poder de aprovação financeira só por ser administrador (prompt master, 4.1),
- * e quem não tem cargo Liderança / gestor no setor não aprova.
+ * e quem não tem cargo Diretoria, Gestão ou Liderança no setor não aprova.
  */
 export const decidesStages = (auth: AuthContext & { sectorRole?: string | null }): ('gerencia' | 'diretoria')[] => {
   // Diretoria é a aprovação final: decide pelo perfil (só quem é apenas observador nos setores fica de fora)
   if (auth.profiles.includes('diretoria')) return auth.sectorRole === 'observador' ? [] : ['gerencia', 'diretoria'];
-  if (auth.sectorRole && auth.sectorRole !== 'lideranca') return [];
+  if (auth.sectorRole && !isApproverSectorRole(auth.sectorRole)) return [];
   if (auth.profiles.includes('gerencia')) return ['gerencia'];
   return [];
 };

@@ -6,7 +6,7 @@
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, type ProfileKey } from '@isp/domain';
+import { DEFAULT_ACCESS, MODULES, OPPORTUNITY_STAGES, PROFILE_KEYS, PROFILE_LABELS, type ProfileKey, defaultSectorRole } from '@isp/domain';
 import { createHash } from 'node:crypto';
 import { getActiveInstruction } from '../services/instructions';
 import { createDb, type DB } from './client';
@@ -108,7 +108,7 @@ export async function seedTenant(
   for (const u of opts.users) {
     const [user] = await db
       .insert(s.users)
-      .values({ tenantId: tenant.id, name: u.name, email: u.email, passwordHash, jobTitle: u.jobTitle, goalSales: u.goals?.[0] ?? 8, goalProposals: u.goals?.[1] ?? 10, goalLeads: u.goals?.[2] ?? 40, sectorRole: u.profiles.some((k) => ['supervisor', 'gerencia', 'diretoria', 'administrador'].includes(k)) ? 'lideranca' : 'operador' })
+      .values({ tenantId: tenant.id, name: u.name, email: u.email, passwordHash, jobTitle: u.jobTitle, goalSales: u.goals?.[0] ?? 8, goalProposals: u.goals?.[1] ?? 10, goalLeads: u.goals?.[2] ?? 40, sectorRole: defaultSectorRole(u.profiles[0] ?? 'operacao') })
       .returning();
     users.push({ id: user!.id, profiles: u.profiles });
     await db.insert(s.userRoles).values(u.profiles.map((k) => ({ userId: user!.id, roleId: roleIds[k]! })));

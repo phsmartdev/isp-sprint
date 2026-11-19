@@ -25,7 +25,7 @@ const acoes: Gen = (id) => [table(id, [['Ação', ...PROFILE_KEYS.map((p) => PRO
   { id: id(), type: 'text', text: 'Sem **Ver valores financeiros**, a API devolve oculto todo campo em R$ (e margem, LTV, CAC, comissão) em qualquer tela, relatório ou indicador, e as planilhas com valores são recusadas.' }];
 
 const cargos: Gen = (id) => [table(id, [['Cargo', 'O que faz'], ...SECTOR_ROLES.map((r) => [SECTOR_ROLE_LABELS[r], SECTOR_ROLE_HINTS[r]])]),
-  { id: id(), type: 'text', text: 'Cargo inicial: Supervisão, Gerência, Diretoria e Administrador começam como **Liderança / gestor**; os demais como **Operador**. A lista de aprovadores é formada só por quem tem cargo Liderança / gestor, dentro da alçada do perfil. Observador não recebe tarefas do setor, não conclui etapas e não aprova.' }];
+  { id: id(), type: 'text', text: 'Cargo inicial: Diretoria começa como **Diretoria**; Gerência como **Gestão**; Supervisão e Administrador como **Liderança**; os demais como **Operação**. A lista de aprovadores é formada só por quem tem cargo Diretoria, Gestão ou Liderança, dentro da alçada do perfil. Observador não recebe tarefas do setor, não conclui etapas e não aprova.' }];
 
 const funcionalidades: Gen = (id) => {
   const out: Block[] = [];

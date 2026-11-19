@@ -55,7 +55,7 @@ Muitas tentativas erradas bloqueiam o login por alguns minutos. Se a empresa lig
 Cada pessoa tem um **perfil** (Administrador, Diretoria, Gerência, Supervisão ou Operação). O perfil define o **nível** em cada módulo: **Próprio** (só a sua carteira), **Equipe** (os times que você lidera), **Total** (a empresa toda) ou **Sem acesso**. Detalhes no capítulo *Perfis, níveis e permissões*.
 
 ## Cargo no setor
-Além do perfil, cada pessoa tem um **cargo no setor**: **Observador** (só acompanha), **Operador** (executa e conclui etapas) ou **Liderança / gestor** (executa e aprova). Só Liderança / gestor entra na lista de aprovadores.
+Além do perfil, cada pessoa tem um **cargo no setor**, na hierarquia **Diretoria > Gestão > Liderança > Operação**, mais o **Observador** (só acompanha). Diretoria, Gestão e Liderança executam e aprovam; a Operação executa e conclui etapas. Só Diretoria, Gestão e Liderança entram na lista de aprovadores.
 
 ## Histórico que não se apaga
 Mudanças importantes (etapas, aprovações, versões de contrato, metas, lançamentos financeiros, decisões) são gravadas como **registros novos**. Corrigir não apaga o anterior: o histórico mostra quem fez, quando e por quê. Excluir, quando permitido, tira o registro das telas mas mantém a auditoria.
@@ -143,7 +143,7 @@ Ao entrar na etapa **Proposta**, o sistema gera a proposta em PDF sozinho pelo m
 4) Fila :: Aprovações mostra o que está na sua alçada e os seus pedidos; o menu Comercial mostra o contador.
 
 :::importante Quem aprova
-Só pessoas com cargo **Liderança / gestor** no setor aprovam, dentro da alçada do seu perfil. Ninguém decide o próprio pedido. As alçadas ficam em Configurações → Aprovações.
+Só pessoas com cargo **Diretoria**, **Gestão** ou **Liderança** no setor aprovam, dentro da alçada do seu perfil. Ninguém decide o próprio pedido. As alçadas ficam em Configurações → Aprovações.
 :::
 
 # Viabilidade econômica

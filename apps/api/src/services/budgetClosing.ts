@@ -6,7 +6,7 @@
  * - Avisos no sino, sem duplicar (chave por evento).
  */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { payableSituation, type PaymentInput } from '@isp/domain';
+import { payableSituation, type PaymentInput, isApproverSectorRole } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -106,12 +106,12 @@ export async function notifyBudget(db: DbOrTx, tenantId: string, userIds: (strin
   const rows = await db.insert(s.userNotifications).values(ids.map((userId) => ({ tenantId, userId, module: 'orcamento', event: ev.event, title: ev.title.slice(0, 200), body: ev.body ?? null, link: ev.link, actorId: ev.actorId ?? null, dedupeKey: `orc:${ev.key}` }))).onConflictDoNothing().returning({ id: s.userNotifications.id });
   return rows.length;
 }
-/** Quem decide numa etapa (Gerência ou Diretoria), com cargo Liderança / gestor. */
+/** Quem decide numa etapa (Gerência ou Diretoria), com cargo Diretoria, Gestão ou Liderança no setor. */
 export async function deciders(db: DbOrTx, tenantId: string, stage: 'gerencia' | 'diretoria') {
   const rows = await db.select({ id: s.users.id, key: s.roles.key, sectorRole: s.users.sectorRole }).from(s.users).innerJoin(s.userRoles, eq(s.userRoles.userId, s.users.id)).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId))
     .where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), inArray(s.roles.key, stage === 'gerencia' ? ['gerencia', 'diretoria'] : ['diretoria'])));
   // Diretoria recebe sempre (salvo observador); Gerência, só com cargo Liderança
-  return [...new Set(rows.filter((r) => (r.key === 'diretoria' ? r.sectorRole !== 'observador' : r.sectorRole === 'lideranca')).map((r) => r.id))];
+  return [...new Set(rows.filter((r) => (r.key === 'diretoria' ? r.sectorRole !== 'observador' : isApproverSectorRole(r.sectorRole))).map((r) => r.id))];
 }
 export async function financeUsers(db: DbOrTx, tenantId: string) {
   const rows = await db.select({ id: s.users.id, sectors: s.users.sectors, sectorRole: s.users.sectorRole }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true)));

@@ -2,8 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import {
   BUSINESS_MODULES, DEFAULT_ACTIONS, MODULES, SENSITIVE_ACTIONS, defaultTenantModule, gateAccess, mergeLevels, moduleDecision,
-  type AccessLevel, type BusinessModule, type ModuleDecision, type ModuleGrant, type Module, type ReleaseMode, type Sector, type SensitiveAction,
-} from '@isp/domain';
+  type AccessLevel, type BusinessModule, type ModuleDecision, type ModuleGrant, type Module, type ReleaseMode, type Sector, type SensitiveAction, SECTOR_ROLES, type SectorRole } from '@isp/domain';
 import type { DB } from '../db/client';
 import type { Config } from '../config';
 import * as s from '../db/schema';
@@ -32,7 +31,7 @@ export type AuthContext = {
   /** Só visualiza os setores (não atua na operação). */
   sectorViewer: boolean;
   /** cargo nos setores: só liderança aprova */
-  sectorRole: 'observador' | 'operador' | 'lideranca';
+  sectorRole: SectorRole;
   /** Etapa 1: módulos de negócio ligados para a pessoa (e por quê), funcionalidades desligadas na empresa e ações sensíveis. */
   modules: Record<BusinessModule, boolean>;
   moduleReasons: Record<BusinessModule, ModuleDecision['reason']>;
@@ -220,6 +219,6 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     sectors: (row.sectorViewer ? [] : row.sectors ?? []) as Sector[],
     viewSectors: (row.sectors ?? []) as Sector[],
     sectorViewer: !!row.sectorViewer,
-    sectorRole: (row.sectorRole === 'observador' || row.sectorRole === 'lideranca' ? row.sectorRole : 'operador') as 'observador' | 'operador' | 'lideranca',
+    sectorRole: ((SECTOR_ROLES as readonly string[]).includes(row.sectorRole ?? '') ? row.sectorRole : 'operador') as SectorRole,
   };
 }
