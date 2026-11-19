@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fmtBRL, fmtDate, fmtDuration, fmtPct, isoToLocalInput, localInputToIso } from './format';
 import { qs } from './api';
+import { moneyHidden, setMoneyHidden } from './privacy';
+let originalHidden: boolean;
+beforeEach(() => { originalHidden = moneyHidden(); setMoneyHidden(false); });
+afterEach(() => setMoneyHidden(originalHidden));
 
 describe('formatação da interface', () => {
   it('moeda BRL a partir de centavos', () => {

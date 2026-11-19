@@ -48,7 +48,10 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.2';
+export const ENGINE_VERSION = 'FINANCE-3.11.0';
+/** Acréscimo de investimento dos serviços; independente de contingência, margem e despesas fixas. */
+export const SERVICE_INVESTMENT_BP = 3500;
+export const serviceInvestmentExtra = (baseCents: number, serviceCostBp?: number | null) => Math.round(baseCents * (serviceCostBp ?? SERVICE_INVESTMENT_BP) / 10_000);
 
 /**
  * Parâmetros da empresa, informados em Configurações → Viabilidade com data de vigência.
@@ -65,6 +68,7 @@ export type EconSettings = {
   /** c: comissão padrão sobre a receita bruta */ commissionBp: number;
   /** g: perda esperada / glosa padrão por segmento */ lossPrivateBp: number; lossPublicBp: number;
   /** contingência sobre o investimento inicial e sobre os custos mensais */ contingencyCapexBp: number; contingencyOpexBp: number;
+  /** Inferência sobre o investimento-base dos serviços; padrão 35% em versões antigas. */ serviceCostBp?: number | null;
   /** D_alvo por segmento (meses), comparado ao payback descontado */ paybackMaxPrivate: number; paybackMaxPublic: number;
   /** Trava: venda fora da política não vai para aprovação */ blockOutsidePolicy: boolean;
   /** despesas fixas rateadas (estrutura, administrativo) em % da receita bruta → margem operacional; ausente em versões antigas */ overheadBp?: number | null;
@@ -86,10 +90,11 @@ export type EconSettings = {
 };
 export function econSettingsErrors(s: EconSettings) {
   const e: string[] = [];
-  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : []), ...(s.netMarginTargetBp != null ? [['Margem líquida alvo', s.netMarginTargetBp] as const] : []), ...(s.netMarginMinBp != null ? [['Margem líquida mínima', s.netMarginMinBp] as const] : []), ...(s.netMarginMaxBp != null ? [['Margem líquida máxima', s.netMarginMaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
+  for (const [k, v] of [['Margem mínima', s.marginTargetBp], ['TMA', s.tmaMonthlyBp], ['Comissão', s.commissionBp], ['Glosa do setor privado', s.lossPrivateBp], ['Glosa do setor público', s.lossPublicBp], ['Contingência de investimento', s.contingencyCapexBp], ['Contingência de custo mensal', s.contingencyOpexBp], ...(s.serviceCostBp != null ? [['Inferência custo de serviço', s.serviceCostBp] as const] : []), ...(s.variableExpenseBp != null ? [['Despesas variáveis', s.variableExpenseBp] as const] : []), ...(s.overheadBp != null ? [['Despesas fixas', s.overheadBp] as const] : []), ...(s.incomeTaxBp != null ? [['IR/CSLL', s.incomeTaxBp] as const] : []), ...(s.netMarginTargetBp != null ? [['Margem líquida alvo', s.netMarginTargetBp] as const] : []), ...(s.netMarginMinBp != null ? [['Margem líquida mínima', s.netMarginMinBp] as const] : []), ...(s.netMarginMaxBp != null ? [['Margem líquida máxima', s.netMarginMaxBp] as const] : [])] as const) if (!Number.isInteger(v) || v < 0 || v >= 10_000) e.push(`${k} inválida.`);
   for (const [k, v] of [['Teto da margem', s.marginMaxBp], ['Sugestão de margem', s.marginSuggestedBp], ['TMA anual', s.tmaAnnualBp], ['Inflação anual', s.inflationAnnualBp], ['Inadimplência', s.badDebtBp]] as const) if (v != null && (!Number.isInteger(v) || v < 0 || v >= 100_000)) e.push(`${k} inválida.`);
   if (s.marginMaxBp != null && s.marginMaxBp < s.marginTargetBp) e.push('O teto da margem precisa ser maior ou igual ao piso.');
   if (s.netMarginMinBp != null && s.netMarginMaxBp != null && s.netMarginMaxBp <= s.netMarginMinBp) e.push('A margem líquida máxima precisa ser maior que a mínima.');
+  if (s.netMarginTargetBp != null && ((s.netMarginMinBp != null && s.netMarginTargetBp <= s.netMarginMinBp) || (s.netMarginMaxBp != null && s.netMarginTargetBp >= s.netMarginMaxBp))) e.push('A margem líquida esperada precisa estar acima da mínima e abaixo da máxima.');
   if (s.marginSuggestedBp != null && (s.marginSuggestedBp < s.marginTargetBp || (s.marginMaxBp != null && s.marginSuggestedBp > s.marginMaxBp))) e.push('A sugestão de margem precisa ficar entre o piso e o teto.');
   if (s.horizonMaxMonths != null && !(Number.isInteger(s.horizonMaxMonths) && s.horizonMaxMonths >= 1 && s.horizonMaxMonths <= 240)) e.push('Prazo máximo de previsão entre 1 e 240 meses.');
   for (const [k, v] of [['Fator histórico da venda pontual', s.legacyOneTimeX100], ['Fator histórico da recorrente', s.legacyRecurringX100]] as const) if (v != null && (!Number.isInteger(v) || v < 100 || v > 2000)) e.push(`${k} entre ×1 e ×20.`);
@@ -111,20 +116,26 @@ export const DEAL_KINDS = ['venda', 'servico', 'recorrencia', 'locacao'] as cons
 export type DealKind = (typeof DEAL_KINDS)[number];
 export const DEAL_KIND_LABELS: Record<DealKind, string> = { venda: 'Venda', servico: 'Serviço único', recorrencia: 'Recorrência', locacao: 'Locação/aluguel' };
 /**
- * Lotes da viabilidade: Venda = o que é patrimonial (sempre pagamento único); Serviço = o resto, recorrente (recorrência,
- * locação) ou não (serviço único). Em cada lote o tributo é o do documento fiscal de maior tributo entre os produtos do lote.
+ * Cestas da viabilidade: Venda = Fornecimento; serviço único = Instalação; recorrência/locação = Implantação.
+ * Em cada cesta o tributo é o do documento fiscal de maior tributo entre seus produtos.
  */
-export const ECON_LOTS = ['venda', 'servico'] as const;
+export const ECON_LOTS = ['venda', 'instalacao', 'servico'] as const;
 export type EconLot = (typeof ECON_LOTS)[number];
-export const ECON_LOT_LABELS: Record<EconLot, string> = { venda: 'Fornecimento (venda pura)', servico: 'Implantação (instalação ou fornecimento + instalação)' };
-export const lotOfKind = (k: DealKind): EconLot => (k === 'venda' ? 'venda' : 'servico');
+export const ECON_LOT_LABELS: Record<EconLot, string> = { venda: 'Fornecimento', instalacao: 'Serviço de Instalação (Sem recorrência)', servico: 'Serviço Fornecimento + Instalação' };
+export const lotOfKind = (k: DealKind): EconLot => (k === 'venda' ? 'venda' : k === 'servico' ? 'instalacao' : 'servico');
 /** pagamento único: venda e serviço único; mensal: recorrência e locação */
 export const isOneTimeKind = (k: DealKind) => k === 'venda' || k === 'servico';
 /** venda é pontual; recorrência e locação são mensais */
 export const isMonthlyKind = (k: DealKind) => !isOneTimeKind(k);
 /** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo; kind = de qual tipo de negociação o custo sai (vazio = comum, rateado pela receita). */
-export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
+export type CostLine = { category?: 'materia_prima' | 'mao_de_obra' | 'parceiros' | 'despesas_operacionais' | null; description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
+export type EconCostProfile = 'fornecimento' | 'instalacao' | 'implantacao';
+export type EconBasketInput = { netTargetBp?: number | null; paybackMonths?: number | null; priceCents?: number | null };
+export const profileOfLot = (lot: EconLot): EconCostProfile => lot === 'venda' ? 'fornecimento' : lot === 'instalacao' ? 'instalacao' : 'implantacao';
 export type EconInput = {
+  pricingMode?: 'global' | 'item';
+  baskets?: Partial<Record<EconCostProfile, EconBasketInput>>;
+
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
   /** d: mês em que o dinheiro entra (pontual; 0 = à vista) */ receiveMonth: number;
@@ -143,18 +154,9 @@ export type EconInput = {
    * (null = Configurações), margem líquida alvo, margem de contribuição manual por cesta, resolver o payback pelo alvo,
    * pesos manuais e lances simulados por produto (chave = descrição do produto).
    */
-  /**
-   * (seções) recorrência e aluguel por seção: o investimento (custos únicos) fica FORA do preço; o preço sai da margem
-   * sobre o que é mensal e o payback real (descontado) mostra quando o investimento volta. A DRE do contrato desconta o investimento.
-   */
-  investmentOutOfPrice?: boolean;
-  /** (seções) indicadores no preço proposto (não no sugerido): a seção mostra a DRE do preço praticado */
-  atProposed?: boolean;
-  /** (seções) simulação intermediária: não busca os preços da faixa de margem líquida (só o preço avaliado importa) */
-  skipRecommendation?: boolean;
-  /** (seções) tipos de negócio da negociação: cada seção com seus produtos, custos, margem, payback e preço */
-  sections?: DealSection[] | null;
-  b2g?: { mode?: 'A' | 'B'; overheadBp?: number | null; netTargetBp?: number | null; contributionBp?: { fornecimento?: number | null; implantacao?: number | null }; solvePayback?: boolean; weights?: Record<string, number>; bids?: Record<string, number> } | null;
+  /** Compatibilidade com seções já salvas na produção. */
+  investmentOutOfPrice?: boolean; atProposed?: boolean; skipRecommendation?: boolean; sections?: DealSection[] | null;
+  b2g?: { mode?: 'A' | 'B'; overheadBp?: number | null; netTargetBp?: number | null; contributionBp?: { fornecimento?: number | null; implantacao?: number | null; instalacao?: number | null }; solvePayback?: boolean; weights?: Record<string, number>; bids?: Record<string, number> } | null;
 };
 export const emptyEconInput = (): EconInput => ({ mode: 'recorrente', termMonths: 12, receiveMonth: 0, capex: [], extraInitialCents: 0, opex: [], commissionBp: null, lossBp: null, marginTargetBp: null, paybackMonths: null, priceCents: null });
 export const costLineTotal = (l: CostLine) => Math.round((l.qtyMilli * l.unitCents) / 1000);
@@ -173,13 +175,35 @@ export function econInputErrors(i: EconInput) {
   if (i.paybackMonths != null && !(Number.isInteger(i.paybackMonths) && i.paybackMonths >= 1 && i.paybackMonths <= 240)) e.push('Payback entre 1 e 240 meses.');
   for (const l of i.capex) if (l.impact && !(COST_IMPACTS as readonly string[]).includes(l.impact)) e.push(`Impacto inválido em ${l.description}.`);
   for (const l of [...i.capex, ...i.opex]) if (l.kind && !(DEAL_KINDS as readonly string[]).includes(l.kind)) e.push(`Tipo de negociação inválido em ${l.description}.`);
+  for (const l of i.opex) if (l.kind && isOneTimeKind(l.kind)) e.push(`Custo mensal deve atender recorrência ou locação: ${l.description}.`);
   if (i.salePriceCents != null && (!Number.isInteger(i.salePriceCents) || i.salePriceCents < 0)) e.push('Preço da venda inválido.');
   if (i.fiscalYear != null && !(Number.isInteger(i.fiscalYear) && i.fiscalYear >= 2020 && i.fiscalYear <= 2100)) e.push('Vigência fiscal inválida.');
+  for (const [profile, basket] of Object.entries(i.baskets ?? {})) {
+    if (!basket) continue;
+    if (basket.paybackMonths != null && (!Number.isInteger(basket.paybackMonths) || basket.paybackMonths < 1 || basket.paybackMonths > 240)) e.push('Payback de ' + profile + ' entre 1 e 240 meses.');
+    if (basket.priceCents != null && (!Number.isInteger(basket.priceCents) || basket.priceCents < 0)) e.push('Preço global inválido em ' + profile + '.');
+  }
   return e;
 }
 
+/** Limites da empresa valem para o alvo geral e para cada cesta. */
+export function econTargetErrors(input: EconInput, settings: EconSettings): string[] {
+  const values = [['negociação', input.b2g?.netTargetBp], ...Object.entries(input.baskets ?? {}).map(([k, v]) => [k, v?.netTargetBp])] as [string, number | null | undefined][];
+  return values.filter(([, value]) => value != null && (!Number.isInteger(value) || value < 0 || value >= 10000 || (settings.netMarginMinBp != null && value < settings.netMarginMinBp) || (settings.netMarginMaxBp != null && value > settings.netMarginMaxBp))).map(([name]) => 'A margem líquida esperada de ' + name + ' deve ficar dentro da faixa das Configurações.');
+}
+
+/** Prazo de recuperação solicitado, limitado ao setor e à projeção. */
+export function econPaybackLimit(input: EconInput, settings: EconSettings, publicSector: boolean): number {
+  return Math.max(1, Math.min(publicSector ? settings.paybackMaxPublic : settings.paybackMaxPrivate, input.termMonths, settings.horizonMaxMonths ?? input.termMonths));
+}
+export function econPaybackErrors(input: EconInput, settings: EconSettings, publicSector: boolean): string[] {
+  const limit = econPaybackLimit(input, settings, publicSector);
+  const requested = [input.mode === 'recorrente' ? input.paybackMonths : null, input.baskets?.implantacao?.paybackMonths];
+  return requested.some((n) => n != null && (!Number.isInteger(n) || n < 1 || n > limit)) ? ['O prazo de recuperação deve ficar entre 1 e ' + limit + ' meses, respeitando o teto do setor ' + (publicSector ? 'público' : 'privado') + ' e a vigência.'] : [];
+}
+
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
-export type EconItem = { /** (seções) índice da seção do produto */ section?: number | null; /** perfil de custo B2G (vazio = padrão pelo tipo) */ costProfile?: 'fornecimento' | 'implantacao' | null; description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
+export type EconItem = { section?: number | null; id?: string; qtyMilli?: number; unit?: string; /** perfil de custo B2G (vazio = padrão pelo tipo) */ costProfile?: 'fornecimento' | 'implantacao' | 'instalacao' | null; priceDefined?: boolean; description: string; revenueCents: number; /** tipo de negociação; sem ele vale o tipo da viabilidade (pontual = venda, recorrente = recorrência) */ kind?: DealKind | null; doc: { id?: string; version?: number; name: string; percentBp: number; fixedCents: number; complete: boolean; /** natureza do documento (venda = NF-e de mercadoria; serviço; locação) */ fiscalKind?: string | null; /** (3.2) tributos crus do documento, base e por ano, para a vigência da simulação */ raw?: { taxes: FiscalTax[]; taxesByYear?: Record<string, FiscalTax[]> | null } } | null };
 
 // ------------------------------------------------------------------ cálculo
 export const ECON_VERDICTS = ['viavel', 'abaixo_recomendado', 'fora_politica', 'abaixo_minimo', 'inviavel', 'sem_preco', 'abaixo_faixa', 'acima_faixa', 'aguardando_sugerido', 'sem_margem_liquida'] as const;
@@ -200,7 +224,7 @@ export type EconCell = {
   /** custo da célula: investimento (com contingência) e, na mensal, custo mensal protegido */
   investmentCents: number; monthlyCostCents: number; costCents: number; divisor: number | null;
   suggestedCents: number | null; minCents: number | null; proposedCents: number | null; marginPct: number | null;
-  result: EconResult;
+  result: EconResult; proposedResult?: EconResult | null; costInput?: Pick<EconInput, 'capex' | 'opex' | 'extraInitialCents'>;
 };
 /** Lote com mais de uma célula: cada uma precificada pelo markup e somadas no preço sugerido do lote. */
 export type DealSummary = {
@@ -227,9 +251,12 @@ export type EconDecision = {
 };
 
 export type EconResult = {
+  /** Resultado no preço proposto; sem referência circular, contém apenas o cálculo avaliado. */ proposedResult?: EconResult | null;
   /** viabilidade B2G (produtos do edital × planilha da engenharia), calculada junto e guardada na fotografia */
   b2g?: import('./b2gViability').B2gResult | null;
   engineVersion: string;
+  pricingBasis?: 'net_margin'; targetNetMarginPct?: number;
+  /** Preço base pela margem contratual, antes da restrição de retorno. */ netTargetPriceCents?: number | null; paybackAdjusted?: boolean;
   /** negociação com venda e itens mensais juntos (um resultado só) */
   deal?: DealSummary;
   /** (seções) resultado de cada tipo de negócio e a visão geral consolidada */
@@ -246,7 +273,7 @@ export type EconResult = {
   fixedTaxCents: number;
   /** I (investimento) e O (custo mensal) já com contingência; as bases e as contingências vêm separadas */
   initialCents: number; monthlyCostCents: number;
-  capexBaseCents: number; capexContingencyCents: number; opexBaseCents: number; opexContingencyCents: number;
+  capexBaseCents: number; capexContingencyCents: number; serviceInvestmentCents?: number; serviceMonthlyCents?: number; serviceCostBp?: number; opexBaseCents: number; opexContingencyCents: number;
   /** (v2) despesas variáveis em R$ de valor único (entrega, taxa fixa de venda): sem contingência; investimento total = I + E */
   variableFixedCents?: number; investmentCents?: number;
   /** N meses projetados (vigência limitada ao horizonte máximo) · Dalvo teto de payback · D payback do vendedor · d mês do recebimento */
@@ -452,8 +479,13 @@ export function applyFiscalEnvelope(args: EngineArgs): { args: EngineArgs; info:
 }
 
 export function financeEngine(args: EngineArgs): EconResult {
-  const fx = applyFiscalEnvelope(args);
-  const r0 = financeEngineCore(fx.args);
+  const target = args.input.b2g?.netTargetBp ?? args.settings.netMarginTargetBp;
+  const effective = { ...args, settings: { ...args.settings, netMarginTargetBp: target, overheadBp: args.input.b2g?.overheadBp ?? args.settings.overheadBp } };
+  const fx = applyFiscalEnvelope(effective);
+  let r0 = financeEngineCore(fx.args);
+  const profiles = new Set(fx.args.items.map((i) => lotOfKind(i.kind ?? (fx.args.input.mode === 'pontual' ? 'venda' : 'recorrencia'))));
+  const unmatched = fx.args.items.length > 0 && fx.args.input.capex.some((l) => l.kind && costLineTotal(l) > 0 && !profiles.has(lotOfKind(l.kind)));
+  if (unmatched) r0 = { ...r0, verdict: 'inviavel', withinPolicy: false, withReservations: true, autoApproval: r0.autoApproval ? { ...r0.autoApproval, ok: false } : undefined, decision: r0.decision ? { ...r0.decision, verdict: 'inviavel', withinPolicy: false, autoApproval: r0.decision.autoApproval ? { ...r0.decision.autoApproval, ok: false } : undefined } : undefined };
   const r = applyNetMarginRule(r0, fx.args.settings);
   if (!fx.info) return r;
   return { ...r, fiscal: fx.info, warnings: [...new Set([...fx.warnings, ...r.warnings])] };
@@ -490,8 +522,8 @@ function financeEngineCore(args0: EngineArgs): EconResult {
 
   const inp0 = args0.input;
   const kindOf = (i: EconItem): DealKind => i.kind ?? (inp0.mode === 'pontual' ? 'venda' : 'recorrencia');
-  // perfil de custo escolhido na oportunidade manda na cesta; sem escolha, a natureza do documento
-  const lotOfItem = (i: EconItem): EconLot => (i.costProfile ? (i.costProfile === 'fornecimento' ? 'venda' : 'servico') : cestaOf(i.doc?.fiscalKind ?? null, kindOf(i)));
+  // O tipo fixa o perfil; o documento fiscal determina somente os tributos da cesta.
+  const lotOfItem = (i: EconItem): EconLot => lotOfKind(kindOf(i));
   // teto de cada cesta: o documento de maior tributo entre os produtos da cesta (completos primeiro)
   const better = (d: NonNullable<EconItem['doc']>, cur?: NonNullable<EconItem['doc']>) => !cur || d.percentBp > cur.percentBp || (d.percentBp === cur.percentBp && d.fixedCents > cur.fixedCents);
   const top = new Map<EconLot, NonNullable<EconItem['doc']>>();
@@ -542,22 +574,23 @@ function financeEngineCore(args0: EngineArgs): EconResult {
   for (const lot of ECON_LOTS) {
     const lines = inp0.capex.filter((l) => l.kind && lotOfKind(l.kind) === lot);
     if (!lines.length) continue;
-    if (!spread(lines, cells.filter((c) => c.lot === lot), capex)) { spread(lines, cells, capex); warnings.push(`${lines.length} investimento(s) da ${ECON_LOT_LABELS[lot]} sem produto nessa cesta: rateado(s) entre as demais.`); }
+    if (!spread(lines, cells.filter((c) => c.lot === lot), capex)) warnings.push(`${lines.length} investimento(s) da cesta ${ECON_LOT_LABELS[lot]} sem produto correspondente. Corrija a cesta: esses custos não foram rateados entre outros perfis.`);
   }
   spread(inp0.capex.filter((l) => !l.kind), cells, capex);
   const monthly = cells.filter((c) => c.ritmo === 'mensal');
   if (monthly.length) {
     for (const lot of ECON_LOTS) {
       const lines = inp0.opex.filter((l) => l.kind && lotOfKind(l.kind) === lot);
-      if (lines.length && !spread(lines, monthly.filter((c) => c.lot === lot), opex)) spread(lines, monthly, opex);
+      if (lines.length && !spread(lines, monthly.filter((c) => c.lot === lot), opex)) warnings.push(`Custo mensal sem produto no mesmo perfil: ${ECON_LOT_LABELS[lot]}.`);
     }
     spread(inp0.opex.filter((l) => !l.kind), monthly, opex);
   } else if (inp0.opex.length) warnings.push('Sem produto mensal: os custos mensais não entram no cálculo (use o investimento inicial).');
   const wAll = weightOf(cells);
   // despesas fixas rateadas não incidem no Fornecimento (venda pura): não há estrutura de serviço para só vender
+  const basketOf = (c: Cell) => inp0.baskets?.[profileOfLot(c.lot)];
   const parts = cells.map((c, k) => ({
     cell: c,
-    args: { ...args, settings: c.lot === 'venda' && args.settings.overheadBp != null ? { ...args.settings, overheadBp: 0 } : args.settings, items: c.items, input: { ...inp0, mode: c.ritmo === 'unico' ? 'pontual' as const : 'recorrente' as const, capex: capex.get(c.key)!, opex: c.ritmo === 'mensal' ? opex.get(c.key)! : [], extraInitialCents: Math.round(inp0.extraInitialCents * wAll[k]!), priceCents: null, salePriceCents: null } },
+    args: { ...args, settings: { ...args.settings, netMarginTargetBp: basketOf(c)?.netTargetBp ?? args.settings.netMarginTargetBp, ...(c.lot === 'venda' && args.settings.overheadBp != null ? { overheadBp: 0 } : {}) }, items: c.items, input: { ...inp0, paybackMonths: basketOf(c)?.paybackMonths ?? inp0.paybackMonths, mode: c.ritmo === 'unico' ? 'pontual' as const : 'recorrente' as const, capex: capex.get(c.key)!, opex: c.ritmo === 'mensal' ? opex.get(c.key)! : [], extraInitialCents: Math.round(inp0.extraInitialCents * wAll[k]!), priceCents: null, salePriceCents: null } },
   }));
 
   // preço sugerido de cada célula (markup na margem escolhida) e o mínimo (no piso)
@@ -569,10 +602,11 @@ function financeEngineCore(args0: EngineArgs): EconResult {
   const revR = (r: 'unico' | 'mensal') => cells.filter((c) => c.ritmo === r).reduce((t, c) => t + rev(c), 0);
   const askU = hasU ? (hasM ? inp0.salePriceCents ?? null : inp0.priceCents) : null;
   const askM = hasM ? inp0.priceCents : null;
-  const propU = askU ?? (hasU && revR('unico') > 0 ? revR('unico') : null);
-  const propM = askM ?? (hasM && revR('mensal') > 0 ? revR('mensal') : null);
-  const anyProposed = propU != null || propM != null;
-  const source: EconDecision['source'] = askU != null || askM != null ? 'informado' : anyProposed ? 'itens' : 'motor';
+  const propU = askU ?? (hasU && cells.some((c) => c.ritmo === 'unico' && c.items.some((i) => i.priceDefined ?? i.revenueCents > 0)) ? revR('unico') : null);
+  const propM = askM ?? (hasM && cells.some((c) => c.ritmo === 'mensal' && c.items.some((i) => i.priceDefined ?? i.revenueCents > 0)) ? revR('mensal') : null);
+  const proposedCell = (c: Cell) => basketOf(c)?.priceCents != null || (c.ritmo === 'unico' ? propU : propM) != null;
+  const anyProposed = cells.some(proposedCell);
+  const source: EconDecision['source'] = askU != null || askM != null || cells.some((c) => basketOf(c)?.priceCents != null) ? 'informado' : anyProposed ? 'itens' : 'motor';
   const share = (r: 'unico' | 'mensal', total: number | null) => {
     const idx = parts.map((p, k) => (p.cell.ritmo === r ? k : -1)).filter((k) => k >= 0);
     const base = idx.map((k) => (revR(r) > 0 ? rev(parts[k]!.cell) : sugOf(k) ?? 0));
@@ -582,15 +616,17 @@ function financeEngineCore(args0: EngineArgs): EconResult {
     return out;
   };
   const shU = share('unico', propU), shM = share('mensal', propM);
-  const P = anyProposed ? parts.map((p, k) => evalAt(p.args, (p.cell.ritmo === 'unico' ? shU : shM).get(k) ?? null)) : null;
+  const P = anyProposed ? parts.map((p, k) => evalAt(p.args, basketOf(p.cell)?.priceCents ?? (p.cell.ritmo === 'unico' ? shU : shM).get(k) ?? null)) : null;
 
   if (cells.length === 1) {
     if (inp0.atProposed && P) { const r = finalize(P[0]!, P[0]!, source, warnings); r.suggestedCents = S[0]!.priceCents; r.lots = lotsOf([P[0]!]); return r; }
-    const r = finalize(S[0]!, P?.[0] ?? null, source, warnings);
+    const r = finalize(S[0]!, proposedCell(cells[0]!) ? P?.[0] ?? null : null, source, warnings);
     r.lots = lotsOf([S[0]!]);
     return r;
   }
   const sum = (r: 'unico' | 'mensal', xs: (number | null | undefined)[]) => { const v = xs.filter((_, k) => parts[k]!.cell.ritmo === r); return v.length && v.every((x) => x != null) ? (v as number[]).reduce((t, x) => t + x, 0) : null; };
+  const proposedU = P && hasU ? sum('unico', P.map((p) => p.priceCents)) : null;
+  const proposedM = P && hasM ? sum('mensal', P.map((p) => p.priceCents)) : null;
   const comb = combineParts(parts.map((p) => p.cell), S, N, warnings);
   const combP = P ? combineParts(parts.map((p) => p.cell), P, N, warnings) : null;
   const sugU = sum('unico', pre.map((x) => x.suggestedCents)), sugM = sum('mensal', pre.map((x) => x.suggestedCents));
@@ -602,10 +638,9 @@ function financeEngineCore(args0: EngineArgs): EconResult {
     floor: { cashCents: null, economicCents: null, minCents: main === 'mensal' ? minM : minU }, operatingFloorCents: null,
   });
   const atP = !!(inp0.atProposed && combP);
-  if (atP) Object.assign(combP!, { suggestedCents: comb.suggestedCents, suggestedOneTimeCents: comb.suggestedOneTimeCents, suggestedMinCents: comb.suggestedMinCents, recommendedCents: comb.recommendedCents, markupPriceCents: comb.markupPriceCents, marginPriceCents: comb.marginPriceCents, floor: comb.floor, operatingFloorCents: null });
-  const r = atP ? finalize(combP!, combP!, source, []) : finalize(comb, combP, source, []);
-  if (atP) r.suggestedCents = comb.suggestedCents; else r.priceCents = comb.priceCents;
-  if (combP) r.decision = { ...r.decision!, priceCents: main === 'mensal' ? propM : propU, oneTimeCents: hasM && hasU ? propU : null };
+  const r = finalize(atP ? combP! : comb, combP, source, []);
+  r.priceCents = atP ? combP!.priceCents : comb.priceCents;
+  if (combP) r.decision = { ...r.decision!, priceCents: main === 'mensal' ? proposedM : proposedU, oneTimeCents: hasM && hasU ? proposedU : null };
   r.lots = lotsOf(S);
   const revK = (k: DealKind) => items.filter((i) => i.kind === k).reduce((t, i) => t + Math.max(0, i.revenueCents), 0);
   r.deal = {
@@ -615,23 +650,34 @@ function financeEngineCore(args0: EngineArgs): EconResult {
       return {
         key: p.cell.key, ritmo: p.cell.ritmo, lot: p.cell.lot, kinds: DEAL_KINDS.filter((kk) => p.cell.items.some((i) => i.kind === kk)), items: p.cell.items.length, revenueCents: rev(p.cell),
         doc: x.lots?.[0]?.doc ?? null, taxPct: x.rates.a * 100, pending: x.withReservations, investmentCents: x.investmentCents ?? 0, monthlyCostCents: x.monthlyCostCents, costCents: cost, divisor: D,
-        suggestedCents: x.suggestedCents ?? null, minCents: x.suggestedMinCents ?? null, proposedCents: P ? P[k]!.priceCents : null, marginPct: x.kpi?.marginPct ?? null, result: x,
+        suggestedCents: x.suggestedCents ?? null, minCents: x.suggestedMinCents ?? null, proposedCents: P && proposedCell(p.cell) ? P[k]!.priceCents : null, marginPct: x.kpi?.marginPct ?? null, result: x, costInput: { capex: p.args.input.capex, opex: p.args.input.opex, extraInitialCents: p.args.input.extraInitialCents }, proposedResult: P && proposedCell(p.cell) ? P[k]! : null,
       };
     }),
     kinds: DEAL_KINDS.filter((k) => items.some((i) => i.kind === k)),
     revenue: { venda: revK('venda'), servico: revK('servico'), recorrencia: revK('recorrencia'), locacao: revK('locacao') },
     suggested: { unico: sugU, mensal: sugM }, minimum: { unico: minU, mensal: minM },
-    proposed: anyProposed ? { unico: propU, mensal: propM } : null,
+    proposed: anyProposed ? { unico: proposedU, mensal: proposedM } : null,
   };
   return r;
 }
 
+export type EconBasketView = { profile: EconCostProfile; lot: EconLot; kinds: DealKind[]; result: EconResult; evaluation: EconResult; costInput: Pick<EconInput, 'capex' | 'opex' | 'extraInitialCents'> };
+export function econBasketViews(input: EconInput, items: EconItem[], settings: EconSettings, result: EconResult): EconBasketView[] {
+  const profiles = [...new Set(items.map((i) => lotOfKind(i.kind ?? (input.mode === 'pontual' ? 'venda' : 'recorrencia'))))];
+  return profiles.flatMap((lot) => {
+    const cell = result.deal?.cells.find((c) => c.lot === lot);
+    if (result.deal && !cell) return [];
+    const suggested = cell?.result ?? result;
+    const proposed = cell ? cell.proposedResult ?? null : result.proposedResult ?? null;
+    const view = applyNetMarginRule(finalize(suggested, proposed, proposed ? 'informado' : 'motor', []), settings);
+    return [{ profile: profileOfLot(lot), lot, costInput: cell?.costInput ?? input, kinds: DEAL_KINDS.filter((k) => items.some((i) => (i.kind ?? (input.mode === 'pontual' ? 'venda' : 'recorrencia')) === k) && lotOfKind(k) === lot), result: view, evaluation: proposed ? { ...proposed, decision: view.decision, verdict: view.verdict, withinPolicy: view.withinPolicy, suggestedCents: suggested.suggestedCents } : view }];
+  });
+}
+
 /**
- * Cesta fiscal do produto (regra provisória, decisão em aberto para NFCOM e locação): documento de venda (NF-e de
- * mercadoria) = Fornecimento (venda pura); qualquer outro documento = Implantação; sem documento, pelo tipo de negociação.
+ * Cesta do produto pelo tipo de negociação. A natureza fiscal não altera seu perfil de custo.
  */
 export function cestaOf(fiscalKind: string | null | undefined, kind: DealKind): EconLot {
-  if (fiscalKind) return fiscalKind === 'venda' ? 'venda' : 'servico';
   return lotOfKind(kind);
 }
 
@@ -648,8 +694,8 @@ function lotsOf(rs: EconResult[]): NonNullable<EconResult['lots']> {
 /** Indicadores no sugerido (r) e decisão no proposto (p) quando houver; os campos de decisão do topo seguem a decisão. */
 function finalize(r: EconResult, p: EconResult | null, source: EconDecision['source'], warnings: string[]): EconResult {
   const d = p ?? r;
-  const out: EconResult = { ...r, priceSource: 'motor', warnings: [...new Set([...r.warnings, ...(p?.warnings ?? []), ...warnings])] };
-  out.suggestedCents = r.priceCents;
+  const out: EconResult = { ...r, proposedResult: p, priceSource: 'motor', warnings: [...new Set([...r.warnings, ...(p?.warnings ?? []), ...warnings])] };
+  out.suggestedCents = r.pricingBasis === 'net_margin' ? r.suggestedCents ?? null : r.priceCents;
   out.decision = {
     basis: p ? 'proposto' : 'sugerido', source: p ? source : 'motor', priceCents: d.priceCents, oneTimeCents: null,
     verdict: d.verdict, withinPolicy: d.withinPolicy, marginOk: d.marginOk, paybackOk: d.paybackOk,
@@ -696,6 +742,7 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
   };
   const monthParts = parts.filter((_, k) => cells[k]!.ritmo === 'mensal');
   const tma = r;
+  const basePrices = parts.filter((_, k) => cells[k]!.ritmo === (hasM ? 'mensal' : 'unico')).map((p) => p.netTargetPriceCents);
   const checks = [
     { label: 'VPL positivo', ok: priced && npvC > 0 },
     { label: 'TIR acima da TMA', ok: ir != null && ir > tma },
@@ -707,12 +754,13 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
   const op = add('operating'), net = add('net');
   return {
     ...base,
+    ...(parts.some((p) => p.pricingBasis === 'net_margin') ? { netTargetPriceCents: basePrices.every((p) => p != null) ? basePrices.reduce<number>((sum, p) => sum + p!, 0) : null, paybackAdjusted: parts.some((p) => p.paybackAdjusted === true) } : {}),
     mode: hasM ? 'recorrente' : 'pontual',
     revenueCents: parts.reduce((t, p) => t + p.revenueCents, 0),
     rates: { ...base.rates, a: revB > 0 ? (add('tax') ?? 0) / revB : base.rates.a },
     fixedTaxCents: parts.reduce((t, p) => t + p.fixedTaxCents, 0),
     initialCents: parts.reduce((t, p) => t + p.initialCents, 0), monthlyCostCents: monthParts.reduce((t, p) => t + p.monthlyCostCents, 0),
-    capexBaseCents: parts.reduce((t, p) => t + p.capexBaseCents, 0), capexContingencyCents: parts.reduce((t, p) => t + p.capexContingencyCents, 0),
+    capexBaseCents: parts.reduce((t, p) => t + p.capexBaseCents, 0), capexContingencyCents: parts.reduce((t, p) => t + p.capexContingencyCents, 0), serviceInvestmentCents: parts.reduce((t, p) => t + (p.serviceInvestmentCents ?? 0), 0), serviceMonthlyCents: parts.reduce((t, p) => t + (p.serviceMonthlyCents ?? 0), 0),
     opexBaseCents: monthParts.reduce((t, p) => t + p.opexBaseCents, 0), opexContingencyCents: monthParts.reduce((t, p) => t + p.opexContingencyCents, 0),
     variableFixedCents: parts.reduce((t, p) => t + (p.variableFixedCents ?? 0), 0), investmentCents: inv,
     term: { ...base.term, N: hasM ? N : 0 },
@@ -747,7 +795,40 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
 }
 
 /** O motor com o que o Financial Studio mostra: as variáveis de entrada (com o preço avaliado) e a execução do modelo. */
-export function financeEngineDetailed(args: EngineArgs): { result: EconResult; base: FinBase; run: ModelRun; model: FinModel } {
+type NetPricingPlan = { netTargetPriceCents: number | null; priceCents: number | null; contribution: number; minimum: number; maximum: number | null; recommendation: EconRecommendation | null };
+export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan | false): { result: EconResult; base: FinBase; run: ModelRun; model: FinModel } {
+  // O preço busca a margem líquida do contrato; o payback informado é o prazo máximo de retorno.
+  if (pricing === undefined && args.settings.netMarginTargetBp != null && !args.input.investmentOutOfPrice && !args.input.atProposed && !args.input.skipRecommendation) {
+    const probe = financeEngineDetailed(args, false);
+    const recommendation = probe.result.recommendation ?? null;
+    const netTargetPriceCents = recommendation?.priceCents ?? null;
+    let price = netTargetPriceCents;
+    // O preço deve devolver o investimento no prazo escolhido, depois dos desembolsos do fluxo.
+    const D = probe.result.term.D;
+    if (price != null && args.input.mode === 'recorrente' && D > 0) {
+      const balance = (P: number) => {
+        const rr = runModel(probe.model, { ...probe.base, preco: P });
+        return rr.fluxo.slice(0, D + 1).reduce((sum, value, k) => sum + value / (1 + probe.result.rates.r) ** k, 0);
+      };
+      if (balance(price) < -0.000001) {
+        let lo = price, hi = Math.max(1, price);
+        for (let k = 0; k < 48 && balance(hi) < 0; k++) hi *= 2;
+        if (balance(hi) >= 0) {
+          for (let k = 0; k < 65 && hi - lo > 0.001; k++) { const mid = (hi + lo) / 2; if (balance(mid) >= 0) hi = mid; else lo = mid; }
+          price = Math.ceil(hi - 1e-8);
+        } else price = null;
+      }
+    }
+    if (recommendation) recommendation.priceCents = price;
+    const contributionAt = (value: number | null | undefined) => {
+      if (value == null || value <= 0) return 0;
+      const run = runModel(probe.model, { ...probe.base, preco: value });
+      const mc = run.values.margem_contribuicao_pct;
+      return typeof mc === 'number' && Number.isFinite(mc) ? mc : 0;
+    };
+    return financeEngineDetailed(args, { netTargetPriceCents, priceCents: price, contribution: contributionAt(price), minimum: contributionAt(recommendation?.range?.min.priceCents), maximum: recommendation?.range?.max.priceCents != null ? contributionAt(recommendation.range.max.priceCents) : null, recommendation: recommendation ? { ...recommendation, contributionPct: price != null ? contributionAt(price) * 100 : null } : null });
+  }
+  const targetPricing = pricing || null;
   const { input: inp, settings: st, publicSector } = args;
   const warnings: string[] = [];
   const bp = (v: number) => v / 10_000;
@@ -757,7 +838,14 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const capexBase = inp.capex.filter((l) => !isVariableFixed(l.impact)).reduce((s, l) => s + costLineTotal(l), 0);
   const E = inp.capex.filter((l) => isVariableFixed(l.impact)).reduce((s, l) => s + costLineTotal(l), 0) + inp.extraInitialCents;
   const opexBase = rec ? inp.opex.reduce((s, l) => s + costLineTotal(l), 0) : 0;
-  const invEstimate = capexBase * (1 + bp(st.contingencyCapexBp)) + E; // só para os avisos de prazo
+  const serviceItems = args.items.length > 0 && args.items.every((i) => (i.kind ?? (rec ? 'recorrencia' : 'venda')) !== 'venda');
+  const serviceBase = inp.capex.filter((l) => !isVariableFixed(l.impact) && (l.kind ? l.kind !== 'venda' : serviceItems)).reduce((t, l) => t + costLineTotal(l), 0);
+  const serviceExtra = inp.atProposed || inp.investmentOutOfPrice ? 0 : serviceInvestmentExtra(serviceBase, st.serviceCostBp);
+  // Sem alvo líquido, mantém a compatibilidade do motor histórico.
+  const monthlyService = rec && st.netMarginTargetBp != null;
+  const serviceInvestmentCents = monthlyService ? 0 : serviceExtra;
+  const serviceMonthlyCents = monthlyService ? serviceExtra : 0;
+  const invEstimate = capexBase * (1 + bp(st.contingencyCapexBp)) + serviceInvestmentCents + E; // só para os avisos de prazo
   if (!rec && inp.opex.length) warnings.push('Venda pontual: custos mensais não entram no cálculo (use o investimento inicial).');
   // tributos por lote: em cada lote (Venda / Serviço) vale o documento fiscal de maior tributo entre os produtos do lote;
   // com os dois lotes no mesmo cálculo, a alíquota é a dos lotes ponderada pela receita; o fixo, uma vez por lote (fatura)
@@ -794,27 +882,27 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const badDebt = st.badDebtBp != null ? bp(st.badDebtBp) : 0;
   if (st.badDebtBp == null) warnings.push('Inadimplência não informada em Configurações → Viabilidade: só a glosa entra no risco.');
   const g = glosa + badDebt;
-  const mMin = bp(st.marginTargetBp), mMax = st.marginMaxBp != null ? bp(st.marginMaxBp) : null;
+  const mMin = targetPricing ? targetPricing.minimum : bp(st.marginTargetBp), mMax = targetPricing ? targetPricing.maximum : st.marginMaxBp != null ? bp(st.marginMaxBp) : null;
   const mAsk = inp.marginTargetBp != null ? bp(inp.marginTargetBp) : bp(st.marginSuggestedBp ?? st.marginTargetBp);
-  const m = clamp(mAsk, mMin, mMax ?? 1);
-  if (inp.marginTargetBp != null && m !== mAsk) warnings.push(`Margem pedida (${(mAsk * 100).toLocaleString('pt-BR')}%) fora dos limites da Direção: ajustada para ${(m * 100).toLocaleString('pt-BR')}%.`);
+  const m = targetPricing ? targetPricing.contribution : clamp(mAsk, mMin, mMax ?? 1);
+  if (!targetPricing && inp.marginTargetBp != null && m !== mAsk) warnings.push(`Margem pedida (${(mAsk * 100).toLocaleString('pt-BR')}%) fora dos limites da Direção: ajustada para ${(m * 100).toLocaleString('pt-BR')}%.`);
   const Dalvo = publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate;
   const horizon = st.horizonMaxMonths ?? null;
   const N = rec ? Math.min(inp.termMonths, horizon ?? inp.termMonths) : 0;
   if (rec && horizon != null && inp.termMonths > horizon) warnings.push(`Vigência de ${inp.termMonths} meses acima do prazo máximo de previsão: a projeção vai até ${horizon} meses.`);
   const pbAsk = inp.paybackMonths ?? null;
-  // o vendedor ajusta o payback livremente (até o prazo projetado) e a análise toda acompanha;
+  // O prazo de recuperação respeita o teto do setor e o prazo projetado;
   // o teto do setor continua como regra de aprovação, pelo payback descontado real (atende_payback)
   const outOfPrice = rec && !!inp.investmentOutOfPrice;
-  const D = rec ? (outOfPrice ? 0 : Math.max(1, Math.min(pbAsk ?? Dalvo, N || 1))) : 0;
-  if (rec && !outOfPrice && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o preço mínimo cai, mas se o retorno real passar do teto a viabilidade vai para a alçada superior.`);
-  if (rec && !outOfPrice && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
+  const D = rec ? outOfPrice ? 0 : Math.max(1, Math.min(pbAsk ?? Dalvo, Dalvo, N || 1)) : 0;
+  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o cálculo foi limitado ao teto configurado.`);
+  if (rec && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
   const d = rec ? 0 : inp.receiveMonth;
 
   // 2–4. preço, fluxo de caixa e decisão: executados pelo modelo de fórmulas (Financial Studio; padrão = motor 2.0)
   const fm = args.model ?? defaultModel();
   const base: FinBase = {
-    recorrente: rec, receita_produtos: revenue, investimento_base: capexBase, despesas_variaveis: E, custo_mensal_base: rec ? opexBase : 0,
+    recorrente: rec, receita_produtos: revenue, investimento_base: capexBase, acrescimo_investimento_servico: serviceInvestmentCents, inferencia_servico_mensal: serviceMonthlyCents, despesas_variaveis: E, custo_mensal_base: rec ? opexBase : 0,
     aliq_contingencia_capex: bp(st.contingencyCapexBp), aliq_contingencia_opex: bp(st.contingencyOpexBp),
     aliq_tributos: a, tributo_fixo: F, tributos_completos: !(pendingItems.length > 0 || !n),
     aliq_comissao: 0, aliq_despesas_variaveis: c, aliq_glosa: glosa, aliq_inadimplencia: badDebt, margem: m, margem_piso: mMin,
@@ -831,7 +919,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const r = numv(pre.values.tma_mensal) ?? 0;
   const inflM = numv(pre.values.inflacao_mensal) ?? 0;
   const I = numv(pre.values.investimento) ?? 0, Inv = numv(pre.values.investimento_total) ?? 0, O = numv(pre.values.custo_mensal) ?? 0;
-  const capexCont = I - capexBase, opexCont = rec ? O - opexBase : 0;
+  const capexCont = I - capexBase - serviceInvestmentCents, opexCont = rec ? O - opexBase - serviceMonthlyCents : 0;
   const cash = numv(pre.values.preco_caixa), eco = numv(pre.values.preco_tma), minP = numv(pre.values.preco_minimo);
   const marginPrice = numv(pre.values.preco_margem_minima), markupPrice = numv(pre.values.preco_exato), recP = numv(pre.values.preco_recomendado);
   const opFloor = numv(pre.values.preco_margem_operacional_zero), suggested = numv(pre.values.preco_minimo_sugerido);
@@ -847,8 +935,8 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   const noValue = n > 0 && revenue <= 0;
   const priceSource: EconResult['priceSource'] = inp.priceCents != null ? 'informado' : noValue ? 'sugerido' : n ? 'itens' : 'motor';
   // sem valor nos produtos: o maior entre o mínimo sugerido e o preço que entrega a margem escolhida pelo vendedor
-  const sugP = suggested != null && recP != null ? Math.max(suggested, recP) : suggested ?? recP;
-  const P0 = inp.priceCents ?? (noValue ? roundUp(sugP) : n ? revenue : roundUp(recP));
+  const sugP = targetPricing ? targetPricing.priceCents : suggested != null && recP != null ? Math.max(suggested, recP) : suggested ?? recP;
+  const P0 = inp.priceCents ?? (noValue ? roundUp(sugP) : n ? revenue : roundUp(targetPricing ? sugP : recP));
   const P = P0 != null && Number.isFinite(P0) ? P0 : null;
   let kpi: EconResult['kpi'] = null;
   let flows: number[] = [];
@@ -886,7 +974,7 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     };
     for (const w of run.warnings) if (!w.includes('Divisão por zero') && !warnings.includes(`Fórmula ${w}`)) warnings.push(`Fórmula ${w}`);
   }
-  let recommendation: EconRecommendation | null = null;
+  let recommendation: EconRecommendation | null = targetPricing?.recommendation ?? null;
   // target seeking: preço que entrega a margem líquida t (recorrente: no contrato inteiro; única: no valor único) (mesma álgebra das fórmulas; só parâmetros)
   // recorrente: margem líquida do contrato no preço P (o mesmo fluxo da aprovação: IR mês a mês, sem crédito nos meses negativos)
   const contractAt = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const t0 = statementOfPeriods(rr.periods, N).total; const tt = outOfPrice ? withInvestment(t0, Inv, st.incomeTaxBp) : t0; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
@@ -906,13 +994,13 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     }
     return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: cp != null && bm != null && bm - mc > 0 ? roundUp(cp / (bm - mc)) : null };
   };
-  const range = !inp.skipRecommendation && st.netMarginMinBp != null && st.netMarginMaxBp != null ? { min: recAt(bp(st.netMarginMinBp)), max: recAt(bp(st.netMarginMaxBp)) } : null;
-  if (st.netMarginTargetBp == null && range) {
+  const range = inp.skipRecommendation ? null : targetPricing ? targetPricing.recommendation?.range ?? null : st.netMarginMinBp != null && st.netMarginMaxBp != null ? { min: recAt(bp(st.netMarginMinBp)), max: recAt(bp(st.netMarginMaxBp)) } : null;
+  if (!targetPricing && st.netMarginTargetBp == null && range) {
     const p = range.min;
     recommendation = { netTargetPct: p.netPct, operatingNeededPct: p.operatingPct, contributionPct: p.contributionPct, priceCents: p.priceCents, params: { overheadPct: st.overheadBp != null ? bp(st.overheadBp) * 100 : null, glosaPct: glosa * 100, badDebtPct: badDebt * 100, incomeTaxPct: st.incomeTaxBp != null ? bp(st.incomeTaxBp) * 100 : null }, feasible: p.priceCents != null, range };
     if (p.contributionPct == null) warnings.push('Faixa de margem líquida informada, mas faltam despesas fixas ou IR/CSLL: sem preço recomendado.');
   }
-  if (!inp.skipRecommendation && st.netMarginTargetBp != null) {
+  if (!targetPricing && !inp.skipRecommendation && st.netMarginTargetBp != null) {
     const mo = numv(pre.values.margem_operacional_necessaria), mc = numv(pre.values.margem_contrib_recomendada), pr = rec ? recAt(bp(st.netMarginTargetBp)).priceCents : numv(pre.values.preco_margem_liquida_alvo);
     const fixas = st.overheadBp != null ? bp(st.overheadBp) : null, irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null;
     recommendation = {
@@ -923,6 +1011,13 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
     if (mc == null) warnings.push('Margem líquida alvo informada, mas faltam despesas fixas ou IR/CSLL em Configurações → Viabilidade: sem margem de contribuição recomendada.');
     else if (pr == null) warnings.push(`A margem de contribuição recomendada (${(mc * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%) não cabe no markup com os tributos e despesas variáveis: a margem líquida alvo não é alcançável por preço.`);
   }
+  if (targetPricing && rec && targetPricing.priceCents != null && st.netMarginTargetBp != null) {
+    const rr = runModel(fm, { ...base, preco: targetPricing.priceCents });
+    const total = statementOfPeriods(rr.periods, N).total;
+    const actualNet = total.net != null && total.revenue > 0 ? total.net / total.revenue * 100 : null;
+    if (targetPricing.netTargetPriceCents != null && targetPricing.priceCents > targetPricing.netTargetPriceCents && actualNet != null) warnings.push(`Para cumprir o teto de payback de ${D} meses, o sugerido foi elevado acima do preço base da margem líquida. A margem líquida do contrato no sugerido é ${actualNet.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% (alvo ${((st.netMarginTargetBp ?? 0) / 100).toLocaleString('pt-BR')}%). A mensalidade permanece constante durante a vigência.`);
+  }
+  if (targetPricing && targetPricing.priceCents == null) warnings.push('A margem líquida esperada não é alcançável com os custos e tributos configurados.');
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
   if (st.inflationAnnualBp == null && rec && N > 12) warnings.push('Inflação anual não informada: a receita não é reajustada depois do 12º mês.');
 
@@ -952,15 +1047,15 @@ export function financeEngineDetailed(args: EngineArgs): { result: EconResult; b
   for (const f of fm.formulas.values()) if (f.version !== 0) versions[f.code] = f.version ?? -1;
 
   const result: EconResult = {
-    engineVersion: ENGINE_VERSION,
+    engineVersion: ENGINE_VERSION, ...(targetPricing ? { pricingBasis: 'net_margin' as const, netTargetPriceCents: targetPricing.netTargetPriceCents, paybackAdjusted: targetPricing.netTargetPriceCents != null && targetPricing.priceCents != null && targetPricing.priceCents > targetPricing.netTargetPriceCents, targetNetMarginPct: (st.netMarginTargetBp ?? 0) / 100 } : {}),
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
     rates: { a, c, g, m, r, b, glosa, badDebt, bMarkup: bMk, mMin, mMax, inflationMonthly: inflM, tmaAnnual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null },
     fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
-    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
+    capexBaseCents: capexBase, capexContingencyCents: Math.round(capexCont), serviceInvestmentCents, serviceMonthlyCents, serviceCostBp: st.serviceCostBp ?? SERVICE_INVESTMENT_BP, opexBaseCents: opexBase, opexContingencyCents: Math.round(opexCont),
     variableFixedCents: E, investmentCents: Math.round(Inv),
     term: { N, Dalvo, D, d, termMonths: inp.termMonths, horizon, paybackAsked: pbAsk }, items, lots: lotsOut,
     floor: { cashCents: roundUp(cash), economicCents: roundUp(eco), minCents: roundUp(minP) },
-    marginPriceCents: roundUp(marginPrice), recommendedCents: roundUp(recP), markupPriceCents: roundUp(markupPrice), operatingFloorCents: roundUp(opFloor), suggestedMinCents: roundUp(suggested),
+    marginPriceCents: roundUp(marginPrice), recommendedCents: roundUp(targetPricing ? sugP : recP), markupPriceCents: roundUp(targetPricing ? sugP : markupPrice), operatingFloorCents: roundUp(opFloor), suggestedMinCents: roundUp(suggested),
     suggestedCents: roundUp(sugP),
     kpi, cashflow: flows.map(Math.round), investmentFlow: investmentFlow.map(Math.round), statement, recommendation,
     marginOk, paybackOk, verdict, withinPolicy, withReservations, warnings,
@@ -981,11 +1076,11 @@ const COST_COLS = {
   qty: ['quantidade', 'qtd', 'qtd.', 'qtde', 'qtde.', 'quant', 'quant.'],
   unitValue: ['valor unitario', 'valor unit', 'valor unit.', 'preco unitario', 'preco', 'valor', 'custo unitario', 'custo unit.', 'custo unit'],
   total: ['valor total', 'total'],
-  frequency: ['frequencia do custo', 'frequencia', 'periodicidade', 'recorrencia'],
-  impact: ['impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
+  frequency: ['quando', 'frequencia do custo', 'frequencia', 'periodicidade', 'recorrencia'],
+  impact: ['deducao', 'impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
 };
-const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
-const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /parceir|terceir/.test(s) ? 'parceiro' : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
+const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr|^mes$/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
+const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /parceir|terceir/.test(s) ? 'parceiro' : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr|parceir/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
 /** Quantidade de planilha ou digitada: "8400", "8.400" (milhar), "2,5", 21 → milésimos. */
 export function costQty(raw: unknown): number | null {
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 1000) : null;
@@ -1040,7 +1135,9 @@ export function parseCostTable(rows: (string | number | null | undefined)[][]): 
     if (unitCents == null) return errors.push({ row, message: `valor inválido em ${description}` });
     const unit = idx.unit >= 0 ? String(r[idx.unit] ?? '').trim().slice(0, 12) || null : null;
     const frequency = idx.frequency >= 0 ? freqOf(r[idx.frequency]) : null, impact = idx.impact >= 0 ? impactOf(r[idx.impact]) : null;
-    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit, ...(frequency ? { frequency } : {}), ...(impact ? { impact } : {}) });
+    const deduction = idx.impact >= 0 && head[idx.impact] === 'deducao' ? norm(r[idx.impact]) : '';
+    const category: CostLine['category'] = /parceir/.test(deduction) ? 'parceiros' : /operac/.test(deduction) ? 'despesas_operacionais' : /mao de obra/.test(deduction) ? 'mao_de_obra' : /mater/.test(deduction) ? 'materia_prima' : null;
+    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit, ...(category ? { category } : {}), ...(frequency ? { frequency } : {}), ...(impact ? { impact } : {}) });
   });
   return { lines, errors, missing: [] };
 }
@@ -1217,9 +1314,9 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Planilha de custos classificada (frequência e impacto), tributos do documento fiscal e parâmetros da Direção.',
     rows: [
-      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(r.capexBaseCents)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : 'materiais, equipamentos e serviços de valor único', value: money(I), strong: true },
       ...(E ? [{ label: 'Despesas variáveis em R$ (E)', formula: 'despesa de entrega e taxa fixa de venda, sem contingência', value: money(E) }] : []),
-      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}` : 'custos operacionais recorrentes', value: money(O), strong: true }] : []),
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: `${money(r.opexBaseCents)} + contingência ${money(r.opexContingencyCents)}${r.serviceMonthlyCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceMonthlyCents)}/mês` : ''}`, value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(r.fiscal ? [
         { label: `Vigência fiscal ${r.fiscal.year} (${r.fiscal.regime === 'reforma' ? 'Reforma Tributária' : 'regime atual'})`, formula: r.fiscal.docs?.length ? r.fiscal.docs.map((x) => `${x.name}: ${pc(x.percentBp / 100)}${x.fromYear != null ? ` (tributos de ${x.fromYear})` : ' (cadastro atual)'}`).join(' · ') : 'sem documento fiscal nos produtos', value: 'na carga da nota' },
@@ -1254,7 +1351,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
   const rc = r.recommendation;
   if (rc) prices.push(
     { label: 'Margem operacional necessária', formula: `margem líquida alvo ÷ (1 - IR/CSLL) = ${pc(rc.netTargetPct)} ÷ (1 - ${rc.params.incomeTaxPct == null ? '—' : pc(rc.params.incomeTaxPct)})`, value: rc.operatingNeededPct == null ? '—' : pc(rc.operatingNeededPct) },
-    { label: 'Margem de contribuição recomendada', formula: `MO + despesas fixas + glosa + inadimplência = ${rc.operatingNeededPct == null ? '—' : pc(rc.operatingNeededPct)} + ${rc.params.overheadPct == null ? '—' : pc(rc.params.overheadPct)} + ${pc(rc.params.glosaPct)} + ${pc(rc.params.badDebtPct)}`, value: rc.contributionPct == null ? '—' : pc(rc.contributionPct), strong: true },
+    { label: 'Margem de contribuição recomendada', formula: r.pricingBasis === 'net_margin' ? 'Resultado do preço que entrega a margem líquida esperada; na recorrência, contribuição do primeiro mês.' : `MO + despesas fixas + glosa + inadimplência = ${rc.operatingNeededPct == null ? '—' : pc(rc.operatingNeededPct)} + ${rc.params.overheadPct == null ? '—' : pc(rc.params.overheadPct)} + ${pc(rc.params.glosaPct)} + ${pc(rc.params.badDebtPct)}`, value: rc.contributionPct == null ? '—' : pc(rc.contributionPct), strong: true },
     { label: 'Preço com a margem recomendada', formula: rc.contributionPct == null ? 'sem margem recomendada' : `(${costTxt}) ÷ (1 - ${pc(a * 100)} - ${pc(c * 100)} - ${pc(rc.contributionPct)})`, value: rc.priceCents == null ? 'a margem não cabe no divisor' : `${money(rc.priceCents)}${rec ? '/mês' : ''}`, ok: rc.feasible },
   );
   if (rc?.range) for (const [lab, pt] of [['mínima', rc.range.min], ['máxima', rc.range.max]] as const) prices.push({
@@ -1262,7 +1359,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
     value: pt.priceCents == null ? 'não cabe no divisor' : `${money(pt.priceCents)}${rec ? '/mês' : ''}`, strong: true,
   });
   const pbNote = rec && annuity && k ? `Payback do investimento na precificação = ${D} ${D === 1 ? 'mês' : 'meses'} (a parcela pela TMA devolve I com juros em exatamente D meses). O payback de caixa (${k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses`}) sai menor porque a margem de contribuição também entra no caixa; ele só é igual a D com margem zero.` : undefined;
-  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
+  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: r.pricingBasis === 'net_margin' ? 'Preço que cobre os custos e entrega a margem líquida alvo, considerando tributos, perdas, despesas fixas e IR/CSLL. Na mensalidade, busca primeiro a margem líquida do contrato inteiro; se necessário, eleva a mensalidade constante para cumprir o teto de retorno, mostrando a margem final maior.' : 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
 
   const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
   const cmp = fx ? econCompare(r, opts.legacy ?? {}) : null;
@@ -1334,8 +1431,8 @@ function econMemoryV1(r: EconResult, fmt: (c: number) => string, opts: MemoryOpt
   steps.push({
     key: 'entradas', title: 'Entradas', desc: 'Custos da oportunidade, tributos dos documentos fiscais e parâmetros vigentes do motor.',
     rows: [
-      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}` : undefined, value: money(I), strong: true },
-      ...(rec ? [{ label: 'Custos mensais (O)', formula: r.opexContingencyCents ? `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}` : undefined, value: money(O), strong: true }] : []),
+      { label: 'Investimento inicial (I)', formula: r.capexContingencyCents || r.serviceInvestmentCents ? `${money(capexBase)} + contingência ${money(r.capexContingencyCents)}${r.serviceInvestmentCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceInvestmentCents)}` : ''}` : undefined, value: money(I), strong: true },
+      ...(rec ? [{ label: 'Custos mensais (O)', formula: `${money(opexBase)} + contingência ${money(r.opexContingencyCents)}${r.serviceMonthlyCents ? ` + inferência custo de serviço (${((r.serviceCostBp ?? SERVICE_INVESTMENT_BP) / 100).toLocaleString('pt-BR')}%) ${money(r.serviceMonthlyCents)}/mês` : ''}`, value: money(O), strong: true }] : []),
       { label: 'Tributos sobre o preço (a)', formula: r.items.length ? `maior documento de cada lote, pelo peso na receita: ${taxParts}` : 'sem produtos', value: pc(a * 100) },
       ...(F ? [{ label: 'Tributo fixo por fatura (F)', value: money(F) }] : []),
       { label: 'Comissão (c)', value: pc(c * 100) },

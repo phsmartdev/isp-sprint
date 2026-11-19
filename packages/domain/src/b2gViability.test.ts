@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { b2gViability, distribute, type B2gParams, type B2gProduct } from './b2gViability';
-import type { CostLine } from './finance';
+import { b2gFromEconomics, b2gViability, distribute, type B2gParams, type B2gProduct } from './b2gViability';
+import { emptyEconInput, type CostLine, type EconSettings } from './finance';
 
 const nfe = { name: 'NF-e', taxBp: 1000, fixedCents: 0 }; // 10%
 const nfse = { name: 'NFS-e', taxBp: 1500, fixedCents: 0 }; // 15%
@@ -20,14 +20,14 @@ describe('viabilidade B2G', () => {
   });
 
   it('só recorrente: mensalidade pela fórmula do payback (conta conferida)', () => {
-    // custo direto da implantação R$ 10.000, rateio 35% sobre o custo = R$ 3.500 → investimento R$ 13.500
-    // despesas fixas na mensalidade: (10.000 ÷ 12 + 1.000) ÷ (1 − 15% tributos − 35% fixas) = 1.833,33 ÷ 0,50 = R$ 3.666,67
+    // Investimento: R$ 10.000 + acréscimo de serviço de R$ 3.500 = R$ 13.500.
+    // Despesas fixas configuradas continuam independentes: (13.500 ÷ 12 + 1.000) ÷ (1 − 15% tributos − 35% fixas) = R$ 4.250,00.
     const r = b2gViability([prod('link', 'recorrencia', 'implantacao', 300_000)], [line('recorrencia', 1_000_000)], [{ description: 'mensal', qtyMilli: 1000, unitCents: 100_000 }], { ...base, paybackMonths: 12 });
     expect(r.unica).toBeNull();
-    expect(r.recorrente!.investmentCents).toBe(1_000_000);
+    expect(r.recorrente!.investmentCents).toBe(1_350_000);
     expect(r.recorrente!.overheadOnCostCents).toBe(0);
-    expect(r.recorrente!.lines[0]!.priceCents).toBe(366_667);
-    expect(r.recorrente!.lines[0]!.overheadCents).toBe(128_333); // 35% da mensalidade, todo mês
+    expect(r.recorrente!.lines[0]!.priceCents).toBe(425_000);
+    expect(r.recorrente!.lines[0]!.overheadCents).toBe(148_750); // 35% da mensalidade, todo mês
     expect(r.recorrente!.lines[0]!.overheadBase).toBe('preco');
     expect(r.recorrente!.lines[0]!.paybackMonths).toBeCloseTo(12, 6);
   });
@@ -43,14 +43,16 @@ describe('viabilidade B2G', () => {
     expect(r.global.priceCents).toBe(r.unica!.priceCents + r.recorrente!.priceCents);
     expect(r.global.netCents).toBe(r.unica!.netCents + r.recorrente!.netCents);
     expect(r.global.costCents).toBe(r.unica!.costCents + r.recorrente!.costCents);
-    // o investimento do recorrente não é abatido pela venda única
-    expect(r.recorrente!.investmentCents).toBe(1_000_000);
+    // Instalação avulsa e investimento recorrente permanecem em perfis independentes.
+    const uniqueImpl = 81_000;
+    expect(r.unica!.lines.find((l) => l.id === 'inst')!.costCents).toBe(uniqueImpl);
+    expect(r.recorrente!.investmentCents).toBe(1_350_000);
     expect(r.global.markup).toBeCloseTo(r.global.priceCents / r.global.costCents, 10);
   });
 
-  it('contribuição 35% + rateio 35% na Implantação (venda única) zera a margem de operação', () => {
-    const r = b2gViability([prod('inst', 'servico', 'implantacao', 100_000)], [line('servico', 50_000)], [], { ...base, contributionBp: { implantacao: 3500 } });
-    const c = r.unica!.cascade!.find((x) => x.profile === 'implantacao')!;
+  it('contribuição 35% + rateio 35% na Instalação (venda única) zera a margem de operação', () => {
+    const r = b2gViability([prod('inst', 'servico', 'implantacao', 100_000)], [line('servico', 50_000)], [], { ...base, contributionBp: { instalacao: 3500 } });
+    const c = r.unica!.cascade!.find((x) => x.profile === 'instalacao')!;
     expect(c.contributionPct).toBeCloseTo(35, 4);
     expect(c.overheadPct).toBe(35);
     expect(c.operatingPct).toBeCloseTo(0, 2);
@@ -126,4 +128,57 @@ describe('viabilidade B2G', () => {
     expect(r.unica!.lines[0]!.floorCents).toBeNull();
     expect(r.alerts.join(' ')).toMatch(/Configure a margem líquida mínima/);
   });
+  it('três perfis independentes: mudar a instalação não altera o custo ou preço mensal', () => {
+    const ps = [prod('Venda', 'venda', 'fornecimento', 200000), prod('Avulso', 'servico', 'implantacao', 100000), prod('Link', 'recorrencia', 'implantacao', 10000), prod('Aluguel', 'locacao', 'fornecimento', 20000)];
+    const capex = [line('venda', 50001), line('servico', 300001), line('recorrencia', 240003)];
+    const params = { ...base, autoPrice: true, termMonths: 12, paybackMonths: 6, overheadBp: 0, netTargetBp: 2000 };
+    const r = b2gViability(ps, capex, [line(null, 3000)], params);
+    expect(r.unica!.lines.find((l) => l.id === 'Venda')!.costCents).toBe(50001);
+    expect(r.unica!.lines.find((l) => l.id === 'Avulso')!).toMatchObject({ profile: 'instalacao', costCents: 405001 });
+    expect(r.recorrente!.investmentCents).toBe(324004);
+    expect(r.recorrente!.lines.every((l) => l.profile === 'implantacao')).toBe(true);
+    expect(r.recorrente!.lines.reduce((t, l) => t + l.investmentCents!, 0)).toBe(324004);
+    expect(r.baskets!.reduce((t, b) => t + b.costCents, 0)).toBe(r.global.costCents);
+    expect(r.global.costCents).toBe(815006);
+    const changed = b2gViability(ps, [...capex.slice(0, 1), line('servico', 700001), capex[2]!], [line(null, 3000)], params);
+    expect(changed.recorrente).toEqual(r.recorrente);
+    expect(changed.global.costCents - r.global.costCents).toBe(540000);
+  });
+
+  it.each([true, false])('mantém sugerido em ambos os contextos; valor informado = %s', (known) => {
+    const ps = [prod('Venda', 'venda', 'fornecimento', known ? 100000 : 0), prod('Avulso', 'servico', 'instalacao', known ? 120000 : 0), prod('Link', 'recorrencia', 'implantacao', known ? 20000 : 0)].map((x) => ({ ...x, priceDefined: known }));
+    const r = b2gViability(ps, [line('venda', 50001), line('servico', 60003), line('recorrencia', 120005)], [line(null, 1000)], { ...base, autoPrice: true, netTargetBp: 2000, paybackMonths: 6, termMonths: 12 });
+    for (const l of [...r.unica!.lines, ...r.recorrente!.lines]) {
+      expect(l.suggestedCents).toBeGreaterThan(0);
+      expect(l.priceBasis).toBe(known ? 'informado' : 'sugerido');
+      expect(l.priceCents).toBe(known ? l.estimatedCents : l.suggestedCents);
+      expect(l.netPct).not.toBeNull();
+    }
+  });
+
+  it('sem valores: divisão igual por cesta com centavos fechados e peso manual preservado', () => {
+    const ps = [prod('A', 'venda', 'fornecimento', 0), prod('B', 'venda', 'fornecimento', 0), prod('C', 'servico', 'instalacao', 0)];
+    const capex = [line('venda', 100001), line('servico', 70003)];
+    const params = { ...base, autoPrice: true, netTargetBp: 2000 };
+    const r = b2gViability(ps, capex, [], params);
+    expect(r.unica!.lines.map((l) => l.costCents)).toEqual([50001, 50000, 94504]);
+    const weighted = b2gViability(ps, capex, [], { ...params, weights: { A: 0.8 } });
+    expect(weighted.unica!.lines.map((l) => l.costCents)).toEqual([80001, 20000, 94504]);
+    expect(weighted.global.costCents).toBe(194505);
+  });
+
+  it('perfil sem produto avisa e mantém custo global, sem contaminar outra cesta', () => {
+    const r = b2gViability([prod('Venda', 'venda', 'fornecimento', 100000)], [line('servico', 50001)], [], { ...base, autoPrice: true, netTargetBp: 2000 });
+    expect(r.unica!.costCents).toBe(0);
+    expect(r.global.costCents).toBe(67501);
+    expect(r.alerts.join(' ')).toMatch(/não foi distribuído para outros perfis/);
+    expect(r.verdict).toBe('abaixo_minimo');
+  });
+  it('usa margem e payback padrão quando não existe margem líquida alvo', () => {
+    const settings: EconSettings = { marginTargetBp: 2000, tmaMonthlyBp: 0, commissionBp: 0, lossPrivateBp: 0, lossPublicBp: 0, contingencyCapexBp: 0, contingencyOpexBp: 0, paybackMaxPrivate: 6, paybackMaxPublic: 12, blockOutsidePolicy: true };
+    const r = b2gFromEconomics({ publicSector: false, settings, input: { ...emptyEconInput(), capex: [line('venda', 60000), line('servico', 50000), line('recorrencia', 120000)] }, items: (['venda', 'servico', 'recorrencia'] as const).map((kind) => ({ description: kind, kind, priceDefined: false, revenueCents: 0, doc: { name: 'Doc', percentBp: 1000, fixedCents: 0, complete: true } })) });
+    expect(r.unica!.lines.map((l) => l.suggestedCents)).toEqual([85714, 96429]);
+    expect(r.recorrente!.monthlyPriceCents).toBe(30000);
+  });
+
 });

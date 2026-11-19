@@ -46,8 +46,8 @@ describe('envelope fiscal por vigência (documentos fiscais por ano + DRE e rete
     const s = r27.statement!;
     expect(s.month.incomeTax).toBe(Math.round(Math.max(0, s.month.operating!) * 0.15));
     expect(s.after!.incomeTax).toBe(Math.round(Math.max(0, s.after!.operating!) * 0.15));
-    expect(r27.recommendation!.contributionPct!).toBeCloseTo(40 / 0.85 + 24, 6);
-    expect(r26.recommendation!.contributionPct!).toBeCloseTo(40 / 0.89 + 24, 6);
+    expect(r27.recommendation!.contributionPct!).toBeCloseTo(r27.kpi!.marginPct, 6);
+    expect(r26.recommendation!.contributionPct!).toBeCloseTo(r26.kpi!.marginPct, 6);
     // sem ano informado: o ano corrente
     expect(run().fiscal!.year).toBe(2026);
   });

@@ -4,12 +4,12 @@
  * Venda única e mensalidade aparecem em blocos separados, e o consolidado soma tudo.
  */
 import clsx from 'clsx';
-import { COST_PROFILE_SHORT, type B2gBlock, type B2gLine, type B2gResult, type EconSettings } from '@isp/domain';
+import { COST_PROFILES, COST_PROFILE_LABELS, COST_PROFILE_SHORT, type CostProfile, type B2gBlock, type B2gLine, type B2gResult, type EconSettings } from '@isp/domain';
 import { fmtBRL } from '../../lib/format';
 import { FormField, Input, Notice } from '../../components/ui/primitives';
 
-export type B2gForm = { mode: 'A' | 'B'; overhead: string; netTarget: string; mcForn: string; mcImpl: string; solvePb: boolean; weights: Record<string, string>; bids: Record<string, string> };
-export const emptyB2gForm = (): B2gForm => ({ mode: 'A', overhead: '', netTarget: '', mcForn: '', mcImpl: '', solvePb: false, weights: {}, bids: {} });
+export type B2gForm = { mode: 'A' | 'B'; overhead: string; netTarget: string; mcForn: string; mcImpl: string; mcInst: string; solvePb: boolean; weights: Record<string, string>; bids: Record<string, string> };
+export const emptyB2gForm = (): B2gForm => ({ mode: 'A', overhead: '', netTarget: '', mcForn: '', mcImpl: '', mcInst: '', solvePb: false, weights: {}, bids: {} });
 
 const pct = (v: number | null | undefined, d = 1) => (v == null ? '—' : `${v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d })}%`);
 const bpText = (bp: number | null | undefined) => (bp == null ? '' : (bp / 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 }));
@@ -27,20 +27,18 @@ const VERDICT: Record<B2gResult['verdict'], { label: string; cls: string }> = {
   bloqueado: { label: 'Bloqueado: falta documento fiscal', cls: 'bg-danger-soft text-danger' },
 };
 
-export function B2gPanel({ r, f, set, settings, disabled }: { r: B2gResult | null | undefined; f: B2gForm; set: (p: Partial<B2gForm>) => void; settings: EconSettings; disabled: boolean }) {
+export function B2gPanel({ r, profiles, f, set, settings, disabled }: { profiles?: CostProfile[]; r: B2gResult | null | undefined; f: B2gForm; set: (p: Partial<B2gForm>) => void; settings: EconSettings; disabled: boolean }) {
+  const maxPct = settings.netMarginMaxBp != null ? settings.netMarginMaxBp / 100 : null;
   const minPct = settings.netMarginMinBp != null ? settings.netMarginMinBp / 100 : null;
-  const hasUnica = !!r?.kinds.unica, hasRec = !!r?.kinds.recorrente;
-  const hasForn = !!r?.unica?.lines.some((l) => l.profile === 'fornecimento');
-  const hasImpl = !!r?.unica?.lines.some((l) => l.profile === 'implantacao');
   return (
     <section className="space-y-4 border border-line p-4" aria-labelledby="b2g-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 id="b2g-title" className="text-sm font-semibold text-ink">Preço por produto</h3>
-          <p className="max-w-2xl text-xs text-muted">{f.mode === 'A' ? 'Do custo ao preço: informe os custos e a margem; o sistema calcula o preço de cada produto.' : 'Do preço às margens: parta do valor estimado do edital (ou simule o lance) e veja as margens, o piso e o desconto máximo.'}</p>
+          <p className="max-w-2xl text-xs text-muted">Valores preenchidos nos produtos: análise no preço de venda. Valores em branco: análise no preço sugerido. O sugerido fica disponível em ambos os cenários.</p>
         </div>
-        <div className="flex rounded-sm border border-line p-0.5 text-sm" role="radiogroup" aria-label="Forma de cálculo">
-          {([['A', 'Do custo ao preço'], ['B', 'Do preço às margens']] as const).map(([m, l]) => (
+        <div className="flex rounded-sm border border-line p-0.5 text-sm" role="radiogroup" aria-label="Visualização dos preços">
+          {([['A', 'Preços e custos'], ['B', 'Simular lances']] as const).map(([m, l]) => (
             <label key={m} className={clsx('cursor-pointer rounded-sm px-3 py-1.5', f.mode === m ? 'bg-primary-soft font-semibold text-primary' : 'text-muted hover:text-ink')}>
               <input type="radio" className="sr-only" checked={f.mode === m} disabled={disabled} onChange={() => set({ mode: m })} />{l}
             </label>
@@ -49,29 +47,13 @@ export function B2gPanel({ r, f, set, settings, disabled }: { r: B2gResult | nul
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <FormField label="Despesas fixas rateadas (%)" htmlFor="b2g-oh" hint={`Só na Implantação. Padrão ${bpText(settings.overheadBp ?? 0)}%.`}>
+        <FormField label="Despesas fixas rateadas (%)" htmlFor="b2g-oh" hint={`Nos serviços de Instalação e Implantação. Padrão ${bpText(settings.overheadBp ?? 0)}%.`}>
           <Input id="b2g-oh" inputMode="decimal" placeholder={bpText(settings.overheadBp ?? 0)} value={f.overhead} disabled={disabled} onChange={(e) => set({ overhead: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
         </FormField>
-        <FormField label="Margem líquida alvo (%)" htmlFor="b2g-nt" hint={minPct != null ? `Mínimo da diretoria: ${pct(minPct)}` : 'Sem mínimo configurado'}>
-          <Input id="b2g-nt" inputMode="decimal" placeholder={bpText(settings.netMarginTargetBp ?? settings.netMarginMinBp ?? null)} value={f.netTarget} disabled={disabled} onChange={(e) => set({ netTarget: e.target.value.replace(/[^\d,.-]/g, '').slice(0, 6) })} />
+        <FormField label="Margem líquida esperada (%)" htmlFor="b2g-nt" hint={`Recomendação: ${bpText(settings.netMarginTargetBp)}%. Permitido: ${bpText(settings.netMarginMinBp)}% a ${bpText(settings.netMarginMaxBp)}%.`}>
+          <Input id="b2g-nt" inputMode="decimal" value={f.netTarget} disabled={disabled} placeholder={bpText(settings.netMarginTargetBp)} onChange={(e) => set({ netTarget: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
         </FormField>
-        {f.mode === 'A' && hasUnica && hasForn && (
-          <FormField label="Margem de contribuição · Fornecimento (%)" htmlFor="b2g-mf" hint="Em branco: calculada pela margem líquida alvo">
-            <Input id="b2g-mf" inputMode="decimal" value={f.mcForn} disabled={disabled} onChange={(e) => set({ mcForn: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
-          </FormField>
-        )}
-        {f.mode === 'A' && hasUnica && hasImpl && (
-          <FormField label="Margem de contribuição · Implantação (%)" htmlFor="b2g-mi" hint="Em branco: calculada pela margem líquida alvo">
-            <Input id="b2g-mi" inputMode="decimal" value={f.mcImpl} disabled={disabled} onChange={(e) => set({ mcImpl: e.target.value.replace(/[^\d,.]/g, '').slice(0, 6) })} />
-          </FormField>
-        )}
       </div>
-      {f.mode === 'A' && hasRec && (
-        <label className="flex items-start gap-2 text-sm text-text">
-          <input type="checkbox" className="mt-0.5 accent-primary" checked={f.solvePb} disabled={disabled} onChange={(e) => set({ solvePb: e.target.checked })} />
-          <span>Calcular o payback pela margem líquida alvo <span className="block text-xs text-muted">Desmarcado, vale o payback informado acima. Marcado, o sistema acha o payback em que a margem líquida da vigência chega ao alvo (os primeiros meses ficam com margem baixa).</span></span>
-        </label>
-      )}
 
       {!r ? <Notice tone="warning">Confira os campos destacados para ver o preço por produto.</Notice> : (
         <>
@@ -85,8 +67,17 @@ export function B2gPanel({ r, f, set, settings, disabled }: { r: B2gResult | nul
               {r.alerts.map((a) => <li key={a}>{a}</li>)}
             </ul>
           )}
-          {r.unica && <Block title="Venda única" hint="Fornecimento e implantação pagos uma vez." b={r.unica} f={f} set={set} disabled={disabled} minPct={minPct} />}
-          {r.recorrente && <Block title="Mensalidade" hint="Recorrência e locação: o investimento volta no payback." b={r.recorrente} f={f} set={set} disabled={disabled} minPct={minPct} />}
+          {!r.baskets && r.unica && <Block title="Venda única (cálculo anterior)" hint="Fotografia preservada" b={r.unica} f={f} set={set} disabled={disabled} minPct={minPct} maxPct={maxPct} />}
+          {!r.baskets && r.recorrente && <Block title="Mensalidade (cálculo anterior)" hint="Fotografia preservada" b={r.recorrente} f={f} set={set} disabled={disabled} minPct={minPct} maxPct={maxPct} />}
+          {!!r.baskets && COST_PROFILES.filter((p) => !profiles || profiles.includes(p)).map((profile) => {
+            const source = profile === 'implantacao' ? r.recorrente : r.unica;
+            const lines = source?.lines.filter((l) => l.profile === profile) ?? [];
+            if (!source || !lines.length) return null;
+            const sum = (field: 'costCents' | 'contributionCents' | 'operatingCents' | 'netCents' | 'overheadCents') => lines.reduce((t, l) => t + (l[field] ?? 0), 0);
+            const price = source.revenue === 'recorrente' ? source.priceCents : lines.reduce((t, l) => t + (l.priceCents ?? 0), 0);
+            const b = { ...source, lines, priceCents: price, costCents: sum('costCents'), contributionCents: sum('contributionCents'), overheadCents: sum('overheadCents'), operatingCents: sum('operatingCents'), netCents: sum('netCents'), netPct: price > 0 ? sum('netCents') / price * 100 : null, cascade: source.cascade?.filter((c) => c.profile === profile) };
+            return <Block key={profile} title={COST_PROFILE_LABELS[profile]} hint={source.revenue === 'recorrente' ? 'Pagamento mensal' : 'Pagamento único'} b={b} f={f} set={set} disabled={disabled} minPct={minPct} maxPct={maxPct} />;
+          })}
           {r.unica && r.recorrente && <Consolidated r={r} minPct={minPct} />}
           {!(r.unica && r.recorrente) && r.byDoc.length > 1 && <ByDoc r={r} />}
           {!!r.notes.length && <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul>}
@@ -96,27 +87,30 @@ export function B2gPanel({ r, f, set, settings, disabled }: { r: B2gResult | nul
   );
 }
 
-function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hint: string; b: B2gBlock; f: B2gForm; set: (p: Partial<B2gForm>) => void; disabled: boolean; minPct: number | null }) {
+function Block({ title, hint, b, f, set, disabled, minPct, maxPct }: { title: string; hint: string; b: B2gBlock; f: B2gForm; set: (p: Partial<B2gForm>) => void; disabled: boolean; minPct: number | null; maxPct: number | null }) {
+  const known = b.lines.some((l) => l.priceDefined ?? l.estimatedCents > 0);
+  const suggested = b.lines.every((l) => l.suggestedCents != null) ? b.lines.reduce((t, l) => t + l.suggestedCents!, 0) : null;
   const rec = b.revenue === 'recorrente', per = rec ? '/mês' : '';
   return (
-    <div className="space-y-3">
+    <section className="space-y-3" aria-label={`Cesta ${title}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-1.5">
         <p className="text-sm font-semibold text-ink">{title} <span className="font-normal text-muted">· {hint}</span></p>
-        <p className="text-xs text-muted">{rec ? <>Mensalidade <b className="num text-ink">{brl(b.monthlyPriceCents ?? null)}/mês</b> · na vigência {brl(b.priceCents)}</> : <>Preço <b className="num text-ink">{brl(b.priceCents)}</b></>} · margem líquida <b className={clsx('num', tone(b.netPct, minPct))}>{pct(b.netPct)}</b></p>
+        <p className="text-xs text-muted">{rec ? <>Mensalidade <b className="num text-ink">{brl(b.monthlyPriceCents ?? null)}/mês</b> · na vigência {brl(b.priceCents)}</> : <>Preço <b className="num text-ink">{brl(b.priceCents)}</b></>} · custo total da cesta <b className="num text-ink">{brl(b.costCents)}</b> · margem líquida <b className={clsx('num', tone(b.netPct, minPct))}>{pct(b.netPct)} · {brl(b.netCents)}</b></p>
       </div>
 
+      <p className="text-xs text-muted">Preço sugerido da cesta <b className="num text-primary">{brl(suggested)}{per}</b> · {known ? 'Margens avaliadas no valor de venda ou lance simulado.' : 'Sem valor de venda: margem líquida apresentada somente para a cesta, no preço sugerido.'}{minPct != null && maxPct != null ? ` Faixa: acima de ${pct(minPct)} e abaixo de ${pct(maxPct)}.` : ''}</p>
       {rec ? (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
           <Fact k="Custo direto da implantação" v={brl(b.directImplCents)} />
           <Fact k="Despesas fixas (da mensalidade)" v={`${brl(b.lines.reduce((t, l) => t + l.overheadCents, 0))}/mês`} />
           <Fact k="Investimento a recuperar" v={brl(b.investmentCents)} strong />
           <Fact k="Custo mensal" v={`${brl(b.monthlyCostCents)}/mês`} />
-          <Fact k="Payback" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
+          <Fact k="Payback real" v={b.paybackMonths != null ? months(b.paybackMonths) : '—'} strong />
           <Fact k="Vigência" v={b.termMonths ? `${b.termMonths} meses` : '—'} />
           <Fact k="Mensalidade" v={`${brl(b.monthlyPriceCents ?? b.priceCents)}/mês`} strong />
           {b.paybackStatus ? <Fact k="Situação" v={b.paybackStatus} /> : null}
         </dl>
-      ) : !!b.cascade?.length && (
+      ) : known && !!b.cascade?.length && (
         <div className="grid gap-2 sm:grid-cols-2">
           {b.cascade.map((c) => (
             <p key={c.profile} className="rounded-md bg-surface-2 px-3 py-2 text-sm text-text">
@@ -127,23 +121,24 @@ function Block({ title, hint, b, f, set, disabled, minPct }: { title: string; hi
       )}
 
       <div className="scroll-thin overflow-x-auto">
-        <table className="w-full min-w-[980px] text-left text-sm">
+        <table className={clsx('w-full text-left text-sm', known ? 'min-w-[1100px]' : 'min-w-[560px]')}>
           <thead className="text-xs text-muted">
-            <tr>{['Produto', 'Perfil', rec ? 'Custo na vigência' : 'Custo', 'Peso', 'Valor estimado', f.mode === 'B' ? 'Lance simulado' : 'Preço calculado', 'Contribuição', 'Operacional', 'Líquida', 'Piso', 'Desconto máx.', 'Faixa de lance'].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
+            <tr>{['Produto', ...(known ? ['Líquida / negociação'] : []), 'Perfil', rec ? 'Custo na vigência' : 'Custo', 'Peso', ...(known ? ['Valor de venda'] : []), 'Preço sugerido', ...(known || f.mode === 'B' ? [f.mode === 'B' ? 'Lance simulado' : 'Preço avaliado'] : []), ...(known ? ['Contribuição', 'Operacional', 'Piso', 'Desconto máx.', 'Faixa de lance'] : [])].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
           </thead>
-          <tbody>{b.lines.map((l) => <Row key={l.id} l={l} f={f} set={set} disabled={disabled} minPct={minPct} per={per} />)}</tbody>
+          <tbody>{b.lines.map((l) => <Row key={l.id} l={l} f={f} set={set} disabled={disabled} minPct={minPct} maxPct={maxPct} known={known} per={per} />)}</tbody>
         </table>
       </div>
-    </div>
+    </section>
   );
 }
 
-function Row({ l, f, set, disabled, minPct, per }: { l: B2gLine; f: B2gForm; set: (p: Partial<B2gForm>) => void; disabled: boolean; minPct: number | null; per: string }) {
+function Row({ l, f, set, disabled, minPct, maxPct, known, per }: { l: B2gLine; f: B2gForm; set: (p: Partial<B2gForm>) => void; disabled: boolean; minPct: number | null; maxPct: number | null; known: boolean; per: string }) {
   const wOn = f.weights[l.id] != null;
   return (
     <>
       <tr className="border-t border-line align-middle">
-        <td className="px-1.5 py-1.5"><span className="font-medium text-ink">{l.description}</span>{l.doc && <span className="block text-2xs text-muted">{l.doc} · {pct(l.taxPct)}</span>}</td>
+        <td className="min-w-[130px] px-1.5 py-1.5"><span className="font-medium text-ink">{l.description}</span>{l.doc && <span className="block text-2xs text-muted">{l.doc} · {pct(l.taxPct)}</span>}</td>
+        {known && <td className={clsx('num px-1.5 py-1.5 font-semibold', tone(l.netPct, minPct))}>{pct(l.netPct)}<ProductAssessment l={l} minPct={minPct} maxPct={maxPct} per={per} /></td>}
         <td className="px-1.5 py-1.5 text-muted">{COST_PROFILE_SHORT[l.profile]}</td>
         <td className="num px-1.5 py-1.5">{brl(l.costCents)}{l.investmentCents != null && <span className="block text-2xs text-muted">invest. {brl(l.investmentCents)}</span>}</td>
         <td className="px-1.5 py-1.5">
@@ -151,24 +146,36 @@ function Row({ l, f, set, disabled, minPct, per }: { l: B2gLine; f: B2gForm; set
             placeholder={l.weightPct.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} value={f.weights[l.id] ?? ''}
             onChange={(e) => { const v = e.target.value.replace(/[^\d,.]/g, '').slice(0, 5); const w = { ...f.weights }; if (v) w[l.id] = v; else delete w[l.id]; set({ weights: w }); }} />
         </td>
-        <td className="num px-1.5 py-1.5">{brl(l.estimatedCents)}{per}</td>
-        <td className="px-1.5 py-1.5">
+        {known && <td className="num px-1.5 py-1.5">{l.priceDefined === false ? 'Não informado' : <>{brl(l.estimatedCents)}{per}</>}</td>}
+        <td className="num px-1.5 py-1.5 font-semibold text-primary">{brl(l.suggestedCents)}{per}</td>
+        {(known || f.mode === 'B') && <td className="px-1.5 py-1.5">
           {f.mode === 'B' ? (
             <Input aria-label={`Lance de ${l.description}`} inputMode="decimal" className="num h-8 w-[110px]" disabled={disabled} placeholder={money(l.estimatedCents)} value={f.bids[l.id] ?? ''}
               onChange={(e) => { const v = e.target.value.replace(/[^\d,.]/g, ''); const b = { ...f.bids }; if (v) b[l.id] = v; else delete b[l.id]; set({ bids: b }); }} />
           ) : <span className="num font-semibold text-ink">{brl(l.priceCents)}{per}</span>}
           {l.markup != null && <span className="block text-2xs text-muted">markup {l.markup.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}×</span>}
-        </td>
-        <td className={clsx('num px-1.5 py-1.5', tone(l.contributionPct, null))}>{pct(l.contributionPct)}</td>
+        </td>}
+        {known && <><td className={clsx('num px-1.5 py-1.5', tone(l.contributionPct, null))}>{pct(l.contributionPct)}</td>
         <td className={clsx('num px-1.5 py-1.5', tone(l.operatingPct, null))}>{pct(l.operatingPct)}{l.overheadCents > 0 && <span className="block text-2xs text-muted">fixas {brl(l.overheadCents)}{per} s/ preço</span>}</td>
-        <td className={clsx('num px-1.5 py-1.5 font-semibold', tone(l.netPct, minPct))}>{pct(l.netPct)}</td>
         <td className="num px-1.5 py-1.5">{brl(l.floorCents)}{l.floorCents != null && per}</td>
         <td className="num px-1.5 py-1.5">{l.maxDiscountPct == null ? '—' : pct(l.maxDiscountPct)}</td>
-        <td className="num whitespace-nowrap px-1.5 py-1.5 text-xs text-muted">{l.bidRange ? `${brl(l.bidRange.from)} a ${brl(l.bidRange.to)}` : '—'}{l.paybackMonths != null && <span className="block">payback {months(l.paybackMonths)}{l.cashPaybackMonths != null ? ` · caixa ${months(l.cashPaybackMonths)}` : ''}</span>}</td>
+        <td className="num whitespace-nowrap px-1.5 py-1.5 text-xs text-muted">{l.bidRange ? `${brl(l.bidRange.from)} a ${brl(l.bidRange.to)}` : '—'}{l.paybackMonths != null && <span className="block">payback {months(l.paybackMonths)}{l.cashPaybackMonths != null ? ` · caixa ${months(l.cashPaybackMonths)}` : ''}</span>}</td></>}
       </tr>
-      {!!l.alerts.length && <tr><td colSpan={12} className="px-1.5 pb-2 text-xs text-[#C2610C]">{l.alerts.join(' · ')}</td></tr>}
+      {known && !!l.alerts.length && <tr><td colSpan={13} className="px-1.5 pb-2 text-xs text-[#C2610C]">{l.alerts.join(' · ')}</td></tr>}
     </>
   );
+}
+
+function ProductAssessment({ l, minPct, maxPct, per }: { l: B2gLine; minPct: number | null; maxPct: number | null; per: string }) {
+  if (minPct == null || maxPct == null) return <span className="block text-2xs font-normal text-muted">Configure a faixa de margem líquida.</span>;
+  if (l.netPct == null || l.priceCents == null) return <span className="block text-2xs font-normal text-muted">Margem não calculada.</span>;
+  const low = l.netPct <= minPct, high = l.netPct >= maxPct;
+  const room = l.floorCents != null ? Math.max(0, l.priceCents - l.floorCents) : null;
+  return <span className="mt-1 block min-w-[160px] text-xs font-normal" aria-label={`Negociação de ${l.description}`}>
+    <span className={clsx('block font-semibold', low ? 'text-danger' : high ? 'text-primary' : 'text-success')}>{low ? 'Aumentar preço ou reduzir custo' : high ? 'Reduzir preço: acima da faixa' : 'Manter na faixa'}</span>
+    {!low && room != null && l.priceCents > 0 && <span className="mt-0.5 block text-2xs text-muted">Folga até o piso: {brl(room)}{per} · {pct(room / l.priceCents * 100)}</span>}
+    {low && l.floorCents != null && <span className="mt-0.5 block text-2xs text-muted">Piso: {brl(l.floorCents)}{per}</span>}
+  </span>;
 }
 
 function Fact({ k, v, strong }: { k: string; v: string; strong?: boolean }) {

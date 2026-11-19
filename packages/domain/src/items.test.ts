@@ -12,6 +12,12 @@ describe('itens da oportunidade', () => {
     expect(itemErrors({ description: 'Link', unit: 'un', qtyMilli: 1000, unitCents: 100, discountCents: 200, surchargeCents: 0 })).toMatch(/desconto/);
   });
 
+  it('importação distingue valor em branco de zero explícito', () => {
+    const r = parseItemsTable([['Descrição', 'Quantidade', 'Valor'], ['Sem preço', '1', ''], ['Zero informado', '1', '0']]);
+    expect(r.errors).toEqual([]);
+    expect(r.items.map((i) => [i.unitCents, i.priceDefined])).toEqual([[0, false], [0, true]]);
+  });
+
   it('lê números, medidas e a tabela colada do Excel; linhas ruins voltam com o motivo', () => {
     expect(parseMoney('R$ 1.234,56')).toBe(123456);
     expect(parseMoney('1234.5')).toBe(123450);

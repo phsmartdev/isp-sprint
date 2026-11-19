@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, type CostProfile, type DealKind } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econTargetErrors, econPaybackErrors, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -12,15 +12,19 @@ import { bumpVersion, loadOpportunity, opportunityDto } from '../services/opport
 import { pipelinesOf } from '../services/instructions';
 import { assertDeliveryAddresses, deliveryAddressesOf } from './deliveryAddresses';
 
+import { EconBody } from './economicsInput';
+import { publicSectorOf, econSettingsOf, resolveCostLines, learnCostLines, saveEconomics } from '../services/economics';
+import { requireAction } from '../services/modules';
+
 const OppParams = z.object({ id: z.string().uuid() });
 const cents = z.number().int().min(0).max(100_000_000_000);
 const ItemBody = z.object({
   description: z.string().trim().min(2).max(300), unit: z.enum(ITEM_UNITS), qtyMilli: z.number().int().min(1).max(1_000_000_000),
-  unitCents: cents, discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(), dealKind: z.enum(DEAL_KINDS).default('recorrencia'),
+  unitCents: cents, priceDefined: z.boolean().optional(), discountCents: cents.default(0), surchargeCents: cents.default(0), notes: z.string().trim().max(1000).nullable().optional(), bidUnitCents: cents.nullable().optional(), dealKind: z.enum(DEAL_KINDS).default('recorrencia'),
   /** documento fiscal do item (tributos da viabilidade econômica) */ fiscalDocTypeId: z.string().uuid().nullable().optional(),
   /** endereço de entrega do item (um dos outros endereços da oportunidade); vazio = o principal */ deliveryAddressId: z.string().uuid().nullable().optional(),
-  /** perfil de custo (viabilidade B2G); vazio = padrão pelo tipo (venda = fornecimento; os demais = implantação) */ costProfile: z.enum(['fornecimento', 'implantacao']).nullable().optional(),
-  /** seção (tipo de negócio) da negociação; 0 = a primeira */ section: z.number().int().min(0).max(9).default(0),
+  /** perfil de custo derivado do tipo; valor recebido é normalizado pelo servidor */ costProfile: z.enum(['fornecimento', 'implantacao', 'instalacao']).nullable().optional(),
+  section: z.number().int().min(0).max(9).default(0),
 });
 
 /** Licitação: tipo de venda do formulário (ou, nas oportunidades antigas, a jornada com essa chave). */
@@ -36,7 +40,7 @@ export const opportunityItemRoutes = [
     query: z.object({ q: z.string().trim().max(100).optional() }),
     handler: async ({ app, auth, query }) => {
       const t = query.q ? `%${query.q.replace(/[%_\\]/g, '\\$&')}%` : null;
-      const items = await app.db.select({ id: s.productCatalog.id, description: s.productCatalog.description, unit: s.productCatalog.unit, lastUnitCents: s.productCatalog.lastUnitCents, dealKind: s.productCatalog.dealKind, fiscalDocTypeId: s.productCatalog.fiscalDocTypeId, timesUsed: s.productCatalog.timesUsed })
+      const items = await app.db.select({ id: s.productCatalog.id, description: s.productCatalog.description, unit: s.productCatalog.unit, lastUnitCents: s.productCatalog.lastUnitCents, lastPriceDefined: s.productCatalog.lastPriceDefined, dealKind: s.productCatalog.dealKind, fiscalDocTypeId: s.productCatalog.fiscalDocTypeId, timesUsed: s.productCatalog.timesUsed })
         .from(s.productCatalog).where(and(eq(s.productCatalog.tenantId, auth.tenantId), t ? ilike(s.productCatalog.description, t) : undefined))
         .orderBy(desc(s.productCatalog.timesUsed), asc(s.productCatalog.description)).limit(300);
       return { items };
@@ -48,7 +52,7 @@ export const opportunityItemRoutes = [
       const opp = await loadOpportunity(app.db, auth, params.id);
       const rows = await app.db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, opp.id), eq(s.opportunityItems.tenantId, auth.tenantId))).orderBy(asc(s.opportunityItems.position));
       return {
-        items: rows.map((r) => ({ ...r, totalCents: itemTotal(r) })),
+        items: rows.map((r) => ({ ...r, costProfile: defaultCostProfile(r.dealKind as DealKind), totalCents: itemTotal(r) })),
         totals: itemsTotals(rows),
         bid: await isBid(app.db, auth.tenantId, opp),
         bidMode: opp.bidMode ?? null, bidGlobalCents: opp.bidGlobalCents ?? null,
@@ -62,16 +66,34 @@ export const opportunityItemRoutes = [
   }),
   defineRoute({
     method: 'PUT', url: '/opportunities/:id/items', summary: 'Salva a lista de produtos e serviços (o total vira o valor da oportunidade)', tag: 'Oportunidades', module: 'oportunidades', params: OppParams,
-    body: z.object({ rowVersion: z.number().int(), items: z.array(ItemBody).max(300), bidMode: z.enum(BID_MODES).nullable().optional(), bidGlobalCents: cents.nullable().optional() }),
+    body: z.object({ rowVersion: z.number().int(), items: z.array(ItemBody).max(300), bidMode: z.enum(BID_MODES).nullable().optional(), bidGlobalCents: cents.nullable().optional(), economics: EconBody.optional(), economicsUpdatedAt: z.string().datetime().nullable().optional() }),
     handler: async ({ app, auth, params, body }) => {
       await app.db.transaction(async (tx) => {
         const opp = await loadOpportunity(tx, auth, params.id);
         if (opp.rowVersion !== body.rowVersion) throw conflict(opp.rowVersion);
         if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: os itens não mudam mais.');
+        if (body.economics) {
+          requireAction(auth, 'ver_financeiro', 'Seu perfil não permite alterar os custos da negociação.');
+          if (body.economicsUpdatedAt !== undefined) {
+            const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
+            if ((saved?.updatedAt.getTime() ?? null) !== (body.economicsUpdatedAt == null ? null : new Date(body.economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
+          }
+          const errors = econInputErrors(body.economics as EconInput);
+          if (errors.length) throw unprocessable(errors.join(' '));
+          const version = await econSettingsOf(tx, auth.tenantId);
+          if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
+          const targetErrors = econTargetErrors(body.economics as EconInput, version.settings);
+          if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
+          const paybackErrors = econPaybackErrors(body.economics as EconInput, version.settings, await publicSectorOf(tx, opp));
+          if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
+        }
         for (const [i, it] of body.items.entries()) {
+          it.costProfile = defaultCostProfile(it.dealKind);
+          if (it.priceDefined === false && (it.unitCents !== 0 || it.discountCents !== 0 || it.surchargeCents !== 0)) throw unprocessable(`Item ${i + 1}: sem valor de venda, não informe desconto ou acréscimo.`);
           const err = itemErrors({ ...it, notes: it.notes ?? null, bidUnitCents: it.bidUnitCents ?? null });
           if (err) throw unprocessable(`Item ${i + 1}: ${err}`, [{ path: `items.${i}`, message: err }]);
         }
+        if (body.items.some((i) => i.priceDefined === false) && body.items.some((i) => i.priceDefined !== false)) throw unprocessable('Informe o valor de todos os produtos ou deixe todos em branco para usar o preço sugerido.');
         const docIds = [...new Set(body.items.map((i) => i.fiscalDocTypeId).filter(Boolean) as string[])];
         if (docIds.length) {
           const found = await tx.select({ id: s.fiscalDocTypes.id }).from(s.fiscalDocTypes).where(and(eq(s.fiscalDocTypes.tenantId, auth.tenantId), inArray(s.fiscalDocTypes.id, docIds)));
@@ -102,8 +124,8 @@ export const opportunityItemRoutes = [
         if (body.items.length) {
           await tx.insert(s.opportunityItems).values(body.items.map((it, position) => ({
             ...(bid ? carry(it.description) : {}),
-            tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents,
-            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, costProfile: it.costProfile ?? null, dealKind: it.dealKind, section: it.section ?? 0, createdBy: auth.userId,
+            tenantId: auth.tenantId, opportunityId: opp.id, position, description: it.description, unit: it.unit, qtyMilli: it.qtyMilli, unitCents: it.unitCents, priceDefined: it.priceDefined ?? (it.unitCents > 0 || it.surchargeCents > 0),
+            discountCents: it.discountCents, surchargeCents: it.surchargeCents, notes: it.notes ?? null, bidUnitCents: bid ? it.bidUnitCents ?? null : null, fiscalDocTypeId: it.fiscalDocTypeId ?? null, deliveryAddressId: it.deliveryAddressId ?? null, costProfile: defaultCostProfile(it.dealKind), dealKind: it.dealKind, section: it.section ?? 0, createdBy: auth.userId,
           })));
         }
         // cada item lançado/importado fica no catálogo para as próximas negociações (último valor e tipo usados)
@@ -113,9 +135,9 @@ export const opportunityItemRoutes = [
           if (!key || seen.has(key)) continue;
           seen.add(key);
           await tx.execute(sql`
-            insert into product_catalog (tenant_id, description, unit, last_unit_cents, deal_kind, fiscal_doc_type_id)
-            values (${auth.tenantId}, ${it.description.trim().slice(0, 300)}, ${it.unit}, ${it.unitCents}, ${it.dealKind}, ${it.fiscalDocTypeId ?? null})
-            on conflict (tenant_id, lower(description)) do update set unit = excluded.unit, last_unit_cents = excluded.last_unit_cents, deal_kind = excluded.deal_kind,
+            insert into product_catalog (tenant_id, description, unit, last_unit_cents, last_price_defined, deal_kind, fiscal_doc_type_id)
+            values (${auth.tenantId}, ${it.description.trim().slice(0, 300)}, ${it.unit}, ${it.unitCents}, ${it.priceDefined ?? true}, ${it.dealKind}, ${it.fiscalDocTypeId ?? null})
+            on conflict (tenant_id, lower(description)) do update set unit = excluded.unit, last_unit_cents = excluded.last_unit_cents, last_price_defined = excluded.last_price_defined, deal_kind = excluded.deal_kind,
               fiscal_doc_type_id = coalesce(excluded.fiscal_doc_type_id, product_catalog.fiscal_doc_type_id), times_used = product_catalog.times_used + 1, last_used_at = now()`);
         }
         const totals = itemsTotals(body.items.map((i) => ({ ...i, bidUnitCents: bid ? i.bidUnitCents ?? null : null })));
@@ -130,6 +152,11 @@ export const opportunityItemRoutes = [
         const updated = await tx.update(s.opportunities).set({ valueCents, bidMode, bidGlobalCents, updatedAt: new Date(), rowVersion: bumpVersion() })
           .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(opp.rowVersion);
+        if (body.economics) {
+          const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body.economics as EconInput));
+          const result = await saveEconomics(tx, { ...opp, tenantId: auth.tenantId }, input, auth.userId, 'produtos_e_custos');
+          if (!result) throw unprocessable('Parâmetros de viabilidade não encontrados.');
+        }
         // perfil de custo alterado na oportunidade fica no histórico (e na fotografia da viabilidade ao fechar)
         const profOf = (x: { costProfile?: string | null; dealKind: string }) => (x.costProfile ?? defaultCostProfile(x.dealKind as DealKind)) as CostProfile;
         const profChanges = body.items.flatMap((it) => { const b = before.find((x) => x.description.trim().toLowerCase() === it.description.trim().toLowerCase()); return b && profOf(b) !== profOf(it) ? [`${it.description}: ${COST_PROFILE_SHORT[profOf(b)]} → ${COST_PROFILE_SHORT[profOf(it)]}`] : []; });
