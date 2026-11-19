@@ -141,6 +141,18 @@ describe('viabilidade global por cesta', () => {
     fireEvent.change(field, { target: { value: '2' } });
     expect(field.value).toBe('2');
   });
+  it('mostra o percentual configurado da inferência, sem confundir com a participação no preço', async () => {
+    setup(['recorrencia'], { priceCents: 400000 });
+    await screen.findByText('35% da base');
+    const row = within(panel('Recorrência')).getByText('(−) Inferência custo de serviço').parentElement!;
+    expect(row.textContent).toContain('420,00');
+    expect(row.textContent).toContain('35% da base');
+    fireEvent.change(screen.getByLabelText('Preço da venda de Recorrência'), { target: { value: '8000' } });
+    await waitFor(() => expect(within(panel('Recorrência')).getByText('As métricas abaixo vêm do preço da venda').parentElement?.textContent).toContain('8.000,00'));
+    const updatedRow = within(panel('Recorrência')).getByText('(−) Inferência custo de serviço').parentElement!;
+    expect(updatedRow.textContent).toContain('35% da base');
+    expect(updatedRow.textContent).toContain('420,00');
+  });
   it('preserva proposta global antiga ao migrar para os controles por cesta', async () => {
     const { requests } = setup(['venda', 'servico', 'recorrencia'], { priceCents: 25000, salePriceCents: 300000 });
     await screen.findByLabelText('Margem líquida de Venda');

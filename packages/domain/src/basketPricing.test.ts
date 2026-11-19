@@ -19,12 +19,12 @@ describe('precificação global por cesta', () => {
     expect(views[0]!.result.suggestedCents).toBe(1428572);
     expect(views[1]!.result.suggestedCents).toBe(1800000);
   });
-  it('payback da Implantação altera sua mensalidade e preserva Venda e Instalação', () => {
+  it('teto de payback preserva a margem contratual e as demais cestas', () => {
     const a = run(), b = run({ ...input, baskets: { implantacao: { paybackMonths: 2 } } });
     const av = econBasketViews(input, items, settings, a), bv = econBasketViews(input, items, settings, b);
     expect(bv[2]!.result.term.D).toBe(2);
-    expect(bv[2]!.result.kpi!.paybackMonths!).toBeLessThanOrEqual(2.00001);
-    expect(bv[2]!.result.suggestedCents!).toBeGreaterThan(av[2]!.result.suggestedCents!);
+    expect(bv[2]!.result.decision!.netMarginPct!).toBeCloseTo(20, 2);
+    expect(bv[2]!.result.suggestedCents).toBe(av[2]!.result.suggestedCents);
     expect(bv.slice(0, 2).map((v) => v.result.suggestedCents)).toEqual(av.slice(0, 2).map((v) => v.result.suggestedCents));
   });
   it('os preços globais propostos são avaliados separadamente e fecham com o consolidado', () => {

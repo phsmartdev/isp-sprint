@@ -21,26 +21,21 @@ function scenario(D = 6, serviceCostBp = 3500, kind: DealKind = 'recorrencia') {
   };
 }
 describe('preço mensal: caixa, inferência e margem negociada', () => {
-  it.each([1, 2, 3, 6, 12])('sugerido recupera o investimento em até %i meses, já depois dos custos e IR', (D) => {
+  it.each([1, 2, 3, 6, 12])('sugerido preserva a margem contratual com teto de %i meses', (D) => {
     const args = scenario(D);
     const result = financeEngine(args);
-    expect(result.kpi!.paybackMonths).not.toBeNull();
-    expect(result.kpi!.paybackMonths!).toBeLessThanOrEqual(D + 0.0001);
-    expect(result.cashflow.slice(0, D + 1).reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(-1);
-    expect(result.cashflow.slice(0, D + 1).reduce((a, b, k) => a + b / 1.001 ** k, 0)).toBeGreaterThanOrEqual(-2);
-    expect(result.decision!.netMarginPct!).toBeGreaterThanOrEqual(19.99);
+    expect(result.decision!.netMarginPct!).toBeCloseTo(20, 2);
+    if (result.kpi!.paybackMonths == null || result.kpi!.paybackMonths > result.term.D + 0.0001) expect(result.warnings.some((w) => w.includes('teto de payback'))).toBe(true);
     const products = b2gFromEconomics(args, undefined, result);
     expect(products.recorrente!.lines[0]!.suggestedCents).toBe(result.suggestedCents);
     expect(products.recorrente!.lines[0]!.paybackMonths).toBeCloseTo(result.kpi!.paybackMonths!, 4);
     expect(products.global.netPct).toBeCloseTo(result.decision!.netMarginPct!, 2);
   });
-  it('payback menor aumenta o preço quando é a restrição dominante, evitando o prejuízo de amortização inicial', () => {
-    const fast = financeEngine(scenario(2, 0)), slow = financeEngine(scenario(6, 0));
-    expect(fast.suggestedCents!).toBeGreaterThan(slow.suggestedCents!);
-    expect(fast.statement!.month.net!).toBeGreaterThanOrEqual(-1);
-    expect(fast.kpi!.paybackMonths!).toBeLessThanOrEqual(2);
-    expect(fast.warnings.some((w) => w.includes('margem líquida alvo é aplicada'))).toBe(true);
-    expect(fast.statement!.total.net).toBeGreaterThan(0);
+  it('teto curto não força uma margem acima do alvo: informa a incompatibilidade', () => {
+    const r = financeEngine(scenario(2, 0));
+    expect(r.decision!.netMarginPct!).toBeCloseTo(20, 2);
+    expect(r.kpi!.paybackMonths!).toBeGreaterThan(2);
+    expect(r.warnings.some((w) => w.includes('teto de payback'))).toBe(true);
   });
   it.each(['recorrencia', 'locacao'] as const)('%s: 35%% da base se repete em todos os meses e não duplica o investimento inicial', (kind) => {
     const args = scenario(6, 3500, kind), result = financeEngine(args);
@@ -69,24 +64,21 @@ describe('preço mensal: caixa, inferência e margem negociada', () => {
     const changed = financeEngine(b);
     expect(changed.targetNetMarginPct).toBe(30);
     expect(changed.suggestedCents!).toBeGreaterThan(normal.suggestedCents!);
-    expect(changed.decision!.paybackNetMarginPct).toBeCloseTo(30, 2);
-    expect(changed.decision!.netMarginPct!).toBeGreaterThan(30);
-    expect(b2gFromEconomics(b, undefined, changed).global.netPct).toBeCloseTo(changed.decision!.netMarginPct!, 2);
+    expect(changed.decision!.netMarginPct).toBeCloseTo(30, 2);
+    expect(b2gFromEconomics(b, undefined, changed).global.netPct).toBeCloseTo(30, 2);
   });
-  it.each(['recorrencia', 'locacao'] as const)('%s: mais prazo reduz a mensalidade em todos os prazos permitidos, com tributos, IR, TMA e inferência', (kind) => {
-    for (const publicSector of [false, true]) {
-      let previous = Infinity;
-      const limit = publicSector ? settings.paybackMaxPublic : settings.paybackMaxPrivate;
-      for (let D = 1; D <= limit; D++) {
-        const a = { ...scenario(D, 2700, kind), publicSector };
-        const r = financeEngine(a);
-        expect(r.term.D).toBe(D);
-        expect(r.suggestedCents!).toBeLessThan(previous);
-        expect(r.decision!.paybackNetMarginPct!).toBeCloseTo(20, 2);
-        expect(r.kpi!.paybackMonths!).toBeLessThanOrEqual(D + 0.0001);
-        expect(r.statement!.total.net!).toBeGreaterThan(0);
-        previous = r.suggestedCents!;
-      }
+  it('alvo volta a ser a margem contratual e a inferência usa o percentual configurado, inclusive zero', () => {
+    for (const serviceCostBp of [3500, 2700, 0]) {
+      const a = scenario(6, serviceCostBp);
+      const r = financeEngine(a);
+      expect(r.serviceCostBp).toBe(serviceCostBp);
+      expect(r.serviceMonthlyCents).toBe(Math.round(800000 * serviceCostBp / 10000));
+      expect(r.decision!.netMarginPct!).toBeCloseTo(20, 2);
+      if ((r.kpi!.paybackMonths ?? Infinity) > 6) expect(r.warnings.join(' ')).toContain('teto de payback');
+      const proposed = financeEngine({ ...a, input: { ...a.input, priceCents: 400000 } });
+      expect(proposed.proposedResult!.serviceMonthlyCents).toBe(r.serviceMonthlyCents);
+      expect(proposed.suggestedCents).toBe(r.suggestedCents);
+      expect(proposed.warnings.filter((w) => w.includes('teto de payback'))).toEqual(r.warnings.filter((w) => w.includes('teto de payback')));
     }
   });
   it('API deve rejeitar o prazo acima do teto privado ou público, inclusive por cesta', () => {

@@ -48,7 +48,7 @@ const GROUPS: { title: string; desc: string; fields: Field[] }[] = [
   ] },
   { title: 'Acréscimos sobre os custos', desc: 'Folga somada aos custos informados na oportunidade.', fields: [
     { key: 'contingencyCapexBp', label: 'Sobre o investimento', hint: 'Somada ao investimento inicial (CAPEX)' },
-    { key: 'serviceCostBp', label: 'Inferência custo de serviço', hint: 'Sobre o investimento-base de Instalação e Implantação. Soma-se à contingência, sem incidir no Fornecimento ou nos custos mensais' },
+    { key: 'serviceCostBp', label: 'Inferência custo de serviço', hint: 'Sobre o investimento-base dos serviços: na Instalação, uma vez; na Implantação, mensalmente. Percentual independente da contingência; não incide no Fornecimento' },
     { key: 'contingencyOpexBp', label: 'Sobre os custos mensais', hint: 'Somada aos custos operacionais (OPEX)' },
   ] },
   { title: 'Margem operacional e líquida', desc: 'Da margem de contribuição saem glosa e inadimplência; do resultado positivo, o IR/CSLL (não entra na nota fiscal: fica coberto pela margem).', fields: [

@@ -71,9 +71,9 @@ describe('viabilidade econômica', () => {
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
     // Investimento 30.000; operação 2.000 + inferência mensal 10.500. O sugerido atende margem e payback.
-    expect(saved.result.engineVersion).toBe('FINANCE-3.9.0');
+    expect(saved.result.engineVersion).toBe('FINANCE-3.10.0');
     const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
-    expect(Math.abs(saved.result.suggestedCents - (parc + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(saved.result.suggestedCents - (3_000_000 / 24 + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(saved.result.rates.m * 100, 4);
     expect(saved.result.recommendation.netTargetPct).toBe(20); // sem margem líquida alvo nos parâmetros
     // No proposto de 10.000, tributos e custo mensal deixam caixa negativo: o retorno não fecha.
@@ -126,11 +126,10 @@ describe('viabilidade econômica', () => {
     expect(rv['margem_liquida_alvo_%']).toBe(40);
     expect(rv['margem_contrib_recomendada_%']).toBeCloseTo(withTarget.result.kpi.marginPct, 2);
     expect(rv.parametros_utilizados).toMatchObject({ 'taxa_rateio_fixo_%': 20, 'glosa_%': 3, 'inadimplencia_%': 1 });
-    // A mensalidade entrega o alvo durante a recuperação; a margem contratual aumenta após quitar o investimento.
+    // A mensalidade entrega o alvo no contrato inteiro, respeitando o teto de payback.
     expect(rv['preco_mensal_recomendado_R$']).toBeLessThan(17_500 / (1 - 0.2 - (0.4 / 0.85 + 0.24)));
     const atRec = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, priceCents: Math.round(rv['preco_mensal_recomendado_R$'] * 100) })).json();
-    expect(atRec.result.decision.paybackNetMarginPct).toBeCloseTo(40, 1);
-    expect(atRec.result.decision.netMarginPct).toBeGreaterThan(40);
+    expect(atRec.result.decision.netMarginPct).toBeCloseTo(40, 1);
     ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     expect(withTarget.result.statement.after.amortization).toBe(0);
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(withTarget.result.kpi.marginPct, 2);
@@ -439,7 +438,7 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.verified).toBe(true);
-    expect(run.engineVersion).toBe('FINANCE-3.9.0');
+    expect(run.engineVersion).toBe('FINANCE-3.10.0');
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
   });
