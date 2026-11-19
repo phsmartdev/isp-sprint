@@ -116,6 +116,24 @@ describe('viabilidade global por cesta', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Contrato inteiro' }));
     expect(screen.queryByText(/Média por mês do contrato inteiro/)).toBeNull();
   });
+  it.each([[100, 'text-danger'], [1000000, 'text-success']] as const)('colore o resultado do contrato no preço da venda de %i centavos', async (price, color) => {
+    setup(['recorrencia'], { priceCents: price });
+    await screen.findByRole('table', { name: 'DRE da negociação' });
+    const row = within(screen.getByRole('table', { name: 'DRE da negociação' })).getByText('(=) Resultado líquido do contrato').closest('tr');
+    expect(row?.classList.contains(color)).toBe(true);
+    const overview = screen.getByRole('region', { name: 'Visão geral do negócio' });
+    const metric = within(overview).getByText('Resultado líquido (DRE)').nextElementSibling;
+    expect(metric?.classList.contains(color)).toBe(true);
+  });
+  it('mudar payback preserva o preço da venda e identifica a base do caixa', async () => {
+    setup(['recorrencia'], { priceCents: 750000 });
+    const field = await screen.findByLabelText('Preço da venda de Recorrência');
+    const original = (field as HTMLInputElement).value;
+    fireEvent.change(screen.getByLabelText('Payback de Recorrência'), { target: { value: '9' } });
+    await screen.findByText(/Visão geral calculada com os preços da venda/);
+    expect((field as HTMLInputElement).value).toBe(original);
+    expect(within(panel('Recorrência')).getByText(/No preço da venda · no sugerido:/)).toBeTruthy();
+  });
   it('preserva proposta global antiga ao migrar para os controles por cesta', async () => {
     const { requests } = setup(['venda', 'servico', 'recorrencia'], { priceCents: 25000, salePriceCents: 300000 });
     await screen.findByLabelText('Margem líquida de Venda');
