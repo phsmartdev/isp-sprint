@@ -39,7 +39,7 @@ test('organograma: quem vê o quê no CRM, bloquear e retirar a regra pelo paine
   await expect(lucas).toHaveAttribute('aria-label', /Só o próprio/);
 
   // painel do time e visão geral
-  await page.getByRole('button', { name: /^Residencial/ }).click();
+  await page.locator('[data-testid="org-team"][aria-label="Time Residencial"]').getByRole('button', { name: /^Residencial/ }).click();
   await expect(page.getByRole('complementary', { name: 'Time Residencial' })).toContainText('Liderança: Ana Souza');
   await page.getByRole('button', { name: 'Visão geral' }).click();
   await expect(lucas).toHaveAttribute('aria-label', /^Lucas Lima, Operação$/);
@@ -178,6 +178,40 @@ test('organograma: gestão funcional no mesmo nível da hierárquica, com os doi
   await expect(page.locator('[data-testid="org-team"][aria-label="Time Empresarial"]').getByRole('button', { name: /^Mariana Costa/ })).toHaveCount(0);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/organograma-funcional.png` });
   for (const t of before) await page.request.put(`/api/v1/admin/org-chart/teams/${t.id}`, { data: { directorIds: t.directorIds, managers: t.managers, leadIds: t.leadIds, memberIds: t.memberIds, participantIds: t.participantIds } });
+});
+
+test('organograma: gestão funcional atrela setores e pessoas; o grupo só aparece solto na edição; marca BKT | RevOps', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1700, height: 1100 });
+  await login(page, 'carlos@yepnet.test');
+  const d = await (await page.request.get('/api/v1/admin/org-chart')).json() as { people: { id: string; name: string }[]; teams: { id: string; name: string; directorIds: string[]; managers: { userId: string; kind: string }[]; leadIds: string[]; memberIds: string[]; participantIds: string[] }[] };
+  const id = (n: string) => d.people.find((p) => p.name.startsWith(n))!.id;
+  const res = d.teams.find((t) => t.name === 'Residencial')!;
+  await page.request.put(`/api/v1/admin/org-chart/teams/${res.id}`, { data: { directorIds: [id('Carlos')], managers: [{ userId: id('Carlos'), kind: 'hierarquico_funcional' }], leadIds: res.leadIds, memberIds: res.memberIds, participantIds: res.participantIds } });
+  await page.goto('/settings/users?visao=organograma');
+  await expect(page.getByLabel('BKT RevOps')).toBeVisible();
+  await page.locator('[data-testid="org-team"][aria-label="Time Empresarial"]').getByRole('button', { name: /^Rafael Mendes/ }).click();
+  const f = page.getByRole('complementary', { name: 'Acesso de Rafael Mendes' }).getByRole('form', { name: 'Gestão funcional' });
+  await f.getByRole('group', { name: 'Setores (times inteiros)' }).getByRole('button', { name: 'Residencial' }).click();
+  await f.getByRole('group', { name: 'Pessoas avulsas' }).getByRole('button', { name: 'Mariana Costa' }).click();
+  await f.getByLabel('Nome do grupo de pessoas').fill('Negócios E2E');
+  await f.getByRole('button', { name: 'Salvar gestão funcional' }).click();
+  await expect(page.getByText('Gestão funcional atualizada')).toBeVisible();
+  const dir = page.getByRole('region', { name: 'Diretoria de Carlos Silva' });
+  const fb = dir.getByLabel('Gestão funcional de Rafael Mendes');
+  await expect(fb.getByLabel('Time Residencial (gestão funcional)')).toBeVisible();
+  await expect(fb.getByLabel('Time Negócios E2E (gestão funcional)')).toContainText('Mariana Costa');
+  // o grupo não aparece solto fora da edição; na edição, aparece
+  await expect(page.locator('[data-testid="org-team"][aria-label="Time Negócios E2E"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ajustar estrutura' }).click();
+  await expect(page.locator('[data-testid="org-team"][aria-label="Time Negócios E2E"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Concluir ajustes' }).click();
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/organograma-funcional.png` });
+  // desfaz
+  const after = await (await page.request.get('/api/v1/admin/org-chart')).json() as { teams: { id: string; name: string }[] };
+  await page.request.put(`/api/v1/admin/org-chart/functional/${id('Rafael')}`, { data: { teamIds: [], userIds: [] } });
+  await page.request.delete(`/api/v1/admin/teams/${after.teams.find((t) => t.name === 'Negócios E2E')!.id}`);
+  await page.request.put(`/api/v1/admin/org-chart/teams/${res.id}`, { data: { directorIds: res.directorIds, managers: res.managers, leadIds: res.leadIds, memberIds: res.memberIds, participantIds: res.participantIds } });
 });
 
 test('organograma: só a administração acessa', async ({ page }) => {

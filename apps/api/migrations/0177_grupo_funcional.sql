@@ -1,0 +1,1 @@
+ALTER TABLE "teams" ADD COLUMN "functional_group_of" uuid;
