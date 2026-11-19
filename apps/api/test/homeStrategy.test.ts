@@ -26,7 +26,7 @@ describe('Início: contribuição para o planejamento estratégico', () => {
     const ind = ok(await carlos.post('/performance/indicators', { def: { name: `Tarefas concluídas ${st}`, category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' } } }), 201).json().id;
     // percentual não é somável: não serve para "a sua parte"
     const pct = ok(await carlos.post('/performance/indicators', { def: { name: `Propostas % ${st}`, category: 'comercial', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'proposta_enviada', measure: 'contagem' }, denominator: { event: 'oportunidade_criada', measure: 'contagem' } } }), 201).json().id;
-    const g = ok(await carlos.post('/performance/goals', { title: `Tarefas da empresa ${st}`, scope: 'empresa', indicatorId: ind, periodType: 'mes', target: 400, objectiveId: obj, consolidation: 'soma' }), 201).json().id;
+    const g = ok(await carlos.post('/performance/goals', { title: `A tarefas da empresa ${st}`, scope: 'empresa', indicatorId: ind, periodType: 'mes', target: 400, objectiveId: obj, consolidation: 'soma' }), 201).json().id;
     ok(await carlos.post('/performance/goals', { title: `Conversão em proposta ${st}`, scope: 'empresa', indicatorId: pct, periodType: 'mes', target: 50, objectiveId: obj }), 201);
     // Lucas conclui uma atividade: entra na parte dele
     const act = ok(await lucas.post('/activities', { type: 'tarefa', title: `Ligar para cliente ${st}`, dueAt: new Date().toISOString() }), 201).json();

@@ -13,7 +13,7 @@ let kpiId = '';
 beforeAll(async () => {
   ctx = await makeApp();
   [carlos, lucas] = (await Promise.all(['carlos', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client];
-  const [t] = await ctx.db.select({ id: s.tenants.id }).from(s.tenants).limit(1);
+  const [t] = await ctx.db.select({ id: s.users.tenantId }).from(s.users).where(eq(s.users.email, 'carlos@yepnet.test')).limit(1);
   const base = KPI_SHEETS[0]!.def;
   const [i] = await ctx.db.insert(s.indicators).values({ tenantId: t!.id, key: `kpi_teste_${st}` }).returning({ id: s.indicators.id });
   await ctx.db.insert(s.indicatorVersions).values({ tenantId: t!.id, indicatorId: i!.id, version: 1, def: { ...base, name: `Win Rate teste ${st}` }, note: 'teste' });
