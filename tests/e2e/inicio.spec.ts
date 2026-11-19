@@ -21,7 +21,10 @@ test('início: contribuição de cada número para a meta estratégica da empres
   // a Diretoria/Gerência monta um objetivo estratégico com meta da empresa de atividades concluídas
   await login(page, 'carlos@yepnet.test');
   const post = async (url: string, data: unknown) => { const r = await page.request.post(`/api/v1${url}`, { data }); expect(r.status(), await r.text()).toBe(201); return r.json(); };
-  const obj = await post('/performance/objectives', { title: `Ampliar a carteira ${st}`, level: 'estrategico', periodStart: `${today().slice(0, 7)}-01`, periodEnd: '2026-12-31' });
+  // com KPIs principais, o objetivo estratégico é um deles; sem KPIs, cria-se um
+  const objs = await (await page.request.get('/api/v1/performance/objectives')).json();
+  const kpiObj = objs.items.find((o: { kpi: unknown; status: string }) => o.kpi && o.status === 'ativo');
+  const obj = kpiObj ?? await post('/performance/objectives', { title: `Ampliar a carteira ${st}`, level: 'estrategico', periodStart: `${today().slice(0, 7)}-01`, periodEnd: `${today().slice(0, 4)}-12-31` });
   const ind = await post('/performance/indicators', { def: { name: `Atividades concluídas ${st}`, category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' } } });
   await post('/performance/goals', { title: `Atividades da empresa ${st}`, scope: 'empresa', indicatorId: ind.id, periodType: 'mes', target: 200, objectiveId: obj.id, consolidation: 'soma' });
 
@@ -30,7 +33,7 @@ test('início: contribuição de cada número para a meta estratégica da empres
   const act = page.getByTestId('kpi-atividades_hoje');
   await expect(act).toContainText('Atividades');
   await expect(act).toContainText('Sua parte na meta da empresa');
-  await expect(act).toContainText(`Ampliar a carteira ${st}`);
+  await expect(act).toContainText(kpiObj ? kpiObj.title : `Ampliar a carteira ${st}`);
   await expect(act).toContainText('de 200');
   // os outros números sem meta ligada no planejamento não inventam percentual
   await expect(page.getByTestId('kpi-abertas')).toContainText('Oportunidades');

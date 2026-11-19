@@ -15,7 +15,9 @@ import { Drawer, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../contracts/shared';
 import { fmtIndicator } from './format';
 
-export type IndicatorRow = { id: string; key: string; active: boolean; currentVersion: number; def: IndicatorDef; versionNote: string | null; versionAt: string };
+export type IndicatorRow = { id: string; key: string; active: boolean; currentVersion: number; objectiveId?: string | null; def: IndicatorDef; versionNote: string | null; versionAt: string };
+const isKpi = (d: IndicatorDef) => d.calc === 'informado' && !!d.sheet;
+type ObjOpt = { id: string; title: string; level: string; status: string; kpi: { indicatorId: string } | null };
 type ListResp = { items: IndicatorRow[]; suggestions: (IndicatorDef & { key: string })[]; canEdit: boolean };
 const MEASURE_LABELS: Record<Measure, string> = { contagem: 'Quantidade de eventos', soma_valor: 'Soma do valor', media_valor: 'Média do valor', media_campo: 'Média de um campo' };
 const CREDIT_LABELS = { direto: 'Resultado (pela parte de cada um)', participacao: 'Participação', gestao: 'Gestão da equipe', qualquer: 'Qualquer crédito' } as const;
@@ -33,20 +35,38 @@ export function IndicatorsAdmin() {
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const toggle = useMutation({ mutationFn: (i: IndicatorRow) => api(`/performance/indicators/${i.id}`, { method: 'PATCH', body: { active: !i.active } }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['performance'] }) });
+  const objs = useQuery({ queryKey: ['performance', 'objectives', 'active'], queryFn: () => api<{ items: ObjOpt[] }>('/performance/objectives?active=true') });
+  const link = useMutation({
+    mutationFn: ({ i, objectiveId }: { i: IndicatorRow; objectiveId: string | null }) => api(`/performance/indicators/${i.id}`, { method: 'PATCH', body: { objectiveId } }),
+    onSuccess: (_r, v) => { void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: v.objectiveId ? 'Indicador ligado ao objetivo' : 'Indicador desligado do objetivo' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
+  const objItems = objs.data?.items ?? [];
+  const kpiObjs = objItems.filter((o) => o.kpi);
+  const otherObjs = objItems.filter((o) => !o.kpi);
+  const objTitle = (id: string | null | undefined) => objItems.find((o) => o.id === id)?.title ?? null;
   if (q.isLoading) return <div className="card"><LoadingRows rows={5} /></div>;
   const d = q.data!;
   return (
     <div className="space-y-4">
       <section className="card overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div><h2 className="text-lg font-bold text-ink">Indicadores</h2><p className="text-sm text-muted">Calculados sobre os eventos de negócio válidos. Mudar a definição cria uma versão nova; resultados já fechados guardam a versão da época.</p></div>
+          <div><h2 className="text-lg font-bold text-ink">Indicadores</h2><p className="text-sm text-muted">Calculados sobre os eventos de negócio válidos e ligados ao objetivo estratégico (KPI) para o qual contribuem. Mudar a definição cria uma versão nova; resultados já fechados guardam a versão da época.</p></div>
           {d.canEdit && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>Novo indicador</Button>}
         </div>
         {!d.items.length ? <div className="border-t border-line"><EmptyState title="Nenhum indicador ainda" description="Comece pelas sugestões abaixo ou crie o seu." /></div> : (
           <ul className="divide-y divide-line border-t border-line">
             {d.items.map((i) => (
               <li key={i.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1"><p className="font-semibold text-ink">{i.def.name} {!i.active && <Chip tone="neutral">Inativo</Chip>}</p><p className="text-xs text-muted">{INDICATOR_CATEGORY_LABELS[i.def.category]} · {INDICATOR_CALC_LABELS[i.def.calc]} · {PERIOD_LABELS[i.def.period]} · {i.def.direction === 'maior' ? 'maior é melhor' : 'menor é melhor'} · v{i.currentVersion}{i.def.target != null ? ` · meta padrão ${fmtIndicator(i.def.target, i.def.unit)}` : ''}</p></div>
+                <div className="min-w-0 flex-1"><p className="font-semibold text-ink">{i.def.name} {!i.active && <Chip tone="neutral">Inativo</Chip>} {isKpi(i.def) && <Chip tone="purple">KPI principal · objetivo estratégico</Chip>}</p><p className="text-xs text-muted">{INDICATOR_CATEGORY_LABELS[i.def.category]} · {INDICATOR_CALC_LABELS[i.def.calc]} · {PERIOD_LABELS[i.def.period]} · {i.def.direction === 'maior' ? 'maior é melhor' : 'menor é melhor'} · v{i.currentVersion}{i.def.target != null ? ` · meta padrão ${fmtIndicator(i.def.target, i.def.unit)}` : ''}</p></div>
+                {!isKpi(i.def) && (d.canEdit
+                  ? <Select aria-label={`Objetivo de ${i.def.name}`} className="w-auto max-w-[16rem]" value={i.objectiveId ?? ''} disabled={link.isPending} onChange={(e) => link.mutate({ i, objectiveId: e.target.value || null })}>
+                      <option value="">Sem objetivo</option>
+                      {!!kpiObjs.length && <optgroup label="Objetivos estratégicos (KPIs)">{kpiObjs.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</optgroup>}
+                      {!!otherObjs.length && <optgroup label="Outros objetivos">{otherObjs.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</optgroup>}
+                      {i.objectiveId && !objItems.some((o) => o.id === i.objectiveId) && <option value={i.objectiveId}>Objetivo encerrado</option>}
+                    </Select>
+                  : objTitle(i.objectiveId) && <Chip tone="blue">{objTitle(i.objectiveId)}</Chip>)}
                 {d.canEdit && <><Button size="sm" variant="secondary" onClick={() => setEdit(i)}>Editar</Button><Button size="sm" variant="ghost" onClick={() => toggle.mutate(i)}>{i.active ? 'Desativar' : 'Ativar'}</Button></>}
               </li>
             ))}

@@ -19,7 +19,10 @@ describe('Início: contribuição para o planejamento estratégico', () => {
     const h0 = ok(await lucas.get('/home')).json();
     expect(Object.keys(h0.strategy).sort()).toEqual(['abertas', 'atividades_hoje', 'propostas', 'valor']);
     const start = `${today().slice(0, 7)}-01`;
-    const obj = ok(await carlos.post('/performance/objectives', { title: `Crescer a base ${st}`, level: 'estrategico', periodStart: start, periodEnd: '2026-12-31' }), 201).json().id;
+    // com KPIs principais, os objetivos estratégicos são eles; sem KPIs, cria-se um estratégico
+    const objs = ok(await carlos.get('/performance/objectives')).json();
+    const kpiObj = objs.items.find((o: { kpi: unknown; status: string }) => o.kpi && o.status === 'ativo');
+    const obj = kpiObj?.id ?? ok(await carlos.post('/performance/objectives', { title: `Crescer a base ${st}`, level: 'estrategico', periodStart: start, periodEnd: `${today().slice(0, 4)}-12-31` }), 201).json().id;
     const ind = ok(await carlos.post('/performance/indicators', { def: { name: `Tarefas concluídas ${st}`, category: 'tarefas', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: { event: 'tarefa_concluida', measure: 'contagem' } } }), 201).json().id;
     // percentual não é somável: não serve para "a sua parte"
     const pct = ok(await carlos.post('/performance/indicators', { def: { name: `Propostas % ${st}`, category: 'comercial', calc: 'percentual', unit: 'percentual', direction: 'maior', period: 'mes', numerator: { event: 'proposta_enviada', measure: 'contagem' }, denominator: { event: 'oportunidade_criada', measure: 'contagem' } } }), 201).json().id;

@@ -82,7 +82,9 @@ describe('objetivos e metas em cascata', () => {
   it('objetivo estratégico só com visão total; tático precisa de superior acima', async () => {
     const start = `${today().slice(0, 7)}-01`;
     expect((await ana.post('/performance/objectives', { title: 'Aumentar a receita', level: 'estrategico', periodStart: start, periodEnd: '2026-12-31' })).statusCode).toBe(403);
-    objE = ok(await carlos.post('/performance/objectives', { title: 'Aumentar a receita comercial', level: 'estrategico', periodStart: start, periodEnd: '2026-12-31', sponsorId: uid('carlos') }), 201).json().id;
+    // com KPIs principais cadastrados, os objetivos estratégicos são eles
+    const kpiObj = ok(await carlos.get('/performance/objectives')).json().items.find((o: { kpi: unknown; status: string }) => o.kpi && o.status === 'ativo');
+    objE = kpiObj?.id ?? ok(await carlos.post('/performance/objectives', { title: 'Aumentar a receita comercial', level: 'estrategico', periodStart: start, periodEnd: '2026-12-31', sponsorId: uid('carlos') }), 201).json().id;
     objT = ok(await ana.post('/performance/objectives', { title: 'Elevar a conversão', level: 'tatico', parentId: objE, periodStart: start, periodEnd: '2026-12-31' }), 201).json().id;
     expect((await carlos.post('/performance/objectives', { title: 'Invertido', level: 'estrategico', parentId: objT, periodStart: start, periodEnd: '2026-12-31' })).statusCode).toBe(422);
   });
