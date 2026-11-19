@@ -188,6 +188,10 @@ export const teams = pgTable(
     substituteLeadId: uuid('substitute_lead_id'),
     /** Gestores do time (um gestor pode ter vários times; veem e acompanham só os times que gerem). */
     managerIds: uuid('manager_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** Tipo de cada gestor (organograma): hierárquico e funcional, só hierárquico ou só funcional. Ausente = os dois. */
+    managerKinds: jsonb('manager_kinds').$type<Record<string, 'hierarquico_funcional' | 'hierarquico' | 'funcional'>>().notNull().default(sql`'{}'::jsonb`),
+    /** Diretoria a que o time responde (topo da cadeia Diretor > Gestor > Líder > Operação). */
+    directorIds: uuid('director_ids').array().notNull().default(sql`'{}'::uuid[]`),
     /** Time excluído: some de todas as escolhas e listas; o histórico continua apontando para ele. */
     deletedAt: ts('deleted_at'),
     createdAt: createdAt(),
@@ -201,8 +205,10 @@ export const teamMemberships = pgTable(
     teamId: uuid('team_id').notNull().references(() => teams.id, { onDelete: 'cascade' }),
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     isLead: boolean('is_lead').notNull().default(false),
+    /** operação (faz parte do time) ou participante (colabora com o time; não entra no organograma do setor) */
+    role: text('role').notNull().default('operacao'),
   },
-  (t) => ({ pk: primaryKey({ columns: [t.teamId, t.userId] }) }),
+  (t) => ({ pk: primaryKey({ columns: [t.teamId, t.userId] }), roleCk: check('team_memberships_role_ck', sql`${t.role} in ('operacao','participante')`) }),
 );
 
 /** Redefinição de senha por e-mail: só o hash do código, uso único, expira em 1 hora. */
