@@ -128,6 +128,7 @@ const AdminUsers = lazy(() => import('./pages/admin/Admin').then((m) => ({ defau
 const AdminWebservice = lazy(() => import('./pages/admin/Webservice').then((m) => ({ default: m.AdminWebservice })));
 const AcademyTrackPage = lazy(() => import('./pages/playbooks/academy/Learn').then((m) => ({ default: m.AcademyTrackPage })));
 const AcademyLessonPage = lazy(() => import('./pages/playbooks/academy/Learn').then((m) => ({ default: m.AcademyLessonPage })));
+const AcademyStudioPage = lazy(() => import('./pages/playbooks/academy/Studio').then((m) => ({ default: m.AcademyStudioPage })));
 const AcademyEditorPage = lazy(() => import('./pages/playbooks/academy/Manage').then((m) => ({ default: m.AcademyEditorPage })));
 const ApiDocsPage = lazy(() => import('./pages/playbooks/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const AdminPlans = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminPlans })));
@@ -240,6 +241,7 @@ export function App() {
         <Route path="playbooks/api" element={<Suspense fallback={<LoadingRows rows={6} />}><ApiDocsPage /></Suspense>} />
         <Route path="playbooks/academia/trilhas/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><AcademyTrackPage /></Suspense>} />
         <Route path="playbooks/academia/trilhas/:id/aulas/:lessonId" element={<Suspense fallback={<LoadingRows rows={6} />}><AcademyLessonPage /></Suspense>} />
+        <Route path="playbooks/academia/estudio" element={<Suspense fallback={<LoadingRows rows={6} />}><AcademyStudioPage /></Suspense>} />
         <Route path="playbooks/academia/gestao/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><AcademyEditorPage /></Suspense>} />
         <Route path="playbooks/novo" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookNewPage /></Suspense>} />
         <Route path="playbooks/:id" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookReaderPage /></Suspense>} />
