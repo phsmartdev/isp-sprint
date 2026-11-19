@@ -27,6 +27,13 @@ test('objetivos estratégicos = KPIs; indicador ligado aparece no card do KPI', 
 
   // ligar o indicador ao Win Rate
   await page.getByRole('tab', { name: 'Indicadores' }).click();
+  // KPI não abre o construtor (quebrava a tela): a ficha é editada na Inteligência
+  const winRow = page.locator('li', { hasText: 'KPI principal' }).filter({ hasText: 'Win Rate' }).first();
+  await expect(winRow.getByRole('button', { name: 'Abrir ficha' })).toBeVisible();
+  await expect(winRow.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  await page.locator('li', { hasText: `Propostas enviadas ${st}` }).getByRole('button', { name: 'Editar' }).click();
+  await expect(page.getByLabel('Nome')).toHaveValue(`Propostas enviadas ${st}`);
+  await page.getByRole('button', { name: 'Cancelar' }).click();
   await page.getByLabel(`Objetivo de Propostas enviadas ${st}`).selectOption({ label: 'Win Rate' });
   await expect(page.getByText('Indicador ligado ao objetivo')).toBeVisible();
 
