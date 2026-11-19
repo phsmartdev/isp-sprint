@@ -138,6 +138,9 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   const seeked = Number((await page.getByTestId('lesson-pct').textContent())!.replace('%', '').replace(',', '.'));
   expect(seeked).toBeLessThan(40);
   await expect(page.getByText('Aula concluída')).toHaveCount(0);
+  // voltar para a aula anterior sem recarregar a página: a anotação continua lá (não usa cópia antiga da tela)
+  await page.getByRole('link', { name: 'Aula anterior' }).click();
+  await expect(page.getByTestId('notes')).toContainText('Pergunta sobre orçamento');
 
   // 6) terceiro vídeo ficou indisponível: sai da conta e a jornada avisa
   psql(`update academy_contents set state = 'removido' where external_id = '${vids[2]}'`);
@@ -149,6 +152,7 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   // anotações na página da trilha: o link abre a aula no ponto anotado
   await expect(page.getByRole('region', { name: 'Minhas anotações' })).toContainText('Pergunta sobre orçamento');
   await shot(page, '3-jornada');
+  await page.evaluate(() => { const y = (window as any).__yt; if (y) { y.p = null; y.start = null; } }); // espera o player novo, não o da tela anterior
   await page.getByRole('region', { name: 'Minhas anotações' }).getByRole('link', { name: new RegExp(`Ir para ${at}`) }).click();
   await page.waitForFunction(() => !!(window as any).__yt?.p);
   expect(await page.evaluate(() => (window as any).__yt.start as number)).toBe(atSec);
@@ -162,6 +166,22 @@ test('academia: montar trilha, aprovar, assistir com progresso real e acompanhar
   await expect(person).toContainText('Em andamento');
   await expect(person).toContainText('50%');
   await shot(page, '4-acompanhamento');
+
+  // 8) atribuição: a pessoa fica sabendo pelo sino (painel no lugar, sem trocar de tela) e o aviso leva à trilha
+  await page.getByRole('row').filter({ hasText: title }).getByRole('button', { name: 'Atribuir' }).click();
+  const dlg = page.getByRole('dialog', { name: `Atribuir: ${title}` });
+  await dlg.getByRole('button', { name: 'Mariana Costa' }).click();
+  await dlg.getByRole('button', { name: 'Atribuir', exact: true }).click();
+  await expect(page.getByText(/1 pessoa\(s\) receberam a trilha/)).toBeVisible();
+  await login(page, 'mariana@yepnet.test');
+  const url = page.url();
+  await page.getByRole('button', { name: /^Notificações/ }).click();
+  const panel = page.getByRole('dialog', { name: 'Notificações' });
+  await expect(panel).toBeVisible();
+  expect(page.url()).toBe(url); // abriu no lugar
+  await panel.getByRole('link').filter({ hasText: 'atribuiu uma trilha a você' }).first().click();
+  await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
+  await expect(page.getByText('Módulo não liberado')).toHaveCount(0);
 });
 
 test('integrações: a tela abre com o cartão do YouTube (Academia) e a chave não aparece', async ({ page }) => {
