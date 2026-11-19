@@ -21,21 +21,32 @@ function scenario(D = 6, serviceCostBp = 3500, kind: DealKind = 'recorrencia') {
   };
 }
 describe('preço mensal: caixa, inferência e margem negociada', () => {
-  it.each([1, 2, 3, 6, 12])('sugerido preserva a margem contratual com teto de %i meses', (D) => {
+  it.each([1, 2, 3, 6, 12])('sugerido respeita a margem base e recupera o investimento no teto de %i meses', (D) => {
     const args = scenario(D);
     const result = financeEngine(args);
-    expect(result.decision!.netMarginPct!).toBeCloseTo(20, 2);
-    if (result.kpi!.paybackMonths == null || result.kpi!.paybackMonths > result.term.D + 0.0001) expect(result.warnings.some((w) => w.includes('teto de payback'))).toBe(true);
+    expect(result.decision!.netMarginPct!).toBeGreaterThanOrEqual(19.99);
+    expect(result.kpi!.paybackMonths!).toBeLessThanOrEqual(result.term.D + 0.0001);
+    if (!result.paybackAdjusted) expect(result.decision!.netMarginPct!).toBeCloseTo(20, 2);
     const products = b2gFromEconomics(args, undefined, result);
     expect(products.recorrente!.lines[0]!.suggestedCents).toBe(result.suggestedCents);
     expect(products.recorrente!.lines[0]!.paybackMonths).toBeCloseTo(result.kpi!.paybackMonths!, 4);
     expect(products.global.netPct).toBeCloseTo(result.decision!.netMarginPct!, 2);
   });
-  it('teto curto não força uma margem acima do alvo: informa a incompatibilidade', () => {
-    const r = financeEngine(scenario(2, 0));
-    expect(r.decision!.netMarginPct!).toBeCloseTo(20, 2);
-    expect(r.kpi!.paybackMonths!).toBeGreaterThan(2);
-    expect(r.warnings.some((w) => w.includes('teto de payback'))).toBe(true);
+  it('margem contratual é a base; encurtar o teto eleva a mensalidade constante e a margem real', () => {
+    const base = financeEngine(scenario(6));
+    const fast = financeEngine(scenario(2));
+    expect(base.decision!.netMarginPct!).toBeCloseTo(20, 2);
+    expect(base.paybackAdjusted).toBe(false);
+    expect(base.suggestedCents).toBe(base.netTargetPriceCents);
+    expect(fast.suggestedCents!).toBeGreaterThan(base.suggestedCents!);
+    expect(fast.suggestedCents!).toBeGreaterThan(fast.netTargetPriceCents!);
+    expect(fast.paybackAdjusted).toBe(true);
+    expect(fast.decision!.netMarginPct!).toBeGreaterThan(20);
+    expect(fast.kpi!.paybackMonths!).toBeLessThanOrEqual(2.0001);
+    expect(fast.warnings.join(' ')).toContain('mensalidade permanece constante');
+    const first = fast.statement!.month.revenue;
+    expect(fast.statement!.after!.revenue).toBe(first);
+    expect(fast.statement!.total.revenue).toBe(first * fast.term.N);
   });
   it.each(['recorrencia', 'locacao'] as const)('%s: 35%% da base se repete em todos os meses e não duplica o investimento inicial', (kind) => {
     const args = scenario(6, 3500, kind), result = financeEngine(args);
@@ -73,8 +84,9 @@ describe('preço mensal: caixa, inferência e margem negociada', () => {
       const r = financeEngine(a);
       expect(r.serviceCostBp).toBe(serviceCostBp);
       expect(r.serviceMonthlyCents).toBe(Math.round(800000 * serviceCostBp / 10000));
-      expect(r.decision!.netMarginPct!).toBeCloseTo(20, 2);
-      if ((r.kpi!.paybackMonths ?? Infinity) > 6) expect(r.warnings.join(' ')).toContain('teto de payback');
+      expect(r.decision!.netMarginPct!).toBeGreaterThanOrEqual(19.99);
+      expect(r.kpi!.paybackMonths!).toBeLessThanOrEqual(6.0001);
+      if (!r.paybackAdjusted) expect(r.decision!.netMarginPct!).toBeCloseTo(20, 2);
       const proposed = financeEngine({ ...a, input: { ...a.input, priceCents: 400000 } });
       expect(proposed.proposedResult!.serviceMonthlyCents).toBe(r.serviceMonthlyCents);
       expect(proposed.suggestedCents).toBe(r.suggestedCents);

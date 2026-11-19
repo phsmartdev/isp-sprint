@@ -47,7 +47,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.10.0';
+export const ENGINE_VERSION = 'FINANCE-3.11.0';
 /** Acréscimo de investimento dos serviços; independente de contingência, margem e despesas fixas. */
 export const SERVICE_INVESTMENT_BP = 3500;
 export const serviceInvestmentExtra = (baseCents: number, serviceCostBp?: number | null) => Math.round(baseCents * (serviceCostBp ?? SERVICE_INVESTMENT_BP) / 10_000);
@@ -253,6 +253,7 @@ export type EconResult = {
   b2g?: import('./b2gViability').B2gResult | null;
   engineVersion: string;
   pricingBasis?: 'net_margin'; targetNetMarginPct?: number;
+  /** Preço base pela margem contratual, antes da restrição de retorno. */ netTargetPriceCents?: number | null; paybackAdjusted?: boolean;
   /** negociação com venda e itens mensais juntos (um resultado só) */
   deal?: DealSummary;
   mode: EconMode; publicSector: boolean;
@@ -722,6 +723,7 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
   };
   const monthParts = parts.filter((_, k) => cells[k]!.ritmo === 'mensal');
   const tma = r;
+  const basePrices = parts.filter((_, k) => cells[k]!.ritmo === (hasM ? 'mensal' : 'unico')).map((p) => p.netTargetPriceCents);
   const checks = [
     { label: 'VPL positivo', ok: priced && npvC > 0 },
     { label: 'TIR acima da TMA', ok: ir != null && ir > tma },
@@ -733,6 +735,7 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
   const op = add('operating'), net = add('net');
   return {
     ...base,
+    ...(parts.some((p) => p.pricingBasis === 'net_margin') ? { netTargetPriceCents: basePrices.every((p) => p != null) ? basePrices.reduce<number>((sum, p) => sum + p!, 0) : null, paybackAdjusted: parts.some((p) => p.paybackAdjusted === true) } : {}),
     mode: hasM ? 'recorrente' : 'pontual',
     revenueCents: parts.reduce((t, p) => t + p.revenueCents, 0),
     rates: { ...base.rates, a: revB > 0 ? (add('tax') ?? 0) / revB : base.rates.a },
@@ -773,14 +776,30 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
 }
 
 /** O motor com o que o Financial Studio mostra: as variáveis de entrada (com o preço avaliado) e a execução do modelo. */
-type NetPricingPlan = { priceCents: number | null; contribution: number; minimum: number; maximum: number | null; recommendation: EconRecommendation | null };
+type NetPricingPlan = { netTargetPriceCents: number | null; priceCents: number | null; contribution: number; minimum: number; maximum: number | null; recommendation: EconRecommendation | null };
 export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan | false): { result: EconResult; base: FinBase; run: ModelRun; model: FinModel } {
   // O preço busca a margem líquida do contrato; o payback informado é o prazo máximo de retorno.
   if (pricing === undefined && args.settings.netMarginTargetBp != null) {
     const probe = financeEngineDetailed(args, false);
     const recommendation = probe.result.recommendation ?? null;
-    const price = recommendation?.priceCents ?? null;
-    // O teto é verificado no retorno real; não eleva o preço nem substitui a margem contratual escolhida.
+    const netTargetPriceCents = recommendation?.priceCents ?? null;
+    let price = netTargetPriceCents;
+    // O preço deve devolver o investimento no prazo escolhido, depois dos desembolsos do fluxo.
+    const D = probe.result.term.D;
+    if (price != null && args.input.mode === 'recorrente' && D > 0) {
+      const balance = (P: number) => {
+        const rr = runModel(probe.model, { ...probe.base, preco: P });
+        return rr.fluxo.slice(0, D + 1).reduce((sum, value, k) => sum + value / (1 + probe.result.rates.r) ** k, 0);
+      };
+      if (balance(price) < -0.000001) {
+        let lo = price, hi = Math.max(1, price);
+        for (let k = 0; k < 48 && balance(hi) < 0; k++) hi *= 2;
+        if (balance(hi) >= 0) {
+          for (let k = 0; k < 65 && hi - lo > 0.001; k++) { const mid = (hi + lo) / 2; if (balance(mid) >= 0) hi = mid; else lo = mid; }
+          price = Math.ceil(hi - 1e-8);
+        } else price = null;
+      }
+    }
     if (recommendation) recommendation.priceCents = price;
     const contributionAt = (value: number | null | undefined) => {
       if (value == null || value <= 0) return 0;
@@ -788,7 +807,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
       const mc = run.values.margem_contribuicao_pct;
       return typeof mc === 'number' && Number.isFinite(mc) ? mc : 0;
     };
-    return financeEngineDetailed(args, { priceCents: price, contribution: contributionAt(price), minimum: contributionAt(recommendation?.range?.min.priceCents), maximum: recommendation?.range?.max.priceCents != null ? contributionAt(recommendation.range.max.priceCents) : null, recommendation: recommendation ? { ...recommendation, contributionPct: price != null ? contributionAt(price) * 100 : null } : null });
+    return financeEngineDetailed(args, { netTargetPriceCents, priceCents: price, contribution: contributionAt(price), minimum: contributionAt(recommendation?.range?.min.priceCents), maximum: recommendation?.range?.max.priceCents != null ? contributionAt(recommendation.range.max.priceCents) : null, recommendation: recommendation ? { ...recommendation, contributionPct: price != null ? contributionAt(price) * 100 : null } : null });
   }
   const targetPricing = pricing || null;
   const { input: inp, settings: st, publicSector } = args;
@@ -974,8 +993,9 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   }
   if (targetPricing && rec && targetPricing.priceCents != null && st.netMarginTargetBp != null) {
     const rr = runModel(fm, { ...base, preco: targetPricing.priceCents });
-    const actualPayback = paybackOf(rr.fluxo, r);
-    if (actualPayback == null || actualPayback > D + 0.0001) warnings.push(`No preço sugerido, o retorno real ${actualPayback == null ? 'não ocorre na projeção' : 'é de ' + actualPayback.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' meses'}, acima do teto de payback de ${D} meses. A margem líquida contratual escolhida foi preservada; revise custos ou margem para atender ao teto.`);
+    const total = statementOfPeriods(rr.periods, N).total;
+    const actualNet = total.net != null && total.revenue > 0 ? total.net / total.revenue * 100 : null;
+    if (targetPricing.netTargetPriceCents != null && targetPricing.priceCents > targetPricing.netTargetPriceCents && actualNet != null) warnings.push(`Para cumprir o teto de payback de ${D} meses, o sugerido foi elevado acima do preço base da margem líquida. A margem líquida do contrato no sugerido é ${actualNet.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% (alvo ${((st.netMarginTargetBp ?? 0) / 100).toLocaleString('pt-BR')}%). A mensalidade permanece constante durante a vigência.`);
   }
   if (targetPricing && targetPricing.priceCents == null) warnings.push('A margem líquida esperada não é alcançável com os custos e tributos configurados.');
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
@@ -1007,7 +1027,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   for (const f of fm.formulas.values()) if (f.version !== 0) versions[f.code] = f.version ?? -1;
 
   const result: EconResult = {
-    engineVersion: ENGINE_VERSION, ...(targetPricing ? { pricingBasis: 'net_margin' as const, targetNetMarginPct: (st.netMarginTargetBp ?? 0) / 100 } : {}),
+    engineVersion: ENGINE_VERSION, ...(targetPricing ? { pricingBasis: 'net_margin' as const, netTargetPriceCents: targetPricing.netTargetPriceCents, paybackAdjusted: targetPricing.netTargetPriceCents != null && targetPricing.priceCents != null && targetPricing.priceCents > targetPricing.netTargetPriceCents, targetNetMarginPct: (st.netMarginTargetBp ?? 0) / 100 } : {}),
     mode: inp.mode, publicSector, revenueCents: revenue, priceCents: round(P), priceSource,
     rates: { a, c, g, m, r, b, glosa, badDebt, bMarkup: bMk, mMin, mMax, inflationMonthly: inflM, tmaAnnual: st.tmaAnnualBp != null ? bp(st.tmaAnnualBp) : null },
     fixedTaxCents: F, initialCents: Math.round(I), monthlyCostCents: Math.round(O),
@@ -1319,7 +1339,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
     value: pt.priceCents == null ? 'não cabe no divisor' : `${money(pt.priceCents)}${rec ? '/mês' : ''}`, strong: true,
   });
   const pbNote = rec && annuity && k ? `Payback do investimento na precificação = ${D} ${D === 1 ? 'mês' : 'meses'} (a parcela pela TMA devolve I com juros em exatamente D meses). O payback de caixa (${k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses`}) sai menor porque a margem de contribuição também entra no caixa; ele só é igual a D com margem zero.` : undefined;
-  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: r.pricingBasis === 'net_margin' ? 'Preço que cobre os custos e entrega a margem líquida alvo, considerando tributos, perdas, despesas fixas e IR/CSLL. Na mensalidade, busca a margem líquida do contrato inteiro; o payback informado limita o prazo de retorno.' : 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
+  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: r.pricingBasis === 'net_margin' ? 'Preço que cobre os custos e entrega a margem líquida alvo, considerando tributos, perdas, despesas fixas e IR/CSLL. Na mensalidade, busca primeiro a margem líquida do contrato inteiro; se necessário, eleva a mensalidade constante para cumprir o teto de retorno, mostrando a margem final maior.' : 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
 
   const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
   const cmp = fx ? econCompare(r, opts.legacy ?? {}) : null;

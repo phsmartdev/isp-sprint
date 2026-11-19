@@ -153,6 +153,17 @@ describe('viabilidade global por cesta', () => {
     expect(updatedRow.textContent).toContain('35% da base');
     expect(updatedRow.textContent).toContain('420,00');
   });
+  it('encurtar o payback eleva a sugestão sem trocar a margem alvo e explica o aumento do lucro final', async () => {
+    setup(['recorrencia']);
+    await screen.findByLabelText('Payback de Recorrência');
+    const card = panel('Recorrência');
+    const initial = within(card).getByText('Preço sugerido').parentElement!.textContent;
+    fireEvent.change(screen.getByLabelText('Payback de Recorrência'), { target: { value: '2' } });
+    await within(card).findByText(/Para cumprir o teto de payback de 2 meses/);
+    expect(within(card).getByText('Preço sugerido').parentElement!.textContent).not.toBe(initial);
+    expect((screen.getByLabelText('Margem líquida de Recorrência') as HTMLInputElement).value).toBe('20');
+    expect(within(card).getByText(/A mensalidade permanece constante durante a vigência/)).toBeTruthy();
+  });
   it('preserva proposta global antiga ao migrar para os controles por cesta', async () => {
     const { requests } = setup(['venda', 'servico', 'recorrencia'], { priceCents: 25000, salePriceCents: 300000 });
     await screen.findByLabelText('Margem líquida de Venda');

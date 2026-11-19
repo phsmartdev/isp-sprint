@@ -71,7 +71,7 @@ describe('viabilidade econômica', () => {
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
     // Investimento 30.000; operação 2.000 + inferência mensal 10.500. O sugerido atende margem e payback.
-    expect(saved.result.engineVersion).toBe('FINANCE-3.10.0');
+    expect(saved.result.engineVersion).toBe('FINANCE-3.11.0');
     const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
     expect(Math.abs(saved.result.suggestedCents - (3_000_000 / 24 + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(saved.result.rates.m * 100, 4);
@@ -438,7 +438,7 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.verified).toBe(true);
-    expect(run.engineVersion).toBe('FINANCE-3.10.0');
+    expect(run.engineVersion).toBe('FINANCE-3.11.0');
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
   });
