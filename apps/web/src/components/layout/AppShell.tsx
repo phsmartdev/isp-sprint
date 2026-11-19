@@ -24,6 +24,7 @@ import { HeaderSelo } from '../../features/gamification/Gamification';
 type NavLeaf = {
   to: string; label: string; icon?: ReactNode; module: Module; feature?: FeatureKey; badge?: 'approvals'; also?: string[];
   /** aba da Gestão de Contratos que o item abre (segue a permissão da aba por perfil) */ contractTab?: ContractTab;
+  /** só para quem pode ver o organograma */ orgChart?: true;
 };
 type NavGroup = { key: string; label: string; icon: ReactNode; children: NavLeaf[] };
 type NavEntry = NavLeaf | NavGroup;
@@ -70,6 +71,7 @@ const NAV: NavEntry[] = [
     { to: '/times/metas', label: 'Metas e indicadores', module: 'desempenho' },
     { to: '/times/acompanhamento', label: 'Acompanhamento', module: 'resultados' },
     { to: '/times/pessoas', label: 'Pessoas', module: 'resultados' },
+    { to: '/times/organograma', label: 'Organograma', module: 'inicio', orgChart: true },
   ] },
   { key: 'projetos', label: 'Projetos', icon: <FolderKanban className={ICON} />, children: [
     { to: '/projetos', label: 'Projetos', module: 'projetos' },
@@ -133,9 +135,9 @@ function SettingsMenu({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { can, feature } = useAuth();
+  const { can, feature, me } = useAuth();
   const contractTabs = useQuery({ queryKey: ['contracts', 'view'], enabled: can('contratos'), queryFn: () => api<{ tabs: ContractTab[] }>('/contracts/view'), staleTime: 60_000 }).data?.tabs;
-  const show = (n: NavLeaf) => can(n.module) && (!n.feature || feature(n.feature)) && (!n.contractTab || !contractTabs || contractTabs.includes(n.contractTab));
+  const show = (n: NavLeaf) => can(n.module) && (!n.feature || feature(n.feature)) && (!n.contractTab || !contractTabs || contractTabs.includes(n.contractTab)) && (!n.orgChart || !!me?.orgChart);
   const loc = useLocation();
   // itens com ?t= (submenus de Contratos) comparam também a aba; "Contratos" vale para as demais abas e para as fichas
   const currentTab = new URLSearchParams(loc.search).get('t');

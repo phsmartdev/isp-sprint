@@ -5,6 +5,8 @@ export type Me = {
   user: { id: string; name: string; email: string; jobTitle: string | null; hasAvatar: boolean };
   tenant: { id: string; name: string; timezone: string };
   profiles: string[];
+  /** pode ver o organograma (Administração ou autorizado) */
+  orgChart?: boolean;
   access: Record<Module, AccessLevel>;
   teamIds: string[];
   teamMemberIds: string[];

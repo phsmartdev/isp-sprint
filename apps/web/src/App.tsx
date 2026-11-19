@@ -128,6 +128,7 @@ const AdminUsers = lazy(() => import('./pages/admin/Admin').then((m) => ({ defau
 const AdminWebservice = lazy(() => import('./pages/admin/Webservice').then((m) => ({ default: m.AdminWebservice })));
 const AcademyTrackPage = lazy(() => import('./pages/playbooks/academy/Learn').then((m) => ({ default: m.AcademyTrackPage })));
 const AcademyLessonPage = lazy(() => import('./pages/playbooks/academy/Learn').then((m) => ({ default: m.AcademyLessonPage })));
+const OrgChartPage = lazy(() => import('./pages/admin/OrgChart').then((m) => ({ default: m.OrgChartPage })));
 const AcademyStudioPage = lazy(() => import('./pages/playbooks/academy/Studio').then((m) => ({ default: m.AcademyStudioPage })));
 const AcademyEditorPage = lazy(() => import('./pages/playbooks/academy/Manage').then((m) => ({ default: m.AcademyEditorPage })));
 const ApiDocsPage = lazy(() => import('./pages/playbooks/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
@@ -233,6 +234,7 @@ export function App() {
         <Route path="times" element={<Gate module="resultados"><TeamPanelPage /></Gate>} />
         <Route path="times/acompanhamento" element={<Gate module="resultados"><TeamTrackingPage /></Gate>} />
         <Route path="times/pessoas" element={<TeamPeoplePage />} />
+        <Route path="times/organograma" element={<Suspense fallback={<LoadingRows rows={6} />}><OrgChartPage /></Suspense>} />
         <Route path="times/intervencoes" element={<GoTo to="/times/acompanhamento" aba="intervencoes" />} />
         <Route path="times/intervencoes/:id/analise" element={<Gate module="resultados"><AnalysisPage /></Gate>} />
         <Route path="times/rituais" element={<GoTo to="/times/acompanhamento" aba="rituais" />} />

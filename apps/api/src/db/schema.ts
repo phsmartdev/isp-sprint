@@ -32,6 +32,9 @@ export const tenants = pgTable('tenants', {
   /** Topo do organograma de acessos (quem encabeça a estrutura), editável em Usuários → Organograma */
   orgTopName: text('org_top_name'),
   orgTopTitle: text('org_top_title'),
+  /** Quem pode ver o organograma (só consulta), além da Administração: pessoas e perfis autorizados */
+  orgChartViewerIds: uuid('org_chart_viewer_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  orgChartViewerProfiles: text('org_chart_viewer_profiles').array().notNull().default(sql`'{}'::text[]`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
