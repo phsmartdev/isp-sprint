@@ -1,5 +1,6 @@
 /** Construtor de indicadores: origem nos eventos, filtros de lista fechada, fórmula validada, teste e versões. */
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import {
@@ -25,6 +26,7 @@ const blankSource = (): Source => ({ event: 'negociacao_ganha', measure: 'contag
 const blankDef = (): IndicatorDef => ({ name: '', category: 'comercial', calc: 'contagem', unit: 'quantidade', direction: 'maior', period: 'mes', base: blankSource() });
 
 export function IndicatorsAdmin() {
+  const nav = useNavigate();
   const toast = useToast();
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['performance', 'indicators'], queryFn: () => api<ListResp>('/performance/indicators') });
@@ -67,7 +69,7 @@ export function IndicatorsAdmin() {
                       {i.objectiveId && !objItems.some((o) => o.id === i.objectiveId) && <option value={i.objectiveId}>Objetivo encerrado</option>}
                     </Select>
                   : objTitle(i.objectiveId) && <Chip tone="blue">{objTitle(i.objectiveId)}</Chip>)}
-                {d.canEdit && <><Button size="sm" variant="secondary" onClick={() => setEdit(i)}>Editar</Button><Button size="sm" variant="ghost" onClick={() => toggle.mutate(i)}>{i.active ? 'Desativar' : 'Ativar'}</Button></>}
+                {d.canEdit && <>{isKpi(i.def) ? <Button size="sm" variant="secondary" title="A ficha do KPI é editada na Inteligência" onClick={() => nav('/intelligence?v=indicadores')}>Abrir ficha</Button> : <Button size="sm" variant="secondary" onClick={() => setEdit(i)}>Editar</Button>}<Button size="sm" variant="ghost" onClick={() => toggle.mutate(i)}>{i.active ? 'Desativar' : 'Ativar'}</Button></>}
               </li>
             ))}
           </ul>
@@ -161,7 +163,7 @@ function IndicatorEditor({ row, onClose }: { row: IndicatorRow | 'new' | null; o
           <FormField label="Peso padrão" htmlFor="ind-w"><Input id="ind-w" inputMode="numeric" value={d.weight ?? ''} onChange={(e) => set({ weight: e.target.value === '' ? undefined : Number(e.target.value) })} /></FormField>
           <FormField label="Amostra mínima" htmlFor="ind-min" hint="Abaixo disso: incompleto"><Input id="ind-min" inputMode="numeric" value={d.minSample ?? ''} onChange={(e) => set({ minSample: e.target.value === '' ? undefined : Number(e.target.value) })} /></FormField>
         </div>
-        {two ? (<><SourceEditor label="Parte (numerador)" value={d.numerator!} onChange={(x) => set({ numerator: x })} /><SourceEditor label="Total (denominador)" value={d.denominator!} onChange={(x) => set({ denominator: x })} /></>)
+        {two ? (<><SourceEditor label="Parte (numerador)" value={d.numerator ?? blankSource()} onChange={(x) => set({ numerator: x })} /><SourceEditor label="Total (denominador)" value={d.denominator ?? blankSource()} onChange={(x) => set({ denominator: x })} /></>)
           : d.calc === 'formula' ? (
             <div className="space-y-3">
               {vars.map(([n, src]) => (
@@ -174,7 +176,8 @@ function IndicatorEditor({ row, onClose }: { row: IndicatorRow | 'new' | null; o
               <FormField label="Fórmula" htmlFor="ind-expr" hint="Use as variáveis, + − × ÷, parênteses e min, max, abs, round. Separe argumentos com ';'."><Input id="ind-expr" value={d.expr ?? ''} onChange={(e) => set({ expr: e.target.value })} /></FormField>
               {formula && (formula.ok ? <p className="text-sm text-success">Fórmula válida.</p> : <p className="text-sm text-danger">{formula.error}</p>)}
             </div>
-          ) : <SourceEditor label="Origem" value={d.base!} onChange={(x) => set({ base: x })} />}
+          ) : d.calc === 'informado' ? <Notice tone="info">Resultado informado: lançado por competência, sem origem nos eventos do sistema.</Notice>
+          : <SourceEditor label="Origem" value={d.base ?? blankSource()} onChange={(x) => set({ base: x })} />}
         {!!errs.length && <Notice tone="warning">{errs.join(' ')}</Notice>}
         <section className="flex flex-wrap items-end gap-2 rounded-md bg-surface-2 p-3">
           <FormField label="Testar para" htmlFor="ind-who"><Select id="ind-who" value={who} onChange={(e) => setWho(e.target.value)}><option value="">Empresa toda</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
