@@ -12,6 +12,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { level } from '../services/scope';
+import { audit } from '../services/audit';
 import { ensureFreshEvents, performanceConfig } from '../services/businessEvents';
 import { todayLocal } from '../services/projects';
 import { performanceUsers } from './performance';
@@ -19,7 +20,8 @@ import { descendants, orgData, resultsScope } from '../services/results';
 import {
   allIndicators, computeIndicator, goalProgress, indicatorDef, rollRecurringGoals, scorecardsFor, sourceEvents, teamUsers, type Who,
 } from '../services/indicators';
-import { SheetSchema } from './kpis';
+import { SheetSchema, kpiBoards } from './kpis';
+import { ensureKpiObjectives, isKpiDef } from '../services/kpiObjectives';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
 const SourceSchema = z.object({
@@ -121,15 +123,19 @@ export const indicatorRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/performance/indicators', summary: 'Cria indicador (definição validada; fórmula sem execução de código)', tag: 'Desempenho', module: 'configuracoes', min: 'total',
-    body: z.object({ def: DefSchema, key: z.string().max(40).optional(), note: z.string().max(500).optional() }),
+    body: z.object({ def: DefSchema, key: z.string().max(40).optional(), note: z.string().max(500).optional(), objectiveId: z.string().uuid().nullable().optional() }),
     handler: async ({ app, auth, body, reply }) => {
       const def = body.def as IndicatorDef;
       checkDef(def);
+      if (body.objectiveId) {
+        const [o] = await app.db.select({ id: s.objectives.id }).from(s.objectives).where(and(eq(s.objectives.id, body.objectiveId), eq(s.objectives.tenantId, auth.tenantId), eq(s.objectives.status, 'ativo'))).limit(1);
+        if (!o) throw unprocessable('Objetivo não encontrado ou inativo.');
+      }
       const r = await app.db.transaction(async (tx) => {
         let key = body.key ?? slug(def.name);
         const [dup] = await tx.select({ id: s.indicators.id }).from(s.indicators).where(and(eq(s.indicators.tenantId, auth.tenantId), eq(s.indicators.key, key))).limit(1);
         if (dup) key = `${key}_${Date.now().toString(36).slice(-4)}`;
-        const [i] = await tx.insert(s.indicators).values({ tenantId: auth.tenantId, key, createdBy: auth.userId }).returning({ id: s.indicators.id });
+        const [i] = await tx.insert(s.indicators).values({ tenantId: auth.tenantId, key, objectiveId: isKpiDef(def) ? null : body.objectiveId ?? null, createdBy: auth.userId }).returning({ id: s.indicators.id });
         await tx.insert(s.indicatorVersions).values({ tenantId: auth.tenantId, indicatorId: i!.id, version: 1, def, note: body.note ?? 'Criação', createdBy: auth.userId });
         return i!;
       });
@@ -171,11 +177,25 @@ export const indicatorRoutes = [
     },
   }),
   defineRoute({
-    method: 'PATCH', url: '/performance/indicators/:id', summary: 'Ativa ou desativa indicador', tag: 'Desempenho', module: 'configuracoes', min: 'total', params: IdParams,
-    body: z.object({ active: z.boolean() }),
-    handler: async ({ app, auth, params, body }) => {
-      const r = await app.db.update(s.indicators).set({ active: body.active }).where(and(eq(s.indicators.id, params.id), eq(s.indicators.tenantId, auth.tenantId))).returning({ id: s.indicators.id });
-      if (!r.length) throw notFound('Indicador não encontrado.');
+    method: 'PATCH', url: '/performance/indicators/:id', summary: 'Ativa ou desativa indicador e liga ao objetivo estratégico (KPI) para o qual contribui', tag: 'Desempenho', module: 'configuracoes', min: 'total', params: IdParams,
+    body: z.object({ active: z.boolean().optional(), objectiveId: z.string().uuid().nullable().optional() }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const d = await indicatorDef(app.db, auth.tenantId, params.id);
+      if (!d) throw notFound('Indicador não encontrado.');
+      if (body.objectiveId !== undefined) {
+        if (body.objectiveId && isKpiDef(d.def)) throw unprocessable('Este indicador é um KPI principal: ele já é o objetivo estratégico.');
+        if (body.objectiveId) {
+          const [o] = await app.db.select({ id: s.objectives.id, status: s.objectives.status }).from(s.objectives).where(and(eq(s.objectives.id, body.objectiveId), eq(s.objectives.tenantId, auth.tenantId))).limit(1);
+          if (!o) throw unprocessable('Objetivo não encontrado.');
+          if (o.status !== 'ativo') throw unprocessable('Ligue o indicador a um objetivo ativo.');
+        }
+      }
+      const set: Partial<typeof s.indicators.$inferInsert> = {};
+      if (body.active !== undefined) set.active = body.active;
+      if (body.objectiveId !== undefined) set.objectiveId = body.objectiveId;
+      if (!Object.keys(set).length) throw unprocessable('Nada para alterar.');
+      await app.db.update(s.indicators).set(set).where(and(eq(s.indicators.id, params.id), eq(s.indicators.tenantId, auth.tenantId)));
+      if (body.objectiveId !== undefined) await audit(app.db, req, { action: 'indicator.objective', entityType: 'indicator', entityId: params.id, metadata: { objectiveId: body.objectiveId } });
       return { ok: true };
     },
   }),
@@ -230,17 +250,32 @@ export const indicatorRoutes = [
     method: 'GET', url: '/performance/objectives', summary: 'Objetivos (estratégicos, táticos, operacionais) com vínculos e metas', tag: 'Desempenho', module: 'desempenho',
     query: z.object({ active: z.coerce.boolean().optional() }),
     handler: async ({ app, auth, query: q }) => {
+      const today = todayLocal(auth);
+      await ensureKpiObjectives(app.db, auth.tenantId, today, auth.userId);
       const rows = await app.db.select({ o: s.objectives, ownerName: s.users.name }).from(s.objectives).innerJoin(s.users, eq(s.users.id, s.objectives.ownerId)).where(and(eq(s.objectives.tenantId, auth.tenantId), q.active ? eq(s.objectives.status, 'ativo') : undefined)).orderBy(asc(s.objectives.level), desc(s.objectives.periodEnd));
       const ids = rows.map((r) => r.o.id);
       const gs = ids.length ? await app.db.select().from(s.goals).where(and(eq(s.goals.tenantId, auth.tenantId), inArray(s.goals.objectiveId, ids), eq(s.goals.status, 'ativa'), goalVisible(auth, await resultsScope(app.db, auth)))) : [];
       const { config } = await performanceConfig(app.db, auth.tenantId);
       const goalsOut = await Promise.all(gs.map((g) => goalDto(app.db, auth, g, config.traffic)));
+      const inds = await allIndicators(app.db, auth.tenantId);
+      // o placar do KPI (meta do trimestre, resultado, farol) é o mesmo da Inteligência: só para quem vê a Inteligência ou o desempenho da empresa
+      const seesKpi = level(auth, 'inteligencia') !== 'nenhum' || level(auth, 'desempenho') === 'total';
+      const boards = seesKpi && rows.some((r) => r.o.kpiIndicatorId) ? new Map((await kpiBoards(app.db, auth.tenantId, Number(today.slice(0, 4)), today)).map((b) => [b.id, b])) : new Map();
+      const kpiOrder = new Map(inds.map((i, n) => [i.id, n]));
+      const items = rows.map(({ o, ownerName }) => {
+        const mine = goalsOut.filter((g) => g.objectiveId === o.id);
+        const atts = mine.map((g) => g.progress.attainment).filter((a): a is number => a !== null);
+        const kd = o.kpiIndicatorId ? inds.find((i) => i.id === o.kpiIndicatorId) : undefined;
+        const b = o.kpiIndicatorId ? boards.get(o.kpiIndicatorId) : undefined;
+        return {
+          ...o, ownerName, goals: mine, progress: atts.length ? Math.min(1, atts.reduce((a, b) => a + Math.min(1, b), 0) / atts.length) : null,
+          kpi: kd ? { indicatorId: kd.id, name: kd.def.name, unit: kd.def.unit, direction: kd.def.direction, paused: !!kd.def.sheet?.paused, board: b ? { current: b.current, annual: b.annual, source: b.source } : null } : null,
+          indicators: inds.filter((i) => i.objectiveId === o.id).map((i) => ({ id: i.id, name: i.def.name, unit: i.def.unit, active: i.active })),
+        };
+      });
+      items.sort((a, b) => (a.kpi ? 0 : 1) - (b.kpi ? 0 : 1) || (a.kpi && b.kpi ? (kpiOrder.get(a.kpi.indicatorId) ?? 0) - (kpiOrder.get(b.kpi.indicatorId) ?? 0) : 0));
       return {
-        items: rows.map(({ o, ownerName }) => {
-          const mine = goalsOut.filter((g) => g.objectiveId === o.id);
-          const atts = mine.map((g) => g.progress.attainment).filter((a): a is number => a !== null);
-          return { ...o, ownerName, goals: mine, progress: atts.length ? Math.min(1, atts.reduce((a, b) => a + Math.min(1, b), 0) / atts.length) : null };
-        }),
+        items, kpiDriven: items.some((i) => i.kpi),
         canEdit: atLeast(level(auth, 'desempenho'), 'equipe'),
       };
     },
@@ -254,6 +289,7 @@ export const indicatorRoutes = [
       if (body.level === 'estrategico' && !total && !rs.perspectives.includes('diretoria')) throw forbidden('Objetivos estratégicos são definidos pela Diretoria.');
       if (!total && !rs.perspectives.length && level(auth, 'desempenho') !== 'equipe') throw forbidden('Só lideranças definem objetivos.');
       if (body.periodEnd < body.periodStart) throw unprocessable('O fim não pode ser antes do início.');
+      if (body.level === 'estrategico' && (await allIndicators(app.db, auth.tenantId)).some((i) => i.active && isKpiDef(i.def))) throw unprocessable('Os objetivos estratégicos são os KPIs principais da Inteligência. Crie um objetivo tático ou operacional ligado a um deles.');
       if (body.parentId) {
         const [p] = await app.db.select().from(s.objectives).where(and(eq(s.objectives.id, body.parentId), eq(s.objectives.tenantId, auth.tenantId))).limit(1);
         if (!p) throw unprocessable('Objetivo superior não encontrado.');
@@ -272,6 +308,7 @@ export const indicatorRoutes = [
       if (!o) throw notFound('Objetivo não encontrado.');
       if (o.level === 'estrategico' && level(auth, 'desempenho') !== 'total') throw forbidden();
       if (o.rowVersion !== body.rowVersion) throw conflict(o.rowVersion);
+      if (o.kpiIndicatorId && (body.title !== undefined || body.periodEnd !== undefined || body.status === 'encerrado')) throw unprocessable('Este objetivo é um KPI principal: nome, período e encerramento seguem a ficha do KPI na Inteligência.');
       const { rowVersion, ...rest } = body;
       await app.db.update(s.objectives).set({ ...rest, updatedAt: new Date(), rowVersion: sql`${s.objectives.rowVersion} + 1` }).where(eq(s.objectives.id, o.id));
       return { ok: true };
@@ -340,6 +377,13 @@ export const indicatorRoutes = [
       else range = periodRange(body.periodType as Exclude<PeriodType, 'personalizado'>, body.ref ?? body.periodStart ?? todayLocal(auth));
       return app.db.transaction(async (tx) => {
         if (body.indicatorId && !(await indicatorDef(tx, auth.tenantId, body.indicatorId))) throw unprocessable('Indicador não encontrado.');
+        // sem objetivo escolhido, a meta herda o objetivo do indicador (ou o do próprio KPI)
+        let objectiveId = body.objectiveId ?? null;
+        if (!objectiveId && body.indicatorId) {
+          const [ind] = await tx.select({ objectiveId: s.indicators.objectiveId }).from(s.indicators).where(eq(s.indicators.id, body.indicatorId)).limit(1);
+          const [kpiObj] = await tx.select({ id: s.objectives.id }).from(s.objectives).where(and(eq(s.objectives.tenantId, auth.tenantId), eq(s.objectives.kpiIndicatorId, body.indicatorId), eq(s.objectives.status, 'ativo'))).limit(1);
+          objectiveId = ind?.objectiveId ?? kpiObj?.id ?? null;
+        }
         if (body.parentGoalId) {
           const [p] = await tx.select().from(s.goals).where(and(eq(s.goals.id, body.parentGoalId), eq(s.goals.tenantId, auth.tenantId))).limit(1);
           if (!p) throw unprocessable('Meta superior não encontrada.');
@@ -351,7 +395,7 @@ export const indicatorRoutes = [
           tenantId: auth.tenantId, title: body.title, scope: body.scope, category: body.category, indicatorId: body.indicatorId ?? null, manualUnit: body.indicatorId ? null : body.manualUnit ?? null,
           userId: body.scope === 'individual' ? body.userId! : null, teamId: body.scope === 'equipe' ? body.teamId! : null, orgUnitId: body.scope === 'unidade' ? body.orgUnitId! : null, ownerId: body.ownerId ?? body.userId ?? auth.userId,
           recurring: body.recurring, approvalStatus: needsApproval ? 'proposta' : 'aprovada', approvedBy: needsApproval ? null : auth.userId, approvedAt: needsApproval ? null : new Date(),
-          periodType: body.periodType, periodStart: range.from, periodEnd: range.to, target: body.target, originalTarget: body.target, objectiveId: body.objectiveId ?? null, parentGoalId: body.parentGoalId ?? null,
+          periodType: body.periodType, periodStart: range.from, periodEnd: range.to, target: body.target, originalTarget: body.target, objectiveId, parentGoalId: body.parentGoalId ?? null,
           weight: body.weight, consolidation: body.consolidation, notes: body.notes ?? null, createdBy: auth.userId,
         }).returning({ id: s.goals.id });
         await tx.update(s.goals).set({ seriesId: g!.id }).where(eq(s.goals.id, g!.id));

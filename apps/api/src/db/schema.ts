@@ -3321,6 +3321,8 @@ export const indicators = pgTable(
     key: text('key').notNull(),
     active: boolean('active').notNull().default(true),
     currentVersion: integer('current_version').notNull().default(1),
+    /** objetivo estratégico (KPI principal) ao qual o indicador contribui */
+    objectiveId: uuid('objective_id').references((): AnyPgColumn => objectives.id),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
   },
@@ -3361,12 +3363,15 @@ export const objectives = pgTable(
     periodStart: date('period_start', { mode: 'string' }).notNull(),
     periodEnd: date('period_end', { mode: 'string' }).notNull(),
     status: text('status').notNull().default('ativo'),
+    /** objetivo estratégico que É um KPI principal (ficha da Inteligência): nasce e se mantém a partir dele */
+    kpiIndicatorId: uuid('kpi_indicator_id').references((): AnyPgColumn => indicators.id),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     rowVersion: rowVersion(),
   },
   (t) => ({
+    kpiUq: uniqueIndex('objectives_kpi_uq').on(t.tenantId, t.kpiIndicatorId).where(sql`kpi_indicator_id is not null`),
     levelCk: check('objectives_level_ck', inList('level', ['estrategico', 'tatico', 'operacional'])),
     statusCk: check('objectives_status_ck', inList('status', ['ativo', 'encerrado', 'cancelado'])),
     priorityCk: check('objectives_priority_ck', inList('priority', ['baixa', 'media', 'alta'])),

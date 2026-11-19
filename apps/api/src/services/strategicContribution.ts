@@ -35,7 +35,7 @@ export type Contribution = {
 
 export async function strategicContribution(db: DbOrTx, auth: AuthContext, today: string): Promise<Record<string, Contribution | null>> {
   const goals = await db.select().from(s.goals).where(and(eq(s.goals.tenantId, auth.tenantId), eq(s.goals.scope, 'empresa'), eq(s.goals.status, 'ativa'), eq(s.goals.approvalStatus, 'aprovada'), isNotNull(s.goals.indicatorId), lte(s.goals.periodStart, today), gte(s.goals.periodEnd, today)));
-  const objectives = await db.select({ id: s.objectives.id, title: s.objectives.title, level: s.objectives.level, parentId: s.objectives.parentId, status: s.objectives.status }).from(s.objectives).where(eq(s.objectives.tenantId, auth.tenantId));
+  const objectives = await db.select({ id: s.objectives.id, title: s.objectives.title, level: s.objectives.level, parentId: s.objectives.parentId, status: s.objectives.status, kpiIndicatorId: s.objectives.kpiIndicatorId }).from(s.objectives).where(eq(s.objectives.tenantId, auth.tenantId));
   const objById = new Map(objectives.map((o) => [o.id, o]));
   /** objetivo estratégico ao qual a meta responde (sobe a cadeia tático → estratégico) */
   const strategicOf = (id: string | null) => {
@@ -43,6 +43,10 @@ export async function strategicContribution(db: DbOrTx, auth: AuthContext, today
     for (let i = 0; o && i < 5; i++) { if (o.level === 'estrategico') return o; o = o.parentId ? objById.get(o.parentId) : undefined; }
     return id ? objById.get(id) ?? null : null;
   };
+  // meta sem objetivo herda o do indicador (ou o objetivo que é o próprio KPI)
+  const indObj = new Map((await db.select({ id: s.indicators.id, objectiveId: s.indicators.objectiveId }).from(s.indicators).where(eq(s.indicators.tenantId, auth.tenantId))).map((r) => [r.id, r.objectiveId]));
+  for (const o of objectives) if (o.kpiIndicatorId && !indObj.get(o.kpiIndicatorId)) indObj.set(o.kpiIndicatorId, o.id);
+  const objOf = (g: typeof goals[number]) => g.objectiveId ?? (g.indicatorId ? indObj.get(g.indicatorId) ?? null : null);
   const defs = new Map<string, IndicatorDef>();
   for (const g of goals) if (g.indicatorId && !defs.has(g.indicatorId)) { const d = await indicatorDef(db, auth.tenantId, g.indicatorId); if (d) defs.set(g.indicatorId, d.def); }
 
@@ -51,13 +55,13 @@ export async function strategicContribution(db: DbOrTx, auth: AuthContext, today
     const matches = goals.filter((g) => { const m = measures(defs.get(g.indicatorId!)!); return !!m && want.events.includes(m.event) && m.money === want.money; });
     if (!matches.length) { out[kpi] = null; continue; }
     // prioridade: meta ligada a objetivo estratégico ativo; depois a de período mais curto (a mais próxima do dia a dia)
-    const rankOf = (g: typeof goals[number]) => (strategicOf(g.objectiveId)?.level === 'estrategico' ? 0 : g.objectiveId ? 1 : 2);
+    const rankOf = (g: typeof goals[number]) => (strategicOf(objOf(g))?.level === 'estrategico' ? 0 : objOf(g) ? 1 : 2);
     matches.sort((a, b) => rankOf(a) - rankOf(b) || a.periodEnd.localeCompare(b.periodEnd) || a.title.localeCompare(b.title));
     const g = matches[0]!, def = defs.get(g.indicatorId!)!;
     const company = await goalProgress(db, auth.timezone, today, g);
     const me = await computeIndicator(db, auth.tenantId, auth.timezone, def, { users: [auth.userId] }, { from: g.periodStart, to: g.periodEnd }, g.indicatorId ?? undefined);
     const mine = me.status === 'indisponivel' ? null : me.value;
-    const obj = strategicOf(g.objectiveId);
+    const obj = strategicOf(objOf(g));
     out[kpi] = {
       goalId: g.id, goal: g.title, objective: obj ? { id: obj.id, title: obj.title, level: obj.level } : null,
       unit: def.unit, target: g.target, periodStart: g.periodStart, periodEnd: g.periodEnd,

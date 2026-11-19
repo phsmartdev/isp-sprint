@@ -71,6 +71,21 @@ function board(def: IndicatorDef, entries: { period: string; periodStart: string
   };
 }
 
+/** Placar de todos os KPIs principais ativos no ano (o mesmo do painel da Inteligência e dos objetivos estratégicos). */
+export async function kpiBoards(db: Parameters<typeof allIndicators>[0], tenantId: string, year: number, today: string) {
+  const all = (await allIndicators(db, tenantId)).filter((i) => i.active && i.def.calc === 'informado' && i.def.sheet);
+  const items = [];
+  // Booking de Contratos: calculado da base de contratos (crescimento sem reajuste) quando há receita do ano anterior para comparar
+  const rev = all.some((i) => i.key === 'kpi_booking_de_contratos') ? await revenueReport(db, tenantId, year, today) : null;
+  for (const i of all) {
+    const entries = await indicatorEntriesOf(db, tenantId, i.id);
+    const auto = i.key === 'kpi_booking_de_contratos' ? (rev ? bookingAuto(rev) : null) : (await kpiAuto(db, tenantId, i.key, i.def, year, today))?.auto ?? null;
+    const hasAuto = !!auto && ([...auto.quarters.values()].some((v) => v !== null) || [...auto.months.values()].some((v) => v !== null));
+    items.push({ id: i.id, key: i.key, version: i.currentVersion, def: i.def, source: hasAuto ? 'crm' as const : 'informado' as const, ...board(i.def, entries, year, today, hasAuto ? auto : null) });
+  }
+  return items;
+}
+
 /**
  * Contexto do Booking: contratos fechados no trimestre, negociações em andamento e saúde das contas.
  * Tudo vem do próprio CRM; valores anualizados como no Tier (mensal × 12; global proporcional a 12 meses).
@@ -264,16 +279,7 @@ export const kpiRoutes = [
     handler: async ({ app, auth, query }) => {
       const today = todayLocal(auth);
       const year = query.year ?? Number(today.slice(0, 4));
-      const all = (await allIndicators(app.db, auth.tenantId)).filter((i) => i.active && i.def.calc === 'informado' && i.def.sheet);
-      const items = [];
-      // Booking de Contratos: calculado da base de contratos (crescimento sem reajuste) quando há receita do ano anterior para comparar
-      const rev = all.some((i) => i.key === 'kpi_booking_de_contratos') ? await revenueReport(app.db, auth.tenantId, year, today) : null;
-      for (const i of all) {
-        const entries = await indicatorEntriesOf(app.db, auth.tenantId, i.id);
-        const auto = i.key === 'kpi_booking_de_contratos' ? (rev ? bookingAuto(rev) : null) : (await kpiAuto(app.db, auth.tenantId, i.key, i.def, year, today))?.auto ?? null;
-        const hasAuto = !!auto && ([...auto.quarters.values()].some((v) => v !== null) || [...auto.months.values()].some((v) => v !== null));
-        items.push({ id: i.id, key: i.key, version: i.currentVersion, def: i.def, source: hasAuto ? 'crm' as const : 'informado' as const, ...board(i.def, entries, year, today, hasAuto ? auto : null) });
-      }
+      const items = await kpiBoards(app.db, auth.tenantId, year, today);
       const live = items.filter((i) => !i.def.sheet!.paused);
       const count = (st: KpiStatus) => live.filter((i) => i.current?.status === st).length;
       return {

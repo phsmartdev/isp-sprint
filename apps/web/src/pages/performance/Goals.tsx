@@ -6,8 +6,9 @@ import clsx from 'clsx';
 import { CornerDownRight, Plus, Target } from 'lucide-react';
 import {
   CLOSING_STATUS_LABELS, CONSOLIDATIONS, CONSOLIDATION_LABELS, GOAL_CATEGORIES, TREND_LABELS, GOAL_CATEGORY_LABELS, GOAL_SCOPES, GOAL_SCOPE_LABELS, GOAL_STATUS_LABELS, OBJECTIVE_LEVELS, OBJECTIVE_LEVEL_LABELS, PERIOD_LABELS, PERIOD_TYPES, TRAFFIC_LABELS,
-  type Consolidation, type GoalStatus, type ObjectiveLevel, type PeriodType, type TrafficColor,
+  type Consolidation, type GoalStatus, type IndicatorDef, type KpiStatus, type ObjectiveLevel, type PeriodType, type TrafficColor,
 } from '@isp/domain';
+import { ST_COLOR, ST_LABEL, kpiParts, kpiText } from '../../features/kpis/KpiBoard';
 import { api, qs } from '../../lib/api';
 import { fmtDate, fmtDateTime } from '../../lib/format';
 import { useLookups, useUrlState } from '../../lib/hooks';
@@ -24,7 +25,12 @@ export type Goal = {
   id: string; title: string; scope: 'individual' | 'equipe' | 'unidade' | 'empresa'; category: string; orgUnitId?: string | null; unitName?: string | null; recurring?: boolean; approvalStatus?: 'proposta' | 'aprovada' | 'rejeitada'; indicatorId: string | null; indicatorName?: string | null; manualUnit: string | null; userId: string | null; userName?: string | null; teamId: string | null; teamName?: string | null;
   ownerId: string; periodType: PeriodType; periodStart: string; periodEnd: string; target: number; originalTarget: number; version: number; objectiveId: string | null; parentGoalId: string | null; weight: number; consolidation: Consolidation; notes: string | null; status: string; rowVersion: number; progress: Progress;
 };
-type Objective = { id: string; title: string; description: string | null; level: ObjectiveLevel; parentId: string | null; ownerName: string; periodStart: string; periodEnd: string; status: string; priority: string; goals: Goal[]; progress: number | null; rowVersion: number };
+type KpiBoardSlice = { current: { q: number; target: number | null; value: number | null; status: KpiStatus; attainment: number | null } | null; annual: { target: number | null; value: number | null; status: KpiStatus; attainment: number | null }; source: 'crm' | 'informado' };
+type Objective = {
+  id: string; title: string; description: string | null; level: ObjectiveLevel; parentId: string | null; ownerName: string; periodStart: string; periodEnd: string; status: string; priority: string; goals: Goal[]; progress: number | null; rowVersion: number;
+  kpi: { indicatorId: string; name: string; unit: IndicatorDef['unit']; direction: 'maior' | 'menor'; paused: boolean; board: KpiBoardSlice | null } | null;
+  indicators: { id: string; name: string; unit: string; active: boolean }[];
+};
 
 const who = (g: Goal) => (g.scope === 'empresa' ? 'Empresa' : g.scope === 'unidade' ? g.unitName ?? 'Área' : g.scope === 'equipe' ? `Equipe ${g.teamName ?? ''}` : g.userName ?? 'Pessoa');
 type ScopeResp = { units: { id: string; name: string }[]; perspectives: { key: string }[]; all: boolean };
@@ -144,7 +150,7 @@ function NewGoal({ parentId, onClose, goals, objectiveId }: { parentId: string |
           {f.scope === 'unidade' && <FormField label="Área / unidade" htmlFor="ng-unit"><Select id="ng-unit" value={f.orgUnitId} onChange={(e) => setF({ ...f, orgUnitId: e.target.value })}><option value="">Escolha</option>{rsc.data?.units.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</Select></FormField>}
           {f.scope === 'equipe' && <FormField label="Equipe" htmlFor="ng-team"><Select id="ng-team" value={f.teamId} onChange={(e) => setF({ ...f, teamId: e.target.value })}><option value="">Escolha</option>{lk?.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></FormField>}
           {f.scope === 'individual' && <FormField label="Pessoa" htmlFor="ng-user"><Select id="ng-user" value={f.userId} onChange={(e) => setF({ ...f, userId: e.target.value })}><option value="">Escolha</option>{lk?.users.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></FormField>}
-          <FormField label="Indicador" htmlFor="ng-ind" hint="Sem indicador: meta manual com apontamentos"><Select id="ng-ind" value={f.indicatorId} onChange={(e) => setF({ ...f, indicatorId: e.target.value })}><option value="">Meta manual</option>{inds.data?.items.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.def.name}</option>)}</Select></FormField>
+          <FormField label="Indicador" htmlFor="ng-ind" hint="Sem indicador: meta manual com apontamentos"><Select id="ng-ind" value={f.indicatorId} onChange={(e) => { const ind = inds.data?.items.find((i) => i.id === e.target.value); const kpiObj = ind && objs.data?.items.find((o) => (o as { kpi?: { indicatorId: string } | null }).kpi?.indicatorId === ind.id); setF({ ...f, indicatorId: e.target.value, objectiveId: f.objectiveId || ind?.objectiveId || kpiObj?.id || '' }); }}><option value="">Meta manual</option>{inds.data?.items.filter((i) => i.active).map((i) => <option key={i.id} value={i.id}>{i.def.name}</option>)}</Select></FormField>
           {!f.indicatorId && <FormField label="Unidade da meta manual" htmlFor="ng-unit"><Input id="ng-unit" value={f.manualUnit} onChange={(e) => setF({ ...f, manualUnit: e.target.value })} placeholder="visitas, treinamentos…" /></FormField>}
           <FormField label="Valor-alvo" htmlFor="ng-target" required><Input id="ng-target" inputMode="decimal" value={f.target} onChange={(e) => setF({ ...f, target: e.target.value })} /></FormField>
           <FormField label="Período" htmlFor="ng-period"><Select id="ng-period" value={f.periodType} onChange={(e) => setF({ ...f, periodType: e.target.value as PeriodType })}>{PERIOD_TYPES.map((p) => <option key={p} value={p}>{PERIOD_LABELS[p]}</option>)}</Select></FormField>
@@ -248,37 +254,113 @@ function GoalDrawer({ id, onClose, onOpen }: { id: string | null; onClose: () =>
   );
 }
 
+/** Objetivo estratégico que é um KPI principal: o placar do trimestre (igual ao da Inteligência), indicadores e metas ligados. */
+function KpiObjectiveCard({ o, children, onGoal }: { o: Objective; children: React.ReactNode; onGoal: (id: string) => void }) {
+  const k = o.kpi!;
+  const b = k.board;
+  const cur = b?.current ?? null;
+  const st: KpiStatus = cur?.status ?? 'sem_dado';
+  const [num, unit] = kpiParts(cur?.value ?? null, k.unit);
+  const le = k.direction === 'menor' ? '≤ ' : '';
+  return (
+    <section className={clsx('card flex flex-col p-4', o.status !== 'ativo' && 'opacity-60')} data-testid="kpi-objective" aria-label={`Objetivo estratégico ${o.title}`}>
+      <div className="flex items-start gap-2">
+        <h3 className="min-w-0 flex-1 font-bold leading-snug text-ink">{o.title}</h3>
+        <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: ST_COLOR[st] }} title={ST_LABEL[st]} aria-label={ST_LABEL[st]} />
+      </div>
+      {o.status !== 'ativo' ? <Chip tone="neutral" className="mt-1 self-start">{o.status}</Chip> : k.paused && <Chip tone="neutral" className="mt-1 self-start">Pausado</Chip>}
+      {b ? (
+        <>
+          <p className="mt-3 font-display text-3xl font-bold text-ink num">{num}<span className="ml-0.5 text-base text-muted">{unit}</span></p>
+          <p className="mt-1 text-sm text-muted">meta {cur ? `${cur.q}T` : 'do ano'} {le}{kpiText(cur?.target ?? b.annual.target, k.unit)}{cur?.attainment != null && <span className="ml-2 font-semibold" style={{ color: ST_COLOR[st] }}>{Math.round(cur.attainment * 100)}%</span>}</p>
+          <p className="text-xs text-muted">{b.source === 'crm' ? 'CRM · ' : ''}No ano {kpiText(b.annual.value, k.unit)} · meta {le}{kpiText(b.annual.target, k.unit)}</p>
+        </>
+      ) : <p className="mt-3 text-sm text-muted">O placar do KPI aparece para quem acompanha a Inteligência.</p>}
+      <div className="mt-3 border-t border-line pt-2">
+        <p className="text-xs font-semibold text-muted">Indicadores ligados</p>
+        {o.indicators.length ? <ul className="mt-1 flex flex-wrap gap-1">{o.indicators.map((i) => <li key={i.id}><Chip tone={i.active ? 'blue' : 'neutral'}>{i.name}</Chip></li>)}</ul> : <p className="text-xs text-muted">Nenhum ainda. Ligue em Indicadores.</p>}
+      </div>
+      {!!o.goals.length && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold text-muted">Metas</p>
+          <ul className="mt-1 space-y-1">{o.goals.map((g) => <li key={g.id} className="flex items-center gap-2 text-xs"><button type="button" className="min-w-0 flex-1 truncate text-left text-primary hover:underline" onClick={() => onGoal(g.id)}>{g.title} · {who(g)}</button><Chip tone={TRAFFIC_TONE[g.progress.color]}>{fmtAtt(g.progress.attainment)}</Chip></li>)}</ul>
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
 function Objectives({ onGoal }: { onGoal: (id: string) => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const { level } = useAuth();
   const lk = useLookups().data;
-  const q = useQuery({ queryKey: ['performance', 'objectives', 'all'], queryFn: () => api<{ items: Objective[]; canEdit: boolean }>('/performance/objectives') });
+  const q = useQuery({ queryKey: ['performance', 'objectives', 'all'], queryFn: () => api<{ items: Objective[]; canEdit: boolean; kpiDriven: boolean }>('/performance/objectives') });
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ title: '', description: '', level: 'tatico' as ObjectiveLevel, parentId: '', periodStart: `${new Date().getFullYear()}-01-01`, periodEnd: `${new Date().getFullYear()}-12-31`, priority: 'media', sponsorId: '' });
   const m = useMutation({ mutationFn: () => api('/performance/objectives', { method: 'POST', body: { ...f, parentId: f.parentId || null, sponsorId: f.sponsorId || null, description: f.description || null } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['performance'] }); setOpen(false); toast({ tone: 'success', message: 'Objetivo criado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const cancel = useMutation({ mutationFn: (o: Objective) => api(`/performance/objectives/${o.id}`, { method: 'PATCH', body: { rowVersion: o.rowVersion, status: 'cancelado' } }), onSuccess: () => { void qc.invalidateQueries({ queryKey: ['performance'] }); toast({ tone: 'success', message: 'Objetivo cancelado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   if (q.isLoading) return <LoadingRows rows={4} />;
+  if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   const items = q.data?.items ?? [];
+  const kpiDriven = !!q.data?.kpiDriven;
   const node = (o: Objective, depth: number): React.ReactNode => (
     <div key={o.id} style={{ marginLeft: depth * 24 }} className="space-y-2">
       <section className="card p-4">
         <div className="flex flex-wrap items-center gap-2"><Chip tone={o.level === 'estrategico' ? 'purple' : o.level === 'tatico' ? 'blue' : 'sky'}>{OBJECTIVE_LEVEL_LABELS[o.level]}</Chip><h3 className="font-bold text-ink">{o.title}</h3>{o.status !== 'ativo' && <Chip tone="neutral">{o.status}</Chip>}<span className="ml-auto num text-sm text-muted">{o.progress === null ? 'sem metas com dado' : `${Math.round(o.progress * 100)}% das metas`}</span></div>
         <p className="text-xs text-muted">Responsável {o.ownerName} · {fmtDate(o.periodStart)} a {fmtDate(o.periodEnd)}</p>
+        {!!o.indicators.length && <p className="mt-1 text-xs text-muted">Indicadores: {o.indicators.map((i) => i.name).join(', ')}</p>}
         {!!o.goals.length && <ul className="mt-2 space-y-1.5">{o.goals.map((g) => <li key={g.id} className="flex items-center gap-2 text-sm"><button type="button" className="min-w-0 flex-1 truncate text-left text-primary hover:underline" onClick={() => onGoal(g.id)}>{g.title} · {who(g)}</button><span className="w-32"><GoalBar g={g} /></span><Chip tone={TRAFFIC_TONE[g.progress.color]}>{fmtAtt(g.progress.attainment)}</Chip></li>)}</ul>}
+        {kpiDriven && o.level === 'estrategico' && !o.kpi && o.status === 'ativo' && level('desempenho') === 'total' && <div className="mt-2"><Button size="sm" variant="ghost" className="text-danger" loading={cancel.isPending && cancel.variables?.id === o.id} onClick={() => cancel.mutate(o)}>Cancelar objetivo</Button></div>}
       </section>
       {items.filter((x) => x.parentId === o.id).map((x) => node(x, depth + 1))}
     </div>
   );
+  const kpis = items.filter((o) => o.kpi && o.status !== 'cancelado');
+  const kpiActive = kpis.filter((o) => o.status === 'ativo');
+  const rest = items.filter((o) => !o.kpi && (!o.parentId || !items.some((x) => x.id === o.parentId)));
+  const looseStrategic = rest.filter((o) => o.level === 'estrategico');
+  const others = rest.filter((o) => o.level !== 'estrategico');
+  const levels = OBJECTIVE_LEVELS.filter((l) => l !== 'estrategico' || (!kpiDriven && level('desempenho') === 'total'));
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {q.data?.canEdit && <div className="flex justify-end"><Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setOpen(true)}>Novo objetivo</Button></div>}
-      {!items.length ? <section className="card"><EmptyState title="Nenhum objetivo" description="Comece pelo objetivo estratégico e desdobre em táticos e operacionais." /></section> : items.filter((o) => !o.parentId || !items.some((x) => x.id === o.parentId)).map((o) => node(o, 0))}
-      <Modal open={open} onClose={() => setOpen(false)} title="Novo objetivo" footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancelar</Button><Button variant="primary" disabled={f.title.trim().length < 3} loading={m.isPending} onClick={() => m.mutate()}>Criar</Button></>}>
+      {kpiDriven && (
+        <section aria-label="Objetivos estratégicos">
+          <h2 className="mb-1 text-lg font-bold text-ink">Objetivos estratégicos</h2>
+          <p className="mb-3 text-sm text-muted">São os KPIs principais da Inteligência. Os indicadores e as metas se ligam a eles; os objetivos táticos e operacionais se desdobram abaixo de cada um.</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {kpis.map((o) => (
+              <KpiObjectiveCard key={o.id} o={o} onGoal={onGoal}>
+                {items.some((x) => x.parentId === o.id) && <div className="mt-2"><p className="text-xs font-semibold text-muted">Desdobramentos</p><ul className="mt-1 space-y-0.5 text-xs">{items.filter((x) => x.parentId === o.id).map((x) => <li key={x.id} className="flex items-center gap-1 text-ink"><CornerDownRight className="h-3 w-3 text-muted" aria-hidden />{OBJECTIVE_LEVEL_LABELS[x.level]}: {x.title}</li>)}</ul></div>}
+              </KpiObjectiveCard>
+            ))}
+          </div>
+        </section>
+      )}
+      {kpiDriven && kpis.some((o) => items.some((x) => x.parentId === o.id)) && (
+        <section className="space-y-2" aria-label="Desdobramentos dos objetivos estratégicos">
+          <h2 className="text-lg font-bold text-ink">Desdobramentos</h2>
+          {kpis.map((o) => items.filter((x) => x.parentId === o.id).map((x) => <div key={x.id}><p className="mb-1 text-xs font-semibold text-muted">{o.title}</p>{node(x, 0)}</div>))}
+        </section>
+      )}
+      {!kpiDriven && (!items.length ? <section className="card"><EmptyState title="Nenhum objetivo" description="Cadastre os KPIs principais na Inteligência: cada um vira um objetivo estratégico aqui. Ou comece por um objetivo estratégico e desdobre em táticos e operacionais." /></section> : rest.map((o) => node(o, 0)))}
+      {kpiDriven && !!others.length && <section className="space-y-2" aria-label="Outros objetivos"><h2 className="text-lg font-bold text-ink">Outros objetivos</h2>{others.map((o) => node(o, 0))}</section>}
+      {kpiDriven && !!looseStrategic.filter((o) => o.status === 'ativo').length && (
+        <section className="space-y-2" aria-label="Objetivos estratégicos sem KPI">
+          <h2 className="text-lg font-bold text-ink">Estratégicos sem KPI</h2>
+          <p className="text-sm text-muted">Criados antes de os KPIs virarem os objetivos estratégicos. Religue as metas a um KPI e cancele estes.</p>
+          {looseStrategic.filter((o) => o.status === 'ativo').map((o) => node(o, 0))}
+        </section>
+      )}
+      <Modal open={open} onClose={() => setOpen(false)} title="Novo objetivo" footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancelar</Button><Button variant="primary" disabled={f.title.trim().length < 3 || (kpiDriven && f.level === 'tatico' && !f.parentId)} loading={m.isPending} onClick={() => m.mutate()}>Criar</Button></>}>
         <div className="space-y-3">
+          {kpiDriven && <Notice tone="info">Os objetivos estratégicos são os KPIs principais. Crie aqui o tático ou operacional ligado a um deles.</Notice>}
           <FormField label="Objetivo" htmlFor="ob-t" required><Input id="ob-t" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></FormField>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <FormField label="Nível" htmlFor="ob-l"><Select id="ob-l" value={f.level} onChange={(e) => setF({ ...f, level: e.target.value as ObjectiveLevel })}>{OBJECTIVE_LEVELS.filter((l) => l !== 'estrategico' || level('desempenho') === 'total').map((l) => <option key={l} value={l}>{OBJECTIVE_LEVEL_LABELS[l]}</option>)}</Select></FormField>
-            <FormField label="Objetivo superior" htmlFor="ob-p"><Select id="ob-p" value={f.parentId} onChange={(e) => setF({ ...f, parentId: e.target.value })}><option value="">Nenhum</option>{items.filter((o) => OBJECTIVE_LEVELS.indexOf(o.level) < OBJECTIVE_LEVELS.indexOf(f.level)).map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</Select></FormField>
+            <FormField label="Nível" htmlFor="ob-l"><Select id="ob-l" value={f.level} onChange={(e) => setF({ ...f, level: e.target.value as ObjectiveLevel })}>{levels.map((l) => <option key={l} value={l}>{OBJECTIVE_LEVEL_LABELS[l]}</option>)}</Select></FormField>
+            <FormField label={kpiDriven && f.level === 'tatico' ? 'KPI (objetivo estratégico)' : 'Objetivo superior'} htmlFor="ob-p"><Select id="ob-p" value={f.parentId} onChange={(e) => setF({ ...f, parentId: e.target.value })}><option value="">{kpiDriven && f.level === 'tatico' ? 'Escolha o KPI' : 'Nenhum'}</option>{(kpiDriven && f.level === 'tatico' ? kpiActive : items.filter((o) => o.status === 'ativo' && OBJECTIVE_LEVELS.indexOf(o.level) < OBJECTIVE_LEVELS.indexOf(f.level))).map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}</Select></FormField>
             <FormField label="Início" htmlFor="ob-s"><Input id="ob-s" type="date" value={f.periodStart} onChange={(e) => setF({ ...f, periodStart: e.target.value })} /></FormField>
             <FormField label="Fim" htmlFor="ob-e"><Input id="ob-e" type="date" value={f.periodEnd} onChange={(e) => setF({ ...f, periodEnd: e.target.value })} /></FormField>
             <FormField label="Patrocinador" htmlFor="ob-sp"><Select id="ob-sp" value={f.sponsorId} onChange={(e) => setF({ ...f, sponsorId: e.target.value })}><option value="">Nenhum</option>{lk?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
