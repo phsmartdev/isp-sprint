@@ -200,16 +200,20 @@ export function OrgChart() {
       .filter((g) => g.director || g.teams.length)
       .map((g) => {
         const mgrIds = [...new Set(g.teams.map(hierOf).filter((x): x is string => !!x))];
+        const funcOf = (id: string) => g.teams.filter((t) => t.managers.some((m) => m.userId === id && m.kind === 'funcional'));
+        // gestão só funcional fica ao lado da hierárquica, embaixo da mesma diretoria, ligada aos times por linha tracejada
+        const funcIds = [...new Set(g.teams.flatMap((t) => t.managers.filter((m) => m.kind === 'funcional' && people.has(m.userId)).map((m) => m.userId)))].filter((id) => !mgrIds.includes(id));
         return {
           director: g.director,
-          managers: mgrIds.map((id) => ({ person: people.get(id)!, teams: g.teams.filter((t) => hierOf(t) === id), functional: d.teams.filter((t) => t.managers.some((m) => m.userId === id && m.kind === 'funcional')) })),
+          managers: [
+            ...mgrIds.map((id) => ({ person: people.get(id)!, teams: g.teams.filter((t) => hierOf(t) === id), functional: funcOf(id), onlyFunctional: false })),
+            ...funcIds.map((id) => ({ person: people.get(id)!, teams: [] as Team[], functional: funcOf(id), onlyFunctional: true })),
+          ],
           loose: g.teams.filter((t) => !hierOf(t)),
         };
       });
-    // gestores só funcionais que não são hierárquicos de ninguém
-    const placed = new Set(groups.flatMap((g) => g.managers.map((m) => m.person.id)));
-    const onlyFunctional = [...new Set(d.teams.flatMap((t) => t.managers.filter((m) => m.kind === 'funcional' && people.has(m.userId) && !placed.has(m.userId)).map((m) => m.userId)))]
-      .map((id) => ({ person: people.get(id)!, functional: d.teams.filter((t) => t.managers.some((m) => m.userId === id && m.kind === 'funcional')) }));
+    // gestores só funcionais de times em outra diretoria já aparecem lá; não há mais área separada
+    const onlyFunctional: { person: Person; functional: Team[] }[] = [];
     const inChart = new Set([...directorIds, ...d.teams.flatMap((t) => [...t.leadIds, ...t.memberIds, ...t.managers.map((m) => m.userId)])]);
     const participantsOnly = new Set(d.teams.flatMap((t) => t.participantIds));
     const noTeam = d.people.filter((p) => !inChart.has(p.id) && !participantsOnly.has(p.id));
@@ -222,12 +226,19 @@ export function OrgChart() {
   const open = (x: Sel) => setSel(x);
   const card = (p: Person, role?: string) => <PersonCard key={p.id} p={p} module={module} profiles={d.profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role={role} edit={edit} fromTeamId={null} />;
   const box = (team: Team, functional?: boolean) => <TeamBox key={`${team.id}${functional ? 'f' : ''}`} t={team} people={t.people} module={module} profiles={d.profiles} open={open} sel={sel} edit={edit} onDrop={drop} functional={functional} />;
-  const mgrColumn = (m: { person: Person; teams: Team[]; functional: Team[] }) => (
+  /** Times sob gestão funcional: tracejado, com o nome de cada time (clicar abre o time). */
+  const funcBlock = (m: { person: Person; functional: Team[] }) => (
+    <div className="w-[232px] border-2 border-dashed border-sky bg-sky-soft px-3 py-2" aria-label={`Gestão funcional de ${m.person.name}`}>
+      <p className="text-[11px] font-semibold text-sky">Gestão funcional sobre</p>
+      <div className="mt-1 flex flex-wrap gap-1">{m.functional.map((tm) => <button key={tm.id} type="button" onClick={() => open({ kind: 'team', id: tm.id })} aria-label={`Time ${tm.name} (gestão funcional)`} className="border border-dashed border-sky bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-ink hover:border-primary">{tm.name}</button>)}</div>
+    </div>
+  );
+  const mgrColumn = (m: { person: Person; teams: Team[]; functional: Team[]; onlyFunctional?: boolean }) => (
     <div key={m.person.id} className="flex flex-col items-center">
-      <VLine />
-      {card(m.person, 'Gestão')}
+      <VLine dashed={m.onlyFunctional} />
+      {card(m.person, m.onlyFunctional ? 'Gestão funcional' : 'Gestão')}
       {!!m.teams.length && <><VLine h="h-5" /><div className="flex items-start gap-4 border-t-2 border-line-strong pt-4">{m.teams.map((tm) => box(tm))}</div></>}
-      {!!m.functional.length && <><VLine dashed h="h-5" /><div className="flex items-start gap-3 border-t-2 border-dashed border-sky pt-3">{m.functional.map((tm) => box(tm, true))}</div></>}
+      {!!m.functional.length && <><VLine dashed h="h-5" />{funcBlock(m)}</>}
     </div>
   );
 
@@ -306,7 +317,7 @@ export function OrgChart() {
                   <VLine dashed />
                   <p className="mb-2 border-2 border-dashed border-sky bg-sky-soft px-3 py-2 text-xs font-semibold text-sky">Gestão só funcional</p>
                   <div className="flex items-start gap-6">{t.onlyFunctional.map((m) => (
-                    <div key={m.person.id} className="flex flex-col items-center">{card(m.person, 'Gestão funcional')}<VLine dashed h="h-5" /><div className="flex flex-col gap-2">{m.functional.map((tm) => box(tm, true))}</div></div>
+                    <div key={m.person.id} className="flex flex-col items-center">{card(m.person, 'Gestão funcional')}<VLine dashed h="h-5" />{funcBlock(m)}</div>
                   ))}</div>
                 </section>
               )}
