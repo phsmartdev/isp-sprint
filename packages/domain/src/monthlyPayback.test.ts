@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { b2gFromEconomics } from './b2gViability';
-import { econMemory, emptyEconInput, financeEngine, type DealKind, type EconSettings } from './finance';
+import { econMemory, econPaybackErrors, emptyEconInput, financeEngine, type DealKind, type EconSettings } from './finance';
 
 const settings: EconSettings = {
   marginTargetBp: 0, marginSuggestedBp: 3500, tmaMonthlyBp: 10,
@@ -39,7 +39,7 @@ describe('preço mensal: caixa, inferência e margem negociada', () => {
     expect(fast.suggestedCents!).toBeGreaterThan(slow.suggestedCents!);
     expect(fast.statement!.month.net!).toBeGreaterThanOrEqual(-1);
     expect(fast.kpi!.paybackMonths!).toBeLessThanOrEqual(2);
-    expect(fast.warnings.some((w) => w.includes('exige preço maior'))).toBe(true);
+    expect(fast.warnings.some((w) => w.includes('margem líquida alvo é aplicada'))).toBe(true);
     expect(fast.statement!.total.net).toBeGreaterThan(0);
   });
   it.each(['recorrencia', 'locacao'] as const)('%s: 35%% da base se repete em todos os meses e não duplica o investimento inicial', (kind) => {
@@ -69,8 +69,34 @@ describe('preço mensal: caixa, inferência e margem negociada', () => {
     const changed = financeEngine(b);
     expect(changed.targetNetMarginPct).toBe(30);
     expect(changed.suggestedCents!).toBeGreaterThan(normal.suggestedCents!);
-    expect(changed.decision!.netMarginPct).toBeCloseTo(30, 2);
-    expect(b2gFromEconomics(b, undefined, changed).global.netPct).toBeCloseTo(30, 2);
+    expect(changed.decision!.paybackNetMarginPct).toBeCloseTo(30, 2);
+    expect(changed.decision!.netMarginPct!).toBeGreaterThan(30);
+    expect(b2gFromEconomics(b, undefined, changed).global.netPct).toBeCloseTo(changed.decision!.netMarginPct!, 2);
+  });
+  it.each(['recorrencia', 'locacao'] as const)('%s: mais prazo reduz a mensalidade em todos os prazos permitidos, com tributos, IR, TMA e inferência', (kind) => {
+    for (const publicSector of [false, true]) {
+      let previous = Infinity;
+      const limit = publicSector ? settings.paybackMaxPublic : settings.paybackMaxPrivate;
+      for (let D = 1; D <= limit; D++) {
+        const a = { ...scenario(D, 2700, kind), publicSector };
+        const r = financeEngine(a);
+        expect(r.term.D).toBe(D);
+        expect(r.suggestedCents!).toBeLessThan(previous);
+        expect(r.decision!.paybackNetMarginPct!).toBeCloseTo(20, 2);
+        expect(r.kpi!.paybackMonths!).toBeLessThanOrEqual(D + 0.0001);
+        expect(r.statement!.total.net!).toBeGreaterThan(0);
+        previous = r.suggestedCents!;
+      }
+    }
+  });
+  it('API deve rejeitar o prazo acima do teto privado ou público, inclusive por cesta', () => {
+    const a = scenario(7);
+    expect(econPaybackErrors(a.input, settings, false)).toHaveLength(1);
+    expect(econPaybackErrors(a.input, settings, true)).toEqual([]);
+    expect(econPaybackErrors({ ...a.input, paybackMonths: null, baskets: { implantacao: { paybackMonths: 7 } } }, settings, false)).toHaveLength(1);
+    expect(econPaybackErrors({ ...a.input, paybackMonths: 13, termMonths: 24 }, settings, true)).toHaveLength(1);
+    expect(financeEngine(a).term.D).toBe(6);
+    expect(financeEngine({ ...a, publicSector: true }).term.D).toBe(7);
   });
   it('preço informado continua sendo analisado, mesmo quando não atende ao payback', () => {
     const a = scenario(2, 0);

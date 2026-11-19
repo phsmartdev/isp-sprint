@@ -1,14 +1,14 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_IMPACTS, ECON_MODES, econTargetErrors, econInputErrors, econBasketViews, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
+import { COST_IMPACTS, ECON_MODES, econTargetErrors, econPaybackErrors, econInputErrors, econBasketViews, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
-import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
+import { publicSectorOf, computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
@@ -269,6 +269,8 @@ export const economicsRoutes = [
       const pricingSettings = await econSettingsOf(tx, auth.tenantId);
       const targetErrors = pricingSettings ? econTargetErrors(body as EconInput, pricingSettings.settings) : [];
       if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
+      const paybackErrors = pricingSettings ? econPaybackErrors(body as EconInput, pricingSettings.settings, await publicSectorOf(tx, opp)) : [];
+      if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
       if (pricingSettings?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para calcular o preço.');
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
       const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body as EconInput));

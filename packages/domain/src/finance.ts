@@ -47,7 +47,7 @@ export function fiscalDocErrors(d: { code: string; name: string; taxes: FiscalTa
 
 // ------------------------------------------------------------------ parâmetros e entradas
 /** Versão do motor gravada em cada cálculo salvo (muda quando uma regra de cálculo muda). */
-export const ENGINE_VERSION = 'FINANCE-3.8.0';
+export const ENGINE_VERSION = 'FINANCE-3.9.0';
 /** Acréscimo de investimento dos serviços; independente de contingência, margem e despesas fixas. */
 export const SERVICE_INVESTMENT_BP = 3500;
 export const serviceInvestmentExtra = (baseCents: number, serviceCostBp?: number | null) => Math.round(baseCents * (serviceCostBp ?? SERVICE_INVESTMENT_BP) / 10_000);
@@ -187,6 +187,16 @@ export function econInputErrors(i: EconInput) {
 export function econTargetErrors(input: EconInput, settings: EconSettings): string[] {
   const values = [['negociação', input.b2g?.netTargetBp], ...Object.entries(input.baskets ?? {}).map(([k, v]) => [k, v?.netTargetBp])] as [string, number | null | undefined][];
   return values.filter(([, value]) => value != null && (!Number.isInteger(value) || value < 0 || value >= 10000 || (settings.netMarginMinBp != null && value < settings.netMarginMinBp) || (settings.netMarginMaxBp != null && value > settings.netMarginMaxBp))).map(([name]) => 'A margem líquida esperada de ' + name + ' deve ficar dentro da faixa das Configurações.');
+}
+
+/** Prazo de recuperação solicitado, limitado ao setor e à projeção. */
+export function econPaybackLimit(input: EconInput, settings: EconSettings, publicSector: boolean): number {
+  return Math.max(1, Math.min(publicSector ? settings.paybackMaxPublic : settings.paybackMaxPrivate, input.termMonths, settings.horizonMaxMonths ?? input.termMonths));
+}
+export function econPaybackErrors(input: EconInput, settings: EconSettings, publicSector: boolean): string[] {
+  const limit = econPaybackLimit(input, settings, publicSector);
+  const requested = [input.mode === 'recorrente' ? input.paybackMonths : null, input.baskets?.implantacao?.paybackMonths];
+  return requested.some((n) => n != null && (!Number.isInteger(n) || n < 1 || n > limit)) ? ['O prazo de recuperação deve ficar entre 1 e ' + limit + ' meses, respeitando o teto do setor ' + (publicSector ? 'público' : 'privado') + ' e a vigência.'] : [];
 }
 
 /** Item da oportunidade com a resolução fiscal do vínculo Filial + Documento + Item. doc null = sem regra (ressalva). */
@@ -765,7 +775,7 @@ function combineParts(cells: { ritmo: 'unico' | 'mensal' }[], parts: EconResult[
 /** O motor com o que o Financial Studio mostra: as variáveis de entrada (com o preço avaliado) e a execução do modelo. */
 type NetPricingPlan = { priceCents: number | null; contribution: number; minimum: number; maximum: number | null; recommendation: EconRecommendation | null };
 export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan | false): { result: EconResult; base: FinBase; run: ModelRun; model: FinModel } {
-  // A recomendação existente resolve o preço na margem líquida do contrato; MC é derivada desse preço.
+  // Na mensalidade, a margem alvo incide durante a recuperação do investimento no prazo escolhido; MC é derivada.
   if (pricing === undefined && args.settings.netMarginTargetBp != null) {
     const probe = financeEngineDetailed(args, false);
     const recommendation = probe.result.recommendation ?? null;
@@ -858,10 +868,10 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
   const N = rec ? Math.min(inp.termMonths, horizon ?? inp.termMonths) : 0;
   if (rec && horizon != null && inp.termMonths > horizon) warnings.push(`Vigência de ${inp.termMonths} meses acima do prazo máximo de previsão: a projeção vai até ${horizon} meses.`);
   const pbAsk = inp.paybackMonths ?? null;
-  // o vendedor ajusta o payback livremente (até o prazo projetado) e a análise toda acompanha;
+  // O prazo de recuperação respeita o teto do setor e o prazo projetado;
   // o teto do setor continua como regra de aprovação, pelo payback descontado real (atende_payback)
-  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, N || 1)) : 0;
-  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o preço mínimo cai, mas se o retorno real passar do teto a viabilidade vai para a alçada superior.`);
+  const D = rec ? Math.max(1, Math.min(pbAsk ?? Dalvo, Dalvo, N || 1)) : 0;
+  if (rec && pbAsk != null && pbAsk > Dalvo) warnings.push(`Payback de ${pbAsk} meses acima do teto do setor ${publicSector ? 'público' : 'privado'} (${Dalvo}): o cálculo foi limitado ao teto configurado.`);
   if (rec && (pbAsk ?? Dalvo) > N && invEstimate > 0) warnings.push(`Payback maior que a projeção (${N} meses): o investimento é amortizado em ${D} meses.`);
   const d = rec ? 0 : inp.receiveMonth;
 
@@ -941,22 +951,22 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
     for (const w of run.warnings) if (!w.includes('Divisão por zero') && !warnings.includes(`Fórmula ${w}`)) warnings.push(`Fórmula ${w}`);
   }
   let recommendation: EconRecommendation | null = targetPricing?.recommendation ?? null;
-  // target seeking: preço que entrega a margem líquida t (recorrente: no contrato inteiro; única: no valor único) (mesma álgebra das fórmulas; só parâmetros)
-  // recorrente: margem líquida do contrato no preço P (o mesmo fluxo da aprovação: IR mês a mês, sem crédito nos meses negativos)
-  const contractAt = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const tt = statementOfPeriods(rr.periods, N).total; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
+  // target seeking: preço que entrega a margem líquida t (recorrente: nos meses da recuperação; única: no valor único) (mesma álgebra das fórmulas; só parâmetros)
+  // recorrente: margem líquida durante a recuperação no preço P (o mesmo fluxo da aprovação: IR mês a mês, sem crédito nos meses negativos)
+  const netAtPricingPeriod = (P: number) => { const rr = runModel(fm, { ...base, preco: P }); const tt = statementOfPeriods(rr.periods, rec && st.netMarginTargetBp != null ? D : N).total; return tt.revenue > 0 && tt.net != null ? { net: tt.net / tt.revenue, t: tt } : null; };
   const recAt = (t: number): RecPoint => {
     const irA = st.incomeTaxBp != null ? bp(st.incomeTaxBp) : null, fx = st.overheadBp != null ? bp(st.overheadBp) : null, cp = numv(pre.values.custo_preco), bm = numv(pre.values.base_markup);
     if (irA == null || fx == null || irA >= 1) return { netPct: t * 100, operatingPct: null, contributionPct: null, priceCents: null };
     const mo = t / (1 - irA), mc = mo + fx + glosa + badDebt;
     if (rec && N > 0 && cp != null && cp > 0) {
-      // busca do preço em que a margem líquida do contrato inteiro chega a t
+      // Busca a margem nos meses 1..D, cobrindo a parcela I/ANUIDADE(TMA,D), e não diluindo I na vigência N.
       let lo = 0, hi = Math.max(1, cp);
-      let at = contractAt(hi);
-      for (let i = 0; i < 40 && (at == null || at.net < t); i++) { lo = hi; hi *= 2; at = contractAt(hi); }
+      let at = netAtPricingPeriod(hi);
+      for (let i = 0; i < 40 && (at == null || at.net < t); i++) { lo = hi; hi *= 2; at = netAtPricingPeriod(hi); }
       if (at == null || at.net < t) return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: null };
-      for (let i = 0; i < 60 && hi - lo > 0.5; i++) { const mid = (lo + hi) / 2; const x = contractAt(mid); if (x && x.net >= t) hi = mid; else lo = mid; }
-      const fin = contractAt(hi)!.t;
-      return { netPct: t * 100, operatingPct: fin.operating == null ? null : (fin.operating / fin.revenue) * 100, contributionPct: ((fin.contribution + fin.amortization) / fin.revenue) * 100, priceCents: roundUp(hi) };
+      for (let i = 0; i < 60 && hi - lo > 0.5; i++) { const mid = (lo + hi) / 2; const x = netAtPricingPeriod(mid); if (x && x.net >= t) hi = mid; else lo = mid; }
+      const fin = netAtPricingPeriod(hi)!.t;
+      return { netPct: t * 100, operatingPct: fin.operating == null ? null : (fin.operating / fin.revenue) * 100, contributionPct: ((fin.contribution + (st.netMarginTargetBp != null ? 0 : fin.amortization)) / fin.revenue) * 100, priceCents: roundUp(hi) };
     }
     return { netPct: t * 100, operatingPct: mo * 100, contributionPct: mc * 100, priceCents: cp != null && bm != null && bm - mc > 0 ? roundUp(cp / (bm - mc)) : null };
   };
@@ -981,7 +991,7 @@ export function financeEngineDetailed(args: EngineArgs, pricing?: NetPricingPlan
     const rr = runModel(fm, { ...base, preco: targetPricing.priceCents });
     const total = statementOfPeriods(rr.periods, N).total;
     const actual = total.net != null && total.revenue > 0 ? total.net / total.revenue * 100 : null;
-    if (actual != null && actual > st.netMarginTargetBp / 100 + 0.02) warnings.push(`O payback de ${D} meses exige preço maior que o alvo de margem líquida: no sugerido, a margem do contrato é ${actual.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%.`);
+    if (actual != null && actual > st.netMarginTargetBp / 100 + 0.02) warnings.push(`A margem líquida alvo é aplicada durante os ${D} meses de recuperação. Após quitar o investimento, a margem aumenta: no contrato inteiro é ${actual.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%.`);
   }
   if (targetPricing && targetPricing.priceCents == null) warnings.push('A margem líquida esperada não é alcançável com os custos e tributos configurados.');
   if (st.overheadBp == null || st.incomeTaxBp == null) warnings.push('Despesas fixas e IR/CSLL não informados em Configurações → Viabilidade: margem operacional e líquida não calculadas.');
@@ -1325,7 +1335,7 @@ export function econMemory(r: EconResult, fmt: (c: number) => string, opts: Memo
     value: pt.priceCents == null ? 'não cabe no divisor' : `${money(pt.priceCents)}${rec ? '/mês' : ''}`, strong: true,
   });
   const pbNote = rec && annuity && k ? `Payback do investimento na precificação = ${D} ${D === 1 ? 'mês' : 'meses'} (a parcela pela TMA devolve I com juros em exatamente D meses). O payback de caixa (${k.paybackMonths == null ? 'não se paga' : `${num(k.paybackMonths, 1)} meses`}) sai menor porque a margem de contribuição também entra no caixa; ele só é igual a D com margem zero.` : undefined;
-  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
+  steps.push({ key: 'preco', title: `Precificação (markup divisor, ${annuity ? 'FINANCE-3.1' : 'FINANCE-3.0'})`, desc: r.pricingBasis === 'net_margin' ? 'Preço que cobre os custos e entrega a margem líquida alvo, considerando tributos, perdas, despesas fixas e IR/CSLL. Na mensalidade, recupera o investimento no prazo informado; a margem do contrato inteiro é um resultado.' : 'Custos em R$ no numerador; no divisor só o que sai da nota: tributos da cesta, despesas variáveis e margem. Glosa, inadimplência e despesas fixas ficam fora do preço e entram no fluxo de caixa e nas margens operacional e líquida.', rows: prices, note: pbNote });
 
   const fx = (rec ? opts.legacy?.recurringX100 : opts.legacy?.oneTimeX100) ?? null;
   const cmp = fx ? econCompare(r, opts.legacy ?? {}) : null;

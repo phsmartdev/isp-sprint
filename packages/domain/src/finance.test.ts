@@ -85,10 +85,10 @@ describe('piso, preço recomendado e indicadores', () => {
     expect(npv(flows, p.kpi!.irrMonthly!)).toBeCloseTo(0, 2);
     expect(r.decision!.npvCents).toBe(p.kpi!.npvCents);
     expect(r.verdict).toBe('abaixo_minimo');
-    // payback do vendedor: 3 meses dobra a amortização; acima do teto também vale (o teto fica na aprovação)
+    // Prazo menor aumenta a parcela; entradas legadas acima do teto são limitadas.
     expect(financeEngine({ input: { ...input, paybackMonths: 3 }, items: items([200_000, 1000]), settings: st, publicSector: false }).term.D).toBe(3);
     const over = financeEngine({ input: { ...input, paybackMonths: 10 }, items: items([200_000, 1000]), settings: st, publicSector: false });
-    expect(over.term.D).toBe(10);
+    expect(over.term.D).toBe(6);
     expect(over.warnings.join(' ')).toMatch(/acima do teto/);
   });
   it('margem do vendedor fica entre o piso e o teto; sem escolha, vale a sugestão', () => {
@@ -184,18 +184,19 @@ describe('decisões da diretoria (29/10)', () => {
     expect(rich.kpi!.marginPct).toBeCloseTo(60, 1);
     expect(econHeadline(r, (c) => String(c))).toMatch(/Sem preço proposto: a decisão usa o sugerido/);
   });
-  it('payback do vendedor muda a análise inteira (inclusive acima do teto); o teto segue na aprovação pelo retorno real', () => {
+  it('prazo de recuperação é limitado ao teto, mesmo com entrada legada acima dele', () => {
     const it0 = items([0, 0]);
     const a = financeEngine({ input: rec({ paybackMonths: 3 }), items: it0, settings: S, publicSector: false });
     const b = financeEngine({ input: rec({ paybackMonths: 12 }), items: it0, settings: S, publicSector: false });
     expect(a.term.D).toBe(3);
-    expect(b.term.D).toBe(12); // teto privado é 6: não corta mais
+    expect(b.term.D).toBe(6); // teto privado é obrigatório
     expect(b.suggestedMinCents!).toBeLessThan(a.suggestedMinCents!);
     expect(b.warnings.join(' ')).toMatch(/acima do teto/);
-    // no preço mínimo do payback de 12 meses, o retorno real passa do teto de 6: fora da política
+    // Mesmo a entrada legada de 12 usa o teto privado de 6 na amortização.
     const atMin = financeEngine({ input: rec({ paybackMonths: 12, priceCents: b.suggestedMinCents }), items: it0, settings: S, publicSector: false });
-    expect(atMin.kpi!.margins!.amortizationCents).toBe(Math.round(atMin.investmentCents! / annuityFactor(0.015, 12)));
-    expect(atMin.paybackOk).toBe(false);
+    expect(atMin.kpi!.margins!.amortizationCents).toBe(Math.round(atMin.investmentCents! / annuityFactor(0.015, 6)));
+    expect(atMin.term.D).toBe(6);
+    expect(atMin.paybackOk).toBe(true);
   });
   it('a trava usa o payback descontado: 5,9 meses simples passa de 6 com TMA de 3%', () => {
     // I = 500.000, MC = 85.000/mês → simples 5,88; descontado a 3% passa de 6
@@ -517,10 +518,11 @@ describe('FINANCE-3.1: payback pela anuidade, DRE temporal e margem líquida alv
     const rc = r.recommendation!;
     expect(rc.operatingNeededPct!).toBeCloseTo(47.0588, 3);
     expect(rc.params).toEqual({ overheadPct: 20, glosaPct: 3, badDebtPct: 1, incomeTaxPct: 15 });
-    // recorrente: o preço é o que entrega 40% de margem líquida no contrato inteiro (IR mês a mês)
+    // Recorrente: alvo de 40% durante a recuperação, com IR mês a mês.
     const at = financeEngine({ input: { ...input, priceCents: rc.priceCents }, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000 }, publicSector: false });
-    near(at.decision!.netMarginPct!, 40, 0.01);
-    // e fica abaixo do preço da regra antiga (alvo só nos meses do payback)
+    near(at.decision!.paybackNetMarginPct!, 40, 0.01);
+    expect(at.decision!.netMarginPct!).toBeGreaterThan(40);
+    // A margem da vigência aumenta depois de quitar o investimento.
     expect(r.kpi!.paybackMonths!).toBeLessThanOrEqual(r.term.D + 0.00001);
     // muda o parâmetro → muda a recomendação (sem valor fixo no código)
     const r2 = financeEngine({ input, items: items([0, 1000]), settings: { ...st, netMarginTargetBp: 4000, overheadBp: 4000 }, publicSector: false });

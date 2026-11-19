@@ -71,9 +71,9 @@ describe('viabilidade econômica', () => {
     expect(saved.result.lots).toEqual([expect.objectContaining({ lot: 'servico', percentBp: 2000, items: 2 })]);
     expect(saved.result.withReservations).toBe(false);
     // Investimento 30.000; operação 2.000 + inferência mensal 10.500. O sugerido atende margem e payback.
-    expect(saved.result.engineVersion).toBe('FINANCE-3.8.0');
+    expect(saved.result.engineVersion).toBe('FINANCE-3.9.0');
     const parc = 3_000_000 / annuityFactor(saved.result.rates.r, 6);
-    expect(Math.abs(saved.result.suggestedCents - (3_000_000 / 24 + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
+    expect(Math.abs(saved.result.suggestedCents - (parc + 1_250_000) / (1 - 0.2 - 0.2))).toBeLessThanOrEqual(1);
     expect(saved.result.kpi.marginPct).toBeCloseTo(saved.result.rates.m * 100, 4);
     expect(saved.result.recommendation.netTargetPct).toBe(20); // sem margem líquida alvo nos parâmetros
     // No proposto de 10.000, tributos e custo mensal deixam caixa negativo: o retorno não fecha.
@@ -126,10 +126,11 @@ describe('viabilidade econômica', () => {
     expect(rv['margem_liquida_alvo_%']).toBe(40);
     expect(rv['margem_contrib_recomendada_%']).toBeCloseTo(withTarget.result.kpi.marginPct, 2);
     expect(rv.parametros_utilizados).toMatchObject({ 'taxa_rateio_fixo_%': 20, 'glosa_%': 3, 'inadimplencia_%': 1 });
-    // mensalidade: o preço recomendado entrega 40% de margem líquida no contrato inteiro (24 meses), abaixo da regra antiga
+    // A mensalidade entrega o alvo durante a recuperação; a margem contratual aumenta após quitar o investimento.
     expect(rv['preco_mensal_recomendado_R$']).toBeLessThan(17_500 / (1 - 0.2 - (0.4 / 0.85 + 0.24)));
     const atRec = ok(await carlos.put(`/opportunities/${o.id}/economics`, { ...input, priceCents: Math.round(rv['preco_mensal_recomendado_R$'] * 100) })).json();
-    expect(atRec.result.decision.netMarginPct).toBeCloseTo(40, 1);
+    expect(atRec.result.decision.paybackNetMarginPct).toBeCloseTo(40, 1);
+    expect(atRec.result.decision.netMarginPct).toBeGreaterThan(40);
     ok(await carlos.put(`/opportunities/${o.id}/economics`, input));
     expect(withTarget.result.statement.after.amortization).toBe(0);
     expect(ok(await carlos.get(`/opportunities/${o.id}/economics`)).json().recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(withTarget.result.kpi.marginPct, 2);
@@ -391,7 +392,7 @@ describe('viabilidade econômica', () => {
     expect(its.find((i: { description: string }) => i.description === 'Roteador B2G').costProfile).toBe('fornecimento');
     expect(its.find((i: { description: string }) => i.description === 'Link B2G').costProfile).toBe('implantacao');
 
-    const input = { mode: 'recorrente', termMonths: 36, receiveMonth: 0, paybackMonths: 12, variableBp: 0, lossBp: 0, marginTargetBp: 3500, priceCents: null, commissionBp: null, extraInitialCents: 0,
+    const input = { mode: 'recorrente', termMonths: 36, receiveMonth: 0, paybackMonths: 6, variableBp: 0, lossBp: 0, marginTargetBp: 3500, priceCents: null, commissionBp: null, extraInitialCents: 0,
       capex: [{ description: 'Obra', impact: 'servico', kind: 'recorrencia', qtyMilli: 1000, unitCents: 1_000_000 }],
       opex: [{ description: 'Trânsito', qtyMilli: 1000, unitCents: 100_000 }],
       b2g: { mode: 'A' } };
@@ -438,7 +439,7 @@ describe('viabilidade econômica', () => {
     expect(ok(await carlos.get(`/opportunities/${o.id}/items`)).json().items).toEqual(originalItems);
     const run = ok(await carlos.get(`/opportunities/${o.id}/economics/runs/ultimo`)).json();
     expect(run.verified).toBe(true);
-    expect(run.engineVersion).toBe('FINANCE-3.8.0');
+    expect(run.engineVersion).toBe('FINANCE-3.9.0');
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=csv`));
     ok(await carlos.get(`/opportunities/${o.id}/economics/runs/${run.id}/export?format=pdf`));
   });
@@ -562,12 +563,17 @@ describe('viabilidade econômica', () => {
     ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: o.rowVersion, items: products }));
     const input = { mode: 'recorrente', termMonths: 12, receiveMonth: 0, pricingMode: 'global', capex: kinds.map((kind) => ({ description: 'Investimento global ' + kind, kind, impact: 'material', qtyMilli: 1000, unitCents: 800000 })), opex: [{ description: 'Operação global', kind: 'recorrencia', qtyMilli: 1000, unitCents: 10000 }], extraInitialCents: 0, commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null, baskets: { fornecimento: { netTargetBp: 3000 }, instalacao: { netTargetBp: 2500 }, implantacao: { netTargetBp: 4000, paybackMonths: 2 } } };
     ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...input, baskets: { ...input.baskets, fornecimento: { netTargetBp: 800 } } }), 422);
+    ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...input, termMonths: 24, baskets: { ...input.baskets, implantacao: { ...input.baskets.implantacao, paybackMonths: 7 } } }), 422);
     const saved = ok(await carlos.put('/opportunities/' + o.id + '/economics', input)).json();
     expect(saved.result.deal.cells.map((c: { result: { targetNetMarginPct: number } }) => c.result.targetNetMarginPct)).toEqual([30, 25, 40]);
     expect(saved.result.deal.cells[2].result.term.D).toBe(2);
     expect(saved.result.deal.cells[2].result.kpi.paybackMonths).toBeLessThanOrEqual(2.0001);
     const read = ok(await carlos.get('/opportunities/' + o.id + '/economics')).json();
     expect(read.input.baskets).toMatchObject(input.baskets);
+    const beforeItems = ok(await carlos.get('/opportunities/' + o.id + '/items')).json();
+    ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: beforeItems.rowVersion, items: products, economics: { ...input, termMonths: 24, baskets: { ...input.baskets, implantacao: { paybackMonths: 7 } } } }), 422);
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/items')).json().rowVersion).toBe(beforeItems.rowVersion);
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/economics')).json().input.baskets.implantacao.paybackMonths).toBe(2);
     expect(read.items.map((i: { qtyMilli: number }) => i.qtyMilli)).toEqual([2000, 1000, 3000]);
     ok(await carlos.post('/opportunities/' + o.id + '/economics/submit', {}), 422);
     const old = ok(await carlos.get('/opportunities/' + o.id + '/economics/runs/ultimo')).json();

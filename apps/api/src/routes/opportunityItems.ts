@@ -4,7 +4,7 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econTargetErrors, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econTargetErrors, econPaybackErrors, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -13,7 +13,7 @@ import { pipelinesOf } from '../services/instructions';
 import { assertDeliveryAddresses, deliveryAddressesOf } from './deliveryAddresses';
 
 import { EconBody } from './economicsInput';
-import { econSettingsOf, resolveCostLines, learnCostLines, saveEconomics } from '../services/economics';
+import { publicSectorOf, econSettingsOf, resolveCostLines, learnCostLines, saveEconomics } from '../services/economics';
 import { requireAction } from '../services/modules';
 
 const OppParams = z.object({ id: z.string().uuid() });
@@ -83,6 +83,8 @@ export const opportunityItemRoutes = [
           if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
           const targetErrors = econTargetErrors(body.economics as EconInput, version.settings);
           if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
+          const paybackErrors = econPaybackErrors(body.economics as EconInput, version.settings, await publicSectorOf(tx, opp));
+          if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
         }
         for (const [i, it] of body.items.entries()) {
           it.costProfile = defaultCostProfile(it.dealKind);

@@ -88,6 +88,11 @@ export function stableStringify(v: unknown): string {
 
 type Opp = { id: string; tenantId: string; contactId: string; branchId: string | null; saleKind: string | null };
 
+export async function publicSectorOf(db: DbOrTx, opp: Pick<Opp, 'contactId' | 'saleKind'>) {
+  const [contact] = await db.select({ segment: s.contacts.segment, nature: s.contacts.nature }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1);
+  return contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
+}
+
 /** Tudo que o cálculo precisa: itens com a resolução fiscal, parâmetros vigentes, segmento e o que foi salvo. */
 export async function economicsContext(db: DbOrTx, opp: Opp) {
   const [version, items, docs, [contact], [saved], [branch], fm, envelopes] = await Promise.all([

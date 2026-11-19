@@ -18,12 +18,12 @@ let hidden: boolean;
 beforeEach(() => { hidden = moneyHidden(); setMoneyHidden(false); vi.mocked(api).mockReset(); vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); clients.splice(0).forEach((c) => c.clear()); setMoneyHidden(hidden); vi.unstubAllGlobals(); });
 
-function setup(selected: DealKind[] = ['venda', 'servico', 'recorrencia'], override?: Partial<EconInput>) {
+function setup(selected: DealKind[] = ['venda', 'servico', 'recorrencia'], override?: Partial<EconInput>, publicSector = false) {
   const selectedItems = selected.map((kind) => ({ ...items[kind === 'venda' ? 0 : kind === 'servico' ? 1 : 2]!, kind, description: kind === 'locacao' ? 'Aluguel roteador' : items[kind === 'venda' ? 0 : kind === 'servico' ? 1 : 2]!.description }));
   const profiles = new Set<DealKind>(selected.map((k) => k === 'venda' ? 'venda' : k === 'servico' ? 'servico' : 'recorrencia'));
   const input: EconInput = { ...baseInput, capex: baseInput.capex.filter((c) => profiles.has(c.kind!)), opex: profiles.has('recorrencia') ? baseInput.opex : [], ...override };
-  const calc = (i: EconInput) => { const r = financeEngine({ input: i, items: selectedItems, settings, publicSector: false }); return { ...r, b2g: b2gFromEconomics({ input: i, items: selectedItems, settings, publicSector: false }, undefined, r) }; };
-  let data = { input, settings, items: selectedItems, publicSector: false, saved: { updatedAt: '2026-11-19T12:00:00Z' }, result: calc(input), stale: false, editable: true, emitter: null, financeHidden: false, modelOverrides: [], settingsVersion: { id: 'settings', validFrom: '2026-11-19' }, status: 'calculada', canDecide: false, decisions: [], history: [] };
+  const calc = (i: EconInput) => { const r = financeEngine({ input: i, items: selectedItems, settings, publicSector }); return { ...r, b2g: b2gFromEconomics({ input: i, items: selectedItems, settings, publicSector }, undefined, r) }; };
+  let data = { input, settings, items: selectedItems, publicSector, saved: { updatedAt: '2026-11-19T12:00:00Z' }, result: calc(input), stale: false, editable: true, emitter: null, financeHidden: false, modelOverrides: [], settingsVersion: { id: 'settings', validFrom: '2026-11-19' }, status: 'calculada', canDecide: false, decisions: [], history: [] };
   const requests: (EconInput & { economicsUpdatedAt?: string | null })[] = [];
   vi.mocked(api).mockImplementation(async (_url, options) => {
     if (options?.method === 'PUT') {
@@ -93,16 +93,13 @@ describe('viabilidade global por cesta', () => {
     expect(within(dialog).getByText('OTDR')).toBeTruthy();
     expect(within(dialog).queryByText('Link dedicado')).toBeNull();
   });
-  it('mostra a distribuição global por item sem gravar os valores dos produtos', async () => {
+  it('oculta o rateio e as premissas, sem gravar valores nos produtos', async () => {
     const { requests } = setup();
     await screen.findByLabelText('Margem líquida de Venda');
     fireEvent.click(within(panel('Venda')).getByRole('button', { name: 'Usar preço sugerido' }));
     await waitFor(() => expect((screen.getByLabelText('Preço da venda de Venda') as HTMLInputElement).value).not.toBe(''));
-    fireEvent.click(within(panel('Venda')).getByRole('button', { name: 'Ver valores por item' }));
-    const dialog = screen.getByRole('dialog', { name: 'Valores por item — Venda' });
-    expect(within(dialog).getByText('OTDR')).toBeTruthy();
-    expect(within(dialog).getByText('Não informado')).toBeTruthy();
-    expect(within(dialog).getByText('Valor global da cesta')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ver valores por item' })).toBeNull();
+    expect(screen.queryByText('Premissas fiscais e ajustes da negociação')).toBeNull();
     expect(requests).toHaveLength(0);
     expect(vi.mocked(api).mock.calls.some(([url]) => url.endsWith('/items'))).toBe(false);
   });
@@ -132,7 +129,17 @@ describe('viabilidade global por cesta', () => {
     fireEvent.change(screen.getByLabelText('Payback de Recorrência'), { target: { value: '9' } });
     await screen.findByText(/Visão geral calculada com os preços da venda/);
     expect((field as HTMLInputElement).value).toBe(original);
+    expect((screen.getByLabelText('Payback de Recorrência') as HTMLInputElement).value).toBe('6');
     expect(within(panel('Recorrência')).getByText(/No preço da venda · no sugerido:/)).toBeTruthy();
+  });
+  it.each([[false, 6], [true, 12]] as const)('limita o prazo pelo setor público=%s, teto=%i', async (publicSector, limit) => {
+    setup(['recorrencia'], undefined, publicSector);
+    const field = await screen.findByLabelText('Payback de Recorrência') as HTMLInputElement;
+    expect(field.max).toBe(String(limit));
+    fireEvent.change(field, { target: { value: String(limit + 1) } });
+    expect(field.value).toBe(String(limit));
+    fireEvent.change(field, { target: { value: '2' } });
+    expect(field.value).toBe('2');
   });
   it('preserva proposta global antiga ao migrar para os controles por cesta', async () => {
     const { requests } = setup(['venda', 'servico', 'recorrencia'], { priceCents: 25000, salePriceCents: 300000 });

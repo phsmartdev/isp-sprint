@@ -8,7 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Calculator, ChevronDown, Eye, EyeOff, Maximize2 } from 'lucide-react';
 import {
-  econInputErrors, econTargetErrors, econBasketViews, type EconBasketView, type EconCostProfile, defaultCostProfile, type CostProfile, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costQty, econDre, econMemory, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  econInputErrors, econPaybackErrors, econPaybackLimit, econTargetErrors, econBasketViews, type EconBasketView, type EconCostProfile, defaultCostProfile, type CostProfile, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costQty, econDre, econMemory, econHeadline, emptyEconInput, financeEngine, parseMoney,
   buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict, type B2gResult,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -586,7 +586,7 @@ export function EconomicsTab({ oppId, onProducts }: { oppId: string; onProducts?
       const own = i.baskets?.[profile];
       const oldPrice = profile === 'implantacao' ? i.priceCents : mixed ? i.salePriceCents : i.priceCents;
       const inheritedPrice = oldPrice != null ? legacy.find((v) => v.profile === profile)?.result.decision?.priceCents : null;
-      return [profile, { margin: rateText(own?.netTargetBp ?? i.b2g?.netTargetBp ?? st?.netMarginTargetBp), payback: String(own?.paybackMonths ?? i.paybackMonths ?? (d.publicSector ? st?.paybackMaxPublic : st?.paybackMaxPrivate) ?? ''), price: money(own?.priceCents ?? inheritedPrice ?? null) }];
+      return [profile, { margin: rateText(own?.netTargetBp ?? i.b2g?.netTargetBp ?? st?.netMarginTargetBp), payback: st ? String(Math.min(own?.paybackMonths ?? i.paybackMonths ?? econPaybackLimit(i, st, d.publicSector), econPaybackLimit(i, st, d.publicSector))) : '', price: money(own?.priceCents ?? inheritedPrice ?? null) }];
     })) as Record<EconCostProfile, BasketForm>;
     setForm({ source: { ...i, pricingMode: 'global', priceCents: null, salePriceCents: null, paybackMonths: null, b2g: { ...i.b2g, netTargetBp: null } }, version: d.saved?.updatedAt ?? null, baskets, variable: rateText(i.variableBp), loss: rateText(i.lossBp), year: i.fiscalYear ? String(i.fiscalYear) : '' });
   }, [q.data, form, model, profiles]);
@@ -599,7 +599,7 @@ export function EconomicsTab({ oppId, onProducts }: { oppId: string; onProducts?
     }
     return { ...form.source, baskets, pricingMode: 'global', variableBp: parseRate(form.variable), lossBp: parseRate(form.loss), fiscalYear: form.year.trim() ? Number(form.year) : null };
   }, [form, profiles, q.data?.settings?.netMarginTargetBp]);
-  const errors = useMemo(() => input ? [...econInputErrors(input), ...(q.data?.settings ? econTargetErrors(input, q.data.settings) : []), ...(form?.year && (form.year.length !== 4 || Number(form.year) < 2020 || Number(form.year) > 2100) ? ['Confira a vigência fiscal.'] : [])] : [], [input, q.data?.settings, form?.year]);
+  const errors = useMemo(() => input ? [...econInputErrors(input), ...(q.data?.settings ?  [...econTargetErrors(input, q.data.settings), ...econPaybackErrors(input, q.data.settings, q.data.publicSector)] : []), ...(form?.year && (form.year.length !== 4 || Number(form.year) < 2020 || Number(form.year) > 2100) ? ['Confira a vigência fiscal.'] : [])] : [], [input, q.data?.settings, q.data?.publicSector, form?.year]);
   const [debounced, setDebounced] = useState<EconInput | null>(null);
   useEffect(() => { const timer = setTimeout(() => setDebounced(input), 400); return () => clearTimeout(timer); }, [input]);
   const pending = JSON.stringify(debounced) !== JSON.stringify(input);
@@ -651,7 +651,6 @@ export function EconomicsTab({ oppId, onProducts }: { oppId: string; onProducts?
     {!views.length && profiles.length > 0 && st.netMarginTargetBp != null && !errors.length && <p className="text-sm text-muted">Calculando os preços das cestas…</p>}
     {!!errors.length && <Notice tone="warning"><p>Confira os parâmetros para calcular e salvar:</p><ul className="list-disc pl-4">{errors.map((e) => <li key={e}>{e}</li>)}</ul></Notice>}
     {!errors.length && views.length > 0 && views.every((v) => v.evaluation.statement) && <BusinessOverview views={views} input={input} settings={st} />}
-    <details className="border border-line p-4"><summary className="cursor-pointer text-sm font-semibold text-ink">Premissas fiscais e ajustes da negociação</summary><div className="mt-3 grid gap-3 sm:grid-cols-3"><FormField label="Vigência fiscal (ano)" htmlFor="global-fiscal-year" hint="Em branco, usa o ano corrente."><Input id="global-fiscal-year" value={form.year} placeholder={d.fiscal?.today.slice(0, 4)} disabled={!editable} onChange={(e) => setForm({ ...form, year: e.target.value.replace(/\D/g, '').slice(0, 4) })} /></FormField><FormField label="Despesas variáveis (%)" htmlFor="global-variable" hint={'Em branco: ' + rateText(st.variableExpenseBp ?? 0) + '%.'}><Input id="global-variable" value={form.variable} disabled={!editable} inputMode="decimal" onChange={(e) => setForm({ ...form, variable: e.target.value })} /></FormField><FormField label="Glosa (%)" htmlFor="global-loss" hint="Em branco, usa o parâmetro do setor."><Input id="global-loss" value={form.loss} disabled={!editable} inputMode="decimal" onChange={(e) => setForm({ ...form, loss: e.target.value })} /></FormField></div></details>
     {activeAdvanced && <AdvancedCalculation r={activeAdvanced.evaluation} settings={{ ...st, netMarginTargetBp: targetOf(activeAdvanced.profile) }} open title={'Cálculo avançado — ' + basketName(activeAdvanced)} onClose={() => setAdvancedProfile(null)} />}
     <ItemValuesModal view={activeItems} items={d.items} result={b2g} onClose={() => setItemsProfile(null)} />
     {d.editable && <div className="flex justify-end"><Button variant="primary" disabled={!canSave} loading={save.isPending} onClick={() => save.mutate({ input, version: form.version })}>Salvar viabilidade</Button></div>}

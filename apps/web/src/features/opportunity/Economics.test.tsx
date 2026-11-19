@@ -38,14 +38,14 @@ describe('memória de cálculo no preço por cesta', () => {
     expect(row.textContent).toContain(fmtBRL(90000));
     expect(supply.textContent).toContain(fmtBRL(128572));
     expect(monthly.textContent).toContain(fmtBRL(120000));
-    expect(monthly.textContent).toContain(fmtBRL(95385));
+    expect(monthly.textContent).toContain(fmtBRL(110769));
     expect(within(monthly).getByText('Parcela do investimento (P_inv)')).toBeTruthy();
     expect(monthly.textContent).toContain('1–6');
     expect(JSON.stringify(r)).toBe(before);
   });
 
   it('respeita a ocultação dos valores financeiros', () => {
-    const r = result(), visiblePrice = fmtBRL(95385);
+    const r = result(), visiblePrice = fmtBRL(110769);
     setMoneyHidden(true);
     render(<EconomicsResult r={r} />);
     fireEvent.click(screen.getByRole('button', { name: 'Ver cálculo avançado' }));

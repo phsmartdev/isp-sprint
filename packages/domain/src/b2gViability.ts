@@ -15,7 +15,7 @@
  * Dinheiro em centavos; percentuais em frações (0,35 = 35%).
  */
 import { annuityFactor, paybackMonths as paybackOf } from './formula';
-import { financeEngine, type EconResult, serviceInvestmentExtra, SERVICE_INVESTMENT_BP, applyFiscalEnvelope, type CostLine, type DealKind, type EngineArgs } from './finance';
+import { econPaybackLimit, financeEngine, type EconResult, serviceInvestmentExtra, SERVICE_INVESTMENT_BP, applyFiscalEnvelope, type CostLine, type DealKind, type EngineArgs } from './finance';
 
 export type CostProfile = 'fornecimento' | 'implantacao' | 'instalacao';
 export const COST_PROFILES: CostProfile[] = ['fornecimento', 'instalacao', 'implantacao'];
@@ -482,7 +482,7 @@ export function b2gFromEconomics(args: Omit<EngineArgs, 'model'>, profitTaxBp?: 
     riskBp: (inp.lossBp ?? (args.publicSector ? st.lossPublicBp : st.lossPrivateBp)) + (st.badDebtBp ?? 0),
     incomeTaxBp: profitTaxBp ?? fx.args.settings.incomeTaxBp ?? null, overheadBp: b.overheadBp ?? st.overheadBp ?? 0, netMinBp: st.netMarginMinBp ?? null,
     netTargetBp: target, contributionBp: target != null ? undefined : contribution, solvePayback: false,
-    serviceCostBp: st.serviceCostBp, contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths), paybackMonths: inp.baskets?.implantacao?.paybackMonths ?? inp.paybackMonths ?? (args.publicSector ? st.paybackMaxPublic : st.paybackMaxPrivate),
+    serviceCostBp: st.serviceCostBp, contingencyCapexBp: st.contingencyCapexBp, contingencyOpexBp: st.contingencyOpexBp, termMonths: Math.min(inp.termMonths, st.horizonMaxMonths ?? inp.termMonths), paybackMonths: Math.min(inp.baskets?.implantacao?.paybackMonths ?? inp.paybackMonths ?? econPaybackLimit(inp, st, args.publicSector), econPaybackLimit(inp, st, args.publicSector)),
     paymentTermDays: st.paymentTermDays ?? null, weights: weights,
   }, inp.extraInitialCents);
 }
