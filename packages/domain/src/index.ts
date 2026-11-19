@@ -74,3 +74,4 @@ export * from './zenith';
 export * from './dataImport';
 export * from './bidProjects';
 export * from './giftCompliance';
+export * from './studio';

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { ArrowDown, ArrowUp, ChevronLeft, Plus, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronLeft, Plus, RefreshCw, Send, Trash2, Video } from 'lucide-react';
 import {
   CONTENT_STATE_LABELS, ENROLLMENT_STATUS_LABELS, MIN_WATCH_PCTS, PROFILE_KEYS, PROFILE_LABELS, PROGRESS_METHODS, PROGRESS_METHOD_LABELS, TRACK_LEVELS, TRACK_LEVEL_LABELS,
   TRACK_MODES, TRACK_MODE_LABELS, TRACK_STATUS_LABELS, VISIBILITIES, VISIBILITY_LABELS, fmtDuration, playableState,
@@ -53,7 +53,7 @@ export function AcademyAdmin() {
       <section aria-label="Trilhas" className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-display text-lg font-bold text-ink">Trilhas</h2>
-          {d.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => nav('/playbooks/academia/gestao/nova')}>Nova trilha</Button>}
+          {d.can.create && <div className="flex gap-2"><Button icon={<Video className="h-4 w-4" />} onClick={() => nav('/playbooks/academia/estudio')}>Gravar treinamento</Button><Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => nav('/playbooks/academia/gestao/nova')}>Nova trilha</Button></div>}
         </div>
         {!d.items.length ? <EmptyState title="Nenhuma trilha ainda" description={d.can.create ? 'Crie a primeira trilha colando vídeos ou uma playlist do YouTube. Ela passa pela Gerência antes de ser publicada.' : 'As trilhas que você cuida aparecem aqui.'} /> : (
           <div className="overflow-x-auto border border-line bg-surface"><table className="w-full min-w-[820px] text-left text-sm">
