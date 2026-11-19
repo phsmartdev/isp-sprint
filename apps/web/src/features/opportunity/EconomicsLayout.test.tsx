@@ -96,8 +96,8 @@ describe('viabilidade global por cesta', () => {
   it('mostra a distribuição global por item sem gravar os valores dos produtos', async () => {
     const { requests } = setup();
     await screen.findByLabelText('Margem líquida de Venda');
-    fireEvent.click(within(panel('Venda')).getByRole('button', { name: 'Usar este preço' }));
-    await waitFor(() => expect((screen.getByLabelText('Preço global de Venda') as HTMLInputElement).value).not.toBe(''));
+    fireEvent.click(within(panel('Venda')).getByRole('button', { name: 'Usar preço sugerido' }));
+    await waitFor(() => expect((screen.getByLabelText('Preço da venda de Venda') as HTMLInputElement).value).not.toBe(''));
     fireEvent.click(within(panel('Venda')).getByRole('button', { name: 'Ver valores por item' }));
     const dialog = screen.getByRole('dialog', { name: 'Valores por item — Venda' });
     expect(within(dialog).getByText('OTDR')).toBeTruthy();
@@ -119,8 +119,8 @@ describe('viabilidade global por cesta', () => {
   it('preserva proposta global antiga ao migrar para os controles por cesta', async () => {
     const { requests } = setup(['venda', 'servico', 'recorrencia'], { priceCents: 25000, salePriceCents: 300000 });
     await screen.findByLabelText('Margem líquida de Venda');
-    const sale = (screen.getByLabelText('Preço global de Venda') as HTMLInputElement).value;
-    const installation = (screen.getByLabelText('Preço global de Instalação') as HTMLInputElement).value;
+    const sale = (screen.getByLabelText('Preço da venda de Venda') as HTMLInputElement).value;
+    const installation = (screen.getByLabelText('Preço da venda de Instalação') as HTMLInputElement).value;
     expect(sale).not.toBe('');
     expect(installation).not.toBe('');
     fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade' }));
