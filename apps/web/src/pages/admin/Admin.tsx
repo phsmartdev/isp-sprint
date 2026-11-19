@@ -1,3 +1,5 @@
+import { useSearchParams } from 'react-router-dom';
+import { OrgChart } from './OrgChart';
 import { useSectors } from '../../lib/hooks';
 import { SECTOR_ROLES, SECTOR_ROLE_HINTS, SECTOR_ROLE_LABELS, defaultSectorRole, type SectorRole } from '@isp/domain';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -390,7 +392,24 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
   );
 }
 
+/** Usuários: lista (cadastro) ou organograma de acessos (quem vê o quê, pela estrutura de times). */
 export function AdminUsers() {
+  const [sp, setSp] = useSearchParams();
+  const org = sp.get('visao') === 'organograma';
+  const tab = (v: boolean) => { const n = new URLSearchParams(sp); if (v) n.set('visao', 'organograma'); else n.delete('visao'); setSp(n, { replace: true }); };
+  return (
+    <div className="space-y-4">
+      <div role="tablist" aria-label="Usuários" className="flex gap-0 border-b border-line">
+        {[['Lista de usuários', false], ['Organograma de acessos', true]].map(([label, v]) => (
+          <button key={String(label)} role="tab" aria-selected={org === v} onClick={() => tab(v as boolean)} className={clsx('-mb-px border-b-2 px-4 py-2.5 text-sm font-semibold', org === v ? 'border-primary text-primary' : 'border-transparent text-muted hover:text-ink')}>{label as string}</button>
+        ))}
+      </div>
+      {org ? <OrgChart /> : <AdminUserList />}
+    </div>
+  );
+}
+
+function AdminUserList() {
   const qc = useQueryClient();
   const sectorList = useSectors();
   const toast = useToast();

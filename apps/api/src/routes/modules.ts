@@ -3,11 +3,11 @@
  * funcionalidades, liberações e bloqueios por equipe ou pessoa (com motivo e validade), ações sensíveis por perfil
  * e a prévia do acesso efetivo de um usuário. Tudo auditado; nada amplia o nível do perfil.
  */
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   BUSINESS_MODULES, BUSINESS_MODULE_HINTS, BUSINESS_MODULE_LABELS, DEFAULT_ACTIONS, FEATURES, MODULE_OWNER, MODULES, PROFILE_KEYS, PROFILE_LABELS, RELEASE_MODES,
-  SENSITIVE_ACTIONS, SENSITIVE_ACTION_LABELS, defaultTenantModule, grantErrors, type BusinessModule,
+  SENSITIVE_ACTIONS, SENSITIVE_ACTION_LABELS, ACCESS_LEVELS, defaultTenantModule, grantErrors, type AccessLevel, type BusinessModule, type Module,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unprocessable } from '../http/errors';
@@ -112,6 +112,37 @@ export const moduleRoutes = [
         .onConflictDoUpdate({ target: [s.actionPolicies.roleId, s.actionPolicies.action], set: { allowed: body.allowed, updatedBy: auth.userId, updatedAt: new Date() } });
       await audit(app.db, req, { action: 'security.action', entityType: 'action_policy', entityId: `${body.profile}:${body.action}`, metadata: { profile: body.profile, action: body.action, from: cur?.allowed ?? DEFAULT_ACTIONS[body.profile]?.[body.action] ?? false, to: body.allowed } });
       return { ok: true };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/admin/org-chart', summary: 'Organograma de acessos: pessoas, times (gestores, líderes e membros) e, por módulo, o que cada pessoa enxerga e por quê', tag: 'Administração', ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const [users, teams, members, grants] = await Promise.all([
+        app.db.select({ id: s.users.id, name: s.users.name, jobTitle: s.users.jobTitle, hasAvatar: s.userAvatars.userId }).from(s.users).leftJoin(s.userAvatars, eq(s.userAvatars.userId, s.users.id)).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
+        app.db.select({ id: s.teams.id, name: s.teams.name, managerIds: s.teams.managerIds }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), eq(s.teams.active, true), isNull(s.teams.deletedAt))).orderBy(asc(s.teams.name)),
+        app.db.select({ teamId: s.teamMemberships.teamId, userId: s.teamMemberships.userId, isLead: s.teamMemberships.isLead }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(eq(s.teams.tenantId, auth.tenantId)),
+        app.db.select().from(s.moduleGrants).where(eq(s.moduleGrants.tenantId, auth.tenantId)),
+      ]);
+      const rank = (l: AccessLevel) => ACCESS_LEVELS.indexOf(l);
+      const people = [];
+      for (const u of users) {
+        const a = await authForUser(app.db, auth.tenantId, u.id);
+        if (!a) continue;
+        // o que a pessoa enxerga em cada módulo de negócio: o maior nível entre as telas do módulo (já com o módulo ligado ou não para ela)
+        const view = Object.fromEntries(BUSINESS_MODULES.map((bm: BusinessModule) => {
+          const techs = (MODULES as readonly Module[]).filter((m) => MODULE_OWNER[m] === bm);
+          const lvl = techs.reduce<AccessLevel>((best, m) => (rank(a.access[m] ?? 'nenhum') > rank(best) ? a.access[m]! : best), 'nenhum');
+          return [bm, { level: a.modules[bm] ? lvl : 'nenhum', enabled: a.modules[bm], reason: a.moduleReasons[bm] }];
+        }));
+        people.push({ id: u.id, name: u.name, jobTitle: u.jobTitle, hasAvatar: !!u.hasAvatar, profile: a.profiles[0] ?? null, profiles: a.profiles, view });
+      }
+      return {
+        modules: BUSINESS_MODULES.map((m: BusinessModule) => ({ key: m, label: BUSINESS_MODULE_LABELS[m] })),
+        profiles: PROFILE_KEYS.map((k) => ({ key: k, label: PROFILE_LABELS[k] })),
+        people,
+        teams: teams.map((t) => ({ id: t.id, name: t.name, managerIds: t.managerIds, leadIds: members.filter((m) => m.teamId === t.id && m.isLead).map((m) => m.userId), memberIds: members.filter((m) => m.teamId === t.id && !m.isLead).map((m) => m.userId) })),
+        grants: grants.map((g) => ({ id: g.id, module: g.module, subjectType: g.subjectType, subjectId: g.subjectId, effect: g.effect, reason: g.reason, validUntil: g.validUntil })),
+      };
     },
   }),
   defineRoute({
