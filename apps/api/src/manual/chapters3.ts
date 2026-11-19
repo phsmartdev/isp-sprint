@@ -123,7 +123,7 @@ Configurações exige o nível **Total** no módulo Configurações (Administrad
 
 # Usuários e times
 1) Cadastrar usuário :: Nome, e-mail, perfil, times, times que lidera (Supervisão precisa liderar ao menos um), metas e **cargo no setor**. A senha temporária aparece uma única vez.
-2) Cargo no setor :: Observador, Operador ou Liderança / gestor; vem sugerido pelo perfil e pode ser trocado.
+2) Cargo no setor :: Diretoria, Gestão, Liderança, Operação ou Observador; vem sugerido pelo perfil e pode ser trocado.
 3) Redefinir senha :: Gera nova senha temporária e encerra as sessões.
 4) Times :: Criar, renomear, inativar ou excluir (sai das escolhas e do orçamento; o histórico continua).
 A gerência não consegue tirar o próprio acesso de administração.

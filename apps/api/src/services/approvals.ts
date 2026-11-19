@@ -7,8 +7,7 @@ import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import {
   ALERT_LABELS, APPROVAL_LEVEL_LABELS, DEFAULT_APPROVAL_POLICY, PROCESS_LABELS, type AlertKind, type ProcessKind, DEFAULT_APPROVAL_TEMPLATE, DEFAULT_CLASSIFICATION_OPTIONS, NEGOTIATION_TYPE_LABELS,
   buildOpinion, canDecide, customerKind, discountBp, materialChanges, monthsBetween, negotiationMargin, requiredApproval, userApprovalLevel,
-  type AnalysisFingerprint, type ApprovalLevel, type ApprovalPolicy, type ClassificationOptions, type NegotiationType, type ServiceLine,
-} from '@isp/domain';
+  type AnalysisFingerprint, type ApprovalLevel, type ApprovalPolicy, type ClassificationOptions, type NegotiationType, type ServiceLine, isApproverSectorRole } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import type { AuthContext } from '../http/context';
@@ -38,8 +37,8 @@ export async function approvalSettingsOf(db: DbOrTx, tenantId: string) {
   };
 }
 
-/** Alçada de quem decide: só quem tem cargo de liderança/gestor nos setores aprova (observador e operador não). */
-export const approvalLevelOf = (auth: Pick<AuthContext, 'profiles' | 'sectors'> & { sectorRole?: string }): ApprovalLevel => (auth.sectorRole && auth.sectorRole !== 'lideranca' ? 'vendedor' : userApprovalLevel(auth.profiles, auth.sectors));
+/** Alçada de quem decide: só quem tem cargo Diretoria, Gestão ou Liderança nos setores aprova (Operação e Observador não). */
+export const approvalLevelOf = (auth: Pick<AuthContext, 'profiles' | 'sectors'> & { sectorRole?: string }): ApprovalLevel => (auth.sectorRole && !isApproverSectorRole(auth.sectorRole) ? 'vendedor' : userApprovalLevel(auth.profiles, auth.sectors));
 
 // ------------------------------------------------------------------ classificação e identidade
 

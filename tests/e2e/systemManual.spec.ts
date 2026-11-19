@@ -27,7 +27,7 @@ test('manual do sistema: instalar, ler o capítulo de acessos e a referência da
   await page.getByRole('textbox', { name: 'Buscar playbooks' }).fill('Perfis, níveis');
   await page.getByText('Perfis, níveis e permissões').first().click();
   await expect(page.getByRole('heading', { name: 'Matriz padrão de níveis' })).toBeVisible();
-  await expect(page.getByText('Liderança / gestor').first()).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Gere o setor abaixo da Diretoria: executa e entra na lista de aprovadores (pela alçada do perfil).' })).toBeVisible();
   await page.screenshot({ path: 'test-results/manual-acessos.png', fullPage: false });
   await page.goto('/playbooks');
   await page.getByRole('textbox', { name: 'Buscar playbooks' }).fill('Referência da API');

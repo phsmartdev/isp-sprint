@@ -1226,6 +1226,13 @@
       "when": 1795094133100,
       "tag": "0174_organograma_hierarquia",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1795096381101,
+      "tag": "0175_cargo_setor_hierarquia",
+      "breakpoints": true
     }
   ]
 }
