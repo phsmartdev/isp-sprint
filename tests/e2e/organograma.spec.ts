@@ -17,7 +17,7 @@ test('organograma: quem vê o quê no CRM, bloquear e retirar a regra pelo paine
   await page.goto('/settings/users');
   await page.getByRole('tab', { name: 'Organograma de acessos' }).click();
   await expect(page.getByRole('heading', { name: 'Organograma de acessos' })).toBeVisible();
-  const team = page.getByLabel('Time Residencial', { exact: true });
+  const team = page.locator('[data-testid="org-team"][aria-label="Time Residencial"]');
   const lucas = team.getByRole('button', { name: /^Lucas Lima/ });
   await expect(lucas).toHaveAttribute('aria-label', /Só o próprio/);
   await expect(team.getByRole('button', { name: /^Ana Souza/ })).toHaveAttribute('aria-label', /: Time$/);
@@ -43,6 +43,59 @@ test('organograma: quem vê o quê no CRM, bloquear e retirar a regra pelo paine
   await expect(page.getByRole('complementary', { name: 'Time Residencial' })).toContainText('Liderança: Ana Souza');
   await page.getByRole('button', { name: 'Visão geral' }).click();
   await expect(lucas).toHaveAttribute('aria-label', /^Lucas Lima, Operação$/);
+});
+
+test('organograma: ajustar topo, times (arrastar, incluir, tirar, gestores) e o nível do perfil', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1700, height: 1100 });
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/users?visao=organograma');
+  // topo da estrutura, sem a marca: nome e cargo editáveis
+  await page.getByRole('button', { name: 'Editar o topo da estrutura' }).click();
+  await page.getByLabel('Nome', { exact: true }).fill('Welliton Sá');
+  await page.getByLabel('Cargo').fill('Diretoria Executiva');
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByTestId('org-top')).toContainText('Welliton Sá');
+  await expect(page.getByTestId('org-top')).toContainText('Diretoria Executiva');
+
+  // arrastar o Lucas do Residencial para o Governo
+  await page.getByRole('button', { name: 'Ajustar estrutura' }).click();
+  const res = page.locator('[data-testid="org-team"][aria-label="Time Residencial"]'), gov = page.locator('[data-testid="org-team"][aria-label="Time Governo"]');
+  await res.getByRole('button', { name: /^Lucas Lima/ }).dragTo(gov);
+  await expect(page.getByText('Pessoa movida de time')).toBeVisible();
+  await expect(gov.getByRole('button', { name: /^Lucas Lima/ })).toBeVisible();
+  await expect(res.getByRole('button', { name: /^Lucas Lima/ })).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/organograma-ajuste.png`, fullPage: true });
+
+  // pelo painel: tirar do Governo e incluir de volta no Residencial
+  await gov.getByRole('button', { name: /^Lucas Lima/ }).click();
+  const panel = page.getByRole('complementary', { name: 'Acesso de Lucas Lima' });
+  await panel.getByRole('list', { name: 'Times da pessoa' }).getByRole('button', { name: 'Tirar do time' }).click();
+  await expect(page.getByRole('region', { name: 'Pessoas sem time' })).toContainText('Lucas Lima');
+  await panel.getByLabel('Incluir em outro time').selectOption({ label: 'Residencial' });
+  await panel.getByRole('button', { name: 'Incluir', exact: true }).click();
+  await expect(res.getByRole('button', { name: /^Lucas Lima/ })).toBeVisible();
+
+  // nível do perfil Operação no CRM: confirma que vale para todo o perfil e reverte
+  await panel.getByLabel('Nível do perfil Operação em CRM').selectOption('equipe');
+  const dlg = page.getByRole('dialog', { name: 'Mudar o nível do perfil Operação?' });
+  await expect(dlg).toContainText('Vale para as');
+  await dlg.getByRole('button', { name: 'Mudar para todo o perfil' }).click();
+  await expect(res.getByRole('button', { name: /^Lucas Lima/ })).toHaveAttribute('aria-label', /: Time$/);
+  await panel.getByLabel('Nível do perfil Operação em CRM').selectOption('proprio');
+  await page.getByRole('dialog', { name: 'Mudar o nível do perfil Operação?' }).getByRole('button', { name: 'Mudar para todo o perfil' }).click();
+  await expect(res.getByRole('button', { name: /^Lucas Lima/ })).toHaveAttribute('aria-label', /Só o próprio/);
+
+  // gestor do time: Carlos passa a gerir o Governo (o time vai para baixo dele) e depois sai
+  await gov.getByRole('button', { name: /^Governo/ }).click();
+  const tp = page.getByRole('complementary', { name: 'Time Governo' });
+  await tp.getByRole('group', { name: /Gestores/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('button', { name: 'Salvar time' }).click();
+  await expect(page.getByText('Time atualizado')).toBeVisible();
+  await expect(page.getByText('Times sem gestor definido')).toBeVisible(); // outros times seguem sem gestor
+  await tp.getByRole('group', { name: /Gestores/ }).getByRole('button', { name: 'Carlos Silva' }).click();
+  await tp.getByRole('button', { name: 'Salvar time' }).click();
+  await expect(page.getByText('Time atualizado').first()).toBeVisible();
 });
 
 test('organograma: só a administração acessa', async ({ page }) => {

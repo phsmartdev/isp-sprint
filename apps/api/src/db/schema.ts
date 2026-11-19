@@ -29,6 +29,9 @@ export const tenants = pgTable('tenants', {
   timezone: text('timezone').notNull().default('America/Sao_Paulo'),
   /** não usado (a arte do login é sempre a animação RevOps); mantido para não exigir migração */
   loginStyle: text('login_style').notNull().default('hexagono'),
+  /** Topo do organograma de acessos (quem encabeça a estrutura), editável em Usuários → Organograma */
+  orgTopName: text('org_top_name'),
+  orgTopTitle: text('org_top_title'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
