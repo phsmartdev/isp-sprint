@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
-import { forbidden, notFound, unprocessable } from '../http/errors';
+import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
@@ -12,23 +12,13 @@ import { computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econS
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
+import { EconBody } from './economicsInput';
+
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
-const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional(), kind: z.enum(DEAL_KINDS).nullable().optional() });
-const EconBody = z.object({
-  mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
-  capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
-  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
-  fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(),
-  /** viabilidade B2G: modo A/B, rateio da negociação, alvo, margens manuais, payback pelo alvo, pesos e lances por produto */
-  b2g: z.object({
-    mode: z.enum(['A', 'B']).optional(), overheadBp: bp.nullable().optional(), netTargetBp: z.number().int().min(-5000).max(9_999).nullable().optional(),
-    contributionBp: z.object({ fornecimento: bp.nullable().optional(), implantacao: bp.nullable().optional(), instalacao: bp.nullable().optional() }).optional(), solvePayback: z.boolean().optional(),
-    weights: z.record(z.string().max(300), z.number().min(0).max(1)).optional(), bids: z.record(z.string().max(300), z.number().int().min(0).max(10_000_000_000)).optional(),
-  }).nullable().optional(),
-});
+
 
 export const economicsRoutes = [
   // ------------------------------------------------------------------ parâmetros (Configurações → Viabilidade)
@@ -264,25 +254,30 @@ export const economicsRoutes = [
   }),
   defineRoute({
     method: 'PUT', url: '/opportunities/:id/economics', summary: 'Salva a viabilidade econômica (calcula no servidor com os parâmetros vigentes e guarda a fotografia auditável)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
-    body: EconBody,
-    handler: async ({ app, auth, params, body, req }) => {
+    body: EconBody.extend({ economicsUpdatedAt: z.string().datetime().nullable().optional() }),
+    handler: async ({ app, auth, params, body: payload, req }) => app.db.transaction(async (tx) => {
+      const { economicsUpdatedAt, ...body } = payload;
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
-      const opp = await loadOpportunity(app.db, auth, params.id);
+      const opp = await loadOpportunity(tx, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
+      if (economicsUpdatedAt !== undefined) {
+        const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
+        if ((saved?.updatedAt.getTime() ?? null) !== (economicsUpdatedAt == null ? null : new Date(economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
+      }
       const e = econInputErrors(body as EconInput);
       if (e.length) throw unprocessable(e.join(' '));
-      const pricingSettings = await econSettingsOf(app.db, auth.tenantId);
+      const pricingSettings = await econSettingsOf(tx, auth.tenantId);
       const requestedTarget = body.b2g?.netTargetBp;
       const policy = pricingSettings?.settings;
       if (requestedTarget != null && (!policy || (policy.netMarginMinBp != null && requestedTarget < policy.netMarginMinBp) || (policy.netMarginMaxBp != null && requestedTarget > policy.netMarginMaxBp))) throw unprocessable('A margem líquida esperada deve ficar dentro da faixa das Configurações.');
       if (pricingSettings?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para calcular o preço.');
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
-      const input = await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));
-      const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
+      const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body as EconInput));
+      const result = await saveEconomics(tx, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
-      await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
-      return { result, recomendacao_viabilidade: viabilityRecommendationPayload(result.recommendation, result.mode), history: await economicsHistory(app.db, auth.tenantId, opp.id) };
-    },
+      await audit(tx, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
+      return { result, recomendacao_viabilidade: viabilityRecommendationPayload(result.recommendation, result.mode), history: await economicsHistory(tx, auth.tenantId, opp.id) };
+    }),
   }),
   defineRoute({
     method: 'GET', url: '/opportunities/:id/economics/runs/:runId', summary: 'Um cálculo salvo exatamente como foi gravado (sem recalcular), com a conferência do hash; runId "ultimo" = o mais recente', tag: 'Oportunidades', module: 'oportunidades', params: RunParams,

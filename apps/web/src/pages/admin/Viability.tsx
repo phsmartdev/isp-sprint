@@ -106,7 +106,7 @@ function EconEngine() {
     setDirty(false);
   }, [q.data]);
   const m = useMutation({
-    mutationFn: () => api('/admin/viability/econ', { method: 'POST', body: { ...e, commissionBp: 0, overheadBp: 0 } }),
+    mutationFn: (values: EconForm) => api('/admin/viability/econ', { method: 'POST', body: { ...values, commissionBp: 0, overheadBp: 0 } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'viability-econ'] }); qc.invalidateQueries({ queryKey: ['economics'] }); toast({ tone: 'success', message: 'Parâmetros publicados' }); },
     onError: (err) => toast({ tone: 'error', message: errMsg(err) }),
   });
@@ -149,7 +149,7 @@ function EconEngine() {
         <FormField label="Vale a partir de" htmlFor="ec-from" hint="Hoje ou uma data futura"><Input id="ec-from" type="date" className="w-[170px]" min={q.data.today} value={e.validFrom} onChange={(ev) => set({ validFrom: ev.target.value })} /></FormField>
         <div className="flex flex-wrap items-center gap-3">
           {missing.length > 0 && <span className="max-w-md text-xs text-[#C2610C]">Falta: {missing.join(', ')} (0 é um valor válido).</span>}
-          <Button variant="primary" loading={m.isPending} disabled={!dirty || missing.length > 0} onClick={() => m.mutate()}>Publicar parâmetros</Button>
+          <Button variant="primary" loading={m.isPending} disabled={!dirty || missing.length > 0} onClick={() => m.mutate(e)}>Publicar parâmetros</Button>
         </div>
       </div>
 

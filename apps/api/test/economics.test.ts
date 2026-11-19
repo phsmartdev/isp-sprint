@@ -495,4 +495,60 @@ describe('viabilidade econômica', () => {
     ok(await carlos.post('/admin/viability/econ', ECON), 201);
   });
 
+  it('salva produtos e custos atomicamente, preserva os ajustes e rejeita uma viabilidade desatualizada', async () => {
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, contingencyCapexBp: 200, contingencyOpexBp: 500 }), 201);
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const o = ok(await carlos.post('/opportunities', { newContact: { name: 'Produtos e custos ' + Date.now(), segment: 'empresarial' }, pipelineId: lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id, branchId: lk.branches[0].id, saleKind: 'venda_consultiva' }), 201).json();
+    const docs = ok(await carlos.get('/fiscal-docs')).json().items;
+    const doc = docs.find((d: { branchId: string; fiscalKind: string }) => d.branchId === lk.branches[0].id && d.fiscalKind === 'servico');
+    const items = ['servico', 'recorrencia'].map((dealKind) => ({ description: 'Produto conjunto ' + dealKind, unit: 'un', qtyMilli: 1000, unitCents: 0, priceDefined: false, fiscalDocTypeId: doc.id, dealKind }));
+    const economics = { mode: 'recorrente', termMonths: 12, receiveMonth: 0, paybackMonths: 6, capex: [{ description: 'Instalação única', kind: 'servico', impact: 'servico', qtyMilli: 1000, unitCents: 30000 }, { description: 'Investimento do link', kind: 'recorrencia', impact: 'material', qtyMilli: 1000, unitCents: 800000 }], opex: [{ description: 'Parceiro mensal', kind: 'recorrencia', impact: 'operacional', category: 'parceiros', qtyMilli: 1000, unitCents: 10000 }], extraInitialCents: 0, commissionBp: null, lossBp: null, marginTargetBp: null, priceCents: null, b2g: { netTargetBp: 3000 } };
+    let opp = ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: o.rowVersion, items, economics, economicsUpdatedAt: null })).json();
+    let saved = ok(await carlos.get('/opportunities/' + o.id + '/economics')).json();
+    expect(saved.input).toMatchObject({ paybackMonths: 6, b2g: { netTargetBp: 3000 }, opex: [expect.objectContaining({ category: 'parceiros', kind: 'recorrencia' })] });
+    expect(saved.result.targetNetMarginPct).toBe(30);
+    expect(saved.result.b2g.recorrente.monthlyCostCents).toBe(290500);
+    const snapshot = ok(await carlos.get('/opportunities/' + o.id + '/economics/runs/ultimo')).json();
+    expect(snapshot).toMatchObject({ reason: 'produtos_e_custos', verified: true });
+    const initialSuggested = saved.result.suggestedCents;
+    const moved = { ...economics, capex: economics.capex.slice(0, 1), opex: [...economics.opex, economics.capex[1]] };
+    opp = ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items, economics: moved })).json();
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/economics')).json().input.opex.find((c: { description: string }) => c.description === 'Investimento do link').impact).toBe('material');
+    opp = ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items, economics })).json();
+    saved = ok(await carlos.get('/opportunities/' + o.id + '/economics')).json();
+    expect(saved.result.suggestedCents).toBe(initialSuggested);
+
+    ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items, economics: { ...economics, opex: [{ ...economics.opex[0], kind: 'servico' }] } }), 422);
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/items')).json().rowVersion).toBe(opp.rowVersion);
+    // Outra edição financeira não altera o rowVersion dos produtos: o timestamp também é conferido.
+    ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...economics, b2g: { netTargetBp: 3500 } }));
+    ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items, economics, economicsUpdatedAt: saved.saved.updatedAt }), 409);
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/economics')).json().input.b2g.netTargetBp).toBe(3500);
+    ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...economics, economicsUpdatedAt: saved.saved.updatedAt }), 409);
+
+    // Falha proposital no último passo prova o rollback dos produtos, do catálogo e da fotografia.
+    await ctx.db.execute(sql.raw("CREATE FUNCTION test_reject_joint_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.reason = 'produtos_e_custos' THEN RAISE EXCEPTION 'falha proposital de snapshot'; END IF; RETURN NEW; END $$"));
+    await ctx.db.execute(sql.raw('CREATE TRIGGER test_joint_snapshot_failure BEFORE INSERT ON opportunity_economics_snapshots FOR EACH ROW EXECUTE FUNCTION test_reject_joint_snapshot()'));
+    try {
+      ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items: items.map((i) => ({ ...i, description: i.description + ' rollback' })), economics }), 500);
+    } finally {
+      await ctx.db.execute(sql.raw('DROP TRIGGER test_joint_snapshot_failure ON opportunity_economics_snapshots'));
+      await ctx.db.execute(sql.raw('DROP FUNCTION test_reject_joint_snapshot()'));
+    }
+    const unchanged = ok(await carlos.get('/opportunities/' + o.id + '/items')).json();
+    expect(unchanged.rowVersion).toBe(opp.rowVersion);
+    expect(unchanged.items.map((i: { description: string }) => i.description)).toEqual(items.map((i) => i.description));
+    expect(ok(await carlos.get('/opportunities/' + o.id + '/economics')).json().input.b2g.netTargetBp).toBe(3500);
+    expect(ok(await carlos.get('/product-catalog')).json().items.some((i: { description: string }) => i.description.endsWith(' rollback'))).toBe(false);
+    ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'ver_financeiro', allowed: false }));
+    try {
+      ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items, economics }), 403);
+      opp = ok(await carlos.put('/opportunities/' + o.id + '/items', { rowVersion: opp.rowVersion, items })).json();
+      expect(opp.rowVersion).toBeGreaterThan(unchanged.rowVersion);
+    } finally {
+      ok(await carlos.put('/admin/actions', { profile: 'gerencia', action: 'ver_financeiro', allowed: true }));
+    }
+    ok(await carlos.post('/admin/viability/econ', ECON), 201);
+  });
+
 });

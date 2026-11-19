@@ -60,58 +60,16 @@ describe('organização da viabilidade', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('reordena os custos, preserva campos recolhidos e mantém salvar e cálculo avançado', async () => {
+  it('mantém os custos para o cálculo sem oferecer outro editor na viabilidade', async () => {
     const requests = setup();
-    const supply = await screen.findByRole('heading', { name: 'Investimentos de fornecimento' });
-    const implantation = screen.getByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
-    const monthly = screen.getByRole('heading', { name: 'Custos mensais para manter o serviço' });
-    const sale = screen.getByRole('heading', { name: 'A venda' });
-    expect(supply.compareDocumentPosition(implantation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(implantation.compareDocumentPosition(monthly) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(monthly.compareDocumentPosition(sale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText('Base dos indicadores')).toBeNull();
-    const section = supply.closest('section')!;
-    expect(within(section).queryByRole('textbox')).toBeNull();
-    fireEvent.click(within(section).getByRole('button', { name: 'Adicionar outro' }));
-    const description = within(section).getByLabelText('Custo direto do Fornecimento (venda pura): descrição 2');
-    fireEvent.change(description, { target: { value: 'Cabo adicional' } });
-    fireEvent.change(within(section).getByLabelText('Custo direto do Fornecimento (venda pura): valor 2'), { target: { value: '50,00' } });
-    fireEvent.change(within(section).getByLabelText('Custo direto do Fornecimento (venda pura): impacta o quê 2'), { target: { value: 'material' } });
-    fireEvent.click(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' }));
-    expect(within(section).queryByRole('textbox')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Mostrar A venda' }));
-    fireEvent.change(screen.getByLabelText('Vigência (meses)'), { target: { value: '24' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Recolher A venda' }));
+    await screen.findByLabelText('Custos da negociação');
+    expect(screen.getByText(/coluna Quando separa/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Adicionar custo mensal' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Investimentos de fornecimento' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade econômica' }));
     await waitFor(() => expect(requests).toHaveLength(1));
-    expect(requests[0]!.termMonths).toBe(24);
-    expect(requests[0]!.capex.find((c) => c.description === 'Cabo adicional')).toMatchObject({ unitCents: 5000, kind: 'venda', impact: 'material' });
-    expect(requests[0]!.capex.find((c) => c.description === 'Equipamento')!.unitCents).toBe(90000);
-    fireEvent.click(screen.getByRole('button', { name: 'Ver fluxo de caixa e cálculo básico' }));
-    const basic = screen.getByLabelText('Fluxo de caixa e cálculo básico');
-    fireEvent.click(within(basic).getByRole('button', { name: 'Ver cálculo avançado' }));
-    expect(screen.getByRole('dialog', { name: 'Cálculo avançado' })).toBeTruthy();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    fireEvent.click(within(section).getByRole('button', { name: 'Mostrar Custo direto do Fornecimento (venda pura)' }));
-    expect((within(section).getByLabelText('Custo direto do Fornecimento (venda pura): descrição 2') as HTMLInputElement).value).toBe('Cabo adicional');
-  });
-
-  it('permite importar e colar com a listagem recolhida e abre os itens incluídos', async () => {
-    setup();
-    const heading = await screen.findByRole('heading', { name: 'Investimentos de fornecimento' });
-    const section = heading.closest('section')!;
-    const file = new File([''], 'custos.csv', { type: 'text/csv' });
-    Object.defineProperty(file, 'text', { value: async () => 'Descrição;Unidade;Quantidade;Valor unitário;Impacta o quê?\nCabo CSV;un;2;10,00;Material/Equipamento' });
-    fireEvent.change(within(section).getByLabelText('Importar planilha: Custo direto do Fornecimento (venda pura)'), { target: { files: [file] } });
-    await waitFor(() => expect(within(section).getByDisplayValue('Cabo CSV')).toBeTruthy());
-    expect(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' })).toBeTruthy();
-    fireEvent.click(within(section).getByRole('button', { name: 'Recolher Custo direto do Fornecimento (venda pura)' }));
-    fireEvent.click(within(section).getByRole('button', { name: 'Colar do Excel' }));
-    const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Itens colados'), { target: { value: 'Descrição\tUnidade\tQuantidade\tValor unitário\nCabo colado\tun\t3\t20,00' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Incluir itens' }));
-    await waitFor(() => expect(within(section).getByDisplayValue('Cabo colado')).toBeTruthy());
-    expect(within(section).getByDisplayValue('Cabo CSV')).toBeTruthy();
+    expect(requests[0]!.capex).toEqual(input.capex.map((c) => expect.objectContaining(c)));
+    expect(requests[0]!.opex).toEqual(input.opex.map((c) => expect.objectContaining(c)));
   });
   it.each([
     ['venda'], ['servico'], ['recorrencia'], ['locacao'], ['recorrencia', 'locacao'],
@@ -120,24 +78,16 @@ describe('organização da viabilidade', () => {
   ])('mostra apenas as cestas dos tipos %j', async (...selectedKinds) => {
     const selected = selectedKinds.map((kind) => ({ ...items[kind === 'venda' ? 0 : kind === 'servico' ? 1 : 2]!, kind: kind as EconItem['kind'] }));
     setup(selected);
-    await screen.findByRole('heading', { name: 'A venda' });
-    await waitFor(() => {
-      expect(!!screen.queryByRole('heading', { name: 'Investimentos de fornecimento' })).toBe(selectedKinds.includes('venda'));
-      expect(!!screen.queryByRole('heading', { name: 'Serviço de Instalação (Sem recorrência)' })).toBe(selectedKinds.includes('servico'));
-      expect(!!screen.queryByRole('heading', { name: 'Serviço Fornecimento + Instalação' })).toBe(selectedKinds.includes('recorrencia') || selectedKinds.includes('locacao'));
-    });
+    await screen.findByLabelText('Custos da negociação');
     const totals = screen.getByLabelText('Custos totais por cesta');
     expect(within(totals).getAllByRole('term')).toHaveLength(new Set(selectedKinds.map((k) => k === 'venda' ? 'fornecimento' : k === 'servico' ? 'instalacao' : 'implantacao')).size);
-    expect(!!screen.queryByRole('heading', { name: 'Custos mensais para manter o serviço' })).toBe(selectedKinds.includes('recorrencia') || selectedKinds.includes('locacao'));
   });
 
   it('preserva custos de um perfil removido e permite revisá-los sob demanda', async () => {
     const requests = setup([items[2]!]);
-    await screen.findByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
+    await screen.findByLabelText('Custos da negociação');
     expect(screen.queryByRole('heading', { name: 'Investimentos de fornecimento' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Revisar custos preservados' }));
-    expect(screen.getByRole('heading', { name: 'Investimentos de fornecimento' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Recolher custos preservados' }));
+    expect(screen.getByText(/Há custos preservados de tipos sem produtos/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Salvar viabilidade econômica' }));
     await waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0]!.capex.map((c) => c.unitCents)).toEqual([90000, 100000, 120000]);
@@ -147,7 +97,7 @@ describe('organização da viabilidade', () => {
     const previousArgs = { input, items: [items[0]!], settings, publicSector: false };
     const previous = { ...financeEngine(previousArgs), b2g: b2gFromEconomics(previousArgs) };
     setup([items[2]!], previous, true);
-    await screen.findByRole('heading', { name: 'Serviço Fornecimento + Instalação' });
+    await screen.findByLabelText('Custos da negociação');
     fireEvent.click(screen.getByRole('button', { name: 'Mostrar Preço sugerido por produto' }));
     const basket = screen.getByRole('region', { name: 'Cesta Serviço Fornecimento + Instalação' });
     expect(within(basket).getByText('Link')).toBeTruthy();

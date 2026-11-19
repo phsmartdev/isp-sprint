@@ -263,7 +263,7 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
     if (!impact) { missing.push(l.description); return l; }
     if (!it) {
       const [n] = await db.insert(s.costItems).values({ tenantId, name: l.description.trim().slice(0, 120), kind, unit, impact }).onConflictDoNothing().returning();
-      if (!n) return { ...l, impact };
+      if (!n) return { ...l, impact: kind === 'mensal' ? l.impact ?? impact : impact };
       it = { id: n.id, name: n.name, kind, unit: n.unit, impact, active: true, unitCents: null, priceId: null, priceFrom: null };
       cat.push(it);
     } else if (!it.impact || (l.impact && l.impact !== it.impact)) await db.update(s.costItems).set({ impact, updatedAt: new Date() }).where(eq(s.costItems.id, it.id));
@@ -272,7 +272,8 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
       const [p] = await db.insert(s.costItemPrices).values({ tenantId, itemId: it.id, unitCents: l.unitCents, validFrom: on, createdBy: actorId }).returning({ id: s.costItemPrices.id });
       priceId = p!.id; it.unitCents = l.unitCents; it.priceId = priceId;
     }
-    return { ...l, unit, impact, costItemId: it.id, priceId, manual: false };
+    // O catálogo mensal mantém o padrão operacional; a linha preserva sua dedução ao alternar Quando.
+    return { ...l, unit, impact: kind === 'mensal' ? l.impact ?? impact : impact, costItemId: it.id, priceId, manual: false };
   };
   const capex: CostLine[] = [], opex: CostLine[] = [];
   for (const l of input.capex) capex.push(await learn('investimento', l));

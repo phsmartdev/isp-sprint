@@ -4,13 +4,17 @@
  */
 import { and, asc, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, type CostProfile, type DealKind } from '@isp/domain';
+import { bidItemResultError, BID_MODES, ITEM_UNITS, itemErrors, itemTotal, itemsTotals, TERMINAL_STAGES, DEAL_KINDS, COST_PROFILE_SHORT, defaultCostProfile, econInputErrors, type EconInput, type CostProfile, type DealKind } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import { conflict, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { bumpVersion, loadOpportunity, opportunityDto } from '../services/opportunities';
 import { pipelinesOf } from '../services/instructions';
 import { assertDeliveryAddresses, deliveryAddressesOf } from './deliveryAddresses';
+
+import { EconBody } from './economicsInput';
+import { econSettingsOf, resolveCostLines, learnCostLines, saveEconomics } from '../services/economics';
+import { requireAction } from '../services/modules';
 
 const OppParams = z.object({ id: z.string().uuid() });
 const cents = z.number().int().min(0).max(100_000_000_000);
@@ -61,12 +65,25 @@ export const opportunityItemRoutes = [
   }),
   defineRoute({
     method: 'PUT', url: '/opportunities/:id/items', summary: 'Salva a lista de produtos e serviços (o total vira o valor da oportunidade)', tag: 'Oportunidades', module: 'oportunidades', params: OppParams,
-    body: z.object({ rowVersion: z.number().int(), items: z.array(ItemBody).max(300), bidMode: z.enum(BID_MODES).nullable().optional(), bidGlobalCents: cents.nullable().optional() }),
+    body: z.object({ rowVersion: z.number().int(), items: z.array(ItemBody).max(300), bidMode: z.enum(BID_MODES).nullable().optional(), bidGlobalCents: cents.nullable().optional(), economics: EconBody.optional(), economicsUpdatedAt: z.string().datetime().nullable().optional() }),
     handler: async ({ app, auth, params, body }) => {
       await app.db.transaction(async (tx) => {
         const opp = await loadOpportunity(tx, auth, params.id);
         if (opp.rowVersion !== body.rowVersion) throw conflict(opp.rowVersion);
         if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: os itens não mudam mais.');
+        if (body.economics) {
+          requireAction(auth, 'ver_financeiro', 'Seu perfil não permite alterar os custos da negociação.');
+          if (body.economicsUpdatedAt !== undefined) {
+            const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
+            if ((saved?.updatedAt.getTime() ?? null) !== (body.economicsUpdatedAt == null ? null : new Date(body.economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
+          }
+          const errors = econInputErrors(body.economics as EconInput);
+          if (errors.length) throw unprocessable(errors.join(' '));
+          const version = await econSettingsOf(tx, auth.tenantId);
+          if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
+          const target = body.economics.b2g?.netTargetBp;
+          if (target != null && ((version.settings.netMarginMinBp != null && target < version.settings.netMarginMinBp) || (version.settings.netMarginMaxBp != null && target > version.settings.netMarginMaxBp))) throw unprocessable('A margem líquida esperada deve ficar dentro da faixa das Configurações.');
+        }
         for (const [i, it] of body.items.entries()) {
           it.costProfile = defaultCostProfile(it.dealKind);
           if (it.priceDefined === false && (it.unitCents !== 0 || it.discountCents !== 0 || it.surchargeCents !== 0)) throw unprocessable(`Item ${i + 1}: sem valor de venda, não informe desconto ou acréscimo.`);
@@ -132,6 +149,11 @@ export const opportunityItemRoutes = [
         const updated = await tx.update(s.opportunities).set({ valueCents, bidMode, bidGlobalCents, updatedAt: new Date(), rowVersion: bumpVersion() })
           .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(opp.rowVersion);
+        if (body.economics) {
+          const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body.economics as EconInput));
+          const result = await saveEconomics(tx, { ...opp, tenantId: auth.tenantId }, input, auth.userId, 'produtos_e_custos');
+          if (!result) throw unprocessable('Parâmetros de viabilidade não encontrados.');
+        }
         // perfil de custo alterado na oportunidade fica no histórico (e na fotografia da viabilidade ao fechar)
         const profOf = (x: { costProfile?: string | null; dealKind: string }) => (x.costProfile ?? defaultCostProfile(x.dealKind as DealKind)) as CostProfile;
         const profChanges = body.items.flatMap((it) => { const b = before.find((x) => x.description.trim().toLowerCase() === it.description.trim().toLowerCase()); return b && profOf(b) !== profOf(it) ? [`${it.description}: ${COST_PROFILE_SHORT[profOf(b)]} → ${COST_PROFILE_SHORT[profOf(it)]}`] : []; });

@@ -569,3 +569,12 @@ describe('FINANCE-3.2: viabilidade pela faixa de margem líquida, recomendação
     expect(z.decision!.verdict).toBe('aguardando_sugerido');
   });
 });
+
+describe('planilha no novo layout de produtos', () => {
+  it('Quando=Mês e Dedução=Parceiros preservam o custo mensal e a classificação', () => {
+    const imported = parseCostTable([['Dedução', 'Descrição', 'Quando', 'Qtd.', 'Valor unitário'], ['Matéria-prima', 'OTDR', 'Único', '1', '1.000,00'], ['Parceiros', 'Link de terceiro', 'Mês', '2', '50,00']]);
+    expect(imported.errors).toEqual([]);
+    expect(imported.lines[0]).toMatchObject({ frequency: 'unico', impact: 'material', category: 'materia_prima', unitCents: 100000 });
+    expect(imported.lines[1]).toMatchObject({ frequency: 'mensal', impact: 'operacional', category: 'parceiros', qtyMilli: 2000, unitCents: 5000 });
+  });
+});

@@ -127,7 +127,7 @@ export const isOneTimeKind = (k: DealKind) => k === 'venda' || k === 'servico';
 /** venda é pontual; recorrência e locação são mensais */
 export const isMonthlyKind = (k: DealKind) => !isOneTimeKind(k);
 /** Linha de custo; costItemId/priceId = veio do catálogo (com a versão do preço); manual = valor diferente do catálogo; kind = de qual tipo de negociação o custo sai (vazio = comum, rateado pela receita). */
-export type CostLine = { description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
+export type CostLine = { category?: 'materia_prima' | 'mao_de_obra' | 'parceiros' | 'despesas_operacionais' | null; description: string; qtyMilli: number; unitCents: number; unit?: string | null; impact?: CostImpact | null; costItemId?: string | null; priceId?: string | null; manual?: boolean; kind?: DealKind | null };
 export type EconInput = {
   mode: EconMode;
   /** N: vigência do contrato em meses (recorrente) */ termMonths: number;
@@ -1007,11 +1007,11 @@ const COST_COLS = {
   qty: ['quantidade', 'qtd', 'qtd.', 'qtde', 'qtde.', 'quant', 'quant.'],
   unitValue: ['valor unitario', 'valor unit', 'valor unit.', 'preco unitario', 'preco', 'valor', 'custo unitario', 'custo unit.', 'custo unit'],
   total: ['valor total', 'total'],
-  frequency: ['frequencia do custo', 'frequencia', 'periodicidade', 'recorrencia'],
-  impact: ['impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
+  frequency: ['quando', 'frequencia do custo', 'frequencia', 'periodicidade', 'recorrencia'],
+  impact: ['deducao', 'impacta o que?', 'impacta o que', 'impacto', 'impacto contabil', 'classificacao'],
 };
-const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
-const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
+const freqOf = (v: unknown): 'unico' | 'mensal' | null => { const s = norm(v); return !s ? null : /mens|recorr|^mes$/.test(s) ? 'mensal' : /unic|setup|pontu|avuls/.test(s) ? 'unico' : null; };
+const impactOf = (v: unknown): CostImpact | null => { const s = norm(v); return !s ? null : /entreg|frete/.test(s) ? 'entrega' : /taxa/.test(s) ? 'taxa_venda' : /operac|recorr|parceir/.test(s) ? 'operacional' : /servi|mao de obra|hh/.test(s) ? 'servico' : /mater|equip/.test(s) ? 'material' : null; };
 /** Quantidade de planilha ou digitada: "8400", "8.400" (milhar), "2,5", 21 → milésimos. */
 export function costQty(raw: unknown): number | null {
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.round(raw * 1000) : null;
@@ -1066,7 +1066,9 @@ export function parseCostTable(rows: (string | number | null | undefined)[][]): 
     if (unitCents == null) return errors.push({ row, message: `valor inválido em ${description}` });
     const unit = idx.unit >= 0 ? String(r[idx.unit] ?? '').trim().slice(0, 12) || null : null;
     const frequency = idx.frequency >= 0 ? freqOf(r[idx.frequency]) : null, impact = idx.impact >= 0 ? impactOf(r[idx.impact]) : null;
-    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit, ...(frequency ? { frequency } : {}), ...(impact ? { impact } : {}) });
+    const deduction = idx.impact >= 0 && head[idx.impact] === 'deducao' ? norm(r[idx.impact]) : '';
+    const category: CostLine['category'] = /parceir/.test(deduction) ? 'parceiros' : /operac/.test(deduction) ? 'despesas_operacionais' : /mao de obra/.test(deduction) ? 'mao_de_obra' : /mater/.test(deduction) ? 'materia_prima' : null;
+    lines.push({ description: description.slice(0, 160), qtyMilli, unitCents, unit, ...(category ? { category } : {}), ...(frequency ? { frequency } : {}), ...(impact ? { impact } : {}) });
   });
   return { lines, errors, missing: [] };
 }

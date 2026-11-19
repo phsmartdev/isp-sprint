@@ -3,12 +3,12 @@
  * e o resultado na hora — preço mínimo, recomendado, margem, payback, VPL e TIR — numa leitura rápida para o time.
  * O cálculo da tela usa o mesmo motor do servidor; ao salvar, o servidor recalcula e guarda a fotografia auditável.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Calculator, ChevronDown, ClipboardPaste, Eye, EyeOff, FileSpreadsheet, Maximize2, Plus, Trash2 } from 'lucide-react';
+import { Calculator, ChevronDown, Eye, EyeOff, Maximize2 } from 'lucide-react';
 import {
-  defaultCostProfile, type CostProfile, COST_IMPACTS, COST_IMPACT_LABELS, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costLineTotal, costQty, econDre, econMemory, parseCostTable, econHeadline, emptyEconInput, financeEngine, parseMoney,
+  defaultCostProfile, type CostProfile, DEAL_KINDS, DEAL_KIND_LABELS, ECON_LOT_LABELS, ECON_VERDICT_LABELS, econCompare, isMonthlyKind, isOneTimeKind, lotOfKind, type EconLot, type DealKind, costQty, econDre, econMemory, econHeadline, emptyEconInput, financeEngine, parseMoney,
   buildModel, b2gFromEconomics, contractMargins, type FinOverride, type FiscalArgs, type CostImpact, type EconInput, type EconItem, type EconResult, type EconSettings, type EconVerdict, type B2gResult,
 } from '@isp/domain';
 import { TAX_REGIME_LABELS, type TaxRegime } from '@isp/shared';
@@ -37,8 +37,7 @@ type Data = {
 };
 type EconStatus = 'rascunho' | 'calculada' | 'em_decisao' | 'aprovada' | 'devolvida';
 /** Linha do formulário: `unit` = valor unitário digitado; `measure` = unidade de medida (m, und, hh…). */
-type Line = { key: string; description: string; qty: string; unit: string; measure?: string | null; impact?: CostImpact | null; costItemId?: string | null; kind?: DealKind | null };
-type CatalogItem = { id: string; name: string; kind: 'investimento' | 'mensal'; unit: string; impact?: CostImpact | null; unitCents: number | null };
+type Line = { category?: EconInput['capex'][number]['category']; key: string; description: string; qty: string; unit: string; measure?: string | null; impact?: CostImpact | null; costItemId?: string | null; kind?: DealKind | null };
 
 const TONE: Record<EconVerdict, { bar: string; chip: 'green' | 'blue' | 'orange' | 'red' | 'neutral' }> = {
   viavel: { bar: 'border-success bg-success-soft', chip: 'green' }, abaixo_recomendado: { bar: 'border-primary bg-primary-soft', chip: 'blue' },
@@ -55,8 +54,8 @@ const money = (c: number | null) => (c == null ? '' : (c / 100).toLocaleString('
 let seq = 0;
 /** Quantidade sem separador de milhar ("8400", "2,5"): o ponto seria lido como decimal. */
 const qtyText = (milli: number) => (milli / 1000).toLocaleString('pt-BR', { useGrouping: false, maximumFractionDigits: 3 });
-const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
-const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
+const toLines = (l: EconInput['capex']): Line[] => l.map((x) => ({ key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), category: x.category, measure: x.unit ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
+const fromLines = (l: Line[]) => l.filter((x) => x.description.trim() || x.unit.trim()).map((x) => ({ description: x.description.trim(), qtyMilli: costQty(x.qty) ?? 0, unitCents: parseMoney(x.unit) ?? -1, category: x.category, unit: x.measure ?? null, impact: x.impact ?? null, costItemId: x.costItemId ?? null, kind: x.kind ?? null }));
 
 /** Recolher não apaga os campos: o formulário continua montado com seus valores. */
 function EyeToggle({ open, onToggle, label, controls }: { open: boolean; onToggle: () => void; label: string; controls: string }) {
@@ -474,179 +473,6 @@ export function EconomicsResult({ r, compact = false, settings }: { r: EconResul
   );
 }
 
-const linesTotal = (lines: Line[]) => fromLines(lines).reduce((t, l) => t + (l.unitCents >= 0 && l.qtyMilli > 0 ? costLineTotal(l) : 0), 0);
-
-/** Linhas de custo; o nome puxa do catálogo (preço vigente) e a linha mostra se veio do catálogo ou foi alterada. */
-/** Catálogo pela chave Descrição + Unidade (sem unidade, o primeiro com a descrição). */
-const findCat = (catalog: CatalogItem[], name: string, unit?: string | null) => {
-  const n = name.trim().toLowerCase(), u = (unit ?? '').trim().toLowerCase();
-  return catalog.find((c) => c.name.toLowerCase() === n && (!u || c.unit.toLowerCase() === u)) ?? (u ? undefined : catalog.find((c) => c.name.toLowerCase() === n));
-};
-
-/** Custos da planilha; `impacts` liga a coluna "Impacta o quê?"; `onOther` recebe as linhas coladas da outra frequência. */
-function CostLines({ title, heading, hint, example, lines, setLines, disabled, catalog, impacts, frequency, onOther, kinds = [] }: { title: string; heading?: string; hint?: string; example: string; lines: Line[]; setLines: (l: Line[]) => void; disabled: boolean; catalog: CatalogItem[]; impacts?: boolean; frequency: 'unico' | 'mensal'; onOther?: (l: Line[]) => void; /** tipos de negociação dos produtos: com mais de um, cada custo diz de qual sai */ kinds?: DealKind[] }) {
-  const [visible, setVisible] = useState(false);
-  const previousCount = useRef(lines.length);
-  useEffect(() => { if (lines.length > previousCount.current) setVisible(true); previousCount.current = lines.length; }, [lines.length]);
-  const set = (k: string, p: Partial<Line>) => setLines(lines.map((x) => (x.key === k ? { ...x, ...p } : x)));
-  const listId = `cat-${title.replace(/\W/g, '')}`;
-  // auto-preenchimento: descrição + unidade já conhecidas trazem o impacto e o preço da última cotação
-  const fill = (l: Line, p: Partial<Line>) => {
-    const next = { ...l, ...p };
-    const hit = findCat(catalog, next.description, next.measure);
-    set(l.key, { ...p, costItemId: hit?.id ?? null, ...(hit && l.costItemId !== hit.id ? { ...(hit.unitCents != null ? { unit: money(hit.unitCents) } : {}), ...(hit.impact && !next.impact ? { impact: hit.impact } : {}), ...(!next.measure ? { measure: hit.unit } : {}) } : {}) });
-  };
-  const onName = (l: Line, v: string) => fill(l, { description: v });
-  const kindSel = (l: Line, i: number, cls: string) => kinds.length > 1 ? (
-    <select aria-label={`${title}: de qual tipo sai ${i + 1}`} disabled={disabled} value={l.kind ?? ''} onChange={(e) => set(l.key, { kind: (e.target.value || null) as DealKind | null })} className={clsx('field-input', cls)} title="De qual tipo de negociação este custo é deduzido; comum = rateado pela receita">
-      <option value="">Comum (rateado)</option>
-      {kinds.map((k) => <option key={k} value={k}>{k === 'venda' || k === 'servico' ? `Mover para o ${ECON_LOT_LABELS[lotOfKind(k)]}` : `Sai da ${DEAL_KIND_LABELS[k].toLowerCase()}`}</option>)}
-    </select>
-  ) : null;
-  const impactSel = (l: Line, i: number, cls: string) => impacts ? (
-    <select aria-label={`${title}: impacta o quê ${i + 1}`} disabled={disabled} value={l.impact ?? ''} onChange={(e) => set(l.key, { impact: (e.target.value || null) as CostImpact | null })}
-      className={clsx('field-input', cls, !l.impact && l.description.trim() && !l.costItemId && 'border-warning text-[#C2610C]')}>
-      <option value="">Impacta o quê?</option>
-      {COST_IMPACTS.filter((x) => x !== 'operacional').map((x) => <option key={x} value={x}>{COST_IMPACT_LABELS[x]}</option>)}
-    </select>
-  ) : null;
-  const origin = (l: Line) => { const c = l.costItemId ? catalog.find((x) => x.id === l.costItemId) : null; return !c ? null : c.unitCents === parseMoney(l.unit) ? 'catálogo' : 'alterado'; };
-  const add = () => { setVisible(true); setLines([...lines, { key: `l${++seq}`, description: '', qty: '1', unit: '' }]); };
-  const [pasting, setPasting] = useState(false);
-  const [pasteText, setPasteText] = useState('');
-  const [view, setView] = useState<'tabela' | 'lista'>(() => { try { return localStorage.getItem('econ-cost-view') === 'lista' ? 'lista' : 'tabela'; } catch { return 'tabela'; } });
-  const pickView = (v: 'tabela' | 'lista') => { setView(v); try { localStorage.setItem('econ-cost-view', v); } catch { /* sem armazenamento: vale só nesta tela */ } };
-  const lineTotal = (l: Line) => { const one = fromLines([l])[0]; return one && one.unitCents >= 0 && one.qtyMilli > 0 ? costLineTotal(one) : null; };
-  const nameInput = (l: Line, i: number, cls: string, overlay = true) => (
-    <span className="relative block min-w-0">
-      <Input aria-label={`${title}: descrição ${i + 1}`} title={l.description || undefined} className={clsx(cls, overlay && origin(l) && 'pr-[68px]')} list={listId} placeholder={catalog.length ? `${example} — ou escolha do catálogo` : example} value={l.description} disabled={disabled} onChange={(e) => onName(l, e.target.value)} />
-      {overlay && origin(l) && <span className={clsx('pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 px-1 text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>}
-    </span>
-  );
-  const originTag = (l: Line) => origin(l) && <span className={clsx('block text-2xs font-semibold', origin(l) === 'catálogo' ? 'text-success' : 'text-[#C2610C]')}>{origin(l)}</span>;
-  const [wide, setWide] = useState(false);
-  // tabela: na coluna da oportunidade cabe sem rolar (colunas fixas); "Ampliar" abre a mesma tabela larga
-  const costTable = (big: boolean) => (
-    <div className={clsx('border border-line', big && 'overflow-x-auto')}>
-      <table className={clsx('w-full text-sm', big ? 'min-w-[820px]' : 'table-fixed')}>
-        <colgroup><col className={big ? 'w-10' : 'w-5'} /><col /><col className={big ? 'w-[90px]' : 'w-[42px]'} /><col className={big ? 'w-[120px]' : 'w-[56px]'} /><col className={big ? 'w-[140px]' : 'w-[68px]'} /><col className={big ? 'w-[150px]' : 'w-[88px]'} /><col className="w-8" /></colgroup>
-        <thead className="bg-surface-2 text-2xs uppercase text-muted">
-          <tr><th className="px-1.5 py-1.5 text-left font-semibold">{big ? 'Item' : '#'}</th><th className="px-1.5 py-1.5 text-left font-semibold">Descrição</th><th className="px-1.5 py-1.5 text-left font-semibold">{big ? 'Unidade' : 'Un.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Quantidade' : 'Qtd.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Valor unitário' : 'Unit.'}</th><th className="px-1.5 py-1.5 text-right font-semibold">{big ? 'Valor total' : 'Total'}</th><th /></tr>
-        </thead>
-        <tbody>{lines.map((l, i) => {
-          const tot = lineTotal(l);
-          const cell = clsx('h-8 w-full', !big && 'px-1.5 text-xs');
-          return (
-            <tr key={l.key} className="border-t border-line">
-              <td className="num px-1.5 py-1 text-xs text-muted">{i + 1}</td>
-              <td className="px-0.5 py-1">{nameInput(l, i, cell, big)}{impacts && <div className="mt-0.5">{impactSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{kinds.length > 1 && <div className="mt-0.5">{kindSel(l, i, 'h-7 w-full px-1 text-2xs')}</div>}{!big && originTag(l)}</td>
-              <td className="px-0.5 py-1 align-top"><Input aria-label={`${title}: unidade ${i + 1}`} className={cell} placeholder="un" value={l.measure ?? ''} disabled={disabled} onChange={(e) => fill(l, { measure: e.target.value.slice(0, 12) || null })} /></td>
-              <td className="px-0.5 py-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} /></td>
-              <td className="px-0.5 py-1"><Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className={clsx(cell, 'num text-right')} placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} /></td>
-              <td className={clsx('num truncate px-1.5 py-1 text-right text-text', !big && 'text-xs')} title={tot != null ? fmtBRL(tot) : undefined}>{tot != null ? fmtBRL(tot) : '—'}</td>
-              <td className="py-1">{removeBtn(l, i)}</td>
-            </tr>
-          );
-        })}</tbody>
-        <tfoot><tr className="border-t border-line-strong bg-surface-2 font-semibold"><td colSpan={5} className="px-1.5 py-1.5 text-right text-ink">Total</td><td className={clsx('num px-1.5 py-1.5 text-right text-ink', !big && 'text-xs')}>{fmtBRL(lines.reduce((s, l) => s + (lineTotal(l) ?? 0), 0))}</td><td /></tr></tfoot>
-      </table>
-    </div>
-  );
-  const removeBtn = (l: Line, i: number) => (!disabled ? <button type="button" className="p-1.5 text-muted hover:text-danger" aria-label={`Remover ${title} ${i + 1}`} onClick={() => setLines(lines.filter((x) => x.key !== l.key))}><Trash2 className="h-4 w-4" /></button> : <span />);
-  const [msg, setMsg] = useState<{ text: string; bad: boolean } | null>(null);
-  // tabela colada ou importada: entra no fim (as linhas vazias saem); nome igual ao do catálogo liga a linha ao item
-  const addTable = (table: (string | number | null)[][], from: string) => {
-    setVisible(true);
-    const r = parseCostTable(table);
-    if (r.missing.length) { setMsg({ text: `${from}: não encontrei as colunas ${r.missing.join(', ')}. Use os títulos Descrição, Quantidade e Valor unitário (Unidade e Valor total são opcionais).`, bad: true }); return; }
-    const toLine = (x: (typeof r.lines)[number]): Line => {
-      const hit = findCat(catalog, x.description, x.unit);
-      return { key: `l${++seq}`, description: x.description, qty: qtyText(x.qtyMilli), unit: money(x.unitCents), measure: x.unit ?? hit?.unit ?? null, impact: x.impact && x.impact !== 'operacional' ? x.impact : hit?.impact ?? null, costItemId: hit?.id ?? null };
-    };
-    // a coluna Frequência manda: o que é da outra frequência vai para a outra lista
-    const mine = r.lines.filter((x) => !x.frequency || x.frequency === frequency || !onOther), other = r.lines.filter((x) => x.frequency && x.frequency !== frequency && onOther);
-    const added = mine.map(toLine);
-    setLines([...lines.filter((x) => x.description.trim() || x.unit.trim()), ...added]);
-    if (other.length) onOther!(other.map(toLine));
-    setMsg({ text: `${from}: ${added.length} custo(s) incluído(s)${other.length ? ` e ${other.length} enviado(s) para ${frequency === 'unico' ? 'os custos mensais' : 'o investimento'}` : ''}, total ${fmtBRL(mine.reduce((t, x) => t + costLineTotal(x), 0))}${r.errors.length ? `; ${r.errors.length} linha(s) ignorada(s): ${r.errors.slice(0, 4).map((e) => `linha ${e.row} (${e.message})`).join('; ')}` : ''}. Confira e salve.`, bad: r.errors.length > 0 });
-  };
-  const onFile = async (f: File) => {
-    try {
-      if (/\.xlsx?$/i.test(f.name)) {
-        const { default: readXlsx } = await import('read-excel-file');
-        addTable((await readXlsx(f)) as (string | number | null)[][], f.name);
-      } else {
-        const text = await f.text();
-        const line0 = text.split('\n')[0] ?? '';
-        const sep = text.includes('\t') ? '\t' : line0.split(';').length > line0.split(',').length ? ';' : ',';
-        addTable(text.split(/\r?\n/).map((l) => l.split(sep).map((c) => c.replace(/^"|"$/g, ''))), f.name);
-      }
-    } catch { setMsg({ text: `Não foi possível ler ${f.name}. Use Excel (.xlsx) ou CSV.`, bad: true }); }
-  };
-  // descrição em linha inteira; quantidade, valor e total embaixo (cabe na coluna do meio da oportunidade)
-  const cols = 'grid grid-cols-[110px_130px_minmax(0,1fr)_28px] items-center gap-1.5';
-  return (
-    <div>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><div className="flex items-center gap-1"><h3 className="text-sm font-semibold text-ink">{heading ?? title}</h3><EyeToggle open={visible} onToggle={() => setVisible(!visible)} label={title} controls={`${listId}-rows`} /></div>{hint && <p className="text-xs text-muted">{hint}</p>}</div>
-        <span className="num text-xs text-muted">{lines.length} item(ns) · <b className="text-ink">{fmtBRL(linesTotal(lines))}{frequency === 'mensal' ? '/mês' : ''}</b></span>
-      </div>
-      <div id={`${listId}-rows`} hidden={!visible} className="mt-2">
-      {lines.length > 0 && (
-        <>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <p className="text-2xs font-medium text-muted">{view === 'tabela' ? `${lines.length} custo(s)` : 'Cada custo: descrição; embaixo, quantidade × valor unitário = total'}</p>
-            <div className="flex items-center gap-1.5">
-            {view === 'tabela' && <button type="button" className="inline-flex items-center gap-1 px-1.5 py-1 text-2xs font-semibold text-primary hover:underline" onClick={() => setWide(true)}><Maximize2 className="h-3.5 w-3.5" aria-hidden />Ampliar</button>}
-            <div className="flex border border-line text-2xs font-semibold" role="group" aria-label={`Ver ${title.toLowerCase()} como`}>
-              {(['tabela', 'lista'] as const).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => pickView(v)} className={clsx('px-2 py-1', view === v ? 'bg-primary text-white' : 'text-ink hover:bg-surface-2')}>{v === 'tabela' ? 'Tabela' : 'Lista'}</button>)}
-            </div>
-            </div>
-          </div>
-          {view === 'tabela' ? costTable(false) : (
-          <ul className="space-y-1.5">{lines.map((l, i) => {
-            const tot = lineTotal(l);
-            return (
-              <li key={l.key} className={clsx(cols, 'border-l-2 border-line pl-2')}>
-                <span className="col-span-4 block min-w-0">{nameInput(l, i, 'h-9 w-full')}</span>
-                {impacts && <span className="col-span-4 block">{impactSel(l, i, 'h-8 w-full text-xs')}</span>}
-                {kinds.length > 1 && <span className="col-span-4 block">{kindSel(l, i, 'h-8 w-full text-xs')}</span>}
-                <span className="flex items-center gap-1"><Input aria-label={`${title}: quantidade ${i + 1}`} inputMode="decimal" className="num h-9 min-w-0" value={l.qty} disabled={disabled} onChange={(e) => set(l.key, { qty: e.target.value })} />{l.measure && <span className="shrink-0 text-2xs text-muted">{l.measure}</span>}</span>
-                <Input aria-label={`${title}: valor ${i + 1}`} inputMode="decimal" className="num h-9" placeholder="0,00" value={l.unit} disabled={disabled} onChange={(e) => set(l.key, { unit: e.target.value })} />
-                <span className="num text-right text-sm text-text">{tot != null ? fmtBRL(tot) : '—'}</span>
-                {removeBtn(l, i)}
-              </li>
-            );
-          })}</ul>
-          )}
-        </>
-      )}
-      </div>
-      <datalist id={listId}>{catalog.map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${fmtBRL(c.unitCents)} / ${c.unit}` : 'sem preço'}</option>)}</datalist>
-      {!disabled && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={add}>{lines.length ? 'Adicionar outro' : `Adicionar ${title.toLowerCase()}`}</Button>
-          <Button size="sm" variant="ghost" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => setPasting(true)}>Colar do Excel</Button>
-          <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 px-2 text-sm font-semibold text-ink hover:bg-surface-2">
-            <FileSpreadsheet className="h-4 w-4" aria-hidden />Importar planilha
-            <input type="file" accept=".xlsx,.xls,.csv,.txt" className="sr-only" aria-label={`Importar planilha: ${title}`} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ''; }} />
-          </label>
-        </div>
-      )}
-      {msg && <p className={clsx('mt-1 text-xs', msg.bad ? 'text-[#C2610C]' : 'text-success')}>{msg.text}</p>}
-      <Modal open={wide} onClose={() => setWide(false)} title={title} size="xl" footer={<Button variant="primary" onClick={() => setWide(false)}>Fechar</Button>}>
-        {costTable(true)}
-        <p className="mt-2 text-xs text-muted">As mudanças valem na viabilidade; salve depois de fechar.</p>
-      </Modal>
-      <Modal open={pasting} onClose={() => setPasting(false)} title={`Colar do Excel: ${title.toLowerCase()}`} size="lg"
-        footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!pasteText.trim()} onClick={() => { addTable(pasteText.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); setPasteText(''); }}>Incluir itens</Button></>}>
-        <p className="mb-2 text-sm text-muted">Copie as linhas da planilha (com ou sem a linha de títulos) e cole aqui. Colunas aceitas: Item, Descrição, Unidade, Quantidade, Valor unitário (ou Custo unit.), Valor total, Frequência do custo (Único ou Mensal) e Impacta o quê? (Material/Equipamento, Serviço/Mão de obra, Custo operacional, Despesa de entrega, Taxa fixa de venda). Sem valor unitário, ele vem do total ÷ quantidade. Item já usado (mesma descrição e unidade) vem classificado.</p>
-        <textarea aria-label="Itens colados" rows={10} className="field-input w-full font-mono text-xs" value={pasteText} onChange={(e) => setPasteText(e.target.value)} placeholder={'ITEM\tDESCRIÇÃO\tUNIDADE\tQUANTIDADE\tVALOR UNITÁRIO\tVALOR TOTAL\n1\tCabo 01FO\tm\t8400\tR$ 1,50\tR$ 12.600,00'} data-autofocus />
-      </Modal>
-    </div>
-  );
-}
-
 const exportHref = (oppId: string, runId: string, format: 'pdf' | 'csv') => `/api/v1/opportunities/${oppId}/economics/runs/${runId}/export?format=${format}`;
 const emitterLine = (e: NonNullable<Data['emitter']>) => [e.name, e.cnpj ? `CNPJ ${e.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}` : null, e.taxRegime ? TAX_REGIME_LABELS[e.taxRegime as TaxRegime] ?? e.taxRegime : null, e.city ? `${e.city}${e.state ? `/${e.state}` : ''}` : null].filter(Boolean).join(' · ');
 
@@ -735,15 +561,12 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
   );
 }
 
-export function EconomicsTab({ oppId }: { oppId: string }) {
-  const [reviewInactive, setReviewInactive] = useState(false);
+export function EconomicsTab({ oppId, onProducts }: { oppId: string; onProducts?: () => void }) {
   const [basicOpen, setBasicOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
-  const catQ = useQuery({ queryKey: ['cost-items'], queryFn: () => api<{ items: CatalogItem[] }>('/cost-items'), staleTime: 60_000, enabled: q.data?.financeHidden === false });
-  const catalog = catQ.data?.items ?? [];
   const [f, setF] = useState<{ mode: EconInput['mode']; term: string; receive: string; capex: Line[]; extra: string; opex: Line[]; commission: string; loss: string; margin: string; payback: string; price: string; salePrice: string; fiscalYear: string; b2g: B2gForm } | null>(null);
   // formulário como estava no último salvo: diferente disso, o resultado na tela é só simulação
   const [base, setBase] = useState<string | null>(null);
@@ -770,7 +593,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
   const live = useMemo(() => (q.data?.settings && q.data.settings.netMarginTargetBp != null && input && !invalid ? financeEngine({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, model: liveModel, fiscal: q.data.fiscal }) : null), [q.data, input, invalid, liveModel]);
   const liveB2g = useMemo(() => { if (!q.data?.settings || q.data.settings.netMarginTargetBp == null || !input || invalid) return null; try { return b2gFromEconomics({ input, items: q.data.items, settings: q.data.settings, publicSector: q.data.publicSector, fiscal: q.data.fiscal }, live?.fiscal?.profitTaxBp ?? null, live); } catch { return null; } }, [q.data, input, invalid, live]);
   const save = useMutation({
-    mutationFn: () => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body: input }),
+    mutationFn: (body: EconInput & { economicsUpdatedAt?: string | null }) => api<{ result: EconResult }>(`/opportunities/${oppId}/economics`, { method: 'PUT', body }),
     onSuccess: () => { if (f) setBase(formKey(f)); void qc.invalidateQueries({ queryKey: ['economics', oppId] }); toast({ tone: 'success', message: 'Viabilidade econômica salva' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
@@ -818,51 +641,11 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
 
       {shownResult?.warnings.filter((w) => w.includes('exige preço maior que o alvo')).map((w) => <Notice key={w} tone="warning">{w}</Notice>)}
       {!profiles.length && <Notice tone="info">As cestas aparecem conforme o tipo dos produtos. Adicione os itens na aba Produtos e serviços.</Notice>}
-      {hasInactiveCosts && <Notice tone="warning"><p>Há custos de perfis sem produtos. Os valores foram preservados; revise esses custos antes de salvar a análise.</p><button type="button" className="mt-1 text-xs font-semibold text-primary hover:underline" aria-expanded={reviewInactive} onClick={() => setReviewInactive(!reviewInactive)}>{reviewInactive ? 'Recolher custos preservados' : 'Revisar custos preservados'}</button></Notice>}
+      <section className="flex flex-wrap items-center justify-between gap-3 border border-line p-4" aria-label="Custos da negociação">
+        <div><h3 className="text-sm font-semibold text-ink">Produtos e custos</h3><p className="mt-1 text-xs text-muted">Os custos são lançados na aba Produtos e serviços, dentro do tipo de negócio correspondente. A coluna Quando separa os valores únicos dos mensais.</p><p className="mt-1 text-xs text-muted">{f.capex.length} custo(s) único(s) · {f.opex.length} custo(s) mensais</p>{hasInactiveCosts && <p className="mt-1 text-xs text-[#C2610C]">Há custos preservados de tipos sem produtos. Revise-os na aba Produtos e serviços.</p>}</div>
+        {onProducts && <Button size="sm" onClick={onProducts}>Editar produtos e custos</Button>}
+      </section>
       <div className="space-y-3">
-          {(() => {
-            // Três perfis independentes; linhas antigas sem perfil ficam em um bloco explícito.
-            const inLot = (l: Line, lot: EconLot) => !!l.kind && lotOfKind(l.kind) === lot;
-            const byLot = (lot: EconLot | null) => f.capex.filter((l) => (lot ? inLot(l, lot) : !l.kind));
-            const put = (lot: EconLot | null, lines: Line[]) => {
-              const stamped = lines.map((l) => ({ ...l, kind: lot === 'venda' ? 'venda' as DealKind : lot === 'instalacao' ? 'servico' as DealKind : lot === 'servico' ? (l.kind && lotOfKind(l.kind) === 'servico' ? l.kind : 'recorrencia' as DealKind) : null }));
-              set({ capex: [...(lot === 'venda' ? stamped : byLot('venda')), ...(lot === 'instalacao' ? stamped : byLot('instalacao')), ...(lot === 'servico' ? stamped : byLot('servico')), ...(lot === null ? stamped : byLot(null))] });
-            };
-            const toOpex = f.mode === 'recorrente' ? (l: Line[]) => setF((x) => (x ? { ...x, opex: [...x.opex.filter((y) => y.description.trim() || y.unit.trim()), ...l.map((y) => ({ ...y, impact: null, kind: null }))] } : x)) : undefined;
-            const legacy = byLot(null);
-            return (
-              <div className="space-y-4">
-                <section hidden={!profiles.includes('fornecimento') && !(reviewInactive && byLot('venda').length > 0)} className="border border-line p-4">
-                  <CostLines title="Custo direto do Fornecimento (venda pura)" heading="Investimentos de fornecimento" hint="Equipamentos e materiais vendidos sem instalação." example="Ex.: roteador, equipamento" lines={byLot('venda')} setLines={(l) => put('venda', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
-                </section>
-                <section hidden={!profiles.includes('instalacao') && !(reviewInactive && byLot('instalacao').length > 0)} className="border border-line p-4">
-                  <CostLines title="Custo direto da Instalação" heading="Serviço de Instalação (Sem recorrência)" hint="Custos de serviços únicos, pagos uma vez." example="Ex.: mão de obra de instalação avulsa" lines={byLot('instalacao')} setLines={(l) => put('instalacao', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
-                </section>
-                <section hidden={!profiles.includes('implantacao') && !(reviewInactive && byLot('servico').length > 0)} className="border border-line p-4">
-                  <CostLines title="Custo direto da Implantação" heading="Serviço Fornecimento + Instalação" hint="Investimento para atender recorrência e locação/aluguel." example="Ex.: obra, instalação, projeto" lines={byLot('servico')} setLines={(l) => put('servico', l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts frequency="unico" onOther={toOpex} />
-                </section>
-                {!!legacy.length && (
-                  <section className="border border-line p-4">
-                    <CostLines title="Investimento sem lote" heading="Investimentos sem cesta" hint="Custos comuns rateados pela receita." example="" lines={legacy} setLines={(l) => put(null, l)} disabled={dis} catalog={catalog.filter((c) => c.kind === 'investimento')} impacts kinds={['venda', 'servico', 'recorrencia']} frequency="unico" onOther={toOpex} />
-                  </section>
-                )}
-              </div>
-            );
-          })()}
-
-        {(profiles.includes('implantacao') || (reviewInactive && f.opex.length > 0)) && (
-          <section className="border border-line p-4">
-            <CostLines title="Custo mensal" heading="Custos mensais para manter o serviço" hint="Trânsito, link de terceiro, licenças e suporte durante o contrato." example="Ex.: link de terceiro, licença" lines={f.opex} setLines={(l) => set({ opex: l })} disabled={dis} catalog={catalog.filter((c) => c.kind === 'mensal')} kinds={kinds.filter(isMonthlyKind)} frequency="mensal" onOther={(l) => setF((x) => (x ? { ...x, capex: [...x.capex.filter((y) => y.description.trim() || y.unit.trim()), ...l] } : x))} />
-          </section>
-        )}
-
-        <Disclosure title="Outras despesas de entrega e taxas" total={fmtBRL(Math.max(0, parseMoney(f.extra) ?? 0))}>
-          <div className="flex flex-wrap items-center gap-2">
-            <label htmlFor="ec-extra" className="text-sm text-text" title="Despesa variável em R$: entra no preço, fora do investimento e sem contingência">Outras despesas de entrega e taxas (valor único)</label>
-            <Input id="ec-extra" inputMode="decimal" placeholder="0,00" className="num h-9 w-[140px]" value={f.extra} disabled={dis} invalid={(parseMoney(f.extra) ?? 0) < 0} onChange={(e) => set({ extra: e.target.value })} />
-          </div>
-        </Disclosure>
-
         <Disclosure title="A venda" hint="Como o cliente paga e por quanto tempo. O preço em branco usa o total dos produtos.">
           <div className="space-y-3">
             {d.items.length ? (
@@ -918,7 +701,7 @@ export function EconomicsTab({ oppId }: { oppId: string }) {
       {invalid && <Notice tone="warning">Confira os campos destacados para calcular e salvar a viabilidade.</Notice>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <button type="button" disabled={!shownResult} aria-expanded={basicOpen} onClick={() => setBasicOpen(!basicOpen)} className="text-sm font-semibold text-primary hover:underline disabled:opacity-50">{basicOpen ? 'Recolher fluxo de caixa e cálculo básico' : 'Ver fluxo de caixa e cálculo básico'}</button>
-        {d.editable && <Button variant="primary" disabled={invalid || st.netMarginTargetBp == null} loading={save.isPending} onClick={() => save.mutate()}>Salvar viabilidade econômica</Button>}
+        {d.editable && <Button variant="primary" disabled={invalid || st.netMarginTargetBp == null} loading={save.isPending} onClick={() => input && save.mutate({ ...input, economicsUpdatedAt: d.saved?.updatedAt ?? null })}>Salvar viabilidade econômica</Button>}
       </div>
       {basicOpen && shownResult && <div className="space-y-4" aria-label="Fluxo de caixa e cálculo básico">
         {shownResult.cashflow.length > 1 && shownResult.cashflow.some((v) => v !== 0) &&         <section className="border border-line p-4" aria-labelledby="ec-flow">
