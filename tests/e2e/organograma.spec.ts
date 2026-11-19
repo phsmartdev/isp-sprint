@@ -130,7 +130,13 @@ test('organograma: diretoria, gestão hierárquica e funcional, participante for
   // como no desenho: a gestão só funcional (Ana) fica embaixo da mesma diretoria, ao lado da hierárquica, ligada ao time por tracejado
   const dir = page.getByRole('region', { name: 'Diretoria de Carlos Silva' });
   await expect(dir.getByLabel('Gestão funcional de Ana Souza')).toBeVisible();
-  await expect(dir.getByRole('button', { name: 'Time Governo (gestão funcional)' })).toBeVisible();
+  // o time é replicado inteiro embaixo da gestão funcional, em outra cor, com a mesma composição
+  const replica = dir.getByLabel('Time Governo (gestão funcional)');
+  await expect(replica).toBeVisible();
+  await expect(replica.getByRole('button', { name: /^Mariana Costa/ })).toBeVisible();
+  await expect(replica).toContainText('Réplica do time');
+  await expect(page.getByTestId('org-legend')).toContainText('Mesmo time replicado na gestão funcional');
+  await expect(page.getByTestId('org-legend')).toContainText('Time na gestão hierárquica');
   await expect(page.getByRole('region', { name: 'Gestão só funcional' })).toHaveCount(0);
   // Lucas colabora: fica fora do desenho do Governo
   await expect(gov.getByRole('button', { name: /^Lucas Lima/ })).toHaveCount(0);

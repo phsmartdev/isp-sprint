@@ -82,22 +82,14 @@ function TeamBox({ t, people, module, profiles, open, sel, edit, onDrop, functio
     onDragLeave: () => setOver(false),
     onDrop: (e: DragEvent) => { e.preventDefault(); setOver(false); try { onDrop(JSON.parse(e.dataTransfer.getData('application/x-revops-person')) as DragInfo, t.id); } catch { /* arrasto de outra origem */ } },
   } : {};
-  // embaixo de um gestor só funcional, o time aparece resumido e tracejado (o desenho completo fica no gestor hierárquico)
-  if (functional) {
-    return (
-      <button type="button" onClick={() => open({ kind: 'team', id: t.id })} data-testid="org-team-functional" aria-label={`Time ${t.name} (gestão funcional)`} className="w-[232px] border-2 border-dashed border-sky bg-sky-soft px-3 py-2 text-left hover:bg-surface">
-        <span className="flex items-center gap-2"><span className="h-3 w-3 shrink-0 border border-sky" style={hex} aria-hidden /><span className="font-display text-sm font-bold tracking-wide text-ink">{t.name}</span></span>
-        <span className="mt-0.5 block text-[11px] font-semibold text-sky">Gestão funcional</span>
-        <span className="block text-[11px] text-muted">{leads.length + members.length} pessoa(s) · liderança: {leads.map((p) => p.name).join(', ') || '—'}</span>
-      </button>
-    );
-  }
+  // réplica na gestão funcional: o mesmo time, inteiro, em azul claro e tracejado (a composição é a mesma do time original)
+  const F = !!functional;
   return (
-    <div className={clsx('border bg-surface-2 transition-colors', over ? 'border-primary bg-primary-soft outline outline-2 outline-primary' : 'border-ink/80')} data-testid="org-team" aria-label={`Time ${t.name}`} {...dnd}>
-      <button type="button" onClick={() => open({ kind: 'team', id: t.id })} className={clsx('relative flex w-full items-center gap-2 overflow-hidden bg-ink px-3 py-2 text-left text-white hover:bg-navy-2', sel?.kind === 'team' && sel.id === t.id && 'outline outline-2 outline-lime')}>
-        <span className="h-3.5 w-3.5 shrink-0 bg-lime" style={hex} aria-hidden />
+    <div className={clsx('border transition-colors', F ? 'border-2 border-dashed border-sky bg-sky-soft' : over ? 'border-primary bg-primary-soft outline outline-2 outline-primary' : 'border-ink/80 bg-surface-2')} data-testid={F ? 'org-team-functional' : 'org-team'} aria-label={F ? `Time ${t.name} (gestão funcional)` : `Time ${t.name}`} {...dnd}>
+      <button type="button" onClick={() => open({ kind: 'team', id: t.id })} className={clsx('relative flex w-full items-center gap-2 overflow-hidden px-3 py-2 text-left', F ? 'bg-sky text-white hover:bg-primary' : 'bg-ink text-white hover:bg-navy-2', sel?.kind === 'team' && sel.id === t.id && 'outline outline-2 outline-lime')}>
+        <span className={clsx('h-3.5 w-3.5 shrink-0', F ? 'border-2 border-white' : 'bg-lime')} style={hex} aria-hidden />
         <span className="font-display text-sm font-bold tracking-wide">{t.name}</span>
-        <span className="ml-auto text-xs text-white/70">{leads.length + members.length} pessoa(s)</span>
+        <span className="ml-auto text-xs text-white/80">{F ? 'gestão funcional' : `${leads.length + members.length} pessoa(s)`}</span>
       </button>
       {/* gestão do time: hierárquica (contínua) e funcional (tracejada) */}
       <div className="flex flex-wrap gap-1 px-3 pt-2" aria-label={`Gestão do time ${t.name}`}>
@@ -106,12 +98,13 @@ function TeamBox({ t, people, module, profiles, open, sel, edit, onDrop, functio
         {!t.managers.length && <span className="text-[10px] text-muted">Sem gestão definida</span>}
       </div>
       <div className="space-y-2 p-3">
-        {leads.map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Liderança" edit={edit} fromTeamId={t.id} />)}
+        {leads.map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Liderança" edit={edit && !F} fromTeamId={t.id} />)}
         {!!leads.length && !!members.length && <div className="ml-6 h-3 border-l-2 border-line-strong" aria-hidden />}
-        {members.map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Operação" edit={edit} fromTeamId={t.id} />)}
+        {members.map((p) => <PersonCard key={p.id} p={p} module={module} profiles={profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role="Operação" edit={edit && !F} fromTeamId={t.id} />)}
         {!leads.length && !members.length && <p className="text-xs text-muted">Sem pessoas ativas.</p>}
         {!!t.participantIds.length && <p className="text-[11px] text-muted" title={t.participantIds.map(name).join(', ')}>+ {t.participantIds.length} participante(s) colaborando (fora do organograma)</p>}
-        {edit && <p className="border border-dashed border-line-strong px-2 py-1.5 text-center text-[11px] text-muted">Solte uma pessoa aqui para trazer ao time</p>}
+        {edit && !F && <p className="border border-dashed border-line-strong px-2 py-1.5 text-center text-[11px] text-muted">Solte uma pessoa aqui para trazer ao time</p>}
+        {F && <p className="text-[11px] text-sky">Réplica do time: a composição é a mesma da gestão hierárquica.</p>}
       </div>
     </div>
   );
@@ -226,12 +219,9 @@ export function OrgChart() {
   const open = (x: Sel) => setSel(x);
   const card = (p: Person, role?: string) => <PersonCard key={p.id} p={p} module={module} profiles={d.profiles} onOpen={() => open({ kind: 'person', id: p.id })} active={sel?.kind === 'person' && sel.id === p.id} role={role} edit={edit} fromTeamId={null} />;
   const box = (team: Team, functional?: boolean) => <TeamBox key={`${team.id}${functional ? 'f' : ''}`} t={team} people={t.people} module={module} profiles={d.profiles} open={open} sel={sel} edit={edit} onDrop={drop} functional={functional} />;
-  /** Times sob gestão funcional: tracejado, com o nome de cada time (clicar abre o time). */
+  /** Times sob gestão funcional: o mesmo time replicado, inteiro, em azul claro e tracejado. */
   const funcBlock = (m: { person: Person; functional: Team[] }) => (
-    <div className="w-[232px] border-2 border-dashed border-sky bg-sky-soft px-3 py-2" aria-label={`Gestão funcional de ${m.person.name}`}>
-      <p className="text-[11px] font-semibold text-sky">Gestão funcional sobre</p>
-      <div className="mt-1 flex flex-wrap gap-1">{m.functional.map((tm) => <button key={tm.id} type="button" onClick={() => open({ kind: 'team', id: tm.id })} aria-label={`Time ${tm.name} (gestão funcional)`} className="border border-dashed border-sky bg-surface px-1.5 py-0.5 text-[11px] font-semibold text-ink hover:border-primary">{tm.name}</button>)}</div>
-    </div>
+    <div className="flex items-start gap-4 border-t-2 border-dashed border-sky pt-4" aria-label={`Gestão funcional de ${m.person.name}`}>{m.functional.map((tm) => box(tm, true))}</div>
   );
   const mgrColumn = (m: { person: Person; teams: Team[]; functional: Team[]; onlyFunctional?: boolean }) => (
     <div key={m.person.id} className="flex flex-col items-center">
@@ -322,6 +312,13 @@ export function OrgChart() {
                 </section>
               )}
             </div>
+            <section aria-label="Legenda do organograma" className="mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 border border-line bg-surface px-6 py-4 text-sm text-text" data-testid="org-legend">
+              <span className="flex items-center gap-2"><span className="flex h-6 w-16 items-center border border-ink/80 bg-ink px-1.5 text-[10px] font-bold text-white">Time</span>Time na gestão hierárquica</span>
+              <span className="flex items-center gap-2"><span className="flex h-6 w-16 items-center border-2 border-dashed border-sky bg-sky px-1.5 text-[10px] font-bold text-white">Time</span>Mesmo time replicado na gestão funcional</span>
+              <span className="flex items-center gap-2"><span className="w-10 border-t-2 border-line-strong" />Ligação hierárquica</span>
+              <span className="flex items-center gap-2"><span className="w-10 border-t-2 border-dashed border-sky" />Ligação funcional</span>
+              <span className="flex items-center gap-2"><span className="border border-primary bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-white">Hierárq. + funcional</span><span className="border border-dashed border-sky px-1.5 py-0.5 text-[10px] font-semibold text-sky">Funcional</span>Tipo de gestão do time</span>
+            </section>
             {!!t.noTeam.length && (
               <section aria-label="Pessoas sem time" className="mt-10 w-full max-w-4xl border border-dashed border-line-strong bg-surface p-4">
                 <p className="mb-2 text-sm font-semibold text-ink">Pessoas sem time <span className="font-normal text-muted">· no nível "Time" elas não aparecem para nenhuma liderança</span></p>
