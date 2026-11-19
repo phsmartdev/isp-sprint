@@ -17,10 +17,10 @@ import { errMsg } from '../contracts/shared';
 import { DealSectionsEditor } from './DealSections';
 import { addressLine, NewDeliveryAddressModal, type DeliveryAddress } from './DeliveryAddresses';
 
-type Saved = { id: string; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null };
+type Saved = { id: string; priceDefined?: boolean; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes: string | null; bidUnitCents: number | null; fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null };
 type Doc = { id: string; branchId: string; fiscalKind: FiscalKind; code: string; name: string; rates: { percentBp: number; fixedCents: number; complete: boolean } };
 type Data = { items: Saved[]; bid: boolean; bidMode: BidMode | null; bidGlobalCents: number | null; rowVersion: number; editable: boolean; deliveryAddresses?: DeliveryAddress[]; principalAddress?: string | null };
-type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
+type CatalogItem = { id: string; description: string; unit: string; lastUnitCents: number; lastPriceDefined?: boolean; dealKind: string; fiscalDocTypeId: string | null; timesUsed: number };
 type Row = { key: string; description: string; unit: ItemUnit; qty: string; unit$: string; discount: string; surcharge: string; notes: string; bid: string; doc: string; kind: DealKind; addr: string; prof: CostProfile | '' };
 
 const NEW_ADDR = '__novo__';
@@ -28,8 +28,8 @@ const money = (c: number | null | undefined) => (c == null ? '' : (c / 100).toLo
 const qtyText = (m: number) => (m / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
 let seq = 0;
 const blank = (doc = '', kind: DealKind = 'recorrencia'): Row => ({ key: `n${++seq}`, description: '', unit: 'un', qty: '1', unit$: '', discount: '', surcharge: '', notes: '', bid: '', doc, kind, addr: '', prof: '' });
-const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null }): Row => ({ key: `n${++seq}`, prof: i.costProfile ?? '', doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
-const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null, costProfile: r.prof || null });
+const fromSaved = (i: (Saved | ItemInput) & { fiscalDocTypeId?: string | null; dealKind?: DealKind; deliveryAddressId?: string | null; costProfile?: CostProfile | null }): Row => ({ key: `n${++seq}`, prof: defaultCostProfile(i.dealKind ?? 'recorrencia'), doc: i.fiscalDocTypeId ?? '', kind: i.dealKind ?? 'recorrencia', addr: i.deliveryAddressId ?? '', description: i.description, unit: i.unit, qty: qtyText(i.qtyMilli), unit$: i.priceDefined === false ? '' : money(i.unitCents), discount: i.discountCents ? money(i.discountCents) : '', surcharge: i.surchargeCents ? money(i.surchargeCents) : '', notes: i.notes ?? '', bid: i.bidUnitCents != null ? money(i.bidUnitCents) : '' });
+const toInput = (r: Row) => ({ description: r.description.trim(), unit: r.unit, qtyMilli: parseQty(r.qty), unitCents: parseMoney(r.unit$), priceDefined: r.unit$.trim() !== '', discountCents: parseMoney(r.discount), surchargeCents: parseMoney(r.surcharge), notes: r.notes.trim() || null, bidUnitCents: r.bid.trim() ? parseMoney(r.bid) : null, fiscalDocTypeId: r.doc || null, dealKind: r.kind, deliveryAddressId: r.addr || null, costProfile: defaultCostProfile(r.kind) });
 
 /** Aba Produtos e serviços: por seções (tipos de negócio); licitação segue na tabela de itens com lances. */
 export function ProductsTab({ opp }: { opp: Opportunity }) {
@@ -86,6 +86,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
     mutationFn: () => {
       const bad = parsed.findIndex((i) => !i.description || !i.qtyMilli || i.unitCents == null || i.discountCents == null || i.surchargeCents == null || (i.bidUnitCents === null && cur[parsed.indexOf(i)]!.bid.trim() !== ''));
       if (bad >= 0) throw new Error(`Confira o item ${bad + 1}: produto, quantidade e valores.`);
+      if (parsed.some((i) => i.priceDefined) && parsed.some((i) => !i.priceDefined)) throw new Error('Informe o valor de todos os produtos ou deixe todos em branco para usar o preço sugerido.');
       return api<Opportunity>(`/opportunities/${opp.id}/items`, { method: 'PUT', body: { rowVersion: opp.rowVersion, items: parsed, ...(bid ? { bidMode, bidGlobalCents: bidMode === 'global' ? parseMoney(bidGlobal) : null } : {}) } });
     },
     onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); setRows(null); void qc.invalidateQueries({ queryKey: ['product-catalog'] }); void qc.invalidateQueries({ queryKey: ['opp-items', opp.id] }); void qc.invalidateQueries({ queryKey: ['economics', opp.id] }); void qc.invalidateQueries({ queryKey: ['timeline', opp.id] }); toast({ tone: 'success', message: 'Produtos e serviços salvos' }); },
@@ -126,6 +127,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
           </span>
         )}
       </div>
+      <p className="mb-3 text-xs text-muted">Informe o valor de todos os itens para avaliar a venda, ou deixe todos em branco para usar o preço sugerido pelo motor. O perfil de custo é definido pelo tipo.</p>
       {importMsg && <div className="mb-3"><Notice tone={importMsg.includes('faltam') || importMsg.includes('Não foi') ? 'warning' : 'info'}>{importMsg}</Notice></div>}
       {!cur.length ? (
         <p className="text-sm text-muted">{q.isLoading ? 'Carregando…' : 'Nenhum produto ou serviço lançado. A venda só fecha com os produtos lançados.'}</p>
@@ -135,14 +137,14 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
             <thead className="text-xs text-muted"><tr>{['Produto/Serviço', 'Endereço de entrega', 'Tipo', 'Perfil de custo', 'Documento fiscal', 'Medida', 'Qtd.', 'Valor', 'Desconto', 'Acréscimo', ...(bid && bidMode === 'item' ? ['Lance (un.)'] : []), 'Total', 'Observação', ''].map((h) => <th key={h} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr></thead>
             <tbody>
               {cur.map((r, i) => {
-                const lt = lineTotal(parsed[i]!);
+                const lt = parsed[i]!.priceDefined ? lineTotal(parsed[i]!) : null;
                 return (
                   <tr key={r.key} className="border-t border-line align-top">
                     <td className="px-1.5 py-1.5"><Input aria-label={`Produto ou serviço ${i + 1}`} list="items-catalog" className="h-9 min-w-[180px]" value={r.description} disabled={!editable} onChange={(e) => {
                       const v = e.target.value;
                       const c = catalog.find((x) => x.description.toLowerCase() === v.trim().toLowerCase());
                       const doc = !r.doc ? (c?.fiscalDocTypeId || docForPlan(v) || suggestDoc((c?.dealKind as DealKind) ?? r.kind, r.prof)) : '';
-                      set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
+                      set(r.key, { description: v, ...(doc ? { doc } : {}), ...(c && !r.unit$.trim() ? { unit: c.unit as ItemUnit, unit$: c.lastPriceDefined === false ? '' : money(c.lastUnitCents), kind: c.dealKind as DealKind } : {}) });
                     }} /></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Endereço de entrega ${i + 1}`} className="h-9 w-[200px] min-w-[200px]" value={r.addr} disabled={!editable} title={r.addr ? addressLine(addrs.find((a) => a.id === r.addr) ?? { label: null, street: null, number: null, district: null, city: null }) : principalLabel}
@@ -153,7 +155,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                       </Select>
                     </td>
                     <td className="px-1.5 py-1.5"><Select aria-label={`Tipo de negociação ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.kind} disabled={!editable} title="Pagamento único: venda (patrimonial) ou serviço único. Mensal: recorrência ou locação" onChange={(e) => { const k = e.target.value as DealKind; set(r.key, { kind: k, ...(!r.doc ? { doc: suggestDoc(k, r.prof) } : {}) }); }}>{([['Pagamento único', DEAL_KINDS.filter(isOneTimeKind)], ['Mensal', DEAL_KINDS.filter((k) => !isOneTimeKind(k))]] as const).map(([g, ks]) => <optgroup key={g} label={g}>{ks.map((k) => <option key={k} value={k}>{DEAL_KIND_LABELS[k]}</option>)}</optgroup>)}</Select></td>
-                    <td className="px-1.5 py-1.5"><Select aria-label={`Perfil de custo ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={r.prof || defaultCostProfile(r.kind)} disabled={!editable} title={`${COST_PROFILE_LABELS[(r.prof || defaultCostProfile(r.kind)) as CostProfile]}. Despesas fixas rateadas só incidem na Implantação.${r.prof && r.prof !== defaultCostProfile(r.kind) ? ' Alterado nesta oportunidade (fica registrado no fechamento).' : ''}`} onChange={(e) => set(r.key, { prof: e.target.value === defaultCostProfile(r.kind) ? '' : (e.target.value as CostProfile) })}>{COST_PROFILES.map((c) => <option key={c} value={c}>{COST_PROFILE_SHORT[c]}{c === defaultCostProfile(r.kind) ? '' : ' *'}</option>)}</Select></td>
+                    <td className="px-1.5 py-1.5"><Select aria-label={`Perfil de custo ${i + 1}`} className="h-9 w-[150px] min-w-[150px]" value={defaultCostProfile(r.kind)} disabled title={`${COST_PROFILE_LABELS[defaultCostProfile(r.kind)]}. Definido pelo tipo de negociação.`}>{COST_PROFILES.map((c) => <option key={c} value={c}>{COST_PROFILE_SHORT[c]}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5">
                       <Select aria-label={`Documento fiscal ${i + 1}`} className={`h-9 w-[150px] min-w-[150px] ${!r.doc ? 'text-[#C2610C]' : ''}`} value={r.doc} disabled={!editable} onChange={(e) => set(r.key, { doc: e.target.value })} title={r.doc ? undefined : 'Obrigatório: sem documento fiscal a viabilidade econômica fica bloqueada'}>
                         <option value="">{docs.length ? 'Escolha' : 'Nenhum na filial'}</option>
@@ -163,7 +165,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
                     </td>
                     <td className="px-1.5 py-1.5"><Select aria-label={`Medida ${i + 1}`} className="h-9 w-[88px] min-w-[88px]" value={r.unit} disabled={!editable} onChange={(e) => set(r.key, { unit: e.target.value as ItemUnit })}>{ITEM_UNITS.map((u) => <option key={u} value={u}>{ITEM_UNIT_LABELS[u]}</option>)}</Select></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Quantidade ${i + 1}`} inputMode="decimal" className="num h-9 w-[72px]" value={r.qty} disabled={!editable} onChange={(e) => set(r.key, { qty: e.target.value })} /></td>
-                    <td className="px-1.5 py-1.5"><Input aria-label={`Valor ${i + 1}`} inputMode="decimal" className="num h-9 w-[104px]" value={r.unit$} disabled={!editable} onChange={(e) => set(r.key, { unit$: e.target.value })} placeholder="0,00" /></td>
+                    <td className="px-1.5 py-1.5"><Input aria-label={`Valor ${i + 1}`} inputMode="decimal" className="num h-9 w-[104px]" value={r.unit$} disabled={!editable} onChange={(e) => set(r.key, { unit$: e.target.value })} placeholder="Sem valor" title="Em branco: o motor sugere o preço. Preenchido: o valor é usado para avaliar a venda." /></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Desconto ${i + 1}`} inputMode="decimal" className="num h-9 w-[92px]" value={r.discount} disabled={!editable} onChange={(e) => set(r.key, { discount: e.target.value })} placeholder="0,00" /></td>
                     <td className="px-1.5 py-1.5"><Input aria-label={`Acréscimo ${i + 1}`} inputMode="decimal" className="num h-9 w-[92px]" value={r.surcharge} disabled={!editable} onChange={(e) => set(r.key, { surcharge: e.target.value })} placeholder="0,00" /></td>
                     {bid && bidMode === 'item' && <td className="px-1.5 py-1.5"><Input aria-label={`Lance ${i + 1}`} inputMode="decimal" className="num h-9 w-[100px]" value={r.bid} disabled={!editable} onChange={(e) => set(r.key, { bid: e.target.value })} placeholder="0,00" /></td>}
@@ -180,7 +182,7 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       {!!cur.length && <LotTaxes rows={cur} docs={docs} docLabel={docLabel} />}
       <datalist id="items-catalog">{catalog.map((c) => <option key={c.id} value={c.description}>{`${money(c.lastUnitCents)} · ${DEAL_KIND_LABELS[c.dealKind as DealKind] ?? ''}`}</option>)}{plans.filter((p) => !catalog.some((c) => c.description.toLowerCase() === p.name.toLowerCase())).map((p) => <option key={p.id} value={p.name} />)}</datalist>
       {!!cur.length && cur.some((r) => !r.doc) && <p className="mt-2 text-xs text-[#C2610C]">{cur.filter((r) => !r.doc).length} produto(s) sem documento fiscal. O documento é obrigatório: sem ele a viabilidade econômica fica bloqueada.</p>}
-      {!!cur.length && <p className="mt-2 text-xs text-muted">Perfil de custo: <b className="text-ink">Fornecimento</b> = venda pura, sem despesas fixas rateadas; <b className="text-ink">Implantação</b> = instalação ou fornecimento + instalação, recebe o rateio das despesas fixas. * = diferente do padrão do tipo.</p>}
+      {!!cur.length && <p className="mt-2 text-xs text-muted">Perfis fixos pelo tipo: Venda → Fornecimento; Serviço único → Instalação; Recorrência e Locação/aluguel → Implantação.</p>}
       {!!cur.length && !docs.length && <p className="mt-2 text-xs text-[#C2610C]">A filial desta oportunidade ainda não tem documentos fiscais. Cadastre em Configurações → Filiais e documentos fiscais para a viabilidade econômica calcular os tributos.</p>}
       {bid && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-4 rounded-md bg-surface-2 p-3 text-sm" role="radiogroup" aria-label="Lance da licitação">
@@ -193,8 +195,8 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
       <dl className="mt-3 flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
         {discount > 0 && <div className="flex gap-2"><dt className="text-muted">Descontos</dt><dd className="num text-ink">−{fmtBRL(discount)}</dd></div>}
         {surcharge > 0 && <div className="flex gap-2"><dt className="text-muted">Acréscimos</dt><dd className="num text-ink">+{fmtBRL(surcharge)}</dd></div>}
-        <div className="flex gap-2"><dt className="font-semibold text-ink">Total</dt><dd className="num font-bold text-ink">{fmtBRL(total)}</dd></div>
-        {new Set(cur.map((r) => r.kind)).size > 1 && DEAL_KINDS.filter((k) => cur.some((r) => r.kind === k)).map((k) => <div key={k} className="flex gap-2"><dt className="text-muted">{DEAL_KIND_LABELS[k]}</dt><dd className="num text-ink">{fmtBRL(parsed.reduce((t, it, i) => t + (cur[i]?.kind === k ? lineTotal(it) ?? 0 : 0), 0))}{k === 'venda' ? ' (único)' : '/mês'}</dd></div>)}
+        <div className="flex gap-2"><dt className="font-semibold text-ink">Total</dt><dd className="num font-bold text-ink">{cur.every((r) => !r.unit$.trim()) ? 'Sem valor informado' : fmtBRL(total)}</dd></div>
+        {new Set(cur.map((r) => r.kind)).size > 1 && DEAL_KINDS.filter((k) => cur.some((r) => r.kind === k)).map((k) => <div key={k} className="flex gap-2"><dt className="text-muted">{DEAL_KIND_LABELS[k]}</dt><dd className="num text-ink">{fmtBRL(parsed.reduce((t, it, i) => t + (cur[i]?.kind === k ? lineTotal(it) ?? 0 : 0), 0))}{isOneTimeKind(k) ? ' (único)' : '/mês'}</dd></div>)}
         {bid && bidTotal != null && bidTotal > 0 && <div className="flex gap-2"><dt className="font-semibold text-ink">Lance</dt><dd className="num font-bold text-ink">{fmtBRL(bidTotal)}{total > 0 ? <span className="ml-1 font-normal text-muted">({((1 - bidTotal / total) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% abaixo)</span> : null}</dd></div>}
       </dl>
       {editable && (dirty || cur.length > 0) && (
@@ -216,10 +218,10 @@ export function OpportunityItems({ opp, embedded = false }: { opp: Opportunity; 
   );
 }
 
-/** Por cesta (natureza do documento: NF-e de mercadoria = Produtos; demais = Serviços), o documento de maior tributo vale no cálculo. */
+/** Por perfil fixo do tipo, o documento de maior tributo vale no cálculo da cesta. */
 function LotTaxes({ rows, docs, docLabel }: { rows: Row[]; docs: Doc[]; docLabel: (d: Doc) => string }) {
   const lots = ECON_LOTS.map((l) => {
-    const its = rows.filter((r) => (r.prof ? (r.prof === 'fornecimento' ? 'venda' : 'servico') : cestaOf(docs.find((d) => d.id === r.doc)?.fiscalKind ?? null, r.kind)) === l);
+    const its = rows.filter((r) => cestaOf(null, r.kind) === l);
     const ds = its.map((r) => docs.find((d) => d.id === r.doc)).filter((d): d is Doc => !!d);
     const pick = (xs: Doc[]) => xs.reduce<Doc | null>((b, d) => (!b || d.rates.percentBp > b.rates.percentBp || (d.rates.percentBp === b.rates.percentBp && d.rates.fixedCents > b.rates.fixedCents) ? d : b), null);
     return { l, n: its.length, top: pick(ds.filter((d) => d.rates.complete)) ?? pick(ds), without: its.filter((r) => !r.doc).length };

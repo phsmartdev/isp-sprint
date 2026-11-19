@@ -1,38 +1,24 @@
 /** Viabilidade econômica: parâmetros do motor, documentos fiscais por filial e o cálculo de cada oportunidade. */
 import { and, desc, eq, inArray, lte, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { COST_CATEGORIES, SECTION_KINDS, sectionErrors, COST_IMPACTS, ECON_MODES, econInputErrors, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
+import { sectionErrors, COST_IMPACTS, ECON_MODES, econTargetErrors, econPaybackErrors, econInputErrors, econBasketViews, type EconResult, econSettingsErrors, fiscalDocErrors, TERMINAL_STAGES, type EconInput, DEAL_KINDS, viabilityRecommendationPayload, ENVELOPE_RETENTIONS, FISCAL_REGIME_LABELS, fiscalEnvelopeErrors, regimeOfYear, type FiscalEnvelopeValues } from '@isp/domain';
 import { FISCAL_KINDS, FISCAL_KIND_LABELS } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
-import { forbidden, notFound, unprocessable } from '../http/errors';
+import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
-import { catalogSectionCosts, computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
+import { catalogSectionCosts, publicSectorOf, computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
+
+import { EconBody } from './economicsInput';
 
 const ADMIN = { module: 'configuracoes', min: 'total' } as const;
 const RunParams = z.object({ id: z.string().uuid(), runId: z.union([z.literal('ultimo'), z.string().uuid()]) });
 const bp = z.number().int().min(0).max(9_999);
 const Tax = z.object({ name: z.string().trim().min(1).max(60), percentBp: z.number().int().min(0).max(10_000), fixedCents: z.number().int().min(0).max(100_000_000), active: z.boolean(), validFrom: z.string().date().nullable().optional(), validTo: z.string().date().nullable().optional() });
-const Line = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), impact: z.enum(COST_IMPACTS).nullable().optional(), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional(), kind: z.enum(DEAL_KINDS).nullable().optional() });
-const SectionCostBody = z.object({ description: z.string().trim().min(2).max(160), qtyMilli: z.number().int().min(1).max(1_000_000_000), unitCents: z.number().int().min(0).max(10_000_000_000), unit: z.string().trim().max(12).nullable().optional(), category: z.enum(COST_CATEGORIES).nullable(), frequency: z.enum(['unico', 'mensal']), costItemId: z.string().uuid().nullable().optional(), priceId: z.string().uuid().nullable().optional(), manual: z.boolean().optional() });
-const SectionBody = z.object({ id: z.string().trim().min(1).max(20), kind: z.enum(SECTION_KINDS), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60), costs: z.array(SectionCostBody).max(300), marginTargetBp: bp.nullable(), paybackMonths: z.number().int().min(1).max(240).nullable(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable() });
-const EconBody = z.object({
-  /** tipos de negócio da negociação (Venda, Aluguel, Recorrência), cada um com produtos, custos, margem, payback e preço */
-  sections: z.array(SectionBody).max(10).nullable().optional(),
-  mode: z.enum(ECON_MODES), termMonths: z.number().int().min(1).max(240), receiveMonth: z.number().int().min(0).max(60),
-  capex: z.array(Line).max(300), extraInitialCents: z.number().int().min(0).max(10_000_000_000), opex: z.array(Line).max(300),
-  commissionBp: bp.nullable(), lossBp: bp.nullable(), marginTargetBp: bp.nullable(), variableBp: bp.nullable().optional(), paybackMonths: z.number().int().min(1).max(240).nullable().optional(), priceCents: z.number().int().min(0).max(10_000_000_000).nullable(), salePriceCents: z.number().int().min(0).max(10_000_000_000).nullable().optional(),
-  fiscalYear: z.number().int().min(2020).max(2100).nullable().optional(),
-  /** viabilidade B2G: modo A/B, rateio da negociação, alvo, margens manuais, payback pelo alvo, pesos e lances por produto */
-  b2g: z.object({
-    mode: z.enum(['A', 'B']).optional(), overheadBp: bp.nullable().optional(), netTargetBp: z.number().int().min(-5000).max(9_999).nullable().optional(),
-    contributionBp: z.object({ fornecimento: bp.nullable().optional(), implantacao: bp.nullable().optional() }).optional(), solvePayback: z.boolean().optional(),
-    weights: z.record(z.string().max(300), z.number().min(0).max(1)).optional(), bids: z.record(z.string().max(300), z.number().int().min(0).max(10_000_000_000)).optional(),
-  }).nullable().optional(),
-});
+
 
 export const economicsRoutes = [
   // ------------------------------------------------------------------ parâmetros (Configurações → Viabilidade)
@@ -46,7 +32,7 @@ export const economicsRoutes = [
   defineRoute({
     method: 'POST', url: '/admin/viability/econ', summary: 'Publica uma versão dos parâmetros com data de vigência (hoje ou futura; versões anteriores ficam no histórico)', tag: 'Viabilidade', ...ADMIN,
     body: z.object({
-      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
+      marginTargetBp: bp, marginSuggestedBp: bp, marginMaxBp: bp, tmaAnnualBp: z.number().int().min(0).max(99_999), inflationAnnualBp: bp, horizonMaxMonths: z.number().int().min(1).max(240), badDebtBp: bp, commissionBp: bp, lossPrivateBp: bp, lossPublicBp: bp, contingencyCapexBp: bp, contingencyOpexBp: bp, serviceCostBp: bp.optional(), overheadBp: bp, incomeTaxBp: bp, netMarginTargetBp: bp.nullable().optional(), netMarginMinBp: bp.nullable().optional(), netMarginMaxBp: bp.nullable().optional(),
       legacyOneTimeX100: z.number().int().min(100).max(2000).nullable().optional(), legacyRecurringX100: z.number().int().min(100).max(2000).nullable().optional(),
       variableExpenseBp: bp.nullable().optional(),
       /** prazo médio de pagamento do órgão (dias): payback de caixa informativo na viabilidade B2G */ paymentTermDays: z.number().int().min(0).max(720).nullable().optional(),
@@ -55,12 +41,12 @@ export const economicsRoutes = [
     }),
     handler: async ({ app, auth, body, req, reply }) => {
       const { validFrom, ...rest } = body;
+      const before = await econSettingsOf(app.db, auth.tenantId);
       // a TMA é informada ao ano; a mensal equivalente fica guardada junto (compatível com os cálculos anteriores)
-      const values = { ...rest, tmaMonthlyBp: Math.round(((1 + rest.tmaAnnualBp / 10_000) ** (1 / 12) - 1) * 10_000) };
+      const values = { ...rest, serviceCostBp: rest.serviceCostBp ?? before?.settings.serviceCostBp ?? 3500, tmaMonthlyBp: Math.round(((1 + rest.tmaAnnualBp / 10_000) ** (1 / 12) - 1) * 10_000) };
       const e = econSettingsErrors(values);
       if (e.length) throw unprocessable(e.join(' '));
       if (validFrom < today()) throw unprocessable('A vigência começa hoje ou numa data futura: cálculos já salvos não mudam de regra.');
-      const before = await econSettingsOf(app.db, auth.tenantId);
       const [v] = await app.db.insert(s.econSettingsVersions).values({ tenantId: auth.tenantId, values, validFrom, createdBy: auth.userId }).returning({ id: s.econSettingsVersions.id });
       await audit(app.db, req, { action: 'viability.econ', entityType: 'viability', entityId: v!.id, metadata: { validFrom, from: before?.settings ?? null, to: values } });
       reply.code(201);
@@ -268,22 +254,33 @@ export const economicsRoutes = [
   }),
   defineRoute({
     method: 'PUT', url: '/opportunities/:id/economics', summary: 'Salva a viabilidade econômica (calcula no servidor com os parâmetros vigentes e guarda a fotografia auditável)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
-    body: EconBody,
-    handler: async ({ app, auth, params, body, req }) => {
+    body: EconBody.extend({ economicsUpdatedAt: z.string().datetime().nullable().optional() }),
+    handler: async ({ app, auth, params, body: payload, req }) => app.db.transaction(async (tx) => {
+      const { economicsUpdatedAt, ...body } = payload;
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é preenchida por quem vê valores financeiros.');
-      const opp = await loadOpportunity(app.db, auth, params.id);
+      const opp = await loadOpportunity(tx, auth, params.id);
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada: a viabilidade fica como estava no fechamento.');
-      const e = [...econInputErrors(body as EconInput), ...sectionErrors((body.sections ?? []) as never)];
+      if (economicsUpdatedAt !== undefined) {
+        const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
+        if ((saved?.updatedAt.getTime() ?? null) !== (economicsUpdatedAt == null ? null : new Date(economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
+      }
+      const e = [...econInputErrors(body as EconInput), ...(body.pricingMode !== 'global' ? sectionErrors((body.sections ?? []) as never) : [])];
       if (e.length) throw unprocessable(e.join(' '));
+      const pricingSettings = await econSettingsOf(tx, auth.tenantId);
+      const targetErrors = pricingSettings ? econTargetErrors(body as EconInput, pricingSettings.settings) : [];
+      if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
+      const paybackErrors = pricingSettings ? econPaybackErrors(body as EconInput, pricingSettings.settings, await publicSectorOf(tx, opp)) : [];
+      if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
+      if (pricingSettings?.settings.netMarginTargetBp == null && !(body.sections?.length && body.pricingMode !== 'global')) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para calcular o preço.');
       // planilha: confere o catálogo e aprende os itens pela descrição + unidade (impacto e preço da cotação)
-      const input = body.sections?.length
-        ? await catalogSectionCosts(app.db, auth.tenantId, auth.userId, { ...(body as EconInput), capex: [], opex: [], extraInitialCents: 0 })
-        : await learnCostLines(app.db, auth.tenantId, auth.userId, await resolveCostLines(app.db, auth.tenantId, body as EconInput));
-      const result = await saveEconomics(app.db, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
+      const input = body.sections?.length && body.pricingMode !== 'global'
+        ? await catalogSectionCosts(tx, auth.tenantId, auth.userId, { ...(body as EconInput), capex: [], opex: [], extraInitialCents: 0 })
+        : await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body as EconInput));
+      const result = await saveEconomics(tx, { ...opp, tenantId: auth.tenantId }, input, auth.userId);
       if (!result) throw unprocessable(NO_SETTINGS);
-      await audit(app.db, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
-      return { result, recomendacao_viabilidade: viabilityRecommendationPayload(result.recommendation, result.mode), history: await economicsHistory(app.db, auth.tenantId, opp.id) };
-    },
+      await audit(tx, req, { action: 'opportunity.economics', entityType: 'opportunity', entityId: opp.id, metadata: { verdict: result.verdict, priceCents: result.priceCents, minCents: result.floor.minCents, recommendedCents: result.recommendedCents, paybackMonths: result.kpi?.paybackMonths ?? null, engine: result.engineVersion } });
+      return { result, recomendacao_viabilidade: viabilityRecommendationPayload(result.recommendation, result.mode), history: await economicsHistory(tx, auth.tenantId, opp.id) };
+    }),
   }),
   defineRoute({
     method: 'GET', url: '/opportunities/:id/economics/runs/:runId', summary: 'Um cálculo salvo exatamente como foi gravado (sem recalcular), com a conferência do hash; runId "ultimo" = o mais recente', tag: 'Oportunidades', module: 'oportunidades', params: RunParams,
@@ -321,6 +318,7 @@ export const economicsRoutes = [
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada.');
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
       if (!ctx.savedResult) throw unprocessable('Salve a viabilidade econômica antes de enviar.');
+      if (ctx.input.pricingMode === 'global' && ctx.settings && econBasketViews(ctx.input, ctx.items, ctx.settings, ctx.savedResult).some((v) => v.result.decision?.basis !== 'proposto')) throw unprocessable('Defina ou adote o preço global de cada cesta e salve antes de enviar para decisão.');
       if (ctx.savedResult.priceSource === 'sugerido') throw unprocessable('Os produtos estão sem preço: defina o preço (nos produtos ou no campo Preço da viabilidade) e salve antes de enviar.');
       assertDecidable(ctx);
       const st = await econStatus(app.db, auth.tenantId, opp.id);

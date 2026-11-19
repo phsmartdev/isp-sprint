@@ -23,7 +23,7 @@ export function itemsTotals<T extends ItemValues & { bidUnitCents?: number | nul
   return { count: items.length, gross, discount, surcharge, total, bidTotal, bidItems: withBid.length };
 }
 
-export type ItemInput = { description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes?: string | null; bidUnitCents?: number | null };
+export type ItemInput = { priceDefined?: boolean; description: string; unit: ItemUnit; qtyMilli: number; unitCents: number; discountCents: number; surchargeCents: number; notes?: string | null; bidUnitCents?: number | null };
 export function itemErrors(i: ItemInput): string | null {
   if (i.description.trim().length < 2) return 'Informe o produto ou serviço.';
   if (!(ITEM_UNITS as readonly string[]).includes(i.unit)) return 'Medida inválida.';
@@ -118,7 +118,7 @@ export function parseItemsTable(rows: (string | number | null)[][]): { items: It
     if (unitCents == null || discountCents == null || surchargeCents == null || (bidRaw != null && bidRaw !== '' && bidUnitCents == null)) return errors.push({ row, message: 'Valor, desconto, acréscimo ou lance em formato inválido.' });
     const itemNo = cell(idx.itemNo) == null ? '' : String(cell(idx.itemNo)).trim();
     const notes = [itemNo && `Item ${itemNo}`, !known && rawUnit && `Unidade: ${rawUnit}`, cell(idx.notes) == null ? '' : String(cell(idx.notes)).trim()].filter(Boolean).join(' · ');
-    const it: ItemInput = { description: String(cell(idx.description) ?? '').trim(), unit, qtyMilli: qty, unitCents, discountCents, surchargeCents, notes: notes || null, bidUnitCents };
+    const it: ItemInput = { description: String(cell(idx.description) ?? '').trim(), unit, qtyMilli: qty, unitCents, priceDefined: String(cell(idx.unitValue) ?? '').trim() !== '', discountCents, surchargeCents, notes: notes || null, bidUnitCents };
     const err = itemErrors(it);
     if (err) return errors.push({ row, message: err });
     items.push(it);

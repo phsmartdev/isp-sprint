@@ -88,6 +88,11 @@ export function stableStringify(v: unknown): string {
 
 type Opp = { id: string; tenantId: string; contactId: string; branchId: string | null; saleKind: string | null };
 
+export async function publicSectorOf(db: DbOrTx, opp: Pick<Opp, 'contactId' | 'saleKind'>) {
+  const [contact] = await db.select({ segment: s.contacts.segment, nature: s.contacts.nature }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1);
+  return contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
+}
+
 /** Tudo que o cálculo precisa: itens com a resolução fiscal, parâmetros vigentes, segmento e o que foi salvo. */
 export async function economicsContext(db: DbOrTx, opp: Opp) {
   const [version, items, docs, [contact], [saved], [branch], fm, envelopes] = await Promise.all([
@@ -103,7 +108,7 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
   const publicSector = contact?.nature === 'publica' || (contact?.nature !== 'privada' && contact?.segment === 'governamental') || opp.saleKind === 'licitacao';
   const econItems: EconItem[] = items.map((i) => {
     const d = i.fiscalDocTypeId ? docs.find((x) => x.id === i.fiscalDocTypeId) : null;
-    return { section: i.section ?? 0, costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | null) ?? null, description: i.description, revenueCents: itemTotal(i), kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
+    return { section: i.section ?? 0, id: i.id, qtyMilli: i.qtyMilli, unit: i.unit, costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | 'instalacao' | null) ?? null, priceDefined: i.priceDefined, description: i.description, revenueCents: i.priceDefined ? itemTotal(i) : 0, kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
   return {
@@ -126,14 +131,14 @@ export const computeEconomics = (ctx: EconContext, input?: EconInput) => {
   if (!ctx.settings) return null;
   const inp = input ?? ctx.input;
   // negociação por seções (tipos de negócio): cada seção no motor e a visão geral consolidada
-  if (inp.sections?.length) return sectionsEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
+  if (inp.sections?.length && inp.pricingMode !== 'global') return sectionsEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
   const r = financeEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
   return { ...r, b2g: b2gOf(ctx, inp, r) };
 };
 
 /** Viabilidade B2G com os produtos da oportunidade (tributos da vigência fiscal), a planilha e os parâmetros vigentes. */
 export function b2gOf(ctx: EconContext, inp: EconInput, r: EconResult) {
-  return b2gFromEconomics({ input: inp, items: ctx.items, settings: ctx.settings!, publicSector: ctx.publicSector, fiscal: ctx.fiscal }, r.fiscal?.profitTaxBp ?? null);
+  return b2gFromEconomics({ input: inp, items: ctx.items, settings: ctx.settings!, publicSector: ctx.publicSector, fiscal: ctx.fiscal }, r.fiscal?.profitTaxBp ?? null, r);
 }
 
 /**
@@ -265,7 +270,7 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
     if (!impact) { missing.push(l.description); return l; }
     if (!it) {
       const [n] = await db.insert(s.costItems).values({ tenantId, name: l.description.trim().slice(0, 120), kind, unit, impact }).onConflictDoNothing().returning();
-      if (!n) return { ...l, impact };
+      if (!n) return { ...l, impact: kind === 'mensal' ? l.impact ?? impact : impact };
       it = { id: n.id, name: n.name, kind, unit: n.unit, impact, active: true, unitCents: null, priceId: null, priceFrom: null };
       cat.push(it);
     } else if (!it.impact || (l.impact && l.impact !== it.impact)) await db.update(s.costItems).set({ impact, updatedAt: new Date() }).where(eq(s.costItems.id, it.id));
@@ -274,7 +279,8 @@ export async function learnCostLines(db: DbOrTx, tenantId: string, actorId: stri
       const [p] = await db.insert(s.costItemPrices).values({ tenantId, itemId: it.id, unitCents: l.unitCents, validFrom: on, createdBy: actorId }).returning({ id: s.costItemPrices.id });
       priceId = p!.id; it.unitCents = l.unitCents; it.priceId = priceId;
     }
-    return { ...l, unit, impact, costItemId: it.id, priceId, manual: false };
+    // O catálogo mensal mantém o padrão operacional; a linha preserva sua dedução ao alternar Quando.
+    return { ...l, unit, impact: kind === 'mensal' ? l.impact ?? impact : impact, costItemId: it.id, priceId, manual: false };
   };
   const capex: CostLine[] = [], opex: CostLine[] = [];
   for (const l of input.capex) capex.push(await learn('investimento', l));

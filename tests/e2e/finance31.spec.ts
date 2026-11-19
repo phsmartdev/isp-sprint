@@ -31,16 +31,21 @@ test('DRE em três colunas com soma exata e recomendação pela margem líquida 
   const st = saved.result.statement;
   expect(st.afterFrom).toBe(4);
   expect(st.total.net).toBe(saved.result.kpi ? st.total.net : null);
-  expect(saved.recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(71.06, 2);
+  expect(saved.recomendacao_viabilidade['margem_contrib_recomendada_%']).toBeCloseTo(24, 2); // margem contratual alvo combinada com o teto de payback (antes 71,06%)
 
   await page.goto(`/opportunities/${opp.id}`);
   const panel = page.getByRole('region', { name: /Viabilidade da venda/ }).or(page.locator('section[aria-labelledby="econ-sum"]')).first();
   await expect(panel).toBeVisible();
-  await panel.getByRole('button', { name: 'Memória de cálculo' }).click();
-  await expect(panel.getByText('Por mês (1–3, com amortização)')).toBeVisible();
-  await expect(panel.getByText('Por mês (4–12, sem amortização)')).toBeVisible();
-  await expect(panel.getByText('No contrato (12 meses)')).toBeVisible();
-  await expect(panel.getByRole('region', { name: 'Preço pela margem líquida (target seeking)' })).toContainText('71,06%');
-  await expect(panel.getByText('Parcela do investimento (P_inv)')).toBeVisible();
+  await expect(panel).toContainText('Margem de contribuição (1º mês)');
+  await expect(panel).toContainText('24%');
+  // cálculo avançado: preço pela margem líquida e memória de cálculo por cesta
+  await panel.getByRole('button', { name: 'Ver cálculo avançado' }).click();
+  const adv = page.getByRole('dialog', { name: 'Cálculo avançado' });
+  await expect(adv).toContainText('margem de contribuição 24%');
+  await expect(adv.getByRole('columnheader', { name: 'Por mês (1–3, com amortização)' })).toBeVisible();
+  await expect(adv.getByRole('columnheader', { name: 'Por mês (4–12, sem amortização)' })).toBeVisible();
+  await expect(adv.getByRole('columnheader', { name: 'No contrato (12 meses)' })).toBeVisible();
+  await adv.getByRole('button', { name: 'Mostrar Precificação (markup divisor, FINANCE-3.1)' }).click();
+  await expect(adv.getByRole('region', { name: 'Precificação (markup divisor, FINANCE-3.1)' })).toContainText('margem líquida');
   if (SHOTS) await panel.screenshot({ path: `${SHOTS}/finance31-dre.png` });
 });
