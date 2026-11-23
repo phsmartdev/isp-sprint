@@ -258,3 +258,47 @@ test('organograma: a Administração autoriza quem vê; a pessoa autorizada só 
   await page.goto('/times/organograma');
   await expect(page.getByText('Organograma restrito')).toBeVisible();
 });
+
+test('organograma: exportar em PNG e PDF o desenho inteiro, com a faixa da marca e sem botões', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/settings/users?visao=organograma');
+  await expect(page.getByRole('heading', { name: 'Organograma de acessos' })).toBeVisible();
+  const dl = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar organograma em PNG' }).click();
+  const file = await dl;
+  expect(file.suggestedFilename()).toMatch(/^organograma-crm-\d{4}-\d{2}-\d{2}\.png$/);
+  const path = await file.path();
+  const fs = await import('node:fs');
+  const buf = fs.readFileSync(path);
+  expect(buf.subarray(1, 4).toString()).toBe('PNG');
+  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+  expect(w).toBeGreaterThanOrEqual(960);
+  expect(h).toBeGreaterThan(400);
+  // não pode sair em branco: a faixa da marca (escura) no topo e cartões (claros) no desenho
+  const px = await page.evaluate(async (b64) => {
+    const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d')!; g.drawImage(img, 0, 0);
+    const top = g.getImageData(40, 40, 1, 1).data;
+    const all = g.getImageData(0, 0, c.width, c.height).data; const colors = new Set<number>();
+    for (let i = 0; i < all.length; i += 4 * 97) colors.add((all[i]! << 16) | (all[i + 1]! << 8) | all[i + 2]!);
+    return { top: [top[0], top[1], top[2]], colors: colors.size };
+  }, buf.toString('base64'));
+  expect(px.top[0]! + px.top[1]! + px.top[2]!).toBeLessThan(330);
+  expect(px.colors).toBeGreaterThan(20);
+  await expect(page.getByText('Organograma exportado em PNG')).toBeVisible();
+  // a tela não muda: zoom e botões continuam lá, a cópia fora da tela foi removida
+  await expect(page.locator('[aria-hidden="true"][style*="-100000px"]')).toHaveCount(0);
+  if (SHOTS) fs.copyFileSync(path, `${SHOTS}/organograma-export.png`);
+  // PDF: uma página com o mesmo desenho
+  const dl2 = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exportar organograma em PDF' }).click();
+  const pdf = await dl2;
+  expect(pdf.suggestedFilename()).toMatch(/^organograma-crm-\d{4}-\d{2}-\d{2}\.pdf$/);
+  const pb = fs.readFileSync(await pdf.path());
+  expect(pb.subarray(0, 5).toString()).toBe('%PDF-');
+  expect(pb.length).toBeGreaterThan(20_000); // a imagem do desenho está embutida
+  await expect(page.getByText('Organograma exportado em PDF')).toBeVisible();
+  if (SHOTS) fs.copyFileSync(await pdf.path(), `${SHOTS}/organograma-export.pdf`);
+});
