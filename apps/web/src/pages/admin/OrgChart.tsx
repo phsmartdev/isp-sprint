@@ -9,7 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Expand, GripVertical, Maximize2, Minus, Pencil, Plus, X } from 'lucide-react';
+import { Download, Expand, GripVertical, Maximize2, Minus, Pencil, Plus, X } from 'lucide-react';
 import type { AccessLevel, BusinessModule, ProfileKey } from '@isp/domain';
 import { api } from '../../lib/api';
 import { Hexagons, Logo } from '../../components/brand';
@@ -116,8 +116,69 @@ function TeamBox({ t, people, module, profiles, open, sel, edit, onDrop, functio
   );
 }
 
-/** Área com zoom: ajusta o organograma inteiro à tela (automático até a pessoa mexer no zoom), +/−, Ctrl+roda e tela cheia. */
-function ZoomViewport({ children, refitKey }: { children: ReactNode; refitKey: string }) {
+/**
+ * PNG ou PDF do organograma inteiro (não só o que cabe na tela), sem zoom, com a faixa da marca no topo.
+ * Monta uma cópia fora da tela (cabeçalho sem os botões + estrutura em 100%) e rasteriza com html-to-image.
+ */
+async function exportOrg(header: HTMLElement | null, content: HTMLElement, fileName: string, format: 'png' | 'pdf') {
+  const { toPng } = await import('html-to-image');
+  const bg = getComputedStyle(document.body).backgroundColor || '#F2F3F5';
+  const w = Math.max(content.offsetWidth + 64, 960);
+  const wrap = document.createElement('div');
+  wrap.setAttribute('aria-hidden', 'true');
+  Object.assign(wrap.style, { position: 'fixed', left: '-100000px', top: '0', width: `${w}px`, background: bg });
+  if (header) {
+    const h = header.cloneNode(true) as HTMLElement;
+    h.querySelectorAll('[data-export-hide]').forEach((n) => n.remove());
+    wrap.appendChild(h);
+  }
+  const body = document.createElement('div');
+  Object.assign(body.style, { padding: '32px', display: 'flex', justifyContent: 'center' });
+  const c = content.cloneNode(true) as HTMLElement;
+  c.style.transform = 'none';
+  c.querySelectorAll('[data-export-hide]').forEach((n) => n.remove());
+  body.appendChild(c);
+  wrap.appendChild(body);
+  const foot = document.createElement('p');
+  foot.textContent = `Exportado em ${new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}`;
+  Object.assign(foot.style, { padding: '0 32px 16px', fontSize: '11px', color: '#6B7280', textAlign: 'right' });
+  wrap.appendChild(foot);
+  document.body.appendChild(wrap);
+  try {
+    const hgt = wrap.offsetHeight;
+    const ratio = Math.max(1, Math.min(2, 16000 / Math.max(w, hgt))); // limite de tamanho do canvas do navegador
+    const opts = { pixelRatio: ratio, backgroundColor: bg, width: w, height: hgt, cacheBust: true, style: { position: 'static', left: '0', top: '0' } }; // na imagem, a cópia volta para a origem
+    let url: string;
+    try { url = await toPng(wrap, opts); } catch { url = await toPng(wrap, { ...opts, skipFonts: true }); } // fonte de outro domínio não embutida: usa a do sistema
+    const a = document.createElement('a');
+    if (format === 'pdf') {
+      // uma página do tamanho do desenho (CSS px → pt), com a imagem em 2x para ficar nítida na impressão
+      const { PDFDocument } = await import('pdf-lib');
+      const pdf = await PDFDocument.create();
+      pdf.setTitle('Organograma de acessos'); pdf.setCreator('BKT RevOps');
+      const img = await pdf.embedPng(url);
+      const pw = w * 0.75, ph = hgt * 0.75;
+      pdf.addPage([pw, ph]).drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+      const blob = new Blob([(await pdf.save()) as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+      url = URL.createObjectURL(blob);
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }
+    a.href = url; a.download = fileName.replace(/\.png$/, `.${format}`); a.click();
+  } finally { wrap.remove(); }
+}
+
+/** Área com zoom: ajusta o organograma inteiro à tela (automático até a pessoa mexer no zoom), +/−, Ctrl+roda, tela cheia e exportar PNG. */
+function ZoomViewport({ children, refitKey, exportHeader, exportName }: { children: ReactNode; refitKey: string; exportHeader?: React.RefObject<HTMLElement | null>; exportName?: string }) {
+  const toast = useToast();
+  const [exporting, setExporting] = useState<'png' | 'pdf' | null>(null);
+  const doExport = async (format: 'png' | 'pdf') => {
+    if (!inner.current || exporting) return;
+    setExporting(format);
+    const label = format.toUpperCase();
+    try { await exportOrg(exportHeader?.current ?? null, inner.current, exportName ?? 'organograma.png', format); toast({ tone: 'success', message: `Organograma exportado em ${label}` }); }
+    catch { toast({ tone: 'error', message: `Não foi possível gerar o ${label}. Tente de novo ou reduza a visão a um módulo.` }); }
+    finally { setExporting(null); }
+  };
   const outer = useRef<HTMLDivElement>(null), inner = useRef<HTMLDivElement>(null), box = useRef<HTMLDivElement>(null);
   const [z, setZ] = useState(1), [size, setSize] = useState({ w: 0, h: 0 }), [manual, setManual] = useState(false), [full, setFull] = useState(false);
   const fitZ = useCallback(() => {
@@ -149,6 +210,7 @@ function ZoomViewport({ children, refitKey }: { children: ReactNode; refitKey: s
         <button type="button" className={btn} onClick={() => zoom(1.2)} aria-label="Aumentar zoom"><Plus className="h-4 w-4" /></button>
         <button type="button" className={btn} onClick={fit} aria-label="Ajustar à tela"><Maximize2 className="mr-1 h-4 w-4" />Ajustar</button>
         <button type="button" className={btn} onClick={toggleFull} aria-label={full ? 'Sair da tela cheia' : 'Tela cheia'}><Expand className="h-4 w-4" /></button>
+        {exportHeader !== undefined && (['png', 'pdf'] as const).map((f) => <button key={f} type="button" className={btn} onClick={() => void doExport(f)} disabled={!!exporting} aria-label={`Exportar organograma em ${f.toUpperCase()}`}><Download className="mr-1 h-4 w-4" />{exporting === f ? 'Gerando…' : f.toUpperCase()}</button>)}
       </div>
       <div ref={outer} onWheel={onWheel} className={clsx('overflow-auto', full ? 'h-full' : 'h-[calc(100vh-300px)] min-h-[520px]')} data-testid="org-viewport">
         <div className="mx-auto p-4" style={{ width: size.w * z + 32, height: size.h * z + 32 }}>
@@ -171,6 +233,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
   const q = useQuery({ queryKey: ['admin', 'org-chart', readOnly ? 'consulta' : 'edicao'], queryFn: () => api<Chart>(readOnly ? '/org-chart' : '/admin/org-chart'), retry: false });
   const [viewersOpen, setViewersOpen] = useState(false);
   const [module, setModule] = useState<BusinessModule | null>('crm');
+  const headerRef = useRef<HTMLElement>(null);
   const [sel, setSel] = useState<Sel | null>(null);
   const [edit, setEdit] = useState(false);
   const [topForm, setTopForm] = useState<{ name: string; title: string } | null>(null);
@@ -257,13 +320,13 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
   return (
     <div className="space-y-0">
       {/* faixa da marca: degradê grafite → azul só no fundo, símbolo como marca-d'água */}
-      <header className="relative overflow-hidden bg-gradient-to-r from-navy-2 via-navy to-primary px-6 py-4 text-white">
+      <header ref={headerRef} className="relative overflow-hidden bg-gradient-to-r from-navy-2 via-navy to-primary px-6 py-4 text-white">
         <Hexagons className="absolute inset-0" />
         <div className="relative flex flex-wrap items-end justify-between gap-4">
           <div>
             <span className="mb-2 flex items-center gap-3" aria-label="BKT RevOps"><Logo className="h-7" /><span className="border-l border-white/30 pl-3 font-display text-sm font-semibold text-white/80">RevOps</span></span>
             <h2 className="font-display text-xl font-bold tracking-wide">Organograma de acessos</h2>
-            <p className="mt-1 max-w-2xl text-sm text-white/80">Diretoria &gt; Gestão &gt; Liderança &gt; Operação, por time. Clique numa pessoa ou num time para ver o porquê e ajustar.</p>
+            <p className="mt-1 max-w-2xl text-sm text-white/80">Diretoria &gt; Gestão &gt; Liderança &gt; Operação, por time.<span data-export-hide> Clique numa pessoa ou num time para ver o porquê e ajustar.</span></p>
           </div>
           <div className="flex flex-col items-end gap-1 text-xs" aria-label="Legenda">
             <span className="flex flex-wrap justify-end gap-x-4 gap-y-1">{(['total', 'equipe', 'proprio', 'nenhum'] as AccessLevel[]).map((l) => <span key={l} className="flex items-center gap-1.5"><span className={clsx('h-3 w-3', LEVEL[l].bar, l === 'nenhum' && 'bg-white/20')} />{LEVEL[l].label}</span>)}</span>
@@ -271,18 +334,18 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
           </div>
         </div>
         <div className="relative mt-3 flex flex-wrap gap-1.5" role="group" aria-label="Módulo">
-          <button type="button" aria-pressed={!module} onClick={() => setModule(null)} className={clsx('border px-3 py-1.5 text-sm font-semibold', !module ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>Visão geral</button>
-          {d.modules.map((m) => <button key={m.key} type="button" aria-pressed={module === m.key} onClick={() => setModule(m.key)} className={clsx('border px-3 py-1.5 text-sm font-semibold', module === m.key ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>{m.label}</button>)}
-          <span className="ml-auto flex gap-1.5">
+          <button type="button" aria-pressed={!module} {...(module ? { 'data-export-hide': '' } : {})} onClick={() => setModule(null)} className={clsx('border px-3 py-1.5 text-sm font-semibold', !module ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>Visão geral</button>
+          {d.modules.map((m) => <button key={m.key} type="button" aria-pressed={module === m.key} {...(module !== m.key ? { 'data-export-hide': '' } : {})} onClick={() => setModule(m.key)} className={clsx('border px-3 py-1.5 text-sm font-semibold', module === m.key ? 'border-white bg-white text-ink' : 'border-white/30 text-white hover:border-white')}>{m.label}</button>)}
+          <span className="ml-auto flex gap-1.5" data-export-hide>
             {canEdit && <button type="button" onClick={() => setViewersOpen(true)} className="inline-flex items-center gap-1.5 border border-white/30 px-3 py-1.5 text-sm font-semibold text-white hover:border-white">Quem pode ver</button>}
             {edit && <button type="button" onClick={() => setNewTeam('')} className="inline-flex items-center gap-1.5 border border-white/30 px-3 py-1.5 text-sm font-semibold text-white hover:border-white"><Plus className="h-4 w-4" />Novo time</button>}
             {canEdit && <button type="button" aria-pressed={edit} onClick={() => setEdit((v) => !v)} className={clsx('inline-flex items-center gap-1.5 border px-3 py-1.5 text-sm font-semibold', edit ? 'border-lime bg-lime text-ink' : 'border-white/30 text-white hover:border-white')}>{edit ? 'Concluir ajustes' : 'Ajustar estrutura'}</button>}
             {readOnly && <span className="border border-white/30 px-3 py-1.5 text-sm text-white/85">Só consulta</span>}
           </span>
         </div>
-        {edit && <p className="relative mt-3 text-sm text-white/85">Arraste uma pessoa para outro time. Clique num time para definir diretoria, gestão (hierárquica ou funcional), liderança, operação e participantes; clique numa pessoa para os times, as liberações e o perfil. Tudo fica registrado na auditoria.</p>}
+        {edit && <p data-export-hide className="relative mt-3 text-sm text-white/85">Arraste uma pessoa para outro time. Clique num time para definir diretoria, gestão (hierárquica ou funcional), liderança, operação e participantes; clique numa pessoa para os times, as liberações e o perfil. Tudo fica registrado na auditoria.</p>}
         {newTeam !== null && (
-          <form className="relative mt-3 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); createTeam.mutate(); }}>
+          <form data-export-hide className="relative mt-3 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); createTeam.mutate(); }}>
             <label className="text-sm text-white/85" htmlFor="oc-nt">Nome do novo time<Input id="oc-nt" value={newTeam} onChange={(e) => setNewTeam(e.target.value)} className="mt-1 w-64 !border-white/30 !bg-white/10 !text-white" /></label>
             <Button type="submit" variant="primary" disabled={newTeam.trim().length < 2} loading={createTeam.isPending}>Criar time</Button><Button onClick={() => setNewTeam(null)}>Cancelar</Button>
           </form>
@@ -290,7 +353,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
       </header>
 
       <div className="grid border border-t-0 border-line bg-bg lg:grid-cols-[minmax(0,1fr)_auto]">
-        <ZoomViewport refitKey={`${d.teams.length}:${d.people.length}:${sel ? 1 : 0}`}>
+        <ZoomViewport refitKey={`${d.teams.length}:${d.people.length}:${sel ? 1 : 0}`} exportHeader={headerRef} exportName={`organograma-${module ? (d.modules.find((m) => m.key === module)?.label ?? module) : 'visao-geral'}-${new Date().toISOString().slice(0, 10)}.png`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '-').toLowerCase()}>
           <div className="flex flex-col items-center">
             {/* topo da estrutura (quem encabeça), editável */}
             {topForm ? (
@@ -303,7 +366,7 @@ export function OrgChart({ readOnly = false }: { readOnly?: boolean }) {
               <div className="relative min-w-[280px] overflow-hidden border-l-4 border-primary bg-ink px-6 py-3.5 text-white shadow-card" data-testid="org-top">
                 <p className="font-display text-base font-bold tracking-wide">{d.top.name ?? 'Defina quem encabeça a estrutura'}</p>
                 {d.top.title && <p className="text-sm text-white/75">{d.top.title}</p>}
-                {canEdit && <button type="button" onClick={() => setTopForm({ name: d.top.name ?? '', title: d.top.title ?? '' })} aria-label="Editar o topo da estrutura" className="absolute right-2 top-2 p-1 text-white/60 hover:text-white"><Pencil className="h-3.5 w-3.5" /></button>}
+                {canEdit && <button type="button" data-export-hide onClick={() => setTopForm({ name: d.top.name ?? '', title: d.top.title ?? '' })} aria-label="Editar o topo da estrutura" className="absolute right-2 top-2 p-1 text-white/60 hover:text-white"><Pencil className="h-3.5 w-3.5" /></button>}
               </div>
             )}
             <VLine />
