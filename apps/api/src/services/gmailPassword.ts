@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer';
 
 export type ImapMsg = { uid: number; emailId: string; threadId: string; labels: string[]; internalDate: Date; raw: Buffer };
 export type ImapFetch = { uidValidity: string; lastUid: number; messages: ImapMsg[] };
-export type OutMail = { from: string; fromName?: string | null; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null };
+export type OutMail = { from: string; fromName?: string | null; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: { filename: string; content: Buffer; contentType: string; cid?: string }[]; inReplyTo?: string | null; references?: string | null };
 export type GmailPasswordGateway = {
   verify(user: string, pass: string): Promise<void>;
   fetch(user: string, pass: string, opts: { since: Date; afterUid?: number; uidValidity?: string; max: number }): Promise<ImapFetch>;
@@ -95,7 +95,7 @@ const realGateway: GmailPasswordGateway = {
   async send(user, pass, m) {
     const t = nodemailer.createTransport({ ...SMTP, auth: { user, pass }, connectionTimeout: 15_000, socketTimeout: 30_000 });
     try {
-      const info = await t.sendMail({ from: m.fromName ? { name: m.fromName, address: m.from } : m.from, to: m.to, cc: m.cc?.length ? m.cc : undefined, subject: m.subject, text: m.text, inReplyTo: m.inReplyTo ?? undefined, references: m.references ?? undefined });
+      const info = await t.sendMail({ from: m.fromName ? { name: m.fromName, address: m.from } : m.from, to: m.to, cc: m.cc?.length ? m.cc : undefined, subject: m.subject, text: m.text, html: m.html, attachments: m.attachments, inReplyTo: m.inReplyTo ?? undefined, references: m.references ?? undefined });
       return { messageId: String(info.messageId) };
     } catch (e) { throw friendly(e); }
   },
