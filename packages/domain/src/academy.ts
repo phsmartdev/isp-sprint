@@ -228,3 +228,104 @@ export function certificateWorkload(lessons: readonly { kind: ContentKind; durat
   const done = lessons.filter((l) => l.done && l.kind === 'youtube_video');
   return { seconds: done.reduce((t, l) => t + (l.durationSeconds ?? 0), 0), lessons: done.length };
 }
+
+// ------------------------------------------------------------------ prova da trilha
+/**
+ * Prova da trilha (opcional): perguntas de múltipla escolha com uma alternativa certa e uma explicação (a indicação da
+ * resposta). Fica nas regras da versão, então passa pela mesma aprovação. Com prova, a trilha só conclui (e o certificado
+ * só sai) com as aulas obrigatórias assistidas e a nota mínima atingida.
+ */
+export type QuizQuestion = { id: string; text: string; options: string[]; correct: number; explanation: string | null };
+export type TrackQuiz = { passPct: number; maxAttempts: number | null; questions: QuizQuestion[] };
+export const QUIZ_MAX_QUESTIONS = 50;
+export const QUIZ_MIN_OPTIONS = 2;
+export const QUIZ_MAX_OPTIONS = 6;
+export const QUIZ_DEFAULT_PASS_PCT = 70;
+export const QUIZ_DEFAULT_ATTEMPTS = 3;
+/** Letra da alternativa: 0 → A. */
+export const optionLetter = (i: number) => String.fromCharCode(65 + i);
+
+export function quizErrors(q: TrackQuiz): string[] {
+  const e: string[] = [];
+  if (!q.questions.length) e.push('A prova precisa de ao menos uma pergunta.');
+  if (q.questions.length > QUIZ_MAX_QUESTIONS) e.push(`A prova aceita até ${QUIZ_MAX_QUESTIONS} perguntas.`);
+  if (!Number.isInteger(q.passPct) || q.passPct < 1 || q.passPct > 100) e.push('A nota mínima vai de 1% a 100%.');
+  if (q.maxAttempts !== null && (!Number.isInteger(q.maxAttempts) || q.maxAttempts < 1)) e.push('Informe ao menos uma tentativa (ou deixe ilimitado).');
+  q.questions.forEach((x, i) => {
+    const n = `Pergunta ${i + 1}`;
+    if (!x.text.trim()) e.push(`${n}: escreva o enunciado.`);
+    const opts = x.options.map((o) => o.trim());
+    if (opts.length < QUIZ_MIN_OPTIONS || opts.length > QUIZ_MAX_OPTIONS) e.push(`${n}: use de ${QUIZ_MIN_OPTIONS} a ${QUIZ_MAX_OPTIONS} alternativas.`);
+    if (opts.some((o) => !o)) e.push(`${n}: há alternativa em branco.`);
+    if (new Set(opts.map((o) => o.toLowerCase())).size !== opts.length) e.push(`${n}: há alternativas repetidas.`);
+    if (!Number.isInteger(x.correct) || x.correct < 0 || x.correct >= opts.length) e.push(`${n}: marque a alternativa certa.`);
+  });
+  if (new Set(q.questions.map((x) => x.id)).size !== q.questions.length) e.push('Há perguntas com a mesma identificação.');
+  return e;
+}
+
+export type QuizAnswers = Record<string, number>;
+export type QuizGrade = { correct: number; total: number; pct: number; passed: boolean; results: { questionId: string; chosen: number | null; right: boolean }[] };
+/** Corrige: pergunta sem resposta conta como errada; aprova com acertos ÷ total ≥ nota mínima (sem arredondar a favor). */
+export function gradeQuiz(q: TrackQuiz, answers: QuizAnswers): QuizGrade {
+  const results = q.questions.map((x) => {
+    const a = answers[x.id];
+    const chosen = Number.isInteger(a) && a! >= 0 && a! < x.options.length ? a! : null;
+    return { questionId: x.id, chosen, right: chosen === x.correct };
+  });
+  const correct = results.filter((r) => r.right).length, total = q.questions.length;
+  return { correct, total, pct: total ? Math.round((correct / total) * 100) : 0, passed: total > 0 && correct * 100 >= q.passPct * total, results };
+}
+
+/** Situação da pessoa na prova: tentativas usadas e restantes, melhor nota, se já passou e se pode tentar. */
+export function quizStatus(q: TrackQuiz, attempts: readonly { pct: number; passed: boolean }[]) {
+  const used = attempts.length;
+  const passed = attempts.some((a) => a.passed);
+  const best = used ? Math.max(...attempts.map((a) => a.pct)) : null;
+  const left = q.maxAttempts === null ? null : Math.max(0, q.maxAttempts - used);
+  return { used, left, best, passed, canTry: !passed && (left === null || left > 0) };
+}
+
+/** A prova como a pessoa vê antes de responder: sem a alternativa certa e sem a explicação. */
+export const quizForLearner = (q: TrackQuiz) => ({ passPct: q.passPct, maxAttempts: q.maxAttempts, questions: q.questions.map((x) => ({ id: x.id, text: x.text, options: x.options })) });
+
+/**
+ * Perguntas coladas em texto → prova. Formato:
+ *   1. Enunciado            (número seguido de . ou ) abre a pergunta; linhas seguidas sem letra continuam o enunciado)
+ *   a) alternativa          (letra seguida de ) ou . ; um * antes da letra ou no fim marca a certa)
+ *   *b) alternativa certa
+ *   Resposta: B             (opcional: marca a certa pela letra, no lugar do *)
+ *   Explicação: texto       (opcional: a indicação da resposta mostrada na correção)
+ * Devolve as perguntas e os avisos de linhas que não entraram.
+ */
+export function parseQuizText(text: string, newId: () => string): { questions: QuizQuestion[]; warnings: string[] } {
+  const questions: QuizQuestion[] = [], warnings: string[] = [];
+  let cur: QuizQuestion | null = null;
+  const push = () => { if (cur) questions.push(cur); cur = null; };
+  for (const [n, raw] of text.replace(/\r/g, '').split('\n').entries()) {
+    const line = raw.trim();
+    if (!line) continue;
+    const qm = /^(?:quest[ãa]o\s*)?\d{1,3}\s*[.)\-–:]\s*(.+)$/i.exec(line);
+    const om = /^(\*)?\s*\(?([a-fA-F])\s*[).\-–]\s*(.+?)\s*(\*|\(x\)|\(correta\)|✓|✔)?$/i.exec(line);
+    const rm = /^(?:resposta|gabarito|correta)\s*[:\-–]\s*\(?([a-fA-F])\)?\b/i.exec(line);
+    const em = /^(?:explica[çc][ãa]o|justificativa|coment[áa]rio)\s*[:\-–]\s*(.+)$/i.exec(line);
+    if (om && cur && (cur as QuizQuestion).options.length < QUIZ_MAX_OPTIONS && om[2]!.toLowerCase().charCodeAt(0) - 97 === (cur as QuizQuestion).options.length) {
+      const c = cur as QuizQuestion;
+      if (om[1] || om[4]) c.correct = c.options.length;
+      c.options.push(om[3]!.trim());
+    } else if (rm && cur) {
+      (cur as QuizQuestion).correct = rm[1]!.toLowerCase().charCodeAt(0) - 97;
+    } else if (em && cur) {
+      (cur as QuizQuestion).explanation = em[1]!.trim();
+    } else if (qm) {
+      push();
+      cur = { id: newId(), text: qm[1]!.trim(), options: [], correct: -1, explanation: null };
+    } else if (cur && !(cur as QuizQuestion).options.length) {
+      (cur as QuizQuestion).text += ` ${line}`;
+    } else if (cur && (cur as QuizQuestion).explanation) {
+      (cur as QuizQuestion).explanation += ` ${line}`;
+    } else warnings.push(`Linha ${n + 1} não entrou: “${line.slice(0, 60)}”`);
+  }
+  push();
+  return { questions, warnings };
+}

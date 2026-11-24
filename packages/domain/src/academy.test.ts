@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   creditIntervals, emptyTracker, enrollmentStatus, freshParts, isoDurationSeconds, lessonDone, lockedLessons, mergeIntervals, parseYoutube,
-  structureErrors, trackProgress, trackSample, watchPct, type LessonState, type PlayerSample,
+  structureErrors, trackProgress, trackSample, watchPct, gradeQuiz, quizErrors, quizForLearner, quizStatus, parseQuizText, type LessonState, type PlayerSample, type TrackQuiz,
 } from './academy';
 
 describe('YouTube: links e códigos', () => {
@@ -103,5 +103,58 @@ describe('certificado e anotações', () => {
     expect(fmtTimecode(187)).toBe('3:07');
     expect(fmtTimecode(3725)).toBe('1:02:05');
     expect(academyCertificateCode(2026, 7)).toBe('ACD-2026-000007');
+  });
+});
+
+describe('prova da trilha', () => {
+  const q: TrackQuiz = { passPct: 70, maxAttempts: 2, questions: [
+    { id: 'a', text: 'Um?', options: ['x', 'y'], correct: 0, explanation: null },
+    { id: 'b', text: 'Dois?', options: ['x', 'y', 'z'], correct: 2, explanation: 'Porque sim.' },
+    { id: 'c', text: 'Três?', options: ['x', 'y'], correct: 1, explanation: null },
+  ] };
+  it('corrige: sem resposta ou fora das alternativas conta como errada; aprova sem arredondar a favor', () => {
+    expect(gradeQuiz(q, { a: 0, b: 2, c: 1 })).toMatchObject({ correct: 3, pct: 100, passed: true });
+    const two = gradeQuiz(q, { a: 0, b: 2, c: 0 });
+    expect(two).toMatchObject({ correct: 2, pct: 67, passed: false }); // 66,7% < 70%
+    expect(gradeQuiz({ ...q, passPct: 66 }, { a: 0, b: 2 })).toMatchObject({ correct: 2, passed: true });
+    expect(gradeQuiz(q, { a: 9, b: 2 }).results.map((r) => r.chosen)).toEqual([null, 2, null]);
+  });
+  it('confere a prova antes do envio', () => {
+    expect(quizErrors(q)).toEqual([]);
+    expect(quizErrors({ ...q, questions: [] })).toContain('A prova precisa de ao menos uma pergunta.');
+    const bad = quizErrors({ ...q, questions: [{ id: 'a', text: ' ', options: ['x', 'X'], correct: 5, explanation: null }] });
+    expect(bad).toEqual(['Pergunta 1: escreva o enunciado.', 'Pergunta 1: há alternativas repetidas.', 'Pergunta 1: marque a alternativa certa.']);
+  });
+  it('tentativas: conta usadas e restantes, para depois de aprovado ou sem tentativas', () => {
+    expect(quizStatus(q, [])).toEqual({ used: 0, left: 2, best: null, passed: false, canTry: true });
+    expect(quizStatus(q, [{ pct: 33, passed: false }, { pct: 67, passed: false }])).toMatchObject({ left: 0, best: 67, canTry: false });
+    expect(quizStatus(q, [{ pct: 100, passed: true }])).toMatchObject({ passed: true, canTry: false });
+    expect(quizStatus({ ...q, maxAttempts: null }, Array(9).fill({ pct: 0, passed: false }))).toMatchObject({ left: null, canTry: true });
+  });
+  it('a versão de quem responde não leva o gabarito', () => {
+    expect(JSON.stringify(quizForLearner(q))).not.toMatch(/correct|explanation/);
+  });
+});
+
+describe('perguntas coladas em texto', () => {
+  it('lê enunciado, alternativas, a certa (* ou Resposta:) e a explicação', () => {
+    let i = 0;
+    const r = parseQuizText(`1. Quem deve seguir o Código
+de Ética?
+a) Só a diretoria
+*b) Todos os colaboradores
+c) Só o comercial
+Explicação: vale para todos.
+
+2) Presente acima do limite:
+a) Aceitar
+b) Recusar e comunicar
+Resposta: B
+solto aqui`, () => `q${++i}`);
+    expect(r.questions).toEqual([
+      { id: 'q1', text: 'Quem deve seguir o Código de Ética?', options: ['Só a diretoria', 'Todos os colaboradores', 'Só o comercial'], correct: 1, explanation: 'vale para todos.' },
+      { id: 'q2', text: 'Presente acima do limite:', options: ['Aceitar', 'Recusar e comunicar'], correct: 1, explanation: null },
+    ]);
+    expect(r.warnings).toHaveLength(1);
   });
 });

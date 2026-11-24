@@ -31,7 +31,7 @@ function loadYT(): Promise<YTNamespace> {
   return loading;
 }
 
-export type BeatResult = { duplicate: boolean; credited?: number; watchedSeconds: number; pct: number; done: boolean; minPct: number; durationSeconds?: number | null; track?: { pct: number; complete: boolean; nextLessonId: string | null } };
+export type BeatResult = { duplicate: boolean; credited?: number; watchedSeconds: number; pct: number; done: boolean; minPct: number; durationSeconds?: number | null; track?: { pct: number; complete: boolean; nextLessonId: string | null; quizPending?: boolean } };
 
 const sessKey = (lessonId: string) => `academia:sessao:${lessonId}`;
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);

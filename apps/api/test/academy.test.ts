@@ -286,4 +286,88 @@ describe('Academia — Fase 1', () => {
     expect(anaPage.statusCode).toBe(200);
     expect(ok(await ana.get(`/academia/trilhas/${trackId}`)).json().courses[0].modules[0].lessons).toHaveLength(2);
   });
+
+  it('prova: salva rascunho, bloqueia o envio incompleta, libera após as aulas, corrige sem vazar o gabarito, limita tentativas, conclui e põe a nota no certificado', async () => {
+    const t = ok(await ana.post('/academia/trilhas', trackBody({ title: `Código de Ética ${st}` })), 201).json().id as string;
+    let ed = ok(await ana.get(`/academia/trilhas/${t}/editor`)).json();
+    let rv = ok(await ana.put(`/academia/trilhas/${t}/estrutura`, { rowVersion: ed.track.rowVersion, courses: [{ title: 'Código', modules: [{ title: 'Vídeo', lessons: [{ contentId: contents[V1], required: true }] }] }] })).json().rowVersion;
+    // rascunho incompleto salva, mas não deixa enviar
+    const draft = { passPct: 70, maxAttempts: 2, questions: [{ id: 'q1', text: 'Pergunta sem gabarito', options: ['A', ''], correct: -1, explanation: null }] };
+    const d1 = ok(await ana.put(`/academia/trilhas/${t}/prova`, { rowVersion: rv, quiz: draft })).json();
+    expect(d1.errors.length).toBeGreaterThan(0);
+    rv = d1.rowVersion;
+    expect(ok(await ana.get(`/academia/trilhas/${t}/editor`)).json().errors.some((e: string) => e.startsWith('Prova —'))).toBe(true);
+    expect((await ana.post(`/academia/trilhas/${t}/enviar`, {})).statusCode).toBe(422);
+    expect((await lucas.put(`/academia/trilhas/${t}/prova`, { rowVersion: rv, quiz: null })).statusCode).toBe(403);
+    const quiz = { passPct: 70, maxAttempts: 2, questions: [
+      { id: 'q1', text: 'Quem deve seguir o Código?', options: ['Só a diretoria', 'Todos os colaboradores', 'Só o comercial'], correct: 1, explanation: 'O Código vale para todos.' },
+      { id: 'q2', text: 'Presente de fornecedor acima do limite:', options: ['Aceitar', 'Recusar e comunicar'], correct: 1, explanation: 'Recuse e comunique ao gestor.' },
+      { id: 'q3', text: 'Canal para denúncias é:', options: ['Anônimo e sem retaliação', 'Só presencial'], correct: 0, explanation: null },
+    ] };
+    rv = ok(await ana.put(`/academia/trilhas/${t}/prova`, { rowVersion: rv, quiz })).json().rowVersion;
+    ed = ok(await ana.get(`/academia/trilhas/${t}/editor`)).json();
+    expect(ed.errors).toEqual([]);
+    expect(ed.track.quiz.questions).toHaveLength(3);
+    const v = ok(await ana.post(`/academia/trilhas/${t}/enviar`, {})).json();
+    ok(await carlos.post(`/academia/versoes/${v.id}/decidir`, { decision: 'aprovar' }));
+    expect(ok(await ana.get(`/academia/trilhas/${t}/editor`)).json().changed).toBe(false);
+
+    ok(await lucas.post(`/academia/trilhas/${t}/inscrever`));
+    // antes das aulas: prova trancada, sem perguntas
+    let pv = ok(await lucas.get(`/academia/trilhas/${t}/prova`)).json();
+    expect(pv).toMatchObject({ available: false, quiz: { total: 3, questions: [], passPct: 70, maxAttempts: 2 }, status: { used: 0, canTry: true } });
+    expect((await lucas.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 1, q3: 0 } })).statusCode).toBe(422);
+    // assiste à aula: as aulas acabam, mas a trilha só conclui com a prova
+    const L = ok(await lucas.get(`/academia/trilhas/${t}`)).json().courses[0].modules[0].lessons[0].id;
+    const sess = ok(await lucas.post(`/academia/trilhas/${t}/aulas/${L}/sessao`, { clientSessionId: `prova-${st}` })).json();
+    await elapse(sess.sessionId, 120);
+    const b = ok(await lucas.post(`/academia/sessoes/${sess.sessionId}/batida`, { seq: 1, intervals: [[0, 100]], position: 100, ended: true })).json();
+    expect(b.track).toMatchObject({ pct: 100, complete: false, quizPending: true });
+    let page = ok(await lucas.get(`/academia/trilhas/${t}`)).json();
+    expect(page.me.completedAt).toBeNull();
+    expect(page.certificate.issued).toBeNull();
+    expect(page.quiz).toMatchObject({ questions: 3, available: true, used: 0, canTry: true, passed: false });
+    expect((await lucas.get(`/academia/trilhas/${t}/certificado`)).statusCode).toBe(422);
+    // as perguntas chegam sem o gabarito nem a explicação
+    pv = ok(await lucas.get(`/academia/trilhas/${t}/prova`)).json();
+    expect(pv.quiz.questions).toHaveLength(3);
+    const raw = JSON.stringify(pv.quiz.questions);
+    expect(raw).not.toContain('correct');
+    expect(raw).not.toContain('O Código vale para todos');
+    // precisa responder tudo
+    expect((await lucas.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1 } })).statusCode).toBe(422);
+    // 1 de 3 (33%): reprova; mostra o que errou, mas não o gabarito (ainda tem tentativa)
+    const r1 = ok(await lucas.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 0, q3: 1 } })).json();
+    expect(r1).toMatchObject({ result: { correct: 1, total: 3, pct: 33, passed: false }, status: { used: 1, left: 1, canTry: true }, completed: false, review: { revealed: false } });
+    expect(r1.review.questions.map((q: { right: boolean }) => q.right)).toEqual([true, false, false]);
+    expect(JSON.stringify(r1.review)).not.toContain('explanation');
+    // 3 de 3: aprova, conclui e revela gabarito com as explicações
+    const r2 = ok(await lucas.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 1, q3: 0 } })).json();
+    expect(r2).toMatchObject({ result: { pct: 100, passed: true }, status: { passed: true, canTry: false }, completed: true, review: { revealed: true } });
+    expect(r2.review.questions[1]).toMatchObject({ correct: 1, explanation: 'Recuse e comunique ao gestor.' });
+    expect((await lucas.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 1, q3: 0 } })).statusCode).toBe(422); // já aprovado
+    page = ok(await lucas.get(`/academia/trilhas/${t}`)).json();
+    expect(page.me.status).toBe('concluida');
+    expect(page.certificate.issued).toMatchObject({ scorePct: 100, lessons: 1, seconds: 100 });
+    expect(ok(await mariana.get(`/academia/certificados/verificar/${page.certificate.issued.code}`)).json()).toMatchObject({ valid: true, scorePct: 100 });
+    const pdf = ok(await lucas.get(`/academia/trilhas/${t}/certificado`));
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+
+    // tentativas esgotadas: Ana erra duas vezes; a correção revela o gabarito e não aceita mais entregas
+    ok(await ana.post(`/academia/trilhas/${t}/inscrever`));
+    const sa = ok(await ana.post(`/academia/trilhas/${t}/aulas/${L}/sessao`, { clientSessionId: `prova-ana-${st}` })).json();
+    await elapse(sa.sessionId, 120);
+    ok(await ana.post(`/academia/sessoes/${sa.sessionId}/batida`, { seq: 1, intervals: [[0, 100]], position: 100, ended: true }));
+    ok(await ana.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 0, q2: 0, q3: 1 } }));
+    const a2 = ok(await ana.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 0, q3: 1 } })).json();
+    expect(a2).toMatchObject({ result: { pct: 33, passed: false }, status: { used: 2, left: 0, canTry: false }, review: { revealed: true } });
+    expect((await ana.post(`/academia/trilhas/${t}/prova`, { answers: { q1: 1, q2: 1, q3: 0 } })).statusCode).toBe(422);
+    expect(ok(await ana.get(`/academia/trilhas/${t}/prova`)).json()).toMatchObject({ quiz: { questions: [] }, status: { canTry: false }, review: { revealed: true } });
+    expect(ok(await ana.get(`/academia/trilhas/${t}`)).json().me.completedAt).toBeNull();
+
+    // acompanhamento: nota, tentativas e aprovação por pessoa
+    const c = ok(await carlos.get(`/academia/acompanhamento?trilha=${t}`)).json();
+    expect(c.people.find((p: { name: string }) => p.name === 'Lucas Lima')).toMatchObject({ status: 'concluida', quiz: { attempts: 2, best: 100, passed: true, passPct: 70 } });
+    expect(c.people.find((p: { name: string }) => p.name === 'Ana Souza')?.quiz).toMatchObject({ attempts: 2, best: 33, passed: false });
+  });
 });

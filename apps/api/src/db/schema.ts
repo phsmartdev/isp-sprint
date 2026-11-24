@@ -7750,6 +7750,8 @@ export const academyTracks = pgTable('academy_tracks', {
   certificate: boolean('certificate').notNull().default(false),
   validityMonths: integer('validity_months'),
   recycleMonths: integer('recycle_months'),
+  /** prova ao final (cópia de trabalho): perguntas, alternativa certa, explicação, nota mínima e tentativas; vai para a versão nas regras */
+  quiz: jsonb('quiz').$type<Record<string, unknown>>(),
   status: text('status').notNull().default('rascunho'),
   currentVersionId: uuid('current_version_id'),
   createdBy: uuid('created_by').references(() => users.id),
@@ -7945,10 +7947,27 @@ export const academyCertificates = pgTable('academy_certificates', {
   title: text('title').notNull(),
   seconds: integer('seconds').notNull(),
   lessons: integer('lessons').notNull(),
+  /** nota na prova (melhor tentativa aprovada), quando a trilha tem prova */
+  scorePct: integer('score_pct'),
   issuedOn: date('issued_on', { mode: 'string' }).notNull(),
   data: bytea('data').notNull(),
   createdAt: createdAt(),
 }, (t) => ({ one: uniqueIndex('academy_certificates_user_uq').on(t.trackId, t.userId), code: uniqueIndex('academy_certificates_code_uq').on(t.tenantId, t.code) }));
+
+/** Tentativa na prova da trilha: respostas, acertos, nota e aprovação, presa à versão em que a pessoa está. Só acrescentada. */
+export const academyQuizAttempts = pgTable('academy_quiz_attempts', {
+  id: id(),
+  tenantId: tenantId(),
+  trackId: uuid('track_id').notNull().references(() => academyTracks.id),
+  versionId: uuid('version_id').notNull().references(() => academyTrackVersions.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  answers: jsonb('answers').$type<Record<string, number>>().notNull(),
+  correct: integer('correct').notNull(),
+  total: integer('total').notNull(),
+  scorePct: integer('score_pct').notNull(),
+  passed: boolean('passed').notNull(),
+  createdAt: createdAt(),
+}, (t) => ({ mine: index('academy_quiz_attempts_user_idx').on(t.trackId, t.userId, t.versionId), pct: check('academy_quiz_attempts_pct_ck', sql`score_pct between 0 and 100`) }));
 
 /** Anotação pessoal numa aula, presa a um ponto do vídeo (segundos). Só a própria pessoa vê. */
 export const academyNotes = pgTable('academy_notes', {
