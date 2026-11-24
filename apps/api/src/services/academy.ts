@@ -5,7 +5,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import {
   audienceAllows, effectiveMinPct, enrollmentStatus, lockedLessons, playableState, snapshotLessons, trackProgress,
-  type Audience, type ContentState, type LessonState, type ProgressMethod, type TrackSnapshot, type Viewer,
+  type Audience, type ContentState, type LessonState, type ProgressMethod, type TrackQuiz, type TrackSnapshot, type Viewer,
 } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import type { AuthContext } from '../http/context';
@@ -20,12 +20,26 @@ export type TrackMeta = {
   title: string; description: string | null; mode: string; level: string; workloadMinutes: number | null; dueDays: number | null;
   minWatchPct: number; progressMethod: ProgressMethod; sequential: boolean; objectives: string[]; competencies: string[];
   prerequisiteIds: string[]; certificate: boolean; validityMonths: number | null; recycleMonths: number | null;
+  /** prova ao final; ausente nas versões sem prova (e nas anteriores a ela) */
+  quiz?: TrackQuiz | null;
 };
 export const metaOf = (t: TrackRow): TrackMeta => ({
   title: t.title, description: t.description, mode: t.mode, level: t.level, workloadMinutes: t.workloadMinutes, dueDays: t.dueDays,
   minWatchPct: t.minWatchPct, progressMethod: t.progressMethod as ProgressMethod, sequential: t.sequential, objectives: t.objectives, competencies: t.competencies,
   prerequisiteIds: t.prerequisiteIds, certificate: t.certificate, validityMonths: t.validityMonths, recycleMonths: t.recycleMonths,
+  // só quando há prova: assim as versões já publicadas sem prova não parecem “alteradas”
+  ...(t.quiz ? { quiz: t.quiz as unknown as TrackQuiz } : {}),
 });
+/** Tentativas da pessoa na prova da versão em que está, da mais antiga para a mais nova. */
+export const quizAttemptsOf = (db: DbOrTx, userId: string, trackId: string, versionId: string) =>
+  db.select().from(s.academyQuizAttempts).where(and(eq(s.academyQuizAttempts.trackId, trackId), eq(s.academyQuizAttempts.userId, userId), eq(s.academyQuizAttempts.versionId, versionId))).orderBy(asc(s.academyQuizAttempts.createdAt));
+/** A trilha conclui com as aulas obrigatórias assistidas e, se houver prova, a aprovação nela. */
+export async function quizPassed(db: DbOrTx, userId: string, trackId: string, versionId: string, meta: TrackMeta) {
+  if (!meta.quiz) return true;
+  const [x] = await db.select({ id: s.academyQuizAttempts.id }).from(s.academyQuizAttempts)
+    .where(and(eq(s.academyQuizAttempts.trackId, trackId), eq(s.academyQuizAttempts.userId, userId), eq(s.academyQuizAttempts.versionId, versionId), eq(s.academyQuizAttempts.passed, true))).limit(1);
+  return !!x;
+}
 export const audOf = (t: TrackRow): Audience => ({ visibility: t.visibility as Audience['visibility'], teamIds: t.teamIds, costCenterIds: t.costCenterIds, profiles: t.profiles, userIds: t.userIds });
 
 /** Gere a Academia (cria trilhas): quem cria playbooks — liderança de time, Supervisão, Gerência, Diretoria. */

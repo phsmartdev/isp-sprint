@@ -6,7 +6,7 @@ import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { AlertTriangle, Award, Check, ChevronLeft, ChevronRight, Clock, ExternalLink, Lock, Pencil, Play, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Award, Check, ChevronLeft, ChevronRight, ClipboardCheck, Clock, ExternalLink, Lock, Pencil, Play, Search, Trash2 } from 'lucide-react';
 import { CONTENT_STATE_LABELS, ENROLLMENT_STATUS_LABELS, TRACK_LEVEL_LABELS, TRACK_MODE_LABELS, fmtDuration, fmtTimecode, fmtWorkload, type ContentState, type EnrollmentStatus, type TrackLevel, type TrackMode } from '@isp/domain';
 import { api, qs } from '../../../lib/api';
 import { fmtDate } from '../../../lib/format';
@@ -117,9 +117,16 @@ type TrackPage = {
   prerequisites: { id: string; title: string; done: boolean }[];
   me: { enrolled: true; status: EnrollmentStatus; dueOn: string | null; source: string; completedAt: string | null; lastLessonId: string | null } | null;
   progress: { pct: number; doneRequired: number; totalRequired: number; unavailable: number }; nextLessonId: string | null; newerVersion: boolean;
-  certificate: { enabled: boolean; issued: { id: string; code: string; seconds: number; lessons: number; issuedOn: string } | null };
+  certificate: { enabled: boolean; issued: { id: string; code: string; seconds: number; lessons: number; scorePct: number | null; issuedOn: string } | null };
+  quiz: { questions: number; passPct: number; maxAttempts: number | null; available: boolean; used: number; left: number | null; best: number | null; passed: boolean; canTry: boolean } | null;
   notes: Note[];
 };
+const quizLink = (trackId: string) => `/playbooks/academia/trilhas/${trackId}/prova`;
+/** Situação da prova em uma linha, para o painel da trilha. */
+const quizLine = (q: NonNullable<TrackPage['quiz']>) => q.passed ? `Prova aprovada · nota ${q.best}%`
+  : !q.available ? `Prova final: libera depois das aulas obrigatórias (nota mínima ${q.passPct}%)`
+    : !q.canTry ? `Tentativas esgotadas · melhor nota ${q.best ?? 0}%. Fale com a curadoria da trilha.`
+      : `Prova final liberada · ${q.questions} pergunta(s), nota mínima ${q.passPct}%${q.left !== null ? ` · ${q.left} tentativa(s)` : ''}`;
 
 function Node({ l, enrolled, trackId }: { l: LessonView; enrolled: boolean; trackId: string }) {
   const icon = !l.available ? <AlertTriangle className="h-4 w-4" aria-hidden /> : l.done ? <Check className="h-4 w-4" aria-hidden /> : l.locked ? <Lock className="h-3.5 w-3.5" aria-hidden /> : l.kind === 'link' ? <ExternalLink className="h-3.5 w-3.5" aria-hidden /> : <Play className="h-3.5 w-3.5" aria-hidden />;
@@ -180,18 +187,21 @@ export function AcademyTrackPage() {
               <Bar pct={d.progress.pct} className="bg-white/15" />
               <p className="text-sm text-white/80">{d.progress.doneRequired} de {d.progress.totalRequired} aulas obrigatórias concluídas{d.progress.unavailable ? ` · ${d.progress.unavailable} indisponível(is) fora da conta` : ''}</p>
               {d.nextLessonId && <Button variant="primary" onClick={() => nav(`/playbooks/academia/trilhas/${id}/aulas/${d.nextLessonId}`)} icon={<Play className="h-4 w-4" />}>{d.progress.pct > 0 ? 'Continuar' : 'Começar'}</Button>}
+              {d.quiz && <p className="text-sm text-white/85" data-testid="quiz-line">{quizLine(d.quiz)}</p>}
+              {d.quiz?.available && d.quiz.canTry && <Button variant="primary" onClick={() => nav(quizLink(id))} icon={<ClipboardCheck className="h-4 w-4" />}>{d.quiz.used ? 'Tentar a prova de novo' : 'Fazer a prova'}</Button>}
+              {d.quiz && d.quiz.used > 0 && !d.quiz.canTry && <Link to={quizLink(id)} className="text-sm font-semibold text-white underline">Ver a correção</Link>}
               {d.me.completedAt && <p className="text-sm font-semibold">Concluída em {fmtDate(d.me.completedAt)}</p>}
               {d.certificate.issued && (
                 <a href={`/api/v1/academia/trilhas/${id}/certificado`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 border border-white/25 px-3 py-2 hover:bg-white/10" data-testid="certificate">
                   <Award className="h-6 w-6 shrink-0" aria-hidden />
-                  <span><span className="block font-semibold">Baixar certificado</span><span className="text-xs text-white/75">{fmtWorkload(d.certificate.issued.seconds)} · {d.certificate.issued.lessons} aula(s) · {d.certificate.issued.code}</span></span>
+                  <span><span className="block font-semibold">Baixar certificado</span><span className="text-xs text-white/75">{fmtWorkload(d.certificate.issued.seconds)} · {d.certificate.issued.lessons} aula(s){d.certificate.issued.scorePct != null ? ` · nota ${d.certificate.issued.scorePct}%` : ''} · {d.certificate.issued.code}</span></span>
                 </a>
               )}
-              {d.certificate.enabled && !d.me.completedAt && <p className="text-xs text-white/70">Ao concluir, você recebe o certificado com a carga horária das aulas que assistiu.</p>}
+              {d.certificate.enabled && !d.me.completedAt && <p className="text-xs text-white/70">{d.quiz ? `Ao assistir às aulas e ser aprovado na prova (nota mínima ${d.quiz.passPct}%), você recebe o certificado.` : 'Ao concluir, você recebe o certificado com a carga horária das aulas que assistiu.'}</p>}
             </>
           ) : (
             <>
-              <p className="text-sm text-white/80">Cada aula conclui com {t.minWatchPct}% assistido de verdade (o tempo pulado na barra não conta).</p>
+              <p className="text-sm text-white/80">Cada aula conclui com {t.minWatchPct}% assistido de verdade (o tempo pulado na barra não conta).{d.quiz ? ` No fim há uma prova de ${d.quiz.questions} pergunta(s), com nota mínima de ${d.quiz.passPct}%.` : ''}</p>
               {preMissing && <p className="text-sm text-white/80">Conclua antes: {d.prerequisites.filter((p) => !p.done).map((p) => p.title).join(', ')}.</p>}
               <Button variant="primary" loading={enroll.isPending} disabled={preMissing || t.archived} onClick={() => enroll.mutate()}>Inscrever-me</Button>
             </>
@@ -216,6 +226,14 @@ export function AcademyTrackPage() {
             </div>
           </div>
         ))}
+        {d.quiz && (
+          <div className="flex flex-wrap items-center gap-4 border border-line bg-surface px-5 py-4" data-testid="quiz-card">
+            <span className={clsx('flex h-10 w-10 shrink-0 items-center justify-center border-2', d.quiz.passed ? 'border-[#15803D] bg-[#15803D] text-white' : d.quiz.available ? 'border-primary text-primary' : 'border-line-strong text-muted')}>{d.quiz.passed ? <Check className="h-5 w-5" aria-hidden /> : d.quiz.available ? <ClipboardCheck className="h-5 w-5" aria-hidden /> : <Lock className="h-4 w-4" aria-hidden />}</span>
+            <div className="min-w-0 flex-1"><p className="text-xs text-muted">Etapa final</p><h2 className="font-display text-lg font-bold text-ink">Prova</h2><p className="text-sm text-text">{d.quiz.questions} pergunta(s) · nota mínima {d.quiz.passPct}% · {d.quiz.maxAttempts ? `${d.quiz.maxAttempts} tentativa(s)` : 'tentativas ilimitadas'}{d.quiz.used ? ` · melhor nota ${d.quiz.best}%` : ''}</p></div>
+            {d.me && d.quiz.available && (d.quiz.canTry ? <Button variant="primary" onClick={() => nav(quizLink(id))}>{d.quiz.used ? 'Tentar de novo' : 'Fazer a prova'}</Button> : <Link to={quizLink(id)} className="text-sm font-semibold text-primary hover:underline">Ver a correção</Link>)}
+            {!d.quiz.available && <span className="text-sm text-muted">Libera depois das aulas obrigatórias</span>}
+          </div>
+        )}
       </section>
       {!!d.notes.length && (
         <section aria-label="Minhas anotações" className="border border-line bg-surface">
@@ -326,7 +344,7 @@ function LessonPage() {
   const pct = live && !live.duplicate ? live.pct : d.progress.pct;
   const done = live?.done ?? d.progress.done;
   const trackPct = live?.track?.pct ?? d.track.progress.pct;
-  const onBeat = (b: BeatResult) => { setLive(b); if (b.done !== d.progress.done || b.track?.complete) void qc.invalidateQueries({ queryKey: ['academia', 'trilha', id] }); void qc.invalidateQueries({ queryKey: ['academia', 'minha'] }); };
+  const onBeat = (b: BeatResult) => { setLive(b); if (b.done !== d.progress.done || b.track?.complete || b.track?.quizPending) void qc.invalidateQueries({ queryKey: ['academia', 'trilha', id] }); void qc.invalidateQueries({ queryKey: ['academia', 'minha'] }); };
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <Breadcrumb items={[{ label: 'Playbooks', to: '/playbooks' }, { label: d.track.title, to: `/playbooks/academia/trilhas/${id}` }, { label: l.title }]} />
@@ -347,6 +365,7 @@ function LessonPage() {
               <p className="mt-1 text-xs text-muted">Trilha: <span className="num" data-testid="lesson-track-pct">{trackPct.toLocaleString('pt-BR')}%</span></p>
             </div>
           </div>
+          {live?.track?.quizPending && <Link to={quizLink(id)} className="flex items-center gap-3 border border-primary bg-primary-soft px-4 py-3 text-sm text-ink hover:border-primary" data-testid="quiz-pending"><ClipboardCheck className="h-5 w-5 shrink-0 text-primary" aria-hidden /><span><b>Aulas obrigatórias concluídas.</b> Faça a prova para concluir a trilha.</span><ChevronRight className="ml-auto h-4 w-4 text-primary" aria-hidden /></Link>}
           {!l.locked && l.available && l.videoId && <LessonNotes key={l.id} trackId={id} lessonId={l.id} initial={d.notes} control={control} canSeek />}
           {l.description && <p className="whitespace-pre-line text-sm text-text">{l.description}</p>}
           {!!d.materials.length && (

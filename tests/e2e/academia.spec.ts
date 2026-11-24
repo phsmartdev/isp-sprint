@@ -190,3 +190,104 @@ test('integrações: a tela abre com o cartão do YouTube (Academia) e a chave n
   await expect(page.getByRole('heading', { name: 'YouTube (Academia)' })).toBeVisible();
   await expect(page.getByText('Esta tela encontrou um erro')).toHaveCount(0);
 });
+
+test('academia: prova ao final — colar perguntas, aprovar, liberar após as aulas, reprovar, aprovar e receber o certificado com a nota', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.route('https://www.youtube.com/iframe_api', (r) => r.fulfill({ contentType: 'text/javascript', body: FAKE_IFRAME_API }));
+  const st = Date.now().toString(36).slice(-5);
+  const title = `Código de Ética E2E ${st}`;
+  const vid = `pv${st}a`.padEnd(11, 'x').slice(0, 11);
+
+  // 1) supervisão monta a trilha e a prova (colando as perguntas em texto)
+  await login(page, 'ana@yepnet.test');
+  await page.goto('/playbooks/academia/gestao/nova');
+  await page.getByLabel('Nome da trilha').fill(title);
+  await page.getByRole('button', { name: 'Criar e incluir vídeos' }).click();
+  await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
+  await page.getByLabel('Link do YouTube (vídeo ou playlist) ou link de apoio').fill(`https://www.youtube.com/watch?v=${vid}`);
+  await page.getByRole('button', { name: 'Incluir', exact: true }).click();
+  await page.getByRole('button', { name: 'Salvar estrutura' }).click();
+  await expect(page.getByText('Estrutura salva')).toBeVisible();
+  await page.getByTestId('quiz-on').check();
+  await page.getByRole('button', { name: 'Colar perguntas em texto' }).click();
+  await page.getByLabel('Texto das perguntas').fill(`1. Quem deve seguir o Código de Ética?
+a) Só a diretoria
+*b) Todos os colaboradores
+c) Só o time comercial
+Explicação: o Código vale para todos, em qualquer cargo.
+
+2. Ao receber um presente acima do limite, você deve:
+a) Aceitar e não contar
+b) Recusar e comunicar ao gestor
+Resposta: B
+Explicação: recuse com educação e registre com o gestor.
+
+3. O canal de denúncias é:
+*a) Confidencial, sem retaliação
+b) Só presencial`);
+  await expect(page.getByTestId('paste-summary')).toHaveText('3 pergunta(s) reconhecida(s)');
+  await page.getByRole('button', { name: 'Substituir as atuais' }).click();
+  await expect(page.getByTestId('quiz-question')).toHaveCount(3);
+  await page.getByLabel('Tentativas').selectOption('2');
+  await expect(page.getByText('3 pergunta(s) · aprova com 70% (3 de 3 acertos) · 2 tentativa(s)')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Enviar para aprovação' })).toBeDisabled(); // salve antes
+  await page.getByRole('button', { name: 'Salvar prova' }).click();
+  await expect(page.getByText('Prova salva')).toBeVisible();
+  await shot(page, 'prova-1-editor');
+  await page.getByRole('button', { name: 'Enviar para aprovação' }).click();
+  await expect(page.getByText(/Versão 1 enviada/)).toBeVisible();
+
+  // 2) Gerência publica
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/playbooks?aba=academia');
+  await page.getByRole('region', { name: 'Aguardando a sua decisão' }).getByRole('listitem').filter({ hasText: title }).getByRole('button', { name: 'Decidir' }).click();
+  await page.getByRole('button', { name: 'Aprovar e publicar' }).click();
+  await expect(page.getByText('Trilha publicada')).toBeVisible();
+
+  // 3) a pessoa assiste; ao fim das aulas a prova libera; reprova, depois aprova
+  await login(page, 'lucas@yepnet.test');
+  await page.goto('/playbooks?aba=trilhas');
+  await page.getByTestId('track-card').filter({ hasText: title }).click();
+  await expect(page.getByTestId('quiz-card')).toContainText('3 pergunta(s) · nota mínima 70% · 2 tentativa(s)');
+  await page.getByRole('button', { name: 'Inscrever-me' }).click();
+  await expect(page.getByTestId('quiz-line')).toContainText('libera depois das aulas obrigatórias');
+  await page.getByRole('button', { name: 'Começar' }).click();
+  await page.waitForFunction(() => !!(window as any).__yt?.p);
+  await page.evaluate(() => (window as any).__yt.p.play(2));
+  await expect(page.getByTestId('quiz-pending')).toBeVisible({ timeout: 25_000 });
+  await shot(page, 'prova-2-aula');
+  await page.getByTestId('quiz-pending').click();
+  await expect(page.getByRole('heading', { name: `Prova — ${title}` })).toBeVisible();
+  await expect(page.getByTestId('quiz-q')).toHaveCount(3);
+  const entregar = page.getByRole('button', { name: 'Entregar prova' });
+  await expect(entregar).toBeDisabled();
+  const q = page.getByTestId('quiz-q');
+  await q.nth(0).getByText('Só a diretoria').click();
+  await q.nth(1).getByText('Recusar e comunicar ao gestor').click();
+  await q.nth(2).getByText('Só presencial').click();
+  await entregar.click();
+  await expect(page.getByTestId('quiz-result')).toContainText('33%');
+  await expect(page.getByTestId('quiz-result')).toContainText('Abaixo da nota mínima.');
+  await expect(page.getByText('Explicação:')).toHaveCount(0); // ainda tem tentativa: sem gabarito
+  await shot(page, 'prova-3-reprovou');
+  await page.getByRole('button', { name: /Tentar de novo/ }).click();
+  await q.nth(0).getByText('Todos os colaboradores').click();
+  await q.nth(1).getByText('Recusar e comunicar ao gestor').click();
+  await q.nth(2).getByText('Confidencial, sem retaliação').click();
+  await page.getByRole('button', { name: 'Entregar prova' }).click();
+  await expect(page.getByTestId('quiz-result')).toContainText('100%');
+  await expect(page.getByTestId('quiz-result')).toContainText('Aprovado! Trilha concluída.');
+  await expect(page.getByText('o Código vale para todos, em qualquer cargo.')).toBeVisible();
+  await shot(page, 'prova-4-aprovou');
+  await page.getByRole('link', { name: 'Ver a trilha e baixar o certificado' }).click();
+  await expect(page.getByTestId('certificate')).toContainText('nota 100%');
+  await expect(page.getByTestId('quiz-line')).toHaveText('Prova aprovada · nota 100%');
+  await shot(page, 'prova-5-trilha');
+
+  // 4) liderança vê a nota no acompanhamento
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/playbooks?aba=academia');
+  await page.getByRole('region', { name: 'Acompanhamento' }).getByRole('button', { name: title }).click();
+  await expect(page.getByRole('table', { name: 'Pessoas na trilha' }).getByRole('row').filter({ hasText: 'Lucas Lima' }).getByTestId('follow-quiz')).toContainText('100% · aprovada');
+  await shot(page, 'prova-6-acompanhamento');
+});

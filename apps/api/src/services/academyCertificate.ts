@@ -16,7 +16,7 @@ const LINE = rgb(0xdc / 255, 0xe1 / 255, 0xe6 / 255);
 const SOFT = rgb(0xa9 / 255, 0xb4 / 255, 0xbf / 255);
 const WHITE = rgb(1, 1, 1);
 
-export async function academyCertificatePdf(c: { company: string; person: string; track: string; seconds: number; lessons: number; issuedOn: string; code: string; competencies: string[] }) {
+export async function academyCertificatePdf(c: { company: string; person: string; track: string; seconds: number; lessons: number; issuedOn: string; code: string; competencies: string[]; scorePct?: number | null }) {
   const doc = await PDFDocument.create();
   doc.setTitle(`Certificado ${c.code}`);
   doc.setAuthor(c.company);
@@ -33,7 +33,7 @@ export async function academyCertificatePdf(c: { company: string; person: string
   drawGrowthBadge(page, (SIDE - bs) / 2, H - 150, bs);
   const bl = 'Trilha concluída';
   page.drawText(bl, { x: (SIDE - bold.widthOfTextAtSize(bl, 18)) / 2, y: H - 340, size: 18, font: bold, color: WHITE });
-  const sub = `${c.lessons} aula(s) assistida(s)`;
+  const sub = c.scorePct != null ? `${c.lessons} aula(s) assistida(s) · prova aprovada` : `${c.lessons} aula(s) assistida(s)`;
   page.drawText(sub, { x: (SIDE - reg.widthOfTextAtSize(sub, 10)) / 2, y: H - 360, size: 10, font: reg, color: SOFT });
   page.drawRectangle({ x: 0, y: 0, width: SIDE, height: 76, color: NAVY_DARK });
   page.drawText('Código de verificação', { x: 36, y: 46, size: 9, font: reg, color: SOFT });
@@ -55,14 +55,14 @@ export async function academyCertificatePdf(c: { company: string; person: string
   }
 
   const [y, m, d] = c.issuedOn.split('-');
-  const boxes: [string, string][] = [['Carga horária', fmtWorkload(c.seconds)], ['Aulas concluídas', String(c.lessons)], ['Emitido em', `${d}/${m}/${y}`]];
-  const gap = 12, bw = (MAXW - gap * 2) / 3, by = 150, bh = 64;
+  const boxes: [string, string][] = [['Carga horária', fmtWorkload(c.seconds)], ['Aulas concluídas', String(c.lessons)], ...(c.scorePct != null ? [['Nota na prova', `${c.scorePct}%`] as [string, string]] : []), ['Emitido em', `${d}/${m}/${y}`]];
+  const gap = 12, bw = (MAXW - gap * (boxes.length - 1)) / boxes.length, by = 150, bh = 64;
   boxes.forEach(([k, v], i) => {
     const x = L + i * (bw + gap);
     page.drawRectangle({ x, y: by, width: bw, height: bh, borderColor: LINE, borderWidth: 1, color: WHITE });
     page.drawRectangle({ x, y: by + bh - 3, width: bw, height: 3, color: BLUE });
     page.drawText(k, { x: x + 14, y: by + bh - 22, size: 9, font: reg, color: MUTED });
-    const val = fit(bold, v, 20, bw - 28, 11);
+    const val = fit(bold, v, boxes.length > 3 ? 17 : 20, bw - 28, 11);
     page.drawText(val.t, { x: x + 14, y: by + 14, size: val.sz, font: bold, color: INK });
   });
 

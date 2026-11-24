@@ -8,7 +8,8 @@ import { z } from 'zod';
 import {
   MIN_WATCH_PCTS, PROGRESS_METHODS, academyCertificateCode, certificateWorkload, TRACK_LEVELS, TRACK_MODES, VISIBILITIES, audienceAllows, audienceErrors, creditIntervals, effectiveMinPct,
   isoAddDays, lessonDone, lockedLessons, parseYoutube, snapshotLessons, snapshotMinutes, structureErrors, trackProgress, youtubeThumb,
-  type ContentState, type Interval, type LessonState, type TrackSnapshot,
+  QUIZ_MAX_OPTIONS, QUIZ_MAX_QUESTIONS, gradeQuiz, quizErrors, quizForLearner, quizStatus,
+  type ContentState, type Interval, type LessonState, type QuizAnswers, type TrackQuiz, type TrackSnapshot,
 } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { conflict, forbidden, notFound, unprocessable } from '../http/errors';
@@ -23,7 +24,7 @@ import { playlistInfo, videoInfo, type VideoInfo } from '../services/youtube';
 import { academyCertificatePdf } from '../services/academyCertificate';
 import {
   audOf, canEditTrack, canManageAcademy, contentsById, decidesVersion, eligibleUserIds, followedUserIds, metaOf, peopleContext, progressOf,
-  markRead, stageFor, statusOf, trackEvent, usersWithProfiles, versionMeta, versionSnap, workingSnapshot, type TrackRow, type VersionRow,
+  markRead, quizAttemptsOf, quizPassed, stageFor, statusOf, trackEvent, usersWithProfiles, versionMeta, versionSnap, workingSnapshot, type TrackRow, type VersionRow,
 } from '../services/academy';
 
 const A = { tag: 'Academia', anyAuthenticated: true as const };
@@ -57,6 +58,29 @@ const StructureBody = z.object({
     })).max(60),
   })).max(40),
 });
+
+/** Prova: a forma é conferida aqui; o conteúdo incompleto pode ser salvo (rascunho) e só bloqueia o envio para aprovação. */
+const QuizBody = z.object({
+  passPct: z.number().int().min(1).max(100),
+  maxAttempts: z.number().int().min(1).max(50).nullable().default(null),
+  questions: z.array(z.object({
+    id: z.string().trim().min(1).max(40), text: z.string().max(1000), options: z.array(z.string().max(300)).max(QUIZ_MAX_OPTIONS),
+    correct: z.number().int().min(-1).max(QUIZ_MAX_OPTIONS), explanation: z.string().trim().max(2000).nullable().default(null),
+  })).max(QUIZ_MAX_QUESTIONS),
+});
+/** JSON com as chaves em ordem: o jsonb do Postgres reordena as chaves, então a comparação com a versão ignora a ordem. */
+const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
+const quizOf = (t: TrackRow) => (t.quiz ? (t.quiz as unknown as TrackQuiz) : null);
+type AttemptRow = typeof s.academyQuizAttempts.$inferSelect;
+/** Correção de uma tentativa para a tela: o que a pessoa marcou e se acertou; com `reveal`, a alternativa certa e a explicação. */
+const quizReview = (q: TrackQuiz, a: AttemptRow, reveal: boolean) => {
+  const g = gradeQuiz(q, a.answers);
+  return q.questions.map((x, i) => ({
+    id: x.id, text: x.text, options: x.options, chosen: g.results[i]!.chosen, right: g.results[i]!.right,
+    ...(reveal ? { correct: x.correct, explanation: x.explanation } : {}),
+  }));
+};
+const attemptView = (a: AttemptRow) => ({ id: a.id, correct: a.correct, total: a.total, pct: a.scorePct, passed: a.passed, at: a.createdAt });
 
 async function loadTrack(db: DbOrTx, auth: AuthContext, id: string) {
   const [t] = await db.select().from(s.academyTracks).where(and(eq(s.academyTracks.id, id), eq(s.academyTracks.tenantId, auth.tenantId)));
@@ -141,6 +165,9 @@ async function certificateFor(db: DbOrTx, auth: AuthContext, t: TrackRow, issue:
   if (!ls?.enr?.completedAt || !ls.meta.certificate) return null;
   const lessons = snapshotLessons(ls.snap).map((l) => { const st = ls.pr.byId.get(l.id)!; return { kind: l.kind, durationSeconds: st.durationSeconds, done: st.done }; });
   const w = certificateWorkload(lessons);
+  const passedAttempts = ls.meta.quiz ? (await quizAttemptsOf(db, auth.userId, t.id, ls.v.id)).filter((a) => a.passed) : [];
+  if (ls.meta.quiz && !passedAttempts.length) return null;
+  const scorePct = passedAttempts.length ? Math.max(...passedAttempts.map((a) => a.scorePct)) : null;
   const today = todayIn(auth.timezone), year = Number(today.slice(0, 4));
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`acd-cert:${auth.tenantId}:${year}`}))`);
@@ -150,13 +177,13 @@ async function certificateFor(db: DbOrTx, auth: AuthContext, t: TrackRow, issue:
     const code = academyCertificateCode(year, n + 1);
     const [u] = await tx.select({ name: s.users.name }).from(s.users).where(eq(s.users.id, auth.userId));
     const [tn] = await tx.select({ name: s.tenants.name }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId));
-    const pdf = await academyCertificatePdf({ company: tn?.name ?? '', person: u?.name ?? '', track: ls.meta.title, seconds: w.seconds, lessons: w.lessons, issuedOn: today, code, competencies: ls.meta.competencies });
-    const [c] = await tx.insert(s.academyCertificates).values({ tenantId: auth.tenantId, trackId: t.id, versionId: ls.v.id, userId: auth.userId, code, title: ls.meta.title, seconds: w.seconds, lessons: w.lessons, issuedOn: today, data: pdf }).returning();
+    const pdf = await academyCertificatePdf({ company: tn?.name ?? '', person: u?.name ?? '', track: ls.meta.title, seconds: w.seconds, lessons: w.lessons, issuedOn: today, code, competencies: ls.meta.competencies, scorePct });
+    const [c] = await tx.insert(s.academyCertificates).values({ tenantId: auth.tenantId, trackId: t.id, versionId: ls.v.id, userId: auth.userId, code, title: ls.meta.title, seconds: w.seconds, lessons: w.lessons, scorePct, issuedOn: today, data: pdf }).returning();
     await tx.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId: t.id, versionId: ls.v.id, type: 'certificado', note: code, actorId: auth.userId });
     return c!;
   });
 }
-const certView = (c: typeof s.academyCertificates.$inferSelect | null) => (c ? { id: c.id, code: c.code, seconds: c.seconds, lessons: c.lessons, issuedOn: c.issuedOn } : null);
+const certView = (c: typeof s.academyCertificates.$inferSelect | null) => (c ? { id: c.id, code: c.code, seconds: c.seconds, lessons: c.lessons, scorePct: c.scorePct, issuedOn: c.issuedOn } : null);
 const noteView = (n: typeof s.academyNotes.$inferSelect) => ({ id: n.id, lessonId: n.lessonId, position: n.positionSeconds, text: n.text, createdAt: n.createdAt, updatedAt: n.updatedAt });
 
 export const academyRoutes = [
@@ -214,7 +241,7 @@ export const academyRoutes = [
       const contents = await contentsById(app.db, snapshotLessons(snap).map((l) => l.contentId));
       const events = await app.db.select({ e: s.academyTrackEvents, actor: s.users.name }).from(s.academyTrackEvents).leftJoin(s.users, eq(s.users.id, s.academyTrackEvents.actorId)).where(eq(s.academyTrackEvents.trackId, t.id)).orderBy(desc(s.academyTrackEvents.createdAt)).limit(100);
       const current = versions.find((v) => v.id === t.currentVersionId) ?? null;
-      const changed = !current || JSON.stringify(versionSnap(current)) !== JSON.stringify(snap) || JSON.stringify(versionMeta(current)) !== JSON.stringify(metaOf(t));
+      const changed = !current || canon(versionSnap(current)) !== canon(snap) || canon(versionMeta(current)) !== canon(metaOf(t));
       const playlists = await app.db.select().from(s.academyPlaylists).where(eq(s.academyPlaylists.tenantId, auth.tenantId));
       const { cover: _c, coverMime: _m, ...track } = t;
       return {
@@ -223,7 +250,7 @@ export const academyRoutes = [
         playlists: playlists.map((p) => ({ id: p.id, playlistId: p.playlistId, title: p.title, count: p.videoIds.length, lastSyncedAt: p.lastSyncedAt })),
         versions: versions.map((v) => ({ id: v.id, number: v.number, status: v.status, submittedAt: v.submittedAt, publishedAt: v.publishedAt })),
         open: open ? { id: open.id, number: open.number, status: open.status, canDecide: decidesVersion(auth, open) } : null,
-        changed, errors: [...structureErrors(snap), ...audienceErrors(audOf(t))],
+        changed, errors: [...structureErrors(snap), ...audienceErrors(audOf(t)), ...(quizOf(t) ? quizErrors(quizOf(t)!).map((x) => `Prova — ${x}`) : [])],
         events: events.map((x) => ({ type: x.e.type, note: x.e.note, actor: x.actor, at: x.e.createdAt })),
         can: { edit, submit: edit && !open && changed },
       };
@@ -317,6 +344,20 @@ export const academyRoutes = [
     },
   }),
   defineRoute({
+    method: 'PUT', url: '/academia/trilhas/:id/prova', summary: 'Salva a prova da trilha (perguntas, alternativa certa, explicação, nota mínima, tentativas); null tira a prova', ...A, params: IdParams,
+    body: z.object({ rowVersion: z.number().int(), quiz: QuizBody.nullable() }), bodyLimit: 1_000_000,
+    handler: async ({ app, auth, params, body, req }) => {
+      const t = await loadTrack(app.db, auth, params.id);
+      await mustEdit(app.db, auth, t);
+      if (t.rowVersion !== body.rowVersion) throw conflict(t.rowVersion);
+      const quiz: TrackQuiz | null = body.quiz ? { ...body.quiz, questions: body.quiz.questions.map((q) => ({ ...q, text: q.text.trim(), options: q.options.map((o) => o.trim()), explanation: q.explanation || null })) } : null;
+      await app.db.update(s.academyTracks).set({ quiz: quiz as unknown as Record<string, unknown> | null, rowVersion: t.rowVersion + 1, updatedAt: new Date() }).where(eq(s.academyTracks.id, t.id));
+      await trackEvent(app.db, auth, t.id, null, 'editada', quiz ? `Prova (${quiz.questions.length} pergunta(s), nota mínima ${quiz.passPct}%)` : 'Prova retirada');
+      await audit(app.db, req, { action: 'academy_track.quiz', entityType: 'academy_track', entityId: t.id, metadata: { questions: quiz?.questions.length ?? 0 } });
+      return { ok: true, rowVersion: t.rowVersion + 1, errors: quiz ? quizErrors(quiz) : [] };
+    },
+  }),
+  defineRoute({
     method: 'POST', url: '/academia/trilhas/:id/sincronizar', summary: 'Confere de novo os vídeos (situação e duração) e as playlists da trilha no YouTube', ...A, params: IdParams,
     handler: async ({ app, auth, params }) => {
       const t = await loadTrack(app.db, auth, params.id);
@@ -356,7 +397,7 @@ export const academyRoutes = [
       const t = await loadTrack(app.db, auth, params.id);
       await mustEdit(app.db, auth, t);
       const snap = await workingSnapshot(app.db, t.id);
-      const e = [...structureErrors(snap), ...audienceErrors(audOf(t))];
+      const e = [...structureErrors(snap), ...audienceErrors(audOf(t)), ...(quizOf(t) ? quizErrors(quizOf(t)!).map((x) => `Prova — ${x}`) : [])];
       const contents = await contentsById(app.db, snapshotLessons(snap).map((l) => l.contentId));
       if (snapshotLessons(snap).some((l) => l.required && l.kind === 'youtube_video' && ['privado', 'removido', 'sem_incorporacao', 'indisponivel'].includes(contents.get(l.contentId)?.state ?? ''))) e.push('Há aula obrigatória com vídeo indisponível (privado, removido ou com incorporação desligada): troque ou marque como opcional.');
       if (e.length) throw unprocessable(e.join(' '));
@@ -506,6 +547,7 @@ export const academyRoutes = [
         me: ls.enr ? { enrolled: true, status: statusOf(ls.enr, ls.pr.started, auth.timezone), dueOn: ls.enr.dueOn, source: ls.enr.source, completedAt: ls.enr.completedAt, lastLessonId: ls.enr.lastLessonId } : null,
         progress: ls.pr.progress, nextLessonId: ls.pr.nextLessonId,
         newerVersion: !!ls.enr && t.currentVersionId !== ls.enr.versionId,
+        quiz: ls.meta.quiz ? { questions: ls.meta.quiz.questions.length, passPct: ls.meta.quiz.passPct, maxAttempts: ls.meta.quiz.maxAttempts, available: ls.pr.progress.videoComplete, ...quizStatus(ls.meta.quiz, ls.enr ? (await quizAttemptsOf(app.db, auth.userId, t.id, ls.v.id)).map((a) => ({ pct: a.scorePct, passed: a.passed })) : []) } : null,
         certificate: { enabled: ls.meta.certificate, issued: certView(ls.enr ? await certificateFor(app.db, auth, t, !!ls.enr.completedAt) : null) },
         notes: ls.enr ? (await app.db.select().from(s.academyNotes).where(and(eq(s.academyNotes.trackId, t.id), eq(s.academyNotes.userId, auth.userId))).orderBy(asc(s.academyNotes.positionSeconds))).map(noteView) : [],
       };
@@ -599,14 +641,14 @@ export const academyRoutes = [
         // conclusão da trilha (audiovisual): quando todas as obrigatórias disponíveis estão concluídas
         const pr = await progressOf(tx, auth.userId, t.id, snap, meta);
         let trackDone = !!enr.completedAt;
-        if (pr.progress.videoComplete && !enr.completedAt) {
+        if (pr.progress.videoComplete && !enr.completedAt && (await quizPassed(tx, auth.userId, t.id, enr.versionId, meta))) {
           await tx.update(s.academyEnrollments).set({ completedAt: now }).where(and(eq(s.academyEnrollments.id, enr.id), isNull(s.academyEnrollments.completedAt)));
           await tx.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId: t.id, versionId: enr.versionId, type: 'concluida', note: null, actorId: auth.userId });
           trackDone = true;
         }
         return {
           duplicate: false, credited: cr.credited, rejected: cr.rejected, watchedSeconds: Math.round(cr.watchedSeconds), pct: dur ? Math.min(100, Math.round((cr.watchedSeconds / dur) * 1000) / 10) : 0,
-          done, minPct, durationSeconds: dur, track: { pct: pr.progress.pct, complete: trackDone, nextLessonId: pr.nextLessonId },
+          done, minPct, durationSeconds: dur, track: { pct: pr.progress.pct, complete: trackDone, nextLessonId: pr.nextLessonId, quizPending: !!meta.quiz && pr.progress.videoComplete && !trackDone },
         };
       });
     },
@@ -645,13 +687,75 @@ export const academyRoutes = [
     },
   }),
 
+  // ------------------------------------------------------------------ prova
+  defineRoute({
+    method: 'GET', url: '/academia/trilhas/:id/prova', summary: 'Prova da trilha para quem está inscrito: perguntas (sem o gabarito), tentativas e a correção da última', ...A, params: IdParams,
+    handler: async ({ app, auth, params }) => {
+      const t = await loadTrack(app.db, auth, params.id);
+      const ls = await learnerState(app.db, auth, t);
+      if (!ls?.enr) throw forbidden('Inscreva-se na trilha para fazer a prova.');
+      const q = ls.meta.quiz;
+      if (!q) throw notFound('Esta trilha não tem prova.');
+      const attempts = await quizAttemptsOf(app.db, auth.userId, t.id, ls.v.id);
+      const st = quizStatus(q, attempts.map((a) => ({ pct: a.scorePct, passed: a.passed })));
+      const available = ls.pr.progress.videoComplete;
+      const last = attempts.at(-1) ?? null;
+      // o gabarito e as explicações aparecem depois da aprovação ou quando acabam as tentativas
+      const reveal = st.passed || !st.canTry;
+      const shown = st.passed ? attempts.filter((a) => a.passed).at(-1)! : last;
+      return {
+        track: { id: t.id, title: ls.meta.title, completedAt: ls.enr.completedAt },
+        quiz: { passPct: q.passPct, maxAttempts: q.maxAttempts, total: q.questions.length, questions: available && st.canTry ? quizForLearner(q).questions : [] },
+        status: st, available, attempts: attempts.map(attemptView),
+        review: shown ? { attempt: attemptView(shown), revealed: reveal, questions: quizReview(q, shown, reveal) } : null,
+      };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/academia/trilhas/:id/prova', summary: 'Entrega as respostas da prova: corrige, registra a tentativa e, aprovado com as aulas assistidas, conclui a trilha', ...A, params: IdParams,
+    body: z.object({ answers: z.record(z.string().max(40), z.number().int().min(0).max(QUIZ_MAX_OPTIONS)) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const t = await loadTrack(app.db, auth, params.id);
+      const ls = await learnerState(app.db, auth, t);
+      if (!ls?.enr) throw forbidden('Inscreva-se na trilha para fazer a prova.');
+      const q = ls.meta.quiz;
+      if (!q) throw notFound('Esta trilha não tem prova.');
+      if (!ls.pr.progress.videoComplete) throw unprocessable('A prova libera depois que você assiste às aulas obrigatórias.');
+      if (q.questions.some((x) => body.answers[x.id] === undefined || body.answers[x.id]! >= x.options.length)) throw unprocessable('Responda todas as perguntas antes de entregar.');
+      const enrId = ls.enr.id, versionId = ls.v.id;
+      const answers: QuizAnswers = Object.fromEntries(q.questions.map((x) => [x.id, body.answers[x.id]!]));
+      const out = await app.db.transaction(async (tx) => {
+        // uma entrega por vez para a mesma pessoa: o limite de tentativas não estoura com dois cliques
+        const [enr] = await tx.select().from(s.academyEnrollments).where(eq(s.academyEnrollments.id, enrId)).for('update');
+        const before = await quizAttemptsOf(tx, auth.userId, t.id, versionId);
+        const st0 = quizStatus(q, before.map((a) => ({ pct: a.scorePct, passed: a.passed })));
+        if (st0.passed) throw unprocessable('Você já foi aprovado nesta prova.');
+        if (!st0.canTry) throw unprocessable('Você usou todas as tentativas desta prova. Fale com a curadoria da trilha.');
+        const g = gradeQuiz(q, answers);
+        const [a] = await tx.insert(s.academyQuizAttempts).values({ tenantId: auth.tenantId, trackId: t.id, versionId, userId: auth.userId, answers, correct: g.correct, total: g.total, scorePct: g.pct, passed: g.passed }).returning();
+        await tx.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId: t.id, versionId, type: 'prova', note: `${g.pct}% (${g.correct}/${g.total}) — ${g.passed ? 'aprovado' : 'não atingiu a nota mínima'}`, actorId: auth.userId });
+        let completed = !!enr!.completedAt;
+        if (g.passed && !completed) {
+          await tx.update(s.academyEnrollments).set({ completedAt: new Date() }).where(and(eq(s.academyEnrollments.id, enrId), isNull(s.academyEnrollments.completedAt)));
+          await tx.insert(s.academyTrackEvents).values({ tenantId: auth.tenantId, trackId: t.id, versionId, type: 'concluida', note: null, actorId: auth.userId });
+          completed = true;
+        }
+        const st = quizStatus(q, [...before, a!].map((x) => ({ pct: x.scorePct, passed: x.passed })));
+        const reveal = st.passed || !st.canTry;
+        return { result: { correct: g.correct, total: g.total, pct: g.pct, passed: g.passed }, status: st, completed, review: { attempt: attemptView(a!), revealed: reveal, questions: quizReview(q, a!, reveal) } };
+      });
+      await audit(app.db, req, { action: 'academy_track.quiz_attempt', entityType: 'academy_track', entityId: t.id, metadata: { pct: out.result.pct, passed: out.result.passed } });
+      return out;
+    },
+  }),
+
   // ------------------------------------------------------------------ certificado
   defineRoute({
     method: 'GET', url: '/academia/trilhas/:id/certificado', summary: 'Baixa o certificado da trilha concluída (emite na primeira vez; a carga é a soma das aulas concluídas)', ...A, params: IdParams,
     handler: async ({ app, auth, params, reply }) => {
       const t = await loadTrack(app.db, auth, params.id);
       const c = await certificateFor(app.db, auth, t, true);
-      if (!c) throw unprocessable('O certificado sai quando a trilha é concluída (e se ela emite certificado).');
+      if (!c) throw unprocessable('O certificado sai quando a trilha é concluída — aulas obrigatórias assistidas e, se houver prova, aprovação nela — e se ela emite certificado.');
       return reply.header('content-type', 'application/pdf').header('content-disposition', `inline; filename="${c.code}.pdf"`).header('cache-control', 'private, no-store').send(c.data);
     },
   }),
@@ -659,7 +763,7 @@ export const academyRoutes = [
     method: 'GET', url: '/academia/certificados/verificar/:code', summary: 'Confere um certificado da Academia pelo código (qualquer pessoa da empresa)', ...A,
     params: z.object({ code: z.string().regex(/^ACD-\d{4}-\d{6}$/) }),
     handler: async ({ app, auth, params }) => {
-      const [c] = await app.db.select({ title: s.academyCertificates.title, seconds: s.academyCertificates.seconds, lessons: s.academyCertificates.lessons, issuedOn: s.academyCertificates.issuedOn, person: s.users.name }).from(s.academyCertificates)
+      const [c] = await app.db.select({ title: s.academyCertificates.title, seconds: s.academyCertificates.seconds, lessons: s.academyCertificates.lessons, scorePct: s.academyCertificates.scorePct, issuedOn: s.academyCertificates.issuedOn, person: s.users.name }).from(s.academyCertificates)
         .innerJoin(s.users, eq(s.users.id, s.academyCertificates.userId)).where(and(eq(s.academyCertificates.tenantId, auth.tenantId), eq(s.academyCertificates.code, params.code)));
       return c ? { valid: true as const, ...c } : { valid: false as const };
     },
@@ -677,11 +781,12 @@ export const academyRoutes = [
       const scopeIds = new Set(scope.map((p) => p.id));
       const tracks = await app.db.select().from(s.academyTracks).where(and(eq(s.academyTracks.tenantId, auth.tenantId), inArray(s.academyTracks.status, ['publicada', 'arquivada']))).orderBy(asc(s.academyTracks.title));
       const ids = tracks.map((t) => t.id);
-      const [enrs, progress, versions, teams] = await Promise.all([
+      const [enrs, progress, versions, teams, attempts] = await Promise.all([
         ids.length ? app.db.select().from(s.academyEnrollments).where(inArray(s.academyEnrollments.trackId, ids)) : Promise.resolve([]),
         ids.length ? app.db.select().from(s.academyLessonProgress).where(inArray(s.academyLessonProgress.trackId, ids)) : Promise.resolve([]),
         ids.length ? app.db.select().from(s.academyTrackVersions).where(inArray(s.academyTrackVersions.trackId, ids)) : Promise.resolve([]),
         app.db.select({ id: s.teams.id, name: s.teams.name }).from(s.teams).where(eq(s.teams.tenantId, auth.tenantId)),
+        ids.length ? app.db.select({ trackId: s.academyQuizAttempts.trackId, userId: s.academyQuizAttempts.userId, versionId: s.academyQuizAttempts.versionId, scorePct: s.academyQuizAttempts.scorePct, passed: s.academyQuizAttempts.passed }).from(s.academyQuizAttempts).where(inArray(s.academyQuizAttempts.trackId, ids)) : Promise.resolve([]),
       ]);
       const contents = await contentsById(app.db, versions.flatMap((v) => snapshotLessons(versionSnap(v)).map((l) => l.contentId)));
       const today = todayIn(auth.timezone);
@@ -696,7 +801,9 @@ export const academyRoutes = [
         });
         const tp = trackProgress(states, meta.progressMethod);
         const last = mine.reduce<Date | null>((a, p) => (!a || p.updatedAt > a ? p.updatedAt : a), null);
-        return { pct: tp.pct, watchedSeconds: mine.reduce((a, p) => a + p.watchedMs / 1000, 0), lastAt: last, status: statusOf(e, mine.some((p) => p.watchedMs > 0) || !!e.startedAt, auth.timezone) };
+        const tries = meta.quiz ? attempts.filter((a) => a.trackId === t.id && a.userId === e.userId && a.versionId === e.versionId) : [];
+        const quiz = meta.quiz ? { attempts: tries.length, best: tries.length ? Math.max(...tries.map((a) => a.scorePct)) : null, passed: tries.some((a) => a.passed), passPct: meta.quiz.passPct } : null;
+        return { quiz, pct: tp.pct, watchedSeconds: mine.reduce((a, p) => a + p.watchedMs / 1000, 0), lastAt: last, status: statusOf(e, mine.some((p) => p.watchedMs > 0) || !!e.startedAt, auth.timezone) };
       };
       const summary = tracks.map((t) => {
         const eligible = new Set(t.mode === 'atribuida' ? [] : scope.filter((p) => audienceAllows(audOf(t), p.viewer)).map((p) => p.id));
@@ -719,7 +826,7 @@ export const academyRoutes = [
         const elig = chosen.mode === 'atribuida' ? [] : scope.filter((p) => audienceAllows(audOf(chosen), p.viewer) && !es.some((e) => e.userId === p.id));
         people_ = [
           ...es.map((e) => { const p = scope.find((x) => x.id === e.userId)!; const r = personIn(chosen, e); return { userId: e.userId, name: p.name, teams: p.teamIds.map((x) => teams.find((tt) => tt.id === x)?.name).filter(Boolean), source: e.source, dueOn: e.dueOn, ...r, hours: Math.round((r.watchedSeconds / 3600) * 100) / 100, completedAt: e.completedAt }; }),
-          ...elig.map((p) => ({ userId: p.id, name: p.name, teams: p.teamIds.map((x) => teams.find((tt) => tt.id === x)?.name).filter(Boolean), source: null, dueOn: null, pct: 0, watchedSeconds: 0, hours: 0, lastAt: null, status: 'nao_inscrito', completedAt: null })),
+          ...elig.map((p) => ({ userId: p.id, name: p.name, teams: p.teamIds.map((x) => teams.find((tt) => tt.id === x)?.name).filter(Boolean), source: null, dueOn: null, pct: 0, watchedSeconds: 0, hours: 0, lastAt: null, status: 'nao_inscrito', completedAt: null, quiz: null })),
         ].sort((a, b) => String(a.name).localeCompare(String(b.name)));
       }
       return {
