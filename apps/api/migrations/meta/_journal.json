@@ -1261,6 +1261,13 @@
       "when": 1795101905566,
       "tag": "0179_instalacao_preco_definido",
       "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "7",
+      "when": 1795546673666,
+      "tag": "0180_assinatura_imagem",
+      "breakpoints": true
     }
   ]
 }

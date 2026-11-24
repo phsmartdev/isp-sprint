@@ -35,8 +35,8 @@ export const EMAIL_TEMPLATE_LABELS: Record<EmailTemplateKey, string> = {
 export const EMAIL_VARIABLES: Record<EmailTemplateKey, string[]> = {
   proposta: ['cliente.nome', 'vendedor.nome', 'vendedor.email', 'plano.nome', 'plano.valor', 'empresa.nome'],
   followup: ['cliente.nome', 'vendedor.nome', 'vendedor.email', 'plano.nome', 'plano.valor', 'empresa.nome'],
-  convite_usuario: ['usuario.nome', 'usuario.email', 'senha_temporaria', 'link', 'empresa.nome'],
-  nova_senha: ['usuario.nome', 'senha_temporaria', 'link', 'empresa.nome'],
+  convite_usuario: ['usuario.nome', 'usuario.email', 'senha_temporaria', 'link', 'link_wiki', 'empresa.nome'],
+  nova_senha: ['usuario.nome', 'senha_temporaria', 'link', 'link_wiki', 'empresa.nome'],
   alerta_atividades: ['usuario.nome', 'quantidade', 'lista', 'link', 'empresa.nome'],
   alerta_lead_atribuido: ['usuario.nome', 'lead.nome', 'lead.telefone', 'atribuido_por', 'link', 'empresa.nome'],
   alerta_venda_fechada: ['usuario.nome', 'cliente.nome', 'vendedor.nome', 'plano.nome', 'plano.valor', 'link', 'empresa.nome'],
@@ -460,7 +460,7 @@ export function defaultInstruction(): Instruction {
       modelos: {
         proposta: t('Sua proposta {{empresa.nome}} — {{plano.nome}}', 'Olá, {{cliente.nome}}!\n\nConforme conversamos, segue em anexo a proposta do plano {{plano.nome}} por {{plano.valor}} por mês.\n\nQualquer dúvida, é só responder este e-mail.\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
         followup: t('{{cliente.nome}}, conseguiu ver a proposta?', 'Olá, {{cliente.nome}}!\n\nPassando para saber se ficou alguma dúvida sobre o plano {{plano.nome}}. Posso ajudar com algo?\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
-        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso foi criado.\nE-mail: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso ao RevOps foi criado.\n\nLink de acesso: {{link}}\nUsuário: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nNo primeiro acesso, troque a senha em Meu perfil.\n\nDúvidas sobre o uso? A wiki (Central de Playbooks) tem o manual do sistema e o passo a passo de cada tela: {{link_wiki}}'),
         nova_senha: t('Nova senha temporária — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.'),
         alerta_atividades: t('Você tem {{quantidade}} atividade(s) para hoje ou vencida(s)', 'Olá, {{usuario.nome}}!\n\n{{lista}}\n\nVeja em {{link}}'),
         alerta_lead_atribuido: t('Novo lead para você: {{lead.nome}}', 'Olá, {{usuario.nome}}!\n\n{{atribuido_por}} atribuiu o lead {{lead.nome}} ({{lead.telefone}}) para você.\n\nAbra em {{link}}'),

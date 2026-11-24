@@ -282,6 +282,22 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
       expect(conv.messages.map((m: { direction: string }) => m.direction)).toEqual(['saida', 'saida', 'entrada']);
       expect((await threads(rafael, `mailboxId=${box.id}&status=todas`)).filter((x) => x.subject.includes(`Proposta nova ${stamp}`))).toHaveLength(1);
       expect((await lucas.post('/mail/compose', { mailboxId: box.id, to: ['a@b.com'], subject: 'x', text: 'y' })).statusCode).toBe(404);
+      // assinatura em imagem (a mesma da caixa do Gmail): vai embutida (cid) no HTML; o texto fica como versão sem formatação
+      const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      expect((await rafael.put('/mail/signature/image', { data: 'UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAwA0JaQAA3AA/vuUAAA=', width: 300 })).statusCode).toBe(422); // WebP
+      ok(await rafael.put('/mail/signature/image', { data: PNG, width: 320 }));
+      expect(ok(await rafael.get('/mail/signature')).json()).toMatchObject({ text: 'Rafael Souza\nComercial BKT', hasImage: true, imageWidth: 320 });
+      const img = ok(await rafael.get('/mail/signature/image'));
+      expect(img.headers['content-type']).toBe('image/png');
+      expect((await lucas.get('/mail/signature/image')).statusCode).toBe(404); // cada um só a sua
+      ok(await rafael.post('/mail/compose', { mailboxId: box.id, to: [`assina-${stamp}@empresa-ficticia.test`], subject: `Com assinatura ${stamp}`, text: 'Olá, tudo bem?' }), 201);
+      const rich = fake.sent.at(-1)!;
+      expect(rich.text).toBe('Olá, tudo bem?\n\n-- \nRafael Souza\nComercial BKT');
+      expect(rich.html).toContain('src="cid:assinatura@revops"');
+      expect(rich.html).toContain('width="320"');
+      expect(rich.attachments).toEqual([expect.objectContaining({ cid: 'assinatura@revops', contentType: 'image/png' })]);
+      ok(await rafael.del('/mail/signature/image'));
+      expect(ok(await rafael.get('/mail/signature')).json().hasImage).toBe(false);
       // desconectar apaga a senha
       ok(await rafael.post(`/mail/mailboxes/${box.id}/state`, { action: 'desconectar' }));
       const [after] = (await ctx.db.execute(sql`select app_password_enc from mailboxes where id = ${box.id}`)).rows as { app_password_enc: string | null }[];

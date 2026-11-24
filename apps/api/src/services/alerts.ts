@@ -1,4 +1,6 @@
 /** Alertas automáticos por e-mail. Respeitam as chaves em Configurações → Notificações. */
+import { accessEmailHtml } from './accessEmail';
+import { signatureAttachment, signatureHtml, signatureOf } from './mailSignature';
 import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { Config } from '../config';
 import type { DbOrTx } from '../db/client';
@@ -51,10 +53,18 @@ export async function notifyLeadAssigned(db: DbOrTx, config: Config, auth: AuthC
 export async function notifyUserAccess(db: DbOrTx, config: Config, auth: AuthContext, kind: 'convite_usuario' | 'nova_senha', user: { name: string; email: string }, password: string) {
   const n = await notificationsOf(db, auth.tenantId);
   if (!n.userAccess || !(await smtpConfig(db, auth.tenantId))) return false;
+  const company = await tenantName(db, auth.tenantId);
+  const loginUrl = publicLink(config, '/login'), wikiUrl = publicLink(config, '/playbooks');
   const mail = await renderEmail(db, auth.tenantId, kind, {
-    'usuario.nome': user.name, 'usuario.email': user.email, senha_temporaria: password, link: publicLink(config, '/login'), 'empresa.nome': await tenantName(db, auth.tenantId),
+    'usuario.nome': user.name, 'usuario.email': user.email, senha_temporaria: password, link: loginUrl, link_wiki: wikiUrl, 'empresa.nome': company,
   });
-  const r = await sendAlert(db, { tenantId: auth.tenantId, kind, to: user.email, ...mail, createdBy: auth.userId });
+  // texto editável em Configurações vai como versão em texto; o HTML segue o visual da ferramenta
+  // assinatura de quem cadastrou, a mesma do E-mail (imagem embutida, como a programada na caixa do Gmail)
+  const sig = await signatureOf(db, auth.userId);
+  const sigHtml = signatureHtml(sig);
+  const html = accessEmailHtml({ kind, name: user.name, email: user.email, password, loginUrl, wikiUrl, logoUrl: publicLink(config, '/brand/bkt-logo-white.png'), company, signatureHtml: sigHtml || undefined });
+  const text = sig.text ? `${mail.text.trimEnd()}\n\n-- \n${sig.text}` : mail.text;
+  const r = await sendAlert(db, { tenantId: auth.tenantId, kind, to: user.email, subject: mail.subject, text, html, attachments: signatureAttachment(sig), createdBy: auth.userId });
   return !!r?.ok;
 }
 

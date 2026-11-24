@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import { OrgChart } from './OrgChart';
 import { useSectors } from '../../lib/hooks';
 import { SECTOR_ROLES, SECTOR_ROLE_HINTS, SECTOR_ROLE_LABELS, defaultSectorRole, type SectorRole } from '@isp/domain';
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { compressImage } from '../../lib/files';
 import { Link } from 'react-router-dom';
 import { settingsSearch, visibleGroups } from '../../features/settings/nav';
@@ -291,13 +291,31 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  // foto escolhida no cadastro: vai para o servidor depois de salvar a pessoa (no novo, o id só existe depois)
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [photo, setPhoto] = useState<{ file: File; url: string } | null>(null);
+  useEffect(() => () => { if (photo) URL.revokeObjectURL(photo.url); }, [photo]);
+  const pickPhoto = async (f: File | undefined) => {
+    if (!f) return;
+    if (!IMG_TYPES.includes(f.type)) { setErrors((e) => ({ ...e, photo: 'Envie PNG, JPG ou WebP.' })); return; }
+    const img = await compressImage(f, { maxBytes: 1_800_000, maxDim: 1200, keepAlpha: true });
+    if (img.size > 2 * 1024 * 1024) { setErrors((e) => ({ ...e, photo: 'A imagem passa de 2 MB mesmo reduzida. Exporte em tamanho menor.' })); return; }
+    setErrors(({ photo: _p, ...rest }) => rest);
+    setPhoto({ file: img, url: URL.createObjectURL(img) });
+  };
   const m = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
-      return user
+      const saved = await (user
       ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles } });
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles } }));
+      const id = user?.id ?? (saved as { id?: string }).id;
+      if (photo && id) {
+        try { await api(`/admin/users/${id}/avatar`, { method: 'PUT', body: { data: await fileToBase64(photo.file) } }); }
+        catch (e) { toast({ tone: 'error', message: `Usuário salvo, mas a foto não foi enviada: ${(e as Error).message}` }); }
+      }
+      return saved;
     },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['admin'] }); qc.invalidateQueries({ queryKey: ['lookups'] }); toast({ tone: 'success', message: user ? 'Usuário atualizado' : 'Usuário cadastrado' }); onDone((r as { temporaryPassword?: string } | undefined)?.temporaryPassword); },
     onError: (e) => { if (e instanceof ApiError) setErrors(e.fieldErrors()); toast({ tone: 'error', message: (e as Error).message }); },
@@ -305,6 +323,19 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
   const self = user?.id === me?.user.id;
   return (
     <form id="user-form" className="space-y-4" noValidate onSubmit={(e: FormEvent) => { e.preventDefault(); if (!m.isPending) m.mutate(); }}>
+      <div className="flex items-center gap-4">
+        {photo ? <img src={photo.url} alt="" className="h-16 w-16 shrink-0 rounded-circle object-cover" /> : <Avatar name={form.name || user?.name} userId={user?.id} hasPhoto={user?.hasAvatar} size={64} />}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">Foto do perfil</p>
+          <p className="text-xs text-muted">PNG, JPG ou WebP até 2 MB. Aparece no topo, no organograma e nos registros.</p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" type="button" onClick={() => photoInput.current?.click()}>{photo || user?.hasAvatar ? 'Trocar foto' : 'Escolher foto'}</Button>
+            {photo && <Button size="sm" variant="ghost" type="button" onClick={() => setPhoto(null)}>Desfazer</Button>}
+          </div>
+          {errors.photo && <p className="mt-1 text-xs text-danger" role="alert">{errors.photo}</p>}
+        </div>
+        <input ref={photoInput} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" aria-label="Foto do perfil" onChange={(e) => { void pickPhoto(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
       <FormField label="Nome" htmlFor="uf-name" required error={errors.name}><Input id="uf-name" value={form.name} onChange={(e) => set('name', e.target.value)} data-autofocus /></FormField>
       <FormField label="E-mail" htmlFor="uf-email" required error={errors.email} hint={user ? 'É o login e o e-mail usado no “Entrar com Google”. Ao trocar, a conta Google vinculada é desfeita.' : 'Use o e-mail real da pessoa (o mesmo da conta Google, se for entrar com Google).'}><Input id="uf-email" type="email" value={form.email} onChange={(e) => set('email', e.target.value)} /></FormField>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

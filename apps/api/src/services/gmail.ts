@@ -10,6 +10,8 @@
  * Validação real pendente: exige projeto no Google Cloud com a Gmail API ativa e os escopos aprovados.
  * Nos testes, `GOOGLE_FAKE_BASE` aponta para um servidor simulado (só fora de produção).
  */
+import MailComposer from 'nodemailer/lib/mail-composer';
+import type { MailAttachment } from './email';
 import { enqueueEmailReply } from './automationQueue';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -326,10 +328,21 @@ export function buildRaw(m: { from: string; fromName?: string | null; to: string
   return b64u(lines.join('\r\n'));
 }
 
-export async function sendFromBox(db: DbOrTx, cfg: GmailCfg | null, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
+/** Com HTML ou imagem embutida (assinatura), a mensagem vira multipart: monta pelo compositor do nodemailer. */
+async function buildRawRich(m: { from: string; fromName?: string | null; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[]; inReplyTo?: string | null; references?: string | null }) {
+  const mail = new MailComposer({
+    from: m.fromName ? { name: m.fromName, address: m.from } : m.from, to: m.to, cc: m.cc?.length ? m.cc : undefined, subject: m.subject, text: m.text, html: m.html,
+    attachments: m.attachments?.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType, cid: a.cid })),
+    inReplyTo: m.inReplyTo ?? undefined, references: m.references ?? undefined,
+  });
+  return b64u(await mail.compile().build());
+}
+
+export async function sendFromBox(db: DbOrTx, cfg: GmailCfg | null, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[]; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
   if (box.provider === 'gmail_senha') return sendWithPassword(db, box, input, userId);
   if (!cfg) throw new GmailError('A integração com o Google não está configurada no servidor.', 503);
-  const raw = buildRaw({ from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, inReplyTo: input.inReplyTo, references: input.references });
+  const head = { from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, inReplyTo: input.inReplyTo, references: input.references };
+  const raw = input.html || input.attachments?.length ? await buildRawRich({ ...head, html: input.html, attachments: input.attachments }) : buildRaw(head);
   const sent = await gmailApi<{ id: string; threadId: string; labelIds?: string[] }>(db, cfg, box, '/messages/send', { method: 'POST', body: JSON.stringify({ raw, ...(input.threadGmailId ? { threadId: input.threadGmailId } : {}) }) });
   // guarda já a mensagem enviada (a próxima sincronização encontra o mesmo id e ignora)
   const ctx = await loadCtx(db, box.tenantId);
@@ -372,10 +385,10 @@ async function syncPasswordBox(db: DbOrTx, box: Box, actorId: string | null, kin
   }
 }
 
-async function sendWithPassword(db: DbOrTx, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
+async function sendWithPassword(db: DbOrTx, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[]; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
   let sent: { messageId: string };
   try {
-    sent = await gmailPassword().send(box.address, boxPassword(box), { from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, inReplyTo: input.inReplyTo, references: input.references });
+    sent = await gmailPassword().send(box.address, boxPassword(box), { from: box.address, fromName: input.fromName ?? box.displayName, to: input.to, cc: input.cc, subject: input.subject, text: input.text, html: input.html, attachments: input.attachments, inReplyTo: input.inReplyTo, references: input.references });
   } catch (e) {
     throw new GmailError((e as Error).message, e instanceof GmailPasswordError && e.auth ? 401 : 502);
   }

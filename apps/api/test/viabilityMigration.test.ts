@@ -37,7 +37,10 @@ describe('atualização de banco da produção para a viabilidade integrada', ()
       const column = (await pool.query("SELECT is_nullable,column_default FROM information_schema.columns WHERE table_name='opportunity_items' AND column_name='price_defined'")).rows[0];
       expect(column).toMatchObject({ is_nullable: 'NO', column_default: 'true' });
       const after = Number((await pool.query('SELECT count(*) n FROM drizzle.__drizzle_migrations')).rows[0].n);
-      expect(after).toBe(before + 1);
+      // aplica a 0179 e as migrations que vieram depois dela
+      const total = JSON.parse(readFileSync(path.join(original, 'meta/_journal.json'), 'utf8')).entries.length;
+      expect(after).toBe(total);
+      expect(after).toBeGreaterThan(before);
       await pool.query('UPDATE product_catalog SET last_price_defined=true WHERE id=$1', [noValue.id]);
       await runMigrations(url.href);
       expect((await pool.query('SELECT last_price_defined FROM product_catalog WHERE id=$1', [noValue.id])).rows[0].last_price_defined).toBe(true);

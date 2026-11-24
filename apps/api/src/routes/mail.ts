@@ -5,6 +5,8 @@
  * Visibilidade: caixa pessoal só para a dona. Caixa compartilhada: quem tem acesso total ao E-mail, quem está numa fila
  * da caixa ou da conversa, e quem vê a pessoa atribuída (Equipe = times que lidera).
  */
+import { signatureOf, withSignatureParts, SIGNATURE_MAX_WIDTH } from '../services/mailSignature';
+import { decodeImage } from '../services/images';
 import { drainAutomationQueue } from '../services/automationQueue';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -92,10 +94,11 @@ async function visibleBoxes(db: DbOrTx, auth: AuthContext) {
   return all.filter((b) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : qs.some((q) => q.mailboxId === b.id)));
 }
 /** Assinatura da pessoa no fim do texto (separador padrão "-- "). */
+/** Corpo com a assinatura da pessoa: texto sempre; com assinatura em imagem, também o HTML com a imagem embutida. */
 async function withSignature(db: DbOrTx, auth: AuthContext, text: string, include: boolean | undefined) {
-  if (include === false) return text;
-  const [sig] = await db.select({ text: s.mailSignatures.text }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
-  return sig?.text.trim() ? `${text.trimEnd()}\n\n-- \n${sig.text.trim()}` : text;
+  if (include === false) return { text };
+  const p = withSignatureParts(text, await signatureOf(db, auth.userId));
+  return { text: p.text, html: p.html, attachments: p.attachments };
 }
 /** Envia pela caixa: a pessoal só a dona; a compartilhada quem tem total no E-mail, configura, ou está numa fila dela. */
 async function canSendFrom(db: DbOrTx, auth: AuthContext, b: typeof s.mailboxes.$inferSelect) {
@@ -161,7 +164,7 @@ async function replyOnThread(app: ReplyApp, auth: AuthContext, req: Parameters<t
       const cc = (body.cc ?? []).map((x) => x.toLowerCase());
       if (!to.length || [...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
       try {
-        await sendFromBox(app.db, app.config.gmail ?? null, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), text: await withSignature(app.db, auth, body.text, body.signature), inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
+        await sendFromBox(app.db, app.config.gmail ?? null, box, { threadGmailId: t.gmailThreadId, to, cc, subject: replySubject(t.subject), ...(await withSignature(app.db, auth, body.text, body.signature)), inReplyTo: last?.rfcMessageId ?? null, references: last?.rfcMessageId ?? null, fromName: box.kind === 'pessoal' ? auth.name : box.displayName }, auth.userId);
       } catch (e) {
         if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
         throw e;
@@ -328,8 +331,37 @@ export const mailRoutes = [
   defineRoute({
     method: 'GET', url: '/mail/signature', summary: 'Minha assinatura de e-mail', tag: 'E-mail', module: 'email',
     handler: async ({ app, auth }) => {
-      const [sig] = await app.db.select({ text: s.mailSignatures.text, updatedAt: s.mailSignatures.updatedAt }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
-      return { text: sig?.text ?? '', updatedAt: sig?.updatedAt ?? null };
+      const [sig] = await app.db.select({ text: s.mailSignatures.text, hasImage: sql<boolean>`${s.mailSignatures.imageData} is not null`, imageWidth: s.mailSignatures.imageWidth, updatedAt: s.mailSignatures.updatedAt }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
+      return { text: sig?.text ?? '', hasImage: !!sig?.hasImage, imageWidth: sig?.imageWidth ?? null, maxWidth: SIGNATURE_MAX_WIDTH, updatedAt: sig?.updatedAt ?? null };
+    },
+  }),
+  defineRoute({
+    method: 'GET', url: '/mail/signature/image', summary: 'Imagem da minha assinatura', tag: 'E-mail', module: 'email',
+    handler: async ({ app, auth, reply }) => {
+      const [sig] = await app.db.select({ mime: s.mailSignatures.imageMime, data: s.mailSignatures.imageData }).from(s.mailSignatures).where(eq(s.mailSignatures.userId, auth.userId)).limit(1);
+      if (!sig?.data || !sig.mime) throw notFound('Sem imagem na assinatura.');
+      reply.header('Content-Type', sig.mime).header('Cache-Control', 'private, no-cache');
+      return reply.send(sig.data);
+    },
+  }),
+  defineRoute({
+    method: 'PUT', url: '/mail/signature/image', summary: 'Envia a imagem da assinatura (PNG ou JPG até 1 MB), igual à programada na caixa do Gmail', tag: 'E-mail', module: 'email',
+    body: z.object({ data: z.string().min(10), width: z.number().int().min(80).max(SIGNATURE_MAX_WIDTH) }),
+    bodyLimit: 1_600_000,
+    handler: async ({ app, auth, body, req }) => {
+      const img = decodeImage(body.data, 1024 * 1024);
+      if (img.mime === 'image/webp') throw unprocessable('Use PNG ou JPG: muitos programas de e-mail (como o Outlook) não mostram WebP.', [{ path: 'data', message: 'WebP não é aceito na assinatura' }]);
+      const set = { imageMime: img.mime, imageData: img.data, imageWidth: body.width, updatedAt: new Date() };
+      await app.db.insert(s.mailSignatures).values({ userId: auth.userId, tenantId: auth.tenantId, ...set }).onConflictDoUpdate({ target: s.mailSignatures.userId, set });
+      await audit(app.db, req, { action: 'mail.signature.image', entityType: 'user', entityId: auth.userId });
+      return { ok: true, imageWidth: body.width };
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/mail/signature/image', summary: 'Tira a imagem da assinatura (fica só o texto)', tag: 'E-mail', module: 'email',
+    handler: async ({ app, auth }) => {
+      await app.db.update(s.mailSignatures).set({ imageMime: null, imageData: null, imageWidth: null, updatedAt: new Date() }).where(eq(s.mailSignatures.userId, auth.userId));
+      return { ok: true };
     },
   }),
   defineRoute({
@@ -355,7 +387,7 @@ export const mailRoutes = [
       if ([...to, ...cc].some((x) => !isEmail(x))) throw unprocessable('Confira os destinatários.');
       let sent: { id: string; threadId: string };
       try {
-        sent = await sendFromBox(app.db, app.config.gmail ?? null, b, { to, cc, subject: body.subject, text: await withSignature(app.db, auth, body.text, body.signature), fromName: b.kind === 'pessoal' ? auth.name : b.displayName }, auth.userId);
+        sent = await sendFromBox(app.db, app.config.gmail ?? null, b, { to, cc, subject: body.subject, ...(await withSignature(app.db, auth, body.text, body.signature)), fromName: b.kind === 'pessoal' ? auth.name : b.displayName }, auth.userId);
       } catch (e) {
         if (e instanceof GmailError) throw new AppError(502, 'O Gmail não enviou', e.message);
         throw e;

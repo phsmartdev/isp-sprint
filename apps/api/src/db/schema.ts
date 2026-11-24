@@ -4775,6 +4775,10 @@ export const mailSignatures = pgTable('mail_signatures', {
   userId: uuid('user_id').primaryKey().references(() => users.id),
   tenantId: tenantId(),
   text: text('text').notNull().default(''),
+  /** assinatura em imagem (a mesma que se programa na caixa do Gmail); vai inline no HTML, com o texto como alternativa */
+  imageMime: text('image_mime'),
+  imageData: bytea('image_data'),
+  imageWidth: integer('image_width'),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
