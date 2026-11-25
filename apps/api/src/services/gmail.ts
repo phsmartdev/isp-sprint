@@ -10,7 +10,7 @@
  * Validação real pendente: exige projeto no Google Cloud com a Gmail API ativa e os escopos aprovados.
  * Nos testes, `GOOGLE_FAKE_BASE` aponta para um servidor simulado (só fora de produção).
  */
-import MailComposer from 'nodemailer/lib/mail-composer';
+import nodemailer from 'nodemailer';
 import type { MailAttachment } from './email';
 import { enqueueEmailReply } from './automationQueue';
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -330,12 +330,13 @@ export function buildRaw(m: { from: string; fromName?: string | null; to: string
 
 /** Com HTML ou imagem embutida (assinatura), a mensagem vira multipart: monta pelo compositor do nodemailer. */
 async function buildRawRich(m: { from: string; fromName?: string | null; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[]; inReplyTo?: string | null; references?: string | null }) {
-  const mail = new MailComposer({
+  // transporte que só monta a mensagem (sem enviar): evita importar caminho interno do nodemailer, que quebra no ESM do servidor
+  const info = await nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'windows' }).sendMail({
     from: m.fromName ? { name: m.fromName, address: m.from } : m.from, to: m.to, cc: m.cc?.length ? m.cc : undefined, subject: m.subject, text: m.text, html: m.html,
     attachments: m.attachments?.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType, cid: a.cid })),
     inReplyTo: m.inReplyTo ?? undefined, references: m.references ?? undefined,
   });
-  return b64u(await mail.compile().build());
+  return b64u(info.message as Buffer);
 }
 
 export async function sendFromBox(db: DbOrTx, cfg: GmailCfg | null, box: Box, input: { threadGmailId?: string; to: string[]; cc?: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[]; inReplyTo?: string | null; references?: string | null; fromName?: string | null }, userId: string) {
