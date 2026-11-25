@@ -81,4 +81,13 @@ test('Dados Planejados: liga a pessoa ao GLPI no cadastro, configura o SLA unive
   await expect(page.getByText('SLA universal: 8 h úteis para solucionar', { exact: false })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Nível de serviço por grupo e pessoa' })).toContainText('Comercial');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados.png`, fullPage: true });
+
+  // tela cheia (modo TV): barra com título, período e relógio; as pendências continuam visíveis
+  await page.getByRole('button', { name: 'Tela cheia' }).click();
+  await expect(page.getByRole('button', { name: 'Sair (Esc)' })).toBeVisible();
+  await expect(page.getByLabel('Hora atual')).toBeVisible();
+  await expect(rows.filter({ hasText: `#${late}` })).toContainText('Atrasado');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados-tv.png` });
+  await page.getByRole('button', { name: 'Sair (Esc)' }).click();
+  await expect(page.getByRole('button', { name: 'Sair (Esc)' })).toHaveCount(0);
 });

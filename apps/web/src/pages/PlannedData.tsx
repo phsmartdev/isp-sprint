@@ -1,5 +1,5 @@
 /** Dados Planejados: chamados do GLPI atribuídos aos grupos e pessoas do Comercial — quem, o quê e até quando. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
@@ -8,6 +8,7 @@ import { api, qs } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
 import { Button, ErrorState, FormField, Input, LoadingRows, Notice, Select } from '../components/ui/primitives';
 import { Drawer, useToast } from '../components/ui/overlay';
+import { TvArea, TvBar, TvButton, useTvMode } from '../features/TvMode';
 
 type Sit = 'atrasado' | 'a_vencer' | 'no_prazo' | 'sem_prazo';
 type Line = { open: number; ok: number; soon: number; late: number; solved: number; serviceLevel: number | null };
@@ -23,6 +24,7 @@ type Data = {
   canConfigure: boolean;
 };
 
+const TV_KEYS = [['dados-planejados']];
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 const back = (days: number) => iso(new Date(new Date(`${todayIso()}T12:00:00Z`).getTime() - days * 86_400_000));
@@ -53,6 +55,10 @@ export function PlannedDataPage() {
   });
   const pickPeriod = (k: string, days: number) => { setPeriod(k); setRange({ from: back(days), to: todayIso() }); };
   const d = q.data;
+  const tvRef = useRef<HTMLDivElement>(null);
+  const tv = useTvMode(tvRef);
+  const groupName = group === null ? 'Todos os grupos' : (d?.filters.groups.find((g) => g.id === group)?.name ?? 'Grupo');
+  const fmtDay = (v: string) => new Date(`${v}T12:00:00Z`).toLocaleDateString('pt-BR');
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -62,11 +68,15 @@ export function PlannedDataPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {d && <span className="num text-xs text-muted">{d.lastSyncAt ? `Lido do GLPI em ${fmtDateTime(d.lastSyncAt)}` : 'Ainda não lido do GLPI'}</span>}
+          <TvButton onClick={() => void tv.enter()} />
           {d?.canConfigure && <Button size="sm" icon={<RefreshCw className="h-4 w-4" />} loading={run.isPending} onClick={() => run.mutate()}>Ler GLPI agora</Button>}
           {d?.canConfigure && <Button size="sm" variant="secondary" icon={<Settings className="h-4 w-4" />} onClick={() => setConfig(true)}>Configurar alertas</Button>}
         </div>
       </header>
 
+      <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
+      {tv.active && <TvBar title="Dados Planejados" period={`${fmtDay(range.from)} a ${fmtDay(range.to)}`} tabs={[{ key: 'painel', label: groupName }]} tab="painel" onTab={() => undefined} onExit={tv.exit} queryKeys={TV_KEYS} />}
+      <div className="space-y-5">
       {q.isLoading ? <div className="card"><LoadingRows rows={6} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : d && (
         <>
           {!d.configured.glpi && <Notice tone="warning">A integração com o GLPI não está configurada. {d.canConfigure ? <Link className="font-semibold text-primary hover:underline" to="/settings/integrations">Configurar em Integrações</Link> : 'Peça à administração.'}</Notice>}
@@ -161,6 +171,8 @@ export function PlannedDataPage() {
           </section>
         </>
       )}
+      </div>
+      </TvArea>
       {config && <ConfigDrawer onClose={() => setConfig(false)} />}
     </div>
   );
