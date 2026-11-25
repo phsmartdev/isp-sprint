@@ -101,10 +101,10 @@ export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExi
       </div>
       <p className="num text-3xl font-extrabold tabular-nums" aria-label="Hora atual">{time(now)}</p>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white/10 px-3 text-sm font-semibold hover:bg-white/15">
+        {tabs.length > 1 && <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-white/10 px-3 text-sm font-semibold hover:bg-white/15">
           <input type="checkbox" className="h-4 w-4 accent-[#4FBBFF]" checked={rotate} onChange={(e) => setRotate(e.target.checked)} />
           <RefreshCw className="h-4 w-4" aria-hidden />Alternar abas ({ROTATE_SECONDS}s)
-        </label>
+        </label>}
         {tabs.length > 1 && (
           <div ref={pickRef} className="relative">
             <button type="button" aria-expanded={picking} aria-haspopup="true" onClick={() => setPicking((v) => !v)} className="inline-flex h-10 items-center gap-2 rounded-md bg-white/10 px-3 text-sm font-semibold hover:bg-white/15">
