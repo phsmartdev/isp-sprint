@@ -9,7 +9,7 @@ import * as s from '../db/schema';
 import { mergeCustom } from './customFields';
 import type { AuthContext } from '../http/context';
 import { notFound, unprocessable } from '../http/errors';
-import { assertAssignableUser, assertTenantRefs, level, ownerScope } from './scope';
+import { assertAssignableUser, assertTenantRefs, clientTeamScope, level, ownerScope } from './scope';
 import { audit } from './audit';
 import { resolvePipeline } from './instructions';
 import { assertPortAvailable } from './ports';
@@ -91,9 +91,9 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       .select({ name: s.contacts.name, segment: s.contacts.segment })
       .from(s.contacts)
       // órgão da ata: o contato é do cadastro da ata, não da carteira de quem cria
-      .where(opts.trustedContact ? and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId)) : and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
+      .where(opts.trustedContact ? and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId)) : and(eq(s.contacts.id, contactId), clientTeamScope(auth, { tenantId: s.contacts.tenantId, deletedAt: s.contacts.deletedAt })))
       .limit(1);
-    if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Contato fora da sua carteira' }]);
+    if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Cliente não encontrado' }]);
     contactName = c.name;
     segment = c.segment;
   }
@@ -178,6 +178,9 @@ export const opportunitySelect = {
   installDistrict: s.opportunities.installDistrict,
   installCity: s.opportunities.installCity,
   condominiumId: s.opportunities.condominiumId,
+  privacy: s.opportunities.privacy,
+  privateUserIds: s.opportunities.privateUserIds,
+  privateTeamIds: s.opportunities.privateTeamIds,
   condominiumName: sql<string | null>`(select c.name from condominiums c where c.id = "opportunities"."condominium_id")`,
   regionName: sql<string | null>`(select r.name from condominiums c join regions r on r.id = c.region_id where c.id = "opportunities"."condominium_id")`,
   installBlock: s.opportunities.installBlock,
@@ -272,21 +275,32 @@ export function opportunityQuery(db: DbOrTx) {
     .leftJoin(s.campaigns, eq(s.campaigns.id, s.opportunities.campaignId));
 }
 
-/** Nível do módulo + jornadas restritas: quem não é membro só vê as próprias oportunidades nelas. */
-/** Leitura: quem vê só as próprias negociações também vê as dos colegas de time (funis); escrever segue só nas próprias. */
-export const seesTeamReadOnly = (auth: AuthContext) => level(auth, 'oportunidades') === 'proprio' && auth.requestMethod === 'GET' && auth.teamIds.length > 0;
+/**
+ * Quem vê cada negociação. Leitura: todo mundo com acesso ao módulo vê as negociações do time (o time colabora),
+ * menos as privadas, que ficam só com o responsável e as pessoas ou times escolhidos. Alterar segue o nível do módulo
+ * (no "Próprio", só as suas). Jornadas restritas continuam só para os membros (e o nível total).
+ */
+export const seesTeamReadOnly = (auth: AuthContext) => level(auth, 'oportunidades') !== 'nenhum' && auth.requestMethod === 'GET';
 
 /** Pode alterar esta negociação (no nível "Próprio", só a que é sua). */
 export const canEditOpportunity = (auth: AuthContext, ownerId: string | null) => level(auth, 'oportunidades') !== 'proprio' || ownerId === auth.userId;
 
+/** Negociação privada: só o responsável, as pessoas e os membros dos times escolhidos. */
+export function privacyFilter(auth: AuthContext) {
+  return sql`(${s.opportunities.privacy} <> 'privada' or ${s.opportunities.ownerId} = ${auth.userId}
+    or ${auth.userId}::uuid = any(${s.opportunities.privateUserIds})
+    or exists (select 1 from team_memberships tm where tm.user_id = ${auth.userId} and tm.team_id = any(${s.opportunities.privateTeamIds})))`;
+}
+
 export function oppVisibility(auth: AuthContext) {
+  const l = level(auth, 'oportunidades');
   const base = seesTeamReadOnly(auth)
-    ? and(eq(s.opportunities.tenantId, auth.tenantId), isNull(s.opportunities.deletedAt),
-      sql`(${s.opportunities.ownerId} = ${auth.userId} or ${s.opportunities.ownerId} in (select tm.user_id from team_memberships tm where tm.team_id in (${sql.join(auth.teamIds.map((t) => sql`${t}::uuid`), sql`, `)})))`)!
+    ? and(eq(s.opportunities.tenantId, auth.tenantId), isNull(s.opportunities.deletedAt))!
     : ownerScope(auth, 'oportunidades', { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
-  if (level(auth, 'oportunidades') === 'total') return base;
+  if (l === 'total') return and(base, privacyFilter(auth))!;
   return and(
     base,
+    privacyFilter(auth),
     sql`(${s.opportunities.ownerId} = ${auth.userId}
       or not exists (select 1 from pipeline_members pm where pm.pipeline_id = ${s.opportunities.pipelineId})
       or exists (select 1 from pipeline_members pm where pm.pipeline_id = ${s.opportunities.pipelineId} and pm.user_id = ${auth.userId}))`,

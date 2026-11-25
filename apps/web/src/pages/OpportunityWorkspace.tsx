@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Trash2, Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
+import { Lock, Users, Trash2, Building2, CalendarPlus, FileSignature, FileText, CheckCircle2, Handshake, ListChecks, Mail, MapPin, PauseCircle, Phone, PlayCircle, RotateCcw, Scale, Send, UserRound, XCircle } from 'lucide-react';
 import {
   LOSS_REASON_LABELS, OPPORTUNITY_REASONS, REASON_LABELS, SEGMENTS, SEGMENT_LABELS, toCents,
   type CustomerLifecycle, type LossReason, type OpportunityReason, type SaleType, type Segment,
@@ -866,6 +866,7 @@ export function OpportunityWorkspacePage() {
             {opp.condominiumName && <span>· {opp.condominiumName}{opp.installBlock ? ` · Bl. ${opp.installBlock}` : ''}{opp.installUnit ? ` · Ap. ${opp.installUnit}` : ''}</span>}
             <SaveStatus state={a.status} onRetry={() => void a.save()} />
           </p>
+          <OpportunityPrivacy opp={opp} />
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* venda fechada: o próximo passo é o contrato, no canto superior direito */}
@@ -945,5 +946,58 @@ function DeleteOpportunity({ id, rowVersion, title, onClose }: { id: string; row
       <p><strong>{title}</strong> sai do funil, das listas e dos indicadores. Tarefas e pontos ligados a ela deixam de contar. O registro e o motivo ficam na auditoria.</p>
       <FormField label="Motivo da exclusão" htmlFor="del-opp-reason" required><Textarea id="del-opp-reason" value={reason} onChange={(e) => setReason(e.target.value)} className="min-h-[64px]" data-autofocus /></FormField>
     </ConfirmDialog>
+  );
+}
+
+/** Privacidade: do time (todos com acesso ao módulo veem) ou privada (só o responsável e as pessoas ou times escolhidos). */
+function OpportunityPrivacy({ opp }: { opp: Opportunity }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const lk = useLookups().data;
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<'time' | 'privada'>(opp.privacy ?? 'time');
+  const [users, setUsers] = useState<string[]>(opp.privateUserIds ?? []);
+  const [teams, setTeams] = useState<string[]>(opp.privateTeamIds ?? []);
+  const save = useMutation({
+    mutationFn: () => api(`/opportunities/${opp.id}/privacy`, { method: 'PUT', body: { privacy: mode, userIds: users, teamIds: teams } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['opportunity', opp.id] }); void qc.invalidateQueries({ queryKey: ['opportunities'] }); toast({ tone: 'success', message: mode === 'privada' ? 'Negociação privada' : 'Negociação visível para o time' }); setOpen(false); },
+    onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
+  });
+  const priv = opp.privacy === 'privada';
+  const who = priv ? [...(opp.privateUserIds ?? []).map((id) => lk?.users.find((u) => u.id === id)?.name).filter(Boolean), ...(opp.privateTeamIds ?? []).map((id) => lk?.teams.find((t) => t.id === id)?.name).filter(Boolean)] : [];
+  const toggle = (list: string[], set: (v: string[]) => void, id: string) => set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+      <span className={clsx('inline-flex items-center gap-1 px-2 py-0.5 font-semibold', priv ? 'bg-[#FFF6D6] text-[#9A6B00]' : 'bg-primary-soft text-primary')} data-testid="opp-privacy">
+        {priv ? <Lock className="h-3.5 w-3.5" aria-hidden /> : <Users className="h-3.5 w-3.5" aria-hidden />}
+        {priv ? (who.length ? `Privada: ${opp.ownerName ?? 'responsável'}, ${who.join(', ')}` : `Privada: só ${opp.ownerName ?? 'o responsável'}`) : 'Visível para o time'}
+      </span>
+      {opp.canSetPrivacy && <button type="button" className="font-semibold text-primary hover:underline" onClick={() => { setMode(opp.privacy ?? 'time'); setUsers(opp.privateUserIds ?? []); setTeams(opp.privateTeamIds ?? []); setOpen(true); }}>Alterar privacidade</button>}
+      <Modal open={open} onClose={() => setOpen(false)} title="Quem vê esta negociação" size="md" footer={<><Button onClick={() => setOpen(false)}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>Salvar</Button></>}>
+        <div className="space-y-3">
+          <div role="radiogroup" aria-label="Privacidade" className="space-y-1.5">
+            {([['time', 'Do time', 'Todos com acesso a Oportunidades veem e acompanham. É o padrão: o time colabora.'], ['privada', 'Privada', 'Só você (responsável) e as pessoas ou times que escolher abaixo.']] as const).map(([k, l, h]) => (
+              <label key={k} className={clsx('flex cursor-pointer items-start gap-2 border px-3 py-2 text-sm', mode === k ? 'border-primary bg-primary-soft' : 'border-line')}>
+                <input type="radio" name="opp-priv" className="mt-0.5 h-4 w-4 accent-primary" checked={mode === k} onChange={() => setMode(k)} />
+                <span><span className="block font-semibold text-ink">{l}</span><span className="text-xs text-muted">{h}</span></span>
+              </label>
+            ))}
+          </div>
+          {mode === 'privada' && (
+            <>
+              <fieldset>
+                <legend className="mb-1 text-sm font-semibold text-ink">Times que também veem</legend>
+                <div className="flex flex-wrap gap-1.5">{(lk?.teams ?? []).map((t) => <label key={t.id} className={clsx('flex cursor-pointer items-center gap-1.5 border px-2 py-1 text-sm', teams.includes(t.id) ? 'border-primary bg-primary-soft' : 'border-line')}><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={teams.includes(t.id)} onChange={() => toggle(teams, setTeams, t.id)} />{t.name}</label>)}</div>
+              </fieldset>
+              <fieldset>
+                <legend className="mb-1 text-sm font-semibold text-ink">Pessoas que também veem</legend>
+                <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">{(lk?.users ?? []).filter((u) => u.id !== opp.ownerId).map((u) => <label key={u.id} className={clsx('flex cursor-pointer items-center gap-1.5 border px-2 py-1 text-sm', users.includes(u.id) ? 'border-primary bg-primary-soft' : 'border-line')}><input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={users.includes(u.id)} onChange={() => toggle(users, setUsers, u.id)} />{u.name}</label>)}</div>
+              </fieldset>
+              <p className="text-xs text-muted">Sem ninguém marcado, só você vê. Os números entram nos totais do funil e das metas, sem mostrar a negociação.</p>
+            </>
+          )}
+        </div>
+      </Modal>
+    </div>
   );
 }

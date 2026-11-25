@@ -560,6 +560,10 @@ export const opportunities = pgTable(
     leadId: uuid('lead_id').references(() => leads.id),
     ownerId: uuid('owner_id').notNull().references(() => users.id),
     teamId: uuid('team_id').references(() => teams.id),
+    /** "time": todo mundo com acesso ao módulo vê; "privada": só o responsável e as pessoas ou times escolhidos */
+    privacy: text('privacy').notNull().default('time'),
+    privateUserIds: uuid('private_user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    privateTeamIds: uuid('private_team_ids').array().notNull().default(sql`'{}'::uuid[]`),
     title: text('title').notNull(),
     pipelineId: uuid('pipeline_id').notNull().references(() => pipelines.id),
     /** Endereço de instalação (90% em condomínio). */
@@ -1932,6 +1936,8 @@ export const contractAmendments = pgTable('contract_amendments', {
   groupId: uuid('group_id'),
   /** Reajuste aplicado neste aditivo (%, ex.: 4.5). */
   adjustmentPct: doublePrecision('adjustment_pct'),
+  /** reajuste por item: [{ description, pct, fromCents, toCents }] (vazio quando o percentual vale para o contrato todo) */
+  itemAdjustments: jsonb('item_adjustments').$type<{ description: string; pct: number; fromCents: number; toCents: number }[]>(),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'])) }));

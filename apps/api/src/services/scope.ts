@@ -23,6 +23,8 @@ export function ownerScope(auth: AuthContext, m: Module, cols: { tenantId: PgCol
   const parts: SQL[] = [eq(cols.tenantId, auth.tenantId)];
   if (cols.deletedAt) parts.push(isNull(cols.deletedAt));
   const l = level(auth, m);
+  // cadastro de clientes é do time: quem tem acesso ao módulo lê todos; alterar continua pelo nível
+  if (m === 'clientes' && l !== 'nenhum' && auth.requestMethod === 'GET') return and(...parts)!;
   if (l === 'nenhum') parts.push(sql`false`);
   else if (l === 'proprio') parts.push(eq(cols.ownerId, auth.userId));
   else if (l === 'equipe') parts.push(or(inArray(cols.ownerId, auth.teamMemberIds), isNull(cols.ownerId))!);
@@ -70,4 +72,12 @@ export async function assertTenantRefs(
     const rows = await db.select({ id: idCol }).from(table).where(and(eq(idCol, value), eq(tenantCol, auth.tenantId))).limit(1);
     if (!rows.length) throw unprocessable('Referência inválida.', [{ path, message: 'Registro não encontrado nesta empresa' }]);
   }
+}
+
+/** Cadastro de clientes visível para o time inteiro (quem tem acesso a Clientes ou a Oportunidades), para ler e referenciar. */
+export function clientTeamScope(auth: AuthContext, cols: { tenantId: PgColumn; deletedAt?: PgColumn }): SQL {
+  const parts: SQL[] = [eq(cols.tenantId, auth.tenantId)];
+  if (cols.deletedAt) parts.push(isNull(cols.deletedAt));
+  if (level(auth, 'clientes') === 'nenhum' && level(auth, 'oportunidades') === 'nenhum') parts.push(sql`false`);
+  return and(...parts)!;
 }

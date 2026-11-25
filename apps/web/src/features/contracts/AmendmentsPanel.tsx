@@ -14,7 +14,7 @@ import { Modal, useToast } from '../../components/ui/overlay';
 import { MoneyInput } from '../DealFields';
 import { errMsg, todayIso, type ContractDetail } from './shared';
 
-type Amendment = { id: string; number: string; kind: AmendmentKind; label: string; signedOn: string; valueDeltaCents: number; monthlyDeltaCents: number; newEndAt: string | null; reforma: boolean; acordo: boolean; description: string; version: number; groupId: string | null; adjustmentPct: number | null };
+type Amendment = { id: string; number: string; kind: AmendmentKind; label: string; signedOn: string; valueDeltaCents: number; monthlyDeltaCents: number; newEndAt: string | null; reforma: boolean; acordo: boolean; description: string; version: number; groupId: string | null; adjustmentPct: number | null; itemAdjustments?: { description: string; pct: number; fromCents: number; toCents: number }[] | null };
 /** Linhas do mesmo aditivo (várias finalidades) juntas. */
 const groups = (list: Amendment[]) => { const m = new Map<string, Amendment[]>(); for (const a of list) { const k = a.groupId ?? a.id; m.set(k, [...(m.get(k) ?? []), a]); } return [...m.entries()].map(([key, rows]) => ({ key, rows })); };
 type Use = { cents: number; share: number | null; remainingCents: number };
@@ -42,7 +42,7 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
   const [open, setOpen] = useState(false);
   if (q.isLoading || !q.data) return <LoadingRows rows={4} />;
   const d = q.data;
-  const writable = d.canManage && c.stage !== 'arquivado' && c.stage !== 'cadastro_validacao';
+  const writable = d.canManage && c.stage !== 'arquivado';
   return (
     <section aria-label="Termos aditivos" className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -74,6 +74,7 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
                     {a.valueDeltaCents !== 0 && <span className={clsx('num', a.valueDeltaCents < 0 ? 'text-danger' : 'text-[#15803D]')}>{AMENDMENT_LABELS[a.kind]}: valor {a.valueDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.valueDeltaCents))}{d.limits.baseCents ? ` (${pctTxt(Math.abs(a.valueDeltaCents) / d.limits.baseCents)})` : ''}</span>}
                     {a.monthlyDeltaCents !== 0 && <span className="num">{AMENDMENT_LABELS[a.kind]}: mensal {a.monthlyDeltaCents > 0 ? '+' : '−'}{fmtBRL(Math.abs(a.monthlyDeltaCents))}</span>}
                     {a.adjustmentPct != null && <span className="num">Reajuste {a.adjustmentPct.toLocaleString('pt-BR')}%</span>}
+                    {!!a.itemAdjustments?.length && <span className="num">Reajuste por item: {a.itemAdjustments.map((x) => `${x.description} ${x.pct.toLocaleString('pt-BR')}% (${fmtBRL(x.fromCents)} → ${fmtBRL(x.toCents)})`).join('; ')}</span>}
                     {a.newEndAt && <span>Novo término {fmtDate(a.newEndAt)}</span>}
                     {a.kind === 'itens' && <span>Itens atualizados</span>}
                     {a.reforma && <span>Reforma (limite de 50%)</span>}
@@ -94,7 +95,7 @@ export function AmendmentsPanel({ c }: { c: ContractDetail }) {
 type ItemDraft = { description: string; qty: string; unit: string; kind: ContractItemKind };
 const PURPOSE_HINT: Partial<Record<AmendmentKind, string>> = {
   acrescimo: 'Aumenta valor ou quantidade (conta no limite legal).', supressao: 'Reduz valor ou quantidade (conta no limite legal).', prazo: 'Estende a vigência.',
-  reajuste: 'Aplica o percentual aos itens e ao valor mensal.', reequilibrio: 'Recompõe o equilíbrio econômico-financeiro.', itens: 'Inclui, retira ou muda os itens do contrato.', outro: 'Outra alteração (só registro).',
+  reajuste: 'Percentual no contrato todo ou só em itens escolhidos.', reequilibrio: 'Recompõe o equilíbrio econômico-financeiro.', itens: 'Inclui, retira ou muda os itens do contrato.', outro: 'Outra alteração (só registro).',
 };
 
 function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClose: () => void }) {
@@ -105,6 +106,9 @@ function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClos
   const [signedOn, setSignedOn] = useState(todayIso());
   const [vals, setVals] = useState<Record<'acrescimo' | 'supressao' | 'reequilibrio', { value: number | null; monthly: number | null }>>({ acrescimo: { value: null, monthly: null }, supressao: { value: null, monthly: null }, reequilibrio: { value: null, monthly: null } });
   const [pct, setPct] = useState('');
+  // reajuste do contrato todo ou de itens escolhidos (cada um com o seu %)
+  const [adjMode, setAdjMode] = useState<'contrato' | 'itens'>('contrato');
+  const [itemPct, setItemPct] = useState<Record<number, string>>({});
   const [newEndAt, setNewEndAt] = useState('');
   const [reforma, setReforma] = useState(false);
   const [acordo, setAcordo] = useState(false);
@@ -120,12 +124,17 @@ function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClos
   const parsedItems = items.filter((i) => i.description.trim()).map((i) => ({ planId: null, description: i.description.trim(), qty: Math.max(1, Number(i.qty) || 1), unitCents: toCents(i.unit) ?? 0, kind: i.kind }));
   const newMonthly = contractValuesFromItems(parsedItems, null).monthlyCents;
   const pctNum = pct.trim() ? Number(pct.replace(',', '.')) : NaN;
+  const num = (v: string | undefined) => (v && v.trim() ? Number(v.replace(',', '.')) : NaN);
+  // itens sobre os quais o reajuste por item é aplicado: a lista nova (se o aditivo muda itens) ou a atual
+  const adjBase = has('itens') ? parsedItems : c.current.items.map((i) => ({ description: i.description, qty: i.qty, unitCents: i.unitCents, kind: itemKindOf(i) }));
+  const itemAdj = Object.entries(itemPct).map(([k, v]) => ({ index: Number(k), pct: num(v) })).filter((x) => x.index < adjBase.length && Number.isFinite(x.pct) && x.pct !== 0);
+  const adjReady = adjMode === 'contrato' ? Number.isFinite(pctNum) && pctNum !== 0 : itemAdj.length > 0;
   const save = useMutation({
     mutationFn: () => {
       const purposes: Record<string, unknown> = {};
       for (const k of ['acrescimo', 'supressao', 'reequilibrio'] as const) if (has(k)) purposes[k] = { valueCents: cents(vals[k].value), monthlyCents: cents(vals[k].monthly) };
       if (has('prazo')) purposes.prazo = { newEndAt };
-      if (has('reajuste')) purposes.reajuste = { pct: pctNum };
+      if (has('reajuste')) purposes.reajuste = adjMode === 'contrato' ? { pct: pctNum } : { items: itemAdj };
       if (has('itens')) purposes.itens = true;
       if (has('outro')) purposes.outro = true;
       return api(`/contracts/${c.id}/amendments`, { method: 'POST', body: { number: number.trim(), signedOn, description: description.trim(), reforma: has('acrescimo') && reforma, acordo: has('supressao') && acordo, purposes, ...(has('itens') ? { items: parsedItems } : {}) } });
@@ -135,7 +144,7 @@ function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClos
   });
   const ready = number.trim() && description.trim().length >= 5 && kinds.length > 0 && !overAdd && !overSup
     && (!has('acrescimo') || cents(vals.acrescimo.value) > 0) && (!has('supressao') || cents(vals.supressao.value) > 0)
-    && (!has('prazo') || !!newEndAt) && (!has('reajuste') || Number.isFinite(pctNum)) && (!has('itens') || parsedItems.length > 0);
+    && (!has('prazo') || !!newEndAt) && (!has('reajuste') || adjReady) && (!has('itens') || parsedItems.length > 0);
   const setItem = (i: number, p: Partial<ItemDraft>) => setItems((x) => x.map((r, j) => (j === i ? { ...r, ...p } : r)));
   return (
     <Modal open onClose={onClose} title="Registrar termo aditivo" size="xl" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} disabled={!ready} onClick={() => { setError(null); save.mutate(); }}>Registrar aditivo</Button></>}>
@@ -169,7 +178,33 @@ function AmendmentDialog({ c, d, onClose }: { c: ContractDetail; d: Data; onClos
         {(has('prazo') || has('reajuste')) && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {has('prazo') && <FormField label="Novo término" htmlFor="am-end" required hint={c.current.endAt ? `Término atual: ${fmtDate(c.current.endAt)}` : undefined}><Input id="am-end" type="date" value={newEndAt} onChange={(e) => setNewEndAt(e.target.value)} /></FormField>}
-            {has('reajuste') && <FormField label="Reajuste (%)" htmlFor="am-pct" required hint="Aplicado aos itens e ao valor mensal. Ex.: 4,5"><Input id="am-pct" inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} /></FormField>}
+            {has('reajuste') && adjMode === 'contrato' && <FormField label="Reajuste (%)" htmlFor="am-pct" required hint="Aplicado a todos os itens e ao valor mensal. Ex.: 4,5"><Input id="am-pct" inputMode="decimal" value={pct} onChange={(e) => setPct(e.target.value)} /></FormField>}
+          </div>
+        )}
+        {has('reajuste') && (
+          <div className="rounded-md border border-line p-3" aria-label="Reajuste">
+            <div className="flex flex-wrap items-center gap-4" role="radiogroup" aria-label="Reajuste sobre">
+              <span className="text-sm font-semibold text-ink">Reajuste sobre</span>
+              {([['contrato', 'O contrato todo'], ['itens', 'Itens específicos']] as const).map(([k, l]) => (
+                <label key={k} className="flex items-center gap-2 text-sm"><input type="radio" name="am-adj" className="h-4 w-4 accent-primary" checked={adjMode === k} onChange={() => setAdjMode(k)} />{l}</label>
+              ))}
+            </div>
+            {adjMode === 'itens' && (
+              <>
+                <p className="mt-2 text-xs text-muted">Informe o % só nos itens que mudam (pode ser negativo). Os demais ficam como estão.{has('itens') ? ' Vale sobre a lista de itens depois do aditivo.' : ''}</p>
+                <ul className="mt-2 divide-y divide-line">{adjBase.map((it, i) => {
+                  const p = num(itemPct[i]);
+                  const to = Number.isFinite(p) ? Math.round(it.unitCents * (1 + p / 100)) : null;
+                  return (
+                    <li key={i} className="grid grid-cols-[minmax(0,1fr)_110px_150px] items-center gap-2 py-1.5 text-sm">
+                      <span className="min-w-0 truncate text-ink">{it.description} <span className="text-muted">· {it.qty} × {fmtBRL(it.unitCents)}</span></span>
+                      <Input aria-label={`Reajuste de ${it.description} (%)`} inputMode="decimal" placeholder="%" value={itemPct[i] ?? ''} onChange={(e) => setItemPct((x) => ({ ...x, [i]: e.target.value }))} />
+                      <span className="num text-right text-muted">{to !== null && to !== it.unitCents ? <>passa a <b className="text-ink">{fmtBRL(to)}</b></> : '—'}</span>
+                    </li>
+                  );
+                })}</ul>
+              </>
+            )}
           </div>
         )}
         {has('itens') && (

@@ -237,7 +237,31 @@ export const opportunityRoutes = [
     tag: 'Oportunidades',
     module: 'oportunidades',
     params: IdParams,
-    handler: async ({ app, auth, params }) => { const r = await loadOpportunity(app.db, auth, params.id); return { ...opportunityDto(r), canEdit: canEditOpportunity(auth, r.ownerId) }; },
+    handler: async ({ app, auth, params }) => { const r = await loadOpportunity(app.db, auth, params.id); return { ...opportunityDto(r), canEdit: canEditOpportunity(auth, r.ownerId), canSetPrivacy: r.ownerId === auth.userId || level(auth, 'oportunidades') === 'total' || auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p)) }; },
+  }),
+
+  defineRoute({
+    method: 'PUT', url: '/opportunities/:id/privacy', summary: 'Privacidade da negociação: do time (todos com acesso ao módulo veem) ou privada (só o responsável e as pessoas ou times escolhidos)', tag: 'Oportunidades', module: 'oportunidades', params: IdParams,
+    body: z.object({ privacy: z.enum(['time', 'privada']), userIds: z.array(z.string().uuid()).max(100).default([]), teamIds: z.array(z.string().uuid()).max(50).default([]) }),
+    handler: async ({ app, auth, params, body, req }) => {
+      const cur = await loadOpportunity(app.db, auth, params.id);
+      const lead = level(auth, 'oportunidades') === 'total' || auth.profiles.some((p) => ['gerencia', 'diretoria', 'administrador'].includes(p));
+      if (cur.ownerId !== auth.userId && !lead) throw forbidden('Só o responsável pela negociação (ou a gerência) define a privacidade.');
+      const userIds = body.privacy === 'privada' ? [...new Set(body.userIds.filter((u) => u !== cur.ownerId))] : [];
+      const teamIds = body.privacy === 'privada' ? [...new Set(body.teamIds)] : [];
+      if (userIds.length) {
+        const ok = await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), inArray(s.users.id, userIds)));
+        if (ok.length !== userIds.length) throw unprocessable('Pessoa não encontrada.', [{ path: 'userIds', message: 'Escolha pessoas da empresa' }]);
+      }
+      if (teamIds.length) {
+        const ok = await app.db.select({ id: s.teams.id }).from(s.teams).where(and(eq(s.teams.tenantId, auth.tenantId), inArray(s.teams.id, teamIds)));
+        if (ok.length !== teamIds.length) throw unprocessable('Time não encontrado.', [{ path: 'teamIds', message: 'Escolha times da empresa' }]);
+      }
+      await app.db.update(s.opportunities).set({ privacy: body.privacy, privateUserIds: userIds, privateTeamIds: teamIds, updatedAt: new Date() }).where(eq(s.opportunities.id, cur.id));
+      await app.db.insert(s.opportunityEvents).values({ tenantId: auth.tenantId, opportunityId: cur.id, type: 'privacidade', actorId: auth.userId, payload: { privacy: body.privacy, users: userIds.length, teams: teamIds.length } });
+      await audit(app.db, req, { action: 'opportunity.privacy', entityType: 'opportunity', entityId: cur.id, metadata: { privacy: body.privacy, userIds, teamIds } });
+      return { privacy: body.privacy, privateUserIds: userIds, privateTeamIds: teamIds };
+    },
   }),
 
   defineRoute({

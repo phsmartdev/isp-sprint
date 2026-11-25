@@ -138,6 +138,8 @@ export type Opportunity = {
   measurementContractId: string | null;
   /** false = negociação de colega do time: só leitura */
   canEdit?: boolean;
+  /** "time": todos com acesso veem; "privada": só o responsável e as pessoas ou times escolhidos */
+  privacy?: 'time' | 'privada'; privateUserIds?: string[]; privateTeamIds?: string[]; canSetPrivacy?: boolean;
   measurementCents: number | null;
   executiveTicket: string | null;
   proposalStatus: ProposalStatus;

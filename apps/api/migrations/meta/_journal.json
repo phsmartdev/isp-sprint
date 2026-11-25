@@ -1268,6 +1268,13 @@
       "when": 1795546673666,
       "tag": "0180_assinatura_imagem",
       "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 1795549967273,
+      "tag": "0181_visibilidade_aditivo_itens",
+      "breakpoints": true
     }
   ]
 }
