@@ -1,0 +1,84 @@
+import { expect, test, type Page } from '@playwright/test';
+
+/** Dados Planejados contra o GLPI 11 simulado (porta 3398): cadastro do usuário no GLPI, configuração e painel. */
+const SHOTS = process.env.ACADEMIA_SHOTS;
+const GLPI = 'http://127.0.0.1:3398';
+async function login(page: Page, email: string) {
+  await page.context().clearCookies();
+  await page.goto('/login');
+  await page.getByLabel('E-mail').fill(email);
+  await page.getByLabel('Senha', { exact: true }).fill('Sprint@2026');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
+}
+/** Data no formato do GLPI (horário de Brasília). */
+const glpiDate = (d: Date) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(d);
+
+test.afterAll(async ({ browser }) => {
+  const page = await browser.newPage();
+  await login(page, 'carlos@yepnet.test');
+  const o = { origin: new URL(page.url()).origin };
+  const users = (await (await page.request.get('/api/v1/admin/users')).json()).users as { id: string; email: string }[];
+  const lucas = users.find((u) => u.email === 'lucas@yepnet.test')!;
+  await page.request.patch(`/api/v1/admin/users/${lucas.id}`, { headers: o, data: { glpiUserId: null, glpiGroups: [] } });
+  const cfg = await (await page.request.get('/api/v1/admin/dados-planejados')).json();
+  await page.request.put('/api/v1/admin/dados-planejados', { headers: o, data: { enabled: false, rootEntityId: 0, managerIds: [], groupLeaders: {}, settings: cfg.settings } });
+  await page.request.put('/api/v1/admin/integrations/glpi', { headers: o, data: { enabled: false, config: {}, secrets: {} } });
+  await page.close();
+});
+
+test('Dados Planejados: liga a pessoa ao GLPI no cadastro, configura o SLA universal e mostra as pendências', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await login(page, 'carlos@yepnet.test');
+  const o = { origin: new URL(page.url()).origin };
+  expect((await page.request.put('/api/v1/admin/integrations/glpi', { headers: o, data: { enabled: true, config: { baseUrl: GLPI, clientId: 'isp-sprint', username: 'integracao' }, secrets: { clientSecret: 'glpi-secret', password: 'Integra@2026' } } })).ok()).toBe(true);
+  const st = Date.now().toString(36).slice(-5);
+  // no GLPI: um chamado do Lucas aberto há 3 dias (atrasado) e um do grupo, sem responsável
+  const old = new Date(Date.now() - 3 * 86_400_000);
+  const late = (await (await page.request.post(`${GLPI}/__test/seed`, { data: { name: `Revisão de proposta ${st}`, date: glpiDate(old), team: [{ type: 'Group', id: 21 }, { type: 'User', id: 31 }] } })).json()).id as number;
+  const free = (await (await page.request.post(`${GLPI}/__test/seed`, { data: { name: `Aditivo de contrato ${st}`, date: glpiDate(new Date(Date.now() - 30 * 60_000)), team: [{ type: 'Group', id: 21 }] } })).json()).id as number;
+
+  // cadastro: usuário e grupo do Lucas no GLPI
+  await page.goto('/settings/users');
+  await page.getByRole('row', { name: /Lucas Lima/ }).getByRole('button', { name: /Editar/ }).first().click();
+  const glpi = page.getByRole('group', { name: 'GLPI' });
+  await glpi.getByLabel('Buscar usuário no GLPI').fill('lucas');
+  await glpi.getByRole('button', { name: 'Buscar' }).first().click();
+  await glpi.getByRole('button', { name: /Lucas Lima \(lucas\.lima\)/ }).click();
+  await expect(glpi.getByTestId('glpi-user')).toHaveText('Lucas Lima (lucas.lima)');
+  await glpi.getByLabel('Buscar grupo no GLPI').fill('comer');
+  await glpi.getByLabel('Buscar grupo no GLPI').press('Enter');
+  await glpi.getByRole('button', { name: /^Comercial/ }).click();
+  await expect(glpi.getByTestId('glpi-group')).toContainText('Comercial');
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByText('Usuário atualizado')).toBeVisible();
+
+  // menu: Dados Planejados logo abaixo de Início
+  const nav = page.getByRole('navigation').first();
+  await nav.getByRole('link', { name: 'Dados Planejados' }).click();
+  await expect(page.getByRole('heading', { name: 'Dados Planejados' })).toBeVisible();
+  await expect(page.getByText(/O monitoramento está desligado/)).toBeVisible();
+
+  // configuração: liga, SLA universal de 8 h úteis
+  await page.getByRole('button', { name: 'Configurar alertas' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Configurar alertas' });
+  await drawer.getByLabel('Monitorar os chamados do GLPI e mandar os avisos').check();
+  await expect(drawer.getByRole('radio', { name: /SLA universal/ })).toBeChecked();
+  await drawer.getByLabel('Horas para solucionar').fill('8');
+  await drawer.getByRole('button', { name: 'Salvar' }).click();
+  await expect(page.getByText('Configuração salva')).toBeVisible();
+  await page.getByRole('button', { name: 'Ler GLPI agora' }).click();
+  await expect(page.getByText('GLPI lido e avisos conferidos')).toBeVisible();
+
+  const rows = page.getByTestId('pending-row');
+  await expect(rows.filter({ hasText: `#${late}` })).toContainText('Atrasado');
+  await expect(rows.filter({ hasText: `#${late}` })).toContainText('lucas.lima');
+  await expect(rows.filter({ hasText: `#${free}` })).toContainText('Sem responsável');
+  await expect(rows.first()).toContainText(`#${late}`); // atrasados primeiro
+  await expect(page.getByRole('alert', { name: 'Alerta' })).toContainText('em atraso');
+  await expect(page.getByRole('link', { name: 'Abrir no GLPI' }).first()).toHaveAttribute('href', new RegExp(`ticket\\.form\\.php\\?id=${late}`));
+  await expect(page.getByText('SLA universal: 8 h úteis para solucionar', { exact: false })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Nível de serviço por grupo e pessoa' })).toContainText('Comercial');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados.png`, fullPage: true });
+});

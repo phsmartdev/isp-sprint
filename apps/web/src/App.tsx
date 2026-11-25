@@ -53,6 +53,7 @@ const HomePage = lazy(() => import('./pages/Home').then((m) => ({ default: m.Hom
 const LeadsPage = lazy(() => import('./pages/Leads').then((m) => ({ default: m.LeadsPage })));
 const OpportunitiesPage = lazy(() => import('./pages/Opportunities').then((m) => ({ default: m.OpportunitiesPage })));
 const NewOpportunityPage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.NewOpportunityPage })));
+const PlannedDataPage = lazy(() => import('./pages/PlannedData').then((m) => ({ default: m.PlannedDataPage })));
 const OpportunityWorkspacePage = lazy(() => import('./pages/OpportunityWorkspace').then((m) => ({ default: m.OpportunityWorkspacePage })));
 const BudgetPlanningPage = lazy(() => import('./pages/budget/Planning').then((m) => ({ default: m.BudgetPlanningPage })));
 const BudgetPurchasesPage = lazy(() => import('./pages/budget/Resources').then((m) => ({ default: m.BudgetPurchasesPage })));
@@ -184,6 +185,7 @@ export function App() {
       <Route path="/painel/indicadores" element={<RequireAuth><Gate module="inteligencia"><KpiBoardPage /></Gate></RequireAuth>} />
       <Route element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Gate module="inicio"><HomePage /></Gate>} />
+        <Route path="dados-planejados" element={<Gate module="inicio"><PlannedDataPage /></Gate>} />
         <Route path="pessoas" element={<Gate module="pessoas" feature="pessoas_cultura.experiencia"><PeopleLayout /></Gate>}>
           <Route index element={<PeopleFeedHome />} />
           <Route path="meu-espaco" element={<MySpacePage />} />

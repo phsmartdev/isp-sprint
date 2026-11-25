@@ -57,6 +57,7 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
     const raw = await body(req);
     try {
       if (p === '/__test/health') return json(res, 200, { ok: true, tickets: tickets.size });
+      if (p === '/__test/seed' && req.method === 'POST') return json(res, 200, { id: api.seed(JSON.parse(raw || '{}')) });
       if (p.startsWith('/__test/tickets/') && req.method === 'POST') {
         const id = Number(p.split('/')[3]);
         const a = JSON.parse(raw || '{}');
