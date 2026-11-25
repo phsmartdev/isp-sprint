@@ -91,11 +91,11 @@ async function accessToken(c: GlpiCfg, fresh = false): Promise<string> {
   return j.access_token;
 }
 
-export async function glpiCall<T>(c: GlpiCfg, method: 'GET' | 'POST' | 'PATCH', path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined>; entityId?: number } = {}): Promise<T> {
+export async function glpiCall<T>(c: GlpiCfg, method: 'GET' | 'POST' | 'PATCH', path: string, opts: { body?: unknown; query?: Record<string, string | number | undefined>; entityId?: number; recursive?: boolean } = {}): Promise<T> {
   const q = opts.query ? `?${new URLSearchParams(Object.entries(opts.query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)])).toString()}` : '';
   const go = async (fresh: boolean) => hfetch(`${c.baseUrl}/api.php${path}${q}`, {
     method,
-    headers: { authorization: `Bearer ${await accessToken(c, fresh)}`, accept: 'application/json', 'GLPI-API-Version': '2', ...(opts.entityId !== undefined ? { 'GLPI-Entity': String(opts.entityId) } : {}), ...(opts.body ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: `Bearer ${await accessToken(c, fresh)}`, accept: 'application/json', 'GLPI-API-Version': '2', ...(opts.entityId !== undefined ? { 'GLPI-Entity': String(opts.entityId) } : {}), ...(opts.recursive ? { 'GLPI-Entity-Recursive': 'true' } : {}), ...(opts.body ? { 'content-type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let r = await go(false);
@@ -119,6 +119,19 @@ const like = (q?: string) => (q && q.trim() ? `name=ilike="*${q.trim().replace(/
 export const glpiEntities = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET', '/Administration/Entity', { query: { limit: 50, filter: like(q), sort: 'name' } });
 export const glpiCategories = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET', '/Dropdowns/ITILCategory', { query: { limit: 100, filter: like(q), sort: 'name' } });
 export const glpiGroups = (c: GlpiCfg, q?: string) => glpiCall<Named[]>(c, 'GET', '/Administration/Group', { query: { limit: 100, filter: like(q), sort: 'name' } });
+
+/** Usuários do GLPI (busca pelo login ou pelo nome), para ligar cada pessoa do RevOps ao seu usuário no GLPI. */
+export async function glpiUsers(c: GlpiCfg, q?: string) {
+  const term = q?.trim().replace(/["\\]/g, '');
+  const rows = await glpiCall<{ id: number; username?: string; name?: string; realname?: string | null; firstname?: string | null }[]>(c, 'GET', '/Administration/User', {
+    query: { limit: 50, sort: 'username', filter: term ? `username=ilike="*${term}*",realname=ilike="*${term}*",firstname=ilike="*${term}*"` : undefined },
+  });
+  return (rows ?? []).map((u) => {
+    const login = u.username ?? u.name ?? String(u.id);
+    const full = [u.firstname, u.realname].filter(Boolean).join(' ').trim();
+    return { id: u.id, name: full ? `${full} (${login})` : login };
+  });
+}
 
 export async function glpiCreateTicket(c: GlpiCfg, t: { title: string; content: string; author: string; type: number; urgency: number; entityId: number; categoryId?: number | null; groupId?: number | null }) {
   const r = await glpiCall<{ id: number }>(c, 'POST', '/Assistance/Ticket', {

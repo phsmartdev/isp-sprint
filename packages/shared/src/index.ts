@@ -293,6 +293,10 @@ export const UserCreate = z.object({
   sectorRole: z.enum(['diretoria', 'gestao', 'lideranca', 'operador', 'observador']).optional(),
   isCsm: z.boolean().default(false),
   playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).default([]),
+  /** usuário e grupos dela no GLPI (Dados Planejados) */
+  glpiUserId: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  glpiUserName: z.string().trim().max(200).nullable().optional(),
+  glpiGroups: z.array(z.object({ id: z.number().int().min(0).max(100_000_000), name: z.string().trim().max(200) })).max(30).optional(),
 });
 export const UserUpdate = z.object({
   name: trimmed(120).min(2).optional(),
@@ -314,6 +318,10 @@ export const UserUpdate = z.object({
   isCsm: z.boolean().optional(),
   /** papéis do Playbook Comercial (contratos) que a pessoa ocupa */
   playbookRoles: z.array(z.enum(PLAYBOOK_INTERNAL_ROLES)).max(6).optional(),
+  /** usuário e grupos dela no GLPI (Dados Planejados) */
+  glpiUserId: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  glpiUserName: z.string().trim().max(200).nullable().optional(),
+  glpiGroups: z.array(z.object({ id: z.number().int().min(0).max(100_000_000), name: z.string().trim().max(200) })).max(30).optional(),
 });
 const ProductCommission = z.object({ kind: z.enum(['percent', 'fixo']), value: z.number().int().min(0).max(10_000_000) }).nullable().default(null);
 export const PlanProductItem = z.object({

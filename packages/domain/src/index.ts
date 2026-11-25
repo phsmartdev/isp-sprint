@@ -77,3 +77,4 @@ export * from './giftCompliance';
 export * from './studio';
 
 export * from './sectionCompatibility';
+export * from './glpiSla';

@@ -9,18 +9,21 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHmac, randomBytes } from 'node:crypto';
 
 type TL = { type: 'Followup' | 'Task' | 'Solution' | 'Document' | 'Validation'; item: Record<string, unknown> };
-type Ticket = { id: number; name: string; content: string; type: number; urgency: number; entity: number; category: number | null; status: number; date_mod: string; date_solve: string | null; date_close: string | null; timeline: TL[]; team: { type: string; id: number; role: string }[] };
+type Ticket = { id: number; name: string; content: string; type: number; urgency: number; entity: number; category: number | null; status: number; date_mod: string; date_solve: string | null; date_close: string | null; timeline: TL[]; team: { type: string; id: number; role: string; name?: string }[]; date?: string; resolution_date?: string | null; take_into_account_date?: string | null };
 
 export const GLPI_CREDS = { clientId: 'isp-sprint', clientSecret: 'glpi-secret', username: 'integracao', password: 'Integra@2026' };
 const ENTITIES = [{ id: 0, name: 'Raiz', completename: 'Raiz' }, { id: 3, name: 'Prefeitura de Lagarto', completename: 'Raiz > Clientes > Prefeitura de Lagarto' }, { id: 4, name: 'Hospital São Lucas', completename: 'Raiz > Clientes > Hospital São Lucas' }];
 const CATEGORIES = [{ id: 7, name: 'Link dedicado', completename: 'Rede > Link dedicado' }, { id: 8, name: 'Instalação', completename: 'Campo > Instalação' }];
-const GROUPS = [{ id: 11, name: 'NOC', completename: 'NOC' }, { id: 12, name: 'Campo', completename: 'Campo' }];
+const GROUPS = [{ id: 11, name: 'NOC', completename: 'NOC' }, { id: 12, name: 'Campo', completename: 'Campo' }, { id: 21, name: 'Comercial', completename: 'Comercial' }, { id: 22, name: 'Sucesso do Cliente', completename: 'Sucesso do Cliente' }];
+const USERS = [{ id: 31, username: 'lucas.lima', firstname: 'Lucas', realname: 'Lima' }, { id: 32, username: 'ana.souza', firstname: 'Ana', realname: 'Souza' }, { id: 33, username: 'tecnico.noc', firstname: 'Técnico', realname: 'NOC' }];
 const STATUS: Record<number, string> = { 1: 'Novo', 2: 'Em atendimento (atribuído)', 3: 'Em atendimento (planejado)', 4: 'Pendente', 5: 'Solucionado', 6: 'Fechado' };
 
 export type FakeGlpi = {
   url: string;
   close: () => Promise<void>;
   tickets: Map<number, Ticket>;
+  /** Cria um chamado direto no GLPI (como se aberto lá), com equipe e prazo. Datas no formato do GLPI ("AAAA-MM-DD HH:MM:SS"). */
+  seed: (t: { name: string; entity?: number; status?: number; date: string; resolution_date?: string | null; take_into_account_date?: string | null; date_solve?: string | null; team: { type: 'User' | 'Group'; id: number; role?: string }[] }) => number;
   /** O técnico responde/age no GLPI; com `hook`, dispara o webhook assinado como o GLPI faz. */
   act: (ticketId: number, a: { kind: 'followup' | 'task' | 'solution' | 'status' | 'validation'; text?: string; status?: number; isPrivate?: boolean; toOther?: boolean }, hook?: { url: string; secret: string; badSignature?: boolean }) => Promise<number | null>;
   failNext: (status: number) => void;
@@ -54,6 +57,7 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
     const raw = await body(req);
     try {
       if (p === '/__test/health') return json(res, 200, { ok: true, tickets: tickets.size });
+      if (p === '/__test/seed' && req.method === 'POST') return json(res, 200, { id: api.seed(JSON.parse(raw || '{}')) });
       if (p.startsWith('/__test/tickets/') && req.method === 'POST') {
         const id = Number(p.split('/')[3]);
         const a = JSON.parse(raw || '{}');
@@ -76,6 +80,22 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
       if (req.method === 'GET' && path === '/Administration/Entity') return json(res, 200, filterBy(ENTITIES, u.searchParams.get('filter')));
       if (req.method === 'GET' && path === '/Administration/Group') return json(res, 200, filterBy(GROUPS, u.searchParams.get('filter')));
       if (req.method === 'GET' && path === '/Dropdowns/ITILCategory') return json(res, 200, filterBy(CATEGORIES, u.searchParams.get('filter')));
+      if (req.method === 'GET' && path === '/Administration/User') {
+        const f = u.searchParams.get('filter');
+        const m = f?.match(/username=ilike="\*(.*?)\*"/);
+        return json(res, 200, m ? USERS.filter((x) => `${x.username} ${x.firstname} ${x.realname}`.toLowerCase().includes(m[1]!.toLowerCase())) : USERS);
+      }
+      if (req.method === 'GET' && path === '/Assistance/Ticket') {
+        // como o GLPI: só a entidade ativa, ou ela e as filhas com GLPI-Entity-Recursive
+        if (req.headers['glpi-entity-recursive'] !== 'true') return json(res, 200, []);
+        const m = u.searchParams.get('filter')?.match(/^date_mod=ge="(.+)"$/);
+        const start = Number(u.searchParams.get('start') ?? 0), limit = Number(u.searchParams.get('limit') ?? 50);
+        const list = [...tickets.values()].filter((x) => !m || x.date_mod >= m[1]!).sort((a, b) => a.date_mod.localeCompare(b.date_mod)).slice(start, start + limit);
+        return json(res, 200, list.map((x) => {
+          const ent = ENTITIES.find((e) => e.id === x.entity)!;
+          return { id: x.id, name: x.name, status: { id: x.status, name: STATUS[x.status] }, entity: { id: ent.id, name: ent.name, completename: ent.completename }, date: x.date ?? x.date_mod, date_mod: x.date_mod, date_solve: x.date_solve, date_close: x.date_close, resolution_date: x.resolution_date ?? null, take_into_account_date: x.take_into_account_date ?? null, team: x.team.map((tm) => ({ ...tm, name: tm.name ?? (tm.type === 'Group' ? GROUPS.find((g) => g.id === tm.id)?.name : USERS.find((us) => us.id === tm.id)?.username) })) };
+        }));
+      }
       if (req.method === 'POST' && path === '/Assistance/Ticket') {
         const b = JSON.parse(raw);
         // como no GLPI 11: `entity` é somente leitura no corpo; vale a entidade ativa (cabeçalho GLPI-Entity, padrão a raiz 0)
@@ -145,6 +165,11 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
     tickets,
     close: () => new Promise((ok) => server.close(() => ok())),
     failNext: (status) => { failNext = status; },
+    seed: (x) => {
+      const id = ++seq;
+      tickets.set(id, { id, name: x.name, content: x.name, type: 1, urgency: 3, entity: x.entity ?? 3, category: null, status: x.status ?? 2, date: x.date, date_mod: now(), date_solve: x.date_solve ?? null, date_close: null, timeline: [], team: x.team.map((m) => ({ type: m.type, id: m.id, role: m.role ?? 'assigned' })), resolution_date: x.resolution_date ?? null, take_into_account_date: x.take_into_account_date ?? null });
+      return id;
+    },
     act: async (ticketId, a, hook) => {
       const t = tickets.get(ticketId);
       if (!t) throw new Error(`chamado ${ticketId} não existe no GLPI simulado`);

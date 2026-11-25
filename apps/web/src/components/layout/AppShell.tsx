@@ -36,6 +36,7 @@ const isGroup = (n: NavEntry): n is NavGroup => 'children' in n;
 /** Menu na ordem combinada com o Paulo (21/10/2026). Grupos abrem e fecham; abrem sozinhos quando a página atual está dentro. */
 const NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: <Home className={ICON} />, module: 'inicio' },
+  { to: '/dados-planejados', label: 'Dados Planejados', icon: <Gauge className={ICON} />, module: 'inicio' },
   { key: 'comercial', label: 'Comercial', icon: <Briefcase className={ICON} />, children: [
     { to: '/opportunities', label: 'Oportunidades', module: 'oportunidades' },
     { to: '/customers', label: 'Contas', module: 'clientes', feature: 'crm.contas' },
@@ -342,6 +343,13 @@ export function AppShell() {
   useHotkey('/', useCallback(() => search.current?.focus(), []));
   useHotkey('n', newOpp);
   useEffect(() => setMobileOpen(false), [loc.pathname]);
+  // Dados Planejados: com a ferramenta aberta, a rotina de leitura do GLPI e dos avisos roda (o servidor limita a 1 vez a cada 4 min por empresa)
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === 'visible') void api('/dados-planejados/tick', { method: 'POST' }).catch(() => undefined); };
+    const first = window.setTimeout(tick, 20_000);
+    const every = window.setInterval(tick, 5 * 60_000);
+    return () => { window.clearTimeout(first); window.clearInterval(every); };
+  }, []);
   const notify = (counts?.overdue ?? 0) + (counts?.today ?? 0);
 
   return (

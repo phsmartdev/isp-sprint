@@ -172,7 +172,7 @@ export function AdminOverview() {
 // =================================================================== usuários
 type AdminUser = {
   id: string; name: string; email: string; jobTitle: string | null; phone: string | null; active: boolean; ipBypass?: boolean; lastLoginAt: string | null; profile: ProfileKey | null;
-  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; teamIds: string[]; leadTeamIds: string[]; sectors: string[]; sectorViewer?: boolean; sectorRole?: SectorRole; isCsm?: boolean; playbookRoles?: PlaybookRole[];
+  goalSales: number; goalProposals: number; goalLeads: number; hasAvatar: boolean; glpiUserId?: number | null; glpiUserName?: string | null; glpiGroupIds?: number[]; glpiGroupNames?: string[]; teamIds: string[]; leadTeamIds: string[]; sectors: string[]; sectorViewer?: boolean; sectorRole?: SectorRole; isCsm?: boolean; playbookRoles?: PlaybookRole[];
 };
 
 async function fileToBase64(file: File) {
@@ -289,6 +289,10 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
     name: user?.name ?? '', email: user?.email ?? '', jobTitle: user?.jobTitle ?? '', phone: user?.phone ?? '', profile: (user?.profile ?? 'operacao') as ProfileKey, active: user?.active ?? true, ipBypass: user?.ipBypass ?? false,
     teamIds: user?.teamIds ?? [], leadTeamIds: user?.leadTeamIds ?? [], sectors: user?.sectors ?? [], sectorRole: (user?.sectorRole ?? defaultSectorRole(user?.profile ?? 'operacao')) as SectorRole, isCsm: user?.isCsm ?? false, playbookRoles: (user?.playbookRoles ?? []) as PlaybookRole[], goalSales: user?.goalSales ?? 0, goalProposals: user?.goalProposals ?? 0, goalLeads: user?.goalLeads ?? 0,
   });
+  const [glpi, setGlpi] = useState<{ user: { id: number; name: string } | null; groups: { id: number; name: string }[] }>({
+    user: user?.glpiUserId ? { id: user.glpiUserId, name: user.glpiUserName ?? `Usuário ${user.glpiUserId}` } : null,
+    groups: (user?.glpiGroupIds ?? []).map((id, i) => ({ id, name: user?.glpiGroupNames?.[i] ?? `Grupo ${id}` })),
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
   // foto escolhida no cadastro: vai para o servidor depois de salvar a pessoa (no novo, o id só existe depois)
@@ -308,8 +312,8 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
       if (form.profile === 'supervisor' && !form.leadTeamIds.length) { setErrors({ leadTeamIds: 'Escolha ao menos um time para supervisionar.' }); throw new Error('O supervisor precisa supervisionar ao menos um time.'); }
       const leadTeamIds = form.profile === 'supervisor' ? form.leadTeamIds : [];
       const saved = await (user
-      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
-      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles } }));
+      ? api(`/admin/users/${user.id}`, { method: 'PATCH', body: { glpiUserId: glpi.user?.id ?? null, glpiUserName: glpi.user?.name ?? null, glpiGroups: glpi.groups, name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, active: form.active, ipBypass: form.ipBypass, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles, goalSales: form.goalSales, goalProposals: form.goalProposals, goalLeads: form.goalLeads } })
+      : api<{ temporaryPassword: string }>('/admin/users', { method: 'POST', body: { glpiUserId: glpi.user?.id ?? null, glpiUserName: glpi.user?.name ?? null, glpiGroups: glpi.groups, name: form.name, email: form.email, jobTitle: form.jobTitle || null, phone: form.phone.trim() || null, profile: form.profile, teamIds: form.teamIds, leadTeamIds, sectors: form.sectors, sectorRole: form.sectorRole, isCsm: form.isCsm, playbookRoles: form.playbookRoles } }));
       const id = user?.id ?? (saved as { id?: string }).id;
       if (photo && id) {
         try { await api(`/admin/users/${id}/avatar`, { method: 'PUT', body: { data: await fileToBase64(photo.file) } }); }
@@ -345,6 +349,7 @@ function UserForm({ user, teams: allTeams, users = [], onDone }: { user?: AdminU
           <Select id="uf-profile" value={form.profile} disabled={self} onChange={(e) => { set('profile', e.target.value as ProfileKey); if (!user) set('sectorRole', defaultSectorRole(e.target.value)); }}>{PROFILE_KEYS.map((p) => <option key={p} value={p}>{PROFILE_LABELS[p]}</option>)}</Select>
         </FormField>
       </div>
+      <GlpiLink value={glpi} onChange={setGlpi} />
       {form.profile === 'supervisor' ? (
         <fieldset>
           <legend className="mb-1 text-sm font-semibold text-ink">Times que supervisiona</legend>
@@ -848,5 +853,51 @@ function SectorsManager({ open, onClose }: { open: boolean; onClose: () => void 
         <p className="text-sm text-ink">O setor sai do cadastro das pessoas e das escolhas. O que já foi registrado continua no histórico.</p>
       </Modal>
     </Modal>
+  );
+}
+
+/** Usuário e grupos da pessoa no GLPI: os Dados Planejados leem os chamados atribuídos a ela e aos grupos dela. */
+function GlpiLink({ value, onChange }: { value: { user: { id: number; name: string } | null; groups: { id: number; name: string }[] }; onChange: (v: { user: { id: number; name: string } | null; groups: { id: number; name: string }[] }) => void }) {
+  const [uq, setUq] = useState('');
+  const [gq, setGq] = useState('');
+  const [search, setSearch] = useState<{ kind: 'users' | 'groups'; q: string } | null>(null);
+  const res = useQuery({ queryKey: ['glpi-lookup', search], enabled: !!search, retry: false, queryFn: () => api<{ items: { id: number; name: string }[] }>(`/admin/glpi/${search!.kind}?q=${encodeURIComponent(search!.q)}`) });
+  const items = res.data?.items ?? [];
+  return (
+    <fieldset className="border border-line p-3" aria-label="GLPI">
+      <legend className="px-1 text-sm font-semibold text-ink">GLPI (Dados Planejados)</legend>
+      <p className="mb-2 text-xs text-muted">Os chamados atribuídos a este usuário ou a estes grupos no GLPI entram nos Dados Planejados e nos avisos dela.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <p className="text-sm font-semibold text-ink">Usuário no GLPI</p>
+          {value.user ? (
+            <p className="mt-1 flex items-center gap-2 text-sm"><span className="bg-primary-soft px-2 py-1 font-semibold text-primary" data-testid="glpi-user">{value.user.name}</span><button type="button" className="text-xs font-semibold text-danger hover:underline" onClick={() => onChange({ ...value, user: null })}>Tirar</button></p>
+          ) : (
+            <div className="mt-1 flex gap-1.5">
+              <Input onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setSearch({ kind: 'users', q: uq }); } }} aria-label="Buscar usuário no GLPI" placeholder="login ou nome" value={uq} onChange={(e) => setUq(e.target.value)} />
+              <Button type="button" size="sm" onClick={() => setSearch({ kind: 'users', q: uq })}>Buscar</Button>
+            </div>
+          )}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-ink">Grupos no GLPI</p>
+          <div className="mt-1 flex flex-wrap gap-1.5">{value.groups.map((g) => <span key={g.id} className="inline-flex items-center gap-1 bg-primary-soft px-2 py-1 text-sm font-semibold text-primary" data-testid="glpi-group">{g.name}<button type="button" aria-label={`Tirar ${g.name}`} className="text-danger" onClick={() => onChange({ ...value, groups: value.groups.filter((x) => x.id !== g.id) })}>×</button></span>)}</div>
+          <div className="mt-1 flex gap-1.5">
+            <Input onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); setSearch({ kind: 'groups', q: gq }); } }} aria-label="Buscar grupo no GLPI" placeholder="nome do grupo" value={gq} onChange={(e) => setGq(e.target.value)} />
+            <Button type="button" size="sm" onClick={() => setSearch({ kind: 'groups', q: gq })}>Buscar</Button>
+          </div>
+        </div>
+      </div>
+      {search && (res.isLoading ? <p className="mt-2 text-xs text-muted">Buscando no GLPI…</p> : res.isError ? <p className="mt-2 text-xs text-danger" role="alert">{(res.error as Error).message}</p> : (
+        <ul className="mt-2 max-h-40 divide-y divide-line overflow-y-auto border border-line" aria-label={search.kind === 'users' ? 'Usuários do GLPI' : 'Grupos do GLPI'}>
+          {!items.length ? <li className="px-2 py-1.5 text-xs text-muted">Nada encontrado no GLPI.</li> : items.map((it) => (
+            <li key={it.id}><button type="button" className="w-full px-2 py-1.5 text-left text-sm hover:bg-primary-soft" onClick={() => {
+              if (search.kind === 'users') { onChange({ ...value, user: it }); setUq(''); } else if (!value.groups.some((g) => g.id === it.id)) { onChange({ ...value, groups: [...value.groups, it] }); setGq(''); }
+              setSearch(null);
+            }}>{it.name} <span className="text-xs text-muted">· id {it.id}</span></button></li>
+          ))}
+        </ul>
+      ))}
+    </fieldset>
   );
 }

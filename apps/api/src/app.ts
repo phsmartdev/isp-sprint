@@ -96,6 +96,7 @@ import { bidActionRoutes, bidParticipantRoutes } from './routes/bidParticipants'
 import { competitorRoutes } from './routes/competitors';
 import { contractHabilitationRoutes } from './routes/contractHabilitation';
 import { contractAmendmentRoutes } from './routes/contractAmendments';
+import { plannedDataRoutes } from './routes/plannedData';
 import { kpiRoutes } from './routes/kpis';
 import { contractAttentionRoutes } from './routes/contractAttention';
 import { contractExecutionRoutes } from './routes/contractExecution';
@@ -317,6 +318,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...competitorRoutes,
     ...contractHabilitationRoutes,
     ...contractAmendmentRoutes,
+    ...plannedDataRoutes,
     ...kpiRoutes,
     ...contractAttentionRoutes,
     ...contractExecutionRoutes,
