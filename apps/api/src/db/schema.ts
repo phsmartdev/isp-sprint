@@ -59,6 +59,11 @@ export const users = pgTable(
     jobTitle: text('job_title'),
     /** WhatsApp para avisos internos (pedidos de aprovação). */
     phone: text('phone'),
+    /** Usuário e grupos dela no GLPI (Dados Planejados: chamados atribuídos a ela ou aos grupos dela). */
+    glpiUserId: integer('glpi_user_id'),
+    glpiUserName: text('glpi_user_name'),
+    glpiGroupIds: integer('glpi_group_ids').array().notNull().default(sql`'{}'::int[]`),
+    glpiGroupNames: text('glpi_group_names').array().notNull().default(sql`'{}'::text[]`),
     /** Metas mensais usadas em "Meta do mês" e "Meu desempenho" no Início. */
     goalSales: integer('goal_sales').notNull().default(0),
     goalProposals: integer('goal_proposals').notNull().default(0),
@@ -7981,3 +7986,85 @@ export const academyNotes = pgTable('academy_notes', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => ({ mine: index('academy_notes_user_idx').on(t.userId, t.trackId), pos: check('academy_notes_pos_ck', sql`${t.positionSeconds} >= 0`) }));
+
+// ------------------------------------------------------------------ Dados Planejados (SLA dos chamados do GLPI)
+
+/** Chamados do GLPI atribuídos aos grupos ou às pessoas mapeadas no cadastro de usuários. Espelho lido do GLPI. */
+export const glpiQueueTickets = pgTable(
+  'glpi_queue_tickets',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    glpiId: integer('glpi_id').notNull(),
+    entityId: integer('entity_id'),
+    entityName: text('entity_name'),
+    title: text('title').notNull(),
+    categoryName: text('category_name'),
+    requesterName: text('requester_name'),
+    status: integer('status'),
+    statusName: text('status_name'),
+    priority: integer('priority'),
+    openedAt: ts('opened_at').notNull(),
+    /** prazo para solucionar (SLA/OLA do GLPI) e para assumir */
+    dueSolveAt: ts('due_solve_at'),
+    dueOwnAt: ts('due_own_at'),
+    takenAt: ts('taken_at'),
+    solvedAt: ts('solved_at'),
+    closedAt: ts('closed_at'),
+    groupIds: integer('group_ids').array().notNull().default(sql`'{}'::int[]`),
+    groupNames: text('group_names').array().notNull().default(sql`'{}'::text[]`),
+    glpiUserIds: integer('glpi_user_ids').array().notNull().default(sql`'{}'::int[]`),
+    glpiUserNames: text('glpi_user_names').array().notNull().default(sql`'{}'::text[]`),
+    /** pessoas do RevOps atribuídas (pelo usuário do GLPI no cadastro) */
+    userIds: uuid('user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    glpiUpdatedAt: text('glpi_updated_at'),
+    /** visto pela primeira vez pelo monitoramento (o aviso "chegou" só vale para o que chegou depois de ligar) */
+    firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
+    lastSyncAt: ts('last_sync_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('glpi_queue_tickets_uq').on(t.tenantId, t.glpiId),
+    open: index('glpi_queue_tickets_open_idx').on(t.tenantId, t.status),
+    opened: index('glpi_queue_tickets_opened_idx').on(t.tenantId, t.openedAt),
+  }),
+);
+
+/** Avisos enviados (um por chave, pessoa e canal: nunca repete o mesmo aviso). Append-only. */
+export const glpiSlaAlerts = pgTable(
+  'glpi_sla_alerts',
+  {
+    id: id(),
+    tenantId: tenantId(),
+    ticketId: uuid('ticket_id').references(() => glpiQueueTickets.id),
+    /** ex.: "48213:venceu:1" ou "resumo:2026-11-25" */
+    alertKey: text('alert_key').notNull(),
+    stage: text('stage').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    channel: text('channel').notNull(),
+    ok: boolean('ok').notNull(),
+    error: text('error'),
+    sentAt: ts('sent_at').notNull().defaultNow(),
+  },
+  (t) => ({
+    uq: uniqueIndex('glpi_sla_alerts_uq').on(t.tenantId, t.alertKey, t.userId, t.channel),
+    ticket: index('glpi_sla_alerts_ticket_idx').on(t.ticketId),
+  }),
+);
+
+/** Régua, metas e responsáveis pelos avisos; estado da leitura do GLPI. */
+export const glpiSlaSettings = pgTable('glpi_sla_settings', {
+  tenantId: uuid('tenant_id').primaryKey().references(() => tenants.id),
+  enabled: boolean('enabled').notNull().default(false),
+  settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default({}),
+  /** líderes de cada grupo do GLPI: { "<glpiGroupId>": [userId…] } */
+  groupLeaders: jsonb('group_leaders').$type<Record<string, string[]>>().notNull().default({}),
+  /** gestão: recebe o escalonamento e o resumo geral */
+  managerIds: uuid('manager_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** entidade raiz da leitura (com as subentidades) */
+  rootEntityId: integer('root_entity_id').notNull().default(0),
+  lastSyncAt: ts('last_sync_at'),
+  lastRunAt: ts('last_run_at'),
+  lastError: text('last_error'),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
