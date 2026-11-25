@@ -206,6 +206,12 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
               {editable && form.length > 1 && <button type="button" className="text-sm text-muted hover:text-danger" onClick={() => setForm(form.filter((x) => x.key !== f.key))}>Remover seção</button>}
             </div>
 
+            <div className="space-y-4 px-4 py-4">
+            <div className="min-w-0 overflow-hidden rounded-md border border-line-strong bg-surface">
+            <div className="px-4 pb-2 pt-3"><h4 className="text-sm font-semibold text-ink">Produtos da proposta</h4><p className="text-xs text-muted">Itens que o cliente verá na proposta.</p></div>
+            {editable && <div role="group" aria-label="Ações dos produtos da proposta" className="flex flex-wrap items-center gap-2 px-4 pb-3">
+              <button type="button" className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/50 bg-primary-soft px-3 text-sm font-semibold text-primary hover:border-primary" onClick={() => setSec(f.key, { items: [...f.items, blankItem(f.kind, suggestDoc(f.kind))] })}><Plus className="h-4 w-4 border border-primary" aria-hidden />Adicionar produto ou serviço</button>
+            </div>}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-sm" aria-label={`Produtos do tipo de negócio ${si + 1}`}>
                 <thead className="bg-surface-2 text-left text-xs text-muted"><tr>{['Item', 'Produto ou serviço', 'Documento fiscal', 'Medida', 'Qtd.', ...(showValues ? ['Valor unitário (proposta)'] : []), 'Observação', ''].map((h) => <th key={h} className="px-2 py-2 font-medium">{h}</th>)}</tr></thead>
@@ -235,15 +241,15 @@ export function DealSectionsEditor({ opp }: { opp: Opportunity }) {
                 </tbody>
               </table>
             </div>
-            <div className="flex flex-wrap items-center gap-4 px-4 py-2.5">
-              {editable && <button type="button" className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline" onClick={() => setSec(f.key, { items: [...f.items, blankItem(f.kind, suggestDoc(f.kind))] })}><Plus className="h-4 w-4 border border-primary" aria-hidden />Adicionar produto ou serviço</button>}
-              <span className="flex-1" />
+            <div className="flex flex-wrap items-center justify-end gap-4 px-4 py-2.5">
               {f.items.length > 0 && <span className="text-xs text-muted">Valor na proposta: <b className="num text-ink">{fmtBRL(valueTotal)}</b>{monthly ? '/mês' : ''}{f.priceCents != null ? ' · preço definido na viabilidade' : ''}</span>}
               {f.items.length > 0 && editable && <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={() => setValues({ ...values, [f.key]: !values[f.key] })}>{showValues ? 'Ocultar valores' : 'Editar valores'}</button>}
             </div>
 
+            </div>
             {finance && <SectionCosts secKey={f.key} kind={f.kind} costs={f.costs} si={si} editable={editable} catalog={costCat} update={updateCosts} />}
 
+            </div>
             {finance && out && (
               <div className="flex flex-wrap border-t border-line bg-surface-2">
                 <Kpi label={f.priceCents != null ? 'Preço praticado' : 'Preço ideal'} value={out.priceCents != null ? `${fmtBRL(out.priceCents)}${monthly ? '/mês' : ''}` : '—'} />
@@ -309,18 +315,16 @@ const SectionCosts = memo(function SectionCosts({ secKey, kind, costs, si, edita
   };
   const listId = `deal-costs-${si}`;
   return (
-    <div className="border-t border-line px-4 pb-3 pt-2.5">
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h4 className="text-sm font-semibold text-ink">Custos desta negociação</h4>
-        <span className="flex-1" />
-        {editable && <>
-          <Button size="sm" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => setPasting(true)}>Colar do Excel</Button>
+    <div className="min-w-0 rounded-md border border-line-strong bg-surface-2 px-4 py-3">
+      <div className="mb-2"><h4 className="text-sm font-semibold text-ink">Custos da negociação</h4><p className="text-xs text-muted">Lançamentos usados no cálculo da viabilidade.</p></div>
+      {editable && <div role="group" aria-label="Ações dos custos da negociação" className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/50 bg-primary-soft px-3 text-sm font-semibold text-primary hover:border-primary" onClick={() => setCosts([...f.costs, blankCost(f.kind)])}><Plus className="h-4 w-4 border border-primary" aria-hidden />Adicionar custo</button>
+          <Button size="sm" icon={<ClipboardPaste className="h-4 w-4" />} onClick={() => setPasting(true)}>Colar custos do Excel</Button>
           <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 border border-line-strong bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2">
-            <FileSpreadsheet className="h-4 w-4" aria-hidden />Importar planilha da viabilidade técnica
+            <FileSpreadsheet className="h-4 w-4" aria-hidden />Importar planilha de custos
             <input type="file" accept=".xlsx,.xls,.csv,.txt" className="sr-only" aria-label={`Importar planilha de custos ${si + 1}`} onChange={(e) => { const x = e.target.files?.[0]; if (x) void onFile(x); e.target.value = ''; }} />
           </label>
-        </>}
-      </div>
+      </div>}
       {msg && <p role="status" className={clsx('mb-2 border-l-[3px] px-2.5 py-1.5 text-xs', msg.bad ? 'border-warning bg-warning-soft text-[#9A4F08]' : 'border-success bg-success-soft text-success')}>{msg.text}</p>}
       {f.costs.length > 0 && (
         <div className="overflow-x-auto">
@@ -330,7 +334,6 @@ const SectionCosts = memo(function SectionCosts({ secKey, kind, costs, si, edita
           </table>
         </div>
       )}
-      {editable && <button type="button" className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline" onClick={() => setCosts([...f.costs, blankCost(f.kind)])}><Plus className="h-4 w-4 border border-primary" aria-hidden />Adicionar custo</button>}
       <datalist id={listId}>{catalog.filter((c) => monthly || c.kind === 'investimento').map((c) => <option key={c.id} value={c.name}>{c.unitCents != null ? `${money(c.unitCents)} · ${c.kind === 'mensal' ? 'mensal' : 'único'}` : ''}</option>)}</datalist>
       <Modal open={pasting} onClose={() => setPasting(false)} title="Colar do Excel: custos" size="lg"
         footer={<><Button onClick={() => setPasting(false)}>Cancelar</Button><Button variant="primary" disabled={!pasteText.trim()} onClick={() => { addTable(pasteText.split(/\r?\n/).map((l) => l.split('\t')), 'Colado'); setPasting(false); setPasteText(''); }}>Incluir custos</Button></>}>
