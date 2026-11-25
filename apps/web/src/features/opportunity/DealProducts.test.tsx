@@ -33,6 +33,27 @@ function setup(hidden = false, onlyMonthly = false, bid = false) {
   return requests;
 }
 describe('produtos e custos por tipo de negócio', () => {
+  it('mantém as ações de produtos e custos em grupos separados', async () => {
+    const requests = setup(false, true);
+    const recurrence = await screen.findByRole('region', { name: 'Negociação Recorrência' });
+    const productActions = within(recurrence).getByRole('group', { name: 'Ações dos produtos da proposta' });
+    const costActions = within(recurrence).getByRole('group', { name: 'Ações de custos da negociação' });
+    expect(within(productActions).getByRole('button', { name: 'Colar produtos do Excel' })).toBeTruthy();
+    expect(within(productActions).getByLabelText('Importar produtos de Recorrência')).toBeTruthy();
+    expect(within(costActions).getByRole('button', { name: 'Adicionar custo' })).toBeTruthy();
+    expect(within(recurrence).getByRole('button', { name: 'Colar custos do Excel' })).toBeTruthy();
+    const costImport = within(costActions).getByLabelText('Importar custos de Recorrência');
+    const file = Object.assign(new File([], 'custos.csv'), { text: async () => 'Descrição;Quantidade;Valor unitário\nCabo importado;2;15,00' });
+    fireEvent.change(costImport, { target: { files: [file] } });
+    await within(recurrence).findByDisplayValue('Cabo importado');
+    fireEvent.click(within(productActions).getByRole('button', { name: 'Adicionar produto ou serviço' }));
+    fireEvent.change(within(recurrence).getByLabelText('Produto ou serviço 1.2'), { target: { value: 'Produto adicionado' } });
+    fireEvent.change(within(recurrence).getByLabelText('Valor unitário do custo 1'), { target: { value: '200,00' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Salvar produtos e custos' })[0]!);
+    await waitFor(() => expect(requests[0]?.economics?.capex[0]?.unitCents).toBe(20000));
+    expect(requests[0]?.economics?.capex).toContainEqual(expect.objectContaining({ description: 'Cabo importado', unitCents: 1500 }));
+    expect(requests[0]?.items).toHaveLength(2);
+  });
   it('separa Instalação, Venda, Aluguel e Recorrência; Quando distingue único e mensal', async () => {
     setup();
     const installation = await screen.findByRole('region', { name: 'Negociação Instalação' });
@@ -60,7 +81,7 @@ describe('produtos e custos por tipo de negócio', () => {
   it('cola custos únicos e mensais na mesma negociação sem reclassificar produtos', async () => {
     const requests = setup();
     const recurrence = await screen.findByRole('region', { name: 'Negociação Recorrência' });
-    fireEvent.click(within(recurrence).getByRole('button', { name: 'Colar do Excel' }));
+    fireEvent.click(within(recurrence).getByRole('button', { name: 'Colar custos do Excel' }));
     fireEvent.change(screen.getByLabelText('Custos colados'), { target: { value: 'Descrição\tQuantidade\tValor unitário\tFrequência\nCabo colado\t2\t20,00\tÚnico\nLink terceiro\t1\t50,00\tMensal' } });
     fireEvent.click(screen.getByRole('button', { name: 'Incluir custos' }));
     await screen.findByDisplayValue('Link terceiro');
@@ -82,7 +103,7 @@ describe('produtos e custos por tipo de negócio', () => {
   it('sem permissão financeira mantém produtos sem consultar ou sobrescrever custos', async () => {
     const requests = setup(true);
     const sale = await screen.findByRole('region', { name: 'Negociação Venda' });
-    expect(screen.queryByText('Custos desta negociação')).toBeNull();
+    expect(screen.queryByText('Custos da negociação')).toBeNull();
     expect(vi.mocked(api).mock.calls.some(([url]) => url === '/cost-items')).toBe(false);
     fireEvent.change(within(sale).getByDisplayValue('Produto venda'), { target: { value: 'Produto corrigido' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Salvar produtos e custos' })[0]!);
