@@ -101,7 +101,7 @@ describe('Dados Planejados', () => {
     // a tela chama a rotina: roda e, logo depois, não roda de novo (no máximo a cada 4 minutos)
     ok(await lucas.post('/dados-planejados/tick'));
     expect(ok(await ana.post('/dados-planejados/tick')).json()).toEqual({ ran: false });
-    const t = glpi.tickets.get(ids.B)!;
+    const t = glpi.tickets.get(ids.B!)!;
     t.team = [{ type: 'Group', id: 11, role: 'assigned' }];
     t.date_mod = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(Date.now() + 60_000));
     await runGlpiSla(ctx.db, ctx.app.config, tenantId, { force: true, now: new Date(NOW.getTime() + 20 * 60_000) });
