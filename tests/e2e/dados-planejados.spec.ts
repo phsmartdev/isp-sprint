@@ -109,6 +109,11 @@ test('Dados Planejados: liga a pessoa ao GLPI no cadastro, configura o SLA unive
   await expect(page.getByLabel('Hora atual')).toBeVisible();
   await expect(rows.filter({ hasText: `#${late}` })).toContainText('Atrasado');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados-tv.png` });
+  // já entra alternando: Atribuídos → Requisitados a cada 30 s
+  await expect(page.getByRole('checkbox', { name: /Alternar abas/ })).toBeChecked();
+  await expect(page.getByRole('heading', { name: 'Requisitados pelo Comercial' })).toBeVisible({ timeout: 40_000 });
+  await expect(rows.filter({ hasText: `#${asked}` })).toContainText('tecnico.noc');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados-tv-requisitados.png` });
   await page.getByRole('button', { name: 'Sair (Esc)' }).click();
   await expect(page.getByRole('button', { name: 'Sair (Esc)' })).toHaveCount(0);
 });
