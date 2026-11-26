@@ -1,3 +1,4 @@
+import { joinCostCenters } from './budgetAccess';
 import { expect, test, type Page } from '@playwright/test';
 
 /** Central do orçamento: tela única com indicadores, DRE, painel do lançamento, aprovação e execução. */
@@ -18,6 +19,8 @@ test('central do orçamento: planejar, enviar e ver no painel sem sair da tela',
   const setup = page.getByRole('button', { name: 'Criar estrutura sugerida' });
   await expect(setup.or(page.getByRole('region', { name: 'Indicadores do orçamento' }))).toBeVisible();
   if (await setup.isVisible()) await setup.click();
+  await joinCostCenters(page);
+  await page.reload();
   await expect(page.getByRole('region', { name: 'Indicadores do orçamento' })).toBeVisible();
   await page.getByRole('button', { name: 'Novo lançamento' }).click();
   const dlg = page.getByRole('dialog', { name: 'Novo lançamento' });

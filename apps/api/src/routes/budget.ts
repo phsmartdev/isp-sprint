@@ -70,6 +70,8 @@ export const budgetRoutes = [
     handler: async ({ app, auth }) => {
       const accounts = await accountsOf(app.db, auth.tenantId);
       const ccs = await costCentersOf(app.db, auth, true);
+      // o nível Total administra o CADASTRO de todos os centros (nome e pessoas), sem ver os valores dos centros em que não está
+      const allCcs = isBudgetAdmin(auth) ? await app.db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code) : null;
       const users0 = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name));
       const roleRows = users0.length ? await app.db.select({ userId: s.userRoles.userId, key: s.roles.key }).from(s.userRoles).innerJoin(s.roles, eq(s.roles.id, s.userRoles.roleId)).where(inArray(s.userRoles.userId, users0.map((u) => u.id))) : [];
       const users = users0.map((u) => ({ ...u, profiles: roleRows.filter((r) => r.userId === u.id).map((r) => r.key) }));
@@ -79,6 +81,8 @@ export const budgetRoutes = [
         admin: isBudgetAdmin(auth),
         accounts,
         costCenters: ccs.map((c) => ({ ...c, leaderName: c.leaderId ? name.get(c.leaderId) ?? null : null, memberNames: c.memberIds.map((m) => name.get(m) ?? ''), ownerNames: c.ownerIds.map((m) => name.get(m) ?? ''), executorNames: c.executorIds.map((m) => name.get(m) ?? ''), myRole: isBudgetAdmin(auth) ? 'dono' : costCenterRole(c, auth.userId) })),
+        // cadastro de todos os centros (só para o nível Total, na aba da estrutura); visible = vê os valores
+        allCostCenters: allCcs?.map((c) => ({ ...c, leaderName: c.leaderId ? name.get(c.leaderId) ?? null : null, memberNames: c.memberIds.map((m) => name.get(m) ?? ''), ownerNames: c.ownerIds.map((m) => name.get(m) ?? ''), executorNames: c.executorIds.map((m) => name.get(m) ?? ''), visible: ccs.some((x) => x.id === c.id) })) ?? null,
         suppliers, users,
       };
     },

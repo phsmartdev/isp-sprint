@@ -44,7 +44,7 @@ export function BudgetPlanningPage() {
   const tabs = [{ key: 'central', label: 'Central do orçamento' }, { key: 'revisoes', label: 'Revisões e projeção' }, { key: 'fechamento', label: 'Fechamento mensal' }, { key: 'lancamentos', label: 'Lançamentos do trimestre' }, { key: 'visao', label: 'Visão por centro' }, { key: 'centro', label: 'Centro de custo' }, ...(st.data?.admin ? [{ key: 'estrutura', label: 'Plano de contas e centros' }] : []), { key: 'historico', label: 'Histórico' }];
   return (
     <BudgetShell subtitle="Custos e investimentos do trimestre: lance, acompanhe e dê baixa em cada item." actions={<QuarterPicker year={year} quarter={quarter} onChange={(y, q) => setF({ y: String(y), q: String(q) })} />}>
-      {st.isLoading ? <div className="card"><LoadingRows /></div> : st.isError ? <ErrorState error={st.error} onRetry={() => st.refetch()} /> : !st.data!.accounts.length || !st.data!.costCenters.length ? (
+      {st.isLoading ? <div className="card"><LoadingRows /></div> : st.isError ? <ErrorState error={st.error} onRetry={() => st.refetch()} /> : !st.data!.accounts.length || !(st.data!.allCostCenters ?? st.data!.costCenters).length ? (
         <div className="card">
           <EmptyState title={st.data!.admin ? 'Comece pela estrutura do orçamento' : 'Você ainda não é responsável por um centro de custo'}
             description={st.data!.admin ? 'Crie o plano de contas sugerido pela política (Comunicação, Ferramentas, Viagens, Serviços, Eventos) e os centros Marketing, Comercial, Sucesso do Cliente, YepNet e Produto. Depois ajuste à vontade.' : 'A Diretoria define o líder de cada centro de custo em Planejamento orçamentário → Plano de contas e centros.'}
@@ -513,9 +513,9 @@ function StructureAdmin({ st }: { st: Structure }) {
           <Button size="sm" variant="outline" icon={<Plus className="h-4 w-4" />} onClick={() => setCc({ isNew: true, code: '', name: '', leaderId: null, memberIds: [], active: true })}>Novo centro</Button>
         </header>
         <ul className="divide-y divide-line">
-          {st.costCenters.map((c) => (
+          {(st.allCostCenters ?? st.costCenters).map((c) => (
             <li key={c.id} className={clsx('flex items-center gap-3 px-4 py-2.5', !c.active && 'opacity-50')}>
-              <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{c.code} · {c.name}</p><p className="text-xs text-muted">{c.ownerNames?.length ? `Dono do orçamento: ${c.ownerNames.join(', ')}` : `Líder: ${c.leaderName ?? 'não definido'}`}{c.executorNames?.length ? ` · Execução: ${c.executorNames.join(', ')}` : c.memberNames.length ? ` · também consomem: ${c.memberNames.join(', ')}` : ''}</p></div>
+              <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{c.code} · {c.name}{'visible' in c && !c.visible && <span className="ml-2 text-xs font-normal text-muted">(você não está neste centro: não vê os valores)</span>}</p><p className="text-xs text-muted">{c.ownerNames?.length ? `Dono do orçamento: ${c.ownerNames.join(', ')}` : `Líder: ${c.leaderName ?? 'não definido'}`}{c.executorNames?.length ? ` · Execução: ${c.executorNames.join(', ')}` : c.memberNames.length ? ` · também consomem: ${c.memberNames.join(', ')}` : ''}</p></div>
               <Button size="sm" variant="ghost" onClick={() => setCc({ ...c })}>Editar</Button>
             </li>
           ))}
