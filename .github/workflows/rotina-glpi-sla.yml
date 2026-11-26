@@ -30,8 +30,8 @@ jobs:
             echo "::notice::Segredo CRON_SECRET não configurado neste repositório; rotina ignorada."
             exit 0
           fi
-          code=$(curl -sS -o resposta.json -w '%{http_code}' --max-time 240 \
+          # repositório público: o log mostra só o código HTTP, nunca a resposta (dados de chamados)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 240 \
             -H "Authorization: Bearer $CRON_SECRET" "$REVOPS_URL/api/v1/cron/glpi-sla")
           echo "HTTP $code"
-          head -c 600 resposta.json; echo
           test "$code" = 200
