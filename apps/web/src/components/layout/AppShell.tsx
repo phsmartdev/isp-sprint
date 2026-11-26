@@ -260,11 +260,11 @@ function UserMenu() {
   return (
     <div className="relative flex items-center gap-1" ref={ref}>
       <HeaderSelo />
-      <button aria-label={`Conta de ${me.user.name}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((v) => !v)} className="flex items-center gap-3 rounded-md px-2 py-1 hover:bg-surface-2">
+      <button aria-label={`Conta de ${me.user.name}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((v) => !v)} title={[me.user.name, me.user.jobTitle].filter(Boolean).join(' · ')} className="flex shrink-0 items-center gap-3 rounded-md px-2 py-1 hover:bg-surface-2">
         <Avatar name={me.user.name} userId={me.user.id} hasPhoto={me.user.hasAvatar} size={44} />
-        <span className="hidden text-left leading-tight md:block">
-          <span className="block text-md font-bold text-ink">{me.user.name}</span>
-          <span className="block text-sm text-muted">{me.user.jobTitle ?? ''}</span>
+        <span className="hidden min-w-0 max-w-[220px] text-left leading-tight md:block">
+          <span className="block truncate whitespace-nowrap text-md font-bold text-ink">{me.user.name}</span>
+          {me.user.jobTitle && <span className="block truncate whitespace-nowrap text-sm text-muted">{me.user.jobTitle}</span>}
         </span>
         <ChevronDown className="h-5 w-5 text-ink" aria-hidden />
       </button>
@@ -368,7 +368,7 @@ export function AppShell() {
         <header className="sticky top-0 z-20 flex print:hidden h-[72px] items-center gap-3 border-b border-line/60 bg-surface/95 px-4 backdrop-blur sm:px-6">
           <button className="rounded-sm p-1.5 text-ink hover:bg-surface-2 lg:hidden" aria-label="Abrir menu" onClick={() => setMobileOpen(true)}><Menu className="h-6 w-6" /></button>
           <GlobalSearch ref={search} />
-          <div className="ml-auto flex items-center gap-1 sm:gap-4">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-4">
             <NotificationsMenu activities={can('atividades') ? { due: notify } : null} />
             {/* no celular estes vão para o menu da conta (o topo não pode passar da largura da tela) */}
             <div className="hidden items-center gap-4 sm:flex"><HeaderSupport /><HeaderPlaybooks /><HeaderMoneyToggle /></div>
