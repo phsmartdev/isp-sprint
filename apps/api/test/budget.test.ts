@@ -1,6 +1,6 @@
 /** Recursos e Orçamento (Política de Orçamento — Anexo I). */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { login, makeApp, type Client } from './helpers';
+import { joinCostCenters, leaveCostCenters, login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, lucas: Client, dir: Client;
@@ -21,7 +21,7 @@ beforeAll(async () => {
   const u = ok(await carlos.post('/admin/users', { name: 'Diretora Fictícia', email, profile: 'diretoria', teamIds: [] }), 201).json();
   dir = await login(ctx.app, email, u.temporaryPassword);
 });
-afterAll(async () => ctx.close());
+afterAll(async () => { await leaveCostCenters(ctx, carlos); await ctx.close(); });
 
 describe('estrutura: plano de contas e centros de custo', () => {
   it('Diretoria cria a estrutura sugerida e contas novas; código segue a hierarquia; vendedor sem acesso', async () => {
@@ -29,6 +29,7 @@ describe('estrutura: plano de contas e centros de custo', () => {
     expect((await ana.post('/budget/setup')).statusCode).toBe(403);
     expect(ok(await carlos.post('/budget/setup')).json()).toMatchObject({ costCenters: 5 });
     expect(ok(await carlos.post('/budget/setup')).json()).toMatchObject({ accounts: 0, costCenters: 0 }); // idempotente
+    await joinCostCenters(ctx, carlos);
     const st = ok(await carlos.get('/budget/structure')).json();
     const acc = (code: string) => st.accounts.find((a: { code: string }) => a.code === code);
     crm = acc('3.2.01').id; midia = acc('3.1.01').id; passagens = acc('3.3.01').id;

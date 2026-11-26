@@ -1,6 +1,6 @@
 /** Central do orçamento: ciclo completo do lançamento (critérios de aceite do prompt master). */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { login, makeApp, type Client } from './helpers';
+import { joinCostCenters, leaveCostCenters, login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, ana: Client, dir: Client, fin: Client, gestor: Client, lucas: Client;
@@ -29,9 +29,12 @@ beforeAll(async () => {
   acc = st.accounts.find((a: { code: string }) => a.code === '3.1.03').id; // Brindes e materiais impressos
   cc = ok(await carlos.post('/budget/cost-centers', { code: `OC${stamp.slice(-4)}`, name: 'Centro Fictício', leaderId: ana.me.user.id, executorIds: [ana.me.user.id] }), 201).json().id;
   other = ok(await carlos.post('/budget/cost-centers', { code: `OX${stamp.slice(-4)}`, name: 'Outro Centro' }), 201).json().id;
-  ok(await carlos.patch(`/budget/cost-centers/${cc}`, { managerId: gestor.me.user.id }));
+  ok(await carlos.patch(`/budget/cost-centers/${cc}`, { managerId: gestor.me.user.id, memberIds: [fin.me.user.id] }));
+  // regra de 26/11/2026: fora da Diretoria só vê quem está no centro (o Financeiro também precisa estar nele)
+  await joinCostCenters(ctx, carlos);
 });
 afterAll(async () => {
+  await leaveCostCenters(ctx, carlos);
   // o setor Financeiro é compartilhado com outros testes (avisos de contratos): tira o usuário de teste dele
   await carlos.patch(`/admin/users/${fin.me.user.id}`, { sectors: [] });
   await ctx.close();
@@ -154,3 +157,19 @@ describe('execução, Budget Guardião e financeiro', () => {
     expect((await ana.patch(`/budget/lines/${lineId}`, { rowVersion: l.line.rowVersion, unitCents: 1 })).statusCode).toBe(422);
   });
 });
+
+describe('quem vê o orçamento (26/11/2026)', () => {
+  it('só quem está no centro e tem perfil de liderança; a Diretoria vê todos', async () => {
+    const code = `OZ${stamp.slice(-4)}`.toUpperCase();
+    const alheio = ok(await dir.post('/budget/cost-centers', { code, name: 'Centro sem a Gerência', leaderId: gestor.me.user.id }), 201).json().id;
+    // diretor responsável já preenchido: a Gerência dos testes não entra nele
+    ok(await dir.patch(`/budget/cost-centers/${alheio}`, { directorId: dir.me.user.id }));
+    const codes = async (c: Client) => ok(await c.get('/budget/structure')).json().costCenters.map((x: { code: string }) => x.code);
+    expect(await codes(dir)).toContain(code); // Diretoria: todos
+    expect(await codes(gestor)).toContain(code); // líder do centro
+    expect(await codes(carlos)).not.toContain(code); // Gerência fora do centro
+    expect(await codes(ana)).not.toContain(code);
+    expect((await carlos.get(`/budget/plan?year=${year}&quarter=1&costCenterId=${alheio}`)).statusCode).toBe(403);
+  });
+});
+

@@ -104,7 +104,8 @@ export const budgetClosingRoutes = [
       const c = await closingRow(app.db, auth.tenantId, params.month);
       const ccs = await visibleCostCenters(app.db, auth);
       const full = c.status === 'fechado' && c.snapshot ? (c.snapshot as ClosingSnapshot) : await closingSnapshot(app.db, auth.tenantId, params.month);
-      const snap = isBudgetAdmin(auth) || isDirector(auth) ? full : scoped(full, ccs.map((x) => x.id));
+      // só os centros que a pessoa vê (inclusive Diretoria e Financeiro)
+      const snap = scoped(full, ccs.map((x) => x.id));
       const dispatches = canConduct(auth) || isDirector(auth) ? await app.db.select({ id: s.budgetReportDispatches.id, email: s.budgetReportDispatches.email, role: s.budgetReportDispatches.role, status: s.budgetReportDispatches.status, attempts: s.budgetReportDispatches.attempts, lastError: s.budgetReportDispatches.lastError, sentAt: s.budgetReportDispatches.sentAt, createdAt: s.budgetReportDispatches.createdAt, name: s.users.name })
         .from(s.budgetReportDispatches).innerJoin(s.users, eq(s.users.id, s.budgetReportDispatches.userId)).where(eq(s.budgetReportDispatches.closingId, c.id)).orderBy(desc(s.budgetReportDispatches.createdAt)) : [];
       const events = await app.db.select({ summary: s.budgetEvents.summary, at: s.budgetEvents.createdAt, actor: s.users.name }).from(s.budgetEvents).leftJoin(s.users, eq(s.users.id, s.budgetEvents.actorId)).where(and(eq(s.budgetEvents.tenantId, auth.tenantId), eq(s.budgetEvents.entity, 'fechamento'), eq(s.budgetEvents.entityId, c.id))).orderBy(desc(s.budgetEvents.createdAt));
