@@ -37,7 +37,8 @@ export const homeRoutes = [
       const strategy = await strategicContribution(app.db, auth, todayStr);
       const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
       const [oppK, actK, month, goals, agenda, pipeline, recent] = await Promise.all([
-        opportunityKpis(app.db, auth, 'inicio'),
+        // o período vale para tudo: situação no fim do período escolhido (no período que termina hoje, é a situação de agora)
+        opportunityKpis(app.db, auth, 'inicio', { end: p.to, prevEnd: p.prevTo, past: to < todayStr }),
         app.db
           .select({
             today: sql<number>`count(*) filter (where ${localDay} = ${today})::int`,
@@ -58,7 +59,7 @@ export const homeRoutes = [
           .from(s.users)
           .where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), users === 'all' ? undefined : inArray(s.users.id, users.length ? users : [auth.userId]))),
         app.db
-          .select({ id: s.activities.id, type: s.activities.type, title: s.activities.title, notes: s.activities.notes, dueAt: s.activities.dueAt, completedAt: s.activities.completedAt, rowVersion: s.activities.rowVersion, opportunityId: s.activities.opportunityId })
+          .select({ id: s.activities.id, type: s.activities.type, title: s.activities.title, notes: s.activities.notes, dueAt: s.activities.dueAt, completedAt: s.activities.completedAt, rowVersion: s.activities.rowVersion, opportunityId: s.activities.opportunityId, contractId: s.activities.contractId, contactId: s.activities.contactId, projectId: s.activities.projectId })
           .from(s.activities)
           .where(and(eq(s.activities.tenantId, auth.tenantId), isNull(s.activities.deletedAt), eq(s.activities.ownerId, auth.userId), sql`${localDay} = ${today}`))
           .orderBy(asc(s.activities.dueAt))
@@ -66,9 +67,12 @@ export const homeRoutes = [
         app.db
           .select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
           .from(s.opportunities)
-          .where(and(oppScope, eq(s.opportunities.pipelineId, pipe.id), sql`${s.opportunities.stage} not in ('ganha','perdida')`))
+          // funil: abertas criadas até o fim do período (num período passado, também as que estavam abertas nele)
+          .where(and(oppScope, eq(s.opportunities.pipelineId, pipe.id), sql`${s.opportunities.createdAt} < ${p.to}`,
+            to < todayStr ? sql`(coalesce(${s.opportunities.wonAt}, ${s.opportunities.lostAt}, 'infinity') >= ${p.to} or ${s.opportunities.stage} not in ('ganha','perdida'))` : sql`${s.opportunities.stage} not in ('ganha','perdida')`))
           .groupBy(s.opportunities.stage),
-        opportunityQuery(app.db).where(oppScope).orderBy(desc(s.opportunities.updatedAt)).limit(5),
+        // recentes: movimentadas no período
+        opportunityQuery(app.db).where(and(oppScope, sql`${s.opportunities.createdAt} < ${p.to}`, sql`${s.opportunities.updatedAt} >= ${p.from}`)).orderBy(desc(s.opportunities.updatedAt)).limit(5),
       ]);
       const m = month.rows[0]!;
       const g = goals[0]!;

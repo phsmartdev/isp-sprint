@@ -75,7 +75,11 @@ function filters(auth: AuthContext, f: { q?: string; ownerId?: string; sourceId?
  * posição atual × posição reconstruída no mesmo instante do mês anterior; vendas do mês até hoje ×
  * mesmo intervalo do mês anterior. Sem histórico, delta = null.
  */
-export async function opportunityKpis(db: DbOrTx, auth: AuthContext, module: 'oportunidades' | 'inicio' = 'oportunidades') {
+/**
+ * `at`: situação no fim de um período (filtro do Início): abertas e valor no fim do período × no fim do período anterior;
+ * sem `at`, agora × mesmo dia do mês anterior.
+ */
+export async function opportunityKpis(db: DbOrTx, auth: AuthContext, module: 'oportunidades' | 'inicio' = 'oportunidades', at?: { end: SQL; prevEnd: SQL; past: boolean }) {
   const tz = auth.timezone;
   const vis = ownerScope(auth, module, { tenantId: s.opportunities.tenantId, ownerId: s.opportunities.ownerId, deletedAt: s.opportunities.deletedAt });
   const openAt = (t: SQL) => sql`${s.opportunities.createdAt} <= ${t} and coalesce(${s.opportunities.wonAt}, ${s.opportunities.lostAt}, 'infinity') > ${t}`;
@@ -85,10 +89,10 @@ export async function opportunityKpis(db: DbOrTx, auth: AuthContext, module: 'op
   const [r] = (
     await db.execute<{ open: number; open_prev: number; value: string; value_prev: string; working: number; proposals: number; won_mtd: number; won_prev_mtd: number }>(sql`
       select
-        count(*) filter (where ${s.opportunities.stage} not in ('ganha','perdida'))::int open,
-        count(*) filter (where ${openAt(prevSameMoment)})::int open_prev,
-        coalesce(sum(${s.opportunities.valueCents}) filter (where ${s.opportunities.stage} not in ('ganha','perdida')),0)::bigint value,
-        coalesce(sum(${s.opportunities.valueCents}) filter (where ${openAt(prevSameMoment)}),0)::bigint value_prev,
+        count(*) filter (where ${at?.past ? openAt(at.end) : sql`${s.opportunities.stage} not in ('ganha','perdida')`})::int open,
+        count(*) filter (where ${openAt(at ? at.prevEnd : prevSameMoment)})::int open_prev,
+        coalesce(sum(${s.opportunities.valueCents}) filter (where ${at?.past ? openAt(at.end) : sql`${s.opportunities.stage} not in ('ganha','perdida')`}),0)::bigint value,
+        coalesce(sum(${s.opportunities.valueCents}) filter (where ${openAt(at ? at.prevEnd : prevSameMoment)}),0)::bigint value_prev,
         count(*) filter (where exists (select 1 from pipeline_stages ps where ps.pipeline_id = ${s.opportunities.pipelineId} and ps.key = ${s.opportunities.stage} and ps.kind = 'open' and ps.position > 0))::int working,
         count(*) filter (where ${s.opportunities.proposalStatus} = 'enviada' and ${s.opportunities.stage} not in ('ganha','perdida'))::int proposals,
         count(*) filter (where ${s.opportunities.wonAt} >= ${monthStart})::int won_mtd,
