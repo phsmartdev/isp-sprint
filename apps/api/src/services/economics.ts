@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { impactOfCategory, sectionsEngine, type SectionCost, b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
+import { impactOfCategory, sectionsEngine, type SectionCost, b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear, calculateContractConsumption, CONTRACT_CONSUMPTION_ENGINE, contractConsumptionInput, type ContractConsumptionResult } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -76,7 +76,7 @@ export async function economicsRun(db: DbOrTx, tenantId: string, opportunityId: 
   const x = r.snap;
   // jsonb não guarda a ordem das chaves, por isso o hash é sobre o JSON ordenado
   const verified = x.sha256 ? snapshotHash({ input: x.input, settings: x.settings, result: x.result }) === x.sha256 : null;
-  return { id: x.id, reason: x.reason, createdAt: x.createdAt, actorName: r.actorName, engineVersion: x.engineVersion, settingsVersionId: x.settingsVersionId, sha256: x.sha256, verified, input: x.input as unknown as EconInput, settings: x.settings, result: x.result as unknown as EconResult };
+  return { id: x.id, reason: x.reason, createdAt: x.createdAt, actorName: r.actorName, engineVersion: x.engineVersion, settingsVersionId: x.settingsVersionId, sha256: x.sha256, verified, input: x.input as unknown as EconInput, settings: x.settings, result: x.result as unknown as EconResult | ContractConsumptionResult };
 }
 
 /** JSON com chaves em ordem: mesma entrada, mesmo texto (base do hash do cálculo). */
@@ -111,12 +111,17 @@ export async function economicsContext(db: DbOrTx, opp: Opp) {
     return { section: i.section ?? 0, id: i.id, qtyMilli: i.qtyMilli, unit: i.unit, costProfile: (i.costProfile as 'fornecimento' | 'implantacao' | 'instalacao' | null) ?? null, priceDefined: i.priceDefined, description: i.description, revenueCents: i.priceDefined ? itemTotal(i) : 0, kind: i.dealKind as DealKind, doc: d ? { id: d.id, version: d.version ?? undefined, name: `${d.code} · ${d.name}`, percentBp: d.rates.percentBp, fixedCents: d.rates.fixedCents, complete: d.rates.complete, fiscalKind: d.fiscalKind ?? null, raw: { taxes: d.baseTaxes, taxesByYear: d.taxesByYear } } : null };
   });
   const input = saved ? ({ ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput) : emptyEconInput();
+  const consumption = opp.saleKind === 'consumo_contrato';
+  const isConsumptionResult = saved?.result.engineVersion === CONTRACT_CONSUMPTION_ENGINE;
   return {
+    consumption,
     settings: version?.settings ?? null, settingsVersion: version ? { id: version.id, validFrom: version.validFrom } : null,
     items: econItems, publicSector, input,
     /** emitente: a filial da venda com CNPJ, regime e município (contexto fiscal) */
     emitter: branch ?? null,
-    saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null, savedResult: saved ? (saved.result as unknown as EconResult) : null,
+    saved: saved ? { updatedAt: saved.updatedAt, updatedBy: saved.updatedBy } : null,
+    savedResult: saved && !consumption && !isConsumptionResult ? saved.result as unknown as EconResult : null,
+    savedConsumption: saved && consumption && isConsumptionResult ? saved.result as unknown as ContractConsumptionResult : null,
     branchDocs: docs.filter((d) => d.active && (!opp.branchId || d.branchId === opp.branchId)),
     /** modelo de fórmulas vigente (Financial Studio): padrão do sistema + fórmulas publicadas */
     model: fm.model, modelOverrides: fm.overrides,
@@ -128,7 +133,7 @@ export type EconContext = Awaited<ReturnType<typeof economicsContext>>;
 
 /** null = sem parâmetros vigentes (a empresa ainda não informou em Configurações → Viabilidade). */
 export const computeEconomics = (ctx: EconContext, input?: EconInput) => {
-  if (!ctx.settings) return null;
+  if (ctx.consumption || !ctx.settings) return null;
   const inp = input ?? ctx.input;
   // negociação por seções (tipos de negócio): cada seção no motor e a visão geral consolidada
   if (inp.sections?.length && inp.pricingMode !== 'global') return sectionsEngine({ input: inp, items: ctx.items, settings: ctx.settings, publicSector: ctx.publicSector, model: ctx.model, fiscal: ctx.fiscal });
@@ -161,27 +166,42 @@ export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, acto
   const ctx = await economicsContext(db, opp);
   const result = computeEconomics(ctx, input);
   if (!result) return null;
-  const now = new Date();
-  await db.insert(s.opportunityEconomics).values({ opportunityId: opp.id, tenantId: opp.tenantId, input, result, updatedBy: actorId, updatedAt: now })
-    .onConflictDoUpdate({ target: s.opportunityEconomics.opportunityId, set: { input, result, updatedBy: actorId, updatedAt: now } });
   // a fotografia guarda a versão de cada fórmula publicada usada (o histórico não muda com publicações futuras)
   const envUsed = result.fiscal?.envelope ? ctx.fiscal.envelopes.find((e) => e.id === result.fiscal!.envelope!.id) ?? null : null;
   const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, fiscalYear: result.fiscal?.year ?? null, fiscalEnvelope: envUsed ? { id: envUsed.id, year: envUsed.year, values: envUsed.values } : null, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
-  await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId: ctx.settingsVersion?.id ?? null, sha256: snapshotHash({ input, settings, result }) });
+  await storeEconomics(db, opp, input, result, settings, ctx.settingsVersion?.id ?? null, actorId, reason);
   return result;
+}
+
+export async function saveContractConsumption(db: DbOrTx, opp: Opp, input: EconInput, actorId: string | null, reason = 'produtos_e_custos') {
+  const version = await econSettingsOf(db, opp.tenantId);
+  const normalized = contractConsumptionInput(input);
+  const result = calculateContractConsumption(normalized, version?.settings ?? null);
+  const settings = { serviceCostBp: result.rateBp, settingsVersionId: version?.id ?? null };
+  await storeEconomics(db, opp, normalized, result, settings, version?.id ?? null, actorId, reason);
+  return result;
+}
+
+async function storeEconomics(db: DbOrTx, opp: Opp, input: EconInput, result: EconResult | ContractConsumptionResult, settings: Record<string, unknown>, settingsVersionId: string | null, actorId: string | null, reason: string) {
+  const now = new Date();
+  await db.insert(s.opportunityEconomics).values({ opportunityId: opp.id, tenantId: opp.tenantId, input, result, updatedBy: actorId, updatedAt: now })
+    .onConflictDoUpdate({ target: s.opportunityEconomics.opportunityId, set: { input, result, updatedBy: actorId, updatedAt: now } });
+  await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId, sha256: snapshotHash({ input, settings, result }) });
 }
 
 /** Na venda fechada, a fotografia do dia do fechamento (só quando a viabilidade econômica foi preenchida). */
 export async function snapshotEconomicsOnWon(db: DbOrTx, opp: Opp, actorId: string | null) {
   const [saved] = await db.select({ input: s.opportunityEconomics.input }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
   if (!saved) return null;
-  return saveEconomics(db, opp, { ...emptyEconInput(), ...(saved.input as Partial<EconInput>) } as EconInput, actorId, 'ganha');
+  const input = { ...emptyEconInput(), ...(saved.input as Partial<EconInput>) };
+  if (opp.saleKind === 'consumo_contrato') return saveContractConsumption(db, opp, input, actorId, 'ganha');
+  return saveEconomics(db, opp, input, actorId, 'ganha');
 }
 
 export async function economicsHistory(db: DbOrTx, tenantId: string, opportunityId: string) {
   return db.select({ id: s.opportunityEconomicsSnapshots.id, reason: s.opportunityEconomicsSnapshots.reason, createdAt: s.opportunityEconomicsSnapshots.createdAt, actorName: s.users.name, engineVersion: s.opportunityEconomicsSnapshots.engineVersion, sha256: s.opportunityEconomicsSnapshots.sha256, verdict: sql<string>`${s.opportunityEconomicsSnapshots.result}->>'verdict'`, priceCents: sql<number | null>`(${s.opportunityEconomicsSnapshots.result}->>'priceCents')::bigint` })
     .from(s.opportunityEconomicsSnapshots).leftJoin(s.users, eq(s.users.id, s.opportunityEconomicsSnapshots.actorId))
-    .where(and(eq(s.opportunityEconomicsSnapshots.tenantId, tenantId), eq(s.opportunityEconomicsSnapshots.opportunityId, opportunityId)))
+    .where(and(eq(s.opportunityEconomicsSnapshots.tenantId, tenantId), eq(s.opportunityEconomicsSnapshots.opportunityId, opportunityId), sql`${s.opportunityEconomicsSnapshots.engineVersion} is distinct from ${CONTRACT_CONSUMPTION_ENGINE}`))
     .orderBy(desc(s.opportunityEconomicsSnapshots.createdAt)).limit(20);
 }
 

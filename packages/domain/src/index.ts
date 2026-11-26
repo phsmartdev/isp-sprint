@@ -48,6 +48,7 @@ export * from './budgetLedger';
 export * from './budgetEfficiency';
 export * from './ixc';
 export * from './finance';
+export * from './contractConsumption';
 export * from './dealSections';
 export * from './academy';
 export * from './b2gViability';

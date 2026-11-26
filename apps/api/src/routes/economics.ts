@@ -9,6 +9,7 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { loadOpportunity, oppVisibility } from '../services/opportunities';
 import { catalogSectionCosts, publicSectorOf, computeEconomics, costItemsOf, economicsRun, econSettingsHistory, econSettingsOf, econStatus, economicsContext, economicsHistory, fiscalDocsOf, isStale, pendingDecisions, recordFiscalDocVersion, learnCostLines, resolveCostLines, saveEconomics, today, type EconContext } from '../services/economics';
+import { calculateContractConsumption, CONTRACT_CONSUMPTION_ENGINE, contractConsumptionInput } from '@isp/domain';
 import { requireAction } from '../services/modules';
 import { buildEconCsv, buildEconPdf, econFileName, letterheadMime, letterheadSample } from '../services/economicsExport';
 
@@ -238,11 +239,18 @@ export const economicsRoutes = [
     handler: async ({ app, auth, params }) => {
       const opp = await loadOpportunity(app.db, auth, params.id);
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
-      const { savedResult, model: _model, ...rest } = ctx;
+      const { savedResult, savedConsumption, consumption, model: _model, ...rest } = ctx;
+      const open = !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]);
+      if (consumption) {
+        if (!auth.actions.ver_financeiro) return { consumption: true, financeHidden: true, result: null, input: null, settings: null, saved: null, editable: false };
+        const input = contractConsumptionInput(ctx.input);
+        const preview = calculateContractConsumption(input, ctx.settings);
+        const consumptionNeedsSave = preview.totals.length > 0 && (!savedConsumption || savedConsumption.rateBp !== preview.rateBp);
+        return { consumption: true, financeHidden: false, result: null, input, settings: ctx.settings, saved: ctx.saved, editable: open, savedConsumption, preview, consumptionNeedsSave };
+      }
       // "stale" só avisa que itens, tributos, parâmetros ou o motor mudaram desde o salvo; nada é gravado
       const stale = savedResult ? isStale(savedResult, computeEconomics(ctx)) : false;
       const [history, st] = await Promise.all([economicsHistory(app.db, auth.tenantId, opp.id), econStatus(app.db, auth.tenantId, opp.id)]);
-      const open = !TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number]);
       const decision = { status: st.status, decisions: st.decisions.map(({ actorId: _a, ...d }) => d), canDecide: st.status === 'em_decisao' && auth.actions.aprovar_viabilidade && st.submittedBy !== auth.userId };
       if (!auth.actions.ver_financeiro) {
         // sem "ver financeiro": só o veredito; nada de custos, fluxo, TIR, payback, pesos ou taxas
@@ -263,6 +271,9 @@ export const economicsRoutes = [
       if (economicsUpdatedAt !== undefined) {
         const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
         if ((saved?.updatedAt.getTime() ?? null) !== (economicsUpdatedAt == null ? null : new Date(economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
+      }
+      if (opp.saleKind === 'consumo_contrato') {
+        throw unprocessable('Use a aba Produtos para salvar os itens e a inferência do Consumo de contrato juntos.');
       }
       const e = [...econInputErrors(body as EconInput), ...(body.pricingMode !== 'global' ? sectionErrors((body.sections ?? []) as never) : [])];
       if (e.length) throw unprocessable(e.join(' '));
@@ -301,13 +312,15 @@ export const economicsRoutes = [
       const opp = await loadOpportunity(app.db, auth, params.id);
       const run = await economicsRun(app.db, auth.tenantId, opp.id, params.runId);
       if (!run) throw notFound('Cálculo não encontrado.');
+      if ('totals' in run.result) throw unprocessable('A exportação de DRE não se aplica à inferência de Consumo de contrato.');
+      const financialRun = { ...run, result: run.result };
       const [acc] = await app.db.select({ name: s.contacts.name }).from(s.contacts).where(eq(s.contacts.id, opp.contactId)).limit(1);
       const h = { code: opp.code, title: opp.title ?? '', account: acc?.name ?? '' };
       const name = econFileName(opp.code);
       const [lh] = opp.branchId ? await app.db.select().from(s.branchLetterheads).where(and(eq(s.branchLetterheads.branchId, opp.branchId), eq(s.branchLetterheads.tenantId, auth.tenantId))).limit(1) : [];
       await audit(app.db, req, { action: 'opportunity.economics_export', entityType: 'opportunity', entityId: opp.id, metadata: { runId: run.id, format: query.format } });
-      if (query.format === 'csv') return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${name}.csv"`).send(buildEconCsv(run, h));
-      return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${name}.pdf"`).send(await buildEconPdf(run, h, lh ?? null));
+      if (query.format === 'csv') return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${name}.csv"`).send(buildEconCsv(financialRun, h));
+      return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${name}.pdf"`).send(await buildEconPdf(financialRun, h, lh ?? null));
     },
   }),
   defineRoute({
@@ -315,6 +328,7 @@ export const economicsRoutes = [
     handler: async ({ app, auth, params, req }) => {
       requireAction(auth, 'ver_financeiro', 'A viabilidade econômica é enviada por quem vê valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
+      if (opp.saleKind === 'consumo_contrato') throw unprocessable('Consumo de contrato calcula somente a inferência de custo de serviço.');
       if (TERMINAL_STAGES.includes(opp.stage as (typeof TERMINAL_STAGES)[number])) throw unprocessable('Oportunidade encerrada.');
       const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
       if (!ctx.savedResult) throw unprocessable('Salve a viabilidade econômica antes de enviar.');
@@ -339,6 +353,7 @@ export const economicsRoutes = [
       requireAction(auth, 'aprovar_viabilidade', 'Aprovar a viabilidade econômica é da gestão e da diretoria.');
       requireAction(auth, 'ver_financeiro', 'Para decidir a viabilidade é preciso ver os valores financeiros.');
       const opp = await loadOpportunity(app.db, auth, params.id);
+      if (opp.saleKind === 'consumo_contrato') throw unprocessable('Consumo de contrato calcula somente a inferência de custo de serviço.');
       const st = await econStatus(app.db, auth.tenantId, opp.id);
       if (st.status !== 'em_decisao') throw unprocessable('Não há viabilidade aguardando decisão nesta oportunidade.');
       if (st.submittedBy === auth.userId) throw forbidden('Quem enviou a viabilidade não pode decidir sobre ela.');
@@ -357,7 +372,7 @@ export const economicsRoutes = [
       if (!sent.length) return { items: [] };
       const opps = await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, account: s.contacts.name, result: s.opportunityEconomics.result })
         .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId)).innerJoin(s.opportunityEconomics, eq(s.opportunityEconomics.opportunityId, s.opportunities.id))
-        .where(and(oppVisibility(auth), inArray(s.opportunities.id, sent.map((x) => x.id))));
+        .where(and(oppVisibility(auth), inArray(s.opportunities.id, sent.map((x) => x.id)), sql`${s.opportunities.saleKind} is distinct from 'consumo_contrato'`, sql`${s.opportunityEconomics.result}->>'engineVersion' is distinct from ${CONTRACT_CONSUMPTION_ENGINE}`));
       const pend = await pendingDecisions(app.db, auth.tenantId, opps.map((o) => o.id));
       return { items: pend.map((p) => { const o = opps.find((x) => x.id === p.opportunityId)!; const r = o.result as unknown as EconResult; return { ...p, code: o.code, title: o.title, account: o.account, verdict: r.verdict, priceCents: r.priceCents, mode: r.mode, paybackMonths: r.kpi?.paybackMonths ?? null, marginPct: r.kpi?.marginPct ?? null, mine: p.submittedBy === auth.userId }; }) };
     },

@@ -8,9 +8,9 @@ import { z } from 'zod';
 import { normalizeSections, proposalTitle, validityDate } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
-import { unprocessable } from '../http/errors';
+import { AppError, unprocessable } from '../http/errors';
 import { ensureProposalNumber } from './proposalNumber';
-import { buildProposalPdf, systemValues } from './proposals';
+import { buildProposalPdfFromTemplate, systemValues } from './proposals';
 import { todayIn } from './vacations';
 
 const Photo = z.object({ data: z.string().max(1_400_000), mime: z.enum(['image/jpeg', 'image/png']) });
@@ -22,21 +22,54 @@ export const GenBody = z.object({
 export type GenInput = z.infer<typeof GenBody>;
 type Who = { tenantId: string; userId: string; timezone: string };
 type Tpl = typeof s.proposalTemplates.$inferSelect;
+type ProposalItem = typeof s.opportunityItems.$inferSelect;
+
+export class MissingProposalPrices extends AppError {
+  constructor(items: { index: number; description: string }[]) {
+    const names = items.slice(0, 3).map(({ index, description }) => `“${description}” (item ${index + 1})`).join(', ');
+    const remaining = items.length > 3 ? ` e mais ${items.length - 3}` : '';
+    super(422, 'Dados inválidos', `Defina e salve o preço comercial na aba Produtos para gerar a proposta. Pendentes: ${names}${remaining}.`, {
+      errors: items.map(({ index, description }) => ({ path: `items.${index}.unitCents`, message: `${description}: preço comercial não informado.` })),
+    });
+  }
+}
+
+async function proposalItems(db: DbOrTx, who: Who, oppId: string, t: Tpl) {
+  const items = await db.select().from(s.opportunityItems).where(and(eq(s.opportunityItems.opportunityId, oppId), eq(s.opportunityItems.tenantId, who.tenantId))).orderBy(asc(s.opportunityItems.position));
+  if (t.purpose === 'proposta' && normalizeSections(t.sections).enabled) {
+    const missing = items.flatMap((item, index) => item.priceDefined ? [] : [{ index, description: item.description }]);
+    if (missing.length) throw new MissingProposalPrices(missing);
+  }
+  return items;
+}
+
+export async function proposalPriceWarning(db: DbOrTx, who: Who, oppId: string, t: Tpl) {
+  try {
+    await proposalItems(db, who, oppId, t);
+    return null;
+  } catch (error) {
+    if (error instanceof MissingProposalPrices) return error.message;
+    throw error;
+  }
+}
 
 /** Variáveis + seções automáticas (serviços, itens da aba Produto, validade) e o PDF. */
 export async function renderProposal(db: DbOrTx, who: Who, oppId: string, t: Tpl, body: GenInput) {
+  return renderWithItems(db, who, oppId, t, body, await proposalItems(db, who, oppId, t));
+}
+
+async function renderWithItems(db: DbOrTx, who: Who, oppId: string, t: Tpl, body: GenInput, items: ProposalItem[]) {
   const cfg = normalizeSections(t.sections);
   const days = body.validityDays ?? cfg.validityDays;
   const today = todayIn(who.timezone);
   const custom = Object.fromEntries(t.variables.map((v) => [v.key, body.values[v.key] ?? v.default]));
   const vars = { ...(await systemValues(db, who.tenantId, oppId, who.timezone)), 'proposta.validade_dias': String(days), 'proposta.validade_data': validityDate(today, days).split('-').reverse().join('/'), ...custom };
-  const items = await db.select().from(s.opportunityItems).where(eq(s.opportunityItems.opportunityId, oppId)).orderBy(asc(s.opportunityItems.position));
   const photos = body.services.photos.map((p) => ({ data: Buffer.from(p.data, 'base64'), mime: p.mime }));
   for (const ph of photos) {
     const ok = ph.mime === 'image/png' ? ph.data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) : ph.data[0] === 0xff && ph.data[1] === 0xd8;
     if (!ok) throw unprocessable('Foto inválida: envie JPG ou PNG.');
   }
-  return buildProposalPdf(db, who.tenantId, t.id, vars, { servicesText: body.services.text, photos, items: items.map((i) => ({ description: i.description, unit: i.unit, qtyMilli: Number(i.qtyMilli), unitCents: Number(i.unitCents), discountCents: Number(i.discountCents), surchargeCents: Number(i.surchargeCents) })) });
+  return buildProposalPdfFromTemplate(db, t, vars, { servicesText: body.services.text, photos, items: items.map((i) => ({ description: i.description, unit: i.unit, qtyMilli: Number(i.qtyMilli), unitCents: Number(i.unitCents), discountCents: Number(i.discountCents), surchargeCents: Number(i.surchargeCents) })) });
 }
 
 /**
@@ -44,8 +77,9 @@ export async function renderProposal(db: DbOrTx, who: Who, oppId: string, t: Tpl
  * Retorna null quando o modelo não tem páginas.
  */
 export async function generateProposal(tx: DbOrTx, who: Who, opp: { id: string; contactName: string; proposalStatus: string; rowVersion: number }, t: Tpl, body: GenInput, opts: { bump: boolean; automatic?: boolean }) {
+  const items = await proposalItems(tx, who, opp.id, t);
   const number = await ensureProposalNumber(tx, who.tenantId, opp.id, todayIn(who.timezone));
-  const out = await renderProposal(tx, who, opp.id, t, body);
+  const out = await renderWithItems(tx, who, opp.id, t, body, items);
   if (!out) return null;
   const filename = `${proposalTitle(number, opp.contactName)}.pdf`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 150);
   const [r] = await tx.insert(s.opportunityAttachments).values({ tenantId: who.tenantId, opportunityId: opp.id, kind: 'proposta', filename, mime: 'application/pdf', sizeBytes: out.pdf.length, sha256: createHash('sha256').update(out.pdf).digest('hex'), data: out.pdf, uploadedBy: who.userId })

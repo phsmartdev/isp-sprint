@@ -650,7 +650,7 @@ export function OpportunityWorkspacePage() {
   });
   const setKind = useMutation({
     mutationFn: (saleKind: string) => api<Opportunity>(`/opportunities/${id}`, { method: 'PATCH', body: { saleKind: saleKind || null, rowVersion: (a.base ?? q.data)!.rowVersion } }),
-    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['timeline', o.id] }); toast({ tone: 'success', message: 'Tipo de venda alterado' }); },
+    onSuccess: (o) => { qc.setQueryData(['opportunity', o.id], o); qc.invalidateQueries({ queryKey: ['timeline', o.id] }); qc.invalidateQueries({ queryKey: ['economics', o.id] }); qc.invalidateQueries({ queryKey: ['opp-items', o.id] }); toast({ tone: 'success', message: 'Tipo de venda alterado' }); },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const move = useMutation({
@@ -844,7 +844,7 @@ export function OpportunityWorkspacePage() {
       {!econOn ? null : econ.data?.saved ? <EconomicsSummary oppId={opp.id} onOpen={() => setCenterTab('viabilidade')} /> : (
         <section className="card p-5">
           <h2 className="text-md font-bold text-ink">Viabilidade econômica</h2>
-          <p className="mt-1 text-sm text-muted">Ainda não calculada. Informe investimento, custos e prazo na aba Viabilidade econômica.</p>
+          <p className="mt-1 text-sm text-muted">{opp.saleKind === 'consumo_contrato' ? 'A inferência usa os valores tabelados na aba Produtos.' : 'Ainda não calculada. Informe investimento, custos e prazo na aba Viabilidade econômica.'}</p>
           <Button size="sm" className="mt-3" onClick={() => setCenterTab('viabilidade')}>Abrir viabilidade econômica</Button>
         </section>
       )}
@@ -920,7 +920,7 @@ export function OpportunityWorkspacePage() {
       <Modal open={scheduling} onClose={() => setScheduling(false)} title="Agendar retorno" footer={<><Button onClick={() => setScheduling(false)}>Cancelar</Button><Button variant="primary" type="submit" form="ws-activity">Agendar</Button></>}>
         <ActivityComposer formId="ws-activity" hideSubmit opportunityId={opp.id} defaultTitle={f.nextAction} onDone={() => { setScheduling(false); setCenterTab('tarefas'); }} />
       </Modal>
-      <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} />
+      <ProposalGenerator oppId={opp.id} open={genProposal} onClose={() => setGenProposal(false)} onProducts={() => { setGenProposal(false); setCenterTab('produtos'); }} />
       {email && <EmailComposer oppId={opp.id} kind={email} open onClose={() => setEmail(null)} />}
       <TransitionDialog request={pending} loading={transition.isPending} onCancel={() => setPending(null)} onConfirm={(payload) => { const kind = pending?.toKind; transition.mutate({ opp, payload }, { onSettled: () => setPending(null), onSuccess: () => { void q.refetch(); celebrate(kind); } }); }} />
       {oppAction && <OppActionDialog act={{ opp, kind: oppAction }} stages={stages} onClose={() => setOppAction(null)} />}

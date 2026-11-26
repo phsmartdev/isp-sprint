@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PeriodQuery } from '@isp/shared';
-import { consolidateCashflow, type EconResult } from '@isp/domain';
+import { consolidateCashflow, CONTRACT_CONSUMPTION_ENGINE, type EconResult } from '@isp/domain';
 import { defineRoute } from '../http/route';
 import * as s from '../db/schema';
 import { ownerScope, visibleUserIds } from '../services/scope';
@@ -35,6 +35,7 @@ export const intelligenceRoutes = [
         .innerJoin(s.opportunities, eq(s.opportunities.id, s.opportunityEconomics.opportunityId))
         .innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
         .where(and(oppScopeFor(auth, 'inteligencia'), eq(s.opportunityEconomics.tenantId, auth.tenantId), ne(s.opportunities.stage, 'perdida'),
+          sql`${s.opportunities.saleKind} is distinct from 'consumo_contrato'`, sql`${s.opportunityEconomics.result}->>'engineVersion' is distinct from ${CONTRACT_CONSUMPTION_ENGINE}`,
           ...(query.status === 'ganhas' ? [eq(s.opportunities.stage, 'ganha')] : query.status === 'andamento' ? [ne(s.opportunities.stage, 'ganha')] : [])));
       const now = month(new Date());
       const items = rows.map((r) => {

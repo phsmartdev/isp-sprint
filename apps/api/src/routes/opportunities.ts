@@ -1,7 +1,7 @@
 import { syncBidProject } from '../services/bidProjects';
 import { isBid } from './opportunityItems';
 import { consumeForOpportunity, reverseForOpportunity } from '../services/contractLedger';
-import { GenBody, branchDefaultTemplate, generateProposal, hasProposal, isProposalStage } from '../services/proposalGen';
+import { GenBody, MissingProposalPrices, branchDefaultTemplate, generateProposal, hasProposal, isProposalStage, proposalPriceWarning } from '../services/proposalGen';
 import { accountContracts, CS_KEY, csOnStage, ensureAccountCard, isBaseCustomer } from '../services/customerSuccess';
 import { freshSnapshot } from '../services/cs';
 import { snapshotEconomicsOnWon } from '../services/economics';
@@ -245,7 +245,9 @@ export const opportunityRoutes = [
     handler: async ({ app, auth, params }) => {
       const o = await loadOpportunity(app.db, auth, params.id);
       const t = await branchDefaultTemplate(app.db, auth.tenantId, o.branchId ?? null);
-      return { template: t ? { id: t.id, name: t.name } : null, hasProposal: await hasProposal(app.db, auth.tenantId, o.id) };
+      const attached = await hasProposal(app.db, auth.tenantId, o.id);
+      const priceWarning = t && !attached ? await proposalPriceWarning(app.db, auth, o.id, t) : null;
+      return { template: t ? { id: t.id, name: t.name } : null, hasProposal: attached, priceWarning };
     },
   }),
 
@@ -401,6 +403,7 @@ export const opportunityRoutes = [
     handler: async ({ app, auth, params, body, req }) => {
       let wasWon = false;
       let autoProposal: { filename: string; number: string; template: string } | null = null;
+      let autoProposalWarning: string | null = null;
       await app.db.transaction(async (tx) => {
         const cur = await loadOpportunity(tx, auth, params.id);
         if (cur.rowVersion !== body.rowVersion) throw conflict(cur.rowVersion);
@@ -419,8 +422,13 @@ export const opportunityRoutes = [
           if (tpl) {
             const [d] = await tx.select().from(s.proposalDrafts).where(and(eq(s.proposalDrafts.opportunityId, cur.id), eq(s.proposalDrafts.tenantId, auth.tenantId)));
             const input = GenBody.parse({ templateId: tpl.id, values: d?.templateId === tpl.id ? d.values : {}, services: { text: d?.servicesText ?? '', photos: d?.photos ?? [] }, ...(d?.validityDays ? { validityDays: d.validityDays } : {}) });
-            const g = await generateProposal(tx, auth, { id: cur.id, contactName: cur.contactName, proposalStatus: cur.proposalStatus, rowVersion: cur.rowVersion }, tpl, input, { bump: false, automatic: true });
-            if (g) autoProposal = { filename: g.filename, number: g.number, template: g.template };
+            try {
+              const g = await generateProposal(tx, auth, { id: cur.id, contactName: cur.contactName, proposalStatus: cur.proposalStatus, rowVersion: cur.rowVersion }, tpl, input, { bump: false, automatic: true });
+              if (g) autoProposal = { filename: g.filename, number: g.number, template: g.template };
+            } catch (error) {
+              if (!(error instanceof MissingProposalPrices) || target.requirements?.proposta) throw error;
+              autoProposalWarning = `O PDF não foi gerado. ${error.message}`;
+            }
           }
         }
         if (target.kind !== 'lost') {
@@ -493,7 +501,7 @@ export const opportunityRoutes = [
       if (body.toStage === 'ganha') await notifyDealWon(app.db, app.config, auth, dto);
       // Pessoas & Cultura: conquista no feed (pontos e badges da venda, nunca o valor)
       if (body.toStage === 'ganha') await celebrateDealWon(app.db, auth.tenantId, params.id).catch((e) => req.log.error(e, 'conquista de venda no feed'));
-      return autoProposal ? { ...dto, autoProposal } : dto;
+      return { ...dto, ...(autoProposal ? { autoProposal } : {}), ...(autoProposalWarning ? { autoProposalWarning } : {}) };
     },
   }),
 

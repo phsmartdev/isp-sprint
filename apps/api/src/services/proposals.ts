@@ -175,7 +175,11 @@ async function drawSections(doc: PDFDocument, cfg: ProposalSectionsConfig, bg: {
 export async function buildProposalPdf(db: DbOrTx, tenantId: string, templateId: string, vars: Record<string, string>, content?: ProposalContent) {
   const [t] = await db.select().from(s.proposalTemplates).where(and(eq(s.proposalTemplates.id, templateId), eq(s.proposalTemplates.tenantId, tenantId))).limit(1);
   if (!t) return null;
-  const pages = await db.select().from(s.proposalTemplatePages).where(and(eq(s.proposalTemplatePages.templateId, t.id), eq(s.proposalTemplatePages.tenantId, tenantId))).orderBy(asc(s.proposalTemplatePages.position));
+  return buildProposalPdfFromTemplate(db, t, vars, content);
+}
+
+export async function buildProposalPdfFromTemplate(db: DbOrTx, t: typeof s.proposalTemplates.$inferSelect, vars: Record<string, string>, content?: ProposalContent) {
+  const pages = await db.select().from(s.proposalTemplatePages).where(and(eq(s.proposalTemplatePages.templateId, t.id), eq(s.proposalTemplatePages.tenantId, t.tenantId))).orderBy(asc(s.proposalTemplatePages.position));
   if (!pages.length) return null;
   const doc = await PDFDocument.create();
   doc.setTitle(fill('Proposta {{cliente.nome}}', vars));

@@ -13,7 +13,7 @@ import { pipelinesOf } from '../services/instructions';
 import { assertDeliveryAddresses, deliveryAddressesOf } from './deliveryAddresses';
 
 import { EconBody } from './economicsInput';
-import { publicSectorOf, econSettingsOf, resolveCostLines, learnCostLines, saveEconomics } from '../services/economics';
+import { publicSectorOf, econSettingsOf, resolveCostLines, learnCostLines, saveEconomics, saveContractConsumption } from '../services/economics';
 import { requireAction } from '../services/modules';
 
 const OppParams = z.object({ id: z.string().uuid() });
@@ -78,14 +78,16 @@ export const opportunityItemRoutes = [
             const [saved] = await tx.select({ updatedAt: s.opportunityEconomics.updatedAt }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1).for('update');
             if ((saved?.updatedAt.getTime() ?? null) !== (body.economicsUpdatedAt == null ? null : new Date(body.economicsUpdatedAt).getTime())) throw conflict(opp.rowVersion);
           }
-          const errors = econInputErrors(body.economics as EconInput);
-          if (errors.length) throw unprocessable(errors.join(' '));
-          const version = await econSettingsOf(tx, auth.tenantId);
-          if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
-          const targetErrors = econTargetErrors(body.economics as EconInput, version.settings);
-          if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
-          const paybackErrors = econPaybackErrors(body.economics as EconInput, version.settings, await publicSectorOf(tx, opp));
-          if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
+          if (opp.saleKind !== 'consumo_contrato') {
+            const errors = econInputErrors(body.economics as EconInput);
+            if (errors.length) throw unprocessable(errors.join(' '));
+            const version = await econSettingsOf(tx, auth.tenantId);
+            if (version?.settings.netMarginTargetBp == null) throw unprocessable('Configure a margem líquida esperada em Configurações → Viabilidade para salvar os custos.');
+            const targetErrors = econTargetErrors(body.economics as EconInput, version.settings);
+            if (targetErrors.length) throw unprocessable(targetErrors.join(' '));
+            const paybackErrors = econPaybackErrors(body.economics as EconInput, version.settings, await publicSectorOf(tx, opp));
+            if (paybackErrors.length) throw unprocessable(paybackErrors.join(' '));
+          }
         }
         for (const [i, it] of body.items.entries()) {
           it.costProfile = defaultCostProfile(it.dealKind);
@@ -152,7 +154,9 @@ export const opportunityItemRoutes = [
         const updated = await tx.update(s.opportunities).set({ valueCents, bidMode, bidGlobalCents, updatedAt: new Date(), rowVersion: bumpVersion() })
           .where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.rowVersion, body.rowVersion))).returning({ rowVersion: s.opportunities.rowVersion });
         if (!updated.length) throw conflict(opp.rowVersion);
-        if (body.economics) {
+        if (body.economics && opp.saleKind === 'consumo_contrato') {
+          await saveContractConsumption(tx, { ...opp, tenantId: auth.tenantId }, body.economics as EconInput, auth.userId);
+        } else if (body.economics) {
           const input = await learnCostLines(tx, auth.tenantId, auth.userId, await resolveCostLines(tx, auth.tenantId, body.economics as EconInput));
           const result = await saveEconomics(tx, { ...opp, tenantId: auth.tenantId }, input, auth.userId, 'produtos_e_custos');
           if (!result) throw unprocessable('Parâmetros de viabilidade não encontrados.');

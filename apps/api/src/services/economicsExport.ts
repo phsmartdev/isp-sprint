@@ -10,7 +10,7 @@ import { brl } from './email';
 import { safeText, wrap } from './proposals';
 import type { economicsRun } from './economics';
 
-type Run = NonNullable<Awaited<ReturnType<typeof economicsRun>>>;
+type Run = Omit<NonNullable<Awaited<ReturnType<typeof economicsRun>>>, 'result'> & { result: EconResult };
 /** Memória de cálculo com os fatores históricos da fotografia (os parâmetros da época do cálculo). */
 const memoryOf = (run: Run) => { const st = run.settings as { legacyOneTimeX100?: number | null; legacyRecurringX100?: number | null }; return econMemory(run.result, money, { legacy: { oneTimeX100: st.legacyOneTimeX100, recurringX100: st.legacyRecurringX100 } }); };
 export type RunHeader = { code: number; title: string; account: string };

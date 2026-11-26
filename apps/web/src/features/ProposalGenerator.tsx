@@ -6,7 +6,7 @@ import { compressImage, fileToBase64 } from '../lib/files';
 import { fmtBRL } from '../lib/format';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../lib/api';
-import { Button, EmptyState, FormField, Input, LoadingRows, Select, Textarea } from '../components/ui/primitives';
+import { Button, EmptyState, FormField, Input, LoadingRows, Notice, Select, Textarea } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
 import type { Opportunity } from '../lib/types';
 import { WhatsAppSend } from './WhatsAppSend';
@@ -14,7 +14,7 @@ import { ProposalCanvas, type PField, type PPage } from './ProposalCanvas';
 
 type Tpl = { id: string; name: string; matches: boolean; sections: ProposalSectionsConfig; variables: { key: string; label: string; type: 'texto' | 'texto_longo' | 'moeda'; default: string }[]; fields: PField[]; pages: PPage[] };
 
-export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; open: boolean; onClose: () => void }) {
+export function ProposalGenerator({ oppId, open, onClose, onProducts }: { oppId: string; open: boolean; onClose: () => void; onProducts: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const q = useQuery({ queryKey: ['proposal-templates', oppId], enabled: open, queryFn: () => api<{ items: Tpl[]; system: Record<string, string> }>(`/opportunities/${oppId}/proposal-templates`) });
@@ -25,7 +25,7 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
   const [days, setDays] = useState(15);
   const [previewing, setPreviewing] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
-  const itemsQ = useQuery({ queryKey: ['opportunity-items', oppId], enabled: open, queryFn: () => api<{ items: unknown[]; totals: { total: number } }>(`/opportunities/${oppId}/items`) });
+  const itemsQ = useQuery({ queryKey: ['opp-items', oppId], enabled: open, queryFn: () => api<{ items: { id: string; description: string; priceDefined: boolean }[]; totals: { total: number } }>(`/opportunities/${oppId}/items`) });
   const [sent, setSent] = useState<{ id: string; filename: string } | null>(null);
   const oppQ = useQuery({ queryKey: ['opportunity', oppId], enabled: open, queryFn: () => api<Opportunity>(`/opportunities/${oppId}`) });
   // última proposta da oportunidade (editar e gerar de novo) e o modelo padrão da filial
@@ -50,10 +50,15 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
   const gen = useMutation({
     mutationFn: () => api<{ id: string; filename: string }>(`/opportunities/${oppId}/proposal`, { method: 'POST', body: payload() }),
     onSuccess: (r) => { for (const k of ['attachments', 'opportunity', 'timeline', 'proposal-draft']) qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: `Proposta gerada e anexada: ${r.filename}` }); setSent(r); },
-    onError: (e) => toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message }),
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 422) void qc.invalidateQueries({ queryKey: ['opp-items', oppId] });
+      toast({ tone: 'error', message: e instanceof ApiError ? e.problem.detail ?? e.message : (e as Error).message });
+    },
   });
   const all = { ...(q.data?.system ?? {}), ...values };
   const sec = tpl?.sections?.enabled;
+  const pendingPrices = sec ? itemsQ.data?.items.flatMap((item, index) => item.priceDefined === false ? [{ ...item, index }] : []) ?? [] : [];
+  const pricesBlocked = !!sec && (!itemsQ.data || itemsQ.isFetching || itemsQ.isError || pendingPrices.length > 0);
   const payload = () => ({ templateId: tpl!.id, values, ...(sec ? { services: { text: svcText, photos: photos.map(({ data, mime }) => ({ data, mime })) }, validityDays: days } : {}) });
   const addPhotos = async (files: FileList) => {
     const next = [...photos];
@@ -70,14 +75,18 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
     const win = window.open('', '_blank'); // abre já no clique (bloqueador de pop-up)
     try {
       const r = await fetch(`/api/v1/opportunities/${oppId}/proposal/preview`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload()) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error((j as { detail?: string }).detail ?? 'Não foi possível gerar a prévia.'); }
+      if (!r.ok) {
+        if (r.status === 422) void qc.invalidateQueries({ queryKey: ['opp-items', oppId] });
+        const j = await r.json().catch(() => ({}));
+        throw new Error((j as { detail?: string }).detail ?? 'Não foi possível gerar a prévia.');
+      }
       const url = URL.createObjectURL(await r.blob());
       if (win) win.location.href = url; else window.open(url, '_blank');
     } catch (e) { win?.close(); toast({ tone: 'error', message: (e as Error).message }); } finally { setPreviewing(false); }
   };
   if (sent && oppQ.data) return <WhatsAppSend opp={oppQ.data} attachment={sent} open={open} onClose={() => { setSent(null); onClose(); }} />;
   return (
-    <Modal open={open} onClose={onClose} title={draft ? 'Editar proposta' : 'Gerar proposta'} size="xl" footer={<><Button onClick={onClose}>Cancelar</Button>{tpl && <Button icon={<Eye className="h-4 w-4" />} loading={previewing} onClick={() => void preview()}>Prévia do PDF</Button>}<Button variant="primary" loading={gen.isPending} disabled={!tpl} onClick={() => gen.mutate()}>{draft ? 'Gerar nova versão e anexar' : 'Gerar PDF e anexar'}</Button></>}>
+    <Modal open={open} onClose={onClose} title={draft ? 'Editar proposta' : 'Gerar proposta'} size="xl" footer={<><Button onClick={onClose}>Cancelar</Button>{tpl && <Button icon={<Eye className="h-4 w-4" />} loading={previewing} disabled={pricesBlocked} onClick={() => void preview()}>Prévia do PDF</Button>}<Button variant="primary" loading={gen.isPending} disabled={!tpl || pricesBlocked} onClick={() => gen.mutate()}>{draft ? 'Gerar nova versão e anexar' : 'Gerar PDF e anexar'}</Button></>}>
       {q.isLoading ? <LoadingRows rows={5} /> : !tpl ? (
         <EmptyState title="Nenhum modelo de proposta pronto" description="A gerência cadastra o modelo (com a arte do Canva) em Configurações → Modelos de proposta." />
       ) : (
@@ -98,6 +107,14 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
             ))}
             {sec && (
               <div className="space-y-3 border-t border-line pt-3">
+                {itemsQ.isError && <Notice tone="warning">Não foi possível conferir os preços salvos. <Button size="sm" onClick={() => void itemsQ.refetch()}>Tentar novamente</Button></Notice>}
+                {pendingPrices.length > 0 && <Notice tone="warning">
+                  <div className="space-y-2">
+                    <p>Defina e salve o preço comercial destes itens para gerar a proposta.</p>
+                    <ul className="list-disc pl-4">{pendingPrices.map(({ id, description, index }) => <li key={id}>Item {index + 1} · {description}</li>)}</ul>
+                    <Button size="sm" onClick={onProducts}>Ir para Produtos</Button>
+                  </div>
+                </Notice>}
                 <FormField label={tpl.sections.titles.services} hint="o que será feito; vira o texto da seção" htmlFor="pg-svc"><Textarea id="pg-svc" rows={5} value={svcText} onChange={(e) => setSvcText(e.target.value)} /></FormField>
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-ink">Fotos ({photos.length}/8)</p>
@@ -112,7 +129,7 @@ export function ProposalGenerator({ oppId, open, onClose }: { oppId: string; ope
                   <input ref={photoRef} type="file" accept="image/png,image/jpeg" multiple className="sr-only" aria-label="Fotos dos serviços" onChange={(e) => { if (e.target.files) void addPhotos(e.target.files); e.target.value = ''; }} />
                   <Button size="sm" icon={<ImagePlus className="h-4 w-4" />} disabled={photos.length >= 8} onClick={() => photoRef.current?.click()}>Adicionar fotos</Button>
                 </div>
-                <div className="border border-line bg-surface-2 px-3 py-2 text-sm"><span className="font-semibold text-ink">{tpl.sections.titles.investment}:</span> {itemsQ.data ? (itemsQ.data.items.length ? <>{itemsQ.data.items.length} item(ns) da aba Produto · {fmtBRL(itemsQ.data.totals.total)}</> : <span className="text-[#9A6B00]">nenhum item na aba Produto: a tabela não sai</span>) : '…'}</div>
+                <div className="border border-line bg-surface-2 px-3 py-2 text-sm"><span className="font-semibold text-ink">{tpl.sections.titles.investment}:</span> {itemsQ.data ? (itemsQ.data.items.length ? <>{itemsQ.data.items.length} item(ns) da aba Produto{pendingPrices.length === 0 && ` · ${fmtBRL(itemsQ.data.totals.total)}`}</> : <span className="text-[#9A6B00]">nenhum item na aba Produto: a tabela não sai</span>) : '…'}</div>
                 <FormField label={`${tpl.sections.titles.condition}: prazo (dias)`} htmlFor="pg-days"><Input id="pg-days" type="number" min={1} max={365} value={days} onChange={(e) => setDays(Math.max(1, Math.min(365, Number(e.target.value) || 15)))} /></FormField>
               </div>
             )}

@@ -22,8 +22,11 @@ import { BasketPanel, BusinessOverview, ItemValuesModal } from './BasketEconomic
 import { basketName, parseRate, rateText, type BasketForm } from './basketPresentation';
 import { B2gPanel, emptyB2gForm, type B2gForm } from './B2gPanel';
 import { SectionsEconomics, SectionsSummary } from './DealSections';
+import type { ContractConsumptionResult } from '@isp/domain';
+import { ContractConsumptionPanel } from './ContractConsumption';
 
 type Data = {
+  consumption?: boolean; savedConsumption?: ContractConsumptionResult | null; preview?: ContractConsumptionResult;
   settings: EconSettings | null; items: EconItem[]; publicSector: boolean; input: EconInput; saved: { updatedAt: string } | null;
   /** fórmulas publicadas no Financial Studio (a prévia usa o mesmo modelo do servidor) */
   modelOverrides?: FinOverride[];
@@ -567,6 +570,7 @@ function DecisionBar({ oppId, d, canSubmit }: { oppId: string; d: Data; canSubmi
 export function EconomicsTab(props: { oppId: string; onProducts?: () => void }) {
   const q = useQuery({ queryKey: ['economics', props.oppId], queryFn: () => api<Data>('/opportunities/' + props.oppId + '/economics') });
   const d = q.data;
+  if (d?.consumption) return <ContractConsumptionPanel saved={d.savedConsumption} preview={d.preview} hidden={d.financeHidden} onProducts={d.editable ? props.onProducts : undefined} />;
   if (d?.input?.sections?.length && !d.editable && d.result?.sections) return <div className="space-y-4"><Notice tone="info">Valores da viabilidade salva, em modo de consulta.</Notice><SectionsSummary r={d.result} /></div>;
   if (d?.input?.sections?.length && (d.settings?.netMarginTargetBp == null || !globalInputFromSections(d.input, d.items))) {
     if (d.financeHidden) return <HiddenEconomics d={d} />;
@@ -674,6 +678,7 @@ function GlobalEconomicsTab({ oppId, onProducts }: { oppId: string; onProducts?:
 export function EconomicsSummary({ oppId, onOpen }: { oppId: string; onOpen: () => void }) {
   const q = useQuery({ queryKey: ['economics', oppId], queryFn: () => api<Data>(`/opportunities/${oppId}/economics`) });
   const d = q.data;
+  if (d?.consumption) return <div className="space-y-2"><ContractConsumptionPanel saved={d.savedConsumption} preview={d.preview} hidden={d.financeHidden} /><Button size="sm" onClick={onOpen}>Abrir viabilidade econômica</Button></div>;
   const r = d?.result;
   if (!d?.saved || !r) return null;
   return (

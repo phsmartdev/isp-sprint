@@ -236,7 +236,7 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
   const recurring = ectx.input.mode === 'recorrente';
   const newCost = finKpi && recurring && terms.proposedMonthlyCents !== null ? terms.proposedMonthlyCents - finKpi.contributionCents : null;
   const newMarginCents = finKpi && recurring ? finKpi.contributionCents : null;
-  const econMissing = [!ectx.settings ? 'parâmetros do motor financeiro' : null, !ectx.savedResult ? 'viabilidade econômica salva' : null, fin?.withReservations ? 'tributos do documento fiscal' : null].filter(Boolean) as string[];
+  const econMissing = ectx.consumption ? [] : [!ectx.settings ? 'parâmetros do motor financeiro' : null, !ectx.savedResult ? 'viabilidade econômica salva' : null, fin?.withReservations ? 'tributos do documento fiscal' : null].filter(Boolean) as string[];
   const margin = negotiationMargin(services, {
     listMonthlyCents: listMonthly,
     proposedMonthlyCents: terms.proposedMonthlyCents,

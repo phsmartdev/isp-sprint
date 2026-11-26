@@ -68,6 +68,7 @@ async function simulate(db: DbOrTx, auth: AuthContext, changes: FinOverride[], o
   if (opportunityId) {
     const opp = await loadOpportunity(db, auth, opportunityId);
     const ctx = await economicsContext(db, { ...opp, tenantId: auth.tenantId });
+    if (ctx.consumption) throw unprocessable('O Financial Studio simula formação de preço. O Consumo de contrato calcula apenas a inferência de custo de serviço.');
     if (!ctx.settings) throw unprocessable('Sem parâmetros vigentes em Configurações → Viabilidade: não há como calcular.');
     focusResult = simulateOn(ctx, current, candidate, changed, focus);
   }
@@ -76,7 +77,7 @@ async function simulate(db: DbOrTx, auth: AuthContext, changes: FinOverride[], o
   if (portfolio) {
     const rows = await db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, ownerId: s.opportunities.ownerId, contactId: s.opportunities.contactId, branchId: s.opportunities.branchId, saleKind: s.opportunities.saleKind })
       .from(s.opportunityEconomics).innerJoin(s.opportunities, eq(s.opportunities.id, s.opportunityEconomics.opportunityId)).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
-      .where(and(eq(s.opportunityEconomics.tenantId, auth.tenantId), oppVisibility(auth))).orderBy(desc(s.opportunityEconomics.updatedAt)).limit(200);
+      .where(and(eq(s.opportunityEconomics.tenantId, auth.tenantId), oppVisibility(auth), sql`${s.opportunities.saleKind} is distinct from 'consumo_contrato'`)).orderBy(desc(s.opportunityEconomics.updatedAt)).limit(200);
     const items: BookItem[] = [];
     for (const o of rows) {
       const ctx = await economicsContext(db, { ...o, tenantId: auth.tenantId });
@@ -112,7 +113,7 @@ export const financeStudioRoutes = [
       const term = query.q ? `%${query.q}%` : null;
       const rows = await app.db.select({ id: s.opportunities.id, code: s.opportunities.code, title: s.opportunities.title, account: s.contacts.name, result: s.opportunityEconomics.result, updatedAt: s.opportunityEconomics.updatedAt })
         .from(s.opportunityEconomics).innerJoin(s.opportunities, eq(s.opportunities.id, s.opportunityEconomics.opportunityId)).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
-        .where(and(eq(s.opportunityEconomics.tenantId, auth.tenantId), oppVisibility(auth), term ? or(ilike(s.opportunities.title, term), ilike(s.contacts.name, term), sql`${s.opportunities.code}::text = ${query.q}`) : undefined))
+        .where(and(eq(s.opportunityEconomics.tenantId, auth.tenantId), oppVisibility(auth), sql`${s.opportunities.saleKind} is distinct from 'consumo_contrato'`, term ? or(ilike(s.opportunities.title, term), ilike(s.contacts.name, term), sql`${s.opportunities.code}::text = ${query.q}`) : undefined))
         .orderBy(desc(s.opportunityEconomics.updatedAt)).limit(30);
       return { items: rows.map(({ result, ...r }) => ({ ...r, verdict: (result as { verdict?: string } | null)?.verdict ?? null })) };
     },

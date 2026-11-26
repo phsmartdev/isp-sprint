@@ -51,14 +51,16 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
   const isProposal = !!request && request.toKind === 'open' && (request.to === 'proposta' || request.toName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() === 'proposta');
   const auto = useQuery({
     queryKey: ['auto-proposal', request?.opp.id ?? ''],
-    queryFn: () => api<{ template: { id: string; name: string } | null; hasProposal: boolean }>(`/opportunities/${request!.opp.id}/auto-proposal`),
-    enabled: isProposal && !!request?.requirements.proposta && !request?.opp.proposalCount,
+    queryFn: () => api<{ template: { id: string; name: string } | null; hasProposal: boolean; priceWarning: string | null }>(`/opportunities/${request!.opp.id}/auto-proposal`),
+    enabled: isProposal && !request?.opp.proposalCount,
   });
   if (!request) return null;
-  const autoTemplate = isProposal ? auto.data?.template ?? null : null;
+  const priceWarning = isProposal && !request.opp.proposalCount && !uploaded && !auto.data?.hasProposal ? auto.data?.priceWarning : null;
+  const autoTemplate = isProposal && !priceWarning ? auto.data?.template ?? null : null;
   const { from, to, opp } = request;
   const reopening = isClosed(from);
-  const unmet = unmetRequirements({ ...opp, proposalCount: opp.proposalCount + uploaded + (autoTemplate ? 1 : 0) }, request.requirements, request.toKind);
+  const proposalCount = Math.max(opp.proposalCount, auto.data?.hasProposal ? 1 : 0) + uploaded + (autoTemplate ? 1 : 0);
+  const unmet = unmetRequirements({ ...opp, proposalCount }, request.requirements, request.toKind);
   const title = reopening ? 'Reabrir oportunidade' : to === 'ganha' ? 'Marcar venda fechada' : to === 'perdida' ? 'Marcar como perdida' : `Mover para ${request.toName}`;
 
   const upload = async (f: File) => {
@@ -83,12 +85,13 @@ export function TransitionDialog({ request, onCancel, onConfirm, loading }: { re
       tone={to === 'perdida' ? 'danger' : 'primary'}
       confirmLabel={reopening ? 'Reabrir' : to === 'ganha' ? 'Marcar venda fechada' : to === 'perdida' ? 'Marcar como perdida' : 'Mover'}
       loading={loading}
-      confirmDisabled={(isProposal && auto.isLoading && !!request.requirements.proposta && !opp.proposalCount) || (to === 'perdida' && !loss) || (reopening && !reason.trim()) || unmet.length > 0}
+      confirmDisabled={(isProposal && auto.isFetching && !!request.requirements.proposta && !opp.proposalCount && !uploaded) || (to === 'perdida' && !loss) || (reopening && !reason.trim()) || unmet.length > 0}
       onCancel={onCancel}
       onConfirm={() => onConfirm({ toStage: to, confirm: true, reason: reason.trim() || null, lossReason: to === 'perdida' ? (loss as LossReason) : null })}
     >
       <p><strong>{request.title}</strong>: {request.fromName} → {request.toName}</p>
       {to === 'ganha' && <Notice tone="warning">Venda fechada é ganho comercial. O contrato só conta como confirmado após validação no IXC.</Notice>}
+      {priceWarning && <Notice tone="warning">{priceWarning}{!request.requirements.proposta && ' A oportunidade pode avançar sem gerar o PDF.'}</Notice>}
       {(request.requirements.proposta || request.requirements.plano || request.requirements.proximaAcao || request.requirements.respostasObrigatorias) && request.toKind !== 'lost' && (
         <div className="rounded-md border border-line p-3">
           <p className="mb-2 text-sm font-semibold text-ink">Para entrar em “{request.toName}”</p>

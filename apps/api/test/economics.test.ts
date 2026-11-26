@@ -2,7 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
-import { annuityFactor } from '@isp/domain';
+import { annuityFactor, emptyEconInput, financeEngine } from '@isp/domain';
+import { economicsContext } from '../src/services/economics';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -14,6 +15,66 @@ beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await P
 afterAll(async () => ctx.close());
 
 describe('viabilidade econômica', () => {
+  it('grava consumo mesmo sem parâmetros e aplica a taxa vigente sem formar outro preço', async () => {
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
+    const opp = ok(await carlos.post('/opportunities', {
+      newContact: { name: 'Cliente do consumo de teste', segment: 'empresarial' }, pipelineId: corp.id,
+      branchId: lk.branches[0].id, saleKind: 'consumo_contrato',
+    }), 201).json();
+    const url = `/opportunities/${opp.id}`;
+    const initial = ok(await carlos.get(`${url}/economics`)).json();
+    expect(initial).toMatchObject({ consumption: true, result: null, savedConsumption: null, preview: { rateBp: null } });
+    const economics = {
+      ...emptyEconInput(), pricingMode: 'global',
+      capex: [{ description: 'Repasse contratual', kind: 'venda', qtyMilli: 2000, unitCents: 10000 }],
+      opex: [{ description: 'Conectividade contratada', kind: 'recorrencia', qtyMilli: 5000, unitCents: 10000 }],
+    };
+    const items = [{ description: 'Produto na proposta', dealKind: 'recorrencia', unit: 'un', qtyMilli: 5000, unitCents: 10000, discountCents: 0, surchargeCents: 0 }];
+    ok(await carlos.put(`${url}/items`, { rowVersion: opp.rowVersion, items, economics, economicsUpdatedAt: null }));
+    const draft = ok(await carlos.get(`${url}/economics`)).json();
+    expect(draft.savedConsumption.totals).toEqual([
+      { kind: 'venda', frequency: 'unico', contractCents: 20000, inferenceCents: 0 },
+      { kind: 'recorrencia', frequency: 'mensal', contractCents: 50000, inferenceCents: null },
+    ]);
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: 2500 }), 201);
+    const preview = ok(await carlos.get(`${url}/economics`)).json();
+    expect(preview.consumptionNeedsSave).toBe(true);
+    expect(preview.preview.totals[1].inferenceCents).toBe(12500);
+    const storedItems = ok(await carlos.get(`${url}/items`)).json();
+    expect(storedItems.items[0].unitCents).toBe(10000);
+    ok(await carlos.put(`${url}/items`, { rowVersion: storedItems.rowVersion, items, economics, economicsUpdatedAt: draft.saved.updatedAt }));
+    const saved = ok(await carlos.get(`${url}/economics`)).json();
+    expect(saved.savedConsumption).toEqual(saved.preview);
+    expect(saved.savedConsumption).not.toHaveProperty('suggestedCents');
+    expect(saved.savedConsumption).not.toHaveProperty('kpi');
+    expect(saved.consumptionNeedsSave).toBe(false);
+    const run = ok(await carlos.get(`${url}/economics/runs/ultimo`)).json();
+    expect(run).toMatchObject({ verified: true, engineVersion: 'consumo-contrato-v1', result: saved.savedConsumption });
+    ok(await carlos.post(`${url}/economics/submit`), 422);
+  });
+
+  it.each(['licitacao', 'adesao_ata', 'venda_consultiva'])('mantém a formação de preço em %s', async (saleKind) => {
+    ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: 2500 }), 201);
+    const lk = ok(await carlos.get('/meta/lookups')).json();
+    const corp = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial');
+    const opp = ok(await carlos.post('/opportunities', {
+      newContact: { name: `Cliente do cálculo ${saleKind}`, segment: 'empresarial' }, pipelineId: corp.id, branchId: lk.branches[0].id, saleKind,
+      ...(saleKind === 'licitacao' ? { custom: { tipo_disputa: 'Aberta', lance_inicial: 1000, lance_minimo: 800 } } : {}),
+    }), 201).json();
+    const base = `/opportunities/${opp.id}`;
+    const economics = { ...emptyEconInput(), capex: [{ description: 'Instalação', kind: 'recorrencia', qtyMilli: 5000, unitCents: 10000, impact: 'servico' }] };
+    ok(await carlos.put(`${base}/items`, {
+      rowVersion: opp.rowVersion, economics, items: [{ description: 'Serviço', dealKind: 'recorrencia', unit: 'un', qtyMilli: 1000, unitCents: 50000, discountCents: 0, surchargeCents: 0 }],
+    }));
+    const saved = ok(await carlos.get(`${base}/economics`)).json();
+    expect(saved.result).toMatchObject({ engineVersion: 'FINANCE-3.11.0', serviceMonthlyCents: 12500 });
+    const { input, items, settings, publicSector, model, fiscal } = await economicsContext(ctx.db, { ...opp, tenantId: carlos.me.tenant.id });
+    const expected = financeEngine({ input, items, settings: settings!, publicSector, model, fiscal });
+    const { b2g: _b2g, ...result } = saved.result;
+    expect(result).toEqual(JSON.parse(JSON.stringify(expected)));
+  });
+
   it('publica e preserva a inferência de serviço no histórico versionado', async () => {
     const { serviceCostBp: ignored, ...legacy } = ECON;
     ok(await carlos.post('/admin/viability/econ', { ...ECON, serviceCostBp: -1 }), 422);

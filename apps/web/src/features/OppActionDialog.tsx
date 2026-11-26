@@ -4,6 +4,7 @@ import { api, ApiError } from '../lib/api';
 import type { LookupStage, Opportunity } from '../lib/types';
 import { Button, FormField, Input, Select, Textarea } from '../components/ui/primitives';
 import { Modal, useToast } from '../components/ui/overlay';
+import type { TransitionResult } from './useTransition';
 
 export type OppAction = 'pausar' | 'retomar' | 'reabrir';
 
@@ -18,10 +19,16 @@ export function OppActionDialog({ act, stages, onClose }: { act: { opp: Opportun
   const [stage, setStage] = useState(open.find((s) => s.key === act.column)?.key ?? open.at(-1)?.key ?? '');
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
-    mutationFn: () => kind === 'pausar' ? api(`/opportunities/${opp.id}/pause`, { method: 'POST', body: { reason: reason.trim(), until: until || null, rowVersion: opp.rowVersion } })
-      : kind === 'retomar' ? api(`/opportunities/${opp.id}/resume`, { method: 'POST', body: { rowVersion: opp.rowVersion } })
-      : api(`/opportunities/${opp.id}/transition`, { method: 'POST', body: { toStage: stage, reason: reason.trim(), rowVersion: opp.rowVersion } }),
-    onSuccess: () => { for (const k of ['pipeline', 'opportunities', 'opportunity']) void qc.invalidateQueries({ queryKey: [k] }); toast({ tone: 'success', message: kind === 'pausar' ? 'Negociação pausada' : kind === 'retomar' ? 'Negociação retomada' : 'Negociação reaberta' }); onClose(); },
+    mutationFn: () => kind === 'pausar' ? api<TransitionResult>(`/opportunities/${opp.id}/pause`, { method: 'POST', body: { reason: reason.trim(), until: until || null, rowVersion: opp.rowVersion } })
+      : kind === 'retomar' ? api<TransitionResult>(`/opportunities/${opp.id}/resume`, { method: 'POST', body: { rowVersion: opp.rowVersion } })
+      : api<TransitionResult>(`/opportunities/${opp.id}/transition`, { method: 'POST', body: { toStage: stage, reason: reason.trim(), rowVersion: opp.rowVersion } }),
+    onSuccess: (result) => {
+      for (const k of ['pipeline', 'opportunities', 'opportunity']) void qc.invalidateQueries({ queryKey: [k] });
+      const message = kind === 'pausar' ? 'Negociação pausada' : kind === 'retomar' ? 'Negociação retomada' : 'Negociação reaberta';
+      const warning = result?.autoProposalWarning;
+      toast({ tone: 'success', message: warning ? `${message}. ${warning}` : message });
+      onClose();
+    },
     onError: (e) => setErr(e instanceof ApiError ? (e.problem.detail ?? e.problem.title) : (e as Error).message),
   });
   const title = kind === 'pausar' ? 'Pausar negociação' : kind === 'retomar' ? 'Retomar negociação' : 'Reabrir negociação';

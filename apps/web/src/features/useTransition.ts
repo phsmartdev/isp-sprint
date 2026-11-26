@@ -5,6 +5,7 @@ import { useToast } from '../components/ui/overlay';
 import type { TransitionPayload } from './TransitionDialog';
 
 type PipelineData = { stages: PipelineStage[] };
+export type TransitionResult = Opportunity & { autoProposal?: { filename: string; template: string }; autoProposalWarning?: string };
 
 /** Transição com UI otimista no Kanban e rollback se o servidor recusar (409 versão, 422 regra). */
 export function useTransitionMutation() {
@@ -12,7 +13,7 @@ export function useTransitionMutation() {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ opp, payload }: { opp: Opportunity; payload: TransitionPayload }) =>
-      api<Opportunity>(`/opportunities/${opp.id}/transition`, { method: 'POST', body: { ...payload, rowVersion: opp.rowVersion } }),
+      api<TransitionResult>(`/opportunities/${opp.id}/transition`, { method: 'POST', body: { ...payload, rowVersion: opp.rowVersion } }),
     onMutate: async ({ opp, payload }) => {
       await qc.cancelQueries({ queryKey: ['pipeline'] });
       const snapshots = qc.getQueriesData<PipelineData>({ queryKey: ['pipeline'] });
@@ -38,9 +39,11 @@ export function useTransitionMutation() {
       toast({ tone: 'error', message: e instanceof ApiError && e.status === 409 ? 'Outra pessoa alterou esta oportunidade. O quadro foi atualizado.' : (e as Error).message });
     },
     onSuccess: (o) => {
-      const auto = (o as Opportunity & { autoProposal?: { filename: string; template: string } }).autoProposal;
+      const auto = o.autoProposal;
       qc.setQueryData(['opportunity', o.id], o);
-      toast({ tone: 'success', message: auto ? `Movida para ${o.stageName ?? o.stage}. Proposta gerada no modelo da filial: ${auto.filename}. Edite em Anexos.` : `Movida para ${o.stageName ?? o.stage}` });
+      const moved = `Movida para ${o.stageName ?? o.stage}`;
+      const notice = auto ? `Proposta gerada no modelo da filial: ${auto.filename}. Edite em Anexos.` : o.autoProposalWarning;
+      toast({ tone: 'success', message: notice ? `${moved}. ${notice}` : moved });
       if (auto) for (const k of ['attachments', 'proposal-draft']) qc.invalidateQueries({ queryKey: [k] });
     },
     onSettled: (_d, _e, v) => {

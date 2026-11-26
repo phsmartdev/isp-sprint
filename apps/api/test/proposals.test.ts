@@ -1,5 +1,8 @@
 /** Proposta PJ: modelo com a arte, campos com variáveis e PDF anexado à oportunidade. */
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
+import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from 'pdf-lib';
+import { normalizeSections } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -7,6 +10,14 @@ let carlos: Client, lucas: Client;
 beforeAll(async () => { ctx = await makeApp(); [carlos, lucas] = await Promise.all([login(ctx.app, 'carlos@yepnet.test'), login(ctx.app, 'lucas@yepnet.test')]); });
 afterAll(async () => ctx.close());
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAAY0lEQVR4nO3OUQkAIBBAMb8tYTH75zCG72CwAFv73HHW94F0mLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0gLS0dIC0tHSAtLR0wMj0A7oIvkjy3AeBAAAAAElFTkSuQmCC';
+
+async function priceTemplate(name: string, enabled: boolean) {
+  const template = await carlos.post('/admin/proposal-templates', { name, sections: normalizeSections({ enabled }) });
+  expect(template.statusCode, template.body).toBe(201);
+  const { id } = template.json();
+  expect((await carlos.post(`/admin/proposal-templates/${id}/pages`, { data: PNG })).statusCode).toBe(201);
+  return id as string;
+}
 
 it('modelo Yepempresa: arte, variáveis criadas pela empresa e PDF anexado', async () => {
   const t = await carlos.post('/admin/proposal-templates', {
@@ -49,8 +60,6 @@ it('modelo Yepempresa: arte, variáveis criadas pela empresa e PDF anexado', asy
 });
 
 it('seções automáticas: serviços com fotos, composição do investimento (aba Produto) e condição; prévia exata', async () => {
-  const { PDFDocument } = await import('pdf-lib');
-  const { sql } = await import('drizzle-orm');
   const t = (await carlos.post('/admin/proposal-templates', { name: `Com seções ${Date.now()}`, segments: [], variables: [], fields: [{ id: 'h', page: 1, x: 8, y: 4, w: 80, size: 12, color: '#000000', align: 'left', bold: true, text: '{{proposta.titulo}}' }] })).json();
   for (let i = 0; i < 3; i++) expect((await carlos.post(`/admin/proposal-templates/${t.id}/pages`, { data: PNG })).statusCode).toBe(201);
   const full = (await carlos.get('/admin/proposal-templates')).json().items.find((x: { id: string }) => x.id === t.id);
@@ -75,7 +84,6 @@ it('seções automáticas: serviços com fotos, composição do investimento (ab
 });
 
 it('entrar na etapa Proposta gera a proposta no modelo padrão da filial; editar regera com o mesmo número', async () => {
-  const { sql } = await import('drizzle-orm');
   const t = (await carlos.post('/admin/proposal-templates', { name: `Padrão filial ${Date.now()}`, segments: [], variables: [{ key: 'obs', label: 'Observação', type: 'texto', default: 'Padrão' }], fields: [{ id: 'h', page: 0, x: 8, y: 4, w: 80, size: 12, color: '#000000', align: 'left', bold: true, text: '{{proposta.titulo}} {{obs}}' }] })).json();
   expect((await carlos.post(`/admin/proposal-templates/${t.id}/pages`, { data: PNG })).statusCode).toBe(201);
   const list = (await carlos.get('/admin/proposal-templates')).json();
@@ -101,6 +109,100 @@ it('entrar na etapa Proposta gera a proposta no modelo padrão da filial; editar
   expect(again.json().filename).toBe(mv.json().autoProposal.filename);
   expect((await lucas.get(`/opportunities/${o.id}/proposal-draft`)).json().draft.values).toEqual({ obs: 'Editada' });
   await carlos.put(`/admin/proposal-templates/${t.id}/branches`, { branchIds: [] });
+});
+
+it('bloqueia prévia e PDF da composição com preço em branco e aceita zero explícito', async () => {
+  const templateId = await priceTemplate('Com composição de teste', true);
+  const plainId = await priceTemplate('Sem composição de teste', false);
+  const opp = await lucas.post('/opportunities', { newContact: { name: 'Empresa Preços Pendentes', segment: 'empresarial' } });
+  expect(opp.statusCode, opp.body).toBe(201);
+  const { id, rowVersion } = opp.json();
+  const base = '/opportunities/' + id;
+  const rows = [
+    { description: 'Instalação cortesia', unit: 'un', qtyMilli: 1000, unitCents: 0, priceDefined: false },
+    { description: 'Link contratado', unit: 'un', qtyMilli: 2000, unitCents: 0, priceDefined: false },
+  ];
+  expect((await lucas.post(base + '/proposal/preview', { templateId })).statusCode).toBe(200);
+  expect((await lucas.put(base + '/items', { rowVersion, items: rows })).statusCode).toBe(200);
+  for (const path of ['/proposal/preview', '/proposal']) {
+    const blocked = await lucas.post(base + path, { templateId });
+    expect(blocked.statusCode, blocked.body).toBe(422);
+    expect(blocked.json()).toMatchObject({ errors: [
+      { path: 'items.0.unitCents', message: expect.stringContaining('Instalação cortesia') },
+      { path: 'items.1.unitCents', message: expect.stringContaining('Link contratado') },
+    ] });
+  }
+  expect((await ctx.db.execute(sql`select proposal_number from opportunities where id = ${id}`)).rows[0]?.proposal_number).toBeNull();
+  expect((await lucas.get(base + '/proposal-draft')).json().draft).toBeNull();
+  expect((await lucas.get(base + '/attachments')).json().items).toHaveLength(0);
+  expect((await lucas.post(base + '/proposal/preview', { templateId: plainId })).statusCode).toBe(200);
+  expect((await lucas.post(base + '/proposal', { templateId: plainId })).statusCode).toBe(201);
+
+  const current = (await lucas.get(base + '/items')).json();
+  const items = [{ ...rows[0], priceDefined: true }, { ...rows[1], priceDefined: true, unitCents: 12345 }];
+  const save = await lucas.put(base + '/items', { rowVersion: current.rowVersion, items });
+  expect(save.statusCode, save.body).toBe(200);
+  const preview = await lucas.post(base + '/proposal/preview', { templateId });
+  expect(preview.statusCode, preview.body).toBe(200);
+  const generated = await lucas.post(base + '/proposal', { templateId });
+  expect(generated.statusCode, generated.body).toBe(201);
+  const attached = await lucas.get(base + '/attachments/' + generated.json().id + '/download');
+  expect(attached.statusCode).toBe(200);
+  for (const payload of [preview.rawPayload, attached.rawPayload]) {
+    const pdf = await PDFDocument.load(payload);
+    const text = pdf.getPages().flatMap((page) => {
+      const contents = page.node.Contents();
+      const entries = contents instanceof PDFArray ? contents.asArray() : contents ? [contents] : [];
+      return entries.flatMap((entry) => {
+        const stream = pdf.context.lookup(entry);
+        if (!(stream instanceof PDFRawStream)) return [];
+        const operators = Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
+        return [...operators.matchAll(/<([0-9a-f]+)> Tj/gi)].map((match) => Buffer.from(match[1]!, 'hex').toString('latin1'));
+      });
+    });
+    expect(text).toEqual(expect.arrayContaining(['R$ 0,00', 'R$ 123,45', 'R$ 246,90']));
+  }
+});
+
+it('preserva a etapa sem preço quando o anexo é exigido e avisa quando é opcional', async () => {
+  const templateId = await priceTemplate('Modelo padrão com composição', true);
+  const lk = (await carlos.get('/meta/lookups')).json();
+  const branchId = lk.branches[0].id;
+  const pipelineId = lk.pipelines.find((p: { key: string }) => p.key === 'empresarial').id;
+  const stage = (await ctx.db.execute(sql`select requirements from pipeline_stages where pipeline_id = ${pipelineId} and key = 'proposta'`)).rows[0];
+  expect(stage).toBeTruthy();
+  expect((await carlos.put('/admin/proposal-templates/' + templateId + '/branches', { branchIds: [branchId] })).statusCode).toBe(200);
+  try {
+    for (const required of [true, false]) {
+      await ctx.db.execute(sql`update pipeline_stages set requirements = ${JSON.stringify({ proposta: required })}::jsonb where pipeline_id = ${pipelineId} and key = 'proposta'`);
+      const created = await lucas.post('/opportunities', { newContact: { name: 'Empresa Proposta ' + (required ? 'Obrigatória' : 'Opcional'), segment: 'empresarial' }, pipelineId, branchId });
+      expect(created.statusCode, created.body).toBe(201);
+      const opp = created.json();
+      const base = '/opportunities/' + opp.id;
+      const item = { description: 'Link sem preço definido', unit: 'un', qtyMilli: 1000, unitCents: 0, priceDefined: false };
+      const saved = await lucas.put(base + '/items', { rowVersion: opp.rowVersion, items: [item] });
+      expect(saved.statusCode, saved.body).toBe(200);
+      const hint = (await lucas.get(base + '/auto-proposal')).json();
+      expect(hint).toMatchObject({ hasProposal: false, priceWarning: expect.stringContaining(item.description) });
+      const moved = await lucas.post(base + '/transition', { toStage: 'proposta', rowVersion: saved.json().rowVersion, confirm: true });
+      expect(moved.statusCode, moved.body).toBe(required ? 422 : 200);
+      expect(moved.json()[required ? 'detail' : 'autoProposalWarning']).toContain(item.description);
+      const current = (await lucas.get(base)).json();
+      expect(current.stage).toBe(required ? opp.stage : 'proposta');
+      expect((await ctx.db.execute(sql`select proposal_number from opportunities where id = ${opp.id}`)).rows[0]?.proposal_number).toBeNull();
+      expect((await lucas.get(base + '/attachments')).json().items).toHaveLength(0);
+      if (required) {
+        const priced = await lucas.put(base + '/items', { rowVersion: current.rowVersion, items: [{ ...item, priceDefined: true }] });
+        expect(priced.statusCode, priced.body).toBe(200);
+        const accepted = await lucas.post(base + '/transition', { toStage: 'proposta', rowVersion: priced.json().rowVersion, confirm: true });
+        expect(accepted.statusCode, accepted.body).toBe(200);
+        expect(accepted.json().autoProposal).toHaveProperty('filename');
+      }
+    }
+  } finally {
+    await carlos.put('/admin/proposal-templates/' + templateId + '/branches', { branchIds: [] });
+    await ctx.db.execute(sql`update pipeline_stages set requirements = ${JSON.stringify(stage!.requirements)}::jsonb where pipeline_id = ${pipelineId} and key = 'proposta'`);
+  }
 });
 
 it('diz em que modelo a proposta sai ao mover e permite excluir a negociação (não a venda fechada)', async () => {

@@ -154,10 +154,11 @@ export const approvalRoutes = [
       // trava de segmento do motor financeiro: com a viabilidade econômica preenchida, retorno fora da política não vai para aprovação
       const [econ] = await app.db.select({ opportunityId: s.opportunityEconomics.opportunityId }).from(s.opportunityEconomics).where(eq(s.opportunityEconomics.opportunityId, opp.id)).limit(1);
       // com a viabilidade econômica desligada na empresa (CRM → funcionalidades), a trava não vale
-      if (econ && featureOn('crm.viabilidade', auth.modules, auth.disabledFeatures, auth.access)) {
+      if (opp.saleKind !== 'consumo_contrato' && econ && featureOn('crm.viabilidade', auth.modules, auth.disabledFeatures, auth.access)) {
         // decide pelo cálculo salvo; desatualizado, sem parâmetros ou com tributo faltando, pede para resolver antes
         const ctx = await economicsContext(app.db, { ...opp, tenantId: auth.tenantId });
-        const er = ctx.savedResult!;
+        const er = ctx.savedResult;
+        if (!er) throw unprocessable('Salve a viabilidade econômica para o tipo de venda atual antes de pedir aprovação.');
         const fresh = computeEconomics(ctx);
         if (!fresh || !ctx.settings) throw unprocessable('A empresa ainda não informou os parâmetros da viabilidade econômica (Configurações → Viabilidade).');
         if (isStale(er, fresh)) throw unprocessable('A viabilidade econômica mudou desde que foi salva (produtos, tributos ou parâmetros). Abra a aba Viabilidade econômica, confira e salve de novo antes de pedir aprovação.');
