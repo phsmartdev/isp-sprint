@@ -44,6 +44,40 @@ const VIEWS = [
 ] as const;
 type View = (typeof VIEWS)[number]['key'];
 
+/** Trocar o endereço (caixa desconectada e sem conversas) e excluir a própria caixa pessoal. */
+function BoxManage({ box }: { box: MailboxRow }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [address, setAddress] = useState(box.address);
+  const [confirm, setConfirm] = useState(false);
+  const done = (m: string) => { void qc.invalidateQueries({ queryKey: ['mail'] }); toast({ tone: 'success', message: m }); };
+  const rename = useMutation({ mutationFn: () => api(`/mail/mailboxes/${box.id}`, { method: 'PATCH', body: { address: address.trim() } }), onSuccess: () => { setEditing(false); done('Endereço da caixa trocado'); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  const remove = useMutation({ mutationFn: () => api(`/mail/mailboxes/${box.id}`, { method: 'DELETE' }), onSuccess: () => done('Caixa excluída'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
+  return (
+    <div className="space-y-2 border-t border-line pt-3">
+      {editing ? (
+        <div className="flex flex-wrap items-end gap-2">
+          <FormField label="Novo endereço da caixa" htmlFor={`bx-a-${box.id}`} className="min-w-[240px] flex-1"><Input id={`bx-a-${box.id}`} type="email" value={address} onChange={(e) => setAddress(e.target.value)} /></FormField>
+          <Button size="sm" variant="primary" loading={rename.isPending} disabled={!address.trim() || address.trim().toLowerCase() === box.address.toLowerCase()} onClick={() => rename.mutate()}>Salvar endereço</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setAddress(box.address); }}>Cancelar</Button>
+        </div>
+      ) : confirm ? (
+        <div className="flex flex-wrap items-center gap-2" role="alert">
+          <p className="text-sm text-ink">Excluir a caixa {box.address}? As conversas dela saem do RevOps (no Gmail nada muda).</p>
+          <Button size="sm" variant="danger" loading={remove.isPending} onClick={() => remove.mutate()}>Excluir caixa</Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>Cancelar</Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {box.status === 'desconectada' && <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>Trocar endereço</Button>}
+          <Button size="sm" variant="ghost" className="text-danger" onClick={() => setConfirm(true)}>Excluir caixa</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function useMailboxes() {
   return useQuery({ queryKey: ['mail', 'boxes'], queryFn: () => api<{ items: MailboxRow[]; canConfigure: boolean; me: { email: string } }>('/mail/mailboxes') });
 }
@@ -425,6 +459,7 @@ export function MailboxesPage() {
               </div>
             )}
             {b.kind === 'pessoal' && b.status !== 'conectada' && b.status !== 'pausada' && <AppPasswordConnect boxId={b.id} address={b.address} />}
+            {b.kind === 'pessoal' && <BoxManage box={b} />}
           </article>
         ))}
       </div>

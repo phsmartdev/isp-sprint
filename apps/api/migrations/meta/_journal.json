@@ -1296,6 +1296,13 @@
       "when": 1795707077749,
       "tag": "0184_glpi_requisitados",
       "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 1795726275205,
+      "tag": "0185_caixa_excluida",
+      "breakpoints": true
     }
   ]
 }
