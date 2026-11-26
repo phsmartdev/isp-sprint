@@ -1282,6 +1282,13 @@
       "when": 1795629107172,
       "tag": "0182_dados_planejados_glpi",
       "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1795704596812,
+      "tag": "0183_glpi_mencoes_aprovacoes",
+      "breakpoints": true
     }
   ]
 }

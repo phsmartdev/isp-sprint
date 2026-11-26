@@ -128,4 +128,48 @@ describe('Dados Planejados', () => {
       expect(run.sync.read).toBeGreaterThan(0);
     } finally { glpi.setRecursion(true); }
   });
+
+  it('1º atendimento pela primeira mensagem do Comercial; menções e pedidos de aprovação no painel e nas listas', async () => {
+    const at = (h: string) => `2026-11-25 ${h}:00`;
+    const mention = (id: number, name: string) => `<p>Olá <span data-user-mention="true" data-user-id="${id}">@${name}</span>, pode ver?</p>`;
+    // G: do Comercial, aberto pelo técnico (requerente); a Ana responde 40 min depois citando o Lucas
+    ids.G = glpi.seed({ name: 'Proposta com 1ª resposta', date: at('09:00'), team: [{ type: 'Group', id: 21 }, { type: 'User', id: 33, role: 'requester' }], timeline: [
+      { type: 'Followup', item: { id: 9001, user: { id: 33, name: 'tecnico.noc' }, content: '<p>complemento do requerente</p>', date: at('09:10') } },
+      { type: 'Followup', item: { id: 9002, user: { id: 32, name: 'ana.souza' }, content: mention(31, 'Lucas'), date: at('09:40') } },
+    ] });
+    // H: do NOC (fora do Comercial): cita a Ana e pede aprovação ao Lucas
+    ids.H = glpi.seed({ name: 'Mudança de rota', date: at('10:00'), team: [{ type: 'Group', id: 11 }], timeline: [
+      { type: 'Followup', item: { id: 9003, user: { id: 33, name: 'tecnico.noc' }, content: mention(32, 'Ana'), date: at('10:30') } },
+      { type: 'Validation', item: { id: 9004, requester: { id: 33, name: 'tecnico.noc' }, requested_approver_type: 'User', requested_approver_id: 31, status: 2, submission_date: at('10:45') } },
+    ] });
+    // I: do NOC, aprovação do grupo Comercial já decidida (não fica pendente)
+    ids.I = glpi.seed({ name: 'Compra de ONU', date: at('10:00'), team: [{ type: 'Group', id: 11 }], timeline: [
+      { type: 'Validation', item: { id: 9005, requester: { id: 33, name: 'tecnico.noc' }, requested_approver_type: 'Group', requested_approver_id: 21, status: 3, submission_date: at('10:05'), approval_date: at('11:00') } },
+    ] });
+    await runGlpiSla(ctx.db, ctx.app.config, tenantId, { force: true, full: true, now: new Date(NOW.getTime() + 40 * 60_000) });
+    const d = ok(await carlos.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json();
+    const g = d.pending.find((p: { glpiId: number }) => p.glpiId === ids.G);
+    expect(g.firstResponse.by).toBe('Ana Souza');
+    expect(d.kpi).toMatchObject({ firstResponseCount: 1, firstResponseMin: 40, approvalsPending: 1, mentionsOpen: 2 });
+    expect(d.pending.map((p: { glpiId: number }) => p.glpiId)).not.toContain(ids.H); // só citado: fora das pendências de SLA
+    expect(d.mentions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ glpiId: ids.H, person: 'Ana Souza', by: 'tecnico.noc', answeredAt: null }),
+      expect.objectContaining({ glpiId: ids.G, person: 'Lucas Lima', by: 'ana.souza', answeredAt: null }),
+    ]));
+    expect(d.approvals).toEqual([expect.objectContaining({ glpiId: ids.H, approver: 'Lucas Lima', requester: 'tecnico.noc', isGroup: false })]);
+    expect(d.approvals[0].waiting).toMatch(/^há /);
+    // o Lucas responde no H depois da menção à Ana? não conta; a Ana responde: menção respondida
+    glpi.tickets.get(ids.H!)!.timeline.push({ type: 'Followup', item: { id: 9006, user: { id: 32, name: 'ana.souza' }, content: '<p>Vi, ok.</p>', date: at('11:30') } });
+    glpi.tickets.get(ids.H!)!.date_mod = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(NOW.getTime() + 45 * 60_000));
+    await runGlpiSla(ctx.db, ctx.app.config, tenantId, { force: true, now: new Date(NOW.getTime() + 50 * 60_000) });
+    const d2 = ok(await carlos.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json();
+    expect(d2.mentions.find((m: { glpiId: number }) => m.glpiId === ids.H).answeredAt).not.toBeNull();
+    expect(d2.kpi.mentionsOpen).toBe(1);
+    // filtro por pessoa e escopo: o Lucas vê a aprovação dele; o Rafael (sem grupo) não vê nada
+    expect(ok(await carlos.get(`/dados-planejados?from=2026-11-01&to=2026-11-30&userId=${ana.me.user.id}`)).json().approvals).toEqual([]);
+    expect(ok(await lucas.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json().approvals).toHaveLength(1);
+    const rf = ok(await rafael.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json();
+    expect(rf.mentions).toEqual([]);
+    expect(rf.approvals).toEqual([]);
+  });
 });
