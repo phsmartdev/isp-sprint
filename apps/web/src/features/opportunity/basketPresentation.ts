@@ -22,11 +22,12 @@ export function categoryCosts(view: EconBasketView, input: EconInput, settings: 
   for (const c of lines) {
     const base = costLineTotal(c);
     const protectedCost = monthly ? base * (1 + settings.contingencyOpexBp / 10000)
-      : isVariableFixed(c.impact) ? base : base * (1 + settings.contingencyCapexBp / 10000 + (view.profile === 'fornecimento' ? 0 : (settings.serviceCostBp ?? 3500) / 10000));
+      : isVariableFixed(c.impact) ? base : base * (1 + settings.contingencyCapexBp / 10000);
     weights[categoryOf(c)] += protectedCost;
   }
+  // inferência custo de serviço (% das Configurações de viabilidade): linha própria, com o valor que o motor calculou
   if (monthly) weights.inferencia = e.serviceMonthlyCents ?? 0;
-  else weights.despesas_operacionais += Math.max(0, source.extraInitialCents);
+  else { weights.inferencia = view.profile === 'fornecimento' ? 0 : e.serviceInvestmentCents ?? 0; weights.despesas_operacionais += Math.max(0, source.extraInitialCents); }
   const total = monthly ? e.statement?.total.opex ?? 0 : e.statement?.total.amortization ?? 0;
   const sum = Object.values(weights).reduce((a, b) => a + b, 0);
   if (!sum) { weights.despesas_operacionais = total; return weights; }

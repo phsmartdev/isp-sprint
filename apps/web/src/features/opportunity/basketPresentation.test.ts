@@ -32,4 +32,16 @@ describe('consolidado global usa os resultados do motor', () => {
     flow.cash.forEach((n, k) => expect(n).toBe(flow.revenue[k]! - flow.deductions[k]!));
     expect(flow.cash.at(-1)).toBe(flow.cashflow.reduce((a, b) => a + b, 0));
   });
+  it('Instalação: inferência custo de serviço em linha própria, com o % das Configurações', () => {
+    const one = { ...emptyEconInput(), mode: 'pontual' as const, pricingMode: 'global' as const, capex: [{ description: 'Cabo', kind: 'servico' as const, qtyMilli: 1000, unitCents: 1000000, impact: 'material' as const }], baskets: { instalacao: { netTargetBp: 2000 } } };
+    const its = [{ description: 'Cabeamento', kind: 'servico' as const, priceDefined: false, revenueCents: 0, doc: { name: 'NFS', percentBp: 2515, fixedCents: 0, complete: true } }];
+    for (const bp of [3500, 2000]) {
+      const st = { ...settings, serviceCostBp: bp };
+      const [v] = econBasketViews(one, its, st, financeEngine({ input: one, items: its, settings: st, publicSector: false }));
+      const cats = categoryCosts(v!, one, st);
+      expect(cats.inferencia).toBe(1000000 * bp / 10000);
+      expect(cats.materia_prima).toBe(1000000 + 20000); // base + contingência de 2%
+      expect(cats.mao_de_obra + cats.inferencia + cats.materia_prima).toBe(v!.evaluation.statement!.total.amortization);
+    }
+  });
 });
