@@ -6,7 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import { and, asc, desc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { impactOfCategory, sectionsEngine, type SectionCost, b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
+import { econBasketViews, lotOfKind, impactOfCategory, sectionsEngine, type SectionCost, b2gFromEconomics, defaultModel, emptyEconInput, financeEngine, type DealKind, fiscalDocRates, itemTotal, type CostImpact, type CostLine, type EconInput, type EconItem, type EconResult, type EconSettings, type FiscalTax, type FiscalEnvelope, type FiscalEnvelopeValues, docTaxesForYear } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { unprocessable } from '../http/errors';
@@ -168,7 +168,48 @@ export async function saveEconomics(db: DbOrTx, opp: Opp, input: EconInput, acto
   const envUsed = result.fiscal?.envelope ? ctx.fiscal.envelopes.find((e) => e.id === result.fiscal!.envelope!.id) ?? null : null;
   const settings = { ...ctx.settings, settingsVersionId: ctx.settingsVersion?.id, publicSector: ctx.publicSector, emitter: ctx.emitter, fiscalYear: result.fiscal?.year ?? null, fiscalEnvelope: envUsed ? { id: envUsed.id, year: envUsed.year, values: envUsed.values } : null, formulaModel: { key: ctx.model.key, versions: ctx.modelOverrides.map((o) => ({ code: o.code, version: o.version, versionId: o.versionId, validFrom: o.validFrom })) } };
   await db.insert(s.opportunityEconomicsSnapshots).values({ tenantId: opp.tenantId, opportunityId: opp.id, input, settings, result, reason, actorId, engineVersion: result.engineVersion, settingsVersionId: ctx.settingsVersion?.id ?? null, sha256: snapshotHash({ input, settings, result }) });
+  const value = valueFromEconomics(ctx, input, result);
+  if (value != null) await db.update(s.opportunities).set({ valueCents: value, updatedAt: now }).where(and(eq(s.opportunities.id, opp.id), eq(s.opportunities.tenantId, opp.tenantId)));
   return result;
+}
+
+/**
+ * Valor da oportunidade quando há produto sem preço definido: a soma dos itens daria zero, mas a viabilidade já
+ * decidiu o preço de cada cesta (o preço da venda informado ou, sem ele, o sugerido). Cada cesta entra com o total dos
+ * itens (se todos têm preço) ou com o preço da decisão — na mesma base dos itens (cesta mensal = valor mensal).
+ * Com todos os itens com preço, nada muda (o valor continua a soma dos itens). Sem itens ou sem resultado: null (não mexe).
+ */
+/**
+ * Correção em lote (deploy): oportunidades com produto sem preço e viabilidade salva recebem o valor pela decisão
+ * da viabilidade salva (não recalcula o motor). Idempotente: só grava quando muda. Devolve quantas mudaram.
+ */
+export async function backfillOpportunityValues(db: DbOrTx) {
+  const rows = await db.select({ id: s.opportunities.id, tenantId: s.opportunities.tenantId, contactId: s.opportunities.contactId, branchId: s.opportunities.branchId, saleKind: s.opportunities.saleKind, valueCents: s.opportunities.valueCents, input: s.opportunityEconomics.input, result: s.opportunityEconomics.result })
+    .from(s.opportunities).innerJoin(s.opportunityEconomics, eq(s.opportunityEconomics.opportunityId, s.opportunities.id))
+    .where(sql`exists (select 1 from opportunity_items i where i.opportunity_id = ${s.opportunities.id} and i.price_defined = false)`);
+  let changed = 0;
+  for (const r of rows) {
+    try {
+      const ctx = await economicsContext(db, r);
+      const v = valueFromEconomics(ctx, { ...emptyEconInput(), ...(r.input as Partial<EconInput>) } as EconInput, r.result as unknown as EconResult);
+      if (v != null && v !== (r.valueCents ?? null)) { await db.update(s.opportunities).set({ valueCents: v }).where(eq(s.opportunities.id, r.id)); changed++; }
+    } catch { /* uma oportunidade com dado antigo não para as outras */ }
+  }
+  return changed;
+}
+
+export function valueFromEconomics(ctx: { items: EconItem[]; settings: EconSettings | null }, input: EconInput, result: EconResult): number | null {
+  if (!ctx.items.length || !ctx.settings || ctx.items.every((i) => i.priceDefined !== false)) return null;
+  if (result.sections?.length) return null; // negociação por seções tem a própria visão geral
+  try {
+    const kindOf = (i: EconItem) => i.kind ?? (input.mode === 'pontual' ? 'venda' : 'recorrencia');
+    let total = 0;
+    for (const v of econBasketViews(input, ctx.items, ctx.settings, result)) {
+      const its = ctx.items.filter((i) => lotOfKind(kindOf(i)) === v.lot);
+      total += its.every((i) => i.priceDefined !== false) ? its.reduce((t, i) => t + i.revenueCents, 0) : Math.max(0, Math.round(v.evaluation.priceCents ?? v.result.suggestedCents ?? 0));
+    }
+    return total;
+  } catch { return null; }
 }
 
 /** Na venda fechada, a fotografia do dia do fechamento (só quando a viabilidade econômica foi preenchida). */

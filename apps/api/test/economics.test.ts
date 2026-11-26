@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { PDFDocument } from 'pdf-lib';
 import { annuityFactor } from '@isp/domain';
 import { login, makeApp, type Client } from './helpers';
+import { backfillOpportunityValues } from '../src/services/economics';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client;
@@ -567,6 +568,11 @@ describe('viabilidade econômica', () => {
     expect(saved.result.deal.cells.map((c: { result: { targetNetMarginPct: number } }) => c.result.targetNetMarginPct)).toEqual([30, 25, 40]);
     expect(saved.result.deal.cells[2].result.term.D).toBe(2);
     expect(saved.result.deal.cells[2].result.kpi.paybackMonths).toBeLessThanOrEqual(2.0001);
+    // produtos sem preço: o valor da oportunidade vem da decisão de cada cesta (aqui, o preço sugerido), não zero
+    const valueOf = async () => { const d = ok(await carlos.get('/opportunities/' + o.id)).json(); return Number((d.opportunity ?? d).valueCents ?? (d.opportunity ?? d).value_cents); };
+    const sugTotal = saved.result.deal.cells.reduce((n: number, c: { suggestedCents: number }) => n + c.suggestedCents, 0);
+    expect(sugTotal).toBeGreaterThan(0);
+    expect(await valueOf()).toBe(sugTotal);
     const read = ok(await carlos.get('/opportunities/' + o.id + '/economics')).json();
     expect(read.input.baskets).toMatchObject(input.baskets);
     const beforeItems = ok(await carlos.get('/opportunities/' + o.id + '/items')).json();
@@ -583,6 +589,12 @@ describe('viabilidade econômica', () => {
     };
     const proposed = ok(await carlos.put('/opportunities/' + o.id + '/economics', { ...input, baskets: budgets })).json();
     expect(proposed.result.decision.basis).toBe('proposto');
+    // com o preço da venda informado em cada cesta, o valor passa a ser a soma deles
+    expect(await valueOf()).toBe(budgets.fornecimento.priceCents + budgets.instalacao.priceCents + budgets.implantacao.priceCents);
+    // correção em lote do deploy: oportunidade antiga com valor zerado volta ao valor da viabilidade salva (e não mexe de novo)
+    await ctx.db.execute(sql`update opportunities set value_cents = 0 where id = ${o.id}`);
+    expect(await backfillOpportunityValues(ctx.db)).toBeGreaterThanOrEqual(1);
+    expect(await valueOf()).toBe(budgets.fornecimento.priceCents + budgets.instalacao.priceCents + budgets.implantacao.priceCents);
     expect(proposed.result.b2g.unica.lines.reduce((n: number, l: { priceCents: number }) => n + l.priceCents, 0)).toBe(budgets.fornecimento.priceCents + budgets.instalacao.priceCents);
     expect(proposed.result.b2g.recorrente.lines.reduce((n: number, l: { priceCents: number }) => n + l.priceCents, 0)).toBe(budgets.implantacao.priceCents);
     expect(proposed.result.b2g.global.netCents).toBe(proposed.result.proposedResult.statement.total.net);
