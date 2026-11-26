@@ -33,11 +33,21 @@ async function main() {
   await kpiDemo(url);
   await opsDemo(url);
   await csByAccount(url);
+  await opportunityValues(url);
   const re = process.env.ADMIN_RESET_EMAIL, rp = process.env.ADMIN_RESET_PASSWORD;
   if (re && rp) {
     const r = await recoverAccess(url, re, rp);
     console.log(`[setup] recuperação de acesso (${re.trim().toLowerCase()}): ${RECOVER_MESSAGES[r]}`);
   }
+}
+
+/** Valor das oportunidades com produto sem preço: vem da decisão da viabilidade salva (26/11/2026). Idempotente. */
+async function opportunityValues(url: string) {
+  const { db, pool } = createDb(url);
+  try {
+    const { backfillOpportunityValues } = await import('./services/economics');
+    console.log(`[setup] valor das oportunidades pela viabilidade: ${await backfillOpportunityValues(db)} atualizada(s).`);
+  } catch (e) { console.warn('[setup] valor das oportunidades: não atualizado', (e as Error).message); } finally { await pool.end(); }
 }
 
 /** Indicadores principais de demonstração: só com KPI_DEMO=true (desligado por padrão: nunca recarrega dado fictício sozinho). */
