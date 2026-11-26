@@ -43,11 +43,12 @@ export function PlannedDataPage() {
   const [group, setGroup] = useState<number | null>(null);
   const [person, setPerson] = useState('');
   const [period, setPeriod] = useState<string>('30d');
+  const [view, setView] = useState<'atribuidos' | 'requisitados'>('atribuidos');
   const [range, setRange] = useState({ from: back(29), to: todayIso() });
   const [config, setConfig] = useState(false);
   const q = useQuery({
-    queryKey: ['dados-planejados', group, person, range],
-    queryFn: () => api<Data>(`/dados-planejados${qs({ group: group ?? undefined, userId: person || undefined, from: range.from, to: range.to })}`),
+    queryKey: ['dados-planejados', group, person, range, view],
+    queryFn: () => api<Data>(`/dados-planejados${qs({ group: group ?? undefined, userId: person || undefined, from: range.from, to: range.to, view: view === 'atribuidos' ? undefined : view })}`),
     refetchInterval: 60_000,
   });
   const run = useMutation({
@@ -93,6 +94,11 @@ export function PlannedDataPage() {
           {d.lastError && <Notice tone="warning">Última leitura do GLPI falhou: {d.lastError}</Notice>}
 
           <section aria-label="Filtros" className="card flex flex-wrap items-center gap-x-6 gap-y-3 p-3">
+            <div role="group" aria-label="Visão" className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs font-semibold text-muted">Visão</span>
+              <button type="button" className={pill(view === 'atribuidos')} aria-pressed={view === 'atribuidos'} onClick={() => setView('atribuidos')} title="Chamados atribuídos aos grupos e às pessoas do Comercial">Atribuídos</button>
+              <button type="button" className={pill(view === 'requisitados')} aria-pressed={view === 'requisitados'} onClick={() => setView('requisitados')} title="Chamados que pessoas do Comercial abriram (requerentes no GLPI), atendidos por qualquer time">Requisitados</button>
+            </div>
             <div role="group" aria-label="Grupo" className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-xs font-semibold text-muted">Grupo</span>
               <button type="button" className={pill(group === null)} aria-pressed={group === null} onClick={() => setGroup(null)}>Todos</button>
@@ -122,7 +128,7 @@ export function PlannedDataPage() {
           )}
 
           <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Atribuídos em aberto" value={d.kpi.open} hint={d.kpi.unassigned ? `${d.kpi.unassigned} sem responsável` : 'todos com responsável'} />
+            <Kpi label={view === 'requisitados' ? 'Requisitados em aberto' : 'Atribuídos em aberto'} value={d.kpi.open} hint={d.kpi.unassigned ? `${d.kpi.unassigned} sem responsável` : 'todos com responsável'} />
             <Kpi label="Dentro do prazo" value={d.kpi.ok} hint="abertos com prazo correndo" tone="ok" />
             <Kpi label="A vencer em 24 h" value={d.kpi.soon} hint={`${d.kpi.soon4h} em menos de 4 h`} tone="soon" />
             <Kpi label="Fora do prazo" value={d.kpi.late} hint="abertos com prazo vencido" tone="late" />
@@ -137,13 +143,13 @@ export function PlannedDataPage() {
             </div>
             <Kpi label="1º atendimento (média)" value={mins(d.kpi.firstResponseMin)} hint={d.kpi.firstResponseCount ? `1ª mensagem do Comercial em ${d.kpi.firstResponseCount} chamado(s) · meta ${d.sla.ownHours} h` : `sem mensagem do Comercial ainda · meta ${d.sla.ownHours} h`} />
             <Kpi label="Aprovações pendentes" value={d.kpi.approvalsPending} hint="pedidas a pessoas ou grupos do Comercial" tone={d.kpi.approvalsPending ? 'soon' : undefined} href="#aprovacoes" />
-            <Kpi label="Menções sem resposta" value={d.kpi.mentionsOpen} hint={`${d.kpi.mentions} menção(ões) em chamados abertos`} tone={d.kpi.mentionsOpen ? 'soon' : undefined} href="#mencoes" />
+            <Kpi label="Menções sem resposta" value={d.kpi.mentionsOpen} hint={`${d.kpi.mentions} menção(ões) na lista`} tone={d.kpi.mentionsOpen ? 'soon' : undefined} href="#mencoes" />
           </section>
           <p className="-mt-2 text-xs text-muted">SLA {d.sla.source === 'universal' ? 'universal' : 'do GLPI (sem SLA lá, o universal)'}: {d.sla.solveHours} h {d.sla.businessHoursOnly ? 'úteis' : 'corridas'} para solucionar, {d.sla.ownHours} h para assumir.</p>
 
           <section id="pendencias" aria-label="Pendências" className="card">
             <div className="flex flex-wrap items-end justify-between gap-2 p-4 pb-2">
-              <div><h2 className="text-lg font-bold text-ink">Pendências</h2><p className="text-sm text-muted">Quem precisa agir, em qual chamado e até quando. Atrasados primeiro.</p></div>
+              <div><h2 className="text-lg font-bold text-ink">{view === 'requisitados' ? 'Requisitados pelo Comercial' : 'Pendências'}</h2><p className="text-sm text-muted">{view === 'requisitados' ? 'Chamados que o Comercial abriu no GLPI: quem está atendendo e até quando. Atrasados primeiro.' : 'Quem precisa agir, em qual chamado e até quando. Atrasados primeiro.'}</p></div>
               <p className="num text-sm text-muted">{d.pending.length} chamado(s)</p>
             </div>
             {!d.pending.length ? <p className="px-4 pb-6 text-sm text-muted">Nenhum chamado pendente neste filtro.</p> : (
@@ -173,7 +179,7 @@ export function PlannedDataPage() {
             <Heat heat={d.heat} />
           </div>
 
-          <section aria-label="Nível de serviço por grupo e pessoa" className="card">
+          {view === 'atribuidos' && <section aria-label="Nível de serviço por grupo e pessoa" className="card">
             <div className="p-4 pb-2"><h2 className="text-lg font-bold text-ink">Nível de serviço por grupo e pessoa</h2><p className="text-sm text-muted">Resolvidos no prazo sobre resolvidos no período. Abaixo da meta fica em destaque.</p></div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -181,7 +187,7 @@ export function PlannedDataPage() {
                 <tbody>{d.byGroup.flatMap((g) => [<SlaRow key={`g${g.groupId}`} name={g.name} l={g} goal={d.sla.goalPct} group />, ...g.people.map((p) => <SlaRow key={`g${g.groupId}-${p.userId ?? 'x'}`} name={p.name} l={p} goal={d.sla.goalPct} />)])}</tbody>
               </table>
             </div>
-          </section>
+          </section>}
         </>
       )}
       </div>
@@ -235,10 +241,10 @@ function MentionsList({ items }: { items: Data['mentions'] }) {
   return (
     <section id="mencoes" aria-label="Menções ao Comercial" className="card">
       <div className="flex flex-wrap items-end justify-between gap-2 p-4 pb-2">
-        <div><h2 className="text-lg font-bold text-ink">Menções ao Comercial</h2><p className="text-sm text-muted">Chamados abertos em que alguém citou (@) uma pessoa do Comercial. Sem resposta primeiro.</p></div>
+        <div><h2 className="text-lg font-bold text-ink">Menções ao Comercial</h2><p className="text-sm text-muted">Chamados em que alguém citou (@) uma pessoa do Comercial, em qualquer situação. Sem resposta (de qualquer data) primeiro; respondidas do período.</p></div>
         <p className="num text-sm text-muted">{items.length} menção(ões)</p>
       </div>
-      {!items.length ? <p className="px-4 pb-6 text-sm text-muted">Nenhuma menção em chamados abertos neste filtro.</p> : (
+      {!items.length ? <p className="px-4 pb-6 text-sm text-muted">Nenhuma menção neste filtro.</p> : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-line text-left text-xs text-muted"><th className="px-3 py-2">Situação</th><th className="px-3 py-2">Chamado</th><th className="px-3 py-2">Quem foi citado</th><th className="px-3 py-2">Citado por</th><th className="px-3 py-2"><span className="sr-only">Ações</span></th></tr></thead>

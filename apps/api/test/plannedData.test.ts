@@ -172,4 +172,31 @@ describe('Dados Planejados', () => {
     expect(rf.mentions).toEqual([]);
     expect(rf.approvals).toEqual([]);
   });
+
+  it('visão Requisitados: chamados abertos pelo Comercial e atendidos por outro time; menção a qualquer momento, até em chamado fechado', async () => {
+    const at = (h: string) => `2026-11-25 ${h}:00`;
+    // J: o Lucas pediu ao NOC; o técnico do NOC é o responsável
+    ids.J = glpi.seed({ name: 'Liberar porta no firewall', date: at('08:30'), team: [{ type: 'User', id: 31, role: 'requester' }, { type: 'Group', id: 11 }, { type: 'User', id: 33 }] });
+    // K: fechado, aberto em outubro; hoje alguém cita a Ana
+    ids.K = glpi.seed({ name: 'Contrato antigo', date: '2026-10-01 09:00:00', status: 6, team: [{ type: 'Group', id: 11 }], timeline: [
+      { type: 'Followup', item: { id: 9101, user: { id: 33, name: 'tecnico.noc' }, content: '<p><span data-user-mention="true" data-user-id="32">@Ana</span> precisa do aditivo</p>', date: at('12:00') } },
+    ] });
+    await runGlpiSla(ctx.db, ctx.app.config, tenantId, { force: true, full: true, now: new Date(NOW.getTime() + 60 * 60_000) });
+    const atr = ok(await carlos.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json();
+    expect(atr.pending.map((p: { glpiId: number }) => p.glpiId)).not.toContain(ids.J);
+    const req = ok(await carlos.get('/dados-planejados?from=2026-11-01&to=2026-11-30&view=requisitados')).json();
+    expect(req.view).toBe('requisitados');
+    expect(req.pending.map((p: { glpiId: number }) => p.glpiId)).toEqual([ids.J]);
+    expect(req.pending[0]).toMatchObject({ assignees: ['tecnico.noc'], unassigned: false, groups: ['NOC'] });
+    expect(req.byGroup).toEqual([]);
+    expect(ok(await lucas.get('/dados-planejados?from=2026-11-01&to=2026-11-30&view=requisitados')).json().pending).toHaveLength(1);
+    expect(ok(await carlos.get(`/dados-planejados?from=2026-11-01&to=2026-11-30&view=requisitados&userId=${ana.me.user.id}`)).json().pending).toHaveLength(0);
+    expect(ok(await rafael.get('/dados-planejados?from=2026-11-01&to=2026-11-30&view=requisitados')).json().pending).toHaveLength(0);
+    // a menção no chamado fechado aparece (sem resposta), mesmo num período que não inclui a abertura
+    const m = ok(await carlos.get('/dados-planejados?from=2026-11-20&to=2026-11-30')).json().mentions;
+    expect(m).toEqual(expect.arrayContaining([expect.objectContaining({ glpiId: ids.K, person: 'Ana Souza', answeredAt: null })]));
+    // o J não gera aviso de SLA para o Comercial (não está atribuído a ele)
+    const sent = await ctx.db.execute(sql`select count(*)::int as n from glpi_sla_alerts a join glpi_queue_tickets t on t.id = a.ticket_id where t.glpi_id = ${ids.J!}`);
+    expect((sent as unknown as { rows: { n: number }[] }).rows?.[0]?.n ?? (sent as unknown as { n: number }[])[0]?.n).toBe(0);
+  });
 });
