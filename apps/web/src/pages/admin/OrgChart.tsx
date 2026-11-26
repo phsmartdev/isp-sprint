@@ -37,7 +37,7 @@ const LEVEL: Record<AccessLevel, { label: string; bar: string; chip: string }> =
 };
 const REASON: Record<string, string> = {
   todos: 'módulo liberado para todos os perfis com acesso', nao_liberado: 'módulo só para liberados, e a pessoa não está liberada', empresa_desligou: 'módulo desligado na empresa',
-  pessoa_bloqueada: 'bloqueado para a pessoa', pessoa_liberada: 'liberado para a pessoa', equipe_bloqueada: 'bloqueado para o time', equipe_liberada: 'liberado para o time',
+  pessoa_bloqueada: 'bloqueado para a pessoa', pessoa_liberada: 'liberado para a pessoa', perfil_liberado: 'sempre liberado para o perfil', equipe_bloqueada: 'bloqueado para o time', equipe_liberada: 'liberado para o time',
 };
 const hex = { clipPath: 'polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%)' };
 

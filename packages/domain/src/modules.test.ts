@@ -27,6 +27,14 @@ describe('módulos de negócio', () => {
     expect(moduleDecision(only, [g({ subjectType: 'equipe', subjectId: 't1' })], user, today).reason).toBe('equipe_liberada');
     expect(moduleDecision(only, [g({ subjectType: 'equipe', subjectId: 't1' }), g({ effect: 'bloquear' })], user, today).reason).toBe('pessoa_bloqueada');
     expect(moduleDecision(on, [g({ subjectType: 'equipe', subjectId: 't1', effect: 'bloquear' }), g({})], user, today).reason).toBe('pessoa_liberada');
+    // Marketing: Diretoria e Administrador sempre (mesmo só para liberados ou com a equipe bloqueada); o bloqueio individual vence
+    const mkt = { module: 'marketing' as const, enabled: true, mode: 'liberados' as const, disabledFeatures: [] };
+    expect(moduleDecision(mkt, [], { ...user, profiles: ['diretoria'] }, today)).toEqual({ enabled: true, reason: 'perfil_liberado' });
+    expect(moduleDecision(mkt, [], { ...user, profiles: ['operacao'] }, today).enabled).toBe(false);
+    expect(moduleDecision(mkt, [{ module: 'marketing', subjectType: 'usuario', subjectId: user.id, effect: 'bloquear', validUntil: null }], { ...user, profiles: ['administrador'] }, today).enabled).toBe(false);
+    expect(moduleDecision({ ...mkt, enabled: false }, [], { ...user, profiles: ['diretoria'] }, today).enabled).toBe(false);
+    // outros módulos não mudam
+    expect(moduleDecision({ ...mkt, module: 'pessoas_cultura' }, [], { ...user, profiles: ['diretoria'] }, today).enabled).toBe(false);
     expect(moduleDecision(only, [g({ validUntil: '2026-10-21' })], user, today).reason).toBe('nao_liberado');
     expect(moduleDecision(only, [g({ module: 'crm' })], user, today).reason).toBe('nao_liberado');
   });

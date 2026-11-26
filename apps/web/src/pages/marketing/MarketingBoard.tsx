@@ -27,7 +27,7 @@ type Card = {
 type Sprint = { id: string; name: string; startOn: string; endOn: string; status: 'planejamento' | 'aberta' | 'encerrada'; objective: string | null; highlights: string | null };
 type TagT = { id: string; name: string; color: string };
 type Board = {
-  today: string; wipLimit: number; canLead: boolean; me: string; sprints: Sprint[]; sprint: Sprint | null; tags: TagT[]; users: { id: string; name: string }[]; cards: Card[];
+  today: string; wipLimit: number; canLead: boolean; me: string; sprints: Sprint[]; sprint: Sprint | null; tags: TagT[]; users: { id: string; name: string }[]; assignable: string[]; cards: Card[];
   stats: { total: number; done: number; donePct: number; overdue: number; dueToday: number; dueSoon: number; inProgress: number; furaFila: number; daysLeft: number | null; elapsedPct: number | null;
     overLimit: { ownerId: string; n: number; name: string }[]; wip: { ownerId: string; n: number; name: string }[]; allocation: { key: string; label: string; n: number; pct: number; target: number }[] };
 };
@@ -222,7 +222,7 @@ function CardDrawer({ id, board, initialColumn, onClose }: { id: string | null; 
   const det = useQuery({ queryKey: ['marketing', 'card', id], enabled: !!id, queryFn: () => api<Detail>(`/marketing/quadro/cards/${id}`) });
   const res = useQuery({ queryKey: ['marketing', 'recursos'], queryFn: () => api<{ costCenters: { id: string; code: string; name: string }[]; lines: { id: string; costCenterId: string; what: string; month: string; amountCents: number }[]; gifts: { id: string; name: string; unitCostCents: number }[] }>('/marketing/quadro/recursos') });
   const planning = board.sprints.find((s) => s.status === 'planejamento');
-  const [f, setF] = useState<Form>({ title: '', briefing: '', ownerId: board.me, observerIds: [], dueOn: '', priority: 'media', verticals: [], allocation: 'comercial', requester: '', column: initialColumn, sprintId: board.sprint && board.sprint.status !== 'encerrada' ? board.sprint.id : planning?.id ?? '', tagIds: [], costCenterId: '', budgetLineId: '', budget: '', gifts: [], furaCriterion: '', furaReason: '' });
+  const [f, setF] = useState<Form>({ title: '', briefing: '', ownerId: board.assignable.includes(board.me) ? board.me : board.assignable[0] ?? '', observerIds: [], dueOn: '', priority: 'media', verticals: [], allocation: 'comercial', requester: '', column: initialColumn, sprintId: board.sprint && board.sprint.status !== 'encerrada' ? board.sprint.id : planning?.id ?? '', tagIds: [], costCenterId: '', budgetLineId: '', budget: '', gifts: [], furaCriterion: '', furaReason: '' });
   useEffect(() => {
     const c = det.data;
     if (c) setF({ title: c.title, briefing: c.briefing ?? '', ownerId: c.ownerId, observerIds: c.observerIds, dueOn: c.dueOn ?? '', priority: c.priority, verticals: c.verticals, allocation: c.allocation ?? '', requester: c.requester ?? '', column: c.column, sprintId: c.sprintId ?? '', tagIds: c.tagIds, costCenterId: c.costCenterId ?? '', budgetLineId: c.budgetLineId ?? '', budget: c.budgetCents ? (c.budgetCents / 100).toFixed(2).replace('.', ',') : '', gifts: c.gifts.map((g) => ({ itemId: g.itemId, qty: g.qty })), furaCriterion: '', furaReason: '' });
@@ -244,7 +244,9 @@ function CardDrawer({ id, board, initialColumn, onClose }: { id: string | null; 
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const archive = useMutation({ mutationFn: () => api(`/marketing/quadro/cards/${id}`, { method: 'DELETE' }), onSuccess: () => done('Tarefa arquivada'), onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
-  const users = board.users;
+  // responsável e observadores: só quem tem acesso ao Marketing (e quem já está na tarefa, para não sumir ao editar)
+  const allowed = new Set([...board.assignable, ...(c ? [c.ownerId, ...c.observerIds] : [])]);
+  const users = board.users.filter((u) => allowed.has(u.id));
   const giftCost = f.gifts.reduce((t, g) => t + g.qty * (res.data?.gifts.find((x) => x.id === g.itemId)?.unitCostCents ?? 0), 0);
   return (
     <Drawer open onClose={onClose} width="lg" title={id ? (c ? `MKT-${c.code} · ${c.title}` : 'Tarefa') : 'Nova tarefa de Marketing'}
@@ -270,6 +272,7 @@ function CardDrawer({ id, board, initialColumn, onClose }: { id: string | null; 
               <FormField label="Responsável" htmlFor="mk-o" required><Select id="mk-o" value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value, observerIds: f.observerIds.filter((x) => x !== e.target.value) })}>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></FormField>
               <FormField label="Prazo" htmlFor="mk-d"><Input id="mk-d" type="date" value={f.dueOn} onChange={(e) => setF({ ...f, dueOn: e.target.value })} /></FormField>
               <fieldset className="sm:col-span-2"><legend className="mb-1 text-sm font-semibold text-ink">Observadores</legend>
+                <p className="mb-1.5 text-xs text-muted">Só aparecem pessoas com acesso ao Marketing.</p>
                 <div className="flex flex-wrap gap-1.5">{users.filter((u) => u.id !== f.ownerId).map((u) => {
                   const on = f.observerIds.includes(u.id);
                   return <button key={u.id} type="button" aria-pressed={on} className={clsx('border px-2 py-1 text-xs', on ? 'border-primary bg-primary-soft font-semibold text-primary' : 'border-line text-muted hover:text-ink')} onClick={() => setF({ ...f, observerIds: on ? f.observerIds.filter((x) => x !== u.id) : [...f.observerIds, u.id] })}>{u.name}</button>;

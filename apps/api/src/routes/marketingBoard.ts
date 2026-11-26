@@ -14,6 +14,7 @@ import { forbidden, notFound, unprocessable, conflict } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { usersWithModule } from '../services/moduleAccess';
 import { level } from '../services/scope';
 import { audit } from '../services/audit';
 import { todayIn } from '../services/vacations';
@@ -35,6 +36,13 @@ async function assertPeople(db: DbOrTx, tenantId: string, ids: string[]) {
   if (!ids.length) return;
   const rows = await db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, tenantId), eq(s.users.active, true), inArray(s.users.id, ids)));
   if (rows.length !== new Set(ids).size) throw unprocessable('Escolha pessoas ativas da empresa.', [{ path: 'ownerId', message: 'Pessoa inválida' }]);
+}
+/** Responsável e observadores: só quem tem acesso ao Marketing (módulo liberado e nível em Campanhas). */
+async function assertMarketingPeople(db: DbOrTx, tenantId: string, ids: string[]) {
+  if (!ids.length) return;
+  const ok = await usersWithModule(db, tenantId, 'marketing', 'campanhas');
+  const out = [...new Set(ids)].filter((u) => !ok.has(u));
+  if (out.length) throw unprocessable('Responsável e observadores precisam ter acesso ao Marketing.', [{ path: 'observerIds', message: 'Pessoa sem acesso ao Marketing' }]);
 }
 const event = (db: DbOrTx, auth: AuthContext, cardId: string, type: string, text: string | null) => db.insert(s.mktCardEvents).values({ tenantId: auth.tenantId, cardId, type, text, actorId: auth.userId });
 
@@ -116,11 +124,12 @@ async function boardOf(db: DbOrTx, auth: AuthContext, sprintId: string | null) {
   // concluídas de Sprints anteriores saem do quadro (ficam no histórico)
   const visible = cards.filter((c) => c.column !== 'concluido' || !current || c.sprintId === current.id || (!c.sprintId && c.completedAt && today.slice(0, 7) === c.completedAt.toISOString().slice(0, 7)));
   const ids = visible.map((c) => c.id);
-  const [tags, cardTags, links, users] = await Promise.all([
+  const [tags, cardTags, links, users, assignable] = await Promise.all([
     db.select().from(s.mktTags).where(eq(s.mktTags.tenantId, auth.tenantId)).orderBy(asc(s.mktTags.name)),
     ids.length ? db.select().from(s.mktCardTags).where(inArray(s.mktCardTags.cardId, ids)) : Promise.resolve([]),
     ids.length ? db.select({ cardId: s.mktLinks.cardId, n: sql<number>`count(*)::int` }).from(s.mktLinks).where(inArray(s.mktLinks.cardId, ids)).groupBy(s.mktLinks.cardId) : Promise.resolve([]),
     db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true))).orderBy(asc(s.users.name)),
+    usersWithModule(db, auth.tenantId, 'marketing', 'campanhas'),
   ]);
   const stats = boardStats(visible.map((c) => ({ ownerId: c.ownerId, column: c.column, dueOn: c.dueOn, allocation: c.allocation, furaFila: c.furaFila, sprintId: c.sprintId })), current, today);
   const name = new Map(users.map((u) => [u.id, u.name]));
@@ -129,7 +138,8 @@ async function boardOf(db: DbOrTx, auth: AuthContext, sprintId: string | null) {
     sprints: sprints.map((x) => ({ id: x.id, name: x.name, startOn: x.startOn, endOn: x.endOn, status: x.status, objective: x.objective, highlights: x.highlights })),
     sprint: current ? { id: current.id, name: current.name, startOn: current.startOn, endOn: current.endOn, status: current.status, objective: current.objective, highlights: current.highlights } : null,
     stats: { ...stats, overLimit: stats.overLimit.map((o) => ({ ...o, name: name.get(o.ownerId) ?? '' })), wip: stats.wip.map((o) => ({ ...o, name: name.get(o.ownerId) ?? '' })) },
-    tags, users,
+    // users: nomes de todos (para exibir); assignable: quem pode ser responsável ou observador (acesso ao Marketing)
+    tags, users, assignable: users.filter((u) => assignable.has(u.id)).map((u) => u.id),
     cards: visible.map((c) => ({
       id: c.id, code: c.code, title: c.title, column: c.column, position: c.position, ownerId: c.ownerId, ownerName: name.get(c.ownerId) ?? '', observerIds: c.observerIds,
       dueOn: c.dueOn, due: dueState(c, today), priority: c.priority, verticals: c.verticals, allocation: c.allocation, sprintId: c.sprintId, requester: c.requester,
@@ -207,6 +217,7 @@ export const marketingBoardRoutes = [
     method: 'POST', url: '/marketing/quadro/cards', summary: 'Cria tarefa (um responsável e observadores); dentro de Sprint aberta entra como fura-fila para a liderança aprovar', ...M, body: CardBody,
     handler: async ({ app, auth, body, req, reply }) => {
       await assertPeople(app.db, auth.tenantId, [body.ownerId, ...body.observerIds]);
+      await assertMarketingPeople(app.db, auth.tenantId, [body.ownerId, ...body.observerIds]);
       await checkBudget(app.db, auth, body);
       const gifts = await giftsOf(app.db, auth.tenantId, body.gifts);
       const id = await app.db.transaction(async (tx) => {
@@ -254,6 +265,8 @@ export const marketingBoardRoutes = [
         if (body.ownerId && body.ownerId !== c.ownerId && !isLead(auth) && c.ownerId !== auth.userId) throw forbidden('Trocar o responsável é com o próprio responsável ou a liderança.');
         if (c.furaFila && c.furaFilaStatus === 'pendente' && body.column && body.column !== 'backlog') throw unprocessable('Fura-fila aguardando a liderança: a tarefa só anda depois de aprovada.');
         await assertPeople(tx, auth.tenantId, [...(body.ownerId ? [body.ownerId] : []), ...(body.observerIds ?? [])]);
+        // quem entra agora precisa ter acesso ao Marketing (quem já estava na tarefa continua, para não travar a edição)
+        await assertMarketingPeople(tx, auth.tenantId, [...(body.ownerId && body.ownerId !== c.ownerId ? [body.ownerId] : []), ...(body.observerIds ?? []).filter((u) => !c.observerIds.includes(u) && u !== c.ownerId)]);
         await checkBudget(tx, auth, { costCenterId: body.costCenterId === undefined ? c.costCenterId : body.costCenterId, budgetLineId: body.budgetLineId === undefined ? c.budgetLineId : body.budgetLineId });
         const owner = body.ownerId ?? c.ownerId;
         const col = body.column ?? c.column;
