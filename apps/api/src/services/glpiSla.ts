@@ -67,7 +67,7 @@ const glpiTs = (d: Date, tz: string) => {
 };
 
 /** Lê do GLPI o que mudou desde a última leitura e grava os chamados dos grupos e pessoas mapeados. */
-export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date()) {
+export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date(), opts: { full?: boolean } = {}) {
   const st = await slaSettingsRow(db, tenantId);
   const cfg = await glpiConfig(db, tenantId);
   const [tn] = await db.select({ tz: s.tenants.timezone }).from(s.tenants).where(eq(s.tenants.id, tenantId)).limit(1);
@@ -75,16 +75,33 @@ export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date
   const { people, groups, userIds } = await glpiPeople(db, tenantId);
   if (!people.length) return { read: 0, stored: 0, note: 'Ninguém ligado ao GLPI no cadastro de usuários.' };
   const byGlpiUser = new Map(people.filter((p) => p.glpiUserId).map((p) => [p.glpiUserId!, p.id]));
-  // margem de 10 min sobre a última leitura; na primeira, os últimos 45 dias
-  const since = st.lastSyncAt ? new Date(st.lastSyncAt.getTime() - 10 * 60_000) : new Date(now.getTime() - 45 * 86_400_000);
+  // margem de 10 min sobre a última leitura; na primeira (ou numa releitura completa), os últimos 45 dias
+  const since = st.lastSyncAt && !opts.full ? new Date(st.lastSyncAt.getTime() - 10 * 60_000) : new Date(now.getTime() - 45 * 86_400_000);
   const filter = `date_mod=ge="${glpiTs(since, tz)}"`;
-  let start = 0, read = 0, stored = 0;
+  let read = 0, stored = 0;
   const limit = 100;
-  for (let page = 0; page < 30; page++) {
-    const list = await glpiCall<HlTicket[]>(cfg, 'GET', '/Assistance/Ticket', { query: { filter, limit, start, sort: 'date_mod' }, entityId: st.rootEntityId, recursive: true });
+  // a raiz com as filhas (GLPI-Entity-Recursive) e, além dela, cada entidade visível: se o perfil da integração não
+  // tiver direito recursivo, o GLPI ignora o pedido recursivo e os chamados das subentidades ficariam de fora
+  let entities: { id: number; name: string }[] = [];
+  try {
+    const list = await glpiCall<{ id: number; name?: string; completename?: string }[]>(cfg, 'GET', '/Administration/Entity', { query: { limit: 200 }, entityId: st.rootEntityId, recursive: true });
+    entities = (Array.isArray(list) ? list : []).filter((e) => Number.isFinite(Number(e.id)) && Number(e.id) !== st.rootEntityId).slice(0, 50).map((e) => ({ id: Number(e.id), name: e.completename ?? e.name ?? `Entidade ${e.id}` }));
+  } catch { /* sem leitura das entidades: fica a raiz recursiva */ }
+  const scopes = [{ entityId: st.rootEntityId, recursive: true }, ...entities.map((e) => ({ entityId: e.id, recursive: false }))];
+  const seen = new Set<number>();
+  const seenEntities = new Map<string, number>();
+  for (const scope of scopes) for (let page = 0, start = 0; page < 30; page++, start += limit) {
+    let list: HlTicket[];
+    // a raiz é obrigatória (erro sobe); uma subentidade sem permissão só fica de fora
+    try { list = await glpiCall<HlTicket[]>(cfg, 'GET', '/Assistance/Ticket', { query: { filter, limit, start, sort: 'date_mod' }, ...scope }); }
+    catch (e) { if (scope.recursive) throw e; break; }
     const items = Array.isArray(list) ? list : [];
     for (const t of items) {
+      if (seen.has(t.id)) continue;
+      seen.add(t.id);
       read++;
+      const en = refName(t.entity) ?? 'Entidade ' + (refId(t.entity) ?? '?');
+      seenEntities.set(en, (seenEntities.get(en) ?? 0) + 1);
       let team = t.team;
       if (!team) {
         try { team = await glpiCall<HlTeam>(cfg, 'GET', `/Assistance/Ticket/${t.id}/TeamMember`, { entityId: refId(t.entity) ?? st.rootEntityId }); } catch { team = []; }
@@ -111,10 +128,9 @@ export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date
       stored++;
     }
     if (items.length < limit) break;
-    start += limit;
   }
   await db.update(s.glpiSlaSettings).set({ lastSyncAt: now, lastError: null }).where(eq(s.glpiSlaSettings.tenantId, tenantId));
-  return { read, stored };
+  return { read, stored, entitiesRead: scopes.length, entities: [...seenEntities].map(([name, count]) => ({ name, count })) };
 }
 
 // ------------------------------------------------------------------ avisos
@@ -259,7 +275,7 @@ async function sendDigests(db: DbOrTx, tenantId: string, set: SlaSettings, tz: s
  * Rotina: lê o GLPI e manda os avisos. Roda no máximo a cada 4 minutos por empresa (a tela de quem está usando a
  * ferramenta e o agendamento externo chamam; quem chegar primeiro roda). `force` ignora o intervalo.
  */
-export async function runGlpiSla(db: DbOrTx, config: Config, tenantId: string, opts: { force?: boolean; now?: Date } = {}) {
+export async function runGlpiSla(db: DbOrTx, config: Config, tenantId: string, opts: { force?: boolean; full?: boolean; now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const st = await slaSettingsRow(db, tenantId);
   if (!st.enabled) return { skipped: 'desligado' };
@@ -268,7 +284,7 @@ export async function runGlpiSla(db: DbOrTx, config: Config, tenantId: string, o
     .returning({ t: s.glpiSlaSettings.tenantId });
   if (!claimed.length) return { skipped: 'recente' };
   let sync: unknown;
-  try { sync = await syncGlpiQueue(db, tenantId, now); }
+  try { sync = await syncGlpiQueue(db, tenantId, now, { full: opts.full }); }
   catch (e) {
     await db.update(s.glpiSlaSettings).set({ lastError: (e as Error).message.slice(0, 300) }).where(eq(s.glpiSlaSettings.tenantId, tenantId));
     sync = { error: (e as Error).message };

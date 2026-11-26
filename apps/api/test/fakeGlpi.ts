@@ -27,6 +27,8 @@ export type FakeGlpi = {
   /** O técnico responde/age no GLPI; com `hook`, dispara o webhook assinado como o GLPI faz. */
   act: (ticketId: number, a: { kind: 'followup' | 'task' | 'solution' | 'status' | 'validation'; text?: string; status?: number; isPrivate?: boolean; toOther?: boolean }, hook?: { url: string; secret: string; badSignature?: boolean }) => Promise<number | null>;
   failNext: (status: number) => void;
+  /** Simula perfil sem direito recursivo: GLPI-Entity-Recursive é ignorado (só a entidade ativa). */
+  setRecursion: (on: boolean) => void;
 };
 
 /** Como o GLPI: data local do servidor (aqui, Brasília), sem fuso. */
@@ -41,7 +43,7 @@ const filterBy = <T extends { name: string }>(list: T[], filter: string | null) 
 export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
   const tickets = new Map<number, Ticket>();
   const tokens = new Set<string>();
-  let seq = 100, itemSeq = 500, failNext: number | null = null;
+  let seq = 100, itemSeq = 500, failNext: number | null = null, recursion = true;
 
   async function sendHook(item: Record<string, unknown>, hook: { url: string; secret: string; badSignature?: boolean }) {
     const payload = JSON.stringify({ event: 'new', item }, null, 4);
@@ -86,11 +88,13 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
         return json(res, 200, m ? USERS.filter((x) => `${x.username} ${x.firstname} ${x.realname}`.toLowerCase().includes(m[1]!.toLowerCase())) : USERS);
       }
       if (req.method === 'GET' && path === '/Assistance/Ticket') {
-        // como o GLPI: só a entidade ativa, ou ela e as filhas com GLPI-Entity-Recursive
-        if (req.headers['glpi-entity-recursive'] !== 'true') return json(res, 200, []);
+        // como o GLPI: só a entidade ativa, ou ela e as filhas com GLPI-Entity-Recursive (quando o perfil permite)
+        const active = req.headers['glpi-entity'] === undefined ? 0 : Number(req.headers['glpi-entity']);
+        const rec = recursion && req.headers['glpi-entity-recursive'] === 'true';
+        const inScope = (e: number) => e === active || (rec && active === 0);
         const m = u.searchParams.get('filter')?.match(/^date_mod=ge="(.+)"$/);
         const start = Number(u.searchParams.get('start') ?? 0), limit = Number(u.searchParams.get('limit') ?? 50);
-        const list = [...tickets.values()].filter((x) => !m || x.date_mod >= m[1]!).sort((a, b) => a.date_mod.localeCompare(b.date_mod)).slice(start, start + limit);
+        const list = [...tickets.values()].filter((x) => inScope(x.entity) && (!m || x.date_mod >= m[1]!)).sort((a, b) => a.date_mod.localeCompare(b.date_mod)).slice(start, start + limit);
         return json(res, 200, list.map((x) => {
           const ent = ENTITIES.find((e) => e.id === x.entity)!;
           return { id: x.id, name: x.name, status: { id: x.status, name: STATUS[x.status] }, entity: { id: ent.id, name: ent.name, completename: ent.completename }, date: x.date ?? x.date_mod, date_mod: x.date_mod, date_solve: x.date_solve, date_close: x.date_close, resolution_date: x.resolution_date ?? null, take_into_account_date: x.take_into_account_date ?? null, team: x.team.map((tm) => ({ ...tm, name: tm.name ?? (tm.type === 'Group' ? GROUPS.find((g) => g.id === tm.id)?.name : USERS.find((us) => us.id === tm.id)?.username) })) };
@@ -165,6 +169,7 @@ export async function startFakeGlpi(port = 0): Promise<FakeGlpi> {
     tickets,
     close: () => new Promise((ok) => server.close(() => ok())),
     failNext: (status) => { failNext = status; },
+    setRecursion: (on) => { recursion = on; },
     seed: (x) => {
       const id = ++seq;
       tickets.set(id, { id, name: x.name, content: x.name, type: 1, urgency: 3, entity: x.entity ?? 3, category: null, status: x.status ?? 2, date: x.date, date_mod: now(), date_solve: x.date_solve ?? null, date_close: null, timeline: [], team: x.team.map((m) => ({ type: m.type, id: m.id, role: m.role ?? 'assigned' })), resolution_date: x.resolution_date ?? null, take_into_account_date: x.take_into_account_date ?? null });

@@ -167,7 +167,8 @@ export const plannedDataRoutes = [
   }),
   defineRoute({
     method: 'POST', url: '/admin/dados-planejados/run', summary: 'Lê o GLPI e confere os avisos agora', tag: 'Dados Planejados', ...ADMIN,
-    handler: async ({ app, auth }) => runGlpiSla(app.db, app.config, auth.tenantId, { force: true }),
+    // releitura completa (45 dias): pega o que uma leitura incremental anterior possa ter deixado de fora
+    handler: async ({ app, auth }) => runGlpiSla(app.db, app.config, auth.tenantId, { force: true, full: true }),
   }),
   defineRoute({
     method: 'GET', url: '/admin/glpi/users', summary: 'Usuários do GLPI (para o cadastro de usuários)', tag: 'Dados Planejados', ...ADMIN, query: z.object({ q: z.string().max(80).optional() }),

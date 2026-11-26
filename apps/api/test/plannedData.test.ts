@@ -1,5 +1,5 @@
 /** Dados Planejados: chamados do GLPI dos grupos e pessoas do Comercial, SLA universal, nível de serviço e avisos. */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
 import { GLPI_CREDS, startFakeGlpi, type FakeGlpi } from './fakeGlpi';
@@ -18,6 +18,8 @@ const NOW = new Date('2026-11-25T17:00:00Z');
 const ids: Record<string, number> = {};
 
 beforeAll(async () => {
+  // o painel calcula a situação com a hora atual: o relógio fica na data dos chamados de teste (não depende do dia em que roda)
+  vi.useFakeTimers({ toFake: ['Date'], now: NOW, shouldAdvanceTime: true });
   ctx = await makeApp();
   glpi = await startFakeGlpi();
   [carlos, lucas, ana, rafael] = (await Promise.all(['carlos', 'lucas', 'ana', 'rafael'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client, Client, Client];
@@ -35,6 +37,7 @@ afterAll(async () => {
   setTransportFactory(null);
   await glpi.close();
   await ctx.close();
+  vi.useRealTimers();
 });
 
 describe('Dados Planejados', () => {
@@ -110,5 +113,19 @@ describe('Dados Planejados', () => {
     const cfg = ok(await carlos.get('/admin/dados-planejados')).json();
     expect(cfg.groups).toEqual([{ id: 21, name: 'Comercial', members: expect.arrayContaining(['Lucas Lima', 'Ana Souza']) }]);
     expect(cfg.recent.length).toBeGreaterThan(0);
+  });
+
+  it('perfil da integração sem direito recursivo: lê também cada subentidade; a releitura completa traz o que ficou de fora', async () => {
+    glpi.setRecursion(false);
+    try {
+      ids.F = glpi.seed({ name: 'Chamado na subentidade', entity: 4, date: '2026-11-25 13:00:00', team: [{ type: 'User', id: 31 }] });
+      const r = (await runGlpiSla(ctx.db, ctx.app.config, tenantId, { force: true, full: true, now: new Date(NOW.getTime() + 30 * 60_000) })) as { sync: { entities: { name: string }[] } };
+      expect(r.sync.entities.map((e) => e.name)).toContain('Raiz > Clientes > Hospital São Lucas');
+      const d = ok(await carlos.get('/dados-planejados?from=2026-11-01&to=2026-11-30')).json();
+      expect(d.pending.map((p: { glpiId: number }) => p.glpiId)).toContain(ids.F);
+      // pela rota do botão "Ler GLPI agora"
+      const run = ok(await carlos.post('/admin/dados-planejados/run')).json();
+      expect(run.sync.read).toBeGreaterThan(0);
+    } finally { glpi.setRecursion(true); }
   });
 });

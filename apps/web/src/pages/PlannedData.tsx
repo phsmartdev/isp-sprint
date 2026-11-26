@@ -49,8 +49,14 @@ export function PlannedDataPage() {
     refetchInterval: 60_000,
   });
   const run = useMutation({
-    mutationFn: () => api<{ sync?: { stored?: number; error?: string } }>('/admin/dados-planejados/run', { method: 'POST' }),
-    onSuccess: (r) => { void qc.invalidateQueries({ queryKey: ['dados-planejados'] }); toast({ tone: r.sync?.error ? 'error' : 'success', message: r.sync?.error ? `GLPI: ${r.sync.error}` : 'GLPI lido e avisos conferidos' }); },
+    mutationFn: () => api<{ sync?: { read?: number; error?: string; entities?: { name: string; count: number }[] } }>('/admin/dados-planejados/run', { method: 'POST' }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['dados-planejados'] });
+      // o que o GLPI devolveu: se faltar alguma entidade, o perfil da integração no GLPI não a enxerga
+      const ents = r.sync?.entities ?? [];
+      const detail = r.sync?.read != null ? ` · ${r.sync.read} chamado(s) alterado(s) nos últimos 45 dias${ents.length ? ` em: ${ents.map((e) => `${e.name} (${e.count})`).join('; ')}` : ''}` : '';
+      toast({ tone: r.sync?.error ? 'error' : 'success', message: r.sync?.error ? `GLPI: ${r.sync.error}` : `GLPI lido e avisos conferidos${detail}` });
+    },
     onError: (e) => toast({ tone: 'error', message: (e as Error).message }),
   });
   const pickPeriod = (k: string, days: number) => { setPeriod(k); setRange({ from: back(days), to: todayIso() }); };
