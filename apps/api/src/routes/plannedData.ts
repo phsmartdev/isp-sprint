@@ -9,7 +9,7 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { level } from '../services/scope';
 import { glpiConfig, glpiGroups, glpiUsers } from '../services/glpi';
-import { glpiPeople, isMonitored, runGlpiSla, runGlpiSlaAll, settingsOf, slaSettingsRow } from '../services/glpiSla';
+import { glpiPeople, isMonitored, isWatched, runGlpiSla, runGlpiSlaAll, settingsOf, slaSettingsRow } from '../services/glpiSla';
 
 const ADMIN = { module: 'configuracoes' as const, min: 'total' as const };
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -46,11 +46,19 @@ export const plannedDataRoutes = [
       const all = level(auth, 'inicio') === 'total';
       // abertos (qualquer data) + os do período (abertos ou resolvidos nele)
       const fromTs = new Date(new Date(`${from}T00:00:00Z`).getTime() - 86_400_000);
-      const rows = (await app.db.select().from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, auth.tenantId),
-        or(isNull(s.glpiQueueTickets.status), lt(s.glpiQueueTickets.status, 5), gte(s.glpiQueueTickets.openedAt, fromTs), gte(s.glpiQueueTickets.solvedAt, fromTs)))))
+      const base = await app.db.select().from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, auth.tenantId),
+        or(isNull(s.glpiQueueTickets.status), lt(s.glpiQueueTickets.status, 5), gte(s.glpiQueueTickets.openedAt, fromTs), gte(s.glpiQueueTickets.solvedAt, fromTs))));
+      const groupsOf = new Map(people.map((p) => [p.id, p.glpiGroupIds]));
+      const myGroups = me?.glpiGroupIds ?? [];
+      // pessoa visível para quem não vê tudo: ela mesma ou alguém dos seus grupos
+      const seesPerson = (userId: string | null) => all || (!!userId && (userId === auth.userId || (groupsOf.get(userId) ?? []).some((g) => myGroups.includes(g))));
+      const personOk = (userId: string | null, groupId: number | null = null) =>
+        (!query.userId || userId === query.userId) && (query.group === undefined || groupId === query.group || (!!userId && (groupsOf.get(userId) ?? []).includes(query.group)))
+        && (seesPerson(userId) || (groupId != null && (all || myGroups.includes(groupId))));
+      const rows = base
         .filter((r) => isMonitored(r, groups))
         // quem não vê tudo: os seus e os dos seus grupos
-        .filter((r) => all || r.userIds.includes(auth.userId) || r.groupIds.some((g) => me?.glpiGroupIds.includes(g)))
+        .filter((r) => all || r.userIds.includes(auth.userId) || r.groupIds.some((g) => myGroups.includes(g)))
         .filter((r) => query.group === undefined || r.groupIds.includes(query.group))
         .filter((r) => !query.userId || r.userIds.includes(query.userId));
       const inPeriod = (d: Date | null) => { if (!d) return false; const x = localParts(d, tz).date; return x >= from && x <= to; };
@@ -82,15 +90,28 @@ export const plannedDataRoutes = [
         id: x.r.id, glpiId: x.r.glpiId, title: x.r.title, client: x.r.entityName, groups: x.r.groupNames, situation: x.sit, situationLabel: SITUATION_LABELS[x.sit],
         assignees: x.r.glpiUserNames, unassigned: !x.r.glpiUserIds.length, statusName: x.r.statusName, openedAt: x.r.openedAt, due: x.due, dueText: dueText(x.due, now),
         todo: x.r.takenAt ? 'solucionar' : 'assumir e solucionar', glpiUrl: cfg ? `${cfg.baseUrl}/front/ticket.form.php?id=${x.r.glpiId}` : null,
-        lastAlert: lastAlert.get(x.r.id) ?? null,
+        lastAlert: lastAlert.get(x.r.id) ?? null, firstResponse: x.r.firstResponseAt ? { at: x.r.firstResponseAt, by: x.r.firstResponseBy } : null,
       }));
+      // menções às pessoas do Comercial (chamados abertos) e pedidos de aprovação aguardando
+      const link = (glpiId: number) => (cfg ? `${cfg.baseUrl}/front/ticket.form.php?id=${glpiId}` : null);
+      const watched = base.filter(isWatched);
+      const mentions = watched.filter((r) => isOpenStatus(r.status)).flatMap((r) => r.mentions.filter((m) => personOk(m.userId)).map((m) => ({
+        id: `${r.id}:${m.userId}`, glpiId: r.glpiId, title: r.title, client: r.entityName, person: m.name, by: m.by, at: m.at, answeredAt: m.answeredAt, statusName: r.statusName, glpiUrl: link(r.glpiId),
+      }))).sort((a, b) => Number(!!a.answeredAt) - Number(!!b.answeredAt) || (a.at ?? '').localeCompare(b.at ?? ''));
+      const approvals = watched.flatMap((r) => r.approvals.filter((a) => a.status === 2 && personOk(a.userId, a.groupId)).map((a) => ({
+        id: `${r.id}:${a.validationId}`, glpiId: r.glpiId, title: r.title, client: r.entityName, approver: a.name, isGroup: a.groupId != null, requester: a.requester, at: a.at,
+        waiting: a.at ? dueText(new Date(a.at), now).replace(/^vence(u)? /, '') : null, statusName: r.statusName, glpiUrl: link(r.glpiId),
+      }))).sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''));
       const sits = (list: typeof enriched) => list.map((x) => x.sit);
       const kpi = {
         open: open.length, ok: open.filter((x) => x.sit === 'no_prazo' || x.sit === 'sem_prazo').length, soon: open.filter((x) => x.sit === 'a_vencer').length,
         soon4h: open.filter((x) => soonIn(x, 4)).length, late: open.filter((x) => x.sit === 'atrasado').length,
         unassigned: open.filter((x) => !x.r.glpiUserIds.length).length,
         serviceLevel: serviceLevel(sits(solved)), solved: solved.length, solvedLate: solved.filter((x) => x.sit === 'resolvido_fora').length,
-        firstResponseMin: (() => { const xs = enriched.filter((x) => x.r.takenAt && inPeriod(x.r.openedAt)).map((x) => (x.r.takenAt!.getTime() - x.r.openedAt.getTime()) / 60_000).filter((m) => m >= 0); return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null; })(),
+        // 1º atendimento: da abertura até a primeira mensagem de alguém do Comercial ligado ao GLPI
+        firstResponseMin: (() => { const xs = enriched.filter((x) => x.r.firstResponseAt && inPeriod(x.r.openedAt)).map((x) => (x.r.firstResponseAt!.getTime() - x.r.openedAt.getTime()) / 60_000).filter((m) => m >= 0); return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null; })(),
+        firstResponseCount: enriched.filter((x) => x.r.firstResponseAt && inPeriod(x.r.openedAt)).length,
+        mentionsOpen: mentions.filter((m) => !m.answeredAt).length, mentions: mentions.length, approvalsPending: approvals.length,
         oldestLate: (() => { const l = open.filter((x) => x.sit === 'atrasado').sort((a, b) => a.due!.getTime() - b.due!.getTime())[0]; return l ? { glpiId: l.r.glpiId, dueText: dueText(l.due, now), unassigned: !l.r.glpiUserIds.length, group: l.r.groupNames.join(', ') } : null; })(),
       };
       // volume por dia (abertos e resolvidos no período)
@@ -120,7 +141,7 @@ export const plannedDataRoutes = [
       return {
         configured: { enabled: st.enabled, glpi: !!cfg, people: people.length, groups: groups.size }, lastSyncAt: st.lastSyncAt, lastError: st.lastError,
         period: { from, to }, sla: { source: set.slaSource, solveHours: set.solveHours, ownHours: set.ownHours, businessHoursOnly: set.businessHoursOnly, goalPct: set.goalPct },
-        kpi, pending, days, heat, byGroup,
+        kpi, pending, mentions, approvals, days, heat, byGroup,
         filters: { groups: [...groups].map(([id, name]) => ({ id, name })).filter((g) => all || me?.glpiGroupIds.includes(g.id)), people: (all ? people : people.filter((p) => p.glpiGroupIds.some((g) => me?.glpiGroupIds.includes(g)))).map((p) => ({ id: p.id, name: p.name })) },
         canConfigure: level(auth, 'configuracoes') === 'total',
       };

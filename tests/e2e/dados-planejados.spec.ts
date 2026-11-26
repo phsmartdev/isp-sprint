@@ -37,6 +37,12 @@ test('Dados Planejados: liga a pessoa ao GLPI no cadastro, configura o SLA unive
   // no GLPI: um chamado do Lucas aberto há 3 dias (atrasado) e um do grupo, sem responsável
   const old = new Date(Date.now() - 3 * 86_400_000);
   const late = (await (await page.request.post(`${GLPI}/__test/seed`, { data: { name: `Revisão de proposta ${st}`, date: glpiDate(old), team: [{ type: 'Group', id: 21 }, { type: 'User', id: 31 }] } })).json()).id as number;
+  // um chamado do NOC (fora do Comercial) que cita o Lucas e pede a aprovação dele
+  const ts = glpiDate(new Date(Date.now() - 2 * 3_600_000));
+  const noc = (await (await page.request.post(`${GLPI}/__test/seed`, { data: { name: `Troca de equipamento ${st}`, date: ts, team: [{ type: 'Group', id: 11 }], timeline: [
+    { type: 'Followup', item: { id: 7001, user: { id: 33, name: 'tecnico.noc' }, content: '<p>Pode confirmar, <span data-user-mention="true" data-user-id="31">@Lucas</span>?</p>', date: ts } },
+    { type: 'Validation', item: { id: 7002, requester: { id: 33, name: 'tecnico.noc' }, requested_approver_type: 'User', requested_approver_id: 31, status: 2, submission_date: ts } },
+  ] } })).json()).id as number;
   const free = (await (await page.request.post(`${GLPI}/__test/seed`, { data: { name: `Aditivo de contrato ${st}`, date: glpiDate(new Date(Date.now() - 30 * 60_000)), team: [{ type: 'Group', id: 21 }] } })).json()).id as number;
 
   // cadastro: usuário e grupo do Lucas no GLPI
@@ -80,6 +86,11 @@ test('Dados Planejados: liga a pessoa ao GLPI no cadastro, configura o SLA unive
   await expect(page.getByRole('link', { name: 'Abrir no GLPI' }).first()).toHaveAttribute('href', new RegExp(`ticket\\.form\\.php\\?id=${late}`));
   await expect(page.getByText('SLA universal: 8 h úteis para solucionar', { exact: false })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Nível de serviço por grupo e pessoa' })).toContainText('Comercial');
+  // aprovações e menções: indicadores e listas
+  await expect(page.getByTestId('approval-row').filter({ hasText: `#${noc}` })).toContainText('Lucas Lima');
+  await expect(page.getByTestId('mention-row').filter({ hasText: `#${noc}` })).toContainText('Sem resposta');
+  await expect(page.getByTestId('kpi-aprovacoes')).toContainText(/Aprovações pendentes[1-9]/);
+  await expect(rows.filter({ hasText: `#${noc}` })).toHaveCount(0);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/dados-planejados.png`, fullPage: true });
 
   // tela cheia (modo TV): barra com título, período e relógio; as pendências continuam visíveis

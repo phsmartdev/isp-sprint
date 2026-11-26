@@ -8017,6 +8017,15 @@ export const glpiQueueTickets = pgTable(
     glpiUserNames: text('glpi_user_names').array().notNull().default(sql`'{}'::text[]`),
     /** pessoas do RevOps atribuídas (pelo usuário do GLPI no cadastro) */
     userIds: uuid('user_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** 1º atendimento: primeira mensagem (acompanhamento, tarefa ou solução) de uma pessoa do Comercial ligada ao GLPI */
+    firstResponseAt: ts('first_response_at'),
+    firstResponseBy: text('first_response_by'),
+    /** menções (@) às pessoas do Comercial na descrição e na linha do tempo; a mais recente de cada pessoa */
+    mentions: jsonb('mentions').$type<{ userId: string; name: string; by: string | null; at: string | null; answeredAt: string | null }[]>().notNull().default([]),
+    /** pedidos de aprovação (validação) para pessoas ou grupos do Comercial; status 2 = aguardando, 3 = aprovado, 4 = recusado */
+    approvals: jsonb('approvals').$type<{ validationId: number; userId: string | null; groupId: number | null; name: string; requester: string | null; at: string | null; status: number; decidedAt: string | null }[]>().notNull().default([]),
+    /** pessoas do RevOps citadas ou chamadas a aprovar (para quem vê só os seus) */
+    relatedUserIds: uuid('related_user_ids').array().notNull().default(sql`'{}'::uuid[]`),
     glpiUpdatedAt: text('glpi_updated_at'),
     /** visto pela primeira vez pelo monitoramento (o aviso "chegou" só vale para o que chegou depois de ligar) */
     firstSeenAt: ts('first_seen_at').notNull().defaultNow(),

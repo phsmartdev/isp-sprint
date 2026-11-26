@@ -15,8 +15,10 @@ type Line = { open: number; ok: number; soon: number; late: number; solved: numb
 type Data = {
   configured: { enabled: boolean; glpi: boolean; people: number; groups: number }; lastSyncAt: string | null; lastError: string | null;
   period: { from: string; to: string }; sla: { source: 'universal' | 'glpi'; solveHours: number; ownHours: number; businessHoursOnly: boolean; goalPct: number };
-  kpi: { open: number; ok: number; soon: number; soon4h: number; late: number; unassigned: number; serviceLevel: number | null; solved: number; solvedLate: number; firstResponseMin: number | null; oldestLate: { glpiId: number; dueText: string; unassigned: boolean; group: string } | null };
-  pending: { id: string; glpiId: number; title: string; client: string | null; groups: string[]; situation: Sit; situationLabel: string; assignees: string[]; unassigned: boolean; statusName: string | null; due: string | null; dueText: string; todo: string; glpiUrl: string | null; lastAlert: { stage: string; channels: string[]; names: string[]; sentAt: string } | null }[];
+  kpi: { open: number; ok: number; soon: number; soon4h: number; late: number; unassigned: number; serviceLevel: number | null; solved: number; solvedLate: number; firstResponseMin: number | null; firstResponseCount: number; mentionsOpen: number; mentions: number; approvalsPending: number; oldestLate: { glpiId: number; dueText: string; unassigned: boolean; group: string } | null };
+  pending: { id: string; glpiId: number; title: string; client: string | null; groups: string[]; situation: Sit; situationLabel: string; assignees: string[]; unassigned: boolean; statusName: string | null; due: string | null; dueText: string; todo: string; glpiUrl: string | null; lastAlert: { stage: string; channels: string[]; names: string[]; sentAt: string } | null; firstResponse: { at: string; by: string | null } | null }[];
+  mentions: { id: string; glpiId: number; title: string; client: string | null; person: string; by: string | null; at: string | null; answeredAt: string | null; statusName: string | null; glpiUrl: string | null }[];
+  approvals: { id: string; glpiId: number; title: string; client: string | null; approver: string; isGroup: boolean; requester: string | null; at: string | null; waiting: string | null; statusName: string | null; glpiUrl: string | null }[];
   days: { date: string; opened: number; solved: number; solvedLate: number }[];
   heat: number[][];
   byGroup: ({ groupId: number; name: string; people: ({ userId: string | null; name: string } & Line)[] } & Line)[];
@@ -119,7 +121,7 @@ export function PlannedDataPage() {
             </section>
           )}
 
-          <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          <section aria-label="Indicadores" className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Kpi label="Atribuídos em aberto" value={d.kpi.open} hint={d.kpi.unassigned ? `${d.kpi.unassigned} sem responsável` : 'todos com responsável'} />
             <Kpi label="Dentro do prazo" value={d.kpi.ok} hint="abertos com prazo correndo" tone="ok" />
             <Kpi label="A vencer em 24 h" value={d.kpi.soon} hint={`${d.kpi.soon4h} em menos de 4 h`} tone="soon" />
@@ -133,7 +135,9 @@ export function PlannedDataPage() {
               </div>
               <p className="mt-1.5 text-xs text-white/80">{d.kpi.solved} resolvido(s) · meta {d.sla.goalPct}%</p>
             </div>
-            <Kpi label="1º atendimento (média)" value={mins(d.kpi.firstResponseMin)} hint={`meta ${d.sla.ownHours} h para assumir`} />
+            <Kpi label="1º atendimento (média)" value={mins(d.kpi.firstResponseMin)} hint={d.kpi.firstResponseCount ? `1ª mensagem do Comercial em ${d.kpi.firstResponseCount} chamado(s) · meta ${d.sla.ownHours} h` : `sem mensagem do Comercial ainda · meta ${d.sla.ownHours} h`} />
+            <Kpi label="Aprovações pendentes" value={d.kpi.approvalsPending} hint="pedidas a pessoas ou grupos do Comercial" tone={d.kpi.approvalsPending ? 'soon' : undefined} href="#aprovacoes" />
+            <Kpi label="Menções sem resposta" value={d.kpi.mentionsOpen} hint={`${d.kpi.mentions} menção(ões) em chamados abertos`} tone={d.kpi.mentionsOpen ? 'soon' : undefined} href="#mencoes" />
           </section>
           <p className="-mt-2 text-xs text-muted">SLA {d.sla.source === 'universal' ? 'universal' : 'do GLPI (sem SLA lá, o universal)'}: {d.sla.solveHours} h {d.sla.businessHoursOnly ? 'úteis' : 'corridas'} para solucionar, {d.sla.ownHours} h para assumir.</p>
 
@@ -150,7 +154,7 @@ export function PlannedDataPage() {
                     <tr key={p.id} className={clsx('border-b border-line align-top', p.situation === 'atrasado' && 'bg-[#FFF7F7]')} data-testid="pending-row">
                       <td className="whitespace-nowrap px-3 py-3"><span className={clsx('inline-block px-2 py-0.5 text-xs font-bold', SIT_CHIP[p.situation])}>{p.situationLabel}</span></td>
                       <td className="min-w-[260px] px-3 py-3"><p className="font-semibold text-ink">#{p.glpiId} · {p.title}</p><p className="text-xs text-muted">{p.client ?? '—'} · {p.groups.join(', ')}</p></td>
-                      <td className="min-w-[170px] px-3 py-3">{p.unassigned ? <p className="font-bold text-danger">Sem responsável</p> : <p className="font-semibold text-ink">{p.assignees.join(', ')}</p>}<p className="text-xs text-muted">falta {p.todo}</p></td>
+                      <td className="min-w-[170px] px-3 py-3">{p.unassigned ? <p className="font-bold text-danger">Sem responsável</p> : <p className="font-semibold text-ink">{p.assignees.join(', ')}</p>}<p className="text-xs text-muted">{p.firstResponse ? `1ª resposta: ${p.firstResponse.by ?? 'Comercial'}, ${fmtDateTime(p.firstResponse.at)}` : 'sem resposta do Comercial'} · falta {p.todo}</p></td>
                       <td className="num min-w-[150px] px-3 py-3"><p className={clsx('font-bold', p.situation === 'atrasado' ? 'text-danger' : p.situation === 'a_vencer' ? 'text-[#8A5A00]' : 'text-ink')}>{p.dueText}</p><p className="text-xs text-muted">{p.due ? fmtDateTime(p.due) : '—'}</p></td>
                       <td className="num min-w-[160px] px-3 py-3 text-xs text-muted">{p.lastAlert ? `${p.lastAlert.channels.map((c) => (c === 'email' ? 'E-mail' : 'WhatsApp')).join(' e ')} (${STAGE[p.lastAlert.stage] ?? p.lastAlert.stage}) para ${p.lastAlert.names.join(', ')} · ${fmtDateTime(p.lastAlert.sentAt)}` : 'sem aviso ainda'}</td>
                       <td className="whitespace-nowrap px-3 py-3">{p.glpiUrl && <a href={p.glpiUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 border border-primary px-3 text-sm font-semibold text-primary hover:bg-primary-soft">Abrir no GLPI<ExternalLink className="h-3.5 w-3.5" aria-hidden /></a>}</td>
@@ -160,6 +164,9 @@ export function PlannedDataPage() {
               </div>
             )}
           </section>
+
+          <ApprovalsList items={d.approvals} />
+          <MentionsList items={d.mentions} />
 
           <div className="flex flex-wrap gap-5">
             <DaysChart days={d.days} />
@@ -184,14 +191,70 @@ export function PlannedDataPage() {
   );
 }
 
-function Kpi({ label, value, hint, tone }: { label: string; value: number | string; hint: string; tone?: 'ok' | 'soon' | 'late' }) {
+function Kpi({ label, value, hint, tone, href }: { label: string; value: number | string; hint: string; tone?: 'ok' | 'soon' | 'late'; href?: string }) {
   const c = tone === 'ok' ? 'border-t-[#1F7A4D] text-[#1F7A4D]' : tone === 'soon' ? 'border-t-[#B7791F] text-[#8A5A00]' : tone === 'late' ? 'border-t-danger text-danger' : 'text-ink';
+  const body = <>
+    <p className="text-sm text-muted">{label}</p>
+    <p className={clsx('num mt-1 font-display text-3xl font-bold', c.split(' ').slice(1).join(' ') || 'text-ink')}>{value}</p>
+    <p className="mt-1 text-xs text-muted">{hint}</p>
+  </>;
+  const cls = clsx('card block p-4', tone && 'border-t-[3px]', c.split(' ')[0]);
+  return href ? <a href={href} className={clsx(cls, 'hover:border-primary')} data-testid={`kpi-${href.slice(1)}`}>{body}</a> : <div className={cls}>{body}</div>;
+}
+
+const GlpiLink = ({ url }: { url: string | null }) => (url ? <a href={url} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 border border-primary px-3 text-sm font-semibold text-primary hover:bg-primary-soft">Abrir no GLPI<ExternalLink className="h-3.5 w-3.5" aria-hidden /></a> : null);
+
+function ApprovalsList({ items }: { items: Data['approvals'] }) {
   return (
-    <div className={clsx('card p-4', tone && 'border-t-[3px]', c.split(' ')[0])}>
-      <p className="text-sm text-muted">{label}</p>
-      <p className={clsx('num mt-1 font-display text-3xl font-bold', c.split(' ').slice(1).join(' ') || 'text-ink')}>{value}</p>
-      <p className="mt-1 text-xs text-muted">{hint}</p>
-    </div>
+    <section id="aprovacoes" aria-label="Aprovações pendentes" className="card">
+      <div className="flex flex-wrap items-end justify-between gap-2 p-4 pb-2">
+        <div><h2 className="text-lg font-bold text-ink">Aprovações pendentes</h2><p className="text-sm text-muted">Validações pedidas no GLPI a pessoas ou grupos do Comercial que ainda aguardam resposta.</p></div>
+        <p className="num text-sm text-muted">{items.length} pedido(s)</p>
+      </div>
+      {!items.length ? <p className="px-4 pb-6 text-sm text-muted">Nenhuma aprovação aguardando neste filtro.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-line text-left text-xs text-muted"><th className="px-3 py-2">Chamado</th><th className="px-3 py-2">Quem aprova</th><th className="px-3 py-2">Pedido por</th><th className="px-3 py-2">Aguardando</th><th className="px-3 py-2"><span className="sr-only">Ações</span></th></tr></thead>
+            <tbody>{items.map((a) => (
+              <tr key={a.id} className="border-b border-line align-top" data-testid="approval-row">
+                <td className="min-w-[260px] px-3 py-3"><p className="font-semibold text-ink">#{a.glpiId} · {a.title}</p><p className="text-xs text-muted">{a.client ?? '—'}{a.statusName ? ` · ${a.statusName}` : ''}</p></td>
+                <td className="min-w-[160px] px-3 py-3"><p className="font-semibold text-ink">{a.approver}</p><p className="text-xs text-muted">{a.isGroup ? 'qualquer pessoa do grupo' : 'pessoa'}</p></td>
+                <td className="px-3 py-3 text-ink">{a.requester ?? '—'}</td>
+                <td className="num min-w-[150px] px-3 py-3"><p className="font-bold text-[#8A5A00]">{a.waiting ?? '—'}</p><p className="text-xs text-muted">{a.at ? fmtDateTime(a.at) : '—'}</p></td>
+                <td className="whitespace-nowrap px-3 py-3"><GlpiLink url={a.glpiUrl} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MentionsList({ items }: { items: Data['mentions'] }) {
+  return (
+    <section id="mencoes" aria-label="Menções ao Comercial" className="card">
+      <div className="flex flex-wrap items-end justify-between gap-2 p-4 pb-2">
+        <div><h2 className="text-lg font-bold text-ink">Menções ao Comercial</h2><p className="text-sm text-muted">Chamados abertos em que alguém citou (@) uma pessoa do Comercial. Sem resposta primeiro.</p></div>
+        <p className="num text-sm text-muted">{items.length} menção(ões)</p>
+      </div>
+      {!items.length ? <p className="px-4 pb-6 text-sm text-muted">Nenhuma menção em chamados abertos neste filtro.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-line text-left text-xs text-muted"><th className="px-3 py-2">Situação</th><th className="px-3 py-2">Chamado</th><th className="px-3 py-2">Quem foi citado</th><th className="px-3 py-2">Citado por</th><th className="px-3 py-2"><span className="sr-only">Ações</span></th></tr></thead>
+            <tbody>{items.map((m) => (
+              <tr key={m.id} className={clsx('border-b border-line align-top', !m.answeredAt && 'bg-[#FFFBF2]')} data-testid="mention-row">
+                <td className="whitespace-nowrap px-3 py-3"><span className={clsx('inline-block px-2 py-0.5 text-xs font-bold', m.answeredAt ? 'bg-success-soft text-[#1F6B44]' : 'border border-[#E8C27A] bg-warning-soft text-[#7A4E00]')}>{m.answeredAt ? 'Respondida' : 'Sem resposta'}</span></td>
+                <td className="min-w-[260px] px-3 py-3"><p className="font-semibold text-ink">#{m.glpiId} · {m.title}</p><p className="text-xs text-muted">{m.client ?? '—'}{m.statusName ? ` · ${m.statusName}` : ''}</p></td>
+                <td className="min-w-[150px] px-3 py-3"><p className="font-semibold text-ink">{m.person}</p>{m.answeredAt && <p className="text-xs text-muted">respondeu em {fmtDateTime(m.answeredAt)}</p>}</td>
+                <td className="num min-w-[160px] px-3 py-3"><p className="text-ink">{m.by ?? '—'}</p><p className="text-xs text-muted">{m.at ? fmtDateTime(m.at) : '—'}</p></td>
+                <td className="whitespace-nowrap px-3 py-3"><GlpiLink url={m.glpiUrl} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

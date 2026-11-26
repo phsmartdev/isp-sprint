@@ -30,8 +30,11 @@ type HlTicket = {
   id: number; name?: string; status?: Ref; entity?: Ref; category?: Ref; priority?: Ref; user_recipient?: Ref;
   date?: string | null; date_creation?: string | null; date_mod?: string | null; date_solve?: string | null; date_close?: string | null;
   resolution_date?: string | null; internal_resolution_date?: string | null; take_into_account_date?: string | null; time_to_own?: string | null;
-  team?: HlTeam;
+  team?: HlTeam; content?: string | null;
 };
+type HlTimeline = { type?: string; item?: Record<string, unknown> }[];
+type Mention = Row['mentions'][number];
+type Approval = Row['approvals'][number];
 
 const refId = (r: Ref) => (typeof r === 'number' ? r : r?.id ?? null);
 const refName = (r: Ref) => (typeof r === 'object' && r ? r.completename ?? r.name ?? null : null);
@@ -59,6 +62,70 @@ function teamOf(t: HlTeam | undefined) {
   const kind = (m: HlTeam[number]) => (m.type ?? m.itemtype ?? '').toLowerCase();
   const pick = (k: string) => assigned.filter((m) => kind(m) === k).map((m) => ({ id: Number(m.id ?? m.items_id), name: m.name ?? null })).filter((m) => Number.isFinite(m.id));
   return { groups: pick('group'), users: pick('user') };
+}
+
+/** Quem abriu o chamado (requerentes): a mensagem deles não conta como 1º atendimento. */
+function requestersOf(t: HlTeam | undefined) {
+  return new Set((t ?? []).filter((m) => (m.role === 'requester' || m.role === 1 || m.role === '1') && (m.type ?? m.itemtype ?? '').toLowerCase() === 'user').map((m) => Number(m.id ?? m.items_id)));
+}
+
+/** Usuários citados (@) num texto rico do GLPI: <span data-user-mention="true" data-user-id="N">@Nome</span>. */
+export function mentionedGlpiIds(html: string | null | undefined): number[] {
+  if (!html) return [];
+  const out = new Set<number>();
+  // o GLPI guarda o texto com as entidades HTML escapadas (&lt;span ...&gt;) em alguns caminhos: desfaz antes
+  const src = html.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#0?34;/g, '"');
+  for (const tag of src.match(/<[^>]*data-user-mention[^>]*>/gi) ?? []) {
+    const m = tag.match(/data-user-id\s*=\s*["']?(\d+)/i);
+    if (m) out.add(Number(m[1]));
+  }
+  return [...out];
+}
+
+type People = { byGlpiUser: Map<number, string>; names: Map<string, string>; groups: Map<number, string> };
+/**
+ * Fatos da linha do tempo para o Comercial: 1º atendimento (primeira mensagem de uma pessoa ligada, que não seja
+ * requerente), menções às pessoas ligadas (a mais recente de cada uma, e se ela respondeu depois) e pedidos de
+ * aprovação para pessoas ou grupos monitorados. Datas no formato do GLPI, interpretadas no fuso da empresa.
+ */
+export function timelineFacts(t: { content?: string | null; openedAt: Date; requesterName?: string | null }, timeline: HlTimeline, requesters: Set<number>, p: People, tz: string) {
+  const msgs: { author: number | null; authorName: string | null; at: Date | null; content: string }[] = [];
+  const approvals: Approval[] = [];
+  for (const row of timeline) {
+    const it = row.item ?? {};
+    if (row.type === 'Validation') {
+      const type = String(it.requested_approver_type ?? it.itemtype_target ?? 'User').toLowerCase();
+      const target = Number(it.requested_approver_id ?? it.items_id_target ?? refId(it.approver as Ref) ?? NaN);
+      const userId = type === 'user' ? p.byGlpiUser.get(target) ?? null : null;
+      const groupId = type === 'group' && p.groups.has(target) ? target : null;
+      if (!userId && groupId == null) continue;
+      const status = Number(typeof it.status === 'object' && it.status ? (it.status as { id?: number }).id : it.status) || 2;
+      approvals.push({
+        validationId: Number(it.id), userId, groupId, name: userId ? p.names.get(userId) ?? 'Pessoa' : p.groups.get(groupId!) ?? `Grupo ${groupId}`,
+        requester: refName(it.requester as Ref) ?? refName(it.user as Ref), at: glpiDate((it.submission_date ?? it.date_creation ?? null) as string | null, tz)?.toISOString() ?? null, status,
+        decidedAt: status === 3 || status === 4 ? glpiDate((it.approval_date ?? it.date_mod ?? null) as string | null, tz)?.toISOString() ?? null : null,
+      });
+      continue;
+    }
+    if (row.type !== 'Followup' && row.type !== 'Task' && row.type !== 'Solution') continue;
+    const author = refId((it.user ?? it.users_id) as Ref);
+    msgs.push({ author: author == null ? null : Number(author), authorName: refName(it.user as Ref), at: glpiDate((it.date ?? it.date_creation ?? null) as string | null, tz), content: String(it.content ?? '') });
+  }
+  msgs.sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0));
+  const first = msgs.find((m) => m.author != null && p.byGlpiUser.has(m.author) && !requesters.has(m.author));
+  // menções: a descrição (do requerente, na abertura) e cada mensagem; fica a mais recente de cada pessoa
+  const byUser = new Map<string, Mention>();
+  const sources = [{ author: null as number | null, authorName: t.requesterName ?? null, at: t.openedAt as Date | null, content: t.content ?? '' }, ...msgs];
+  for (const m of sources) for (const g of mentionedGlpiIds(m.content)) {
+    const userId = p.byGlpiUser.get(g);
+    if (!userId || m.author === g) continue;
+    const answered = msgs.find((x) => x.author === g && m.at && x.at && x.at.getTime() > m.at.getTime());
+    byUser.set(userId, { userId, name: p.names.get(userId) ?? 'Pessoa', by: m.authorName, at: m.at?.toISOString() ?? null, answeredAt: answered?.at?.toISOString() ?? null });
+  }
+  return {
+    firstResponseAt: first?.at ?? null, firstResponseBy: first ? p.names.get(p.byGlpiUser.get(first.author!)!) ?? first.authorName : null,
+    mentions: [...byUser.values()], approvals,
+  };
 }
 
 const glpiTs = (d: Date, tz: string) => {
@@ -89,6 +156,8 @@ export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date
   } catch { /* sem leitura das entidades: fica a raiz recursiva */ }
   const scopes = [{ entityId: st.rootEntityId, recursive: true }, ...entities.map((e) => ({ entityId: e.id, recursive: false }))];
   const seen = new Set<number>();
+  let timelineReads = 0;
+  const ppl: People = { byGlpiUser, names: new Map(people.map((p) => [p.id, p.name])), groups };
   const seenEntities = new Map<string, number>();
   for (const scope of scopes) for (let page = 0, start = 0; page < 30; page++, start += limit) {
     let list: HlTicket[];
@@ -107,20 +176,36 @@ export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date
         try { team = await glpiCall<HlTeam>(cfg, 'GET', `/Assistance/Ticket/${t.id}/TeamMember`, { entityId: refId(t.entity) ?? st.rootEntityId }); } catch { team = []; }
       }
       const { groups: gs, users: us } = teamOf(team);
-      const relevant = gs.some((g) => groups.has(g.id)) || us.some((u) => userIds.has(u.id));
+      const assigned = gs.some((g) => groups.has(g.id)) || us.some((u) => userIds.has(u.id));
       const [existing] = await db.select({ id: s.glpiQueueTickets.id }).from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, tenantId), eq(s.glpiQueueTickets.glpiId, t.id))).limit(1);
-      if (!relevant && !existing) continue;
       const status = refId(t.status);
+      const openedAt = glpiDate(t.date ?? t.date_creation, tz) ?? now;
+      // linha do tempo: 1º atendimento, menções e aprovações. Lida nos chamados abertos e nos já monitorados (no máximo 200 por leitura)
+      let facts: ReturnType<typeof timelineFacts> | null = null;
+      if ((assigned || existing || isOpenStatus(status)) && timelineReads < 200) {
+        timelineReads++;
+        try {
+          const tl = await glpiCall<HlTimeline>(cfg, 'GET', `/Assistance/Ticket/${t.id}/Timeline`, { entityId: refId(t.entity) ?? st.rootEntityId });
+          facts = timelineFacts({ content: t.content, openedAt, requesterName: refName(t.user_recipient) }, Array.isArray(tl) ? tl : [], requestersOf(team), ppl, tz);
+        } catch { /* sem a linha do tempo: mantém o que já estava gravado */ }
+      }
+      const watched = !!facts && (facts.mentions.length > 0 || facts.approvals.length > 0);
+      if (!assigned && !watched && !existing) continue;
+      const relevant = assigned;
       const values = {
         tenantId, glpiId: t.id, entityId: refId(t.entity), entityName: refName(t.entity), title: (t.name ?? `Chamado ${t.id}`).slice(0, 300),
         categoryName: refName(t.category), requesterName: refName(t.user_recipient), status, statusName: refName(t.status) ?? glpiStatusLabel(status), priority: refId(t.priority),
-        openedAt: glpiDate(t.date ?? t.date_creation, tz) ?? now,
+        openedAt,
         dueSolveAt: glpiDate(t.resolution_date ?? t.internal_resolution_date, tz), dueOwnAt: glpiDate(t.time_to_own, tz), takenAt: glpiDate(t.take_into_account_date, tz),
         solvedAt: glpiDate(t.date_solve, tz) ?? (status && status >= 5 ? glpiDate(t.date_close, tz) : null), closedAt: glpiDate(t.date_close, tz),
         // sem relevância (foi tirado dos nossos grupos), os atribuídos ficam vazios e o chamado sai do painel
         groupIds: relevant ? gs.map((g) => g.id) : [], groupNames: relevant ? gs.map((g) => g.name ?? groups.get(g.id) ?? `Grupo ${g.id}`) : [],
         glpiUserIds: relevant ? us.map((u) => u.id) : [], glpiUserNames: relevant ? us.map((u) => u.name ?? `Usuário ${u.id}`) : [],
         userIds: relevant ? us.map((u) => byGlpiUser.get(u.id)).filter((x): x is string => !!x) : [],
+        ...(facts ? {
+          firstResponseAt: facts.firstResponseAt, firstResponseBy: facts.firstResponseBy, mentions: facts.mentions, approvals: facts.approvals,
+          relatedUserIds: [...new Set([...facts.mentions.map((m) => m.userId), ...facts.approvals.map((a) => a.userId).filter((x): x is string => !!x)])],
+        } : {}),
         glpiUpdatedAt: t.date_mod ?? null, lastSyncAt: now,
       };
       const { tenantId: _t, glpiId: _g, ...upd } = values;
@@ -200,6 +285,8 @@ async function deliver(db: DbOrTx, tenantId: string, key: string, stage: string,
 
 /** Visível no painel: atribuído a uma pessoa mapeada ou a um grupo monitorado. */
 export const isMonitored = (r: Pick<Row, 'groupIds' | 'userIds'>, groups: Map<number, string>) => r.userIds.length > 0 || r.groupIds.some((g) => groups.has(g));
+/** Chamado que cita alguém do Comercial ou pede aprovação a alguém (ou a um grupo) do Comercial. */
+export const isWatched = (r: Pick<Row, 'mentions' | 'approvals'>) => r.mentions.length > 0 || r.approvals.length > 0;
 
 /** Manda os avisos que já deveriam ter saído (régua) e o resumo diário. */
 export async function runSlaAlerts(db: DbOrTx, config: Config, tenantId: string, now = new Date()) {
