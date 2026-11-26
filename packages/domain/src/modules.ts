@@ -175,15 +175,23 @@ export type ModuleGrant = { module: BusinessModule; subjectType: 'equipe' | 'usu
 /** Pessoas & Cultura nasce em teste: ligado, mas só para quem a empresa liberar (equipe ou pessoa). */
 export const defaultTenantModule = (module: BusinessModule): TenantModule => ({ module, enabled: true, mode: module === 'pessoas_cultura' ? 'liberados' : 'todos', disabledFeatures: [] });
 
-export type ModuleDecision = { enabled: boolean; reason: 'empresa_desligou' | 'pessoa_bloqueada' | 'pessoa_liberada' | 'equipe_bloqueada' | 'equipe_liberada' | 'todos' | 'nao_liberado' };
+export type ModuleDecision = { enabled: boolean; reason: 'empresa_desligou' | 'pessoa_bloqueada' | 'pessoa_liberada' | 'perfil_liberado' | 'equipe_bloqueada' | 'equipe_liberada' | 'todos' | 'nao_liberado' };
+
+/**
+ * Perfis que sempre têm o módulo (se a empresa o ligou), mesmo no modo "só equipes e pessoas liberadas"
+ * e mesmo com a equipe bloqueada; só o bloqueio individual tira (decisão de 26/11/2026: Marketing restrito ao time
+ * de Marketing, com Diretoria e Administrador sempre).
+ */
+export const ALWAYS_RELEASED_PROFILES: Partial<Record<BusinessModule, readonly string[]>> = { marketing: ['diretoria', 'administrador'] };
 
 /** Decide se o módulo está ligado para a pessoa. A exceção individual vence a da equipe; bloqueio vence liberação no mesmo nível. */
-export function moduleDecision(t: TenantModule, grants: ModuleGrant[], user: { id: string; teamIds: string[] }, today: string): ModuleDecision {
+export function moduleDecision(t: TenantModule, grants: ModuleGrant[], user: { id: string; teamIds: string[]; profiles?: readonly string[] }, today: string): ModuleDecision {
   if (!t.enabled) return { enabled: false, reason: 'empresa_desligou' };
   const live = grants.filter((g) => g.module === t.module && (!g.validUntil || g.validUntil >= today));
   const mine = live.filter((g) => g.subjectType === 'usuario' && g.subjectId === user.id);
   if (mine.some((g) => g.effect === 'bloquear')) return { enabled: false, reason: 'pessoa_bloqueada' };
   if (mine.some((g) => g.effect === 'liberar')) return { enabled: true, reason: 'pessoa_liberada' };
+  if ((user.profiles ?? []).some((p) => ALWAYS_RELEASED_PROFILES[t.module]?.includes(p))) return { enabled: true, reason: 'perfil_liberado' };
   const teams = live.filter((g) => g.subjectType === 'equipe' && user.teamIds.includes(g.subjectId));
   if (teams.some((g) => g.effect === 'bloquear')) return { enabled: false, reason: 'equipe_bloqueada' };
   if (teams.some((g) => g.effect === 'liberar')) return { enabled: true, reason: 'equipe_liberada' };

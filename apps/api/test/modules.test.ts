@@ -109,6 +109,37 @@ describe('Etapa 1: módulos de negócio', () => {
     ok(await setModule('projetos', { enabled: true }));
   });
 
+  it('Marketing restrito à equipe: quem está fora perde Leads, ABM e Quadro; Diretoria e Administrador sempre; quadro só aceita quem tem acesso', async () => {
+    const ana = await login(ctx.app, 'ana@yepnet.test');
+    ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'campanhas', level: 'total' }));
+    try {
+      ok(await setModule('marketing', { enabled: true, mode: 'liberados' }));
+      // ninguém liberado ainda: a Gerência (fora da equipe) e a Supervisão perdem o módulo; a Diretoria, não
+      expect((await carlos.get('/leads')).statusCode).toBe(403);
+      expect((await ana.get('/marketing/quadro')).statusCode).toBe(403);
+      ok(await impl.get('/marketing/quadro'));
+      expect(ok(await carlos.get(`/admin/access-preview/${impl.me.user.id}`)).json().modules.marketing).toEqual({ enabled: true, reason: 'perfil_liberado' });
+      // a equipe (aqui, a da Ana e do Lucas, fazendo o papel do time de Marketing) é liberada
+      ok(await carlos.post('/admin/modules/marketing/grants', { subjectType: 'equipe', subjectId: lucasTeam, effect: 'liberar', reason: 'Time de Marketing (teste automatizado)' }), 201);
+      const ana2 = await login(ctx.app, 'ana@yepnet.test');
+      const board = ok(await ana2.get('/marketing/quadro')).json();
+      expect(board.assignable).toEqual(expect.arrayContaining([ana2.me.user.id, impl.me.user.id]));
+      expect(board.assignable).not.toContain(carlos.me.user.id); // sem acesso ao Marketing
+      expect(board.assignable).not.toContain(lucas.me.user.id); // na equipe, mas sem nível em Campanhas
+      const bad = await ana2.post('/marketing/quadro/cards', { title: 'Tarefa com observador de fora', ownerId: ana2.me.user.id, observerIds: [carlos.me.user.id] });
+      expect(bad.statusCode).toBe(422);
+      expect(bad.json().detail).toMatch(/acesso ao Marketing/);
+      expect((await ana2.post('/marketing/quadro/cards', { title: 'Responsável de fora', ownerId: carlos.me.user.id })).statusCode).toBe(422);
+      const card = ok(await ana2.post('/marketing/quadro/cards', { title: 'Tarefa do time (fictícia)', ownerId: ana2.me.user.id, observerIds: [impl.me.user.id] }), 201).json();
+      await ctx.db.execute(sql`delete from mkt_card_events where card_id = ${card.id}`);
+      await ctx.db.execute(sql`delete from mkt_cards where id = ${card.id}`);
+    } finally {
+      await ctx.db.execute(sql`delete from module_grants where tenant_id = ${tenantId} and module = 'marketing'`);
+      ok(await setModule('marketing', { enabled: true }));
+      ok(await carlos.put('/admin/security', { profile: 'diretoria', module: 'campanhas', level: 'nenhum' }));
+    }
+  });
+
   it('funcionalidade desligada: atas some, contratos seguem; funcionalidade de outro módulo é recusada', async () => {
     expect((await setModule('contratos', { enabled: true, disabledFeatures: ['crm.email'] })).statusCode).toBe(422);
     ok(await setModule('contratos', { enabled: true, disabledFeatures: ['contratos.atas'] }));

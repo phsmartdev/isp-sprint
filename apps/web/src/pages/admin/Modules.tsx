@@ -21,7 +21,7 @@ type Actions = { actions: { key: string; label: string }[]; profiles: { key: str
 
 const REASON_TEXT: Record<string, string> = {
   todos: 'liberado para todos os perfis com acesso', nao_liberado: 'só para liberados, e a pessoa não está liberada', empresa_desligou: 'desligado na empresa',
-  pessoa_bloqueada: 'bloqueado para a pessoa', pessoa_liberada: 'liberado para a pessoa', equipe_bloqueada: 'bloqueado para a equipe', equipe_liberada: 'liberado para a equipe',
+  pessoa_bloqueada: 'bloqueado para a pessoa', pessoa_liberada: 'liberado para a pessoa', perfil_liberado: 'sempre liberado para o perfil (Diretoria e Administrador)', equipe_bloqueada: 'bloqueado para a equipe', equipe_liberada: 'liberado para a equipe',
 };
 
 export function AdminModules() {

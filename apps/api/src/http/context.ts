@@ -187,7 +187,7 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
   const decisions = Object.fromEntries(BUSINESS_MODULES.map((m) => {
     const t = tms.find((x) => x.module === m);
     const tm = t ? { module: m, enabled: t.enabled, mode: t.mode as ReleaseMode, disabledFeatures: t.disabledFeatures } : defaultTenantModule(m);
-    return [m, moduleDecision(tm, grants.map((g) => ({ module: g.module as BusinessModule, subjectType: g.subjectType as 'equipe' | 'usuario', subjectId: g.subjectId, effect: g.effect as 'liberar' | 'bloquear', validUntil: g.validUntil })), { id: row.userId, teamIds }, today)];
+    return [m, moduleDecision(tm, grants.map((g) => ({ module: g.module as BusinessModule, subjectType: g.subjectType as 'equipe' | 'usuario', subjectId: g.subjectId, effect: g.effect as 'liberar' | 'bloquear', validUntil: g.validUntil })), { id: row.userId, teamIds, profiles: roleRows.map((r) => r.key) }, today)];
   })) as Record<BusinessModule, ModuleDecision>;
   const modules = Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].enabled])) as Record<BusinessModule, boolean>;
   // ações sensíveis: linha gravada no perfil ou o padrão do perfil; vale se qualquer perfil permitir
