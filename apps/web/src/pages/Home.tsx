@@ -23,7 +23,7 @@ type HomeData = {
   kpis: Kpi[];
   goal: { sales: number; target: number; progress: number | null; delta: number | null; formula: string };
   performance: { key: string; label: string; value: number; target: number; progress: number | null }[];
-  agenda: { id: string; type: ActivityType; title: string; notes: string | null; dueAt: string | null; completedAt: string | null; rowVersion: number; opportunityId: string | null; overdue: boolean }[];
+  agenda: { id: string; type: ActivityType; title: string; notes: string | null; dueAt: string | null; completedAt: string | null; rowVersion: number; opportunityId: string | null; contractId?: string | null; contactId?: string | null; projectId?: string | null; overdue: boolean }[];
   pipelineName: string;
   pipeline: { stage: string; name: string; color: string | null; count: number; valueCents: number }[];
   recent: Opportunity[];
@@ -165,6 +165,10 @@ function GoalRing({ value, target }: { value: number; target: number }) {
   );
 }
 
+/** Para onde a tarefa leva: oportunidade, contrato ou conta; sem vínculo (ou de projeto), abre a própria tarefa no quadro. */
+const taskTarget = (a: { id: string; opportunityId: string | null; contractId?: string | null; contactId?: string | null }) =>
+  a.opportunityId ? `/opportunities/${a.opportunityId}` : a.contractId ? `/contracts/${a.contractId}` : a.contactId ? `/customers/${a.contactId}` : `/tarefas?task=${a.id}`;
+
 export function HomePage() {
   const stageInfo = useStageInfo();
   const { me } = useAuth();
@@ -238,7 +242,7 @@ export function HomePage() {
                       <input type="checkbox" className="h-5 w-5 rounded border-line" checked={!!a.completedAt} onChange={() => done.mutate(a)} aria-label={`Concluir: ${a.title}`} />
                       <span className={clsx('num w-12 text-sm', a.overdue ? 'font-semibold text-danger' : 'text-text')}>{fmtTime(a.dueAt)}</span>
                       <span aria-hidden>{ACT_ICON[a.type]}</span>
-                      <button className="min-w-0 flex-1 text-left" onClick={() => a.opportunityId && nav(`/opportunities/${a.opportunityId}`)}>
+                      <button className="min-w-0 flex-1 text-left" title="Abrir onde a tarefa é feita" onClick={() => nav(taskTarget(a))}>
                         <span className={clsx('block truncate text-sm font-semibold text-ink', a.completedAt && 'text-muted line-through')}>{a.title}</span>
                         <span className="block truncate text-xs text-muted">{a.notes ?? ''}</span>
                       </button>
