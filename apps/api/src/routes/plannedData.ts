@@ -1,6 +1,6 @@
 /** Dados Planejados: painel de SLA dos chamados do GLPI atribuídos ao Comercial, configuração da régua e rotina. */
 import { timingSafeEqual } from 'node:crypto';
-import { and, desc, eq, gte, inArray, isNull, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { DEFAULT_SLA_SETTINGS, SITUATION_LABELS, dueText, isOpenStatus, localParts, serviceLevel, ticketDue, ticketSituation, type Situation } from '@isp/domain';
 import { defineRoute } from '../http/route';
@@ -31,7 +31,7 @@ const SettingsBody = z.object({
 export const plannedDataRoutes = [
   defineRoute({
     method: 'GET', url: '/dados-planejados', summary: 'Chamados do GLPI atribuídos aos grupos e pessoas do Comercial: pendências, prazos, nível de serviço e volume', tag: 'Dados Planejados', module: 'inicio',
-    query: z.object({ group: z.coerce.number().int().optional(), userId: z.string().uuid().optional(), from: day.optional(), to: day.optional() }),
+    query: z.object({ group: z.coerce.number().int().optional(), userId: z.string().uuid().optional(), from: day.optional(), to: day.optional(), view: z.enum(['atribuidos', 'requisitados']).default('atribuidos') }),
     handler: async ({ app, auth, query }) => {
       const st = await slaSettingsRow(app.db, auth.tenantId);
       const set = settingsOf(st);
@@ -55,12 +55,16 @@ export const plannedDataRoutes = [
       const personOk = (userId: string | null, groupId: number | null = null) =>
         (!query.userId || userId === query.userId) && (query.group === undefined || groupId === query.group || (!!userId && (groupsOf.get(userId) ?? []).includes(query.group)))
         && (seesPerson(userId) || (groupId != null && (all || myGroups.includes(groupId))));
-      const rows = base
-        .filter((r) => isMonitored(r, groups))
-        // quem não vê tudo: os seus e os dos seus grupos
-        .filter((r) => all || r.userIds.includes(auth.userId) || r.groupIds.some((g) => myGroups.includes(g)))
-        .filter((r) => query.group === undefined || r.groupIds.includes(query.group))
-        .filter((r) => !query.userId || r.userIds.includes(query.userId));
+      const requested = query.view === 'requisitados';
+      const rows = requested
+        // Requisitados: chamados abertos por pessoas do Comercial (atendidos por qualquer time)
+        ? base.filter((r) => r.requesterUserIds.some((u) => seesPerson(u) && (!query.userId || u === query.userId) && (query.group === undefined || (groupsOf.get(u) ?? []).includes(query.group))))
+        : base
+          .filter((r) => isMonitored(r, groups))
+          // quem não vê tudo: os seus e os dos seus grupos
+          .filter((r) => all || r.userIds.includes(auth.userId) || r.groupIds.some((g) => myGroups.includes(g)))
+          .filter((r) => query.group === undefined || r.groupIds.includes(query.group))
+          .filter((r) => !query.userId || r.userIds.includes(query.userId));
       const inPeriod = (d: Date | null) => { if (!d) return false; const x = localParts(d, tz).date; return x >= from && x <= to; };
       const enriched = rows.map((r) => {
         const due = ticketDue(r, set, tz);
@@ -94,10 +98,14 @@ export const plannedDataRoutes = [
       }));
       // menções às pessoas do Comercial (chamados abertos) e pedidos de aprovação aguardando
       const link = (glpiId: number) => (cfg ? `${cfg.baseUrl}/front/ticket.form.php?id=${glpiId}` : null);
-      const watched = base.filter(isWatched);
-      const mentions = watched.filter((r) => isOpenStatus(r.status)).flatMap((r) => r.mentions.filter((m) => personOk(m.userId)).map((m) => ({
+      // menções e aprovações podem acontecer a qualquer momento, em qualquer situação do chamado: sem resposta (de
+      // qualquer data) e as respondidas no período; aprovações aguardando, de qualquer data
+      const watched = await app.db.select().from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, auth.tenantId),
+        sql`(jsonb_array_length(${s.glpiQueueTickets.mentions}) > 0 or jsonb_array_length(${s.glpiQueueTickets.approvals}) > 0)`));
+      const inPeriodIso = (v: string | null) => !!v && inPeriod(new Date(v));
+      const mentions = watched.filter(isWatched).flatMap((r) => r.mentions.filter((m) => personOk(m.userId) && (!m.answeredAt || inPeriodIso(m.at))).map((m) => ({
         id: `${r.id}:${m.userId}`, glpiId: r.glpiId, title: r.title, client: r.entityName, person: m.name, by: m.by, at: m.at, answeredAt: m.answeredAt, statusName: r.statusName, glpiUrl: link(r.glpiId),
-      }))).sort((a, b) => Number(!!a.answeredAt) - Number(!!b.answeredAt) || (a.at ?? '').localeCompare(b.at ?? ''));
+      }))).sort((a, b) => Number(!!a.answeredAt) - Number(!!b.answeredAt) || (b.at ?? '').localeCompare(a.at ?? ''));
       const approvals = watched.flatMap((r) => r.approvals.filter((a) => a.status === 2 && personOk(a.userId, a.groupId)).map((a) => ({
         id: `${r.id}:${a.validationId}`, glpiId: r.glpiId, title: r.title, client: r.entityName, approver: a.name, isGroup: a.groupId != null, requester: a.requester, at: a.at,
         waiting: a.at ? dueText(new Date(a.at), now).replace(/^vence(u)? /, '') : null, statusName: r.statusName, glpiUrl: link(r.glpiId),
@@ -137,10 +145,10 @@ export const plannedDataRoutes = [
         const ppl = people.filter((p) => p.glpiGroupIds.includes(g)).map((p) => ({ userId: p.id, name: p.name, ...line(list.filter((x) => x.r.userIds.includes(p.id))) }));
         const noOwner = list.filter((x) => !x.r.glpiUserIds.length);
         return { groupId: g, name, ...line(list), people: [...ppl.filter((p) => p.open || p.solved), ...(noOwner.length ? [{ userId: null, name: 'Sem responsável', ...line(noOwner) }] : [])] };
-      }).filter((g) => all || me?.glpiGroupIds.includes(g.groupId));
+      }).filter((g) => !requested && (all || me?.glpiGroupIds.includes(g.groupId)));
       return {
         configured: { enabled: st.enabled, glpi: !!cfg, people: people.length, groups: groups.size }, lastSyncAt: st.lastSyncAt, lastError: st.lastError,
-        period: { from, to }, sla: { source: set.slaSource, solveHours: set.solveHours, ownHours: set.ownHours, businessHoursOnly: set.businessHoursOnly, goalPct: set.goalPct },
+        period: { from, to }, view: query.view, sla: { source: set.slaSource, solveHours: set.solveHours, ownHours: set.ownHours, businessHoursOnly: set.businessHoursOnly, goalPct: set.goalPct },
         kpi, pending, mentions, approvals, days, heat, byGroup,
         filters: { groups: [...groups].map(([id, name]) => ({ id, name })).filter((g) => all || me?.glpiGroupIds.includes(g.id)), people: (all ? people : people.filter((p) => p.glpiGroupIds.some((g) => me?.glpiGroupIds.includes(g)))).map((p) => ({ id: p.id, name: p.name })) },
         canConfigure: level(auth, 'configuracoes') === 'total',

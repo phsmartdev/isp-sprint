@@ -1,0 +1,1 @@
+ALTER TABLE "glpi_queue_tickets" ADD COLUMN "requester_user_ids" uuid[] DEFAULT '{}'::uuid[] NOT NULL;

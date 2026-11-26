@@ -180,28 +180,32 @@ export async function syncGlpiQueue(db: DbOrTx, tenantId: string, now = new Date
       const [existing] = await db.select({ id: s.glpiQueueTickets.id }).from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, tenantId), eq(s.glpiQueueTickets.glpiId, t.id))).limit(1);
       const status = refId(t.status);
       const openedAt = glpiDate(t.date ?? t.date_creation, tz) ?? now;
-      // linha do tempo: 1º atendimento, menções e aprovações. Lida nos chamados abertos e nos já monitorados (no máximo 200 por leitura)
+      // requerentes que são do Comercial (visão "Requisitados")
+      const reqGlpi = requestersOf(team);
+      const requesterUserIds = [...reqGlpi].map((g) => byGlpiUser.get(g)).filter((x): x is string => !!x);
+      // linha do tempo: 1º atendimento, menções e aprovações. As menções podem vir a qualquer momento, em qualquer
+      // situação do chamado: lê a de todo chamado alterado (no máximo 300 por leitura)
       let facts: ReturnType<typeof timelineFacts> | null = null;
-      if ((assigned || existing || isOpenStatus(status)) && timelineReads < 200) {
+      if (timelineReads < 300) {
         timelineReads++;
         try {
           const tl = await glpiCall<HlTimeline>(cfg, 'GET', `/Assistance/Ticket/${t.id}/Timeline`, { entityId: refId(t.entity) ?? st.rootEntityId });
-          facts = timelineFacts({ content: t.content, openedAt, requesterName: refName(t.user_recipient) }, Array.isArray(tl) ? tl : [], requestersOf(team), ppl, tz);
+          facts = timelineFacts({ content: t.content, openedAt, requesterName: refName(t.user_recipient) }, Array.isArray(tl) ? tl : [], reqGlpi, ppl, tz);
         } catch { /* sem a linha do tempo: mantém o que já estava gravado */ }
       }
       const watched = !!facts && (facts.mentions.length > 0 || facts.approvals.length > 0);
-      if (!assigned && !watched && !existing) continue;
-      const relevant = assigned;
+      if (!assigned && !watched && !requesterUserIds.length && !existing) continue;
       const values = {
         tenantId, glpiId: t.id, entityId: refId(t.entity), entityName: refName(t.entity), title: (t.name ?? `Chamado ${t.id}`).slice(0, 300),
         categoryName: refName(t.category), requesterName: refName(t.user_recipient), status, statusName: refName(t.status) ?? glpiStatusLabel(status), priority: refId(t.priority),
         openedAt,
         dueSolveAt: glpiDate(t.resolution_date ?? t.internal_resolution_date, tz), dueOwnAt: glpiDate(t.time_to_own, tz), takenAt: glpiDate(t.take_into_account_date, tz),
         solvedAt: glpiDate(t.date_solve, tz) ?? (status && status >= 5 ? glpiDate(t.date_close, tz) : null), closedAt: glpiDate(t.date_close, tz),
-        // sem relevância (foi tirado dos nossos grupos), os atribuídos ficam vazios e o chamado sai do painel
-        groupIds: relevant ? gs.map((g) => g.id) : [], groupNames: relevant ? gs.map((g) => g.name ?? groups.get(g.id) ?? `Grupo ${g.id}`) : [],
-        glpiUserIds: relevant ? us.map((u) => u.id) : [], glpiUserNames: relevant ? us.map((u) => u.name ?? `Usuário ${u.id}`) : [],
-        userIds: relevant ? us.map((u) => byGlpiUser.get(u.id)).filter((x): x is string => !!x) : [],
+        // a equipe atribuída inteira (também de outros times, para a visão Requisitados). O monitoramento do Comercial
+        // (painel Atribuídos e avisos) olha só os grupos monitorados e as pessoas ligadas: reatribuído para fora, sai
+        groupIds: gs.map((g) => g.id), groupNames: gs.map((g) => g.name ?? groups.get(g.id) ?? `Grupo ${g.id}`),
+        glpiUserIds: us.map((u) => u.id), glpiUserNames: us.map((u) => u.name ?? `Usuário ${u.id}`),
+        userIds: us.map((u) => byGlpiUser.get(u.id)).filter((x): x is string => !!x), requesterUserIds,
         ...(facts ? {
           firstResponseAt: facts.firstResponseAt, firstResponseBy: facts.firstResponseBy, mentions: facts.mentions, approvals: facts.approvals,
           relatedUserIds: [...new Set([...facts.mentions.map((m) => m.userId), ...facts.approvals.map((a) => a.userId).filter((x): x is string => !!x)])],

@@ -8024,6 +8024,8 @@ export const glpiQueueTickets = pgTable(
     mentions: jsonb('mentions').$type<{ userId: string; name: string; by: string | null; at: string | null; answeredAt: string | null }[]>().notNull().default([]),
     /** pedidos de aprovação (validação) para pessoas ou grupos do Comercial; status 2 = aguardando, 3 = aprovado, 4 = recusado */
     approvals: jsonb('approvals').$type<{ validationId: number; userId: string | null; groupId: number | null; name: string; requester: string | null; at: string | null; status: number; decidedAt: string | null }[]>().notNull().default([]),
+    /** pessoas do RevOps que abriram o chamado (requerentes no GLPI): visão "Requisitados" */
+    requesterUserIds: uuid('requester_user_ids').array().notNull().default(sql`'{}'::uuid[]`),
     /** pessoas do RevOps citadas ou chamadas a aprovar (para quem vê só os seus) */
     relatedUserIds: uuid('related_user_ids').array().notNull().default(sql`'{}'::uuid[]`),
     glpiUpdatedAt: text('glpi_updated_at'),
