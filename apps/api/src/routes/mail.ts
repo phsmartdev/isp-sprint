@@ -10,7 +10,7 @@ import { decodeImage } from '../services/images';
 import { drainAutomationQueue } from '../services/automationQueue';
 import { simpleParser, type AddressObject } from 'mailparser';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type SQL, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   MAIL_PRIORITIES, MAIL_SCOPES, OPEN_THREAD, ROUTING_MODES, RULE_FIELDS, RULE_OPS, THREAD_STATUSES, atLeast, domainAllowed, evaluateRules, isEmail,
@@ -56,6 +56,10 @@ async function myQueues(db: DbOrTx, auth: AuthContext) {
 
 /** Condição SQL das conversas que a pessoa vê. */
 async function threadScope(db: DbOrTx, auth: AuthContext): Promise<SQL> {
+  return sql`(${s.mailboxes.deletedAt} is null and ${await threadScopeOf(db, auth)})`;
+}
+/** Conversas de caixa excluída saem das telas (o histórico fica no banco). */
+async function threadScopeOf(db: DbOrTx, auth: AuthContext): Promise<SQL> {
   const own = sql`(${s.mailboxes.kind} = 'pessoal' and ${s.mailboxes.ownerId} = ${auth.userId})`;
   if (isTotal(auth)) return sql`(${own} or ${s.mailboxes.kind} = 'compartilhada')`;
   const qs = await myQueues(db, auth);
@@ -88,7 +92,7 @@ async function canWork(db: DbOrTx, auth: AuthContext, t: typeof s.mailThreads.$i
 }
 
 async function visibleBoxes(db: DbOrTx, auth: AuthContext) {
-  const all = await db.select().from(s.mailboxes).where(eq(s.mailboxes.tenantId, auth.tenantId)).orderBy(asc(s.mailboxes.kind), asc(s.mailboxes.address));
+  const all = await db.select().from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), isNull(s.mailboxes.deletedAt))).orderBy(asc(s.mailboxes.kind), asc(s.mailboxes.address));
   if (isTotal(auth) || canConfigure(auth)) return all.filter((b) => b.kind === 'compartilhada' || b.ownerId === auth.userId);
   const qs = await myQueues(db, auth);
   return all.filter((b) => (b.kind === 'pessoal' ? b.ownerId === auth.userId : qs.some((q) => q.mailboxId === b.id)));
@@ -224,7 +228,7 @@ export const mailRoutes = [
       if (body.kind === 'compartilhada' && !canConfigure(auth)) throw forbidden('Só quem tem acesso total em Configurações cadastra caixas compartilhadas.');
       if (!isEmail(address)) throw unprocessable('Informe o endereço da caixa.');
       if (particular) {
-        const mine = await app.db.select({ id: s.mailboxes.id }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), eq(s.mailboxes.kind, 'pessoal'), eq(s.mailboxes.ownerId, auth.userId)));
+        const mine = await app.db.select({ id: s.mailboxes.id }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), eq(s.mailboxes.kind, 'pessoal'), eq(s.mailboxes.ownerId, auth.userId), isNull(s.mailboxes.deletedAt)));
         if (mine.length >= 3) throw unprocessable('Cada pessoa conecta no máximo 3 caixas pessoais.');
       }
       if (!particular && !domainAllowed(address, st.allowedDomains)) throw unprocessable(st.allowedDomains.length ? `Só caixas dos domínios da empresa (${st.allowedDomains.join(', ')}).` : 'Configure antes os domínios da empresa em Configurações → E-mail.');
@@ -234,6 +238,42 @@ export const mailRoutes = [
       await audit(app.db, req, { action: 'mail.mailbox_created', entityType: 'mailbox', entityId: b!.id, metadata: { kind: body.kind, particular } });
       reply.code(201);
       return publicBox(b!);
+    },
+  }),
+  defineRoute({
+    method: 'PATCH', url: '/mail/mailboxes/:id', summary: 'Troca o endereço da própria caixa pessoal enquanto ela não está conectada e não tem conversas', tag: 'E-mail', module: 'email', params: IdParams,
+    body: z.object({ address: z.string().trim().min(3).max(200) }),
+    handler: async ({ app, auth, req, params, body }) => {
+      const [b] = await app.db.select().from(s.mailboxes).where(and(eq(s.mailboxes.id, params.id), eq(s.mailboxes.tenantId, auth.tenantId), isNull(s.mailboxes.deletedAt))).limit(1);
+      if (!b || b.kind !== 'pessoal' || b.ownerId !== auth.userId) throw notFound('Caixa não encontrada.');
+      if (b.refreshTokenEnc || b.appPasswordEnc || b.status === 'conectada' || b.status === 'pausada') throw unprocessable('Desconecte a caixa antes de trocar o endereço.');
+      const [t] = await app.db.select({ id: s.mailThreads.id }).from(s.mailThreads).where(eq(s.mailThreads.mailboxId, b.id)).limit(1);
+      if (t) throw unprocessable('Esta caixa já tem conversas: exclua a caixa e cadastre o endereço novo.');
+      const address = body.address.toLowerCase();
+      if (!isEmail(address)) throw unprocessable('Informe um e-mail válido.');
+      const st = await settingsOf(app.db, auth.tenantId);
+      if (address === auth.email.toLowerCase() && !domainAllowed(address, st.allowedDomains)) throw unprocessable(st.allowedDomains.length ? `Só caixas dos domínios da empresa (${st.allowedDomains.join(', ')}).` : 'Configure antes os domínios da empresa em Configurações → E-mail.');
+      const [dup] = await app.db.select({ id: s.mailboxes.id }).from(s.mailboxes).where(and(eq(s.mailboxes.tenantId, auth.tenantId), eq(s.mailboxes.address, address))).limit(1);
+      if (dup && dup.id !== b.id) throw unprocessable('Esta caixa já está cadastrada.');
+      const [u] = await app.db.update(s.mailboxes).set({ address, status: 'desconectada', lastError: null, rowVersion: sql`${s.mailboxes.rowVersion} + 1` }).where(eq(s.mailboxes.id, b.id)).returning();
+      await audit(app.db, req, { action: 'mail.mailbox_address', entityType: 'mailbox', entityId: b.id, metadata: { from: b.address, to: address } });
+      return publicBox(u!);
+    },
+  }),
+  defineRoute({
+    method: 'DELETE', url: '/mail/mailboxes/:id', summary: 'Exclui a própria caixa pessoal: revoga o acesso no Google, apaga as credenciais e a caixa some das telas (o histórico das conversas fica)', tag: 'E-mail', module: 'email', params: IdParams,
+    handler: async ({ app, auth, req, params }) => {
+      const [b] = await app.db.select().from(s.mailboxes).where(and(eq(s.mailboxes.id, params.id), eq(s.mailboxes.tenantId, auth.tenantId), isNull(s.mailboxes.deletedAt))).limit(1);
+      if (!b || b.kind !== 'pessoal' || b.ownerId !== auth.userId) throw notFound('Caixa não encontrada.');
+      if (app.config.gmail && b.refreshTokenEnc && b.provider !== 'gmail_senha') await revokeToken(app.config.gmail, b).catch(() => undefined);
+      // o histórico das conversas é só de inclusão: a caixa vira "excluída" (sem credenciais, fora das telas e da sincronização)
+      // e o endereço fica livre para um cadastro novo
+      await app.db.update(s.mailboxes).set({
+        deletedAt: new Date(), status: 'desconectada', address: `excluida-${b.id.slice(0, 8)}-${b.address}`.slice(0, 250),
+        refreshTokenEnc: null, accessTokenEnc: null, accessExpiresAt: null, appPasswordEnc: null, historyId: null, lastError: null, rowVersion: sql`${s.mailboxes.rowVersion} + 1`,
+      }).where(eq(s.mailboxes.id, b.id));
+      await audit(app.db, req, { action: 'mail.mailbox_deleted', entityType: 'mailbox', entityId: b.id, metadata: { address: b.address } });
+      return { ok: true };
     },
   }),
   defineRoute({

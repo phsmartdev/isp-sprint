@@ -210,6 +210,32 @@ describe('Gmail: visibilidade, atendimento e resposta', () => {
     expect((await carlos.post('/mail/mailboxes', { kind: 'compartilhada', address: `vendas.${stamp}@gmail.test` })).statusCode).toBe(422);
   });
 
+  it('caixa pessoal: troca o endereço enquanto não está conectada; excluída some das telas (o histórico fica); só a dona mexe', async () => {
+    // cadastrada com o endereço errado e ainda não autenticada
+    const errado = `lucas.errado.${stamp}@gmail.test`, certo = `lucas.certo.${stamp}@gmail.test`;
+    const box = ok(await lucas.post('/mail/mailboxes', { kind: 'pessoal', address: errado }), 201).json();
+    expect((await carlos.patch(`/mail/mailboxes/${box.id}`, { address: certo })).statusCode).toBe(404);
+    expect((await lucas.patch(`/mail/mailboxes/${box.id}`, { address: 'invalido' })).statusCode).toBe(422);
+    expect(ok(await lucas.patch(`/mail/mailboxes/${box.id}`, { address: certo })).json()).toMatchObject({ address: certo, status: 'desconectada' });
+    // conectada: precisa desconectar antes de trocar
+    expect((await connect(lucas, box.id)).headers.location).toBe('/email/caixas?conexao=ok');
+    expect((await lucas.patch(`/mail/mailboxes/${box.id}`, { address: errado })).statusCode).toBe(422);
+    // com conversas: excluir tira a caixa e as conversas das telas e apaga as credenciais; outra pessoa não exclui
+    g.deliver(certo, { from: `Cliente <cliente-${stamp}@exemplo.test>`, subject: `Assunto da caixa excluída ${stamp}`, text: 'Olá.' });
+    await syncMailbox(ctx.db, ctx.app.config.gmail!, box.id);
+    expect((await ctx.db.execute(sql`select count(*)::int n from mail_threads where mailbox_id = ${box.id}`)).rows[0]).toMatchObject({ n: 1 });
+    expect((await carlos.del(`/mail/mailboxes/${box.id}`)).statusCode).toBe(404);
+    ok(await lucas.del(`/mail/mailboxes/${box.id}`));
+    expect(ok(await lucas.get('/mail/mailboxes')).json().items.some((b: { id: string }) => b.id === box.id)).toBe(false);
+    expect((await threads(lucas, 'status=todas')).some((x) => x.subject === `Assunto da caixa excluída ${stamp}`)).toBe(false);
+    const [gone] = (await ctx.db.execute(sql`select deleted_at is not null as del, status, refresh_token_enc is null as sem_token from mailboxes where id = ${box.id}`)).rows as { del: boolean; status: string; sem_token: boolean }[];
+    expect(gone).toMatchObject({ del: true, status: 'desconectada', sem_token: true });
+    expect((await lucas.patch(`/mail/mailboxes/${box.id}`, { address: errado })).statusCode).toBe(404);
+    // o endereço fica livre para cadastrar de novo
+    const again = ok(await lucas.post('/mail/mailboxes', { kind: 'pessoal', address: certo }), 201).json();
+    ok(await lucas.del(`/mail/mailboxes/${again.id}`));
+  });
+
   it('pastas com regra: aplica às existentes, recebe as novas, move à mão e excluir devolve para a Entrada', async () => {
     const def = { match: 'qualquer', conditions: [{ field: 'dominio', op: 'termina_com', value: 'prefeitura-ficticia.test' }] };
     expect((await lucas.post('/mail/folders', { mailboxId: sharedId, name: 'Prefeituras', def })).statusCode).toBe(403);

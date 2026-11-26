@@ -4669,6 +4669,8 @@ export const mailboxes = pgTable(
     displayName: text('display_name'),
     ownerId: uuid('owner_id').references(() => users.id),
     status: text('status').notNull().default('desconectada'),
+    /** excluída pela dona (some das telas; as conversas e o histórico ficam, pois o histórico é só de inclusão) */
+    deletedAt: ts('deleted_at'),
     /** Como a caixa conecta: Gmail API com OAuth ('gmail_api') ou IMAP/SMTP do Gmail com senha de app ('gmail_senha'). */
     provider: text('provider').notNull().default('gmail_api'),
     /** Senha de app do Gmail, cifrada (só para provider = 'gmail_senha'). */
