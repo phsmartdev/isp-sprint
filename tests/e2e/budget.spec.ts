@@ -1,3 +1,4 @@
+import { joinCostCenters } from './budgetAccess';
 import { expect, test, type Page } from '@playwright/test';
 
 async function login(page: Page, email: string) {
@@ -26,6 +27,8 @@ test('Recursos e Orçamento: estrutura, líder planeja, Gerência aprova e envia
   await dir.getByRole('link', { name: 'Planejamento orçamentário' }).click();
   await dir.getByRole('button', { name: 'Criar estrutura sugerida' }).click();
   await expect(dir.getByRole('tab', { name: 'Plano de contas e centros' })).toBeVisible();
+  await joinCostCenters(dir);
+  await dir.reload();
   await dir.getByRole('tab', { name: 'Plano de contas e centros' }).click();
   const plan = dir.getByRole('region', { name: 'Plano de contas' });
   await expect(plan).toContainText('Plataforma de CRM');

@@ -1,3 +1,4 @@
+import { joinCostCenters } from './budgetAccess';
 import { expect, test } from '@playwright/test';
 
 test('fechamento mensal: competências, conferência e política', async ({ page }) => {
@@ -8,6 +9,7 @@ test('fechamento mensal: competências, conferência e política', async ({ page
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).not.toHaveURL(/\/login/);
   await page.request.post('/api/v1/budget/setup');
+  await joinCostCenters(page);
   await page.goto('/orcamento?t=fechamento&y=2025');
   await expect(page.getByRole('region', { name: 'Competências do ano' })).toBeVisible();
   await page.getByRole('button', { name: /Março/ }).click();

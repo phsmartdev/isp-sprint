@@ -1,3 +1,4 @@
+import { joinCostCenters } from './budgetAccess';
 import { expect, test, type Page } from '@playwright/test';
 
 /** Brindes → Planejamento e orçamento: o plano vira lançamento do orçamento e aparece nas duas telas. */
@@ -16,6 +17,7 @@ test('planejar brinde gera o lançamento no orçamento', async ({ page }) => {
   await login(page, 'carlos@yepnet.test');
   const stamp = Date.now().toString(36);
   await page.request.post('/api/v1/budget/setup');
+  await joinCostCenters(page);
   expect((await page.request.post('/api/v1/brindes/itens', { data: { name: `Caneca fictícia ${stamp}`, unitCostCents: 2500, initialStock: 0 } })).status()).toBe(201);
   await page.goto('/brindes?t=planejamento');
   await page.getByRole('button', { name: 'Planejar brinde' }).click();

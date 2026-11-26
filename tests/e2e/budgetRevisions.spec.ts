@@ -1,3 +1,4 @@
+import { joinCostCenters } from './budgetAccess';
 import { expect, test } from '@playwright/test';
 
 test('revisões e projeção: projeção com cenário e pedido de revisão', async ({ page }) => {
@@ -8,6 +9,7 @@ test('revisões e projeção: projeção com cenário e pedido de revisão', asy
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).not.toHaveURL(/\/login/);
   await page.request.post('/api/v1/budget/setup');
+  await joinCostCenters(page);
   await page.goto('/orcamento?t=revisoes');
   const proj = page.getByRole('region', { name: 'Projeção até o fim do exercício' });
   await expect(proj).toBeVisible();
