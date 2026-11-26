@@ -27,6 +27,8 @@ type Data = {
 };
 
 const TV_KEYS = [['dados-planejados']];
+/** telas do modo TV: alternam sozinhas (Atribuídos ↔ Requisitados) */
+const TV_VIEWS: { key: 'atribuidos' | 'requisitados'; label: string }[] = [{ key: 'atribuidos', label: 'Atribuídos ao Comercial' }, { key: 'requisitados', label: 'Requisitados pelo Comercial' }];
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const todayIso = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 const back = (days: number) => iso(new Date(new Date(`${todayIso()}T12:00:00Z`).getTime() - days * 86_400_000));
@@ -84,7 +86,7 @@ export function PlannedDataPage() {
       </header>
 
       <TvArea innerRef={tvRef} active={tv.active} fallback={tv.fallback}>
-      {tv.active && <TvBar title="Dados Planejados" period={`${fmtDay(range.from)} a ${fmtDay(range.to)}`} tabs={[{ key: 'painel', label: groupName }]} tab="painel" onTab={() => undefined} onExit={tv.exit} queryKeys={TV_KEYS} />}
+      {tv.active && <TvBar title="Dados Planejados" period={`${groupName} · ${fmtDay(range.from)} a ${fmtDay(range.to)}`} tabs={TV_VIEWS} tab={view} onTab={setView} onExit={tv.exit} queryKeys={TV_KEYS} autoRotate />}
       <div className="space-y-5">
       {q.isLoading ? <div className="card"><LoadingRows rows={6} /></div> : q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : d && (
         <>
@@ -160,7 +162,7 @@ export function PlannedDataPage() {
                     <tr key={p.id} className={clsx('border-b border-line align-top', p.situation === 'atrasado' && 'bg-[#FFF7F7]')} data-testid="pending-row">
                       <td className="whitespace-nowrap px-3 py-3"><span className={clsx('inline-block px-2 py-0.5 text-xs font-bold', SIT_CHIP[p.situation])}>{p.situationLabel}</span></td>
                       <td className="min-w-[260px] px-3 py-3"><p className="font-semibold text-ink">#{p.glpiId} · {p.title}</p><p className="text-xs text-muted">{p.client ?? '—'} · {p.groups.join(', ')}</p></td>
-                      <td className="min-w-[170px] px-3 py-3">{p.unassigned ? <p className="font-bold text-danger">Sem responsável</p> : <p className="font-semibold text-ink">{p.assignees.join(', ')}</p>}<p className="text-xs text-muted">{p.firstResponse ? `1ª resposta: ${p.firstResponse.by ?? 'Comercial'}, ${fmtDateTime(p.firstResponse.at)}` : 'sem resposta do Comercial'} · falta {p.todo}</p></td>
+                      <td className="min-w-[170px] px-3 py-3">{p.unassigned ? <p className="font-bold text-danger">Sem responsável</p> : <p className="font-semibold text-ink">{p.assignees.join(', ')}</p>}<p className="text-xs text-muted">{view === 'requisitados' ? '' : p.firstResponse ? `1ª resposta: ${p.firstResponse.by ?? 'Comercial'}, ${fmtDateTime(p.firstResponse.at)} · ` : 'sem resposta do Comercial · '}falta {p.todo}</p></td>
                       <td className="num min-w-[150px] px-3 py-3"><p className={clsx('font-bold', p.situation === 'atrasado' ? 'text-danger' : p.situation === 'a_vencer' ? 'text-[#8A5A00]' : 'text-ink')}>{p.dueText}</p><p className="text-xs text-muted">{p.due ? fmtDateTime(p.due) : '—'}</p></td>
                       <td className="num min-w-[160px] px-3 py-3 text-xs text-muted">{p.lastAlert ? `${p.lastAlert.channels.map((c) => (c === 'email' ? 'E-mail' : 'WhatsApp')).join(' e ')} (${STAGE[p.lastAlert.stage] ?? p.lastAlert.stage}) para ${p.lastAlert.names.join(', ')} · ${fmtDateTime(p.lastAlert.sentAt)}` : 'sem aviso ainda'}</td>
                       <td className="whitespace-nowrap px-3 py-3">{p.glpiUrl && <a href={p.glpiUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1 border border-primary px-3 text-sm font-semibold text-primary hover:bg-primary-soft">Abrir no GLPI<ExternalLink className="h-3.5 w-3.5" aria-hidden /></a>}</td>

@@ -49,9 +49,9 @@ const ROTATE_SECONDS = 30;
 const REFRESH_MINUTES = 5;
 
 /** Barra do modo TV: título, período, relógio, alternar abas, olhinho e sair. */
-export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExit, queryKeys }: { title: string; period: string; tabs: { key: T; label: string }[]; tab: T; onTab: (t: T) => void; onExit: () => void; queryKeys: unknown[][] }) {
+export function TvBar<T extends string>({ title, period, tabs, tab, onTab, onExit, queryKeys, autoRotate = false }: { title: string; period: string; tabs: { key: T; label: string }[]; tab: T; onTab: (t: T) => void; onExit: () => void; queryKeys: unknown[][]; /** já entra alternando as telas */ autoRotate?: boolean }) {
   const qc = useQueryClient();
-  const [rotate, setRotate] = useState(false);
+  const [rotate, setRotate] = useState(autoRotate);
   const [now, setNow] = useState(() => new Date());
   const [refreshedAt, setRefreshedAt] = useState(() => new Date());
   const tabRef = useRef(tab);
